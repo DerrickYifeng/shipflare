@@ -1,0 +1,95 @@
+@import "tailwindcss";
+
+/* ShipFlare Design System Tokens (DESIGN.md) */
+@theme inline {
+  /* Colors */
+  --color-sf-bg-primary: #ffffff;
+  --color-sf-bg-secondary: #f8f8f8;
+  --color-sf-bg-tertiary: #f0f0f0;
+  --color-sf-border: #e5e5e5;
+  --color-sf-border-subtle: #f0f0f0;
+  --color-sf-text-primary: #1a1a1a;
+  --color-sf-text-secondary: #666666;
+  --color-sf-text-tertiary: #767676;
+  --color-sf-accent: #ff6b35;
+  --color-sf-accent-hover: #e55a2b;
+  --color-sf-accent-light: #fff5f0;
+  --color-sf-success: #16a34a;
+  --color-sf-success-light: #f0fdf4;
+  --color-sf-warning: #d97706;
+  --color-sf-warning-light: #fffbeb;
+  --color-sf-error: #dc2626;
+  --color-sf-error-light: #fef2f2;
+
+  /* Fonts */
+  --font-heading: var(--font-space-grotesk), system-ui, sans-serif;
+  --font-body: var(--font-space-grotesk), system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, monospace;
+
+  /* Spacing (4px base) */
+  --spacing-sf-1: 4px;
+  --spacing-sf-2: 8px;
+  --spacing-sf-3: 12px;
+  --spacing-sf-4: 16px;
+  --spacing-sf-5: 20px;
+  --spacing-sf-6: 24px;
+  --spacing-sf-8: 32px;
+
+  /* Radius */
+  --radius-sf-sm: 4px;
+  --radius-sf-md: 6px;
+  --radius-sf-lg: 8px;
+  --radius-sf-full: 9999px;
+
+  /* Animations */
+  --animate-sf-score: sf-score-fill 600ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  --animate-sf-fade-in: sf-fade-in 200ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  --animate-sf-slide-up: sf-slide-up 200ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  --animate-sf-pulse: sf-pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes sf-score-fill {
+  from { stroke-dashoffset: var(--sf-score-circumference, 100); }
+  to { stroke-dashoffset: var(--sf-score-offset, 0); }
+}
+
+@keyframes sf-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes sf-slide-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes sf-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* Respect reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Base styles */
+body {
+  background: var(--color-sf-bg-primary);
+  color: var(--color-sf-text-primary);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Focus ring */
+:focus-visible {
+  outline: 2px solid var(--color-sf-accent);
+  outline-offset: 2px;
+}

@@ -1,0 +1,34 @@
+import { auth } from '@/lib/auth';
+import { redirect } from 'next/navigation';
+import { db } from '@/lib/db';
+import { channels } from '@/lib/db/schema';
+import { eq, and } from 'drizzle-orm';
+import { HeaderBar } from '@/components/layout/header-bar';
+import { ProfileSection } from '@/components/settings/profile-section';
+import { ConnectionsSection } from '@/components/settings/connections-section';
+import { DangerZone } from '@/components/settings/danger-zone';
+
+export default async function SettingsPage() {
+  const session = await auth();
+  if (!session?.user?.id) redirect('/');
+
+  const [redditChannel] = await db
+    .select()
+    .from(channels)
+    .where(and(eq(channels.userId, session.user.id), eq(channels.platform, 'reddit')))
+    .limit(1);
+
+  return (
+    <>
+      <HeaderBar title="Settings" />
+      <div className="max-w-[640px] mx-auto p-6 flex flex-col gap-8">
+        <ProfileSection user={session.user} />
+        <ConnectionsSection
+          redditConnected={!!redditChannel}
+          redditUsername={redditChannel?.username ?? null}
+        />
+        <DangerZone />
+      </div>
+    </>
+  );
+}

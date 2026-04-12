@@ -1,0 +1,106 @@
+import { NextResponse, type NextRequest } from 'next/server';
+import { auth } from '@/lib/auth';
+import { db } from '@/lib/db';
+import { channels } from '@/lib/db/schema';
+import { encrypt } from '@/lib/encryption';
+import { eq, and } from 'drizzle-orm';
+
+/**
+ * Reddit OAuth callback. Exchange code for tokens, encrypt, upsert channel.
+ */
+export async function GET(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return NextResponse.redirect(new URL('/', request.url));
+  }
+
+  const { searchParams } = new URL(request.url);
+  const code = searchParams.get('code');
+  const error = searchParams.get('error');
+
+  if (error || !code) {
+    const redirectUrl = new URL('/onboarding?reddit_error=denied', request.url);
+    return NextResponse.redirect(redirectUrl);
+  }
+
+  // Exchange code for tokens
+  const tokenResponse = await fetch(
+    'https://www.reddit.com/api/v1/access_token',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Authorization: `Basic ${Buffer.from(
+          `${process.env.REDDIT_CLIENT_ID}:${process.env.REDDIT_CLIENT_SECRET}`,
+        ).toString('base64')}`,
+      },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: process.env.REDDIT_REDIRECT_URI!,
+      }),
+    },
+  );
+
+  if (!tokenResponse.ok) {
+    const redirectUrl = new URL(
+      '/onboarding?reddit_error=token_exchange',
+      request.url,
+    );
+    return NextResponse.redirect(redirectUrl);
+  }
+
+  const tokens = (await tokenResponse.json()) as {
+    access_token: string;
+    refresh_token: string;
+    expires_in: number;
+  };
+
+  // Get Reddit username
+  const meResponse = await fetch('https://oauth.reddit.com/api/v1/me', {
+    headers: { Authorization: `Bearer ${tokens.access_token}` },
+  });
+
+  const me = (await meResponse.json()) as { name: string };
+
+  // Encrypt tokens
+  const encryptedAccess = encrypt(tokens.access_token);
+  const encryptedRefresh = encrypt(tokens.refresh_token);
+  const expiresAt = new Date(Date.now() + tokens.expires_in * 1000);
+
+  // Upsert channel
+  const existing = await db
+    .select()
+    .from(channels)
+    .where(
+      and(
+        eq(channels.userId, session.user.id),
+        eq(channels.platform, 'reddit'),
+      ),
+    )
+    .limit(1);
+
+  if (existing.length > 0) {
+    await db
+      .update(channels)
+      .set({
+        username: me.name,
+        oauthTokenEncrypted: encryptedAccess,
+        refreshTokenEncrypted: encryptedRefresh,
+        tokenExpiresAt: expiresAt,
+        updatedAt: new Date(),
+      })
+      .where(eq(channels.id, existing[0]!.id));
+  } else {
+    await db.insert(channels).values({
+      userId: session.user.id,
+      platform: 'reddit',
+      username: me.name,
+      oauthTokenEncrypted: encryptedAccess,
+      refreshTokenEncrypted: encryptedRefresh,
+      tokenExpiresAt: expiresAt,
+    });
+  }
+
+  return NextResponse.redirect(new URL('/dashboard', request.url));
+}
