@@ -6,6 +6,7 @@ export const redditSearchTool = buildTool({
   name: 'reddit_search',
   description:
     'Search a subreddit for threads matching a query. Returns title, URL, body (truncated), score, and comment count.',
+  isConcurrencySafe: true,
   inputSchema: z.object({
     subreddit: z.string().describe('Subreddit name without r/ prefix'),
     query: z.string().describe('Search query'),

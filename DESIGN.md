@@ -144,3 +144,113 @@ Respect `prefers-reduced-motion: reduce`. Replace all animations with instant st
 ## Theme
 
 Light only for Phase 1. CSS variables structured for dark mode addition in Phase 2 via `data-theme="dark"` attribute overriding `--sf-bg-*` and `--sf-text-*` variables.
+
+## Landing Page Layout
+
+Approved mockup: `~/.gstack/projects/DerrickYifeng-shipflare/designs/landing-page-20260411/variant-C.png`
+
+**Flow:** Value-first funnel. No sign-in required to scan. Product demo IS the pitch.
+
+### Hero Section
+- Centered layout, max-width 640px
+- Headline: `--sf-text-2xl`, font-weight 700, `--sf-text-primary`
+- Subline: `--sf-text-base`, `--sf-text-secondary`
+- Search input: full-width, `--sf-radius-md` border, `--sf-border` stroke
+- CTA button: `--sf-accent` background, white text, `--sf-radius-md`, "Scan"
+- Minimal header: Logo + tagline + contextual nav (Dashboard if auth, Sign in if unauth).
+
+### Discovery Cards
+- Source-agnostic design (Reddit, HN, Twitter, ProductHunt...)
+- Each card contains:
+  - Source icon (16px) + platform name (`--sf-text-xs`, `--sf-text-tertiary`)
+  - Thread title (`--sf-text-base`, `--sf-text-primary`, font-weight 500)
+  - Relevance score (0-100) in `--sf-font-mono`, with score ring (24px diameter)
+  - Upvote count + comment count (`--sf-text-sm`, `--sf-text-secondary`)
+  - Topic/subreddit tag pill (`--sf-text-xs`, `--sf-bg-tertiary`, `--sf-radius-sm`)
+  - Time ago (`--sf-text-xs`, `--sf-text-tertiary`)
+- Card gap: 4px (tight stacking, border-bottom separation)
+- Card padding: 12px 16px
+
+### Blur Wall
+- First 3 cards: fully visible, interactive
+- Cards 4+: `backdrop-filter: blur(8px)`, `pointer-events: none`
+- Gradient overlay: white to transparent, top-to-bottom over blurred section
+- CTA overlay: centered "Sign in to unlock all results" (`--sf-text-base`, `--sf-text-primary`)
+- GitHub OAuth button below CTA text
+- After sign-in: blur removes, all cards visible, "Go to Dashboard" CTA appears
+
+### No Marketing Sections
+- No "How it works", no feature grids, no testimonials below the fold
+- The scan results ARE the pitch. 3 real cards from the user's own product URL.
+
+### Thought Stream (Agent Workflow Visualization)
+
+Replaces skeleton loaders during scan. A JetBrains Mono block that streams the AI agent's work in real-time. Not a chatbot. More like watching terminal output.
+
+**Container:**
+- `--sf-bg-secondary` background, `--sf-border` 1px stroke, `--sf-radius-lg`
+- Padding: 16px 20px
+- Max-width: 640px (same as hero)
+- Min-height: 120px to prevent layout shift
+
+**Typography:**
+- All text: `--sf-font-mono` (JetBrains Mono), `--sf-text-sm` (13px)
+- Step labels: `--sf-text-tertiary`
+- Keywords/search phrases: `--sf-accent` (#ff6b35)
+- Completion checkmarks: `--sf-success` (#16a34a)
+- Progress bar fill: `--sf-accent`
+
+**Streaming steps:**
+
+```
+analyzing yourproduct.com...                       ✓
+→ project management · issue tracking · dev tools
+
+searching for conversations...
+  "project management tools"                       ✓
+  "issue tracking alternatives"                    ●
+  "sprint planning small teams"
+
+scoring relevance...                               ●
+```
+
+| Step | Trigger | Display |
+|------|---------|---------|
+| `analyzing {url}...` | Scan starts | URL in `--sf-text-primary`, rest in `--sf-text-tertiary` |
+| `→ keyword · keyword · keyword` | Scrape completes | Keywords in `--sf-accent`, joined with ` · ` |
+| `searching for conversations...` | Agent starts first tool call | Label in `--sf-text-tertiary` |
+| `  "search phrase"` | Each `reddit_search` tool call | Phrase in `--sf-accent`, indented 2 spaces. Appears one-by-one as agent makes calls. `✓` suffix when call returns. `●` suffix while active. |
+| `scoring relevance...` | Agent's final turn (no more tool calls) | `●` while scoring, `✓` when done |
+
+**Animation:**
+- New lines fade in: opacity 0→1, translateY(4px→0), 150ms `--sf-ease-out`
+- Active indicator `●`: CSS pulse animation, 1.5s infinite, opacity 0.4→1.0
+- Checkmark `✓`: instant replace of `●`, no transition
+- Character-by-character typewriter on the `analyzing` line only: ~30ms/char
+- All other lines appear as complete strings (typewriter on every line gets annoying)
+- Respect `prefers-reduced-motion`: disable typewriter, instant line appearance
+
+**Transition to results:**
+- On completion: 400ms pause, then stream fades out (opacity 1→0, 200ms)
+- Results container fades in immediately after (opacity 0→1, 200ms)
+- No collapse/slide. Simple crossfade. Less is more.
+
+**Progress bar (optional, right-aligned):**
+- Thin bar (2px height) at bottom of container
+- Fills left-to-right based on tool calls completed / total expected
+- `--sf-accent` fill, `--sf-bg-tertiary` track
+- Disappears with the container on completion
+
+**Technical requirement:**
+- `/api/scan` must stream SSE events instead of returning all-at-once
+- Event types: `scrape_done`, `agent_thinking`, `tool_call_start`, `tool_call_done`, `scoring`, `complete`
+- Each event carries minimal data (step name, keywords, search query, etc.)
+
+## Decisions Log
+
+| Date | Decision | Rationale |
+|------|----------|-----------|
+| 2026-04-11 | Initial design system created | Created by /design-consultation based on dashboard mockups |
+| 2026-04-12 | Landing page redesign: value-first funnel | Replace sign-in gate with scan-first flow. Show 3 cards free, blur rest. Product demo is the pitch. |
+| 2026-04-12 | Thought Stream: agent workflow visualization | Monospace terminal-style block showing AI work in real-time. Keywords + search phrases streamed via SSE. Builds trust through specificity. |
+| 2026-04-12 | Landing page polish: icon, nav, empty state | Replaced Databricks-like stacked layers icon with flame/flare. Added contextual nav (Dashboard/Sign in). Vertically centered hero on empty state with subtle footer hints. |

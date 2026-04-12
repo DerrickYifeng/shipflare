@@ -3,7 +3,8 @@ import { db } from '@/lib/db';
 import { channels } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 
-const REDDIT_API_BASE = 'https://oauth.reddit.com';
+const REDDIT_OAUTH_BASE = 'https://oauth.reddit.com';
+const REDDIT_PUBLIC_BASE = 'https://www.reddit.com';
 const TOKEN_BUFFER_SECONDS = 300; // Refresh 5 min before expiry
 
 interface RedditThread {
@@ -67,6 +68,21 @@ export class RedditClient {
       channel.refreshTokenEncrypted,
       channel.tokenExpiresAt,
     );
+  }
+
+  /**
+   * Create a RedditClient using the public JSON API (no OAuth).
+   * Read-only access. Used for the public scan endpoint.
+   */
+  static appOnly(): RedditClient {
+    const instance = Object.create(RedditClient.prototype) as RedditClient;
+    instance['channelId'] = 'app-only';
+    instance['accessToken'] = '';
+    instance['refreshToken'] = '';
+    instance['expiresAt'] = new Date(Date.now() + 86400_000);
+    instance['requestCount'] = 0;
+    instance['windowStart'] = Date.now();
+    return instance;
   }
 
   /**
@@ -160,6 +176,11 @@ export class RedditClient {
 
     if (now < bufferDate) return;
 
+    // App-only tokens can't be refreshed (no refresh token)
+    if (this.channelId === 'app-only') {
+      throw new Error('App-only Reddit token expired');
+    }
+
     // Refresh the token
     const response = await fetch(
       'https://www.reddit.com/api/v1/access_token',
@@ -218,10 +239,24 @@ export class RedditClient {
   }
 
   private async get(path: string): Promise<unknown> {
-    await this.ensureValidToken();
     await this.rateLimitCheck();
 
-    const response = await fetch(`${REDDIT_API_BASE}${path}`, {
+    if (this.channelId === 'app-only') {
+      // Public JSON API — no OAuth needed, append .json
+      const jsonPath = path.includes('?')
+        ? path.replace('?', '.json?')
+        : `${path}.json`;
+      const response = await fetch(`${REDDIT_PUBLIC_BASE}${jsonPath}`, {
+        headers: { 'User-Agent': 'ShipFlare/1.0.0' },
+      });
+      if (!response.ok) {
+        throw new Error(`Reddit API GET ${path}: ${response.status}`);
+      }
+      return response.json();
+    }
+
+    await this.ensureValidToken();
+    const response = await fetch(`${REDDIT_OAUTH_BASE}${path}`, {
       headers: {
         Authorization: `Bearer ${this.accessToken}`,
         'User-Agent': 'ShipFlare/1.0.0',
@@ -242,7 +277,7 @@ export class RedditClient {
     await this.ensureValidToken();
     await this.rateLimitCheck();
 
-    const response = await fetch(`${REDDIT_API_BASE}${path}`, {
+    const response = await fetch(`${REDDIT_OAUTH_BASE}${path}`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${this.accessToken}`,

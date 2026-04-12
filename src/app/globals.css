@@ -46,6 +46,7 @@
   --animate-sf-fade-in: sf-fade-in 200ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
   --animate-sf-slide-up: sf-slide-up 200ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
   --animate-sf-pulse: sf-pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  --animate-thought-line: sf-thought-line 150ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 @keyframes sf-score-fill {
@@ -66,6 +67,11 @@
 @keyframes sf-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
+}
+
+@keyframes sf-thought-line {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 /* Respect reduced motion */

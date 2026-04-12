@@ -10,25 +10,19 @@ import { redditSearchTool } from '@/tools/reddit-search';
 import type { ToolDefinition } from '@/bridge/types';
 import { enqueueContent } from '@/lib/queue';
 import { publishEvent } from '@/lib/redis';
+import { queryOutputSchema, discoveryOutputSchema } from '@/agents/schemas';
+import type { DiscoveryOutput } from '@/agents/schemas';
 import { join } from 'path';
-import { z } from 'zod';
 import type { DiscoveryJobData } from '@/lib/queue/types';
 
-const discoveryOutputSchema = z.object({
-  threads: z.array(
-    z.object({
-      id: z.string(),
-      subreddit: z.string(),
-      title: z.string(),
-      url: z.string(),
-      relevanceScore: z.number(),
-      reason: z.string(),
-    }),
-  ),
-});
-
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const toolRegistry = new Map<string, ToolDefinition<any, any>>([['reddit_search', redditSearchTool]]);
+const emptyToolRegistry = new Map<string, ToolDefinition<any, any>>();
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const searchToolRegistry = new Map<string, ToolDefinition<any, any>>([
+  ['reddit_search', redditSearchTool],
+]);
+
+const AGENTS_DIR = join(process.cwd(), 'src/agents');
 
 export async function processDiscovery(job: Job<DiscoveryJobData>) {
   const { userId, productId, subreddits } = job.data;
@@ -53,17 +47,14 @@ export async function processDiscovery(job: Job<DiscoveryJobData>) {
 
   const redditClient = RedditClient.fromChannel(channel);
 
-  // Load agent definition
-  const agentConfig = loadAgentFromFile(
-    join(process.cwd(), 'src/agents/discovery.md'),
-    toolRegistry,
+  // --- Step 1: Query Agent — generate pain-point search queries ---
+
+  const queryAgent = loadAgentFromFile(
+    join(AGENTS_DIR, 'query.md'),
+    emptyToolRegistry,
   );
 
-  // Build context with DI
-  const context = createToolContext({ redditClient });
-
-  // Run discovery agent
-  const userMessage = JSON.stringify({
+  const queryInput = JSON.stringify({
     productName: product.name,
     productDescription: product.description,
     keywords: product.keywords,
@@ -71,17 +62,63 @@ export async function processDiscovery(job: Job<DiscoveryJobData>) {
     subreddits,
   });
 
-  const { result, usage } = await runAgent(
-    agentConfig,
-    userMessage,
-    context,
-    discoveryOutputSchema,
+  const { result: queryResult, usage: queryUsage } = await runAgent(
+    queryAgent,
+    queryInput,
+    createToolContext({}),
+    queryOutputSchema,
   );
 
-  // Insert discovered threads, skip duplicates
+  // --- Step 2: Fan out discovery agents in parallel (one per subreddit) ---
+
+  const discoveryAgent = loadAgentFromFile(
+    join(AGENTS_DIR, 'discovery.md'),
+    searchToolRegistry,
+  );
+
+  const discoveryPromises = subreddits.map((subreddit) => {
+    const queries = queryResult.subredditQueries[subreddit] ?? [];
+    if (queries.length === 0) return Promise.resolve(null);
+
+    const context = createToolContext({ redditClient });
+    const userMessage = JSON.stringify({
+      productName: product.name,
+      productDescription: product.description,
+      valueProp: product.valueProp,
+      subreddit,
+      queries,
+    });
+
+    return runAgent(discoveryAgent, userMessage, context, discoveryOutputSchema);
+  });
+
+  const discoveryResults = await Promise.all(discoveryPromises);
+
+  // --- Step 3: Merge results, deduplicate, persist ---
+
+  const seenIds = new Set<string>();
+  const allThreads: DiscoveryOutput['threads'] = [];
+
+  let totalInputTokens = queryUsage.inputTokens;
+  let totalOutputTokens = queryUsage.outputTokens;
+  let totalCost = queryUsage.costUsd;
+
+  for (const dr of discoveryResults) {
+    if (!dr) continue;
+    totalInputTokens += dr.usage.inputTokens;
+    totalOutputTokens += dr.usage.outputTokens;
+    totalCost += dr.usage.costUsd;
+
+    for (const thread of dr.result.threads) {
+      if (seenIds.has(thread.id)) continue;
+      seenIds.add(thread.id);
+      allThreads.push(thread);
+    }
+  }
+
+  // Insert discovered threads
   let newThreadCount = 0;
-  for (const thread of result.threads) {
-    // Check for existing thread with same external ID
+  for (const thread of allThreads) {
     const existing = await db
       .select()
       .from(threads)
@@ -92,6 +129,8 @@ export async function processDiscovery(job: Job<DiscoveryJobData>) {
 
     if (existing.length > 0) continue;
 
+    const relevanceScore = (thread.relevance + thread.intent) / 2;
+
     const [inserted] = await db
       .insert(threads)
       .values({
@@ -100,14 +139,14 @@ export async function processDiscovery(job: Job<DiscoveryJobData>) {
         subreddit: thread.subreddit,
         title: thread.title,
         url: thread.url,
-        relevanceScore: thread.relevanceScore,
+        relevanceScore,
       })
       .returning();
 
     newThreadCount++;
 
     // Auto-enqueue content for high-relevance threads
-    if (thread.relevanceScore >= 0.7 && inserted) {
+    if (relevanceScore >= 0.7 && inserted) {
       await enqueueContent({
         userId,
         threadId: inserted.id,
@@ -122,16 +161,16 @@ export async function processDiscovery(job: Job<DiscoveryJobData>) {
     eventType: 'discovery_scan',
     metadataJson: {
       subreddits,
-      threadsFound: result.threads.length,
+      threadsFound: allThreads.length,
       newThreads: newThreadCount,
-      cost: usage.costUsd,
+      cost: totalCost,
     },
   });
 
   // Publish SSE event
   await publishEvent(`shipflare:events:${userId}`, {
     type: 'discovery_complete',
-    threadsFound: result.threads.length,
+    threadsFound: allThreads.length,
     newThreads: newThreadCount,
   });
 }

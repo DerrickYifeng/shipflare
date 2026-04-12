@@ -9,6 +9,8 @@ export interface ToolDefinition<TInput = unknown, TOutput = unknown> {
   description: string;
   inputSchema: z.ZodType<TInput>;
   execute: (input: TInput, context: ToolContext) => Promise<TOutput>;
+  /** Whether this tool can safely run in parallel with other concurrent-safe tools. Default: false. */
+  isConcurrencySafe?: boolean;
 }
 
 /**
@@ -48,6 +50,20 @@ export interface AgentResult<T = unknown> {
     turns: number;
   };
 }
+
+/**
+ * Progress events emitted by the agent runner during execution.
+ * Used for SSE streaming to the client.
+ */
+export type AgentProgressEvent =
+  | { type: 'scrape_done'; keywords: string[] }
+  | { type: 'query_done'; subredditCount: number; queriesPerSubreddit: number }
+  | { type: 'tool_call_start'; query: string; subreddit?: string }
+  | { type: 'tool_call_done'; query: string; resultCount: number; subreddit?: string }
+  | { type: 'scoring' }
+  | { type: 'complete' };
+
+export type OnProgress = (event: AgentProgressEvent) => void;
 
 /**
  * Model pricing per million tokens. From Anthropic docs.

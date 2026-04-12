@@ -12,12 +12,14 @@ export function buildTool<TInput, TOutput>(config: {
   description: string;
   inputSchema: z.ZodType<TInput>;
   execute: (input: TInput, context: ToolContext) => Promise<TOutput>;
+  isConcurrencySafe?: boolean;
 }): ToolDefinition<TInput, TOutput> {
   return {
     name: config.name,
     description: config.description,
     inputSchema: config.inputSchema,
     execute: config.execute,
+    isConcurrencySafe: config.isConcurrencySafe ?? false,
   };
 }
 

@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { signOutAction } from '@/app/actions/auth';
 
 export function TopNav() {
   const pathname = usePathname();
@@ -33,6 +34,14 @@ export function TopNav() {
         >
           Settings
         </Link>
+        <form action={signOutAction}>
+          <button
+            type="submit"
+            className="px-3 py-2 text-[13px] font-medium rounded-[var(--radius-sf-md)] text-sf-text-secondary hover:bg-sf-bg-secondary hover:text-sf-text-primary transition-colors"
+          >
+            Sign out
+          </button>
+        </form>
       </nav>
     </header>
   );

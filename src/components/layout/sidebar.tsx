@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { signOutAction } from '@/app/actions/auth';
 
 const navItems = [
   { href: '/dashboard', label: 'Dashboard', icon: DashboardIcon },
@@ -44,6 +45,18 @@ export function Sidebar() {
           })}
         </ul>
       </nav>
+
+      <div className="px-3 pb-4 mt-auto">
+        <form action={signOutAction}>
+          <button
+            type="submit"
+            className="flex items-center gap-3 w-full px-3 py-2.5 rounded-[var(--radius-sf-md)] text-[13px] font-medium text-sf-text-secondary hover:bg-sf-bg-secondary hover:text-sf-text-primary transition-colors duration-150"
+          >
+            <LogOutIcon />
+            Sign out
+          </button>
+        </form>
+      </div>
     </aside>
   );
 }
@@ -55,6 +68,14 @@ function DashboardIcon({ active }: { active: boolean }) {
       <rect x="9" y="1" width="6" height="6" rx="1" />
       <rect x="1" y="9" width="6" height="6" rx="1" />
       <rect x="9" y="9" width="6" height="6" rx="1" />
+    </svg>
+  );
+}
+
+function LogOutIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <path d="M6 14H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1h3M11 11l3-3-3-3M14 8H6" />
     </svg>
   );
 }

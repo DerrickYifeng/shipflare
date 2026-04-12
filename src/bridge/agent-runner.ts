@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { z } from 'zod';
-import type { AgentConfig, AgentResult, ToolContext, ToolDefinition } from './types';
+import type { AgentConfig, AgentResult, OnProgress, ToolContext, ToolDefinition } from './types';
 import { MODEL_PRICING } from './types';
 import { toAnthropicTool } from './build-tool';
 
@@ -21,6 +21,7 @@ export async function runAgent<T>(
   userMessage: string,
   context: ToolContext,
   outputSchema?: z.ZodType<T>,
+  onProgress?: OnProgress,
 ): Promise<AgentResult<T>> {
   const anthropicTools = config.tools.map(toAnthropicTool);
   const messages: Anthropic.Messages.MessageParam[] = [
@@ -38,7 +39,7 @@ export async function runAgent<T>(
 
     const response = await client.messages.create({
       model: config.model,
-      max_tokens: 4096,
+      max_tokens: 8192,
       system: config.systemPrompt,
       messages,
       tools: anthropicTools.length > 0 ? anthropicTools : undefined,
@@ -52,45 +53,26 @@ export async function runAgent<T>(
       // Add assistant message with tool_use blocks
       messages.push({ role: 'assistant', content: response.content });
 
-      // Execute each tool call and collect results
+      // Execute tool calls — concurrent-safe tools run in parallel
+      const toolUseBlocks = response.content.filter(
+        (b): b is Anthropic.Messages.ToolUseBlock => b.type === 'tool_use',
+      );
+
       const toolResults: Anthropic.Messages.ToolResultBlockParam[] = [];
 
-      for (const block of response.content) {
-        if (block.type !== 'tool_use') continue;
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const tool = config.tools.find(
-          (t): t is ToolDefinition<any, any> => t.name === block.name,
-        );
-
-        if (!tool) {
-          toolResults.push({
-            type: 'tool_result',
-            tool_use_id: block.id,
-            content: `Unknown tool: ${block.name}`,
-            is_error: true,
-          });
-          continue;
-        }
-
-        try {
-          // Validate input with Zod, then execute
-          const validatedInput = tool.inputSchema.parse(block.input);
-          const result = await tool.execute(validatedInput, context);
-          toolResults.push({
-            type: 'tool_result',
-            tool_use_id: block.id,
-            content: JSON.stringify(result),
-          });
-        } catch (error) {
-          const message =
-            error instanceof Error ? error.message : String(error);
-          toolResults.push({
-            type: 'tool_result',
-            tool_use_id: block.id,
-            content: `Tool error: ${message}`,
-            is_error: true,
-          });
+      for (const batch of partitionToolCalls(toolUseBlocks, config.tools)) {
+        if (batch.concurrent) {
+          // Run concurrent-safe batch in parallel
+          const batchResults = await Promise.all(
+            batch.blocks.map((block) => executeToolBlock(block, config.tools, context, onProgress)),
+          );
+          toolResults.push(...batchResults);
+        } else {
+          // Run non-concurrent-safe batch serially
+          for (const block of batch.blocks) {
+            const result = await executeToolBlock(block, config.tools, context, onProgress);
+            toolResults.push(result);
+          }
         }
       }
 
@@ -98,7 +80,11 @@ export async function runAgent<T>(
       continue;
     }
 
-    // end_turn: extract text, parse, validate, return
+    // end_turn: the agent is done with tool calls, now scoring/formatting
+    if (onProgress && turns > 1) {
+      onProgress({ type: 'scoring' });
+    }
+
     const textBlock = response.content.find(
       (b): b is Anthropic.Messages.TextBlock => b.type === 'text',
     );
@@ -146,6 +132,85 @@ export async function runAgent<T>(
 
   throw new Error(
     `Agent ${config.name}: exceeded max turns (${config.maxTurns})`,
+  );
+}
+
+/**
+ * Execute a single tool_use block: resolve tool, validate input, run, emit progress.
+ */
+async function executeToolBlock(
+  block: Anthropic.Messages.ToolUseBlock,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tools: ToolDefinition<any, any>[],
+  context: ToolContext,
+  onProgress?: OnProgress,
+): Promise<Anthropic.Messages.ToolResultBlockParam> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tool = tools.find((t): t is ToolDefinition<any, any> => t.name === block.name);
+
+  if (!tool) {
+    return {
+      type: 'tool_result',
+      tool_use_id: block.id,
+      content: `Unknown tool: ${block.name}`,
+      is_error: true,
+    };
+  }
+
+  try {
+    const validatedInput = tool.inputSchema.parse(block.input);
+
+    const query = (block.input as Record<string, unknown>)?.query as string | undefined;
+    if (onProgress && query) {
+      onProgress({ type: 'tool_call_start', query });
+    }
+
+    const result = await tool.execute(validatedInput, context);
+
+    if (onProgress && query) {
+      const resultCount = Array.isArray(result) ? result.length : 0;
+      onProgress({ type: 'tool_call_done', query, resultCount });
+    }
+
+    return {
+      type: 'tool_result',
+      tool_use_id: block.id,
+      content: JSON.stringify(result),
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      type: 'tool_result',
+      tool_use_id: block.id,
+      content: `Tool error: ${message}`,
+      is_error: true,
+    };
+  }
+}
+
+/**
+ * Partition tool_use blocks into batches following engine's toolOrchestration.ts pattern.
+ * Consecutive concurrent-safe tools are grouped into a single parallel batch.
+ * Non-concurrent-safe tools form singleton serial batches.
+ */
+function partitionToolCalls(
+  blocks: Anthropic.Messages.ToolUseBlock[],
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tools: ToolDefinition<any, any>[],
+): Array<{ concurrent: boolean; blocks: Anthropic.Messages.ToolUseBlock[] }> {
+  return blocks.reduce(
+    (acc: Array<{ concurrent: boolean; blocks: Anthropic.Messages.ToolUseBlock[] }>, block) => {
+      const tool = tools.find((t) => t.name === block.name);
+      const isSafe = tool?.isConcurrencySafe ?? false;
+
+      if (isSafe && acc[acc.length - 1]?.concurrent) {
+        acc[acc.length - 1].blocks.push(block);
+      } else {
+        acc.push({ concurrent: isSafe, blocks: [block] });
+      }
+      return acc;
+    },
+    [],
   );
 }
 
