@@ -65,7 +65,7 @@ export async function processPosting(job: Job<PostingJobData>) {
   if (!rateLimit.allowed) {
     log.warn(`Rate limited in r/${thread.subreddit} for user ${userId}`);
     throw new Error(
-      `Rate limit: 0/${rateLimit.remaining} posts remaining in r/${thread.subreddit}`,
+      `Rate limit: ${rateLimit.remaining} posts remaining in r/${thread.subreddit}, resets at ${rateLimit.resetAt.toISOString()}`,
     );
   }
 

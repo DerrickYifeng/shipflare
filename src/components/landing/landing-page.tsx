@@ -269,6 +269,7 @@ export function LandingPage({ isAuthenticated }: LandingPageProps) {
                           relevanceScore={result.score}
                           metadata={result.metadata}
                           reason={result.reason}
+                          intent={result.intent}
                           postedAt={result.postedAt}
                         />
                       ))}

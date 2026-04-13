@@ -133,6 +133,8 @@ export class RedditClient {
     instance['expiresAt'] = new Date(Date.now() + 86400_000);
     instance['requestCount'] = 0;
     instance['windowStart'] = Date.now();
+    instance['instanceMutex'] = createMutex();
+    instance['cache'] = new Map();
     return instance;
   }
 

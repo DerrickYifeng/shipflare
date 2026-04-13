@@ -10,15 +10,22 @@ export function DangerZone() {
   const [showDialog, setShowDialog] = useState(false);
   const [confirmation, setConfirmation] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
   const handleDelete = async () => {
     if (confirmation !== 'DELETE') return;
     setLoading(true);
+    setError('');
 
     try {
-      await fetch('/api/account', { method: 'DELETE' });
+      const res = await fetch('/api/account', { method: 'DELETE' });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error ?? 'Failed to delete account');
+      }
       await signOut({ callbackUrl: '/' });
-    } catch {
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete account');
       setLoading(false);
     }
   };
@@ -49,6 +56,9 @@ export function DangerZone() {
           onChange={(e) => setConfirmation(e.target.value)}
           placeholder="Type DELETE"
         />
+        {error && (
+          <p className="text-[13px] text-sf-error mt-2">{error}</p>
+        )}
         <div className="flex justify-end gap-2 mt-4">
           <Button variant="ghost" onClick={() => setShowDialog(false)}>
             Cancel
