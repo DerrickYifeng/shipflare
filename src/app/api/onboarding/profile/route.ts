@@ -14,7 +14,14 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const { url, name, description, keywords, valueProp } = await request.json();
+  let body: { url?: string; name?: string; description?: string; keywords?: string[]; valueProp?: string };
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+  }
+
+  const { url, name, description, keywords, valueProp } = body;
   log.info(`PUT /api/onboarding/profile name=${name}`);
 
   if (!url || !name || !description) {

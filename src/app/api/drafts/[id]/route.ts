@@ -19,7 +19,14 @@ export async function PATCH(
   const { id } = await params;
   log.info(`PATCH /api/drafts/${id}`);
 
-  const { replyBody } = await request.json();
+  let body: { replyBody?: unknown };
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+  }
+
+  const { replyBody } = body;
 
   if (!replyBody || typeof replyBody !== 'string') {
     return NextResponse.json({ error: 'replyBody is required' }, { status: 400 });

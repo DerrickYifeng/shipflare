@@ -66,6 +66,15 @@ export async function GET(request: NextRequest) {
     headers: { Authorization: `Bearer ${tokens.access_token}` },
   });
 
+  if (!meResponse.ok) {
+    log.error(`Reddit /me failed: ${meResponse.status}`);
+    const redirectUrl = new URL(
+      '/onboarding?reddit_error=profile_fetch',
+      request.url,
+    );
+    return NextResponse.redirect(redirectUrl);
+  }
+
   const me = (await meResponse.json()) as { name: string };
 
   // Encrypt tokens

@@ -50,18 +50,12 @@ export async function GET() {
         send(JSON.stringify({ type: 'heartbeat' }));
       }, 30_000);
 
-      // Cleanup on stream close
+      // Store cleanup handler for the cancel() callback
       const cleanup = () => {
         clearInterval(heartbeat);
         subscriber.unsubscribe(channel).catch(() => {});
         subscriber.disconnect();
       };
-
-      // Handle client disconnect
-      const signal = new AbortController().signal;
-      signal.addEventListener('abort', cleanup, { once: true });
-
-      // Store cleanup for external abort
       (controller as unknown as { _cleanup: () => void })._cleanup = cleanup;
     },
     cancel() {

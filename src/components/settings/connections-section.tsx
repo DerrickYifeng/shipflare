@@ -14,8 +14,17 @@ export function ConnectionsSection({ redditConnected, redditUsername }: Connecti
   };
 
   const handleDisconnect = async () => {
-    await fetch('/api/reddit/disconnect', { method: 'DELETE' });
-    window.location.reload();
+    try {
+      const res = await fetch('/api/reddit/disconnect', { method: 'DELETE' });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        alert(body.error ?? 'Failed to disconnect Reddit account');
+        return;
+      }
+      window.location.reload();
+    } catch {
+      alert('Failed to disconnect Reddit account');
+    }
   };
 
   return (
