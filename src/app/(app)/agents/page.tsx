@@ -9,7 +9,7 @@ export default async function AgentsPage() {
 
   return (
     <>
-      <HeaderBar title="Agents" />
+      <HeaderBar title="Automation" />
       <AgentsWarRoom />
     </>
   );
