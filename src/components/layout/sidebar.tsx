@@ -6,7 +6,7 @@ import { signOutAction } from '@/app/actions/auth';
 
 const navItems = [
   { href: '/dashboard', label: 'Dashboard', icon: DashboardIcon },
-  { href: '/agents', label: 'Agents', icon: AgentsIcon },
+  { href: '/agents', label: 'Automation', icon: AutomationIcon },
   { href: '/settings', label: 'Settings', icon: SettingsIcon },
 ];
 
@@ -81,13 +81,10 @@ function LogOutIcon() {
   );
 }
 
-function AgentsIcon({ active }: { active: boolean }) {
+function AutomationIcon({ active }: { active: boolean }) {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke={active ? 'var(--color-sf-text-primary)' : 'currentColor'} strokeWidth="1.5">
-      <circle cx="8" cy="4" r="2" />
-      <path d="M4 14v-2a4 4 0 0 1 8 0v2" />
-      <circle cx="3" cy="6" r="1.5" />
-      <circle cx="13" cy="6" r="1.5" />
+      <path d="M9 1L3 9h5l-1 6 6-8H8l1-6z" />
     </svg>
   );
 }
