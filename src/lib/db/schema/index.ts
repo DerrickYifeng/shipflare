@@ -9,3 +9,4 @@ export {
   draftStatusEnum,
   postStatusEnum,
 } from './drafts';
+export { agentMemories, agentMemoryLogs } from './memories';

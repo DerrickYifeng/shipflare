@@ -1,23 +1,21 @@
 import { Badge } from '@/components/ui/badge';
-
-interface ScoreDimensions {
-  relevance: number;
-  intent: number;
-  exposure: number;
-  freshness: number;
-  engagement: number;
-}
+import type { IntentClassification } from '@/types/discovery';
 
 interface DiscoveryCardProps {
   source: string;
   title: string;
   url: string;
-  subreddit: string;
-  upvotes: number;
-  commentCount: number;
+  community: string;
   relevanceScore: number;
-  scores?: ScoreDimensions;
   postedAt: string;
+  reason?: string;
+  metadata?: {
+    upvotes?: number;
+    commentCount?: number;
+    points?: number;
+    author?: string;
+  };
+  intent?: IntentClassification;
 }
 
 function getSourceIcon(source: string) {
@@ -32,6 +30,12 @@ function getSourceIcon(source: string) {
       return (
         <svg width="16" height="16" viewBox="0 0 24 24" fill="#FF6600" aria-hidden="true">
           <path d="M0 0v24h24V0H0zm11.09 13.28V18h1.75v-4.72l4.38-8.1h-1.97l-3.3 6.19-3.29-6.19H6.71l4.38 8.1z" />
+        </svg>
+      );
+    case 'web':
+      return (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="text-sf-text-tertiary" aria-hidden="true">
+          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z" />
         </svg>
       );
     default:
@@ -55,27 +59,47 @@ function formatTimeAgo(isoDate: string): string {
   return 'just now';
 }
 
-const DIMENSION_LABELS: Record<keyof ScoreDimensions, string> = {
-  relevance: 'Relevance',
-  intent: 'Intent',
-  exposure: 'Exposure',
-  freshness: 'Freshness',
-  engagement: 'Engagement',
+const BUYER_STAGE_LABELS: Record<string, string> = {
+  purchase_ready: 'Ready to buy',
+  product_aware: 'Comparing products',
+  solution_aware: 'Exploring solutions',
+  problem_aware: 'Problem aware',
+  recently_purchased: 'Recently purchased',
 };
+
+function IntentBadge({ intent }: { intent: IntentClassification }) {
+  if (intent.buyerStage === 'purchase_ready' || intent.buyerStage === 'product_aware') {
+    return <Badge variant="success" className="text-[10px]">{BUYER_STAGE_LABELS[intent.buyerStage]}</Badge>;
+  }
+  if (intent.posterNeed.present && intent.posterNeed.strength > 0.6) {
+    return <Badge variant="warning" className="text-[10px]">Seeking solution</Badge>;
+  }
+  if (intent.readerNeed.present && intent.readerNeed.strength > 0.6) {
+    return <Badge variant="accent" className="text-[10px]">Audience fit</Badge>;
+  }
+  return null;
+}
 
 export function DiscoveryCard({
   source,
   title,
   url,
-  subreddit,
-  upvotes,
-  commentCount,
+  community,
   relevanceScore,
-  scores,
   postedAt,
+  reason,
+  metadata,
+  intent,
 }: DiscoveryCardProps) {
-  const scoreVariant =
-    relevanceScore >= 70 ? 'success' : relevanceScore >= 40 ? 'warning' : 'default';
+  const upvotes = metadata?.upvotes ?? metadata?.points;
+  const commentCount = metadata?.commentCount;
+
+  const scoreColor =
+    relevanceScore >= 70
+      ? 'text-sf-success'
+      : relevanceScore >= 40
+        ? 'text-sf-accent'
+        : 'text-sf-text-tertiary';
 
   return (
     <a
@@ -83,75 +107,56 @@ export function DiscoveryCard({
       target="_blank"
       rel="noopener noreferrer"
       className="
-        group relative flex items-start gap-3 px-4 py-3
+        group flex items-stretch px-4 py-3
         border-b border-sf-border-subtle
         hover:bg-sf-bg-secondary transition-colors duration-150
       "
     >
-      <div className="shrink-0 mt-0.5">{getSourceIcon(source)}</div>
+      {/* Content — left side */}
+      <div className="flex-1 min-w-0 flex items-start gap-3">
+        <div className="shrink-0 mt-0.5">{getSourceIcon(source)}</div>
 
-      <div className="flex-1 min-w-0">
-        <p className="text-[15px] text-sf-text-primary font-medium leading-snug line-clamp-2">
-          {title}
-        </p>
-        <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-          <Badge className="shrink-0">
-            r/{subreddit}
-          </Badge>
-          <span className="text-[11px] text-sf-text-tertiary">
-            {formatTimeAgo(postedAt)}
-          </span>
-          <span className="text-[11px] text-sf-text-tertiary flex items-center gap-0.5">
-            <ArrowUpIcon />
-            {formatCount(upvotes)}
-          </span>
-          <span className="text-[11px] text-sf-text-tertiary flex items-center gap-0.5">
-            <CommentIcon />
-            {formatCount(commentCount)}
-          </span>
+        <div className="flex-1 min-w-0">
+          <p className="text-[15px] text-sf-text-primary font-medium leading-snug line-clamp-2">
+            {title}
+          </p>
+
+          {/* Preview snippet */}
+          {reason && (
+            <p className="mt-1 text-[12px] text-sf-text-secondary leading-relaxed line-clamp-2">
+              {reason}
+            </p>
+          )}
+
+          <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+            <Badge className="shrink-0">
+              {community}
+            </Badge>
+            {intent && <IntentBadge intent={intent} />}
+            <span className="text-[11px] text-sf-text-tertiary">
+              {formatTimeAgo(postedAt)}
+            </span>
+            {upvotes != null && (
+              <span className="text-[11px] text-sf-text-tertiary flex items-center gap-0.5">
+                <ArrowUpIcon />
+                {formatCount(upvotes)}
+              </span>
+            )}
+            {commentCount != null && (
+              <span className="text-[11px] text-sf-text-tertiary flex items-center gap-0.5">
+                <CommentIcon />
+                {formatCount(commentCount)}
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
-      <div className="relative shrink-0 mt-0.5">
-        <Badge mono variant={scoreVariant}>
+      {/* Score — right side */}
+      <div className="shrink-0 flex items-center justify-center w-14 ml-3">
+        <span className={`text-[22px] font-semibold tabular-nums ${scoreColor}`}>
           {relevanceScore}
-        </Badge>
-
-        {/* Score breakdown tooltip on hover */}
-        {scores && (
-          <div className="
-            absolute right-0 top-full mt-1 z-10
-            opacity-0 pointer-events-none scale-95
-            group-hover:opacity-100 group-hover:pointer-events-auto group-hover:scale-100
-            transition-all duration-150 origin-top-right
-          ">
-            <div className="
-              bg-sf-text-primary text-white rounded-[var(--radius-sf-md)]
-              px-3 py-2 shadow-lg min-w-[160px]
-            ">
-              {(Object.entries(scores) as [keyof ScoreDimensions, number][]).map(
-                ([key, value]) => (
-                  <div key={key} className="flex items-center justify-between gap-4 py-0.5">
-                    <span className="text-[11px] text-white/70">
-                      {DIMENSION_LABELS[key]}
-                    </span>
-                    <div className="flex items-center gap-1.5">
-                      <div className="w-[48px] h-[3px] bg-white/20 rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-white/80 rounded-full"
-                          style={{ width: `${value}%` }}
-                        />
-                      </div>
-                      <span className="text-[10px] font-mono text-white/90 w-[24px] text-right">
-                        {value}
-                      </span>
-                    </div>
-                  </div>
-                ),
-              )}
-            </div>
-          </div>
-        )}
+        </span>
       </div>
     </a>
   );

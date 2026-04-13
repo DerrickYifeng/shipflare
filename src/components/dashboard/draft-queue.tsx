@@ -5,7 +5,7 @@ import { DraftCard } from './draft-card';
 import { Skeleton } from '@/components/ui/skeleton';
 
 export function DraftQueue() {
-  const { drafts, isLoading, approve, skip } = useDrafts();
+  const { drafts, isLoading, approve, skip, retry } = useDrafts();
 
   if (isLoading) {
     return (
@@ -35,6 +35,7 @@ export function DraftQueue() {
           draft={draft}
           onApprove={approve}
           onSkip={skip}
+          onRetry={retry}
         />
       ))}
     </div>

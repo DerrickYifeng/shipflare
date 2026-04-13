@@ -4,6 +4,9 @@ import { db } from '@/lib/db';
 import { channels } from '@/lib/db/schema';
 import { encrypt } from '@/lib/encryption';
 import { eq, and } from 'drizzle-orm';
+import { createLogger } from '@/lib/logger';
+
+const log = createLogger('api:reddit');
 
 /**
  * Reddit OAuth callback. Exchange code for tokens, encrypt, upsert channel.
@@ -19,6 +22,7 @@ export async function GET(request: NextRequest) {
   const error = searchParams.get('error');
 
   if (error || !code) {
+    log.warn(`Reddit OAuth denied: ${error ?? 'no code'}`);
     const redirectUrl = new URL('/onboarding?reddit_error=denied', request.url);
     return NextResponse.redirect(redirectUrl);
   }
@@ -43,6 +47,7 @@ export async function GET(request: NextRequest) {
   );
 
   if (!tokenResponse.ok) {
+    log.error(`Reddit token exchange failed: ${tokenResponse.status}`);
     const redirectUrl = new URL(
       '/onboarding?reddit_error=token_exchange',
       request.url,
@@ -102,5 +107,6 @@ export async function GET(request: NextRequest) {
     });
   }
 
+  log.info(`Reddit account connected: u/${me.name}`);
   return NextResponse.redirect(new URL('/dashboard', request.url));
 }

@@ -1,5 +1,7 @@
 import IORedis from 'ioredis';
+import { createLogger } from '@/lib/logger';
 
+const log = createLogger('lib:redis');
 const redisUrl = process.env.REDIS_URL!;
 
 /**
@@ -14,6 +16,9 @@ export function getRedis(): IORedis {
       maxRetriesPerRequest: null, // Required by BullMQ
       enableReadyCheck: false,
     });
+    _redis.on('connect', () => log.info('Redis connected'));
+    _redis.on('error', (err) => log.error('Redis error:', err.message));
+    _redis.on('close', () => log.warn('Redis connection closed'));
   }
   return _redis;
 }

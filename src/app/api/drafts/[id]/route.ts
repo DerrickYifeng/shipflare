@@ -3,6 +3,9 @@ import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { drafts } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
+import { createLogger } from '@/lib/logger';
+
+const log = createLogger('api:drafts');
 
 export async function PATCH(
   request: Request,
@@ -14,6 +17,8 @@ export async function PATCH(
   }
 
   const { id } = await params;
+  log.info(`PATCH /api/drafts/${id}`);
+
   const { replyBody } = await request.json();
 
   if (!replyBody || typeof replyBody !== 'string') {
@@ -30,13 +35,23 @@ export async function PATCH(
     return NextResponse.json({ error: 'Draft not found' }, { status: 404 });
   }
 
-  if (draft.status !== 'pending') {
-    return NextResponse.json({ error: 'Can only edit pending drafts' }, { status: 400 });
+  if (draft.status !== 'pending' && draft.status !== 'needs_revision') {
+    return NextResponse.json(
+      { error: 'Can only edit pending or needs_revision drafts' },
+      { status: 400 },
+    );
   }
 
   await db
     .update(drafts)
-    .set({ replyBody, updatedAt: new Date() })
+    .set({
+      replyBody,
+      status: 'pending', // Reset to pending after edit so it goes through review again
+      reviewVerdict: null,
+      reviewScore: null,
+      reviewJson: null,
+      updatedAt: new Date(),
+    })
     .where(eq(drafts.id, id));
 
   return NextResponse.json({ success: true });

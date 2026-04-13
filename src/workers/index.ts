@@ -2,9 +2,15 @@ import { Worker } from 'bullmq';
 import { getRedis } from '@/lib/redis';
 import { processDiscovery } from './processors/discovery';
 import { processContent } from './processors/content';
+import { processReview } from './processors/review';
 import { processPosting } from './processors/posting';
 import { processHealthScore } from './processors/health-score';
-import type { DiscoveryJobData, ContentJobData, PostingJobData, HealthScoreJobData } from '@/lib/queue/types';
+import { processDream } from './processors/dream';
+import { dreamQueue } from '@/lib/queue';
+import { createLogger } from '@/lib/logger';
+import type { DiscoveryJobData, ContentJobData, ReviewJobData, PostingJobData, HealthScoreJobData, DreamJobData } from '@/lib/queue/types';
+
+const log = createLogger('workers');
 
 const connection = getRedis();
 
@@ -25,6 +31,12 @@ const contentWorker = new Worker<ContentJobData>(
   { connection, concurrency: 3 },
 );
 
+const reviewWorker = new Worker<ReviewJobData>(
+  'review',
+  async (job) => processReview(job),
+  { connection, concurrency: 3 },
+);
+
 const postingWorker = new Worker<PostingJobData>(
   'posting',
   async (job) => processPosting(job),
@@ -37,23 +49,50 @@ const healthScoreWorker = new Worker<HealthScoreJobData>(
   { connection, concurrency: 1 },
 );
 
-const workers = [discoveryWorker, contentWorker, postingWorker, healthScoreWorker];
+const dreamWorker = new Worker<DreamJobData>(
+  'dream',
+  async (job) => processDream(job),
+  { connection, concurrency: 1 },
+);
+
+const workers = [discoveryWorker, contentWorker, reviewWorker, postingWorker, healthScoreWorker, dreamWorker];
 
 // Log events
 for (const worker of workers) {
+  worker.on('active', (job) => {
+    log.debug(`[${worker.name}] job ${job.id} active`);
+  });
   worker.on('completed', (job) => {
-    console.log(`[${worker.name}] Job ${job.id} completed`);
+    log.info(`[${worker.name}] job ${job.id} completed`);
   });
   worker.on('failed', (job, err) => {
-    console.error(`[${worker.name}] Job ${job?.id} failed:`, err.message);
+    log.error(`[${worker.name}] job ${job?.id} failed: ${err.message}`);
   });
 }
 
-console.log('ShipFlare workers started: discovery, content, posting, health-score');
+// Schedule nightly distillation as safety net (4am daily).
+// Threshold-triggered distillation from discovery/content processors
+// handles the responsive case; this catches anything that slips through.
+async function scheduleNightlyDream() {
+  await dreamQueue.add(
+    'distill-all',
+    { productId: '__all__' },
+    {
+      repeat: { pattern: '0 4 * * *' },
+      jobId: 'nightly-distill',
+    },
+  );
+}
+
+scheduleNightlyDream().catch((err) => {
+  log.error('Failed to schedule nightly distillation:', err.message);
+});
+
+log.info('All workers started: discovery, content, review, posting, health-score, dream');
 
 // Graceful shutdown
 async function shutdown() {
-  console.log('Shutting down workers...');
+  log.info('Shutting down workers...');
   await Promise.all(workers.map((w) => w.close()));
   process.exit(0);
 }

@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { randomBytes } from 'crypto';
+import { createLogger } from '@/lib/logger';
+
+const log = createLogger('api:reddit');
 
 /**
  * Initiate Reddit OAuth flow.
@@ -13,6 +16,7 @@ export async function GET() {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  log.info('Reddit OAuth flow initiated');
   const state = randomBytes(16).toString('hex');
   // TODO: Store state in session/cookie for CSRF validation on callback
 

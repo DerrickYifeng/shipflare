@@ -4,25 +4,8 @@ import { useState, useEffect, type FormEvent } from 'react';
 import { DiscoveryCard } from './discovery-card';
 import { ThoughtStream } from './thought-stream';
 import { signInWithGitHub } from '@/app/actions/auth';
-
-interface ScanResult {
-  source: string;
-  externalId: string;
-  title: string;
-  url: string;
-  subreddit: string;
-  upvotes: number;
-  commentCount: number;
-  relevanceScore: number;
-  scores?: {
-    relevance: number;
-    intent: number;
-    exposure: number;
-    freshness: number;
-    engagement: number;
-  };
-  postedAt: string;
-}
+import type { LegacyScanResult, DiscoveredCommunity } from '@/types/discovery';
+import { toLegacyDiscoveryResult } from '@/types/discovery';
 
 interface ScanResponse {
   product: {
@@ -30,7 +13,8 @@ interface ScanResponse {
     description: string;
     url: string;
   };
-  results: ScanResult[];
+  communities?: DiscoveredCommunity[];
+  results: LegacyScanResult[];
 }
 
 interface LandingPageProps {
@@ -39,6 +23,7 @@ interface LandingPageProps {
 
 const VISIBLE_CARDS = 3;
 const SESSION_KEY = 'shipflare_scan_url';
+const SESSION_DATA_KEY = 'shipflare_scan_data';
 
 export function LandingPage({ isAuthenticated }: LandingPageProps) {
   const [url, setUrl] = useState('');
@@ -47,14 +32,31 @@ export function LandingPage({ isAuthenticated }: LandingPageProps) {
   const [error, setError] = useState('');
   const [data, setData] = useState<ScanResponse | null>(null);
 
-  // After OAuth redirect, re-scan if we had a stored URL
+  // After OAuth redirect, restore cached scan results and persist to DB
   useEffect(() => {
     if (isAuthenticated) {
+      const storedData = sessionStorage.getItem(SESSION_DATA_KEY);
       const storedUrl = sessionStorage.getItem(SESSION_KEY);
-      if (storedUrl) {
-        sessionStorage.removeItem(SESSION_KEY);
-        setUrl(storedUrl);
-        startScan(storedUrl);
+      sessionStorage.removeItem(SESSION_KEY);
+      sessionStorage.removeItem(SESSION_DATA_KEY);
+
+      if (storedData) {
+        try {
+          const parsed = JSON.parse(storedData) as ScanResponse;
+          setData(parsed);
+          if (storedUrl) setUrl(storedUrl);
+
+          // Persist to database so dashboard also shows these threads
+          if (parsed.results.length > 0) {
+            fetch('/api/discovery/save', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ results: parsed.results }),
+            }).catch(() => { /* best-effort */ });
+          }
+        } catch {
+          // Corrupted data, ignore
+        }
       }
     }
   }, [isAuthenticated]);
@@ -98,11 +100,15 @@ export function LandingPage({ isAuthenticated }: LandingPageProps) {
     if (url) {
       sessionStorage.setItem(SESSION_KEY, url);
     }
+    if (data) {
+      sessionStorage.setItem(SESSION_DATA_KEY, JSON.stringify(data));
+    }
   }
 
   const results = data?.results ?? [];
-  const visibleResults = isAuthenticated ? results : results.slice(0, VISIBLE_CARDS);
-  const blurredResults = isAuthenticated ? [] : results.slice(VISIBLE_CARDS);
+  const mapped = results.map(toLegacyDiscoveryResult);
+  const visibleResults = isAuthenticated ? mapped : mapped.slice(0, VISIBLE_CARDS);
+  const blurredResults = isAuthenticated ? [] : mapped.slice(VISIBLE_CARDS);
   const hasBlurred = blurredResults.length > 0;
 
   return (
@@ -159,7 +165,7 @@ export function LandingPage({ isAuthenticated }: LandingPageProps) {
 
         <form
           onSubmit={handleSubmit}
-          className="mt-8 w-full max-w-[520px] flex items-center rounded-[var(--radius-sf-lg)] border border-sf-border hover:border-sf-text-tertiary focus-within:border-sf-accent transition-colors duration-150 bg-sf-bg-primary"
+          className="mt-8 w-full max-w-[520px] flex items-center rounded-[var(--radius-sf-lg)] border border-sf-border hover:border-sf-text-tertiary focus-within:border-sf-text-tertiary focus-within:shadow-[0_0_0_3px_rgba(0,0,0,0.04)] transition-all duration-150 bg-sf-bg-primary outline-none focus-visible:outline-none"
         >
           <input
             type="text"
@@ -170,7 +176,7 @@ export function LandingPage({ isAuthenticated }: LandingPageProps) {
               flex-1 min-h-[48px] px-4 py-2
               text-[15px] text-sf-text-primary
               bg-transparent placeholder:text-sf-text-tertiary
-              outline-none border-none
+              outline-none border-none focus:outline-none focus-visible:outline-none
             "
           />
           <button
@@ -221,8 +227,17 @@ export function LandingPage({ isAuthenticated }: LandingPageProps) {
             </div>
           )}
 
+          {/* Discovered communities */}
+          {data.communities && data.communities.length > 0 && (
+            <div className="mb-5 flex flex-wrap gap-2">
+              {data.communities.map((c) => (
+                <CommunityPill key={c.name} community={c} />
+              ))}
+            </div>
+          )}
+
           {/* Results list */}
-          {results.length > 0 && (
+          {mapped.length > 0 && (
             <div className="relative">
               <div className="border border-sf-border rounded-[var(--radius-sf-lg)] overflow-hidden">
                 {visibleResults.map((result) => (
@@ -231,11 +246,11 @@ export function LandingPage({ isAuthenticated }: LandingPageProps) {
                     source={result.source}
                     title={result.title}
                     url={result.url}
-                    subreddit={result.subreddit}
-                    upvotes={result.upvotes}
-                    commentCount={result.commentCount}
-                    relevanceScore={result.relevanceScore}
-                    scores={result.scores}
+                    community={result.community}
+                    relevanceScore={result.score}
+                    metadata={result.metadata}
+                    reason={result.reason}
+                    intent={result.intent}
                     postedAt={result.postedAt}
                   />
                 ))}
@@ -250,10 +265,10 @@ export function LandingPage({ isAuthenticated }: LandingPageProps) {
                           source={result.source}
                           title={result.title}
                           url={result.url}
-                          subreddit={result.subreddit}
-                          upvotes={result.upvotes}
-                          commentCount={result.commentCount}
-                          relevanceScore={result.relevanceScore}
+                          community={result.community}
+                          relevanceScore={result.score}
+                          metadata={result.metadata}
+                          reason={result.reason}
                           postedAt={result.postedAt}
                         />
                       ))}
@@ -290,7 +305,7 @@ export function LandingPage({ isAuthenticated }: LandingPageProps) {
               </div>
 
               {/* Authenticated: show Go to Dashboard */}
-              {isAuthenticated && results.length > 0 && (
+              {isAuthenticated && mapped.length > 0 && (
                 <div className="mt-6 text-center">
                   <a
                     href="/dashboard"
@@ -314,7 +329,7 @@ export function LandingPage({ isAuthenticated }: LandingPageProps) {
           )}
 
           {/* No results */}
-          {results.length === 0 && (
+          {mapped.length === 0 && (
             <div className="text-center py-12">
               <p className="text-[15px] text-sf-text-secondary">
                 No relevant conversations found for this URL.
@@ -339,5 +354,42 @@ export function LandingPage({ isAuthenticated }: LandingPageProps) {
         </footer>
       )}
     </main>
+  );
+}
+
+function CommunityPill({ community }: { community: DiscoveredCommunity }) {
+  const fit = Math.round(community.audienceFit * 100);
+  const subs = community.subscribers
+    ? community.subscribers >= 1_000_000
+      ? `${(community.subscribers / 1_000_000).toFixed(1)}M`
+      : community.subscribers >= 1_000
+        ? `${Math.round(community.subscribers / 1_000)}k`
+        : String(community.subscribers)
+    : null;
+
+  return (
+    <div
+      className="group relative flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-sf-border bg-sf-bg-secondary text-[12px] text-sf-text-secondary"
+      title={community.reason}
+    >
+      <span className="font-medium text-sf-text-primary">{community.name}</span>
+      {subs && (
+        <span className="text-sf-text-tertiary">{subs}</span>
+      )}
+      <span
+        className="inline-block w-1.5 h-1.5 rounded-full"
+        style={{
+          backgroundColor: fit >= 70
+            ? 'var(--color-sf-success)'
+            : fit >= 50
+              ? 'var(--color-sf-accent)'
+              : 'var(--color-sf-text-tertiary)',
+        }}
+      />
+      {/* Tooltip on hover */}
+      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 rounded-[var(--radius-sf-md)] bg-sf-text-primary text-white text-[11px] leading-snug max-w-[240px] opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity duration-150 z-10 whitespace-normal">
+        {community.reason}
+      </div>
+    </div>
   );
 }

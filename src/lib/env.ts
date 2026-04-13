@@ -12,6 +12,7 @@ const envSchema = z.object({
   ENCRYPTION_KEY: z.string().min(32),
   ANTHROPIC_API_KEY: z.string().startsWith('sk-'),
   NEXT_PUBLIC_APP_URL: z.string().url(),
+  LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

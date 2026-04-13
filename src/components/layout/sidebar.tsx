@@ -6,6 +6,7 @@ import { signOutAction } from '@/app/actions/auth';
 
 const navItems = [
   { href: '/dashboard', label: 'Dashboard', icon: DashboardIcon },
+  { href: '/agents', label: 'Agents', icon: AgentsIcon },
   { href: '/settings', label: 'Settings', icon: SettingsIcon },
 ];
 
@@ -76,6 +77,17 @@ function LogOutIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
       <path d="M6 14H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1h3M11 11l3-3-3-3M14 8H6" />
+    </svg>
+  );
+}
+
+function AgentsIcon({ active }: { active: boolean }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke={active ? 'var(--color-sf-text-primary)' : 'currentColor'} strokeWidth="1.5">
+      <circle cx="8" cy="4" r="2" />
+      <path d="M4 14v-2a4 4 0 0 1 8 0v2" />
+      <circle cx="3" cy="6" r="1.5" />
+      <circle cx="13" cy="6" r="1.5" />
     </svg>
   );
 }

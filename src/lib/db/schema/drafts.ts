@@ -16,6 +16,8 @@ export const draftStatusEnum = pgEnum('draft_status', [
   'skipped',
   'posted',
   'failed',
+  'flagged',
+  'needs_revision',
 ]);
 
 export const postStatusEnum = pgEnum('post_status', [
@@ -35,10 +37,15 @@ export const drafts = pgTable('drafts', {
     .notNull()
     .references(() => threads.id, { onDelete: 'cascade' }),
   status: draftStatusEnum('status').notNull().default('pending'),
+  draftType: text('draft_type').notNull().default('reply'), // 'reply' | 'original_post'
+  postTitle: text('post_title'), // for original_post type
   replyBody: text('reply_body').notNull(),
   confidenceScore: real('confidence_score').notNull(),
   whyItWorks: text('why_it_works'),
   ftcDisclosure: text('ftc_disclosure'),
+  reviewVerdict: text('review_verdict'), // 'PASS' | 'FAIL' | 'REVISE'
+  reviewScore: real('review_score'),
+  reviewJson: jsonb('review_json'), // { checks, issues, suggestions }
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
 });

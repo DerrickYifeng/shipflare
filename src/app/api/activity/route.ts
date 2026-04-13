@@ -3,12 +3,17 @@ import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { activityEvents } from '@/lib/db/schema';
 import { eq, desc } from 'drizzle-orm';
+import { createLogger } from '@/lib/logger';
+
+const log = createLogger('api:activity');
 
 export async function GET() {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
+
+  log.info('GET /api/activity');
 
   const events = await db
     .select()

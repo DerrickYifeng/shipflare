@@ -1,75 +1,16 @@
-import type { z } from 'zod';
-
 /**
- * Tool definition following engine's buildTool() pattern (engine/Tool.ts:783).
- * Simplified for ShipFlare's headless agent use case.
+ * Bridge types — re-exports from core/types.ts.
+ *
+ * This file preserves the original import paths so that existing
+ * consumers continue to work without changes.
  */
-export interface ToolDefinition<TInput = unknown, TOutput = unknown> {
-  name: string;
-  description: string;
-  inputSchema: z.ZodType<TInput>;
-  execute: (input: TInput, context: ToolContext) => Promise<TOutput>;
-  /** Whether this tool can safely run in parallel with other concurrent-safe tools. Default: false. */
-  isConcurrencySafe?: boolean;
-}
+export type {
+  ToolDefinition,
+  ToolContext,
+  AgentConfig,
+  AgentResult,
+  AgentProgressEvent,
+  OnProgress,
+} from '../core/types';
 
-/**
- * Dependency injection context passed to tools at execution time.
- * Mirrors engine's ToolUseContext (engine/Tool.ts:158) but scoped to ShipFlare.
- */
-export interface ToolContext {
-  abortSignal: AbortSignal;
-  get<T>(key: string): T;
-}
-
-/**
- * Agent configuration. Corresponds to engine's agent markdown frontmatter
- * (engine/tools/AgentTool/loadAgentsDir.ts).
- */
-export interface AgentConfig {
-  name: string;
-  systemPrompt: string;
-  model: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  tools: ToolDefinition<any, any>[];
-  maxTurns: number;
-  outputSchema?: z.ZodType;
-}
-
-/**
- * Agent execution result with usage metrics.
- * Mirrors engine's cost tracking (engine/services/cost.ts).
- */
-export interface AgentResult<T = unknown> {
-  result: T;
-  usage: {
-    inputTokens: number;
-    outputTokens: number;
-    costUsd: number;
-    model: string;
-    turns: number;
-  };
-}
-
-/**
- * Progress events emitted by the agent runner during execution.
- * Used for SSE streaming to the client.
- */
-export type AgentProgressEvent =
-  | { type: 'scrape_done'; keywords: string[] }
-  | { type: 'query_done'; subredditCount: number; queriesPerSubreddit: number }
-  | { type: 'tool_call_start'; query: string; subreddit?: string }
-  | { type: 'tool_call_done'; query: string; resultCount: number; subreddit?: string }
-  | { type: 'scoring' }
-  | { type: 'complete' };
-
-export type OnProgress = (event: AgentProgressEvent) => void;
-
-/**
- * Model pricing per million tokens. From Anthropic docs.
- */
-export const MODEL_PRICING: Record<string, { input: number; output: number }> = {
-  'claude-haiku-4-5-20251001': { input: 0.80, output: 4.00 },
-  'claude-sonnet-4-6': { input: 3.00, output: 15.00 },
-  'claude-opus-4-6': { input: 15.00, output: 75.00 },
-};
+export { MODEL_PRICING } from '../core/types';

@@ -1,6 +1,31 @@
-import { readFileSync } from 'fs';
-import { join } from 'path';
+import { readFileSync, existsSync } from 'fs';
+import { join, dirname } from 'path';
 import type { AgentConfig, ToolDefinition } from './types';
+import type { ToolRegistry } from '@/core/tool-system';
+
+/** Accept either a ToolRegistry or a legacy Map for tool resolution. */
+type ToolSource = ToolRegistry | Map<string, ToolDefinition<any, any>>;
+
+function lookupTool(source: ToolSource, name: string): ToolDefinition<any, any> | undefined {
+  if ('getForAgent' in source) {
+    return source.get(name);
+  }
+  return source.get(name);
+}
+
+/** Lazily loaded ReAct preamble, cached after first read. */
+let reactPreambleCache: string | null = null;
+
+function getReactPreamble(agentsDir: string): string {
+  if (reactPreambleCache !== null) return reactPreambleCache;
+  const preamblePath = join(agentsDir, 'react-preamble.md');
+  if (existsSync(preamblePath)) {
+    reactPreambleCache = readFileSync(preamblePath, 'utf-8').trim();
+  } else {
+    reactPreambleCache = '';
+  }
+  return reactPreambleCache;
+}
 
 /**
  * Parse a markdown agent definition with YAML frontmatter.
@@ -16,12 +41,12 @@ import type { AgentConfig, ToolDefinition } from './types';
  * System prompt content here...
  */
 export function loadAgentFromFile(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   filePath: string,
-  toolRegistry: Map<string, ToolDefinition<any, any>>,
+  toolSource: ToolSource,
 ): AgentConfig {
   const raw = readFileSync(filePath, 'utf-8');
-  return parseAgentMarkdown(raw, toolRegistry);
+  const agentsDir = dirname(filePath);
+  return parseAgentMarkdown(raw, toolSource, agentsDir);
 }
 
 /**
@@ -29,23 +54,25 @@ export function loadAgentFromFile(
  */
 export function loadAgentsFromDir(
   dirPath: string,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  toolRegistry: Map<string, ToolDefinition<any, any>>,
+  toolSource: ToolSource,
 ): AgentConfig[] {
   const { readdirSync } = require('fs') as typeof import('fs');
-  const files = readdirSync(dirPath).filter((f: string) => f.endsWith('.md'));
+  const files = readdirSync(dirPath).filter(
+    (f: string) => f.endsWith('.md') && f !== 'react-preamble.md',
+  );
   return files.map((f: string) =>
-    loadAgentFromFile(join(dirPath, f), toolRegistry),
+    loadAgentFromFile(join(dirPath, f), toolSource),
   );
 }
 
 /**
  * Parse markdown with YAML frontmatter into AgentConfig.
+ * Automatically injects the ReAct preamble into all agent system prompts.
  */
 export function parseAgentMarkdown(
   raw: string,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  toolRegistry: Map<string, ToolDefinition<any, any>>,
+  toolSource: ToolSource,
+  agentsDir?: string,
 ): AgentConfig {
   const frontmatterMatch = raw.match(
     /^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/,
@@ -64,18 +91,26 @@ export function parseAgentMarkdown(
 
   // Resolve tool names to ToolDefinition instances
   const toolNames: string[] = Array.isArray(meta.tools) ? meta.tools : [];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const tools: ToolDefinition<any, any>[] = toolNames.map((tn) => {
-    const tool = toolRegistry.get(tn);
+    const tool = lookupTool(toolSource, tn);
     if (!tool) {
       throw new Error(`Agent "${name}": unknown tool "${tn}"`);
     }
     return tool;
   });
 
+  // Auto-inject ReAct preamble
+  let systemPrompt = body!.trim();
+  if (agentsDir) {
+    const preamble = getReactPreamble(agentsDir);
+    if (preamble) {
+      systemPrompt = `${preamble}\n\n${systemPrompt}`;
+    }
+  }
+
   return {
     name,
-    systemPrompt: body!.trim(),
+    systemPrompt,
     model,
     tools,
     maxTurns,

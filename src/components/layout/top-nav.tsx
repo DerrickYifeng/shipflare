@@ -25,6 +25,16 @@ export function TopNav() {
           Dashboard
         </Link>
         <Link
+          href="/agents"
+          className={`px-3 py-2 text-[13px] font-medium rounded-[var(--radius-sf-md)] transition-colors ${
+            pathname.startsWith('/agents')
+              ? 'bg-sf-bg-secondary text-sf-text-primary'
+              : 'text-sf-text-secondary'
+          }`}
+        >
+          Agents
+        </Link>
+        <Link
           href="/settings"
           className={`px-3 py-2 text-[13px] font-medium rounded-[var(--radius-sf-md)] transition-colors ${
             pathname.startsWith('/settings')

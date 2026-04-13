@@ -1,14 +1,6 @@
 import { z } from 'zod';
 
 /**
- * Output schema for the query agent.
- * Maps each subreddit to an array of pain-point search queries.
- */
-export const queryOutputSchema = z.object({
-  subredditQueries: z.record(z.string(), z.array(z.string())),
-});
-
-/**
  * Output schema for the discovery agent.
  * Each thread includes AI-scored relevance and intent dimensions.
  */
@@ -19,8 +11,17 @@ export const discoveryOutputSchema = z.object({
       subreddit: z.string(),
       title: z.string(),
       url: z.string(),
-      relevance: z.number(),
-      intent: z.number(),
+      relevanceScore: z.number().optional(),
+      scores: z.object({
+        relevance: z.number(),
+        intent: z.number(),
+        exposure: z.number(),
+        freshness: z.number(),
+        engagement: z.number(),
+      }).optional(),
+      // Also accept flat relevance/intent from agents that don't use score_threads
+      relevance: z.number().optional(),
+      intent: z.number().optional(),
       score: z.number().optional(),
       commentCount: z.number().optional(),
       createdUtc: z.number().optional(),
@@ -29,5 +30,96 @@ export const discoveryOutputSchema = z.object({
   ),
 });
 
-export type QueryOutput = z.infer<typeof queryOutputSchema>;
+/**
+ * Output schema for the draft-review agent.
+ * Adversarial quality check with per-dimension pass/fail.
+ */
+export const draftReviewOutputSchema = z.object({
+  verdict: z.enum(['PASS', 'FAIL', 'REVISE']),
+  score: z.number(),
+  checks: z.array(
+    z.object({
+      name: z.string(),
+      result: z.enum(['PASS', 'FAIL']),
+      detail: z.string(),
+    }),
+  ),
+  issues: z.array(z.string()),
+  suggestions: z.array(z.string()),
+});
+
+/**
+ * Output schema for the run summary prompt.
+ * Structured summary of an agent pipeline run.
+ */
+export const runSummaryOutputSchema = z.object({
+  title: z.string(),
+  subredditsScanned: z.array(z.string()),
+  threadsFound: z.number(),
+  newThreads: z.number(),
+  draftsCreated: z.number(),
+  topPerformingSubreddits: z.array(
+    z.object({
+      subreddit: z.string(),
+      threadCount: z.number(),
+      avgRelevance: z.number(),
+    }),
+  ),
+  strategiesUsed: z.array(z.string()),
+  failures: z.array(z.string()),
+  keyInsights: z.array(z.string()),
+  nextActions: z.array(z.string()),
+});
+
+/**
+ * Output schema for the scout (community-discovery) agent.
+ * Returns a list of communities ranked by audience fit.
+ */
+export const communityDiscoveryOutputSchema = z.object({
+  communities: z.array(
+    z.object({
+      platform: z.string(),
+      name: z.string(),
+      subscribers: z.number().nullable().optional(),
+      audienceFit: z.number(),
+      activityLevel: z.number(),
+      engageability: z.number(),
+      reason: z.string(),
+    }),
+  ),
+});
+
+/**
+ * Output schema for the community intelligence agent.
+ * Per-subreddit rules, hot topics, and engagement recommendation.
+ */
+export const communityIntelOutputSchema = z.object({
+  subreddit: z.string(),
+  rules: z.object({
+    allowed: z.array(z.string()),
+    banned: z.array(z.string()),
+    selfPromoPolicy: z.string(),
+  }),
+  hotTopics: z.array(z.string()),
+  bestPostFormat: z.string(),
+  recommendedApproach: z.enum(['reply', 'original_post', 'both']),
+});
+
+/**
+ * Output schema for the content agent.
+ * Includes optional postTitle for original_post type.
+ */
+export const contentOutputSchema = z.object({
+  replyBody: z.string(),
+  postTitle: z.string().optional(),
+  confidence: z.number(),
+  whyItWorks: z.string(),
+  ftcDisclosure: z.string(),
+});
+
 export type DiscoveryOutput = z.infer<typeof discoveryOutputSchema>;
+export type CommunityDiscoveryOutput = z.infer<typeof communityDiscoveryOutputSchema>;
+export type CommunityIntelOutput = z.infer<typeof communityIntelOutputSchema>;
+export type ContentOutput = z.infer<typeof contentOutputSchema>;
+export type DraftReviewOutput = z.infer<typeof draftReviewOutputSchema>;
+export type RunSummaryOutput = z.infer<typeof runSummaryOutputSchema>;

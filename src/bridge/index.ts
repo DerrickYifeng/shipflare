@@ -1,14 +1,14 @@
-// Bridge layer: adapts Claude Code engine patterns for ShipFlare's headless agents.
-// See engine/ for the full infrastructure this is derived from.
+// Bridge layer: re-exports from core/ modules.
+// Maintains backward compatibility for existing imports.
 
-export { buildTool, toAnthropicTool } from './build-tool';
-export { runAgent, createToolContext } from './agent-runner';
+export { buildTool, toAnthropicTool } from '../core/tool-system';
+export { runAgent, createToolContext } from '../core/query-loop';
 export { loadAgentFromFile, loadAgentsFromDir, parseAgentMarkdown } from './load-agent';
 export type {
   ToolDefinition,
   ToolContext,
   AgentConfig,
   AgentResult,
-} from './types';
-export { MODEL_PRICING } from './types';
+} from '../core/types';
+export { MODEL_PRICING } from '../core/types';
 export { loadProductContext } from './memory-bridge';

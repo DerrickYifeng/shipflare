@@ -3,6 +3,9 @@ import { db } from '@/lib/db';
 import { drafts, posts, activityEvents, healthScores } from '@/lib/db/schema';
 import { eq, and, gte, sql } from 'drizzle-orm';
 import type { HealthScoreJobData } from '@/lib/queue/types';
+import { createLogger } from '@/lib/logger';
+
+const log = createLogger('worker:health-score');
 
 /**
  * Calculate Health Score for a user. Pure SQL, no LLM.
@@ -15,6 +18,7 @@ import type { HealthScoreJobData } from '@/lib/queue/types';
  */
 export async function processHealthScore(job: Job<HealthScoreJobData>) {
   const { userId } = job.data;
+  log.info(`Calculating health score for user ${userId}`);
   const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
   // S1: Pipeline activity (discovery scans + drafts created in last 7 days)
@@ -93,6 +97,8 @@ export async function processHealthScore(job: Job<HealthScoreJobData>) {
   }
 
   score = Math.max(0, Math.min(100, score));
+
+  log.info(`Health score: ${score} (S1=${(s1 * 100).toFixed(0)} S2=${(s2 * 100).toFixed(0)} S3=${(s3 * 100).toFixed(0)} S4=${(s4 * 100).toFixed(0)} S5=${(s5 * 100).toFixed(0)})`);
 
   // Insert health score
   await db.insert(healthScores).values({

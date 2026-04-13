@@ -4,28 +4,28 @@ import { products, threads, activityEvents } from '@/lib/db/schema';
 import { channels } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { RedditClient } from '@/lib/reddit-client';
-import { runAgent, createToolContext } from '@/bridge/agent-runner';
-import { loadAgentFromFile } from '@/bridge/load-agent';
-import { redditSearchTool } from '@/tools/reddit-search';
-import type { ToolDefinition } from '@/bridge/types';
-import { enqueueContent } from '@/lib/queue';
-import { publishEvent } from '@/lib/redis';
-import { queryOutputSchema, discoveryOutputSchema } from '@/agents/schemas';
+import { loadSkill } from '@/core/skill-loader';
+import { runSkill } from '@/core/skill-runner';
+import { discoveryOutputSchema } from '@/agents/schemas';
 import type { DiscoveryOutput } from '@/agents/schemas';
+import { enqueueContent, enqueueDream } from '@/lib/queue';
+import { publishEvent } from '@/lib/redis';
 import { join } from 'path';
 import type { DiscoveryJobData } from '@/lib/queue/types';
+import { createLogger } from '@/lib/logger';
+import { MemoryStore } from '@/memory/store';
+import { AgentDream } from '@/memory/dream';
+import { buildMemoryPrompt } from '@/memory/prompt-builder';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const emptyToolRegistry = new Map<string, ToolDefinition<any, any>>();
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const searchToolRegistry = new Map<string, ToolDefinition<any, any>>([
-  ['reddit_search', redditSearchTool],
-]);
+const log = createLogger('worker:discovery');
 
-const AGENTS_DIR = join(process.cwd(), 'src/agents');
+const discoverySkill = loadSkill(
+  join(process.cwd(), 'src/skills/discovery'),
+);
 
 export async function processDiscovery(job: Job<DiscoveryJobData>) {
   const { userId, productId, subreddits } = job.data;
+  log.info(`Starting discovery for product ${productId}, ${subreddits.length} subreddits`);
 
   // Load product
   const [product] = await db
@@ -47,76 +47,45 @@ export async function processDiscovery(job: Job<DiscoveryJobData>) {
 
   const redditClient = RedditClient.fromChannel(channel);
 
-  // --- Step 1: Query Agent — generate pain-point search queries ---
+  // Load memory context
+  const memoryStore = new MemoryStore(productId);
+  const dream = new AgentDream(memoryStore);
+  const memoryPrompt = await buildMemoryPrompt(memoryStore);
 
-  const queryAgent = loadAgentFromFile(
-    join(AGENTS_DIR, 'query.md'),
-    emptyToolRegistry,
-  );
-
-  const queryInput = JSON.stringify({
-    productName: product.name,
-    productDescription: product.description,
-    keywords: product.keywords,
-    valueProp: product.valueProp,
-    subreddits,
-  });
-
-  const { result: queryResult, usage: queryUsage } = await runAgent(
-    queryAgent,
-    queryInput,
-    createToolContext({}),
-    queryOutputSchema,
-  );
-
-  // --- Step 2: Fan out discovery agents in parallel (one per subreddit) ---
-
-  const discoveryAgent = loadAgentFromFile(
-    join(AGENTS_DIR, 'discovery.md'),
-    searchToolRegistry,
-  );
-
-  const discoveryPromises = subreddits.map((subreddit) => {
-    const queries = queryResult.subredditQueries[subreddit] ?? [];
-    if (queries.length === 0) return Promise.resolve(null);
-
-    const context = createToolContext({ redditClient });
-    const userMessage = JSON.stringify({
+  // Run discovery skill (fan-out across subreddits, cache-safe)
+  const result = await runSkill<DiscoveryOutput>({
+    skill: discoverySkill,
+    input: {
       productName: product.name,
       productDescription: product.description,
+      keywords: product.keywords,
       valueProp: product.valueProp,
-      subreddit,
-      queries,
-    });
-
-    return runAgent(discoveryAgent, userMessage, context, discoveryOutputSchema);
+      subreddits,
+    },
+    deps: { redditClient },
+    memoryPrompt: memoryPrompt || undefined,
+    outputSchema: discoveryOutputSchema,
   });
 
-  const discoveryResults = await Promise.all(discoveryPromises);
-
-  // --- Step 3: Merge results, deduplicate, persist ---
-
+  // Merge and deduplicate threads
   const seenIds = new Set<string>();
   const allThreads: DiscoveryOutput['threads'] = [];
 
-  let totalInputTokens = queryUsage.inputTokens;
-  let totalOutputTokens = queryUsage.outputTokens;
-  let totalCost = queryUsage.costUsd;
-
-  for (const dr of discoveryResults) {
-    if (!dr) continue;
-    totalInputTokens += dr.usage.inputTokens;
-    totalOutputTokens += dr.usage.outputTokens;
-    totalCost += dr.usage.costUsd;
-
-    for (const thread of dr.result.threads) {
+  for (const discovery of result.results) {
+    for (const thread of discovery.threads) {
       if (seenIds.has(thread.id)) continue;
       seenIds.add(thread.id);
       allThreads.push(thread);
     }
   }
 
-  // Insert discovered threads
+  log.info(`Discovery found ${allThreads.length} threads across ${subreddits.length} subreddits, cost $${result.usage.costUsd.toFixed(4)}`);
+
+  for (const err of result.errors) {
+    log.warn(`Agent failed for r/${err.label}: ${err.error}`);
+  }
+
+  // Persist threads
   let newThreadCount = 0;
   for (const thread of allThreads) {
     const existing = await db
@@ -129,7 +98,9 @@ export async function processDiscovery(job: Job<DiscoveryJobData>) {
 
     if (existing.length > 0) continue;
 
-    const relevanceScore = (thread.relevance + thread.intent) / 2;
+    const relevanceScore = thread.relevanceScore != null
+      ? thread.relevanceScore / 100
+      : ((thread.relevance ?? 0) + (thread.intent ?? 0)) / 2;
 
     const [inserted] = await db
       .insert(threads)
@@ -147,6 +118,7 @@ export async function processDiscovery(job: Job<DiscoveryJobData>) {
 
     // Auto-enqueue content for high-relevance threads
     if (relevanceScore >= 0.7 && inserted) {
+      log.debug(`Auto-enqueuing content for thread ${inserted.id} (relevance ${relevanceScore.toFixed(2)})`);
       await enqueueContent({
         userId,
         threadId: inserted.id,
@@ -163,7 +135,7 @@ export async function processDiscovery(job: Job<DiscoveryJobData>) {
       subreddits,
       threadsFound: allThreads.length,
       newThreads: newThreadCount,
-      cost: totalCost,
+      cost: result.usage.costUsd,
     },
   });
 
@@ -173,4 +145,27 @@ export async function processDiscovery(job: Job<DiscoveryJobData>) {
     threadsFound: allThreads.length,
     newThreads: newThreadCount,
   });
+
+  // Memory: log insights from this discovery run
+  const topSubreddits = subreddits
+    .map((sub) => {
+      const count = allThreads.filter((t) => t.subreddit === sub).length;
+      return { sub, count };
+    })
+    .filter((s) => s.count > 0)
+    .sort((a, b) => b.count - a.count);
+
+  if (topSubreddits.length > 0) {
+    const summary = topSubreddits.map((s) => `r/${s.sub}: ${s.count} threads`).join(', ');
+    await dream.logInsight(`Discovery scan found ${allThreads.length} threads (${newThreadCount} new). ${summary}`);
+  }
+
+  for (const err of result.errors) {
+    await dream.logInsight(`Discovery agent failed for r/${err.label}: ${err.error}`);
+  }
+
+  // Check if distillation should be triggered
+  if (await dream.shouldDistill()) {
+    await enqueueDream({ productId });
+  }
 }

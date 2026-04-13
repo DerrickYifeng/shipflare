@@ -1,0 +1,365 @@
+import Anthropic from '@anthropic-ai/sdk';
+import type { z } from 'zod';
+import type {
+  AgentConfig,
+  AgentResult,
+  OnProgress,
+  QueryParams,
+  StreamEvent,
+  ToolContext,
+} from './types';
+import { createMessage, UsageTracker, addMessageCacheBreakpoint } from './api-client';
+import { toAnthropicTool } from './tool-system';
+import { executeTools } from './tool-executor';
+import { createLogger } from '@/lib/logger';
+
+const log = createLogger('core:agent');
+
+// ---------------------------------------------------------------------------
+// Query loop (ported from engine/query.ts:248-1409, stripped of CLI concerns)
+// ---------------------------------------------------------------------------
+
+/**
+ * Core query loop: send messages, execute tools, iterate until done.
+ * Ported from engine/query.ts main loop. Simplified for headless agents:
+ * - No auto-compaction (agents are stateless, 1-10 turns)
+ * - No permission system (all tools pre-authorized)
+ * - No streaming UI (events emitted via callback)
+ * - No stop hooks, tombstone messages, skill discovery
+ *
+ * Keeps: tool execution loop, error recovery, turn budget, cost tracking,
+ * JSON extraction, prompt caching, structured output.
+ */
+export async function queryLoop<T>(params: QueryParams): Promise<{ output: T; tracker: UsageTracker }> {
+  const {
+    messages,
+    systemPrompt,
+    tools,
+    model,
+    maxTurns,
+    maxOutputTokens = 8192,
+    outputSchema,
+    abortSignal,
+    onEvent,
+    promptCaching = true,
+  } = params;
+
+  const anthropicTools = tools.map(toAnthropicTool);
+  const conversationMessages: Anthropic.Messages.MessageParam[] = [...messages];
+  const tracker = new UsageTracker();
+
+  // Build a lightweight ToolContext for tool execution
+  const toolContext: ToolContext = {
+    abortSignal: abortSignal ?? new AbortController().signal,
+    get<V>(key: string): V {
+      throw new Error(`Dependency "${key}" not available in queryLoop. Use runAgent() with deps.`);
+    },
+  };
+
+  let currentMaxTokens = maxOutputTokens;
+
+  for (let turn = 1; turn <= maxTurns; turn++) {
+    if (abortSignal?.aborted) {
+      throw new Error('Query loop aborted');
+    }
+
+    log.debug(`Turn ${turn}/${maxTurns} starting`);
+    onEvent?.({ type: 'turn_start', turn });
+
+    const { response, usage } = await createMessage({
+      model,
+      system: systemPrompt,
+      messages: conversationMessages,
+      tools: anthropicTools.length > 0 ? anthropicTools : undefined,
+      maxTokens: currentMaxTokens,
+      promptCaching,
+      signal: abortSignal,
+    });
+
+    tracker.add(usage, model);
+
+    onEvent?.({
+      type: 'turn_complete',
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      cacheReadTokens: usage.cacheReadTokens,
+      cacheWriteTokens: usage.cacheWriteTokens,
+    });
+
+    log.debug(`Turn ${turn} stop_reason=${response.stop_reason} in=${usage.inputTokens} out=${usage.outputTokens} cache_read=${usage.cacheReadTokens}`);
+
+    // --- Handle tool_use: execute tools and continue loop ---
+    if (response.stop_reason === 'tool_use') {
+      conversationMessages.push({ role: 'assistant', content: response.content });
+
+      const toolUseBlocks = response.content.filter(
+        (b): b is Anthropic.Messages.ToolUseBlock => b.type === 'tool_use',
+      );
+
+      log.debug(`Executing ${toolUseBlocks.length} tool(s): ${toolUseBlocks.map((b) => b.name).join(', ')}`);
+      const toolResults = await executeTools(toolUseBlocks, tools, toolContext, onEvent);
+      conversationMessages.push({ role: 'user', content: toolResults });
+      continue;
+    }
+
+    // --- Handle max_tokens: escalate output budget ---
+    // Ported from engine/query.ts error recovery (lines 1062-1183)
+    if (response.stop_reason === 'max_tokens' && currentMaxTokens < 64_000) {
+      // Escalate: 8k → 16k → 64k
+      const escalatedTokens = currentMaxTokens <= 8192 ? 16_384 : 64_000;
+      log.warn(`Max tokens hit, escalating ${currentMaxTokens} → ${escalatedTokens}`);
+      currentMaxTokens = escalatedTokens;
+      onEvent?.({ type: 'error', error: `max_tokens hit, escalating to ${escalatedTokens}`, recoverable: true });
+
+      // Re-append assistant response and a "please continue" user message
+      conversationMessages.push({ role: 'assistant', content: response.content });
+      conversationMessages.push({ role: 'user', content: 'Please continue where you left off.' });
+      continue;
+    }
+
+    // --- Handle end_turn: extract and return output ---
+    const textBlock = response.content.find(
+      (b): b is Anthropic.Messages.TextBlock => b.type === 'text',
+    );
+
+    if (!textBlock) {
+      throw new Error(`No text in response after ${turn} turns`);
+    }
+
+    // Emit text delta for streaming consumers
+    onEvent?.({ type: 'text_delta', text: textBlock.text });
+
+    // Parse output
+    if (outputSchema) {
+      try {
+        const jsonStr = extractJson(textBlock.text);
+        const parsed = JSON.parse(jsonStr);
+        const validated = outputSchema.parse(parsed);
+        return { output: validated as T, tracker };
+      } catch (parseError) {
+        if (turn < maxTurns) {
+          conversationMessages.push({ role: 'assistant', content: response.content });
+          conversationMessages.push({
+            role: 'user',
+            content: 'Your response was not valid JSON. Respond with ONLY a raw JSON object, no explanation or markdown. Start with { and end with }.',
+          });
+          continue;
+        }
+        throw new Error(
+          `Failed to parse JSON output after ${turn} turns: ${(parseError as Error).message}`,
+        );
+      }
+    }
+
+    return { output: textBlock.text as T, tracker };
+  }
+
+  throw new Error(`Exceeded max turns (${maxTurns})`);
+}
+
+// ---------------------------------------------------------------------------
+// runAgent convenience wrapper (replaces bridge/agent-runner.ts)
+// ---------------------------------------------------------------------------
+
+/**
+ * High-level agent runner. Collects events, returns final result.
+ * Drop-in replacement for bridge's runAgent().
+ */
+export async function runAgent<T>(
+  config: AgentConfig,
+  userMessage: string,
+  context: ToolContext,
+  outputSchema?: z.ZodType<T>,
+  onProgress?: OnProgress,
+  /** Pre-built cache-safe blocks for cross-agent cache sharing. */
+  prebuilt?: {
+    systemBlocks: Anthropic.Messages.TextBlockParam[];
+    cachedTools?: Anthropic.Messages.Tool[];
+    forkContextMessages?: Anthropic.Messages.MessageParam[];
+  },
+): Promise<AgentResult<T>> {
+  log.debug(`Agent "${config.name}" starting (model=${config.model}, maxTurns=${config.maxTurns})`);
+
+  const anthropicTools = prebuilt?.cachedTools ?? config.tools.map(toAnthropicTool);
+  const messages: Anthropic.Messages.MessageParam[] = [
+    ...(prebuilt?.forkContextMessages ?? []),
+    { role: 'user', content: userMessage },
+  ];
+
+  const tracker = new UsageTracker();
+  let currentMaxTokens = 8192;
+
+  for (let turn = 1; turn <= config.maxTurns; turn++) {
+    if (context.abortSignal.aborted) {
+      throw new Error('Agent execution aborted');
+    }
+
+    // When using pre-built blocks, add cache breakpoint on last message
+    // so the growing conversation prefix is cached between turns.
+    const cachedMessages = prebuilt ? addMessageCacheBreakpoint(messages) : messages;
+
+    const { response, usage } = await createMessage({
+      model: config.model,
+      system: config.systemPrompt,
+      messages: cachedMessages,
+      tools: anthropicTools.length > 0 ? anthropicTools : undefined,
+      maxTokens: currentMaxTokens,
+      promptCaching: true,
+      signal: context.abortSignal,
+      systemBlocks: prebuilt?.systemBlocks,
+    });
+
+    tracker.add(usage, config.model);
+
+    // --- Handle tool_use ---
+    if (response.stop_reason === 'tool_use') {
+      messages.push({ role: 'assistant', content: response.content });
+
+      const toolUseBlocks = response.content.filter(
+        (b): b is Anthropic.Messages.ToolUseBlock => b.type === 'tool_use',
+      );
+
+      // Map StreamEvents to OnProgress for backward compat
+      const toolResults = await executeTools(toolUseBlocks, config.tools, context, (event) => {
+        if (event.type === 'tool_start') {
+          const query = (event.input as Record<string, unknown>)?.query as string | undefined;
+          if (onProgress && query) {
+            onProgress({ type: 'tool_call_start', query });
+          }
+        }
+        if (event.type === 'tool_done' && !event.result.is_error) {
+          const input = toolUseBlocks.find((b) => b.id === event.toolUseId)?.input;
+          const query = (input as Record<string, unknown>)?.query as string | undefined;
+          if (onProgress && query) {
+            try {
+              const parsed = JSON.parse(event.result.content);
+              const resultCount = Array.isArray(parsed) ? parsed.length : 0;
+              onProgress({ type: 'tool_call_done', query, resultCount });
+            } catch {
+              onProgress({ type: 'tool_call_done', query, resultCount: 0 });
+            }
+          }
+        }
+      });
+
+      // Guard: API edge case where stop_reason=tool_use but no tool blocks
+      if (toolResults.length === 0) {
+        log.warn(`Agent "${config.name}": stop_reason=tool_use but empty tool results, turn ${turn}`);
+        break;
+      }
+      messages.push({ role: 'user', content: toolResults });
+      continue;
+    }
+
+    // --- Handle max_tokens escalation ---
+    if (response.stop_reason === 'max_tokens' && currentMaxTokens < 64_000) {
+      currentMaxTokens = currentMaxTokens <= 8192 ? 16_384 : 64_000;
+      messages.push({ role: 'assistant', content: response.content });
+      messages.push({ role: 'user', content: 'Please continue where you left off.' });
+      continue;
+    }
+
+    // --- Handle end_turn ---
+    if (onProgress && turn > 1) {
+      onProgress({ type: 'scoring' });
+    }
+
+    const textBlock = response.content.find(
+      (b): b is Anthropic.Messages.TextBlock => b.type === 'text',
+    );
+
+    if (!textBlock) {
+      throw new Error(`Agent ${config.name}: no text in final response`);
+    }
+
+    const summary = tracker.toSummary();
+
+    if (outputSchema) {
+      try {
+        const jsonStr = extractJson(textBlock.text);
+        const parsed = JSON.parse(jsonStr);
+        const validated = outputSchema.parse(parsed);
+
+        return {
+          result: validated,
+          usage: summary,
+        };
+      } catch (parseError) {
+        // LLM returned prose instead of JSON — retry with explicit correction
+        if (turn < config.maxTurns) {
+          messages.push({ role: 'assistant', content: response.content });
+          messages.push({
+            role: 'user',
+            content: 'Your response was not valid JSON. Respond with ONLY a raw JSON object, no explanation or markdown. Start with { and end with }.',
+          });
+          continue;
+        }
+        throw new Error(
+          `Agent ${config.name}: failed to parse JSON output after ${turn} turns: ${(parseError as Error).message}`,
+        );
+      }
+    }
+
+    return {
+      result: textBlock.text as T,
+      usage: summary,
+    };
+  }
+
+  throw new Error(`Agent ${config.name}: exceeded max turns (${config.maxTurns})`);
+}
+
+// ---------------------------------------------------------------------------
+// Create a ToolContext with dependency injection
+// ---------------------------------------------------------------------------
+
+/**
+ * Create a ToolContext with dependency injection.
+ * Kept from bridge/agent-runner.ts for backward compat.
+ */
+export function createToolContext(
+  deps: Record<string, unknown>,
+  abortSignal?: AbortSignal,
+): ToolContext {
+  return {
+    abortSignal: abortSignal ?? new AbortController().signal,
+    get<T>(key: string): T {
+      const value = deps[key];
+      if (value === undefined) {
+        throw new Error(`Missing dependency: ${key}`);
+      }
+      return value as T;
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// JSON extraction (ported from bridge/agent-runner.ts)
+// ---------------------------------------------------------------------------
+
+/**
+ * Extract JSON from text that may be wrapped in markdown code blocks.
+ * Handles: raw JSON, ```json ... ```, ``` ... ```.
+ */
+function extractJson(text: string): string {
+  const trimmed = text.trim();
+
+  // Try raw JSON first
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    return trimmed;
+  }
+
+  // Try markdown code block
+  const codeBlockMatch = trimmed.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
+  if (codeBlockMatch?.[1]) {
+    return codeBlockMatch[1].trim();
+  }
+
+  // Fallback: try to find JSON object/array in the text
+  const jsonMatch = trimmed.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
+  if (jsonMatch?.[1]) {
+    return jsonMatch[1];
+  }
+
+  return trimmed;
+}

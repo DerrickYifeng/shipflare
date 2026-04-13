@@ -1,14 +1,12 @@
 import { db } from '@/lib/db';
 import { products } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
+import { MemoryStore } from '@/memory/store';
+import { buildMemoryPrompt } from '@/memory/prompt-builder';
 
 /**
  * Build a product context block for agent system prompts.
- * Following engine's Memory/Dream pattern (engine/memdir/) but
- * sourced from the database instead of filesystem.
- *
- * This is injected into agent system prompts so they know what
- * product they're marketing without requiring tool calls.
+ * Sourced from the database.
  */
 export async function loadProductContext(userId: string): Promise<string> {
   const [product] = await db
@@ -34,4 +32,21 @@ export async function loadProductContext(userId: string): Promise<string> {
     `Keywords: ${keywords}`,
     '</product-context>',
   ].filter(Boolean).join('\n');
+}
+
+/**
+ * Load full context: product info + agent memory.
+ * Merges DB product context with Supabase-backed agent memory
+ * into a single system prompt block.
+ */
+export async function loadFullContext(
+  userId: string,
+  productId: string,
+): Promise<string> {
+  const productContext = await loadProductContext(userId);
+  const store = new MemoryStore(productId);
+  const memoryPrompt = await buildMemoryPrompt(store);
+
+  const parts = [productContext, memoryPrompt].filter(Boolean);
+  return parts.join('\n\n');
 }

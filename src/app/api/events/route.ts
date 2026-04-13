@@ -1,5 +1,8 @@
 import { auth } from '@/lib/auth';
 import { createPubSubSubscriber } from '@/lib/redis';
+import { createLogger } from '@/lib/logger';
+
+const log = createLogger('api:events');
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -16,6 +19,8 @@ export async function GET() {
   }
 
   const userId = session.user.id;
+  log.info(`SSE connection opened for user ${userId}`);
+
   const channel = `shipflare:events:${userId}`;
   const subscriber = createPubSubSubscriber();
 
@@ -60,6 +65,7 @@ export async function GET() {
       (controller as unknown as { _cleanup: () => void })._cleanup = cleanup;
     },
     cancel() {
+      log.info(`SSE connection closed for user ${userId}`);
       subscriber.unsubscribe().catch(() => {});
       subscriber.disconnect();
     },

@@ -4,6 +4,9 @@ import { db } from '@/lib/db';
 import { products } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { auditSeo } from '@/tools/seo-audit';
+import { createLogger } from '@/lib/logger';
+
+const log = createLogger('api:onboarding');
 
 export async function PUT(request: Request) {
   const session = await auth();
@@ -12,6 +15,7 @@ export async function PUT(request: Request) {
   }
 
   const { url, name, description, keywords, valueProp } = await request.json();
+  log.info(`PUT /api/onboarding/profile name=${name}`);
 
   if (!url || !name || !description) {
     return NextResponse.json(

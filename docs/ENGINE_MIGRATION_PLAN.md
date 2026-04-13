@@ -1,5 +1,24 @@
 # Engine → src Migration Plan
 
+## Executive Summary
+
+**What:** Port ~2,280 lines of battle-tested agent infrastructure from the engine/ Claude Code fork into src/, replacing the 600-line bridge with a proper core layer (query loop, tool system, swarm, memory, MCP).
+
+**Why:** The current bridge lacks streaming, error recovery, swarm coordination, agent memory, prompt caching, and MCP integration. These gaps limit agent reliability, observability, and cost efficiency.
+
+**Expected outcomes:**
+- **50-90% API cost reduction** via prompt caching (system prompts + tool definitions cached across turns)
+- **Agent memory** — agents learn from past runs per product (subreddit performance, tone patterns, shadowban signals)
+- **Reliable execution** — retry logic, error recovery, abort cascading, sibling cancellation
+- **Swarm coordination** — concurrency-limited fan-out replaces raw `Promise.all`
+- **MCP extensibility** — plug in external tool servers (Supabase, future integrations) without code changes
+
+**Scope:** 19 new files, 6 modified files, 2 deleted files. No frontend changes. No agent .md changes. Workers and API routes update import paths only.
+
+**Estimated effort:** 5 sprints (~2.5 weeks at 2-day sprints). Phases 1-3 are sequential and critical-path. Phase 4 (MCP) is independent and can be deferred. Phase 5 (wiring) is the integration sprint.
+
+---
+
 ## Context
 
 ShipFlare's agent infrastructure currently lives in two places:
@@ -55,6 +74,21 @@ src/
 ├── app/                          # Next.js app (updated imports)
 └── lib/                          # Shared infra (unchanged)
 ```
+
+---
+
+## Pre-Migration Checklist
+
+Before starting Phase 1, verify:
+
+- [ ] **Anthropic SDK version** — `@anthropic-ai/sdk` ≥ 0.88.0 supports `cache_control`, raw streaming, and `output_format` (structured output beta). Current: ^0.88.0 ✓
+- [ ] **Engine reference available** — `engine/` directory accessible for porting. Confirm key source files exist:
+  - `engine/query.ts`, `engine/Tool.ts`, `engine/services/api/claude.ts`, `engine/services/api/withRetry.ts`
+  - `engine/memdir/`, `engine/services/mcp/`, `engine/tools/WebFetchTool/`
+- [ ] **Supabase migration tooling** — Can run `drizzle-kit generate` + `drizzle-kit migrate` for new tables (`agent_memories`, `agent_memory_logs`)
+- [ ] **Test baseline** — Capture current scan results for a reference product (thread count, relevance scores, cost per run) to compare post-migration
+- [ ] **Feature branch** — Create `feat/engine-migration` branch. Each phase gets its own PR for reviewability
+- [ ] **Worker restart process** — Document how to restart BullMQ workers after core/ changes (they run as separate `bun` processes)
 
 ---
 
@@ -816,3 +850,219 @@ export type { AgentResult, AgentConfig } from '../core/types'
 3. Content worker generates drafts → drafts stored with correct confidence scores
 4. Memory accumulates across runs — verify `agent_memories` table grows for the product, `loadIndex()` returns entries
 5. Build passes: `pnpm build` succeeds with no type errors
+
+---
+
+## Phase Dependencies & Critical Path
+
+```
+Phase 1 ──► Phase 2 ──► Phase 5
+  (Core)     (Swarm)     (Wiring)
+    │                       ▲
+    └──► Phase 3 ───────────┘
+          (Memory)
+    │
+    └──► Phase 4 ───────────┘
+          (MCP)    [deferrable]
+```
+
+**Critical path:** Phase 1 → Phase 2 → Phase 5
+
+| Phase | Depends on | Can parallelize with |
+|-------|------------|---------------------|
+| Phase 1 (Core) | Nothing | — |
+| Phase 2 (Swarm) | Phase 1 (needs query-loop, tool-system) | Phase 3, Phase 4 |
+| Phase 3 (Memory) | Phase 1 (needs api-client for sideQuery) | Phase 2, Phase 4 |
+| Phase 4 (MCP) | Phase 1 (needs tool-system for registry) | Phase 2, Phase 3 |
+| Phase 5 (Wiring) | Phases 1-3 minimum; Phase 4 optional | — |
+
+**Key insight:** After Phase 1 lands, Phases 2/3/4 can be developed in parallel by separate developers or agents. Phase 5 integrates everything.
+
+---
+
+## Migration Strategy
+
+### Incremental cutover — not big bang
+
+Each phase produces working code that can be merged independently. The bridge layer acts as a compatibility shim throughout migration.
+
+**Phase 1 cutover:**
+1. Create `src/core/` with all 5 files
+2. Update `src/bridge/agent-runner.ts` to delegate to `core/query-loop.ts`
+3. All existing workers and routes continue working via bridge — zero behavior change
+4. Validate: run discovery worker, compare thread results and cost with baseline
+
+**Phase 2 cutover:**
+1. Add `src/core/swarm.ts`
+2. Update `discovery.ts` processor to use `SwarmCoordinator.fanOut()` instead of `Promise.all`
+3. Update `scan/route.ts` to use coordinator
+4. Validate: same threads discovered, but with proper concurrency limits and better error isolation
+
+**Phase 3 cutover:**
+1. Run Supabase migration for `agent_memories` + `agent_memory_logs` tables
+2. Add `src/memory/` with all 5 files
+3. Update `memory-bridge.ts` to include agent memory in context
+4. Add dream queue to `workers/index.ts`
+5. Validate: agents start accumulating memory, second run has richer context
+
+**Phase 4 cutover (optional, can defer):**
+1. `pnpm add @modelcontextprotocol/sdk`
+2. Add `src/mcp/` with all 4 files
+3. Add MCP tools to registry
+4. Validate: test MCP server tools accessible to agents
+
+**Phase 5 cutover:**
+1. Delete absorbed bridge files
+2. Add re-exports for compatibility
+3. Final `pnpm tsc --noEmit` + `pnpm build`
+
+### Rollback strategy
+
+Each phase is its own PR. If a phase introduces regressions:
+
+| Phase | Rollback |
+|-------|----------|
+| Phase 1 | Revert bridge/agent-runner.ts to use inline logic instead of core/query-loop. Core files can stay (unused). |
+| Phase 2 | Revert discovery.ts + scan/route.ts to `Promise.all` pattern. Swarm module can stay (unused). |
+| Phase 3 | Drop `agent_memories` + `agent_memory_logs` tables. Revert memory-bridge.ts. Memory module stays (unused). |
+| Phase 4 | Remove MCP config. MCP module stays (unused). `pnpm remove @modelcontextprotocol/sdk`. |
+| Phase 5 | Restore deleted bridge files from git. Update re-exports. |
+
+**Rule:** No phase deletes a file that can't be restored from the previous commit. Phase 5 (the only destructive phase) is last and only runs after full validation.
+
+---
+
+## Sprint Plan
+
+| Sprint | Phase | Focus | Estimated effort | Deliverable |
+|--------|-------|-------|-----------------|-------------|
+| **S1** | Phase 1 | Core: types, api-client, tool-system, tool-executor, query-loop | 3-4 days | `src/core/` complete, bridge delegates to core |
+| **S2** | Phase 2 | Swarm: coordinator, discovery refactor, scan route refactor | 2 days | Parallel agent execution via SwarmCoordinator |
+| **S3** | Phase 3 | Memory: DB migration, store, retrieval, dream, prompt-builder | 3-4 days | Agents accumulate and retrieve per-product memory |
+| **S4** | Phase 4 | MCP: client, manager, tool-loader + engine tool ports (web-fetch, web-search) | 2-3 days | MCP servers connectable, new tools available |
+| **S5** | Phase 5 | Wiring: registry, bridge cleanup, re-exports, E2E validation | 1-2 days | Clean build, all workers green, E2E passing |
+
+**Total: ~12-15 days of focused work.**
+
+### Sprint priorities
+
+**Must-have (S1-S3):** Core + Swarm + Memory. These deliver the headline value: cost reduction, reliability, and agent learning. Ship these first.
+
+**Nice-to-have (S4):** MCP integration. Valuable for extensibility but no existing feature depends on it. Can defer to a follow-up cycle if timeline is tight.
+
+**Non-negotiable (S5):** Wiring + cleanup. Without this, the codebase has two parallel systems. S5 must run before the migration is "done."
+
+### Parallel work opportunities
+
+After S1 lands, S2/S3/S4 can run in parallel if multiple developers are available:
+
+```
+Developer A: S1 ──────► S2 ──────► S5
+Developer B:        S3 (after S1 merges) ─┘
+Developer C:        S4 (after S1 merges) ─┘
+```
+
+Best case with parallelism: **~8 days.**
+
+---
+
+## Cost Analysis
+
+### Current state (bridge)
+
+Per discovery scan (1 product, ~5 subreddits):
+- **Query agent:** 1 Haiku call → ~$0.002
+- **Discovery agents:** 5× Haiku calls, ~3 turns each → ~$0.03
+- **Total per scan:** ~$0.03-0.05
+- **No prompt caching** — system prompt + tool definitions re-sent every turn
+- **No memory** — agents rediscover the same patterns every run
+
+### After migration (core)
+
+| Optimization | Savings | Mechanism |
+|-------------|---------|-----------|
+| **Prompt caching** | 50-90% on input tokens | `cache_control: { type: 'ephemeral' }` on system prompt + tool definitions. 5-min TTL covers multi-turn agents. |
+| **Structured output** | ~5% (fewer retries) | `output_format: { type: 'json_schema' }` eliminates JSON extraction failures |
+| **Memory retrieval** | Marginal cost (~$0.001/distill via Haiku) | But enables agents to skip already-explored threads, reducing wasted discovery turns |
+| **Error recovery** | Avoids full-retry costs | `withRetry()` retries individual API calls, not entire agent runs |
+
+**Projected per-scan cost after migration:** ~$0.01-0.02 (50-60% reduction)
+
+**Monthly projection (100 products, daily scans):**
+- Before: 100 × 30 × $0.04 = **$120/mo**
+- After: 100 × 30 × $0.015 = **$45/mo**
+- **Savings: ~$75/mo** (scales linearly with product count)
+
+### Memory system cost
+
+- **Log writes:** Free (just DB inserts)
+- **Distillation:** ~$0.001 per distill (Haiku side-query with ~2K tokens)
+- **Retrieval:** ~$0.0005 per retrieval (Haiku manifest scan)
+- **Projected:** ~$5/mo for 100 products with daily distillation
+
+---
+
+## Success Metrics
+
+### Functional
+
+| Metric | Target | How to measure |
+|--------|--------|----------------|
+| Thread parity | ≥95% overlap with pre-migration results | Run same product scan before/after, compare thread IDs |
+| Error recovery | Zero unhandled API errors in 100 scans | Monitor worker failure rate in BullMQ dashboard |
+| Swarm concurrency | Max 5 parallel agents enforced | Log concurrent agent count during fan-out |
+| Memory accumulation | ≥3 memories per product after 5 scans | `SELECT COUNT(*) FROM agent_memories GROUP BY product_id` |
+| Build health | `pnpm build` + `pnpm tsc --noEmit` pass | CI pipeline |
+
+### Performance
+
+| Metric | Target | Baseline |
+|--------|--------|----------|
+| Scan latency (5 subreddits) | ≤ baseline ±10% | Measure current average |
+| API cost per scan | ≤50% of baseline | Track via `UsageTracker` |
+| Worker startup time | < 3s | Measure `bun src/workers/index.ts` cold start |
+| Memory distillation time | < 5s per product | Measure `dream.distill()` duration |
+
+### Quality gates per phase
+
+- **Phase 1 gate:** Discovery worker produces identical thread results at lower cost (prompt caching active)
+- **Phase 2 gate:** `/api/scan` with 10 subreddits completes without timeout, SSE events stream in real time
+- **Phase 3 gate:** Second discovery run for same product includes memory context; `agent_memories` table populated
+- **Phase 4 gate:** Test MCP server tools callable from agent run
+- **Phase 5 gate:** Clean build, no dead imports, all workers start and process jobs
+
+---
+
+## Post-Migration Cleanup
+
+After all 5 phases are validated and merged:
+
+1. **Remove engine/ reference dependency**
+   - If engine/ was only used as a porting reference, no runtime dependency exists
+   - Document which engine commits were ported (for future upstream sync if needed)
+
+2. **Update CLAUDE.md**
+   - Document new `src/core/`, `src/memory/`, `src/mcp/` modules
+   - Update skill routing if new capabilities change agent behavior
+
+3. **Remove compatibility re-exports**
+   - After confirming no code imports from `src/bridge/types.ts` or `src/bridge/build-tool.ts` paths
+   - Delete temporary re-exports in `src/bridge/index.ts`
+   - Run `pnpm tsc --noEmit` to verify
+
+4. **Add monitoring**
+   - Log `UsageTracker` breakdown per agent run (model, tokens, cache hits, cost)
+   - Alert on `agent_memory_logs` count > 100 without distillation (stuck dream worker)
+   - Dashboard: cost per scan over time, memory count per product
+
+5. **Documentation**
+   - Update `docs/` with architecture diagram reflecting new core/ layer
+   - Document how to add new tools (register in `src/tools/registry.ts`)
+   - Document how to add new MCP servers (config in environment or DB)
+   - Document memory system behavior for product owners (what agents learn, how to reset)
+
+6. **Future improvements (out of scope for this migration)**
+   - Vector embeddings for memory retrieval (replace Haiku manifest scan with pgvector similarity)
+   - Agent-to-agent message passing within a swarm (currently fan-out only, no inter-agent communication)
+   - MCP server for ShipFlare's own data (expose threads/drafts/posts as MCP resources)
+   - Prompt cache warming — pre-warm cache for high-frequency products before scan window

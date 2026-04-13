@@ -8,6 +8,7 @@ interface DiscoveredThread {
   id: string;
   externalId: string;
   subreddit: string;
+  community?: string;
   title: string;
   url: string;
   relevanceScore: number;

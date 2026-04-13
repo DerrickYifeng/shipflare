@@ -84,18 +84,20 @@
 }
 
 /* Base styles */
-body {
-  background: var(--color-sf-bg-primary);
-  color: var(--color-sf-text-primary);
-  font-family: var(--font-body);
-  font-size: 15px;
-  line-height: 1.4;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
+@layer base {
+  body {
+    background: var(--color-sf-bg-primary);
+    color: var(--color-sf-text-primary);
+    font-family: var(--font-body);
+    font-size: 15px;
+    line-height: 1.4;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
 
-/* Focus ring */
-:focus-visible {
-  outline: 2px solid var(--color-sf-accent);
-  outline-offset: 2px;
+  /* Focus ring — in @layer base so utilities can override */
+  :focus-visible {
+    outline: 2px solid var(--color-sf-accent);
+    outline-offset: 2px;
+  }
 }

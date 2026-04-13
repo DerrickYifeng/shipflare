@@ -3,6 +3,9 @@ import { auth, signOut } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { users, sessions } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
+import { createLogger } from '@/lib/logger';
+
+const log = createLogger('api:account');
 
 /**
  * DELETE /api/account
@@ -18,6 +21,7 @@ export async function DELETE() {
   }
 
   const userId = session.user.id;
+  log.info(`DELETE /api/account user=${userId}`);
 
   // Delete in a transaction: clear sessions first, then cascade delete user
   await db.transaction(async (tx) => {
@@ -27,6 +31,8 @@ export async function DELETE() {
     // Delete user (cascades to all related tables via FK onDelete: 'cascade')
     await tx.delete(users).where(eq(users.id, userId));
   });
+
+  log.info(`Account deleted: ${userId}`);
 
   // Sign out (clear cookie)
   await signOut({ redirect: false });

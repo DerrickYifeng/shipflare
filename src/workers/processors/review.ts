@@ -1,0 +1,126 @@
+import type { Job } from 'bullmq';
+import { db } from '@/lib/db';
+import { drafts, threads, products } from '@/lib/db/schema';
+import { eq } from 'drizzle-orm';
+import { loadSkill } from '@/core/skill-loader';
+import { runSkill } from '@/core/skill-runner';
+import { draftReviewOutputSchema } from '@/agents/schemas';
+import { publishEvent } from '@/lib/redis';
+import { enqueueDream } from '@/lib/queue';
+import { join } from 'path';
+import type { ReviewJobData } from '@/lib/queue/types';
+import { createLogger } from '@/lib/logger';
+import { MemoryStore } from '@/memory/store';
+import { AgentDream } from '@/memory/dream';
+import { buildMemoryPrompt } from '@/memory/prompt-builder';
+
+const log = createLogger('worker:review');
+
+const SKILLS_DIR = join(process.cwd(), 'src', 'skills');
+
+export async function processReview(job: Job<ReviewJobData>) {
+  const { userId, draftId, productId } = job.data;
+
+  // Load draft + thread + product
+  const [draft] = await db
+    .select()
+    .from(drafts)
+    .where(eq(drafts.id, draftId))
+    .limit(1);
+
+  if (!draft) throw new Error(`Draft not found: ${draftId}`);
+
+  const [thread] = await db
+    .select()
+    .from(threads)
+    .where(eq(threads.id, draft.threadId))
+    .limit(1);
+
+  if (!thread) throw new Error(`Thread not found: ${draft.threadId}`);
+
+  const [product] = await db
+    .select()
+    .from(products)
+    .where(eq(products.id, productId))
+    .limit(1);
+
+  if (!product) throw new Error(`Product not found: ${productId}`);
+
+  log.info(`Reviewing draft ${draftId} for r/${thread.subreddit}`);
+
+  // Load memory context
+  const memoryStore = new MemoryStore(productId);
+  const dream = new AgentDream(memoryStore);
+  const memoryPrompt = await buildMemoryPrompt(memoryStore);
+
+  // Run draft-review skill (single-item fan-out)
+  const skill = loadSkill(join(SKILLS_DIR, 'draft-review'));
+
+  try {
+    const { results, usage } = await runSkill({
+      skill,
+      input: {
+        drafts: [
+          {
+            replyBody: draft.replyBody,
+            threadTitle: thread.title,
+            threadBody: thread.body ?? '',
+            subreddit: thread.subreddit,
+            productName: product.name,
+            productDescription: product.description,
+            confidence: draft.confidenceScore,
+            whyItWorks: draft.whyItWorks ?? '',
+          },
+        ],
+      },
+      memoryPrompt: memoryPrompt || undefined,
+      outputSchema: draftReviewOutputSchema,
+    });
+
+    const result = results[0];
+    if (!result) {
+      log.warn(`Review skill returned no results for draft ${draftId}, leaving as pending`);
+      return;
+    }
+
+    log.info(`Review verdict: ${result.verdict}, score=${result.score.toFixed(2)}, cost=$${usage.costUsd.toFixed(4)}`);
+
+    // Apply verdict
+    const updateData: Record<string, unknown> = {
+      reviewVerdict: result.verdict,
+      reviewScore: result.score,
+      reviewJson: { checks: result.checks, issues: result.issues, suggestions: result.suggestions },
+      updatedAt: new Date(),
+    };
+
+    if (result.verdict === 'FAIL') {
+      updateData.status = 'flagged';
+    } else if (result.verdict === 'REVISE') {
+      updateData.status = 'needs_revision';
+    }
+    // PASS: keep status as 'pending' (ready for user approval)
+
+    await db.update(drafts).set(updateData).where(eq(drafts.id, draftId));
+
+    // Publish SSE event
+    await publishEvent(`shipflare:events:${userId}`, {
+      type: 'draft_reviewed',
+      draftId,
+      verdict: result.verdict,
+      score: result.score,
+      subreddit: thread.subreddit,
+    });
+
+    // Log insight
+    await dream.logInsight(
+      `Review of draft for r/${thread.subreddit} "${thread.title}" — verdict: ${result.verdict}, score: ${result.score}. Issues: ${result.issues.join('; ') || 'none'}`,
+    );
+
+    if (await dream.shouldDistill()) {
+      await enqueueDream({ productId });
+    }
+  } catch (error) {
+    // Fail-open: if review fails, leave draft as pending
+    log.error(`Review failed for draft ${draftId}, leaving as pending: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
