@@ -4,6 +4,7 @@ import { products, threads, activityEvents } from '@/lib/db/schema';
 import { channels } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { RedditClient } from '@/lib/reddit-client';
+import { XAIClient } from '@/lib/xai-client';
 import { loadSkill } from '@/core/skill-loader';
 import { runSkill } from '@/core/skill-runner';
 import { discoveryOutputSchema } from '@/agents/schemas';
@@ -24,8 +25,8 @@ const discoverySkill = loadSkill(
 );
 
 export async function processDiscovery(job: Job<DiscoveryJobData>) {
-  const { userId, productId, subreddits } = job.data;
-  log.info(`Starting discovery for product ${productId}, ${subreddits.length} subreddits`);
+  const { userId, productId, sources, platform } = job.data;
+  log.info(`Starting ${platform} discovery for product ${productId}, ${sources.length} sources`);
 
   // Load product
   const [product] = await db
@@ -36,23 +37,28 @@ export async function processDiscovery(job: Job<DiscoveryJobData>) {
 
   if (!product) throw new Error(`Product not found: ${productId}`);
 
-  // Load Reddit channel
-  const [channel] = await db
-    .select()
-    .from(channels)
-    .where(and(eq(channels.userId, userId), eq(channels.platform, 'reddit')))
-    .limit(1);
+  // Initialize platform-specific client
+  const deps: Record<string, unknown> = {};
 
-  if (!channel) throw new Error('No Reddit channel connected');
+  if (platform === 'reddit') {
+    const [channel] = await db
+      .select()
+      .from(channels)
+      .where(and(eq(channels.userId, userId), eq(channels.platform, 'reddit')))
+      .limit(1);
 
-  const redditClient = RedditClient.fromChannel(channel);
+    if (!channel) throw new Error('No Reddit channel connected');
+    deps.redditClient = RedditClient.fromChannel(channel);
+  } else {
+    deps.xaiClient = new XAIClient();
+  }
 
   // Load memory context
   const memoryStore = new MemoryStore(productId);
   const dream = new AgentDream(memoryStore);
   const memoryPrompt = await buildMemoryPrompt(memoryStore);
 
-  // Run discovery skill (fan-out across subreddits, cache-safe)
+  // Run discovery skill (fan-out across sources, cache-safe)
   const result = await runSkill<DiscoveryOutput>({
     skill: discoverySkill,
     input: {
@@ -60,9 +66,10 @@ export async function processDiscovery(job: Job<DiscoveryJobData>) {
       productDescription: product.description,
       keywords: product.keywords,
       valueProp: product.valueProp,
-      subreddits,
+      sources,
+      platform,
     },
-    deps: { redditClient },
+    deps,
     memoryPrompt: memoryPrompt || undefined,
     outputSchema: discoveryOutputSchema,
   });
@@ -79,10 +86,10 @@ export async function processDiscovery(job: Job<DiscoveryJobData>) {
     }
   }
 
-  log.info(`Discovery found ${allThreads.length} threads across ${subreddits.length} subreddits, cost $${result.usage.costUsd.toFixed(4)}`);
+  log.info(`${platform} discovery found ${allThreads.length} results across ${sources.length} sources, cost $${result.usage.costUsd.toFixed(4)}`);
 
   for (const err of result.errors) {
-    log.warn(`Agent failed for r/${err.label}: ${err.error}`);
+    log.warn(`Agent failed for "${err.label}": ${err.error}`);
   }
 
   // Persist threads
@@ -107,7 +114,8 @@ export async function processDiscovery(job: Job<DiscoveryJobData>) {
       .values({
         userId,
         externalId: thread.id,
-        subreddit: thread.subreddit,
+        platform,
+        community: thread.community,
         title: thread.title,
         url: thread.url,
         relevanceScore,
@@ -118,7 +126,7 @@ export async function processDiscovery(job: Job<DiscoveryJobData>) {
 
     // Auto-enqueue content for high-relevance threads
     if (relevanceScore >= 0.7 && inserted) {
-      log.debug(`Auto-enqueuing content for thread ${inserted.id} (relevance ${relevanceScore.toFixed(2)})`);
+      log.debug(`Auto-enqueuing content for ${platform} thread ${inserted.id} (relevance ${relevanceScore.toFixed(2)})`);
       await enqueueContent({
         userId,
         threadId: inserted.id,
@@ -132,36 +140,40 @@ export async function processDiscovery(job: Job<DiscoveryJobData>) {
     userId,
     eventType: 'discovery_scan',
     metadataJson: {
-      subreddits,
-      threadsFound: allThreads.length,
-      newThreads: newThreadCount,
+      platform,
+      sources,
+      resultsFound: allThreads.length,
+      newResults: newThreadCount,
       cost: result.usage.costUsd,
     },
   });
 
   // Publish SSE event
   await publishEvent(`shipflare:events:${userId}`, {
-    type: 'discovery_complete',
-    threadsFound: allThreads.length,
-    newThreads: newThreadCount,
+    type: 'agent_complete',
+    agentName: 'scout',
+    platform,
+    stats: { resultsFound: allThreads.length, newResults: newThreadCount },
+    cost: result.usage.costUsd,
   });
 
   // Memory: log insights from this discovery run
-  const topSubreddits = subreddits
-    .map((sub) => {
-      const count = allThreads.filter((t) => t.subreddit === sub).length;
-      return { sub, count };
+  const topSources = sources
+    .map((source) => {
+      const count = allThreads.filter((t) => t.community === source).length;
+      return { source, count };
     })
     .filter((s) => s.count > 0)
     .sort((a, b) => b.count - a.count);
 
-  if (topSubreddits.length > 0) {
-    const summary = topSubreddits.map((s) => `r/${s.sub}: ${s.count} threads`).join(', ');
-    await dream.logInsight(`Discovery scan found ${allThreads.length} threads (${newThreadCount} new). ${summary}`);
+  if (topSources.length > 0) {
+    const prefix = platform === 'reddit' ? 'r/' : '';
+    const summary = topSources.map((s) => `${prefix}${s.source}: ${s.count} results`).join(', ');
+    await dream.logInsight(`${platform} discovery found ${allThreads.length} results (${newThreadCount} new). ${summary}`);
   }
 
   for (const err of result.errors) {
-    await dream.logInsight(`Discovery agent failed for r/${err.label}: ${err.error}`);
+    await dream.logInsight(`Discovery agent failed for "${err.label}" (${platform}): ${err.error}`);
   }
 
   // Check if distillation should be triggered

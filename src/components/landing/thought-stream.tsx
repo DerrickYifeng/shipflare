@@ -204,7 +204,7 @@ export function ThoughtStream({ url, onComplete, onError }: ThoughtStreamProps) 
 
       case 'tool_call_start': {
         const query = data.query as string;
-        const sub = data.subreddit as string;
+        const sub = data.community as string;
         if (!sub || !query) break;
 
         // Init state for this community
@@ -240,7 +240,7 @@ export function ThoughtStream({ url, onComplete, onError }: ThoughtStreamProps) 
       }
 
       case 'tool_call_done': {
-        const sub = data.subreddit as string;
+        const sub = data.community as string;
         const resultCount = data.resultCount as number | undefined;
         if (!sub) break;
 
@@ -263,7 +263,7 @@ export function ThoughtStream({ url, onComplete, onError }: ThoughtStreamProps) 
       }
 
       case 'scoring': {
-        const sub = data.subreddit as string;
+        const sub = data.community as string;
         if (sub) {
           // Per-agent scoring — update the community line
           const lineId = `agent-${sub}`;
@@ -339,7 +339,7 @@ export function ThoughtStream({ url, onComplete, onError }: ThoughtStreamProps) 
       }
 
       case 'agent_error': {
-        const sub = data.subreddit as string;
+        const sub = data.community as string;
         const lineId = `agent-${sub}`;
         setLines((prev) => {
           const exists = prev.some((l) => l.id === lineId);

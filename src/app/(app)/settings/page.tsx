@@ -12,11 +12,13 @@ export default async function SettingsPage() {
   const session = await auth();
   if (!session?.user?.id) redirect('/');
 
-  const [redditChannel] = await db
+  const userChannels = await db
     .select()
     .from(channels)
-    .where(and(eq(channels.userId, session.user.id), eq(channels.platform, 'reddit')))
-    .limit(1);
+    .where(eq(channels.userId, session.user.id));
+
+  const redditChannel = userChannels.find((c) => c.platform === 'reddit');
+  const xChannel = userChannels.find((c) => c.platform === 'x');
 
   return (
     <>
@@ -26,6 +28,8 @@ export default async function SettingsPage() {
         <ConnectionsSection
           redditConnected={!!redditChannel}
           redditUsername={redditChannel?.username ?? null}
+          xConnected={!!xChannel}
+          xUsername={xChannel?.username ?? null}
         />
         <DangerZone />
       </div>

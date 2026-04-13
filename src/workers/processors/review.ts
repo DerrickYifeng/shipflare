@@ -46,7 +46,7 @@ export async function processReview(job: Job<ReviewJobData>) {
 
   if (!product) throw new Error(`Product not found: ${productId}`);
 
-  log.info(`Reviewing draft ${draftId} for r/${thread.subreddit}`);
+  log.info(`Reviewing draft ${draftId} for ${thread.community}`);
 
   // Load memory context
   const memoryStore = new MemoryStore(productId);
@@ -65,7 +65,7 @@ export async function processReview(job: Job<ReviewJobData>) {
             replyBody: draft.replyBody,
             threadTitle: thread.title,
             threadBody: thread.body ?? '',
-            subreddit: thread.subreddit,
+            subreddit: thread.community,
             productName: product.name,
             productDescription: product.description,
             confidence: draft.confidenceScore,
@@ -108,12 +108,12 @@ export async function processReview(job: Job<ReviewJobData>) {
       draftId,
       verdict: result.verdict,
       score: result.score,
-      subreddit: thread.subreddit,
+      community: thread.community,
     });
 
     // Log insight
     await dream.logInsight(
-      `Review of draft for r/${thread.subreddit} "${thread.title}" — verdict: ${result.verdict}, score: ${result.score}. Issues: ${result.issues.join('; ') || 'none'}`,
+      `Review of draft for ${thread.community} "${thread.title}" — verdict: ${result.verdict}, score: ${result.score}. Issues: ${result.issues.join('; ') || 'none'}`,
     );
 
     if (await dream.shouldDistill()) {

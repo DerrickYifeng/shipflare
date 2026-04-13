@@ -34,7 +34,7 @@ export const redditGetThreadTool = buildTool({
         title: thread.title,
         body: thread.selftext?.slice(0, 2000) ?? '',
         author: thread.author,
-        subreddit: thread.subreddit,
+        community: thread.subreddit,
         score: thread.score,
         commentCount: thread.num_comments,
         createdUtc: thread.created_utc,

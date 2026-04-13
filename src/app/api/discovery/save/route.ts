@@ -12,7 +12,7 @@ interface ScanResult {
   externalId: string;
   title: string;
   url: string;
-  subreddit: string;
+  community: string;
   upvotes?: number;
   commentCount?: number;
   relevanceScore: number;
@@ -60,7 +60,7 @@ export async function POST(request: Request) {
     userId,
     externalId: r.externalId,
     platform: r.source ?? 'reddit',
-    subreddit: r.subreddit.replace(/^r\//, ''),
+    community: r.source === 'reddit' ? r.community.replace(/^r\//, '') : r.community,
     title: r.title,
     url: r.url,
     upvotes: r.upvotes ?? 0,

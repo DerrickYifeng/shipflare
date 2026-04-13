@@ -65,7 +65,26 @@ async function executeSingleTool(
   }
 
   try {
-    const validatedInput = tool.inputSchema.parse(block.input);
+    // Normalize: if agent passes a bare array, try wrapping in single-key object
+    let inputToValidate = block.input;
+    if (Array.isArray(inputToValidate)) {
+      const result = tool.inputSchema.safeParse(inputToValidate);
+      if (!result.success) {
+        // Find the first array-typed key from the schema shape and wrap
+        const shape = (tool.inputSchema as any)?._def?.shape?.();
+        if (shape) {
+          const arrayKey = Object.keys(shape).find(
+            (k) => shape[k]?._def?.typeName === 'ZodArray',
+          );
+          if (arrayKey) {
+            log.debug(`Auto-wrapping bare array input into { ${arrayKey}: [...] } for tool ${block.name}`);
+            inputToValidate = { [arrayKey]: inputToValidate };
+          }
+        }
+      }
+    }
+
+    const validatedInput = tool.inputSchema.parse(inputToValidate);
     const rawResult = await tool.execute(validatedInput, context);
     // JSON.stringify(undefined) returns JS undefined — guard against it
     let content = JSON.stringify(rawResult ?? null) || 'null';
@@ -86,10 +105,17 @@ async function executeSingleTool(
     const durationMs = Date.now() - start;
     const message = error instanceof Error ? error.message : String(error);
     log.warn(`Tool ${block.name} failed in ${durationMs}ms: ${message}`);
+
+    // Provide actionable error for Zod validation failures
+    let errorContent = `Tool error: ${message}`;
+    if (message.includes('"code"') && message.includes('"path"')) {
+      errorContent += `\n\nYour input did not match the expected schema. Check that you are passing an object with the correct top-level keys. For example, score_threads expects {"threads": [...]}, not a bare array.`;
+    }
+
     return {
       result: {
         tool_use_id: block.id,
-        content: `Tool error: ${message}`,
+        content: errorContent,
         is_error: true,
       },
       durationMs,

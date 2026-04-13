@@ -30,7 +30,7 @@ export function DraftCard({ draft, onApprove, onSkip, onRetry }: DraftCardProps)
       {/* Header */}
       <div className="flex items-start justify-between gap-3 mb-3">
         <div className="flex items-center gap-2 min-w-0 flex-wrap">
-          <Badge variant="accent">r/{draft.thread.subreddit}</Badge>
+          <Badge variant="accent">{draft.thread.community}</Badge>
           <span className="font-mono text-[11px] text-sf-text-tertiary uppercase">
             {draft.draftType === 'original_post' ? 'new post' : 'reply'}
           </span>

@@ -8,7 +8,7 @@ export const products = pgTable('products', {
   userId: text('user_id')
     .notNull()
     .references(() => users.id, { onDelete: 'cascade' }),
-  url: text('url').notNull(),
+  url: text('url'),
   name: text('name').notNull(),
   description: text('description').notNull(),
   keywords: text('keywords').array().notNull().default([]),

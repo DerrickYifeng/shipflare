@@ -284,12 +284,12 @@ export class SwarmCoordinator {
       const onProg = task.onProgress ?? this.onProgress;
       if (abortController.signal.aborted) {
         log.warn(`Cached agent "${task.label}" timed out after ${this.timeoutPerAgent}ms`);
-        onProg?.({ type: 'agent_error', subreddit: task.label, error: 'timeout' });
+        onProg?.({ type: 'agent_error', community: task.label, error: 'timeout' });
         return { status: 'timeout', label: task.label };
       }
       const message = error instanceof Error ? error.message : String(error);
       log.error(`Cached agent "${task.label}" failed: ${message}`);
-      onProg?.({ type: 'agent_error', subreddit: task.label, error: message });
+      onProg?.({ type: 'agent_error', community: task.label, error: message });
       return { status: 'failed', error: message, label: task.label };
     } finally {
       clearTimeout(timeout);

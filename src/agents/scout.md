@@ -98,7 +98,7 @@ JSON with: subreddit, productName, productDescription, keywords, valueProp
 Return JSON:
 ```json
 {
-  "subreddit": "SideProject",
+  "community": "SideProject",
   "rules": {
     "allowed": ["Show-and-tell posts", "Feedback requests"],
     "banned": ["Pure advertisements", "Referral links"],
@@ -110,4 +110,4 @@ Return JSON:
 }
 ```
 
-`recommendedApproach` is one of: `"reply"`, `"original_post"`, or `"both"`.
+`recommendedApproach` is one of: `"reply"`, `"original_post"`, `"both"`, or `"not_recommended"`.

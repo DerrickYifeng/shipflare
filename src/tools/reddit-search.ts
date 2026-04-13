@@ -28,7 +28,7 @@ export const redditSearchTool = buildTool({
         url: `https://reddit.com${t.permalink}`,
         body: t.selftext.slice(0, 500),
         author: t.author,
-        subreddit: t.subreddit,
+        community: t.subreddit,
         score: t.score,
         commentCount: t.num_comments,
         createdUtc: t.created_utc,

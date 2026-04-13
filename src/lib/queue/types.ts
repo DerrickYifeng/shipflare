@@ -1,7 +1,8 @@
 export interface DiscoveryJobData {
   userId: string;
   productId: string;
-  subreddits: string[];
+  sources: string[];
+  platform: 'reddit' | 'x';
 }
 
 export interface ContentJobData {
@@ -32,10 +33,18 @@ export interface DreamJobData {
   productId: string;
 }
 
+export interface CodeScanJobData {
+  userId: string;
+  repoFullName: string;
+  repoUrl: string;
+  githubToken: string;
+}
+
 export type JobData =
   | DiscoveryJobData
   | ContentJobData
   | ReviewJobData
   | PostingJobData
   | HealthScoreJobData
-  | DreamJobData;
+  | DreamJobData
+  | CodeScanJobData;

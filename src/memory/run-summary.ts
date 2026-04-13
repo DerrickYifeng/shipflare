@@ -17,27 +17,27 @@ const RUN_SUMMARY_PROMPT = `You are a marketing pipeline analyst. Your job is to
 Your summary should be thorough in capturing operational patterns and strategic insights that would help the user understand what happened and what to do next.
 
 Before providing your final summary, analyze the data carefully:
-1. Identify which subreddits performed best and worst
+1. Identify which communities performed best and worst
 2. Note any patterns in thread relevance or content confidence
 3. Flag failures or anomalies that need attention
 4. Derive actionable next steps from the data
 
 Your summary must be structured as JSON matching the output schema. Focus on:
 - **title**: A distinctive 5-10 word summary of the run (e.g., "Strong discovery in r/SaaS, 3 high-confidence drafts")
-- **topPerformingSubreddits**: Ranked by thread count and average relevance
+- **topPerformingCommunities**: Ranked by thread count and average relevance
 - **strategiesUsed**: Query patterns or content approaches that worked
-- **failures**: Agent failures, timeouts, subreddits with zero results
+- **failures**: Agent failures, timeouts, communities with zero results
 - **keyInsights**: Non-obvious patterns worth remembering (these may feed into agent memory)
 - **nextActions**: Concrete suggestions for the next run
 
 Be terse. High signal only. No filler.`;
 
 interface RunData {
-  subreddits: string[];
+  communities: string[];
   threadsFound: number;
   newThreads: number;
   draftsCreated: number;
-  threadsBySubreddit: Record<string, { count: number; avgRelevance: number }>;
+  threadsByCommunity: Record<string, { count: number; avgRelevance: number }>;
   failures: string[];
   draftConfidences: number[];
   totalCostUsd: number;
@@ -83,21 +83,21 @@ export async function generateRunSummary(
  * Fallback: construct a summary without LLM if parsing fails.
  */
 function fallbackSummary(data: RunData): RunSummaryOutput {
-  const topSubs = Object.entries(data.threadsBySubreddit)
-    .map(([subreddit, stats]) => ({
-      subreddit,
+  const topCommunities = Object.entries(data.threadsByCommunity)
+    .map(([community, stats]) => ({
+      community,
       threadCount: stats.count,
       avgRelevance: stats.avgRelevance,
     }))
     .sort((a, b) => b.threadCount - a.threadCount);
 
   return {
-    title: `Discovery: ${data.threadsFound} threads across ${data.subreddits.length} subreddits`,
-    subredditsScanned: data.subreddits,
+    title: `Discovery: ${data.threadsFound} threads across ${data.communities.length} communities`,
+    communitiesScanned: data.communities,
     threadsFound: data.threadsFound,
     newThreads: data.newThreads,
     draftsCreated: data.draftsCreated,
-    topPerformingSubreddits: topSubs.slice(0, 5),
+    topPerformingCommunities: topCommunities.slice(0, 5),
     strategiesUsed: [],
     failures: data.failures,
     keyInsights: [],

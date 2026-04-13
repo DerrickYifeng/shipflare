@@ -27,7 +27,7 @@ export interface Draft {
   createdAt: string;
   thread: {
     title: string;
-    subreddit: string;
+    community: string;
     url: string;
   };
 }

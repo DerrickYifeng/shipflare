@@ -42,12 +42,12 @@ test.describe('Onboarding: complete flow', () => {
   });
 });
 
-testWithProduct.describe('Onboarding: redirect with product', () => {
-  testWithProduct('redirects authed user with product to /dashboard from /', async ({
+testWithProduct.describe('Onboarding: with product', () => {
+  testWithProduct('authed user with product sees landing page at /', async ({
     authenticatedPageWithProduct: page,
   }) => {
     await page.goto('/');
-    await page.waitForURL('**/dashboard');
-    await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible();
+    // Landing page renders without redirect for authenticated users
+    await expect(page.getByText('ShipFlare')).toBeVisible();
   });
 });

@@ -182,10 +182,10 @@ export const MODEL_PRICING: Record<string, ModelCosts> = {
 
 export type AgentProgressEvent =
   | { type: 'scrape_done'; keywords: string[] }
-  | { type: 'query_done'; subredditCount: number; queriesPerSubreddit: number }
-  | { type: 'tool_call_start'; query: string; subreddit?: string }
-  | { type: 'tool_call_done'; query: string; resultCount: number; subreddit?: string }
-  | { type: 'agent_error'; subreddit?: string; error: string }
+  | { type: 'query_done'; communityCount: number; queriesPerCommunity: number }
+  | { type: 'tool_call_start'; query: string; community?: string }
+  | { type: 'tool_call_done'; query: string; resultCount: number; community?: string }
+  | { type: 'agent_error'; community?: string; error: string }
   | { type: 'scoring' }
   | { type: 'complete' };
 

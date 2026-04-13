@@ -63,7 +63,7 @@ export const posts = pgTable('posts', {
   status: postStatusEnum('status').notNull().default('posted'),
   externalId: text('external_id'),
   externalUrl: text('external_url'),
-  subreddit: text('subreddit').notNull(),
+  community: text('community').notNull(),
   postedAt: timestamp('posted_at', { mode: 'date' }).defaultNow().notNull(),
 });
 

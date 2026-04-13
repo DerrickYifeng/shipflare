@@ -39,7 +39,7 @@ export async function processContent(job: Job<ContentJobData>) {
   if (!thread) throw new Error(`Thread not found: ${threadId}`);
   if (!product) throw new Error(`Product not found: ${productId}`);
 
-  log.info(`Generating ${draftType} draft for thread ${threadId} in r/${thread.subreddit}`);
+  log.info(`Generating ${draftType} draft for thread ${threadId} in r/${thread.community}`);
 
   // Load memory context
   const memoryStore = new MemoryStore(productId);
@@ -55,7 +55,7 @@ export async function processContent(job: Job<ContentJobData>) {
         {
           threadTitle: thread.title,
           threadBody: thread.body ?? '',
-          subreddit: thread.subreddit,
+          subreddit: thread.community,
           productName: product.name,
           productDescription: product.description,
           valueProp: product.valueProp,
@@ -101,7 +101,7 @@ export async function processContent(job: Job<ContentJobData>) {
     eventType: 'draft_created',
     metadataJson: {
       threadId,
-      subreddit: thread.subreddit,
+      community: thread.community,
       confidence: result.confidence,
       draftType,
       cost: usage.costUsd,
@@ -112,7 +112,7 @@ export async function processContent(job: Job<ContentJobData>) {
   await publishEvent(`shipflare:events:${userId}`, {
     type: 'draft_ready',
     threadTitle: thread.title,
-    subreddit: thread.subreddit,
+    community: thread.community,
     confidence: result.confidence,
     draftType,
   });
@@ -120,7 +120,7 @@ export async function processContent(job: Job<ContentJobData>) {
   // --- Memory: log insights from this content run ---
   const confLabel = result.confidence >= 0.8 ? 'high' : result.confidence >= 0.5 ? 'medium' : 'low';
   await dream.logInsight(
-    `Content draft (${draftType}) for r/${thread.subreddit} "${thread.title}" — confidence ${result.confidence} (${confLabel}). Reason: ${result.whyItWorks}`,
+    `Content draft (${draftType}) for r/${thread.community} "${thread.title}" — confidence ${result.confidence} (${confLabel}). Reason: ${result.whyItWorks}`,
   );
 
   // Check if distillation should be triggered

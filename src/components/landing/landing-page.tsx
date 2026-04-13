@@ -346,7 +346,7 @@ export function LandingPage({ isAuthenticated }: LandingPageProps) {
       {!scanning && !data && (
         <footer className="max-w-[960px] mx-auto px-8 pb-8 w-full">
           <div className="flex items-center justify-center gap-6 text-[11px] text-sf-text-tertiary">
-            <span>Scans Reddit, HN, Twitter &amp; more</span>
+            <span>Scans Reddit, HN, X &amp; more</span>
             <span className="w-px h-3 bg-sf-border" aria-hidden="true" />
             <span>No sign-up required to try</span>
             <span className="w-px h-3 bg-sf-border" aria-hidden="true" />

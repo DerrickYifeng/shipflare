@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { drafts, posts, threads, channels, activityEvents } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { RedditClient } from '@/lib/reddit-client';
+import { XClient } from '@/lib/x-client';
 import { runAgent, createToolContext } from '@/bridge/agent-runner';
 import { loadAgentFromFile } from '@/bridge/load-agent';
 import { registry } from '@/tools/registry';
@@ -33,14 +34,7 @@ export async function processPosting(job: Job<PostingJobData>) {
 
   log.info(`Posting draft ${draftId} for user ${userId}`);
 
-  // Check circuit breaker FIRST
-  const breaker = await isCircuitBreakerTripped(userId);
-  if (breaker.tripped) {
-    log.warn(`Circuit breaker tripped for user ${userId}: ${breaker.reason}`);
-    throw new Error(`Circuit breaker tripped: ${breaker.reason}`);
-  }
-
-  // Load draft + thread
+  // Load draft + thread first (need thread.platform for platform checks)
   const [draft] = await db
     .select()
     .from(drafts)
@@ -60,13 +54,21 @@ export async function processPosting(job: Job<PostingJobData>) {
 
   if (!thread) throw new Error(`Thread not found: ${draft.threadId}`);
 
-  // Check rate limit
-  const rateLimit = await canPostToSubreddit(userId, thread.subreddit);
-  if (!rateLimit.allowed) {
-    log.warn(`Rate limited in r/${thread.subreddit} for user ${userId}`);
-    throw new Error(
-      `Rate limit: ${rateLimit.remaining} posts remaining in r/${thread.subreddit}, resets at ${rateLimit.resetAt.toISOString()}`,
-    );
+  // Reddit-only safety checks (circuit breaker + subreddit rate limit)
+  if (thread.platform !== 'x') {
+    const breaker = await isCircuitBreakerTripped(userId);
+    if (breaker.tripped) {
+      log.warn(`Circuit breaker tripped for user ${userId}: ${breaker.reason}`);
+      throw new Error(`Circuit breaker tripped: ${breaker.reason}`);
+    }
+
+    const rateLimit = await canPostToSubreddit(userId, thread.community);
+    if (!rateLimit.allowed) {
+      log.warn(`Rate limited in r/${thread.community} for user ${userId}`);
+      throw new Error(
+        `Rate limit: ${rateLimit.remaining} posts remaining in r/${thread.community}, resets at ${rateLimit.resetAt.toISOString()}`,
+      );
+    }
   }
 
   // Load channel
@@ -78,25 +80,36 @@ export async function processPosting(job: Job<PostingJobData>) {
 
   if (!channel) throw new Error(`Channel not found: ${channelId}`);
 
-  const redditClient = RedditClient.fromChannel(channel);
+  const isX = channel.platform === 'x';
   const draftType = draft.draftType ?? 'reply';
 
-  // Load agent with tools from registry
+  // Load platform-specific agent and client
   const toolMap = registry.toMap();
+  const cwd = process.cwd();
+
   const agentConfig = loadAgentFromFile(
-    join(process.cwd(), 'src/agents/posting.md'),
+    join(cwd, isX ? 'src/agents/x-posting.md' : 'src/agents/posting.md'),
     toolMap,
   );
 
-  const context = createToolContext({ redditClient });
+  const context = isX
+    ? createToolContext({ xClient: XClient.fromChannel(channel) })
+    : createToolContext({ redditClient: RedditClient.fromChannel(channel) });
 
-  const userMessage = JSON.stringify({
-    draftType,
-    threadFullname: `t3_${thread.externalId}`,
-    subreddit: thread.subreddit,
-    postTitle: draft.postTitle ?? undefined,
-    draftText: draft.replyBody,
-  });
+  const userMessage = isX
+    ? JSON.stringify({
+        draftType,
+        tweetId: thread.externalId,
+        topic: thread.community,
+        draftText: draft.replyBody,
+      })
+    : JSON.stringify({
+        draftType,
+        threadFullname: `t3_${thread.externalId}`,
+        subreddit: thread.community,
+        postTitle: draft.postTitle ?? undefined,
+        draftText: draft.replyBody,
+      });
 
   const { result, usage } = await runAgent(
     agentConfig,
@@ -106,12 +119,14 @@ export async function processPosting(job: Job<PostingJobData>) {
   );
 
   const externalId = result.commentId ?? result.postId ?? null;
-  const externalUrl = result.permalink
-    ? `https://reddit.com${result.permalink}`
-    : result.url ?? null;
+  const externalUrl = isX
+    ? result.url ?? null
+    : result.permalink
+      ? `https://reddit.com${result.permalink}`
+      : result.url ?? null;
 
   if (result.success && externalId) {
-    log.info(`Posted ${draftType} ${externalId} to r/${thread.subreddit}`);
+    log.info(`Posted ${draftType} ${externalId} to r/${thread.community}`);
 
     // Insert post record
     await db.insert(posts).values({
@@ -119,7 +134,7 @@ export async function processPosting(job: Job<PostingJobData>) {
       userId,
       externalId,
       externalUrl,
-      subreddit: thread.subreddit,
+      community: thread.community,
       status: result.verified ? 'verified' : 'posted',
     });
 
@@ -129,12 +144,12 @@ export async function processPosting(job: Job<PostingJobData>) {
       .set({ status: 'posted', updatedAt: new Date() })
       .where(eq(drafts.id, draftId));
 
-    // Shadowban detection: trip circuit breaker (replies only)
-    if (result.shadowbanned && draftType === 'reply') {
-      log.error(`SHADOWBAN detected: ${externalId} in r/${thread.subreddit}`);
+    // Shadowban detection: trip circuit breaker (Reddit replies only)
+    if (!isX && result.shadowbanned && draftType === 'reply') {
+      log.error(`SHADOWBAN detected: ${externalId} in r/${thread.community}`);
       await tripCircuitBreaker(
         userId,
-        `Shadowban detected on ${externalId} in r/${thread.subreddit}`,
+        `Shadowban detected on ${externalId} in r/${thread.community}`,
       );
     }
   } else {
@@ -153,7 +168,7 @@ export async function processPosting(job: Job<PostingJobData>) {
     metadataJson: {
       draftId,
       draftType,
-      subreddit: thread.subreddit,
+      community: thread.community,
       commentId: result.commentId,
       postId: result.postId,
       shadowbanned: result.shadowbanned,
@@ -166,7 +181,7 @@ export async function processPosting(job: Job<PostingJobData>) {
   await publishEvent(`shipflare:events:${userId}`, {
     type: result.success ? 'post_published' : 'post_failed',
     draftType,
-    subreddit: thread.subreddit,
+    community: thread.community,
     shadowbanned: result.shadowbanned,
   });
 }

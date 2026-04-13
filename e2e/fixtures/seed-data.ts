@@ -15,7 +15,7 @@ export function makeThread(userId: string, index: number) {
     userId,
     externalId: `t3_test${index}`,
     platform: 'reddit' as const,
-    subreddit,
+    community: subreddit,
     title: `How do you handle ${['SEO', 'marketing', 'user acquisition', 'pricing', 'onboarding'][index % 5]} for your SaaS?`,
     url: `https://reddit.com/r/${subreddit}/comments/test${index}`,
     body: `Looking for advice on ${subreddit} strategies.`,

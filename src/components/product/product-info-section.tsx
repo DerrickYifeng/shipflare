@@ -1,0 +1,212 @@
+'use client';
+
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { Card } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { useToast } from '@/components/ui/toast';
+
+interface ProductData {
+  name: string;
+  description: string;
+  keywords: string[];
+  valueProp: string | null;
+}
+
+interface ProductInfoSectionProps {
+  product: ProductData;
+}
+
+export function ProductInfoSection({ product }: ProductInfoSectionProps) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(product.name);
+  const [description, setDescription] = useState(product.description);
+  const [keywords, setKeywords] = useState(product.keywords.join(', '));
+  const [valueProp, setValueProp] = useState(product.valueProp ?? '');
+  const [saving, setSaving] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [error, setError] = useState('');
+  const router = useRouter();
+  const { toast } = useToast();
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setSaving(true);
+
+    try {
+      const res = await fetch('/api/onboarding/profile', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          description,
+          keywords: keywords.split(',').map((k) => k.trim()).filter(Boolean),
+          valueProp: valueProp || undefined,
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error ?? 'Failed to save');
+      }
+
+      toast('Product updated');
+      setEditing(false);
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Something went wrong');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleReset = async () => {
+    if (!confirm('Clear all product info? Fields will be reset to empty.')) return;
+    setResetting(true);
+    setError('');
+
+    try {
+      const res = await fetch('/api/onboarding/profile', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Untitled Product',
+          description: '-',
+          keywords: [],
+          valueProp: '',
+        }),
+      });
+
+      if (!res.ok) throw new Error('Failed to reset');
+      toast('Product info cleared');
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to reset');
+    } finally {
+      setResetting(false);
+    }
+  };
+
+  const handleCancel = () => {
+    setName(product.name);
+    setDescription(product.description);
+    setKeywords(product.keywords.join(', '));
+    setValueProp(product.valueProp ?? '');
+    setError('');
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <section>
+        <h2 className="text-[15px] font-semibold text-sf-text-primary mb-4">Edit Product</h2>
+        <Card>
+          <form onSubmit={handleSave} className="flex flex-col gap-4">
+            <Input
+              label="Product name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+            />
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[13px] font-medium text-sf-text-primary">
+                Description
+              </label>
+              <textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                rows={3}
+                required
+                className="
+                  w-full px-3 py-2
+                  rounded-[var(--radius-sf-md)]
+                  border border-sf-border text-[15px] text-sf-text-primary
+                  bg-sf-bg-primary placeholder:text-sf-text-tertiary
+                  hover:border-sf-text-tertiary focus:border-sf-accent
+                  transition-colors duration-150 resize-none
+                "
+              />
+            </div>
+
+            <Input
+              label="Keywords"
+              value={keywords}
+              onChange={(e) => setKeywords(e.target.value)}
+              helper="Comma-separated. These help find relevant threads."
+            />
+
+            <Input
+              label="Value proposition"
+              value={valueProp}
+              onChange={(e) => setValueProp(e.target.value)}
+              helper="One sentence: what does your product do for users?"
+            />
+
+            {error && <p className="text-[13px] text-sf-error">{error}</p>}
+
+            <div className="flex gap-2">
+              <Button type="submit" disabled={saving || !name || !description}>
+                {saving ? 'Saving...' : 'Save changes'}
+              </Button>
+              <Button type="button" variant="ghost" onClick={handleCancel}>
+                Cancel
+              </Button>
+            </div>
+          </form>
+        </Card>
+      </section>
+    );
+  }
+
+  return (
+    <section>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-[15px] font-semibold text-sf-text-primary">Product Info</h2>
+        <div className="flex gap-2">
+          <Button
+            variant="secondary"
+            className="!min-h-[32px] !text-[13px] !px-3"
+            onClick={() => setEditing(true)}
+          >
+            Edit
+          </Button>
+          <Button
+            variant="ghost"
+            className="!min-h-[32px] !text-[13px] !px-3 text-sf-text-tertiary"
+            onClick={handleReset}
+            disabled={resetting}
+          >
+            {resetting ? 'Clearing...' : 'Reset'}
+          </Button>
+        </div>
+      </div>
+
+      <Card>
+        <p className="text-[15px] font-medium text-sf-text-primary">{product.name}</p>
+        <p className="text-[13px] text-sf-text-secondary mt-3 leading-relaxed">
+          {product.description}
+        </p>
+
+        {product.keywords.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mt-3">
+            {product.keywords.map((kw) => (
+              <Badge key={kw}>{kw}</Badge>
+            ))}
+          </div>
+        )}
+
+        {product.valueProp && (
+          <div className="mt-3 pl-3 border-l-2 border-sf-accent/30">
+            <p className="text-[13px] text-sf-text-secondary italic">{product.valueProp}</p>
+          </div>
+        )}
+
+        {error && <p className="text-[13px] text-sf-error mt-3">{error}</p>}
+      </Card>
+    </section>
+  );
+}

@@ -11,15 +11,20 @@
     "lint": "eslint",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "test:e2e:headed": "playwright test --headed"
+    "test:e2e:headed": "playwright test --headed",
+    "db:push": "drizzle-kit push",
+    "db:generate": "drizzle-kit generate",
+    "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.88.0",
     "@auth/drizzle-adapter": "^1.11.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@types/turndown": "^5.0.6",
     "bullmq": "^5.73.4",
     "cheerio": "^1.2.0",
     "drizzle-orm": "^0.45.2",
+    "fast-glob": "^3.3.3",
     "ioredis": "^5.10.1",
     "next": "16.2.3",
     "next-auth": "^5.0.0-beta.30",
@@ -28,6 +33,7 @@
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "swr": "^2.4.1",
+    "turndown": "^7.2.4",
     "zod": "3",
     "zod-to-json-schema": "^3.25.2"
   },

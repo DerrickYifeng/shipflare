@@ -3,16 +3,7 @@
 import { useState } from 'react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-
-interface ExtractedProfile {
-  url: string;
-  name: string;
-  description: string;
-  keywords: string[];
-  valueProp: string;
-  ogImage: string | null;
-  seoAudit: Record<string, unknown> | null;
-}
+import type { ExtractedProfile } from '@/types/onboarding';
 
 interface ProfileReviewStepProps {
   profile: ExtractedProfile;

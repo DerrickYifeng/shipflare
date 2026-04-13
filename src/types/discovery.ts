@@ -72,7 +72,7 @@ export interface LegacyScanResult {
   externalId: string;
   title: string;
   url: string;
-  subreddit: string;
+  community: string;
   upvotes: number;
   commentCount: number;
   relevanceScore: number;
@@ -88,7 +88,7 @@ export function toLegacyDiscoveryResult(r: LegacyScanResult): DiscoveryResult {
     externalId: r.externalId,
     title: r.title,
     url: r.url,
-    community: `r/${r.subreddit}`,
+    community: r.source === 'reddit' ? `r/${r.community}` : r.community,
     score: r.relevanceScore,
     postedAt: r.postedAt,
     reason: r.reason,

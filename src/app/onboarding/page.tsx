@@ -3,19 +3,10 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ProgressDots } from '@/components/ui/progress-dots';
-import { UrlInputStep } from '@/components/onboarding/url-input-step';
+import { ProductSourceStep } from '@/components/onboarding/product-source-step';
 import { ProfileReviewStep } from '@/components/onboarding/profile-review-step';
-import { ConnectRedditStep } from '@/components/onboarding/connect-reddit-step';
-
-interface ExtractedProfile {
-  url: string;
-  name: string;
-  description: string;
-  keywords: string[];
-  valueProp: string;
-  ogImage: string | null;
-  seoAudit: Record<string, unknown> | null;
-}
+import { ConnectAccountsStep } from '@/components/onboarding/connect-accounts-step';
+import type { ExtractedProfile } from '@/types/onboarding';
 
 export default function OnboardingPage() {
   const router = useRouter();
@@ -41,16 +32,16 @@ export default function OnboardingPage() {
         <h1 className="text-[18px] font-semibold text-sf-text-primary">
           {step === 0 && 'Add your product'}
           {step === 1 && 'Review your profile'}
-          {step === 2 && 'Connect Reddit'}
+          {step === 2 && 'Connect your accounts'}
         </h1>
         <ProgressDots steps={3} current={step} />
       </div>
 
-      {step === 0 && <UrlInputStep onExtracted={handleExtracted} />}
+      {step === 0 && <ProductSourceStep onExtracted={handleExtracted} />}
       {step === 1 && profile && (
         <ProfileReviewStep profile={profile} onSaved={handleProfileSaved} />
       )}
-      {step === 2 && <ConnectRedditStep onComplete={handleComplete} />}
+      {step === 2 && <ConnectAccountsStep onComplete={handleComplete} />}
     </div>
   );
 }

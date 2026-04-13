@@ -26,7 +26,7 @@ export async function GET() {
     threads: results.map((t) => ({
       id: t.id,
       externalId: t.externalId,
-      subreddit: t.subreddit,
+      community: t.community,
       title: t.title,
       url: t.url,
       relevanceScore: t.relevanceScore,

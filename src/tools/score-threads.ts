@@ -55,7 +55,7 @@ function computeWeightedScore(dims: {
 
 const threadInputSchema = z.object({
   id: z.string(),
-  subreddit: z.string(),
+  community: z.string(),
   title: z.string(),
   url: z.string(),
   relevance: z.number().min(0).max(1).describe('AI-assessed relevance (0-1)'),
@@ -73,7 +73,7 @@ const threadInputSchema = z.object({
 export const scoreThreadsTool = buildTool({
   name: 'score_threads',
   description:
-    'Apply weighted multi-dimensional scoring to threads. Combines AI-assessed relevance and intent with metadata-derived exposure, freshness, and engagement scores. Returns threads sorted by weighted score with full dimension breakdown.',
+    'Apply weighted multi-dimensional scoring to threads. Input must be {"threads": [...array of thread objects...]}. Each thread needs: id, community, title, url, relevance (0-1), intent (0-1), reason. Returns threads sorted by weighted score.',
   isConcurrencySafe: true,
   isReadOnly: true,
   inputSchema: z.object({
@@ -92,7 +92,7 @@ export const scoreThreadsTool = buildTool({
 
       return {
         id: t.id,
-        subreddit: t.subreddit,
+        community: t.community,
         title: t.title,
         url: t.url,
         relevanceScore: Math.round(weightedScore * 100),

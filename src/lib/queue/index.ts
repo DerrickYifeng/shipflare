@@ -8,6 +8,7 @@ import type {
   PostingJobData,
   HealthScoreJobData,
   DreamJobData,
+  CodeScanJobData,
 } from './types';
 
 const log = createLogger('lib:queue');
@@ -26,12 +27,13 @@ export const healthScoreQueue = new Queue<HealthScoreJobData>(
   connection,
 );
 export const dreamQueue = new Queue<DreamJobData>('dream', connection);
+export const codeScanQueue = new Queue<CodeScanJobData>('code-scan', connection);
 
 /**
- * Enqueue a discovery scan for a user's product across subreddits.
+ * Enqueue a discovery scan for a user's product across sources (subreddits or topics).
  */
 export async function enqueueDiscovery(data: DiscoveryJobData): Promise<void> {
-  log.debug(`Enqueued discovery for product ${data.productId}`);
+  log.debug(`Enqueued ${data.platform} discovery for product ${data.productId}`);
   await discoveryQueue.add('scan', data, {
     attempts: 3,
     backoff: { type: 'exponential', delay: 5000 },
@@ -99,4 +101,19 @@ export async function enqueueDream(data: DreamJobData): Promise<void> {
     attempts: 2,
     backoff: { type: 'exponential', delay: 5000 },
   });
+}
+
+/**
+ * Enqueue a code scan for a GitHub repo.
+ * Runs in worker: clone → scan → save snapshot.
+ */
+export async function enqueueCodeScan(data: CodeScanJobData): Promise<string> {
+  const jobId = `code-scan-${data.userId}-${Date.now()}`;
+  log.debug(`Enqueued code-scan for ${data.repoFullName}`);
+  await codeScanQueue.add('scan', data, {
+    jobId,
+    attempts: 2,
+    backoff: { type: 'exponential', delay: 5000 },
+  });
+  return jobId;
 }

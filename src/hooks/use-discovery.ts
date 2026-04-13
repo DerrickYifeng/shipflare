@@ -7,8 +7,7 @@ const fetcher = (url: string) => fetch(url).then((r) => r.json());
 interface DiscoveredThread {
   id: string;
   externalId: string;
-  subreddit: string;
-  community?: string;
+  community: string;
   title: string;
   url: string;
   relevanceScore: number;

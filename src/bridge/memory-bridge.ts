@@ -26,7 +26,7 @@ export async function loadProductContext(userId: string): Promise<string> {
   return [
     '<product-context>',
     `Name: ${product.name}`,
-    `URL: ${product.url}`,
+    product.url ? `URL: ${product.url}` : null,
     `Description: ${product.description}`,
     product.valueProp ? `Value Proposition: ${product.valueProp}` : null,
     `Keywords: ${keywords}`,

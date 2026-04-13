@@ -20,7 +20,7 @@ export async function canPostToSubreddit(
     .where(
       and(
         eq(posts.userId, userId),
-        eq(posts.subreddit, subreddit),
+        eq(posts.community, subreddit),
         gte(posts.postedAt, dayAgo),
       ),
     );

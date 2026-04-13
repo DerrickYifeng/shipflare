@@ -27,7 +27,7 @@ export function ActivityTimeline() {
       {events.map((event) => {
         const config = eventLabels[event.eventType] ?? { label: event.eventType, variant: 'default' as const };
         const meta = event.metadataJson;
-        const subreddit = (meta?.subreddit as string) ?? '';
+        const community = (meta?.community as string) ?? '';
         const time = new Date(event.createdAt).toLocaleTimeString([], {
           hour: '2-digit',
           minute: '2-digit',
@@ -39,8 +39,8 @@ export function ActivityTimeline() {
             className="shrink-0 flex flex-col gap-1.5 p-3 bg-sf-bg-secondary rounded-[var(--radius-sf-md)] min-w-[120px]"
           >
             <Badge variant={config.variant}>{config.label}</Badge>
-            {subreddit && (
-              <span className="text-[11px] text-sf-text-secondary">r/{subreddit}</span>
+            {community && (
+              <span className="text-[11px] text-sf-text-secondary">{community}</span>
             )}
             <span className="text-[11px] text-sf-text-tertiary font-mono">{time}</span>
           </div>

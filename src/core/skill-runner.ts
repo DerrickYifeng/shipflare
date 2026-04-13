@@ -147,7 +147,7 @@ export async function runSkill<T>(config: SkillRunConfig<T>): Promise<SkillRunRe
         label,
         onProgress: onProgress
           ? (event: AgentProgressEvent) => {
-              onProgress({ ...event, subreddit: label } as AgentProgressEvent);
+              onProgress({ ...event, community: label } as AgentProgressEvent);
             }
           : undefined,
       };

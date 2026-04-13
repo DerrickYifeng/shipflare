@@ -46,7 +46,7 @@ export function DiscoveryFeed() {
             {(thread.relevanceScore * 100).toFixed(0)}
           </Badge>
           <span className="text-[13px] text-sf-text-tertiary shrink-0">
-            {thread.community ?? `r/${thread.subreddit}`}
+            {thread.community}
           </span>
           <span className="text-[13px] text-sf-text-primary truncate">
             {thread.title}

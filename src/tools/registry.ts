@@ -13,6 +13,8 @@ import { classifyIntentTool } from './classify-intent';
 import { hnSearchTool } from './hn-search';
 import { hnGetThreadTool } from './hn-get-thread';
 import { webSearchTool } from './web-search';
+import { xSearchTool } from './x-search';
+import { xPostTool } from './x-post';
 
 /**
  * Central tool registry for ShipFlare agents.
@@ -34,6 +36,10 @@ registry.register(redditSubmitPostTool);
 // HackerNews tools
 registry.register(hnSearchTool);
 registry.register(hnGetThreadTool);
+
+// X tools
+registry.register(xSearchTool);
+registry.register(xPostTool);
 
 // Generic tools
 registry.register(generateQueriesTool);

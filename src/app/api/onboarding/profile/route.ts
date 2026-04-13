@@ -14,24 +14,24 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  let body: { url?: string; name?: string; description?: string; keywords?: string[]; valueProp?: string };
+  let body: { url?: string; name?: string; description?: string; keywords?: string[]; valueProp?: string; merge?: boolean };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
 
-  const { url, name, description, keywords, valueProp } = body;
-  log.info(`PUT /api/onboarding/profile name=${name}`);
+  const { url, name, description, keywords, valueProp, merge } = body;
+  log.info(`PUT /api/onboarding/profile name=${name} merge=${!!merge}`);
 
-  if (!url || !name || !description) {
+  if (!name || !description) {
     return NextResponse.json(
-      { error: 'URL, name, and description are required' },
+      { error: 'Name and description are required' },
       { status: 400 },
     );
   }
 
-  const seoAudit = await auditSeo(url);
+  const seoAudit = url ? await auditSeo(url) : null;
 
   // Upsert product
   const existing = await db
@@ -40,23 +40,46 @@ export async function PUT(request: Request) {
     .where(eq(products.userId, session.user.id))
     .limit(1);
 
-  if (existing.length > 0) {
+  const PLACEHOLDER_NAMES = ['', 'Untitled Product'];
+  const PLACEHOLDER_DESCS = ['', '-'];
+
+  if (existing.length > 0 && merge) {
+    // Merge: keep existing non-placeholder values, union keywords
+    const prev = existing[0];
+    const mergedName = PLACEHOLDER_NAMES.includes(prev.name) ? name : prev.name;
+    const mergedDesc = PLACEHOLDER_DESCS.includes(prev.description) ? description : prev.description;
+    const mergedKeywords = [...new Set([...prev.keywords, ...(keywords ?? [])])];
+    const mergedValueProp = prev.valueProp || valueProp || null;
+
     await db
       .update(products)
       .set({
-        url,
+        ...(url !== undefined ? { url: url || null } : {}),
+        name: mergedName,
+        description: mergedDesc,
+        keywords: mergedKeywords,
+        valueProp: mergedValueProp,
+        ...(seoAudit !== null ? { seoAuditJson: seoAudit } : {}),
+        updatedAt: new Date(),
+      })
+      .where(eq(products.userId, session.user.id));
+  } else if (existing.length > 0) {
+    await db
+      .update(products)
+      .set({
+        ...(url !== undefined ? { url: url || null } : {}),
         name,
         description,
         keywords: keywords ?? [],
         valueProp: valueProp ?? null,
-        seoAuditJson: seoAudit,
+        ...(seoAudit !== null ? { seoAuditJson: seoAudit } : {}),
         updatedAt: new Date(),
       })
       .where(eq(products.userId, session.user.id));
   } else {
     await db.insert(products).values({
       userId: session.user.id,
-      url,
+      url: url || null,
       name,
       description,
       keywords: keywords ?? [],

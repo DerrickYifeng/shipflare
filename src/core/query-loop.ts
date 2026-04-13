@@ -187,7 +187,7 @@ export async function runAgent<T>(
   ];
 
   const tracker = new UsageTracker();
-  let currentMaxTokens = 8192;
+  let currentMaxTokens = 16_384;
 
   for (let turn = 1; turn <= config.maxTurns; turn++) {
     if (context.abortSignal.aborted) {
@@ -210,6 +210,8 @@ export async function runAgent<T>(
     });
 
     tracker.add(usage, config.model);
+
+    log.debug(`Agent "${config.name}" turn ${turn}: stop_reason=${response.stop_reason}, blocks=${response.content.map(b => b.type).join(',')}`);
 
     // --- Handle tool_use ---
     if (response.stop_reason === 'tool_use') {
@@ -252,11 +254,31 @@ export async function runAgent<T>(
     }
 
     // --- Handle max_tokens escalation ---
-    if (response.stop_reason === 'max_tokens' && currentMaxTokens < 64_000) {
-      currentMaxTokens = currentMaxTokens <= 8192 ? 16_384 : 64_000;
-      messages.push({ role: 'assistant', content: response.content });
-      messages.push({ role: 'user', content: 'Please continue where you left off.' });
-      continue;
+    if (response.stop_reason === 'max_tokens') {
+      // If max_tokens hit after emitting complete tool_use blocks,
+      // execute them first to avoid orphaned tool_use without tool_result.
+      const orphanedToolUse = response.content.filter(
+        (b): b is Anthropic.Messages.ToolUseBlock => b.type === 'tool_use',
+      );
+
+      if (orphanedToolUse.length > 0) {
+        messages.push({ role: 'assistant', content: response.content });
+        const toolResults = await executeTools(orphanedToolUse, config.tools, context);
+        if (toolResults.length > 0) {
+          messages.push({ role: 'user', content: toolResults });
+        }
+        if (currentMaxTokens < 64_000) {
+          currentMaxTokens = currentMaxTokens <= 8192 ? 16_384 : 64_000;
+        }
+        continue;
+      }
+
+      if (currentMaxTokens < 64_000) {
+        currentMaxTokens = currentMaxTokens <= 8192 ? 16_384 : 64_000;
+        messages.push({ role: 'assistant', content: response.content });
+        messages.push({ role: 'user', content: 'Please continue where you left off.' });
+        continue;
+      }
     }
 
     // --- Handle end_turn ---

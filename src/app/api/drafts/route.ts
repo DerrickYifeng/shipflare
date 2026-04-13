@@ -31,7 +31,7 @@ export async function GET() {
       reviewJson: drafts.reviewJson,
       createdAt: drafts.createdAt,
       threadTitle: threads.title,
-      threadSubreddit: threads.subreddit,
+      threadCommunity: threads.community,
       threadUrl: threads.url,
     })
     .from(drafts)
@@ -65,7 +65,7 @@ export async function GET() {
       createdAt: r.createdAt,
       thread: {
         title: r.threadTitle,
-        subreddit: r.threadSubreddit,
+        community: r.threadCommunity,
         url: r.threadUrl,
       },
     })),
@@ -109,15 +109,23 @@ export async function POST(request: Request) {
       .set({ status: 'approved', updatedAt: new Date() })
       .where(eq(drafts.id, draftId));
 
-    // Find user's Reddit channel for posting
+    // Find the thread to determine platform, then find the right channel
+    const [thread] = await db
+      .select()
+      .from(threads)
+      .where(eq(threads.id, draft.threadId))
+      .limit(1);
+
+    const platform = thread?.platform ?? 'reddit';
+
     const [channel] = await db
       .select()
       .from(channels)
-      .where(and(eq(channels.userId, session.user.id), eq(channels.platform, 'reddit')))
+      .where(and(eq(channels.userId, session.user.id), eq(channels.platform, platform)))
       .limit(1);
 
     if (channel) {
-      log.info(`Draft ${draftId} approved, posting enqueued`);
+      log.info(`Draft ${draftId} approved (${platform}), posting enqueued`);
       await enqueuePosting({
         userId: session.user.id,
         draftId,
@@ -125,7 +133,7 @@ export async function POST(request: Request) {
       });
     } else {
       return NextResponse.json(
-        { error: 'No Reddit account connected. Connect your account first.' },
+        { error: `No ${platform === 'x' ? 'X' : 'Reddit'} account connected. Connect your account first.` },
         { status: 400 },
       );
     }

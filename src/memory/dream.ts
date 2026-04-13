@@ -18,21 +18,21 @@ const distillOutputSchema = z.object({
 
 const DISTILL_PROMPT = `You are performing a dream — a reflective pass over an AI marketing agent's memory. Synthesize recent observations into durable, well-organized memories so that future agent runs can orient quickly and make better decisions.
 
-This agent helps market products on Reddit by discovering relevant threads, drafting replies, and posting them.
+This agent helps market products on platforms like Reddit and X by discovering relevant threads, drafting replies, and posting them.
 
 ---
 
 ## Phase 1 — Orient
 
-Review the existing memories provided below. Understand what the agent already knows about this product's marketing: which subreddits perform well, what content strategies work, audience pain points, and posting patterns. Identify gaps, outdated facts, and contradictions.
+Review the existing memories provided below. Understand what the agent already knows about this product's marketing: which communities perform well, what content strategies work, audience pain points, and posting patterns. Identify gaps, outdated facts, and contradictions.
 
 ## Phase 2 — Gather signal
 
 Analyze the new observations (raw logs from recent agent runs). Look for:
-1. **Performance patterns** — which subreddits yield the most relevant threads, which content confidence scores are high/low
+1. **Performance patterns** — which communities yield the most relevant threads, which content confidence scores are high/low
 2. **Strategy insights** — what reply approaches get traction, what tone matches which communities
 3. **Audience signals** — recurring pain points, common questions, sentiment patterns
-4. **Failures and dead ends** — subreddits with no results, approaches that don't work, agent timeouts
+4. **Failures and dead ends** — communities with no results, approaches that don't work, agent timeouts
 
 Don't treat every observation as worth remembering. Look for patterns across multiple observations, not one-off data points.
 
@@ -57,17 +57,18 @@ For each insight worth preserving:
 <types>
 <type>
   <name>user</name>
-  <description>Audience insights: target user personas, pain points, needs, and behaviors observed on Reddit. Helps the agent understand WHO it's writing for.</description>
+  <description>Audience insights: target user personas, pain points, needs, and behaviors observed across communities. Helps the agent understand WHO it's writing for.</description>
   <when_to_save>When observations reveal recurring audience characteristics, common frustrations, or user segments that respond well to the product.</when_to_save>
   <examples>
   - "Users in r/SaaS frequently ask about analytics dashboards — they want simple, not enterprise-grade"
   - "Solo founders in r/SideProject respond better to 'I built this' framing than feature lists"
+  - "X discussions about SaaS tools focus on pricing transparency and integrations"
   </examples>
 </type>
 <type>
   <name>feedback</name>
   <description>What works and what doesn't in this product's marketing. Strategy-level guidance learned from past runs — both successes and failures. Lead with the rule, then Why and How to apply.</description>
-  <when_to_save>When content confidence scores reveal patterns, when certain approaches consistently perform well or poorly, when a subreddit's tone requires specific adaptation.</when_to_save>
+  <when_to_save>When content confidence scores reveal patterns, when certain approaches consistently perform well or poorly, when a community's tone requires specific adaptation.</when_to_save>
   <examples>
   - "High-confidence drafts (0.8+) correlate with threads where OP explicitly asks for recommendations. Why: direct intent match. How to apply: prioritize intent score >= 0.8 threads."
   - "r/programming replies need code examples or technical depth — marketing-speak gets downvoted. Why: technical audience. How to apply: include concrete technical details."
@@ -75,19 +76,20 @@ For each insight worth preserving:
 </type>
 <type>
   <name>project</name>
-  <description>Subreddit-specific patterns, posting strategies, and campaign-level decisions. Operational knowledge about how to run this product's marketing.</description>
-  <when_to_save>When discovery reveals subreddit performance patterns, when posting timing matters, when specific query strategies yield better results.</when_to_save>
+  <description>Community-specific patterns, posting strategies, and campaign-level decisions. Operational knowledge about how to run this product's marketing.</description>
+  <when_to_save>When discovery reveals community performance patterns, when posting timing matters, when specific query strategies yield better results.</when_to_save>
   <examples>
   - "r/startups yields 3x more relevant threads than r/Entrepreneur for this product. Best queries: workflow-struggle pattern."
   - "Discovery scans on weekday mornings find fresher threads (< 6h old) than weekend scans."
+  - "X topic 'SaaS tools' surfaces high-intent threads but requires different tone than Reddit."
   </examples>
 </type>
 <type>
   <name>reference</name>
-  <description>Useful subreddits, communities, competitor threads, or external resources discovered during agent runs.</description>
-  <when_to_save>When the agent discovers new relevant subreddits, competitor mentions, or useful community resources.</when_to_save>
+  <description>Useful communities, competitor threads, or external resources discovered during agent runs.</description>
+  <when_to_save>When the agent discovers new relevant communities, competitor mentions, or useful resources.</when_to_save>
   <examples>
-  - "r/NoCode is a high-relevance subreddit discovered via cross-posts from r/SideProject"
+  - "r/NoCode is a high-relevance community discovered via cross-posts from r/SideProject"
   - "Competitor 'ToolX' is frequently mentioned in r/SaaS threads about this problem space"
   </examples>
 </type>
@@ -107,7 +109,7 @@ Return JSON with the actions to take:
 { "memories": [{ "name": "descriptive_slug", "description": "one-line summary for relevance matching", "type": "user|feedback|project|reference", "content": "full memory content", "action": "create|update|delete" }] }
 \`\`\`
 
-Names should be descriptive slugs (e.g., "subreddit_saas_performance", "audience_pain_points_solo_founders").
+Names should be descriptive slugs (e.g., "community_saas_performance", "audience_pain_points_solo_founders").
 For "delete" actions, only name is required.`;
 
 /**

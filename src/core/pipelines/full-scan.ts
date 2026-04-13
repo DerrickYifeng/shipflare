@@ -1,5 +1,6 @@
 import { scrapeUrl, analyzeProduct } from '@/tools/url-scraper';
 import { RedditClient } from '@/lib/reddit-client';
+import { XAIClient } from '@/lib/xai-client';
 import { loadSkill } from '@/core/skill-loader';
 import { runSkill } from '@/core/skill-runner';
 import {
@@ -19,6 +20,7 @@ const log = createLogger('pipeline:full-scan');
 
 const SKILLS_DIR = join(process.cwd(), 'src', 'skills');
 const MAX_SCAN_SUBREDDITS = 3;
+const MAX_RESULTS_PER_PLATFORM = 10;
 const FALLBACK_SUBREDDITS = ['SideProject', 'startups', 'webdev'];
 
 export interface FullScanResult {
@@ -48,11 +50,13 @@ export interface FullScanProgress {
 export async function runFullScan(input: {
   url: string;
   redditClient?: RedditClient;
+  xaiClient?: XAIClient;
   onProgress?: FullScanProgress;
 }): Promise<FullScanResult> {
   const { url, onProgress } = input;
   const send = onProgress ?? (() => {});
   const redditClient = input.redditClient ?? RedditClient.appOnly();
+  const xaiClient = input.xaiClient ?? (process.env.XAI_API_KEY ? new XAIClient(process.env.XAI_API_KEY) : null);
 
   // Step 1: Scrape + analyze
   const scraped = await scrapeUrl(url);
@@ -152,82 +156,138 @@ export async function runFullScan(input: {
     send('community_intel_done', { intel: [], error: message });
   }
 
-  // Step 4: Thread discovery
-  send('discovery_start', { totalCommunities: subreddits.length });
-
+  // Step 4: Thread discovery (Reddit + X in parallel via unified skill)
   const discoverySkill = loadSkill(join(SKILLS_DIR, 'discovery'));
-  const result = await runSkill<DiscoveryOutput>({
+  const xTopics = xaiClient
+    ? product.keywords.slice(0, 3).map((k) => k.toLowerCase())
+    : [];
+  const totalSources = subreddits.length + xTopics.length;
+  send('discovery_start', { totalCommunities: totalSources, platforms: xaiClient ? ['reddit', 'x'] : ['reddit'] });
+
+  // 4a: Reddit discovery
+  const redditDiscoveryPromise = runSkill<DiscoveryOutput>({
     skill: discoverySkill,
     input: {
       ...productContext,
-      subreddits,
+      sources: subreddits,
+      platform: 'reddit',
     },
     deps: { redditClient },
     outputSchema: discoveryOutputSchema,
     onProgress: (event) => send(event.type, event),
   });
 
-  for (const err of result.errors) {
+  // 4b: X discovery (parallel, skipped if no xAI key)
+  const xDiscoveryPromise = xaiClient
+    ? (async () => {
+        try {
+          send('x_discovery_start', { topics: xTopics });
+          const xResult = await runSkill<DiscoveryOutput>({
+            skill: discoverySkill,
+            input: {
+              ...productContext,
+              sources: xTopics,
+              platform: 'x',
+            },
+            deps: { xaiClient },
+            outputSchema: discoveryOutputSchema,
+            onProgress: (event) => send(event.type, { ...event, platform: 'x' }),
+          });
+          send('x_discovery_done', { count: xResult.results.reduce((n, r) => n + r.threads.length, 0) });
+          return xResult;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          log.warn(`X discovery failed (non-fatal): ${message}`);
+          send('x_discovery_done', { count: 0, error: message });
+          return null;
+        }
+      })()
+    : Promise.resolve(null);
+
+  const [redditResult, xResult] = await Promise.all([redditDiscoveryPromise, xDiscoveryPromise]);
+
+  for (const err of redditResult.errors) {
     log.error(`Agent "${err.label}" failed: ${err.error}`);
-    send('agent_error', { subreddit: err.label, error: err.error });
+    send('agent_error', { source: err.label, platform: 'reddit', error: err.error });
   }
-
-  // Step 5: Merge, dedup, sort
-  const seenIds = new Set<string>();
-  const allResults: Array<Record<string, unknown>> = [];
-
-  for (const discovery of result.results) {
-    for (const thread of discovery.threads) {
-      if (seenIds.has(thread.id)) continue;
-      seenIds.add(thread.id);
-
-      const hasScored = thread.relevanceScore != null && thread.scores != null;
-      const relevanceScore = hasScored
-        ? thread.relevanceScore!
-        : Math.round(((thread.relevance ?? 0) + (thread.intent ?? 0)) / 2 * 100);
-      const scores = hasScored
-        ? thread.scores!
-        : {
-            relevance: Math.round((thread.relevance ?? 0) * 100),
-            intent: Math.round((thread.intent ?? 0) * 100),
-            exposure: 50,
-            freshness: 50,
-            engagement: 50,
-          };
-
-      // Determine draft type based on community intel
-      const subIntel = communityIntel.find(
-        (ci) => ci.subreddit.toLowerCase() === thread.subreddit.toLowerCase(),
-      );
-      const draftType =
-        subIntel?.recommendedApproach === 'original_post'
-          ? 'original_post'
-          : 'reply';
-
-      allResults.push({
-        source: 'reddit',
-        externalId: thread.id,
-        title: thread.title,
-        url: thread.url,
-        subreddit: thread.subreddit,
-        upvotes: thread.score ?? 0,
-        commentCount: thread.commentCount ?? 0,
-        relevanceScore,
-        scores,
-        draftType,
-        postedAt: thread.createdUtc
-          ? new Date(thread.createdUtc * 1000).toISOString()
-          : null,
-        reason: thread.reason,
-      });
+  if (xResult) {
+    for (const err of xResult.errors) {
+      log.error(`Agent "${err.label}" failed: ${err.error}`);
+      send('agent_error', { source: err.label, platform: 'x', error: err.error });
     }
   }
 
-  allResults.sort(
-    (a, b) => (b.relevanceScore as number) - (a.relevanceScore as number),
-  );
+  // Step 5: Merge, dedup, sort (cap each platform to MAX_RESULTS_PER_PLATFORM)
+  const seenIds = new Set<string>();
 
-  log.info(`Full scan complete: ${allResults.length} results`);
+  function collectResults(
+    skillResult: { results: DiscoveryOutput[] },
+    platform: 'reddit' | 'x',
+  ): Array<Record<string, unknown>> {
+    const collected: Array<Record<string, unknown>> = [];
+    for (const discovery of skillResult.results) {
+      for (const thread of discovery.threads) {
+        if (seenIds.has(thread.id)) continue;
+        seenIds.add(thread.id);
+
+        const hasScored = thread.relevanceScore != null && thread.scores != null;
+        const relevanceScore = hasScored
+          ? thread.relevanceScore!
+          : Math.round(((thread.relevance ?? 0) + (thread.intent ?? 0)) / 2 * 100);
+        const scores = hasScored
+          ? thread.scores!
+          : {
+              relevance: Math.round((thread.relevance ?? 0) * 100),
+              intent: Math.round((thread.intent ?? 0) * 100),
+              exposure: 50,
+              freshness: 50,
+              engagement: 50,
+            };
+
+        // For Reddit, check community intel for approach recommendation
+        let draftType: string = 'reply';
+        if (platform === 'reddit') {
+          const subIntel = communityIntel.find(
+            (ci) => ci.community.toLowerCase() === thread.community.toLowerCase(),
+          );
+          if (subIntel?.recommendedApproach === 'not_recommended') continue;
+          if (subIntel?.recommendedApproach === 'original_post') draftType = 'original_post';
+        }
+
+        collected.push({
+          source: platform,
+          externalId: thread.id,
+          title: thread.title,
+          url: thread.url,
+          community: thread.community,
+          upvotes: thread.score ?? 0,
+          commentCount: thread.commentCount ?? 0,
+          relevanceScore,
+          scores,
+          draftType,
+          postedAt: thread.createdUtc
+            ? new Date(thread.createdUtc * 1000).toISOString()
+            : null,
+          reason: thread.reason,
+        });
+      }
+    }
+    return collected;
+  }
+
+  const redditResults = collectResults(redditResult, 'reddit');
+  const xResults = xResult ? collectResults(xResult, 'x') : [];
+
+  // Sort each platform by score, cap at MAX_RESULTS_PER_PLATFORM, then merge
+  redditResults.sort((a, b) => (b.relevanceScore as number) - (a.relevanceScore as number));
+  xResults.sort((a, b) => (b.relevanceScore as number) - (a.relevanceScore as number));
+
+  const allResults = [
+    ...redditResults.slice(0, MAX_RESULTS_PER_PLATFORM),
+    ...xResults.slice(0, MAX_RESULTS_PER_PLATFORM),
+  ].sort((a, b) => (b.relevanceScore as number) - (a.relevanceScore as number));
+
+  log.info(`Full scan complete: ${allResults.length} results (reddit: ${redditResult.results.reduce((n, r) => n + r.threads.length, 0)}, x: ${xResult?.results.reduce((n, r) => n + r.threads.length, 0) ?? 0})`);
 
   return {
     product: { name: product.productName, description: product.oneLiner, url },

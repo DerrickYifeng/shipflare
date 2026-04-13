@@ -6,9 +6,10 @@ import { processReview } from './processors/review';
 import { processPosting } from './processors/posting';
 import { processHealthScore } from './processors/health-score';
 import { processDream } from './processors/dream';
+import { processCodeScan } from './processors/code-scan';
 import { dreamQueue } from '@/lib/queue';
 import { createLogger } from '@/lib/logger';
-import type { DiscoveryJobData, ContentJobData, ReviewJobData, PostingJobData, HealthScoreJobData, DreamJobData } from '@/lib/queue/types';
+import type { DiscoveryJobData, ContentJobData, ReviewJobData, PostingJobData, HealthScoreJobData, DreamJobData, CodeScanJobData } from '@/lib/queue/types';
 
 const log = createLogger('workers');
 
@@ -55,7 +56,13 @@ const dreamWorker = new Worker<DreamJobData>(
   { connection, concurrency: 1 },
 );
 
-const workers = [discoveryWorker, contentWorker, reviewWorker, postingWorker, healthScoreWorker, dreamWorker];
+const codeScanWorker = new Worker<CodeScanJobData>(
+  'code-scan',
+  async (job) => processCodeScan(job),
+  { connection, concurrency: 2 },
+);
+
+const workers = [discoveryWorker, contentWorker, reviewWorker, postingWorker, healthScoreWorker, dreamWorker, codeScanWorker];
 
 // Log events
 for (const worker of workers) {
@@ -88,7 +95,7 @@ scheduleNightlyDream().catch((err) => {
   log.error('Failed to schedule nightly distillation:', err.message);
 });
 
-log.info('All workers started: discovery, content, review, posting, health-score, dream');
+log.info('All workers started: discovery, content, review, posting, health-score, dream, code-scan');
 
 // Graceful shutdown
 async function shutdown() {

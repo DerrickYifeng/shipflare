@@ -33,7 +33,7 @@ export const threads = pgTable('threads', {
     .references(() => users.id, { onDelete: 'cascade' }),
   externalId: text('external_id').notNull(),
   platform: text('platform').notNull().default('reddit'),
-  subreddit: text('subreddit').notNull(),
+  community: text('community').notNull(),
   title: text('title').notNull(),
   url: text('url').notNull(),
   body: text('body'),

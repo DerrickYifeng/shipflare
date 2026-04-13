@@ -9,6 +9,12 @@ const envSchema = z.object({
   REDDIT_CLIENT_ID: z.string().min(1),
   REDDIT_CLIENT_SECRET: z.string().min(1),
   REDDIT_REDIRECT_URI: z.string().url(),
+  // X OAuth (Free tier, for posting)
+  X_CLIENT_ID: z.string().min(1).optional(),
+  X_CLIENT_SECRET: z.string().min(1).optional(),
+  X_REDIRECT_URI: z.string().url().optional(),
+  // xAI Grok (for X/Twitter search)
+  XAI_API_KEY: z.string().min(1).optional(),
   ENCRYPTION_KEY: z.string().min(32),
   ANTHROPIC_API_KEY: z.string().startsWith('sk-'),
   NEXT_PUBLIC_APP_URL: z.string().url(),

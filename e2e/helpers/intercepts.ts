@@ -37,3 +37,42 @@ export async function mockExtractFailure(page: Page) {
     }),
   );
 }
+
+/**
+ * Intercept POST /api/automation/run with a successful response.
+ */
+export async function mockAutomationRunSuccess(page: Page) {
+  await page.route('**/api/automation/run', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        product: 'ShipFlare',
+        subreddits: ['SideProject', 'startups', 'webdev'],
+      }),
+    }),
+  );
+}
+
+/**
+ * Intercept POST /api/automation/run with a 400 "no product" error.
+ */
+export async function mockAutomationRunNoProduct(page: Page) {
+  await page.route('**/api/automation/run', (route) =>
+    route.fulfill({
+      status: 400,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        error: 'No product configured. Complete onboarding first.',
+      }),
+    }),
+  );
+}
+
+/**
+ * Intercept POST /api/automation/run with a network failure.
+ */
+export async function mockAutomationRunNetworkError(page: Page) {
+  await page.route('**/api/automation/run', (route) => route.abort());
+}

@@ -8,7 +8,7 @@ export const discoveryOutputSchema = z.object({
   threads: z.array(
     z.object({
       id: z.string(),
-      subreddit: z.string(),
+      community: z.string(),
       title: z.string(),
       url: z.string(),
       relevanceScore: z.number().optional(),
@@ -54,13 +54,13 @@ export const draftReviewOutputSchema = z.object({
  */
 export const runSummaryOutputSchema = z.object({
   title: z.string(),
-  subredditsScanned: z.array(z.string()),
+  communitiesScanned: z.array(z.string()),
   threadsFound: z.number(),
   newThreads: z.number(),
   draftsCreated: z.number(),
-  topPerformingSubreddits: z.array(
+  topPerformingCommunities: z.array(
     z.object({
-      subreddit: z.string(),
+      community: z.string(),
       threadCount: z.number(),
       avgRelevance: z.number(),
     }),
@@ -91,10 +91,10 @@ export const communityDiscoveryOutputSchema = z.object({
 
 /**
  * Output schema for the community intelligence agent.
- * Per-subreddit rules, hot topics, and engagement recommendation.
+ * Per-community rules, hot topics, and engagement recommendation.
  */
 export const communityIntelOutputSchema = z.object({
-  subreddit: z.string(),
+  community: z.string(),
   rules: z.object({
     allowed: z.array(z.string()),
     banned: z.array(z.string()),
@@ -102,7 +102,7 @@ export const communityIntelOutputSchema = z.object({
   }),
   hotTopics: z.array(z.string()),
   bestPostFormat: z.string(),
-  recommendedApproach: z.enum(['reply', 'original_post', 'both']),
+  recommendedApproach: z.enum(['reply', 'original_post', 'both', 'not_recommended']),
 });
 
 /**

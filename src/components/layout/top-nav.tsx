@@ -25,14 +25,24 @@ export function TopNav() {
           Dashboard
         </Link>
         <Link
-          href="/agents"
+          href="/product"
           className={`px-3 py-2 text-[13px] font-medium rounded-[var(--radius-sf-md)] transition-colors ${
-            pathname.startsWith('/agents')
+            pathname.startsWith('/product')
               ? 'bg-sf-bg-secondary text-sf-text-primary'
               : 'text-sf-text-secondary'
           }`}
         >
-          Agents
+          My Product
+        </Link>
+        <Link
+          href="/automation"
+          className={`px-3 py-2 text-[13px] font-medium rounded-[var(--radius-sf-md)] transition-colors ${
+            pathname.startsWith('/automation')
+              ? 'bg-sf-bg-secondary text-sf-text-primary'
+              : 'text-sf-text-secondary'
+          }`}
+        >
+          Automation
         </Link>
         <Link
           href="/settings"

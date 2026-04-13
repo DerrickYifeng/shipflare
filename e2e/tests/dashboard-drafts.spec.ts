@@ -42,7 +42,7 @@ testWithProduct.describe('Dashboard: draft review', () => {
     await expect(firstCard.getByText(/addresses the user/)).toBeVisible();
 
     // Approve first draft
-    await firstCard.getByRole('button', { name: 'Approve' }).click();
+    await firstCard.getByRole('button', { name: 'Send' }).click();
     await expect(draftCards).toHaveCount(2);
 
     // Skip second draft
@@ -52,7 +52,7 @@ testWithProduct.describe('Dashboard: draft review', () => {
 
     // Approve third draft
     const thirdCard = draftCards.first();
-    await thirdCard.getByRole('button', { name: 'Approve' }).click();
+    await thirdCard.getByRole('button', { name: 'Send' }).click();
 
     // Verify empty state
     await expect(page.getByText('No pending drafts')).toBeVisible();
