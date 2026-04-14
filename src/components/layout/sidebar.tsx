@@ -19,7 +19,7 @@ export function Sidebar() {
   return (
     <aside className="hidden lg:flex flex-col w-[200px] border-r border-sf-border bg-sf-bg-primary h-screen sticky top-0">
       <div className="px-5 py-5">
-        <Link href="/dashboard" className="text-[18px] font-semibold text-sf-text-primary tracking-tight">
+        <Link href="/dashboard" className="text-[18px] font-semibold text-sf-text-primary tracking-tight inline-flex items-center min-h-[44px]">
           ShipFlare
         </Link>
       </div>
