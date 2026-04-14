@@ -137,7 +137,7 @@ export function LandingPage({ isAuthenticated }: LandingPageProps) {
           {isAuthenticated ? (
             <a
               href="/dashboard"
-              className="text-[13px] font-medium text-sf-text-secondary hover:text-sf-text-primary transition-colors duration-150"
+              className="text-[13px] font-medium text-sf-text-secondary hover:text-sf-text-primary transition-colors duration-150 inline-flex items-center min-h-[44px] px-2"
             >
               Dashboard
             </a>
@@ -145,7 +145,7 @@ export function LandingPage({ isAuthenticated }: LandingPageProps) {
             <form action={signInWithGitHub}>
               <button
                 type="submit"
-                className="text-[13px] font-medium text-sf-text-secondary hover:text-sf-text-primary transition-colors duration-150 cursor-pointer"
+                className="text-[13px] font-medium text-sf-text-secondary hover:text-sf-text-primary transition-colors duration-150 cursor-pointer inline-flex items-center min-h-[44px] px-2"
               >
                 Sign in
               </button>
@@ -183,7 +183,7 @@ export function LandingPage({ isAuthenticated }: LandingPageProps) {
             type="submit"
             disabled={scanning || !url.trim()}
             className="
-              shrink-0 min-h-[36px] px-5 mr-1.5
+              shrink-0 min-h-[44px] px-5 mr-1.5
               bg-sf-accent text-white font-medium text-[14px]
               rounded-[var(--radius-sf-md)]
               hover:bg-sf-accent-hover
