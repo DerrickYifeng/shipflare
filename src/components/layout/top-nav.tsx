@@ -16,7 +16,7 @@ export function TopNav() {
       <nav className="flex items-center gap-1" aria-label="Mobile navigation">
         <Link
           href="/dashboard"
-          className={`px-3 py-2 text-[13px] font-medium rounded-[var(--radius-sf-md)] transition-colors ${
+          className={`px-3 min-h-[44px] inline-flex items-center text-[13px] font-medium rounded-[var(--radius-sf-md)] transition-colors ${
             pathname === '/dashboard'
               ? 'bg-sf-bg-secondary text-sf-text-primary'
               : 'text-sf-text-secondary'
@@ -26,7 +26,7 @@ export function TopNav() {
         </Link>
         <Link
           href="/product"
-          className={`px-3 py-2 text-[13px] font-medium rounded-[var(--radius-sf-md)] transition-colors ${
+          className={`px-3 min-h-[44px] inline-flex items-center text-[13px] font-medium rounded-[var(--radius-sf-md)] transition-colors ${
             pathname.startsWith('/product')
               ? 'bg-sf-bg-secondary text-sf-text-primary'
               : 'text-sf-text-secondary'
@@ -36,7 +36,7 @@ export function TopNav() {
         </Link>
         <Link
           href="/automation"
-          className={`px-3 py-2 text-[13px] font-medium rounded-[var(--radius-sf-md)] transition-colors ${
+          className={`px-3 min-h-[44px] inline-flex items-center text-[13px] font-medium rounded-[var(--radius-sf-md)] transition-colors ${
             pathname.startsWith('/automation')
               ? 'bg-sf-bg-secondary text-sf-text-primary'
               : 'text-sf-text-secondary'
@@ -46,7 +46,7 @@ export function TopNav() {
         </Link>
         <Link
           href="/growth"
-          className={`px-3 py-2 text-[13px] font-medium rounded-[var(--radius-sf-md)] transition-colors ${
+          className={`px-3 min-h-[44px] inline-flex items-center text-[13px] font-medium rounded-[var(--radius-sf-md)] transition-colors ${
             pathname.startsWith('/growth')
               ? 'bg-sf-bg-secondary text-sf-text-primary'
               : 'text-sf-text-secondary'
@@ -56,7 +56,7 @@ export function TopNav() {
         </Link>
         <Link
           href="/calendar"
-          className={`px-3 py-2 text-[13px] font-medium rounded-[var(--radius-sf-md)] transition-colors ${
+          className={`px-3 min-h-[44px] inline-flex items-center text-[13px] font-medium rounded-[var(--radius-sf-md)] transition-colors ${
             pathname.startsWith('/calendar')
               ? 'bg-sf-bg-secondary text-sf-text-primary'
               : 'text-sf-text-secondary'
@@ -66,7 +66,7 @@ export function TopNav() {
         </Link>
         <Link
           href="/settings"
-          className={`px-3 py-2 text-[13px] font-medium rounded-[var(--radius-sf-md)] transition-colors ${
+          className={`px-3 min-h-[44px] inline-flex items-center text-[13px] font-medium rounded-[var(--radius-sf-md)] transition-colors ${
             pathname.startsWith('/settings')
               ? 'bg-sf-bg-secondary text-sf-text-primary'
               : 'text-sf-text-secondary'
@@ -77,7 +77,7 @@ export function TopNav() {
         <form action={signOutAction}>
           <button
             type="submit"
-            className="px-3 py-2 text-[13px] font-medium rounded-[var(--radius-sf-md)] text-sf-text-secondary hover:bg-sf-bg-secondary hover:text-sf-text-primary transition-colors"
+            className="px-3 min-h-[44px] inline-flex items-center text-[13px] font-medium rounded-[var(--radius-sf-md)] text-sf-text-secondary hover:bg-sf-bg-secondary hover:text-sf-text-primary transition-colors"
           >
             Sign out
           </button>

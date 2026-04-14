@@ -33,7 +33,7 @@ export function Sidebar() {
                 <Link
                   href={item.href}
                   className={`
-                    flex items-center gap-3 px-3 py-2.5 rounded-[var(--radius-sf-md)]
+                    flex items-center gap-3 px-3 min-h-[44px] rounded-[var(--radius-sf-md)]
                     text-[13px] font-medium transition-colors duration-150
                     ${isActive
                       ? 'bg-sf-bg-secondary text-sf-text-primary'
@@ -54,7 +54,7 @@ export function Sidebar() {
         <form action={signOutAction}>
           <button
             type="submit"
-            className="flex items-center gap-3 w-full px-3 py-2.5 rounded-[var(--radius-sf-md)] text-[13px] font-medium text-sf-text-secondary hover:bg-sf-bg-secondary hover:text-sf-text-primary transition-colors duration-150"
+            className="flex items-center gap-3 w-full px-3 min-h-[44px] rounded-[var(--radius-sf-md)] text-[13px] font-medium text-sf-text-secondary hover:bg-sf-bg-secondary hover:text-sf-text-primary transition-colors duration-150"
           >
             <LogOutIcon />
             Sign out
