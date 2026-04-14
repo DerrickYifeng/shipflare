@@ -5,7 +5,9 @@ import {
   xContentCalendar,
   xFollowerSnapshots,
   xTweetMetrics,
+  xAnalyticsSummary,
   products,
+  userPreferences,
 } from '@/lib/db/schema';
 import { eq, desc } from 'drizzle-orm';
 import { loadSkill } from '@/core/skill-loader';
@@ -81,6 +83,21 @@ export async function POST(request: Request) {
     .orderBy(desc(xTweetMetrics.bookmarks))
     .limit(10);
 
+  // Get latest analytics summary (computed daily by analytics worker)
+  const [analyticsSummary] = await db
+    .select()
+    .from(xAnalyticsSummary)
+    .where(eq(xAnalyticsSummary.userId, session.user.id))
+    .orderBy(desc(xAnalyticsSummary.computedAt))
+    .limit(1);
+
+  // Get user preferences for posting hours and content mix
+  const [prefs] = await db
+    .select()
+    .from(userPreferences)
+    .where(eq(userPreferences.userId, session.user.id))
+    .limit(1);
+
   // Build memory context
   const memoryStore = new MemoryStore(product.id);
   const memoryPrompt = await buildMemoryPrompt(memoryStore);
@@ -91,6 +108,9 @@ export async function POST(request: Request) {
 
   // Run planner skill
   log.info(`Running calendar planner for channel=${channel}, followerCount=${latestSnapshot?.followerCount ?? 0}`);
+
+  // Use configured posting hours, falling back to defaults
+  const postingHours = (prefs?.postingHoursUtc as number[]) ?? [14, 17, 21];
 
   const result = await runSkill<CalendarPlanOutput>({
     skill: plannerSkill,
@@ -103,6 +123,25 @@ export async function POST(request: Request) {
       followerCount: latestSnapshot?.followerCount ?? 0,
       topPerformingContent: recentMetrics,
       startDate: startDate.toISOString(),
+      postingHours,
+      contentMix: prefs
+        ? {
+            metric: prefs.contentMixMetric,
+            educational: prefs.contentMixEducational,
+            engagement: prefs.contentMixEngagement,
+            product: prefs.contentMixProduct,
+          }
+        : undefined,
+      ...(analyticsSummary
+        ? {
+            analyticsInsights: {
+              bestContentTypes: analyticsSummary.bestContentTypes,
+              bestPostingHours: analyticsSummary.bestPostingHours,
+              audienceGrowthRate: analyticsSummary.audienceGrowthRate,
+              engagementRate: analyticsSummary.engagementRate,
+            },
+          }
+        : {}),
     },
     deps: {},
     memoryPrompt: memoryPrompt || undefined,

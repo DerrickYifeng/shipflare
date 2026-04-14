@@ -1,4 +1,4 @@
-export { users, accounts, sessions, verificationTokens } from './users';
+export { users, accounts, sessions, verificationTokens, userPreferences } from './users';
 export { products } from './products';
 export { channels, threads } from './channels';
 export {
@@ -17,4 +17,5 @@ export {
   xContentCalendar,
   xTweetMetrics,
   xFollowerSnapshots,
+  xAnalyticsSummary,
 } from './x-growth';

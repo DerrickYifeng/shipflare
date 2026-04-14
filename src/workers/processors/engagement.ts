@@ -4,6 +4,7 @@ import {
   products,
   channels,
   drafts,
+  posts,
   threads,
   activityEvents,
 } from '@/lib/db/schema';
@@ -18,6 +19,8 @@ import { publishEvent } from '@/lib/redis';
 import { join } from 'path';
 import type { XEngagementJobData } from '@/lib/queue/types';
 import { createLogger } from '@/lib/logger';
+
+const MAX_ENGAGEMENT_DEPTH = 2;
 
 const log = createLogger('worker:x-engagement');
 
@@ -87,6 +90,32 @@ export async function processXEngagement(job: Job<XEngagementJobData>) {
       `Found ${result.mentions.length} mentions, ${actionableMentions.length} actionable, cost $${usage.costUsd.toFixed(4)}`,
     );
 
+    // Look up the original posted draft to inherit engagement depth
+    let parentDepth = 0;
+    const [parentPost] = await db
+      .select({ draftId: posts.draftId })
+      .from(posts)
+      .where(eq(posts.externalId, tweetId))
+      .limit(1);
+
+    if (parentPost) {
+      const [parentDraft] = await db
+        .select({ engagementDepth: drafts.engagementDepth })
+        .from(drafts)
+        .where(eq(drafts.id, parentPost.draftId))
+        .limit(1);
+      parentDepth = parentDraft?.engagementDepth ?? 0;
+    }
+
+    const childDepth = parentDepth + 1;
+
+    if (childDepth > MAX_ENGAGEMENT_DEPTH) {
+      log.info(
+        `Skipping engagement draft creation for tweet ${tweetId}: depth ${childDepth} exceeds max ${MAX_ENGAGEMENT_DEPTH}`,
+      );
+      return;
+    }
+
     // Create drafts for actionable mentions
     let draftsCreated = 0;
     for (const mention of actionableMentions) {
@@ -123,6 +152,7 @@ export async function processXEngagement(job: Job<XEngagementJobData>) {
                 ? 0.7
                 : 0.5,
           whyItWorks: `${mention.priority} priority engagement reply to @${mention.authorUsername}`,
+          engagementDepth: childDepth,
         })
         .returning();
 

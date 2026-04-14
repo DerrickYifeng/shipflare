@@ -6,6 +6,7 @@ import { eq, and } from 'drizzle-orm';
 import { HeaderBar } from '@/components/layout/header-bar';
 import { ProfileSection } from '@/components/settings/profile-section';
 import { ConnectionsSection } from '@/components/settings/connections-section';
+import { AutomationSection } from '@/components/settings/automation-section';
 import { DangerZone } from '@/components/settings/danger-zone';
 
 export default async function SettingsPage() {
@@ -31,6 +32,7 @@ export default async function SettingsPage() {
           xConnected={!!xChannel}
           xUsername={xChannel?.username ?? null}
         />
+        <AutomationSection />
         <DangerZone />
       </div>
     </>

@@ -13,6 +13,7 @@ import type {
   XContentCalendarJobData,
   XEngagementJobData,
   XMetricsJobData,
+  XAnalyticsJobData,
 } from './types';
 
 const log = createLogger('lib:queue');
@@ -36,6 +37,7 @@ export const xMonitorQueue = new Queue<XMonitorJobData>('x-monitor', connection)
 export const xContentCalendarQueue = new Queue<XContentCalendarJobData>('x-content-calendar', connection);
 export const xEngagementQueue = new Queue<XEngagementJobData>('x-engagement', connection);
 export const xMetricsQueue = new Queue<XMetricsJobData>('x-metrics', connection);
+export const xAnalyticsQueue = new Queue<XAnalyticsJobData>('x-analytics', connection);
 
 /**
  * Enqueue a discovery scan for a user's product across sources (subreddits or topics).
@@ -181,5 +183,16 @@ export async function enqueueXMetrics(data: XMetricsJobData): Promise<void> {
   await xMetricsQueue.add('collect', data, {
     attempts: 3,
     backoff: { type: 'exponential', delay: 2000 },
+  });
+}
+
+/**
+ * Enqueue X analytics computation: aggregate metrics into insights.
+ */
+export async function enqueueXAnalytics(data: XAnalyticsJobData): Promise<void> {
+  log.debug(`Enqueued x-analytics for user ${data.userId}`);
+  await xAnalyticsQueue.add('compute', data, {
+    attempts: 2,
+    backoff: { type: 'exponential', delay: 3000 },
   });
 }

@@ -13,6 +13,7 @@ export interface CalendarItem {
   status: string;
   topic: string | null;
   draftId: string | null;
+  draftPreview: string | null;
   postedExternalId: string | null;
   createdAt: string;
 }

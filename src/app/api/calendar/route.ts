@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { xContentCalendar, products } from '@/lib/db/schema';
+import { xContentCalendar, drafts, products } from '@/lib/db/schema';
 import { eq, and, gte, desc } from 'drizzle-orm';
 import { createLogger } from '@/lib/logger';
 
@@ -33,14 +33,34 @@ export async function GET(request: Request) {
     conditions.push(eq(xContentCalendar.channel, channel));
   }
 
-  const items = await db
-    .select()
+  const rows = await db
+    .select({
+      id: xContentCalendar.id,
+      userId: xContentCalendar.userId,
+      productId: xContentCalendar.productId,
+      channel: xContentCalendar.channel,
+      scheduledAt: xContentCalendar.scheduledAt,
+      contentType: xContentCalendar.contentType,
+      status: xContentCalendar.status,
+      topic: xContentCalendar.topic,
+      draftId: xContentCalendar.draftId,
+      postedExternalId: xContentCalendar.postedExternalId,
+      createdAt: xContentCalendar.createdAt,
+      updatedAt: xContentCalendar.updatedAt,
+      draftPreview: drafts.replyBody,
+    })
     .from(xContentCalendar)
+    .leftJoin(drafts, eq(xContentCalendar.draftId, drafts.id))
     .where(and(...conditions))
     .orderBy(desc(xContentCalendar.scheduledAt))
     .limit(100);
 
-  return NextResponse.json({ items });
+  return NextResponse.json({
+    items: rows.map((r) => ({
+      ...r,
+      draftPreview: r.draftPreview ?? null,
+    })),
+  });
 }
 
 /**

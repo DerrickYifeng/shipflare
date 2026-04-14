@@ -1,12 +1,12 @@
 import type { Job } from 'bullmq';
 import { db } from '@/lib/db';
-import { drafts, threads, products } from '@/lib/db/schema';
-import { eq } from 'drizzle-orm';
+import { drafts, threads, products, channels, userPreferences } from '@/lib/db/schema';
+import { eq, and, gte, sql } from 'drizzle-orm';
 import { loadSkill } from '@/core/skill-loader';
 import { runSkill } from '@/core/skill-runner';
 import { draftReviewOutputSchema } from '@/agents/schemas';
 import { publishEvent } from '@/lib/redis';
-import { enqueueDream } from '@/lib/queue';
+import { enqueueDream, enqueuePosting } from '@/lib/queue';
 import { join } from 'path';
 import type { ReviewJobData } from '@/lib/queue/types';
 import { createLogger } from '@/lib/logger';
@@ -98,17 +98,91 @@ export async function processReview(job: Job<ReviewJobData>) {
     } else if (result.verdict === 'REVISE') {
       updateData.status = 'needs_revision';
     }
-    // PASS: keep status as 'pending' (ready for user approval)
+    // PASS: check auto-approve, otherwise keep as 'pending'
+
+    let autoApproved = false;
+
+    if (result.verdict === 'PASS') {
+      const [prefs] = await db
+        .select()
+        .from(userPreferences)
+        .where(eq(userPreferences.userId, userId))
+        .limit(1);
+
+      if (prefs?.autoApproveEnabled) {
+        const draftType = draft.draftType ?? 'reply';
+        const allowedTypes = (prefs.autoApproveTypes as string[]) ?? ['reply'];
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        // Count today's auto-approved drafts (approved drafts with no user interaction = auto)
+        const [{ count: todayCount }] = await db
+          .select({ count: sql<number>`count(*)::int` })
+          .from(drafts)
+          .where(
+            and(
+              eq(drafts.userId, userId),
+              eq(drafts.status, 'approved'),
+              gte(drafts.updatedAt, today),
+            ),
+          );
+
+        if (
+          result.score >= prefs.autoApproveThreshold &&
+          allowedTypes.includes(draftType) &&
+          todayCount < prefs.maxAutoApprovalsPerDay
+        ) {
+          // Find the right channel for posting
+          const [channel] = await db
+            .select()
+            .from(channels)
+            .where(
+              and(
+                eq(channels.userId, userId),
+                eq(channels.platform, thread.platform ?? 'reddit'),
+              ),
+            )
+            .limit(1);
+
+          if (channel) {
+            updateData.status = 'approved';
+            autoApproved = true;
+            log.info(
+              `Auto-approving draft ${draftId}: score=${result.score.toFixed(2)} >= threshold=${prefs.autoApproveThreshold}, type=${draftType}`,
+            );
+          }
+        }
+      }
+    }
 
     await db.update(drafts).set(updateData).where(eq(drafts.id, draftId));
 
+    // Enqueue posting for auto-approved drafts (after DB update)
+    if (autoApproved) {
+      const [channel] = await db
+        .select()
+        .from(channels)
+        .where(
+          and(
+            eq(channels.userId, userId),
+            eq(channels.platform, thread.platform ?? 'reddit'),
+          ),
+        )
+        .limit(1);
+
+      if (channel) {
+        await enqueuePosting({ userId, draftId, channelId: channel.id });
+      }
+    }
+
     // Publish SSE event
     await publishEvent(`shipflare:events:${userId}`, {
-      type: 'draft_reviewed',
+      type: autoApproved ? 'draft_auto_approved' : 'draft_reviewed',
       draftId,
       verdict: result.verdict,
       score: result.score,
       community: thread.community,
+      ...(autoApproved ? { autoApproved: true } : {}),
     });
 
     // Log insight

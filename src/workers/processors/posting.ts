@@ -16,6 +16,7 @@ import { z } from 'zod';
 import type { PostingJobData } from '@/lib/queue/types';
 import { createLogger } from '@/lib/logger';
 
+const MAX_ENGAGEMENT_DEPTH = 2;
 const log = createLogger('worker:posting');
 
 const postingOutputSchema = z.object({
@@ -158,20 +159,26 @@ export async function processPosting(job: Job<PostingJobData>) {
 
     // X-specific post-publish actions
     if (isX && externalId) {
-      // Schedule engagement monitoring at +15, +30, +60 minutes
-      const productId = draft.threadId; // Will be resolved by worker
-      for (const delayMin of [15, 30, 60]) {
-        await enqueueXEngagement(
-          {
-            userId,
-            tweetId: externalId,
-            originalText: draft.replyBody,
-            productId: '',
-          },
-          delayMin * 60 * 1000,
+      // Skip engagement monitoring for deep engagement replies
+      if (draft.engagementDepth >= MAX_ENGAGEMENT_DEPTH) {
+        log.info(
+          `Skipping engagement monitoring for tweet ${externalId}: depth ${draft.engagementDepth} >= max ${MAX_ENGAGEMENT_DEPTH}`,
         );
+      } else {
+        // Schedule engagement monitoring at +15, +30, +60 minutes
+        for (const delayMin of [15, 30, 60]) {
+          await enqueueXEngagement(
+            {
+              userId,
+              tweetId: externalId,
+              originalText: draft.replyBody,
+              productId: '',
+            },
+            delayMin * 60 * 1000,
+          );
+        }
+        log.info(`Scheduled engagement monitoring for tweet ${externalId}`);
       }
-      log.info(`Scheduled engagement monitoring for tweet ${externalId}`);
     }
   } else {
     // Post failed

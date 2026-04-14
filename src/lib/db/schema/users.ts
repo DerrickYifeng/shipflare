@@ -3,7 +3,11 @@ import {
   text,
   timestamp,
   integer,
+  real,
+  boolean,
+  jsonb,
   primaryKey,
+  unique,
 } from 'drizzle-orm/pg-core';
 import type { AdapterAccountType } from 'next-auth/adapters';
 
@@ -63,4 +67,42 @@ export const verificationTokens = pgTable(
     expires: timestamp('expires', { mode: 'date' }).notNull(),
   },
   (vt) => [primaryKey({ columns: [vt.identifier, vt.token] })],
+);
+
+/**
+ * User automation preferences.
+ * Controls auto-approve thresholds, posting schedule, content mix, and notifications.
+ */
+export const userPreferences = pgTable(
+  'user_preferences',
+  {
+    id: text('id')
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    autoApproveEnabled: boolean('auto_approve_enabled').notNull().default(false),
+    autoApproveThreshold: real('auto_approve_threshold').notNull().default(0.85),
+    autoApproveTypes: jsonb('auto_approve_types')
+      .notNull()
+      .$type<string[]>()
+      .default(['reply']),
+    maxAutoApprovalsPerDay: integer('max_auto_approvals_per_day')
+      .notNull()
+      .default(10),
+    postingHoursUtc: jsonb('posting_hours_utc')
+      .notNull()
+      .$type<number[]>()
+      .default([14, 17, 21]),
+    contentMixMetric: integer('content_mix_metric').notNull().default(40),
+    contentMixEducational: integer('content_mix_educational').notNull().default(30),
+    contentMixEngagement: integer('content_mix_engagement').notNull().default(20),
+    contentMixProduct: integer('content_mix_product').notNull().default(10),
+    notifyOnNewDraft: boolean('notify_on_new_draft').notNull().default(true),
+    notifyOnAutoApprove: boolean('notify_on_auto_approve').notNull().default(true),
+    createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
+  },
+  (table) => [unique('user_preferences_user_id').on(table.userId)],
 );

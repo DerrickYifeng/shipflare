@@ -13,6 +13,9 @@ interface DraftReview {
   suggestions?: string[];
 }
 
+export type DraftSource = 'monitor' | 'calendar' | 'engagement' | 'discovery';
+export type DraftUrgency = 'critical' | 'high' | 'normal';
+
 export interface Draft {
   id: string;
   threadId: string;
@@ -23,6 +26,10 @@ export interface Draft {
   whyItWorks: string;
   ftcDisclosure: string;
   status: string;
+  source: DraftSource;
+  urgency: DraftUrgency;
+  platform: string;
+  replyDeadline: string | null;
   review: DraftReview | null;
   createdAt: string;
   thread: {

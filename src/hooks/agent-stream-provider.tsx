@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { AgentState } from './use-agent-stream';
+import { useToast } from '@/components/ui/toast';
 
 type AgentMap = Record<string, AgentState>;
 
@@ -31,7 +32,8 @@ type SSEEvent =
   | { type: 'agent_progress'; agentName: AgentName; progress: number; currentTask?: string }
   | { type: 'agent_complete'; agentName: AgentName; platform?: string; stats?: Record<string, number | string>; cost?: number; duration?: number }
   | { type: 'tool_call'; agentName: AgentName; toolName: string; args?: string }
-  | { type: 'draft_reviewed'; agentName: AgentName; stats?: Record<string, number | string> }
+  | { type: 'draft_reviewed'; agentName: AgentName; draftId?: string; verdict?: string; score?: number; community?: string; stats?: Record<string, number | string> }
+  | { type: 'draft_auto_approved'; draftId?: string; verdict?: string; score?: number; community?: string }
   | { type: 'connected' }
   | { type: 'heartbeat' };
 
@@ -136,10 +138,13 @@ function applyEvent(agents: AgentMap, event: SSEEvent): AgentMap {
 export function AgentStreamProvider({ children }: { children: ReactNode }) {
   const [agents, setAgents] = useState<AgentMap>({});
   const [isConnected, setIsConnected] = useState(false);
+  const { toast } = useToast();
 
   const eventSourceRef = useRef<EventSource | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
+  const toastRef = useRef(toast);
+  toastRef.current = toast;
 
   const connect = useCallback(() => {
     if (!mountedRef.current) return;
@@ -169,6 +174,23 @@ export function AgentStreamProvider({ children }: { children: ReactNode }) {
 
       if (event.type === 'heartbeat') {
         return;
+      }
+
+      // Draft notification toasts
+      if (event.type === 'draft_auto_approved') {
+        toastRef.current(
+          `Draft auto-approved for ${event.community ?? 'thread'} (score: ${event.score ?? '?'})`,
+          'info',
+        );
+        return;
+      }
+
+      if (event.type === 'draft_reviewed' && event.verdict) {
+        const variant = event.verdict === 'PASS' ? 'success' : event.verdict === 'FAIL' ? 'error' : 'warning';
+        toastRef.current(
+          `Draft reviewed: ${event.verdict} for ${event.community ?? 'thread'}`,
+          variant,
+        );
       }
 
       setAgents((prev) => applyEvent(prev, event));

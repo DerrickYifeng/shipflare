@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { useCalendar } from '@/hooks/use-calendar';
+import { useCalendar, type CalendarItem } from '@/hooks/use-calendar';
+import { useAnalyticsSummary } from '@/hooks/use-analytics-summary';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -31,6 +32,7 @@ const statusVariant: Record<string, 'default' | 'success' | 'warning' | 'accent'
 export function UnifiedCalendar() {
   const [activeChannel, setActiveChannel] = useState('all');
   const { items, isLoading, generateWeek, cancelItem } = useCalendar('14d', activeChannel);
+  const { summary } = useAnalyticsSummary();
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -107,6 +109,64 @@ export function UnifiedCalendar() {
         ))}
       </div>
 
+      {/* Analytics insights panel */}
+      {summary && (
+        <div className="border border-sf-border rounded-[var(--radius-sf-lg)] p-4 mb-6 bg-sf-bg-primary">
+          <h4 className="text-[12px] font-medium text-sf-text-tertiary uppercase tracking-wider mb-3">
+            Performance Insights (30d)
+          </h4>
+          <div className="grid grid-cols-3 gap-4">
+            {/* Best content types */}
+            <div>
+              <p className="text-[11px] text-sf-text-tertiary mb-1.5">Best content types</p>
+              <div className="flex flex-col gap-1">
+                {(summary.bestContentTypes as Array<{ type: string; avgBookmarks: number }>)
+                  .slice(0, 3)
+                  .map((ct) => (
+                    <div key={ct.type} className="flex items-center gap-2">
+                      <Badge variant={typeColors[ct.type] ?? 'default'}>{ct.type}</Badge>
+                      <span className="text-[11px] text-sf-text-tertiary">
+                        {ct.avgBookmarks.toFixed(1)} avg bookmarks
+                      </span>
+                    </div>
+                  ))}
+              </div>
+            </div>
+            {/* Optimal hours */}
+            <div>
+              <p className="text-[11px] text-sf-text-tertiary mb-1.5">Optimal posting hours</p>
+              <div className="flex flex-wrap gap-1">
+                {(summary.bestPostingHours as Array<{ hour: number; avgEngagement: number }>)
+                  .slice(0, 4)
+                  .map((ph) => (
+                    <span
+                      key={ph.hour}
+                      className="text-[12px] font-mono text-sf-accent bg-sf-accent/10 px-1.5 py-0.5 rounded"
+                    >
+                      {String(ph.hour).padStart(2, '0')}:00
+                    </span>
+                  ))}
+              </div>
+            </div>
+            {/* Key metrics */}
+            <div>
+              <p className="text-[11px] text-sf-text-tertiary mb-1.5">Key metrics</p>
+              <div className="flex flex-col gap-0.5 text-[12px]">
+                <span className="text-sf-text-secondary">
+                  {(summary.engagementRate * 100).toFixed(2)}% engagement rate
+                </span>
+                <span className="text-sf-text-secondary">
+                  +{summary.audienceGrowthRate.toFixed(1)}/day growth
+                </span>
+                <span className="text-sf-text-tertiary">
+                  {summary.totalImpressions.toLocaleString()} impressions
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <div>
@@ -159,39 +219,11 @@ export function UnifiedCalendar() {
               <h4 className="text-[12px] font-medium text-sf-text-secondary mb-2">{day}</h4>
               <div className="flex flex-col gap-1.5">
                 {dayItems.map((item) => (
-                  <Card key={item.id} className="flex items-center justify-between gap-3 py-3">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <ChannelIcon channel={item.channel} />
-                      <span className="text-[12px] font-mono text-sf-text-tertiary tabular-nums w-14 flex-shrink-0">
-                        {new Date(item.scheduledAt).toLocaleTimeString('en-US', {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
-                      </span>
-                      <Badge variant={typeColors[item.contentType] ?? 'default'}>
-                        {item.contentType}
-                      </Badge>
-                      {item.topic && (
-                        <span className="text-[13px] text-sf-text-secondary truncate">
-                          {item.topic}
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2 flex-shrink-0">
-                      <Badge variant={statusVariant[item.status] ?? 'default'}>
-                        {item.status}
-                      </Badge>
-                      <button
-                        onClick={() => handleCancel(item.id)}
-                        className="text-sf-text-tertiary hover:text-sf-error transition-colors p-1"
-                        title="Delete"
-                      >
-                        <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
-                          <path d="M3 3l8 8M11 3l-8 8" />
-                        </svg>
-                      </button>
-                    </div>
-                  </Card>
+                  <CalendarItemCard
+                    key={item.id}
+                    item={item}
+                    onCancel={handleCancel}
+                  />
                 ))}
               </div>
             </div>
@@ -199,6 +231,70 @@ export function UnifiedCalendar() {
         </div>
       )}
     </div>
+  );
+}
+
+function CalendarItemCard({
+  item,
+  onCancel,
+}: {
+  item: CalendarItem;
+  onCancel: (id: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <Card className="flex flex-col py-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <ChannelIcon channel={item.channel} />
+          <span className="text-[12px] font-mono text-sf-text-tertiary tabular-nums w-14 flex-shrink-0">
+            {new Date(item.scheduledAt).toLocaleTimeString('en-US', {
+              hour: '2-digit',
+              minute: '2-digit',
+            })}
+          </span>
+          <Badge variant={typeColors[item.contentType] ?? 'default'}>
+            {item.contentType}
+          </Badge>
+          {item.topic && (
+            <span className="text-[13px] text-sf-text-secondary truncate">
+              {item.topic}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {item.draftPreview && (
+            <button
+              type="button"
+              onClick={() => setExpanded((p) => !p)}
+              className="text-[11px] text-sf-accent hover:underline"
+            >
+              {expanded ? 'Hide' : 'Preview'}
+            </button>
+          )}
+          <Badge variant={statusVariant[item.status] ?? 'default'}>
+            {item.status}
+          </Badge>
+          <button
+            onClick={() => onCancel(item.id)}
+            className="text-sf-text-tertiary hover:text-sf-error transition-colors p-1"
+            title="Delete"
+          >
+            <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M3 3l8 8M11 3l-8 8" />
+            </svg>
+          </button>
+        </div>
+      </div>
+      {expanded && item.draftPreview && (
+        <div className="mt-2 pt-2 border-t border-sf-border animate-sf-fade-in">
+          <p className="text-[12px] text-sf-text-secondary leading-relaxed line-clamp-4">
+            {item.draftPreview}
+          </p>
+        </div>
+      )}
+    </Card>
   );
 }
 

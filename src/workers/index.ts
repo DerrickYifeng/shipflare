@@ -11,9 +11,10 @@ import { processXMonitor } from './processors/monitor';
 import { processXContentCalendar } from './processors/content-calendar';
 import { processXEngagement } from './processors/engagement';
 import { processXMetrics } from './processors/metrics';
-import { dreamQueue, xMonitorQueue, xContentCalendarQueue, xMetricsQueue } from '@/lib/queue';
+import { processXAnalytics } from './processors/analytics';
+import { dreamQueue, xMonitorQueue, xContentCalendarQueue, xMetricsQueue, xAnalyticsQueue } from '@/lib/queue';
 import { createLogger } from '@/lib/logger';
-import type { DiscoveryJobData, ContentJobData, ReviewJobData, PostingJobData, HealthScoreJobData, DreamJobData, CodeScanJobData, XMonitorJobData, XContentCalendarJobData, XEngagementJobData, XMetricsJobData } from '@/lib/queue/types';
+import type { DiscoveryJobData, ContentJobData, ReviewJobData, PostingJobData, HealthScoreJobData, DreamJobData, CodeScanJobData, XMonitorJobData, XContentCalendarJobData, XEngagementJobData, XMetricsJobData, XAnalyticsJobData } from '@/lib/queue/types';
 
 const log = createLogger('workers');
 
@@ -91,10 +92,17 @@ const xMetricsWorker = new Worker<XMetricsJobData>(
   { connection, concurrency: 1 },
 );
 
+const xAnalyticsWorker = new Worker<XAnalyticsJobData>(
+  'x-analytics',
+  async (job) => processXAnalytics(job),
+  { connection, concurrency: 1 },
+);
+
 const workers = [
   discoveryWorker, contentWorker, reviewWorker, postingWorker,
   healthScoreWorker, dreamWorker, codeScanWorker,
   xMonitorWorker, xContentCalendarWorker, xEngagementWorker, xMetricsWorker,
+  xAnalyticsWorker,
 ];
 
 // Log events
@@ -160,16 +168,29 @@ async function scheduleXMetrics() {
   );
 }
 
+// Schedule X analytics: daily at 5am UTC (after metrics and dream)
+async function scheduleXAnalytics() {
+  await xAnalyticsQueue.add(
+    'scheduled-compute',
+    { userId: '__all__' },
+    {
+      repeat: { pattern: '0 5 * * *' },
+      jobId: 'x-analytics-cron',
+    },
+  );
+}
+
 Promise.all([
   scheduleNightlyDream(),
   scheduleXMonitor(),
   scheduleXContentCalendar(),
   scheduleXMetrics(),
+  scheduleXAnalytics(),
 ]).catch((err) => {
   log.error('Failed to schedule cron jobs:', err.message);
 });
 
-log.info('All workers started: discovery, content, review, posting, health-score, dream, code-scan, x-monitor, x-content-calendar, x-engagement, x-metrics');
+log.info('All workers started: discovery, content, review, posting, health-score, dream, code-scan, x-monitor, x-content-calendar, x-engagement, x-metrics, x-analytics');
 
 // Graceful shutdown
 async function shutdown() {

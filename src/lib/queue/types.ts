@@ -61,6 +61,10 @@ export interface XMetricsJobData {
   userId: string;
 }
 
+export interface XAnalyticsJobData {
+  userId: string;
+}
+
 export type JobData =
   | DiscoveryJobData
   | ContentJobData
@@ -72,4 +76,5 @@ export type JobData =
   | XMonitorJobData
   | XContentCalendarJobData
   | XEngagementJobData
-  | XMetricsJobData;
+  | XMetricsJobData
+  | XAnalyticsJobData;

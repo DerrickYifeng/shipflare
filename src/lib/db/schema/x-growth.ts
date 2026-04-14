@@ -5,6 +5,7 @@ import {
   real,
   integer,
   boolean,
+  jsonb,
   unique,
   index,
 } from 'drizzle-orm/pg-core';
@@ -135,4 +136,30 @@ export const xFollowerSnapshots = pgTable('x_follower_snapshots', {
   followingCount: integer('following_count').notNull(),
   tweetCount: integer('tweet_count').notNull(),
   snapshotAt: timestamp('snapshot_at', { mode: 'date' }).defaultNow().notNull(),
+});
+
+/**
+ * Daily analytics summary computed from tweet metrics and follower snapshots.
+ * Used by calendar planner to optimize content strategy.
+ */
+export const xAnalyticsSummary = pgTable('x_analytics_summary', {
+  id: text('id')
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  periodStart: timestamp('period_start', { mode: 'date' }).notNull(),
+  periodEnd: timestamp('period_end', { mode: 'date' }).notNull(),
+  bestContentTypes: jsonb('best_content_types')
+    .notNull()
+    .$type<Array<{ type: string; avgBookmarks: number; avgImpressions: number; count: number }>>(),
+  bestPostingHours: jsonb('best_posting_hours')
+    .notNull()
+    .$type<Array<{ hour: number; avgEngagement: number }>>(),
+  audienceGrowthRate: real('audience_growth_rate').notNull().default(0),
+  engagementRate: real('engagement_rate').notNull().default(0),
+  totalImpressions: integer('total_impressions').notNull().default(0),
+  totalBookmarks: integer('total_bookmarks').notNull().default(0),
+  computedAt: timestamp('computed_at', { mode: 'date' }).defaultNow().notNull(),
 });

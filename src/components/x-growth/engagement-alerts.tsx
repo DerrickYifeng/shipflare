@@ -72,9 +72,17 @@ export function EngagementAlerts() {
       {/* Engagement draft replies */}
       {engagementDrafts.length > 0 ? (
         <div>
-          <h4 className="text-[12px] font-medium text-sf-text-tertiary uppercase tracking-wider mb-2">
-            Draft Replies ({engagementDrafts.length})
-          </h4>
+          <div className="flex items-center justify-between mb-2">
+            <h4 className="text-[12px] font-medium text-sf-text-tertiary uppercase tracking-wider">
+              Draft Replies ({engagementDrafts.length})
+            </h4>
+            <a
+              href="/dashboard"
+              className="text-[12px] text-sf-accent hover:underline"
+            >
+              View all in Queue
+            </a>
+          </div>
           <div className="flex flex-col gap-2">
             {engagementDrafts.map((draft) => (
               <Card key={draft.id} className="flex flex-col gap-3">

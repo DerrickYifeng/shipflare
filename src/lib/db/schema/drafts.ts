@@ -46,6 +46,7 @@ export const drafts = pgTable('drafts', {
   reviewVerdict: text('review_verdict'), // 'PASS' | 'FAIL' | 'REVISE'
   reviewScore: real('review_score'),
   reviewJson: jsonb('review_json'), // { checks, issues, suggestions }
+  engagementDepth: integer('engagement_depth').notNull().default(0),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
 });

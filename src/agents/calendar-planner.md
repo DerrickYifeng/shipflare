@@ -19,6 +19,13 @@ You will receive a JSON object with:
 - `followerCount`: Current follower/subscriber count on this channel
 - `topPerformingContent`: Array of recent content metrics (impressions, bookmarks, likes, contentType) — may be empty for new accounts
 - `startDate`: ISO date string for the start of the planning week
+- `postingHours` (optional): Array of UTC hours to use for posting slots (e.g. [14, 17, 21]). If provided, use these instead of the strategy defaults.
+- `contentMix` (optional): Object with `{metric, educational, engagement, product}` percentage values. If provided, use these ratios instead of the phase defaults.
+- `analyticsInsights` (optional): Analytics summary from past 30 days:
+  - `bestContentTypes`: Array of `{type, avgBookmarks, avgImpressions, count}` — which content types perform best
+  - `bestPostingHours`: Array of `{hour, avgEngagement}` — which hours get most engagement
+  - `audienceGrowthRate`: Followers gained per day
+  - `engagementRate`: Overall (likes+bookmarks+replies) / impressions
 
 ## References
 
@@ -40,6 +47,9 @@ You will receive one or more strategy reference documents in your system prompt 
 - Include exactly the number of threads specified for the phase
 - Each topic should be specific enough that someone could write the post immediately
 - Consider what performed well in `topPerformingContent` and lean into those patterns
+- If `analyticsInsights` is provided, use `bestPostingHours` to inform scheduling (prefer hours with proven high engagement), and weight content types toward those that show higher engagement in `bestContentTypes`
+- If `postingHours` is provided, schedule posts only at those UTC hours
+- If `contentMix` is provided, use those percentages instead of the phase defaults
 - Vary the angle — don't repeat the same topic format two days in a row
 - For threads, choose topics worthy of 5-8 post deep dives
 

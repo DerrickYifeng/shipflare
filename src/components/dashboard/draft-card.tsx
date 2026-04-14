@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Toggle } from '@/components/ui/toggle';
+import { TimeLeft } from '@/components/ui/time-left';
 import type { Draft } from '@/hooks/use-drafts';
 
 interface DraftCardProps {
@@ -19,6 +20,19 @@ const verdictConfig = {
   FAIL: { color: 'text-sf-error', bg: 'bg-sf-error', label: 'FAIL' },
 } as const;
 
+const sourceLabel: Record<string, string> = {
+  monitor: 'Monitor',
+  calendar: 'Calendar',
+  engagement: 'Engagement',
+  discovery: 'Discovery',
+};
+
+const urgencyBorder: Record<string, string> = {
+  critical: 'border-sf-error',
+  high: 'border-sf-warning',
+  normal: 'border-sf-border',
+};
+
 export function DraftCard({ draft, onApprove, onSkip, onRetry }: DraftCardProps) {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const verdict = draft.review?.verdict as keyof typeof verdictConfig | undefined;
@@ -26,11 +40,19 @@ export function DraftCard({ draft, onApprove, onSkip, onRetry }: DraftCardProps)
   const isNeedsRevision = draft.status === 'needs_revision';
 
   return (
-    <div className="border border-sf-border rounded-[var(--radius-sf-lg)] p-4 bg-sf-bg-primary animate-sf-fade-in">
+    <div className={`border rounded-[var(--radius-sf-lg)] p-4 bg-sf-bg-primary animate-sf-fade-in ${urgencyBorder[draft.urgency] ?? 'border-sf-border'}`}>
       {/* Header */}
       <div className="flex items-start justify-between gap-3 mb-3">
         <div className="flex items-center gap-2 min-w-0 flex-wrap">
+          {/* Platform icon */}
+          <span className="font-mono text-[11px] text-sf-text-tertiary uppercase">
+            {draft.platform === 'x' ? '𝕏' : draft.platform}
+          </span>
           <Badge variant="accent">{draft.thread.community}</Badge>
+          {/* Source badge */}
+          <Badge variant="default">
+            {sourceLabel[draft.source] ?? draft.source}
+          </Badge>
           <span className="font-mono text-[11px] text-sf-text-tertiary uppercase">
             {draft.draftType === 'original_post' ? 'new post' : 'reply'}
           </span>
@@ -38,15 +60,31 @@ export function DraftCard({ draft, onApprove, onSkip, onRetry }: DraftCardProps)
             {(draft.confidenceScore * 100).toFixed(0)}%
           </Badge>
         </div>
-        {/* Review verdict indicator */}
-        {vConfig && (
-          <div className="flex items-center gap-1.5 shrink-0">
-            <span className={`inline-block w-2 h-2 rounded-full ${vConfig.bg}`} />
-            <span className={`font-mono text-[11px] ${vConfig.color}`}>
-              {vConfig.label}
-            </span>
-          </div>
-        )}
+        <div className="flex items-center gap-2 shrink-0">
+          {/* Countdown for monitor-sourced drafts */}
+          {draft.replyDeadline && (
+            <TimeLeft deadline={draft.replyDeadline} />
+          )}
+          {/* Urgency dot */}
+          {draft.urgency !== 'normal' && (
+            <span
+              className={`inline-block w-2 h-2 rounded-full ${
+                draft.urgency === 'critical'
+                  ? 'bg-sf-error animate-pulse'
+                  : 'bg-sf-warning'
+              }`}
+            />
+          )}
+          {/* Review verdict indicator */}
+          {vConfig && (
+            <div className="flex items-center gap-1.5">
+              <span className={`inline-block w-2 h-2 rounded-full ${vConfig.bg}`} />
+              <span className={`font-mono text-[11px] ${vConfig.color}`}>
+                {vConfig.label}
+              </span>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Post title for original_post */}

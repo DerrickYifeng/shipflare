@@ -1,11 +1,13 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 import { useMonitoredTweets } from '@/hooks/use-monitored-tweets';
+import { useDrafts } from '@/hooks/use-drafts';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
+import { TimeLeft } from '@/components/ui/time-left';
 
 const statusVariant: Record<string, 'default' | 'success' | 'warning' | 'error' | 'accent'> = {
   pending: 'accent',
@@ -15,45 +17,9 @@ const statusVariant: Record<string, 'default' | 'success' | 'warning' | 'error' 
   expired: 'error',
 };
 
-function TimeLeft({ deadline }: { deadline: string }) {
-  const [timeLeft, setTimeLeft] = useState('');
-
-  useEffect(() => {
-    function update() {
-      const ms = new Date(deadline).getTime() - Date.now();
-      if (ms <= 0) {
-        setTimeLeft('Expired');
-        return;
-      }
-      const mins = Math.floor(ms / 60_000);
-      const secs = Math.floor((ms % 60_000) / 1000);
-      setTimeLeft(`${mins}m ${secs}s`);
-    }
-
-    update();
-    const interval = setInterval(update, 1000);
-    return () => clearInterval(interval);
-  }, [deadline]);
-
-  const isUrgent = new Date(deadline).getTime() - Date.now() < 5 * 60_000;
-
-  return (
-    <span
-      className={`text-[12px] font-mono tabular-nums ${
-        timeLeft === 'Expired'
-          ? 'text-sf-error'
-          : isUrgent
-            ? 'text-sf-warning'
-            : 'text-sf-text-tertiary'
-      }`}
-    >
-      {timeLeft}
-    </span>
-  );
-}
-
 export function ReplyQueue() {
   const { tweets, isLoading, triggerScan } = useMonitoredTweets();
+  const { drafts, approve, skip } = useDrafts();
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -125,9 +91,21 @@ export function ReplyQueue() {
         <>
           {pendingTweets.length > 0 && (
             <div className="flex flex-col gap-2">
-              {pendingTweets.map((tweet) => (
-                <TweetCard key={tweet.id} tweet={tweet} />
-              ))}
+              {pendingTweets.map((tweet) => {
+                // Find matching draft for this tweet (monitor-sourced, pending)
+                const matchedDraft = tweet.status === 'draft_created'
+                  ? drafts.find((d) => d.source === 'monitor' && d.thread.url?.includes(tweet.tweetId))
+                  : undefined;
+                return (
+                  <TweetCard
+                    key={tweet.id}
+                    tweet={tweet}
+                    draft={matchedDraft}
+                    onApproveDraft={approve}
+                    onSkipDraft={skip}
+                  />
+                );
+              })}
             </div>
           )}
 
@@ -149,7 +127,14 @@ export function ReplyQueue() {
   );
 }
 
-function TweetCard({ tweet }: { tweet: ReturnType<typeof useMonitoredTweets>['tweets'][number] }) {
+interface TweetCardProps {
+  tweet: ReturnType<typeof useMonitoredTweets>['tweets'][number];
+  draft?: ReturnType<typeof useDrafts>['drafts'][number];
+  onApproveDraft?: (id: string) => void;
+  onSkipDraft?: (id: string) => void;
+}
+
+function TweetCard({ tweet, draft, onApproveDraft, onSkipDraft }: TweetCardProps) {
   return (
     <Card className="flex flex-col gap-2">
       <div className="flex items-start justify-between gap-3">
@@ -161,7 +146,7 @@ function TweetCard({ tweet }: { tweet: ReturnType<typeof useMonitoredTweets>['tw
             <Badge variant={statusVariant[tweet.status] ?? 'default'}>
               {tweet.status.replace('_', ' ')}
             </Badge>
-            {tweet.status === 'pending' && (
+            {(tweet.status === 'pending' || tweet.status === 'draft_created') && (
               <TimeLeft deadline={tweet.replyDeadline} />
             )}
           </div>
@@ -170,6 +155,33 @@ function TweetCard({ tweet }: { tweet: ReturnType<typeof useMonitoredTweets>['tw
           </p>
         </div>
       </div>
+
+      {/* Inline draft preview + actions for draft_created tweets */}
+      {draft && (
+        <div className="mt-1 border-t border-sf-border pt-2">
+          <p className="text-[12px] text-sf-text-tertiary mb-1">Draft reply:</p>
+          <p className="text-[13px] text-sf-text-primary leading-relaxed line-clamp-3 mb-2">
+            {draft.replyBody}
+          </p>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="primary"
+              onClick={() => onApproveDraft?.(draft.id)}
+              className="text-[12px] py-1 px-3"
+            >
+              Approve
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => onSkipDraft?.(draft.id)}
+              className="text-[12px] py-1 px-3"
+            >
+              Skip
+            </Button>
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center gap-3 text-[11px] text-sf-text-tertiary">
         <span>via @{tweet.targetUsername}</span>
         <span>{new Date(tweet.postedAt).toLocaleString()}</span>

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, createContext, useContext, type ReactNode } from 'react';
 
-type ToastVariant = 'success' | 'error' | 'warning';
+type ToastVariant = 'success' | 'error' | 'warning' | 'info';
 
 interface Toast {
   id: string;
@@ -26,6 +26,7 @@ const variantStyles: Record<ToastVariant, string> = {
   success: 'bg-sf-success text-white',
   error: 'bg-sf-error text-white',
   warning: 'bg-sf-warning text-white',
+  info: 'bg-sf-accent text-white',
 };
 
 export function ToastProvider({ children }: { children: ReactNode }) {
