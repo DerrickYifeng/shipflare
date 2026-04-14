@@ -117,9 +117,73 @@ export const contentOutputSchema = z.object({
   ftcDisclosure: z.string(),
 });
 
+/**
+ * Output schema for the reply-drafter agent.
+ * Generates a high-value reply to a target account's post.
+ */
+export const replyDrafterOutputSchema = z.object({
+  replyText: z.string(),
+  confidence: z.number(),
+  strategy: z.string(),
+  whyItWorks: z.string(),
+});
+
+/**
+ * Output schema for the content creator (content-batch skill).
+ * Generates original post or thread content for the content calendar.
+ */
+export const contentCreatorOutputSchema = z.object({
+  tweets: z.array(z.string()),
+  linkReply: z.string().optional(),
+  confidence: z.number(),
+  whyItWorks: z.string(),
+  contentType: z.string(),
+});
+
+/**
+ * Output schema for the calendar planner agent.
+ * Generates a strategic weekly content plan based on growth phase.
+ */
+export const calendarPlanOutputSchema = z.object({
+  phase: z.number(),
+  phaseDescription: z.string(),
+  weeklyStrategy: z.string(),
+  entries: z.array(
+    z.object({
+      dayOffset: z.number(),
+      hour: z.number(),
+      contentType: z.string(),
+      topic: z.string(),
+      strategicGoal: z.string(),
+      guidelines: z.array(z.string()),
+    }),
+  ),
+});
+
+/**
+ * Output schema for the engagement monitor agent.
+ * Assesses mentions and drafts responses for the engagement window.
+ */
+export const engagementMonitorOutputSchema = z.object({
+  mentions: z.array(
+    z.object({
+      mentionId: z.string(),
+      authorUsername: z.string(),
+      text: z.string(),
+      shouldReply: z.boolean(),
+      draftReply: z.string().optional(),
+      priority: z.enum(['high', 'medium', 'low']),
+    }),
+  ),
+});
+
 export type DiscoveryOutput = z.infer<typeof discoveryOutputSchema>;
 export type CommunityDiscoveryOutput = z.infer<typeof communityDiscoveryOutputSchema>;
 export type CommunityIntelOutput = z.infer<typeof communityIntelOutputSchema>;
 export type ContentOutput = z.infer<typeof contentOutputSchema>;
 export type DraftReviewOutput = z.infer<typeof draftReviewOutputSchema>;
 export type RunSummaryOutput = z.infer<typeof runSummaryOutputSchema>;
+export type ReplyDrafterOutput = z.infer<typeof replyDrafterOutputSchema>;
+export type ContentCreatorOutput = z.infer<typeof contentCreatorOutputSchema>;
+export type CalendarPlanOutput = z.infer<typeof calendarPlanOutputSchema>;
+export type EngagementMonitorOutput = z.infer<typeof engagementMonitorOutputSchema>;

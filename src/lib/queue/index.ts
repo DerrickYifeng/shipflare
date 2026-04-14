@@ -9,6 +9,10 @@ import type {
   HealthScoreJobData,
   DreamJobData,
   CodeScanJobData,
+  XMonitorJobData,
+  XContentCalendarJobData,
+  XEngagementJobData,
+  XMetricsJobData,
 } from './types';
 
 const log = createLogger('lib:queue');
@@ -28,6 +32,10 @@ export const healthScoreQueue = new Queue<HealthScoreJobData>(
 );
 export const dreamQueue = new Queue<DreamJobData>('dream', connection);
 export const codeScanQueue = new Queue<CodeScanJobData>('code-scan', connection);
+export const xMonitorQueue = new Queue<XMonitorJobData>('x-monitor', connection);
+export const xContentCalendarQueue = new Queue<XContentCalendarJobData>('x-content-calendar', connection);
+export const xEngagementQueue = new Queue<XEngagementJobData>('x-engagement', connection);
+export const xMetricsQueue = new Queue<XMetricsJobData>('x-metrics', connection);
 
 /**
  * Enqueue a discovery scan for a user's product across sources (subreddits or topics).
@@ -116,4 +124,62 @@ export async function enqueueCodeScan(data: CodeScanJobData): Promise<string> {
     backoff: { type: 'exponential', delay: 5000 },
   });
   return jobId;
+}
+
+// ----------------------------------------------------------------
+//  X Growth queues
+// ----------------------------------------------------------------
+
+/**
+ * Enqueue X monitor scan: poll target accounts for new tweets.
+ */
+export async function enqueueXMonitor(data: XMonitorJobData): Promise<void> {
+  log.debug(`Enqueued x-monitor for user ${data.userId}`);
+  await xMonitorQueue.add('scan', data, {
+    attempts: 2,
+    backoff: { type: 'exponential', delay: 5000 },
+  });
+}
+
+/**
+ * Enqueue X content calendar processing: generate drafts for scheduled posts.
+ */
+export async function enqueueXContentCalendar(
+  data: XContentCalendarJobData,
+): Promise<void> {
+  log.debug(`Enqueued x-content-calendar for user ${data.userId}`);
+  await xContentCalendarQueue.add('process', data, {
+    attempts: 2,
+    backoff: { type: 'exponential', delay: 3000 },
+  });
+}
+
+/**
+ * Enqueue X engagement monitoring for a recently posted tweet.
+ * Accepts a delay (ms) for scheduling checks at +15/30/60 minutes.
+ */
+export async function enqueueXEngagement(
+  data: XEngagementJobData,
+  delayMs?: number,
+): Promise<void> {
+  log.debug(
+    `Enqueued x-engagement for tweet ${data.tweetId}` +
+      (delayMs ? ` (delay ${Math.round(delayMs / 1000)}s)` : ''),
+  );
+  await xEngagementQueue.add('monitor', data, {
+    attempts: 2,
+    backoff: { type: 'exponential', delay: 3000 },
+    ...(delayMs ? { delay: delayMs } : {}),
+  });
+}
+
+/**
+ * Enqueue X metrics collection: batch-fetch tweet performance data.
+ */
+export async function enqueueXMetrics(data: XMetricsJobData): Promise<void> {
+  log.debug(`Enqueued x-metrics for user ${data.userId}`);
+  await xMetricsQueue.add('collect', data, {
+    attempts: 3,
+    backoff: { type: 'exponential', delay: 2000 },
+  });
 }

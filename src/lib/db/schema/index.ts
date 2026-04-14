@@ -11,3 +11,10 @@ export {
 } from './drafts';
 export { agentMemories, agentMemoryLogs } from './memories';
 export { codeSnapshots } from './code-snapshots';
+export {
+  xTargetAccounts,
+  xMonitoredTweets,
+  xContentCalendar,
+  xTweetMetrics,
+  xFollowerSnapshots,
+} from './x-growth';

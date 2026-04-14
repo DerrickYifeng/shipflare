@@ -1,0 +1,226 @@
+import type { Job } from 'bullmq';
+import { db } from '@/lib/db';
+import {
+  products,
+  channels,
+  drafts,
+  threads,
+  activityEvents,
+  xContentCalendar,
+} from '@/lib/db/schema';
+import { eq, and, lte } from 'drizzle-orm';
+import { loadSkill } from '@/core/skill-loader';
+import { runSkill } from '@/core/skill-runner';
+import { contentCreatorOutputSchema } from '@/agents/schemas';
+import type { ContentCreatorOutput } from '@/agents/schemas';
+import { enqueueReview, enqueueDream } from '@/lib/queue';
+import { publishEvent } from '@/lib/redis';
+import { join } from 'path';
+import type { XContentCalendarJobData } from '@/lib/queue/types';
+import { createLogger } from '@/lib/logger';
+import { MemoryStore } from '@/memory/store';
+import { AgentDream } from '@/memory/dream';
+import { buildMemoryPrompt } from '@/memory/prompt-builder';
+
+const log = createLogger('worker:x-content-calendar');
+
+const contentBatchSkill = loadSkill(
+  join(process.cwd(), 'src/skills/content-batch'),
+);
+
+async function processXContentCalendarForUser(
+  userId: string,
+  productId: string,
+) {
+  log.info(`Processing X content calendar for user ${userId}`);
+
+  // Load product
+  const [product] = await db
+    .select()
+    .from(products)
+    .where(eq(products.id, productId))
+    .limit(1);
+
+  if (!product) throw new Error(`Product not found: ${productId}`);
+
+  // Find scheduled X items that are due
+  const now = new Date();
+  const dueItems = await db
+    .select()
+    .from(xContentCalendar)
+    .where(
+      and(
+        eq(xContentCalendar.userId, userId),
+        eq(xContentCalendar.channel, 'x'),
+        eq(xContentCalendar.status, 'scheduled'),
+        lte(xContentCalendar.scheduledAt, now),
+      ),
+    );
+
+  if (dueItems.length === 0) {
+    log.info('No content calendar items due, skipping');
+    return;
+  }
+
+  log.info(`Found ${dueItems.length} due calendar items`);
+
+  // Build calendar items for the skill (strategy is auto-injected via skill references)
+  const calendarItems = dueItems.map((item) => ({
+    contentType: item.contentType,
+    topic: item.topic ?? undefined,
+    productName: product.name,
+    productDescription: product.description,
+    valueProp: product.valueProp ?? '',
+    keywords: product.keywords,
+    isThread: item.contentType === 'thread',
+  }));
+
+  // Load memory
+  const memoryStore = new MemoryStore(productId);
+  const dream = new AgentDream(memoryStore);
+  const memoryPrompt = await buildMemoryPrompt(memoryStore);
+
+  // Run content batch skill
+  const result = await runSkill<ContentCreatorOutput>({
+    skill: contentBatchSkill,
+    input: { calendarItems },
+    deps: {},
+    memoryPrompt: memoryPrompt || undefined,
+    outputSchema: contentCreatorOutputSchema,
+  });
+
+  let draftsCreated = 0;
+
+  for (let i = 0; i < result.results.length; i++) {
+    const content = result.results[i];
+    const calendarItem = dueItems[i];
+
+    // Combine tweets into single body (for threads, join with double newline)
+    const replyBody = content.tweets.join('\n\n---\n\n');
+    const isThread = content.tweets.length > 1;
+
+    // Create a pseudo-thread record to plug into the existing draft pipeline
+    const [threadRecord] = await db
+      .insert(threads)
+      .values({
+        userId,
+        externalId: `calendar-${calendarItem.id}`,
+        platform: 'x',
+        community: content.contentType,
+        title: content.tweets[0].slice(0, 200),
+        url: '',
+        relevanceScore: content.confidence,
+      })
+      .returning();
+
+    // Create draft with link reply metadata
+    const draftData: Record<string, unknown> = {
+      userId,
+      threadId: threadRecord.id,
+      draftType: isThread ? 'original_post' : 'original_post',
+      postTitle: isThread ? 'Thread' : undefined,
+      replyBody,
+      confidenceScore: content.confidence,
+      whyItWorks: content.whyItWorks,
+    };
+
+    const [draft] = await db
+      .insert(drafts)
+      .values(draftData as typeof drafts.$inferInsert)
+      .returning();
+
+    draftsCreated++;
+
+    // Link draft to calendar item
+    await db
+      .update(xContentCalendar)
+      .set({
+        status: 'draft_created',
+        draftId: draft.id,
+        updatedAt: now,
+      })
+      .where(eq(xContentCalendar.id, calendarItem.id));
+
+    // Auto-enqueue review
+    await enqueueReview({
+      userId,
+      draftId: draft.id,
+      productId,
+    });
+  }
+
+  log.info(
+    `Created ${draftsCreated} content drafts, cost $${result.usage.costUsd.toFixed(4)}`,
+  );
+
+  // Publish SSE event
+  await publishEvent(`shipflare:events:${userId}`, {
+    type: 'agent_complete',
+    agentName: 'content-batch',
+    stats: {
+      calendarItemsProcessed: dueItems.length,
+      draftsCreated,
+    },
+    cost: result.usage.costUsd,
+  });
+
+  // Log activity
+  await db.insert(activityEvents).values({
+    userId,
+    eventType: 'x_content_calendar',
+    metadataJson: {
+      itemsProcessed: dueItems.length,
+      draftsCreated,
+      cost: result.usage.costUsd,
+    },
+  });
+
+  // Memory
+  const types = dueItems.map((i) => i.contentType).join(', ');
+  await dream.logInsight(
+    `Content calendar: processed ${dueItems.length} items (${types}), created ${draftsCreated} drafts`,
+  );
+
+  if (await dream.shouldDistill()) {
+    await enqueueDream({ productId });
+  }
+}
+
+export async function processXContentCalendar(
+  job: Job<XContentCalendarJobData>,
+) {
+  const { userId, productId } = job.data;
+
+  if (userId === '__all__') {
+    // Cron fan-out: find all users with scheduled X content and process each
+    const xChannels = await db
+      .select({ userId: channels.userId })
+      .from(channels)
+      .where(eq(channels.platform, 'x'));
+
+    const userIds = [...new Set(xChannels.map((c) => c.userId))];
+    log.info(`Cron fan-out: processing ${userIds.length} users with X channels`);
+
+    for (const uid of userIds) {
+      const [userProduct] = await db
+        .select()
+        .from(products)
+        .where(eq(products.userId, uid))
+        .limit(1);
+
+      if (!userProduct) {
+        log.warn(`No product found for user ${uid}, skipping`);
+        continue;
+      }
+
+      try {
+        await processXContentCalendarForUser(uid, userProduct.id);
+      } catch (err) {
+        log.error(`X content calendar failed for user ${uid}: ${err}`);
+      }
+    }
+    return;
+  }
+
+  await processXContentCalendarForUser(userId, productId);
+}

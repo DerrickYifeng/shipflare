@@ -40,6 +40,27 @@ export interface CodeScanJobData {
   githubToken: string;
 }
 
+export interface XMonitorJobData {
+  userId: string;
+  productId: string;
+}
+
+export interface XContentCalendarJobData {
+  userId: string;
+  productId: string;
+}
+
+export interface XEngagementJobData {
+  userId: string;
+  tweetId: string;
+  originalText: string;
+  productId: string;
+}
+
+export interface XMetricsJobData {
+  userId: string;
+}
+
 export type JobData =
   | DiscoveryJobData
   | ContentJobData
@@ -47,4 +68,8 @@ export type JobData =
   | PostingJobData
   | HealthScoreJobData
   | DreamJobData
-  | CodeScanJobData;
+  | CodeScanJobData
+  | XMonitorJobData
+  | XContentCalendarJobData
+  | XEngagementJobData
+  | XMetricsJobData;

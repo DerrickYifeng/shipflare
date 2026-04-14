@@ -30,6 +30,8 @@ export interface SkillConfig {
   compose?: string[];
   /** Raw markdown body (the prompt content below frontmatter). */
   prompt: string;
+  /** Auto-loaded reference documents from references/ subdirectory. */
+  references?: Record<string, string>;
 }
 
 // ---------------------------------------------------------------------------
@@ -133,6 +135,16 @@ export function loadSkill(skillDir: string): SkillConfig {
     throw new Error(`SKILL.md in ${skillDir} missing required 'name' field`);
   }
 
+  // Auto-load reference documents from references/ subdirectory
+  const refsDir = join(skillDir, 'references');
+  const references: Record<string, string> = {};
+  if (existsSync(refsDir)) {
+    const refFiles = readdirSync(refsDir).filter(f => f.endsWith('.md'));
+    for (const file of refFiles) {
+      references[file] = readFileSync(join(refsDir, file), 'utf-8');
+    }
+  }
+
   return {
     name,
     description: (meta.description as string) ?? '',
@@ -146,6 +158,7 @@ export function loadSkill(skillDir: string): SkillConfig {
     cacheSafe: (meta['cache-safe'] as boolean) ?? false,
     compose: Array.isArray(meta.compose) ? meta.compose : undefined,
     prompt: body!.trim(),
+    references: Object.keys(references).length > 0 ? references : undefined,
   };
 }
 

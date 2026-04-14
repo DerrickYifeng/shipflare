@@ -9,6 +9,7 @@ import { loadAgentFromFile } from '@/bridge/load-agent';
 import { registry } from '@/tools/registry';
 import { isCircuitBreakerTripped, tripCircuitBreaker } from '@/lib/circuit-breaker';
 import { canPostToSubreddit } from '@/lib/rate-limiter';
+import { enqueueXEngagement } from '@/lib/queue';
 import { publishEvent } from '@/lib/redis';
 import { join } from 'path';
 import { z } from 'zod';
@@ -88,7 +89,7 @@ export async function processPosting(job: Job<PostingJobData>) {
   const cwd = process.cwd();
 
   const agentConfig = loadAgentFromFile(
-    join(cwd, isX ? 'src/agents/x-posting.md' : 'src/agents/posting.md'),
+    join(cwd, 'src/agents/posting.md'),
     toolMap,
   );
 
@@ -96,20 +97,22 @@ export async function processPosting(job: Job<PostingJobData>) {
     ? createToolContext({ xClient: XClient.fromChannel(channel) })
     : createToolContext({ redditClient: RedditClient.fromChannel(channel) });
 
-  const userMessage = isX
-    ? JSON.stringify({
-        draftType,
-        tweetId: thread.externalId,
-        topic: thread.community,
-        draftText: draft.replyBody,
-      })
-    : JSON.stringify({
-        draftType,
-        threadFullname: `t3_${thread.externalId}`,
-        subreddit: thread.community,
-        postTitle: draft.postTitle ?? undefined,
-        draftText: draft.replyBody,
-      });
+  const userMessage = JSON.stringify({
+    platform: isX ? 'x' : 'reddit',
+    draftType,
+    draftText: draft.replyBody,
+    // Reddit-specific
+    ...(isX ? {} : {
+      threadFullname: `t3_${thread.externalId}`,
+      subreddit: thread.community,
+      postTitle: draft.postTitle ?? undefined,
+    }),
+    // X-specific
+    ...(isX ? {
+      tweetId: thread.externalId,
+      topic: thread.community,
+    } : {}),
+  });
 
   const { result, usage } = await runAgent(
     agentConfig,
@@ -151,6 +154,24 @@ export async function processPosting(job: Job<PostingJobData>) {
         userId,
         `Shadowban detected on ${externalId} in r/${thread.community}`,
       );
+    }
+
+    // X-specific post-publish actions
+    if (isX && externalId) {
+      // Schedule engagement monitoring at +15, +30, +60 minutes
+      const productId = draft.threadId; // Will be resolved by worker
+      for (const delayMin of [15, 30, 60]) {
+        await enqueueXEngagement(
+          {
+            userId,
+            tweetId: externalId,
+            originalText: draft.replyBody,
+            productId: '',
+          },
+          delayMin * 60 * 1000,
+        );
+      }
+      log.info(`Scheduled engagement monitoring for tweet ${externalId}`);
     }
   } else {
     // Post failed

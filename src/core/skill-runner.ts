@@ -115,6 +115,15 @@ export async function runSkill<T>(config: SkillRunConfig<T>): Promise<SkillRunRe
     agentConfig.model = skill.model;
   }
 
+  // Append skill references if available
+  if (skill.references && Object.keys(skill.references).length > 0) {
+    let refBlock = '\n\n## References\n';
+    for (const [filename, content] of Object.entries(skill.references)) {
+      refBlock += `\n### ${filename}\n\n${content}\n`;
+    }
+    agentConfig.systemPrompt += refBlock;
+  }
+
   // Append memory prompt if provided
   if (memoryPrompt) {
     agentConfig.systemPrompt += `\n\n## Memory\n\n${memoryPrompt}`;

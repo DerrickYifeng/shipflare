@@ -125,3 +125,23 @@ Return a JSON object:
 - **REVISE**: Minor issues that can be fixed — provide specific suggestions
 - **FAIL**: Fundamental problems — reply should be regenerated
 - `score`: 0.0-1.0, overall quality assessment independent of the content agent's confidence
+
+## X/Twitter Mode
+
+When the `subreddit` field starts with `@` or the content is clearly for X/Twitter (280 chars or fewer), apply these overrides:
+
+### Modified Checks
+
+1. **Character Count Check** (replaces some of the length concerns): Each tweet MUST be 280 characters or fewer. If it exceeds this, FAIL immediately.
+
+2. **No-Link Check**: The tweet body MUST NOT contain any URLs (http://, https://, or domain-like text). Links go in the first reply, not the tweet. If a link is found in the body, FAIL.
+
+3. **FTC Compliance**: SKIP this check for X. FTC disclosure is not required for casual X engagement.
+
+4. **Tone Match**: Instead of matching subreddit culture, verify the tone is:
+   - Conversational and authentic (not corporate or formal)
+   - Opinionated with a clear point of view
+   - Free of hashtags (they hurt reach in 2026)
+   - Free of marketing buzzwords and superlatives
+
+5. **Relevance**, **Value-First**, **Authenticity**, and **Risk** checks still apply as written above.

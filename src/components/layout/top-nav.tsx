@@ -45,6 +45,26 @@ export function TopNav() {
           Automation
         </Link>
         <Link
+          href="/growth"
+          className={`px-3 py-2 text-[13px] font-medium rounded-[var(--radius-sf-md)] transition-colors ${
+            pathname.startsWith('/growth')
+              ? 'bg-sf-bg-secondary text-sf-text-primary'
+              : 'text-sf-text-secondary'
+          }`}
+        >
+          Growth
+        </Link>
+        <Link
+          href="/calendar"
+          className={`px-3 py-2 text-[13px] font-medium rounded-[var(--radius-sf-md)] transition-colors ${
+            pathname.startsWith('/calendar')
+              ? 'bg-sf-bg-secondary text-sf-text-primary'
+              : 'text-sf-text-secondary'
+          }`}
+        >
+          Calendar
+        </Link>
+        <Link
           href="/settings"
           className={`px-3 py-2 text-[13px] font-medium rounded-[var(--radius-sf-md)] transition-colors ${
             pathname.startsWith('/settings')

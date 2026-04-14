@@ -36,6 +36,20 @@
       "when": 1776056805400,
       "tag": "0004_make_url_nullable",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1776137038129,
+      "tag": "0005_abnormal_kulan_gath",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1776224228000,
+      "tag": "0006_add_calendar_channel",
+      "breakpoints": true
     }
   ]
 }

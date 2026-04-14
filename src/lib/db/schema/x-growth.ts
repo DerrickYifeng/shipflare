@@ -1,0 +1,138 @@
+import {
+  pgTable,
+  text,
+  timestamp,
+  real,
+  integer,
+  boolean,
+  unique,
+  index,
+} from 'drizzle-orm/pg-core';
+import { users } from './users';
+import { products } from './products';
+import { drafts } from './drafts';
+
+/**
+ * Target accounts to monitor for the Reply Guy Engine.
+ * Tracks big accounts whose tweets we want to reply to quickly.
+ */
+export const xTargetAccounts = pgTable(
+  'x_target_accounts',
+  {
+    id: text('id')
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    username: text('username').notNull(),
+    displayName: text('display_name'),
+    xUserId: text('x_user_id'),
+    followerCount: integer('follower_count'),
+    priority: integer('priority').notNull().default(1),
+    category: text('category'), // 'competitor' | 'influencer' | 'peer' | 'media'
+    notes: text('notes'),
+    isActive: boolean('is_active').notNull().default(true),
+    createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
+  },
+  (table) => [unique('x_target_accounts_user_username').on(table.userId, table.username)],
+);
+
+/**
+ * Tweets from monitored target accounts.
+ * Each tweet has a 15-minute reply window for maximum algorithm impact.
+ */
+export const xMonitoredTweets = pgTable(
+  'x_monitored_tweets',
+  {
+    id: text('id')
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    targetAccountId: text('target_account_id')
+      .notNull()
+      .references(() => xTargetAccounts.id, { onDelete: 'cascade' }),
+    tweetId: text('tweet_id').notNull(),
+    tweetText: text('tweet_text').notNull(),
+    authorUsername: text('author_username').notNull(),
+    tweetUrl: text('tweet_url').notNull(),
+    postedAt: timestamp('posted_at', { mode: 'date' }).notNull(),
+    discoveredAt: timestamp('discovered_at', { mode: 'date' })
+      .defaultNow()
+      .notNull(),
+    replyDeadline: timestamp('reply_deadline', { mode: 'date' }).notNull(),
+    status: text('status').notNull().default('pending'), // 'pending' | 'draft_created' | 'replied' | 'skipped' | 'expired'
+  },
+  (table) => [unique('x_monitored_tweets_user_tweet').on(table.userId, table.tweetId)],
+);
+
+/**
+ * Content calendar for scheduled original X posts.
+ * Enforces content mix: 40% metric, 30% educational, 20% engagement, 10% product.
+ */
+export const xContentCalendar = pgTable('x_content_calendar', {
+  id: text('id')
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  productId: text('product_id')
+    .notNull()
+    .references(() => products.id, { onDelete: 'cascade' }),
+  channel: text('channel').notNull().default('x'), // 'x' | 'reddit' | 'linkedin' | ...
+  scheduledAt: timestamp('scheduled_at', { mode: 'date' }).notNull(),
+  contentType: text('content_type').notNull(), // 'metric' | 'educational' | 'engagement' | 'product' | 'thread'
+  status: text('status').notNull().default('scheduled'), // 'scheduled' | 'draft_created' | 'approved' | 'posted' | 'skipped'
+  topic: text('topic'),
+  draftId: text('draft_id').references(() => drafts.id),
+  postedExternalId: text('posted_external_id'),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
+});
+
+/**
+ * Tweet performance metrics sampled over time.
+ * Bookmarks are the most important signal (algorithm fuel).
+ */
+export const xTweetMetrics = pgTable(
+  'x_tweet_metrics',
+  {
+    id: text('id')
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    tweetId: text('tweet_id').notNull(),
+    impressions: integer('impressions').notNull().default(0),
+    likes: integer('likes').notNull().default(0),
+    retweets: integer('retweets').notNull().default(0),
+    replies: integer('replies').notNull().default(0),
+    bookmarks: integer('bookmarks').notNull().default(0),
+    quoteTweets: integer('quote_tweets').notNull().default(0),
+    urlClicks: integer('url_clicks').notNull().default(0),
+    profileClicks: integer('profile_clicks').notNull().default(0),
+    sampledAt: timestamp('sampled_at', { mode: 'date' }).defaultNow().notNull(),
+  },
+  (table) => [index('x_tweet_metrics_user_tweet').on(table.userId, table.tweetId)],
+);
+
+/**
+ * Daily snapshots of follower count for growth tracking.
+ */
+export const xFollowerSnapshots = pgTable('x_follower_snapshots', {
+  id: text('id')
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  followerCount: integer('follower_count').notNull(),
+  followingCount: integer('following_count').notNull(),
+  tweetCount: integer('tweet_count').notNull(),
+  snapshotAt: timestamp('snapshot_at', { mode: 'date' }).defaultNow().notNull(),
+});

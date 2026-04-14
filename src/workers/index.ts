@@ -7,9 +7,13 @@ import { processPosting } from './processors/posting';
 import { processHealthScore } from './processors/health-score';
 import { processDream } from './processors/dream';
 import { processCodeScan } from './processors/code-scan';
-import { dreamQueue } from '@/lib/queue';
+import { processXMonitor } from './processors/monitor';
+import { processXContentCalendar } from './processors/content-calendar';
+import { processXEngagement } from './processors/engagement';
+import { processXMetrics } from './processors/metrics';
+import { dreamQueue, xMonitorQueue, xContentCalendarQueue, xMetricsQueue } from '@/lib/queue';
 import { createLogger } from '@/lib/logger';
-import type { DiscoveryJobData, ContentJobData, ReviewJobData, PostingJobData, HealthScoreJobData, DreamJobData, CodeScanJobData } from '@/lib/queue/types';
+import type { DiscoveryJobData, ContentJobData, ReviewJobData, PostingJobData, HealthScoreJobData, DreamJobData, CodeScanJobData, XMonitorJobData, XContentCalendarJobData, XEngagementJobData, XMetricsJobData } from '@/lib/queue/types';
 
 const log = createLogger('workers');
 
@@ -62,7 +66,36 @@ const codeScanWorker = new Worker<CodeScanJobData>(
   { connection, concurrency: 2 },
 );
 
-const workers = [discoveryWorker, contentWorker, reviewWorker, postingWorker, healthScoreWorker, dreamWorker, codeScanWorker];
+// X Growth workers
+const xMonitorWorker = new Worker<XMonitorJobData>(
+  'x-monitor',
+  async (job) => processXMonitor(job),
+  { connection, concurrency: 2 },
+);
+
+const xContentCalendarWorker = new Worker<XContentCalendarJobData>(
+  'x-content-calendar',
+  async (job) => processXContentCalendar(job),
+  { connection, concurrency: 2 },
+);
+
+const xEngagementWorker = new Worker<XEngagementJobData>(
+  'x-engagement',
+  async (job) => processXEngagement(job),
+  { connection, concurrency: 3 },
+);
+
+const xMetricsWorker = new Worker<XMetricsJobData>(
+  'x-metrics',
+  async (job) => processXMetrics(job),
+  { connection, concurrency: 1 },
+);
+
+const workers = [
+  discoveryWorker, contentWorker, reviewWorker, postingWorker,
+  healthScoreWorker, dreamWorker, codeScanWorker,
+  xMonitorWorker, xContentCalendarWorker, xEngagementWorker, xMetricsWorker,
+];
 
 // Log events
 for (const worker of workers) {
@@ -91,11 +124,52 @@ async function scheduleNightlyDream() {
   );
 }
 
-scheduleNightlyDream().catch((err) => {
-  log.error('Failed to schedule nightly distillation:', err.message);
+// Schedule X monitor: every 15 minutes
+async function scheduleXMonitor() {
+  await xMonitorQueue.add(
+    'scheduled-scan',
+    { userId: '__all__', productId: '__all__' },
+    {
+      repeat: { pattern: '*/15 * * * *' },
+      jobId: 'x-monitor-cron',
+    },
+  );
+}
+
+// Schedule X content calendar: every hour
+async function scheduleXContentCalendar() {
+  await xContentCalendarQueue.add(
+    'scheduled-process',
+    { userId: '__all__', productId: '__all__' },
+    {
+      repeat: { pattern: '0 * * * *' },
+      jobId: 'x-content-calendar-cron',
+    },
+  );
+}
+
+// Schedule X metrics: every 6 hours
+async function scheduleXMetrics() {
+  await xMetricsQueue.add(
+    'scheduled-collect',
+    { userId: '__all__' },
+    {
+      repeat: { pattern: '0 */6 * * *' },
+      jobId: 'x-metrics-cron',
+    },
+  );
+}
+
+Promise.all([
+  scheduleNightlyDream(),
+  scheduleXMonitor(),
+  scheduleXContentCalendar(),
+  scheduleXMetrics(),
+]).catch((err) => {
+  log.error('Failed to schedule cron jobs:', err.message);
 });
 
-log.info('All workers started: discovery, content, review, posting, health-score, dream, code-scan');
+log.info('All workers started: discovery, content, review, posting, health-score, dream, code-scan, x-monitor, x-content-calendar, x-engagement, x-metrics');
 
 // Graceful shutdown
 async function shutdown() {

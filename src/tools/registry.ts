@@ -15,6 +15,11 @@ import { hnGetThreadTool } from './hn-get-thread';
 import { webSearchTool } from './web-search';
 import { xSearchTool } from './x-search';
 import { xPostTool } from './x-post';
+import { xGetUserTweetsTool } from './x-get-user-tweets';
+import { xGetTweetTool } from './x-get-tweet';
+import { xGetMentionsTool } from './x-get-mentions';
+import { xGetMetricsTool } from './x-get-metrics';
+import { xThreadPostTool } from './x-thread-post';
 
 /**
  * Central tool registry for ShipFlare agents.
@@ -40,6 +45,11 @@ registry.register(hnGetThreadTool);
 // X tools
 registry.register(xSearchTool);
 registry.register(xPostTool);
+registry.register(xGetUserTweetsTool);
+registry.register(xGetTweetTool);
+registry.register(xGetMentionsTool);
+registry.register(xGetMetricsTool);
+registry.register(xThreadPostTool);
 
 // Generic tools
 registry.register(generateQueriesTool);

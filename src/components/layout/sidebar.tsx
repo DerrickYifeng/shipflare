@@ -8,6 +8,8 @@ const navItems = [
   { href: '/dashboard', label: 'Dashboard', icon: DashboardIcon },
   { href: '/product', label: 'My Product', icon: ProductIcon },
   { href: '/automation', label: 'Automation', icon: AutomationIcon },
+  { href: '/growth', label: 'Growth', icon: GrowthIcon },
+  { href: '/calendar', label: 'Calendar', icon: CalendarIcon },
   { href: '/settings', label: 'Settings', icon: SettingsIcon },
 ];
 
@@ -96,6 +98,24 @@ function AutomationIcon({ active }: { active: boolean }) {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke={active ? 'var(--color-sf-text-primary)' : 'currentColor'} strokeWidth="1.5">
       <path d="M9 1L3 9h5l-1 6 6-8H8l1-6z" />
+    </svg>
+  );
+}
+
+function GrowthIcon({ active }: { active: boolean }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke={active ? 'var(--color-sf-text-primary)' : 'currentColor'} strokeWidth="1.5">
+      <path d="M1 14l4-5 3 3 7-9" />
+      <path d="M11 3h4v4" />
+    </svg>
+  );
+}
+
+function CalendarIcon({ active }: { active: boolean }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke={active ? 'var(--color-sf-text-primary)' : 'currentColor'} strokeWidth="1.5">
+      <rect x="2" y="3" width="12" height="12" rx="1" />
+      <path d="M11 1v4M5 1v4M2 7h12" />
     </svg>
   );
 }
