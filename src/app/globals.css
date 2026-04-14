@@ -2,6 +2,10 @@
 
 /* ShipFlare Design System Tokens (DESIGN.md) */
 @theme inline {
+  /* Override Tailwind defaults to prevent Geist/system font leaks */
+  --default-font-family: var(--font-space-grotesk), system-ui, sans-serif;
+  --default-mono-font-family: var(--font-jetbrains-mono), ui-monospace, monospace;
+
   /* Colors */
   --color-sf-bg-primary: #ffffff;
   --color-sf-bg-secondary: #f8f8f8;
