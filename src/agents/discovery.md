@@ -33,44 +33,48 @@ JSON with: productName, productDescription, keywords, valueProp, source, platfor
 
 ## Relevance Rubric
 
-Use these calibration anchors when scoring relevance:
+Score relevance based on whether the AUTHOR is a **potential user** of the product — not just whether the topic overlaps.
+
+A potential user satisfies ALL THREE:
+1. Has a pain point the product specifically solves (derive this from `productDescription` and `valueProp` in the input)
+2. Is actively seeking help — asking questions, requesting recommendations, or venting frustration about their OWN situation
+3. Is NOT a competitor promoting their own solution in the same space
 
 | Score | Criteria |
 |-------|----------|
-| 0.9-1.0 | Thread directly asks for or discusses the EXACT problem the product solves |
-| 0.7-0.8 | Same problem space with clear need, even if not explicitly asking for tools |
-| 0.4-0.6 | Same domain but the specific need does not match the product's core function |
-| 0.1-0.3 | Shares a broad category tag but the actual discussion is unrelated |
-| 0.0 | No connection to the product whatsoever |
+| 0.9-1.0 | Author directly describes or asks about the EXACT problem the product solves, and is seeking help |
+| 0.7-0.8 | Author has a clear need in the product's problem space, open to solutions |
+| 0.4-0.6 | Same broad domain but the author's specific need does NOT match the product's core function |
+| 0.1-0.3 | Shares a category tag but the actual discussion is about something else |
+| 0.0 | No connection, or author is clearly not a potential user |
+
+### Low-Relevance Overrides (score ≤ 0.2 regardless of topic match)
+
+- **Competitor self-promotion**: Author built or is promoting a competing product/service
+- **Tool roundup / curated list**: Author is listing many tools — curator, not user
+- **Job seeking / career advice**: Author is looking for employment, not solving the product's problem
+- **Showcase / "share your X" threads**: Promotional threads without an active pain point
+- **News / link shares without personal need**: No signal the author has the problem
 
 CRITICAL: Most threads should score 0.0-0.3. A well-calibrated run finds 2-5 threads above 0.7 per source, not 15+. If you are scoring more than 30% of threads above 0.5, you are too generous.
 
-### Anti-Patterns — Score These LOW (≤ 0.3)
-
-Audience match ≠ problem match. A thread posted by the right audience (indie devs, founders) does NOT make it relevant. The **topic** must match. Score LOW when:
-
-- The poster is an indie dev but the discussion is about career advice, freelancing, pricing, hiring, or personal stories — NOT about marketing, growth, or community engagement
-- The thread is about a product launch or showcase that doesn't involve marketing strategy or tool-seeking
-- The thread discusses a broad market trend (agencies dying, SaaS revenue, SEO tactics) without anyone seeking or discussing marketing automation or community engagement tools
-- The thread is about an unrelated product (app stores, fintech tools, homework apps) even if it's in a relevant subreddit or topic
-
-### Anti-Patterns for X/Twitter — Score These LOW (≤ 0.3)
-
-- **Broadcast/promotional tweets** with no conversation: product announcements, AI tool roundup lists, stat-sharing tweets. If there's no genuine discussion or question, the product cannot be naturally mentioned.
-- **Thought leadership without solution-seeking**: VC essays, hot-take threads, "the future of X" commentary. Unless the poster is asking for tools or discussing specific workflows.
-- **Generic AI marketing content**: tweets about AI replacing marketers, LLM capability lists, or tool compilations that don't specifically discuss community discovery, monitoring, or engagement.
-
-### Intent Rubric
-
-Use these anchors when scoring intent (how actively the poster seeks a solution):
+## Intent Rubric
 
 | Score | Criteria |
 |-------|----------|
-| 0.9-1.0 | Explicitly asking "what tool should I use for X?" or comparing specific competitors |
-| 0.7-0.8 | Describing a pain point and clearly open to solutions ("I've been doing this manually...") |
-| 0.4-0.6 | Sharing experience but not actively seeking — could be receptive if engaged |
-| 0.1-0.3 | Broadcasting information, promoting own product, or sharing opinions with no opening |
-| 0.0 | No solution-seeking signal whatsoever |
+| 0.8-1.0 | Explicitly asking for a tool/solution, comparing alternatives, or requesting recommendations |
+| 0.5-0.7 | Describing a personal pain point, venting frustration, showing they're stuck |
+| 0.2-0.3 | Sharing what worked for them (success story) or giving advice — NOT seeking help |
+| 0.0-0.1 | Promoting their own product, curating tool lists, or sharing news |
+
+### Intent Anti-Patterns (score ≤ 0.3)
+
+- **Success stories**: Author is teaching what worked, not seeking help
+- **Advice/coaching threads**: Author is giving advice, not asking for it
+- **Strategy/method sharing**: Author is sharing a discovery, not looking for a solution
+- **Tool builders**: Author built something in the same space — potential competitor, not user
+
+Key: intent = would the author welcome a helpful product suggestion RIGHT NOW?
 
 ## Important
 

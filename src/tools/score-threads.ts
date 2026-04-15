@@ -6,8 +6,8 @@ import { buildTool } from '@/bridge/build-tool';
 // ---------------------------------------------------------------------------
 
 const SCORE_WEIGHTS = {
-  relevance: 0.40,
-  intent: 0.35,
+  relevance: 0.35,
+  intent: 0.40,
   exposure: 0.10,
   freshness: 0.10,
   engagement: 0.05,

@@ -5,20 +5,21 @@ import { buildTool } from '@/bridge/build-tool';
  * Pain-point templates — how real users describe problems on Reddit.
  */
 const PAIN_TEMPLATES = [
-  (kw: string) => `how to automate ${kw}`,
-  (kw: string) => `${kw} manually`,
+  (kw: string) => `how to ${kw}`,
+  (kw: string) => `${kw} not working`,
   (kw: string) => `need help with ${kw}`,
-  (kw: string) => `struggling with ${kw}`,
+  (kw: string) => `can't ${kw}`,
 ] as const;
 
 /**
  * Solution-seeking templates — users actively looking for tools.
+ * Phrased as questions real users ask (not how marketers/competitors post).
  */
 const SOLUTION_TEMPLATES = [
-  (kw: string) => `best ${kw} tool`,
-  (kw: string) => `recommend ${kw}`,
   (kw: string) => `what do you use for ${kw}`,
-  (kw: string) => `looking for ${kw} tool`,
+  (kw: string) => `how do you handle ${kw}`,
+  (kw: string) => `recommend ${kw}`,
+  (kw: string) => `struggling with ${kw}`,
 ] as const;
 
 /**
@@ -41,13 +42,13 @@ function quote(kw: string): string {
 }
 
 /**
- * Pick the "core function" keyword — the longest multi-word keyword
- * (most specific), or the first keyword if all are single-word.
+ * Pick the "core function" keyword — the shortest multi-word keyword,
+ * or the first keyword if all are single-word.
  */
 function pickCoreKeyword(keywords: string[]): string {
   const multiWord = keywords.filter((kw) => kw.includes(' '));
   if (multiWord.length > 0) {
-    return multiWord.reduce((a, b) => (a.length >= b.length ? a : b));
+    return multiWord.reduce((a, b) => (a.length <= b.length ? a : b));
   }
   return keywords[0] ?? '';
 }
@@ -61,7 +62,7 @@ const PASS6_STRATEGY: Record<string, (core: string, secondary: string, source: s
     const titleWord = core.split(' ').reduce((a, b) => (a.length >= b.length ? a : b));
     return `title:"${titleWord}" self:true`;
   },
-  x: (_core, secondary, source) => `${secondary} for ${source.toLowerCase()}`,
+  x: (_core, _secondary, source) => `how do I grow my ${source.toLowerCase()} no budget`,
   hn: (core) => `Ask HN: ${core}`,
   generic: (core, secondary) => `${core} ${secondary}`,
 };
@@ -128,8 +129,8 @@ export const generateQueriesTool = buildTool({
     const solFn2 = hashSelect(SOLUTION_TEMPLATES, `${seed}-sol2`);
     queries.push(solFn2(secondary));
 
-    // Pass 5: Competitor alternative
-    queries.push(`${quote(core)} alternative`);
+    // Pass 5: Frustration / manual-process pain
+    queries.push(`tired of manual ${core}`);
 
     // Pass 6: Platform-specific strategy
     const strategyFn = PASS6_STRATEGY[platform ?? 'reddit'] ?? PASS6_STRATEGY.generic;
