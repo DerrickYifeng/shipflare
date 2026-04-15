@@ -6,11 +6,11 @@ import { buildTool } from '@/bridge/build-tool';
 // ---------------------------------------------------------------------------
 
 const SCORE_WEIGHTS = {
-  relevance: 0.30,
-  intent: 0.25,
-  exposure: 0.20,
-  freshness: 0.15,
-  engagement: 0.10,
+  relevance: 0.40,
+  intent: 0.35,
+  exposure: 0.10,
+  freshness: 0.10,
+  engagement: 0.05,
 };
 
 function scoreExposure(upvotes: number, comments: number): number {
