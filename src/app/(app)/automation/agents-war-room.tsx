@@ -63,7 +63,7 @@ export function AgentsWarRoom() {
       {/* Header row */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <h2 className="text-[13px] font-medium text-sf-text-secondary uppercase tracking-wider">
+          <h2 className="text-[14px] tracking-[-0.224px] font-medium text-sf-text-secondary uppercase">
             Automation
           </h2>
           <span
@@ -99,7 +99,7 @@ export function AgentsWarRoom() {
 
       {/* Error banner */}
       {errorMsg && (
-        <div className="mb-4 px-4 py-3 rounded-[var(--radius-sf-md)] bg-sf-error-light border border-sf-error/20 text-[13px] text-sf-error animate-sf-fade-in">
+        <div className="mb-4 px-4 py-3 rounded-[var(--radius-sf-md)] bg-sf-error-light text-[14px] tracking-[-0.224px] text-sf-error animate-sf-fade-in">
           {errorMsg}
         </div>
       )}
@@ -107,15 +107,15 @@ export function AgentsWarRoom() {
       {/* Empty state — show before first run */}
       {isIdle && Object.keys(agents).length === 0 ? (
         <div className="flex flex-col items-center justify-center py-24 animate-sf-fade-in">
-          <div className="w-16 h-16 mb-6 rounded-full bg-sf-bg-secondary border border-sf-border flex items-center justify-center">
+          <div className="w-16 h-16 mb-6 rounded-full bg-sf-bg-secondary shadow-[0_3px_5px_rgba(0,0,0,0.04),0_6px_20px_rgba(0,0,0,0.06)] flex items-center justify-center">
             <svg width="28" height="28" viewBox="0 0 16 16" fill="none" stroke="var(--color-sf-text-tertiary)" strokeWidth="1.2">
               <path d="M9 1L3 9h5l-1 6 6-8H8l1-6z" />
             </svg>
           </div>
-          <p className="text-[15px] font-medium text-sf-text-primary mb-1">
+          <p className="text-[17px] tracking-[-0.374px] font-medium text-sf-text-primary mb-1">
             Ready to launch
           </p>
-          <p className="text-[13px] text-sf-text-tertiary max-w-[320px] text-center">
+          <p className="text-[14px] tracking-[-0.224px] text-sf-text-tertiary max-w-[320px] text-center">
             Hit <span className="font-medium text-sf-text-secondary">Run Automation</span> to
             start the pipeline. Your AI agents will scout communities,
             discover threads, draft content, review, and post.
@@ -131,7 +131,7 @@ export function AgentsWarRoom() {
         onClose={() => setShowConnectDialog(false)}
         title="Connect an account"
       >
-        <p className="text-[14px] text-sf-text-secondary leading-relaxed mb-6">
+        <p className="text-[14px] tracking-[-0.224px] text-sf-text-secondary leading-relaxed mb-6">
           Automation needs a connected account to discover threads and post on your behalf.
           Connect Reddit, X, or both.
         </p>

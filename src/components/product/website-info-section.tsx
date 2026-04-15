@@ -107,7 +107,7 @@ export function WebsiteInfoSection({ url, seoAudit }: WebsiteInfoSectionProps) {
   if (!url) {
     return (
       <section>
-        <h2 className="text-[15px] font-semibold text-sf-text-primary mb-4">Website</h2>
+        <h2 className="text-[21px] font-bold tracking-[-0.12px] text-sf-text-primary mb-4">Website</h2>
         <Card>
           <form onSubmit={handleAddWebsite} className="flex flex-col gap-4">
             <Input
@@ -119,7 +119,7 @@ export function WebsiteInfoSection({ url, seoAudit }: WebsiteInfoSectionProps) {
               helper="We'll scan your page and update product details automatically."
               required
             />
-            {error && <p className="text-[13px] text-sf-error">{error}</p>}
+            {error && <p className="text-[14px] tracking-[-0.224px] text-sf-error">{error}</p>}
             <Button type="submit" disabled={scanning || !inputUrl}>
               {scanning ? 'Scanning...' : 'Scan website'}
             </Button>
@@ -133,11 +133,11 @@ export function WebsiteInfoSection({ url, seoAudit }: WebsiteInfoSectionProps) {
   return (
     <section>
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-[15px] font-semibold text-sf-text-primary">Website</h2>
+        <h2 className="text-[21px] font-bold tracking-[-0.12px] text-sf-text-primary">Website</h2>
         <div className="flex gap-2">
           <Button
             variant="ghost"
-            className="!min-h-[32px] !text-[13px] !px-3"
+            className="!min-h-[32px] !text-[14px] !tracking-[-0.224px] !px-3"
             onClick={handleRescan}
             disabled={rescanning || removing}
           >
@@ -145,7 +145,7 @@ export function WebsiteInfoSection({ url, seoAudit }: WebsiteInfoSectionProps) {
           </Button>
           <Button
             variant="ghost"
-            className="!min-h-[32px] !text-[13px] !px-3 text-sf-text-tertiary"
+            className="!min-h-[32px] !text-[14px] !tracking-[-0.224px] !px-3 text-sf-text-tertiary"
             onClick={handleRemove}
             disabled={rescanning || removing}
           >
@@ -161,12 +161,12 @@ export function WebsiteInfoSection({ url, seoAudit }: WebsiteInfoSectionProps) {
             href={url}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-[13px] font-medium text-sf-accent hover:underline"
+            className="text-[14px] tracking-[-0.224px] font-medium text-sf-accent hover:underline"
           >
             {url}
           </a>
         </div>
-        {error && <p className="text-[13px] text-sf-error mt-2">{error}</p>}
+        {error && <p className="text-[14px] tracking-[-0.224px] text-sf-error mt-2">{error}</p>}
       </Card>
 
       <div className="mt-4">

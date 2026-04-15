@@ -2,14 +2,16 @@ import type { HTMLAttributes, ReactNode } from 'react';
 
 interface CardProps extends HTMLAttributes<HTMLDivElement> {
   children: ReactNode;
+  elevated?: boolean;
 }
 
-export function Card({ children, className = '', ...props }: CardProps) {
+export function Card({ children, elevated, className = '', ...props }: CardProps) {
   return (
     <div
       className={`
-        bg-sf-bg-primary border border-sf-border
-        rounded-[var(--radius-sf-lg)] p-4
+        bg-sf-bg-secondary
+        rounded-[var(--radius-sf-lg)] p-5
+        ${elevated ? 'shadow-[var(--shadow-sf-elevated)]' : 'shadow-[var(--shadow-sf-card)]'}
         ${className}
       `}
       {...props}

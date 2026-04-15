@@ -17,6 +17,7 @@ export interface Preferences {
   contentMixProduct: number;
   notifyOnNewDraft: boolean;
   notifyOnAutoApprove: boolean;
+  timezone: string;
 }
 
 export function usePreferences() {

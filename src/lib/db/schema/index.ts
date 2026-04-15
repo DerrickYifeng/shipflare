@@ -18,4 +18,17 @@ export {
   xTweetMetrics,
   xFollowerSnapshots,
   xAnalyticsSummary,
+  // Platform-generic aliases
+  contentCalendar,
+  analyticsSummary,
+  targetAccounts,
+  monitoredContent,
 } from './x-growth';
+export {
+  todoItems,
+  todoTypeEnum,
+  todoSourceEnum,
+  todoPriorityEnum,
+  todoStatusEnum,
+} from './todos';
+export { discoveryConfigs } from './discovery-configs';

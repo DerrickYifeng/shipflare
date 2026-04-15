@@ -117,5 +117,5 @@ export async function GET(request: NextRequest) {
   }
 
   log.info(`Reddit account connected: u/${me.name}`);
-  return NextResponse.redirect(new URL('/dashboard', request.url));
+  return NextResponse.redirect(new URL('/today', request.url));
 }

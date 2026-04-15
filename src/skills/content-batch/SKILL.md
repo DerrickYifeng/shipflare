@@ -7,8 +7,10 @@ model: claude-sonnet-4-6
 allowed-tools: []
 fan-out: calendarItems
 max-concurrency: 3
-timeout: 30000
+timeout: 60000
 cache-safe: true
+shared-references:
+  - platforms/x-strategy.md
 ---
 
 # Content Batch Skill

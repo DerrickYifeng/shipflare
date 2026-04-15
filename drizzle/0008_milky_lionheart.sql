@@ -1,0 +1,1 @@
+ALTER TABLE "drafts" ADD COLUMN "media" jsonb DEFAULT '[]'::jsonb;

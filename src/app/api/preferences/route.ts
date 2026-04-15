@@ -17,6 +17,7 @@ const DEFAULT_PREFERENCES = {
   contentMixProduct: 10,
   notifyOnNewDraft: true,
   notifyOnAutoApprove: true,
+  timezone: 'America/Los_Angeles',
 };
 
 const updateSchema = z.object({
@@ -38,6 +39,7 @@ const updateSchema = z.object({
   contentMixProduct: z.number().int().min(0).max(100).optional(),
   notifyOnNewDraft: z.boolean().optional(),
   notifyOnAutoApprove: z.boolean().optional(),
+  timezone: z.string().optional(),
 });
 
 export async function GET() {
@@ -69,6 +71,7 @@ export async function GET() {
       contentMixProduct: prefs.contentMixProduct,
       notifyOnNewDraft: prefs.notifyOnNewDraft,
       notifyOnAutoApprove: prefs.notifyOnAutoApprove,
+      timezone: prefs.timezone,
     },
   });
 }
@@ -154,6 +157,7 @@ export async function PUT(request: Request) {
       contentMixProduct: result.contentMixProduct,
       notifyOnNewDraft: result.notifyOnNewDraft,
       notifyOnAutoApprove: result.notifyOnAutoApprove,
+      timezone: result.timezone,
     },
   });
 }

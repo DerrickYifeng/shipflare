@@ -37,9 +37,10 @@ export function Dialog({ open, onClose, title, children }: DialogProps) {
       ref={dialogRef}
       className="
         m-auto p-0 max-w-lg w-full
-        bg-sf-bg-primary border border-sf-border
-        rounded-[var(--radius-sf-lg)] shadow-xl
-        backdrop:bg-black/40
+        bg-sf-bg-secondary
+        rounded-[var(--radius-sf-lg)]
+        shadow-[var(--shadow-sf-elevated)]
+        backdrop:bg-black/40 backdrop:backdrop-blur-xl
         animate-sf-fade-in
       "
       aria-labelledby="dialog-title"
@@ -47,7 +48,7 @@ export function Dialog({ open, onClose, title, children }: DialogProps) {
       <div className="p-6">
         <h2
           id="dialog-title"
-          className="text-[18px] font-semibold text-sf-text-primary mb-4"
+          className="text-[21px] font-semibold text-sf-text-primary tracking-[0.231px] leading-[1.19] mb-4"
         >
           {title}
         </h2>

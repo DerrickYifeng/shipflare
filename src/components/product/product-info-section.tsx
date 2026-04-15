@@ -102,7 +102,7 @@ export function ProductInfoSection({ product }: ProductInfoSectionProps) {
   if (editing) {
     return (
       <section>
-        <h2 className="text-[15px] font-semibold text-sf-text-primary mb-4">Edit Product</h2>
+        <h2 className="text-[21px] font-bold tracking-[-0.12px] text-sf-text-primary mb-4">Edit Product</h2>
         <Card>
           <form onSubmit={handleSave} className="flex flex-col gap-4">
             <Input
@@ -113,7 +113,7 @@ export function ProductInfoSection({ product }: ProductInfoSectionProps) {
             />
 
             <div className="flex flex-col gap-1.5">
-              <label className="text-[13px] font-medium text-sf-text-primary">
+              <label className="text-[14px] tracking-[-0.224px] font-medium text-sf-text-primary">
                 Description
               </label>
               <textarea
@@ -124,10 +124,10 @@ export function ProductInfoSection({ product }: ProductInfoSectionProps) {
                 className="
                   w-full px-3 py-2
                   rounded-[var(--radius-sf-md)]
-                  border border-sf-border text-[15px] text-sf-text-primary
-                  bg-sf-bg-primary placeholder:text-sf-text-tertiary
+                  border border-[rgba(0,0,0,0.08)] text-[17px] tracking-[-0.374px] text-sf-text-primary
+                  bg-sf-bg-secondary placeholder:text-sf-text-tertiary
                   hover:border-sf-text-tertiary focus:border-sf-accent
-                  transition-colors duration-150 resize-none
+                  transition-colors duration-200 resize-none
                 "
               />
             </div>
@@ -146,7 +146,7 @@ export function ProductInfoSection({ product }: ProductInfoSectionProps) {
               helper="One sentence: what does your product do for users?"
             />
 
-            {error && <p className="text-[13px] text-sf-error">{error}</p>}
+            {error && <p className="text-[14px] tracking-[-0.224px] text-sf-error">{error}</p>}
 
             <div className="flex gap-2">
               <Button type="submit" disabled={saving || !name || !description}>
@@ -165,18 +165,18 @@ export function ProductInfoSection({ product }: ProductInfoSectionProps) {
   return (
     <section>
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-[15px] font-semibold text-sf-text-primary">Product Info</h2>
+        <h2 className="text-[21px] font-bold tracking-[-0.12px] text-sf-text-primary">Product Info</h2>
         <div className="flex gap-2">
           <Button
             variant="secondary"
-            className="!min-h-[32px] !text-[13px] !px-3"
+            className="!min-h-[32px] !text-[14px] !tracking-[-0.224px] !px-3"
             onClick={() => setEditing(true)}
           >
             Edit
           </Button>
           <Button
             variant="ghost"
-            className="!min-h-[32px] !text-[13px] !px-3 text-sf-text-tertiary"
+            className="!min-h-[32px] !text-[14px] !tracking-[-0.224px] !px-3 text-sf-text-tertiary"
             onClick={handleReset}
             disabled={resetting}
           >
@@ -186,8 +186,8 @@ export function ProductInfoSection({ product }: ProductInfoSectionProps) {
       </div>
 
       <Card>
-        <p className="text-[15px] font-medium text-sf-text-primary">{product.name}</p>
-        <p className="text-[13px] text-sf-text-secondary mt-3 leading-relaxed">
+        <p className="text-[17px] tracking-[-0.374px] font-medium text-sf-text-primary">{product.name}</p>
+        <p className="text-[14px] tracking-[-0.224px] text-sf-text-secondary mt-3 leading-[1.47]">
           {product.description}
         </p>
 
@@ -201,11 +201,11 @@ export function ProductInfoSection({ product }: ProductInfoSectionProps) {
 
         {product.valueProp && (
           <div className="mt-3 pl-3 border-l-2 border-sf-accent/30">
-            <p className="text-[13px] text-sf-text-secondary italic">{product.valueProp}</p>
+            <p className="text-[14px] tracking-[-0.224px] text-sf-text-secondary italic">{product.valueProp}</p>
           </div>
         )}
 
-        {error && <p className="text-[13px] text-sf-error mt-3">{error}</p>}
+        {error && <p className="text-[14px] tracking-[-0.224px] text-sf-error mt-3">{error}</p>}
       </Card>
     </section>
   );

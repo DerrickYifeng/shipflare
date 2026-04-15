@@ -5,8 +5,10 @@ context: fork
 agent: calendar-planner
 model: claude-sonnet-4-6
 allowed-tools: []
-timeout: 60000
+timeout: 90000
 cache-safe: false
+shared-references:
+  - platforms/x-strategy.md
 ---
 
 # Calendar Planner Skill

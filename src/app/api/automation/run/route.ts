@@ -6,11 +6,9 @@ import { eq, and } from 'drizzle-orm';
 import { enqueueDiscovery } from '@/lib/queue';
 import { publishEvent } from '@/lib/redis';
 import { createLogger } from '@/lib/logger';
+import { PLATFORMS, isPlatformAvailable } from '@/lib/platform-config';
 
 const log = createLogger('api:automation:run');
-
-const DEFAULT_SUBREDDITS = ['SideProject', 'startups', 'webdev'];
-const DEFAULT_X_TOPICS = ['SaaS', 'startup tools', 'indie hacker'];
 
 /**
  * POST /api/automation/run
@@ -57,9 +55,7 @@ export async function POST() {
     );
   }
 
-  const subreddits = DEFAULT_SUBREDDITS;
-  const xTopics = DEFAULT_X_TOPICS;
-  const platforms: string[] = [];
+  const activePlatforms: string[] = [];
 
   // Publish launch events so the UI shows agents waking up
   const eventChannel = `shipflare:events:${userId}`;
@@ -69,37 +65,27 @@ export async function POST() {
     currentTask: 'Scanning communities...',
   });
 
-  // Enqueue Reddit discovery if connected
-  if (redditChannel) {
-    platforms.push('reddit');
-    await enqueueDiscovery({
-      userId,
-      productId: product.id,
-      sources: subreddits,
-      platform: 'reddit',
-    });
-  }
+  // Enqueue discovery for each connected + available platform
+  for (const [platformId, config] of Object.entries(PLATFORMS)) {
+    const channel = userChannels.find((c) => c.platform === platformId);
+    if (!channel || !isPlatformAvailable(platformId)) continue;
 
-  // Enqueue X discovery if connected + xAI API key is available
-  if (xChannel && process.env.XAI_API_KEY) {
-    platforms.push('x');
+    activePlatforms.push(platformId);
     await enqueueDiscovery({
       userId,
       productId: product.id,
-      sources: xTopics,
-      platform: 'x',
+      sources: config.defaultSources,
+      platform: platformId,
     });
   }
 
   log.info(
-    `Automation triggered for product "${product.name}" (${product.id}), platforms: ${platforms.join(', ')}`,
+    `Automation triggered for product "${product.name}" (${product.id}), platforms: ${activePlatforms.join(', ')}`,
   );
 
   return NextResponse.json({
     ok: true,
     product: product.name,
-    platforms,
-    subreddits: redditChannel ? subreddits : undefined,
-    topics: xChannel ? xTopics : undefined,
+    platforms: activePlatforms,
   });
 }

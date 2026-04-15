@@ -9,7 +9,7 @@ compose:
   - community-discovery
   - thread-discovery
   - deep-analysis
-timeout: 300000
+timeout: 180000
 ---
 
 # Full Scan Skill

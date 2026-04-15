@@ -209,11 +209,19 @@ export class SwarmCoordinator {
   }
 
   /**
-   * Run a single agent with timeout and error isolation.
+   * Run a single agent with idle-based timeout and error isolation.
+   * The timer resets every time the agent makes progress (API response
+   * received, tool executed). Only fires when the agent is truly stuck.
    */
   private async runSingleAgent<T>(task: AgentTask<T>): Promise<AgentTaskResult<T>> {
     const abortController = new AbortController();
-    const timeout = setTimeout(() => abortController.abort(), this.timeoutPerAgent);
+
+    // Idle timeout: resets on every progress signal from the query loop.
+    let idleTimer = setTimeout(() => abortController.abort(), this.timeoutPerAgent);
+    const resetIdle = () => {
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => abortController.abort(), this.timeoutPerAgent);
+    };
 
     // Build a tool context that respects the timeout abort
     const timedContext: ToolContext = {
@@ -230,24 +238,26 @@ export class SwarmCoordinator {
         timedContext,
         task.outputSchema,
         task.onProgress ?? this.onProgress,
+        undefined,
+        resetIdle,
       );
 
       return { status: 'completed', result, label: task.label };
     } catch (error) {
       if (abortController.signal.aborted) {
-        log.warn(`Agent "${task.label}" timed out after ${this.timeoutPerAgent}ms`);
+        log.warn(`Agent "${task.label}" idle-timed out after ${this.timeoutPerAgent}ms of no progress`);
         return { status: 'timeout', label: task.label };
       }
       const message = error instanceof Error ? error.message : String(error);
       log.error(`Agent "${task.label}" failed: ${message}`);
       return { status: 'failed', error: message, label: task.label };
     } finally {
-      clearTimeout(timeout);
+      clearTimeout(idleTimer);
     }
   }
 
   /**
-   * Run a single cached agent with timeout and error isolation.
+   * Run a single cached agent with idle-based timeout and error isolation.
    * Passes pre-built cache blocks to runAgent for cache sharing.
    */
   private async runSingleCachedAgent<T>(
@@ -260,7 +270,12 @@ export class SwarmCoordinator {
     },
   ): Promise<AgentTaskResult<T>> {
     const abortController = new AbortController();
-    const timeout = setTimeout(() => abortController.abort(), this.timeoutPerAgent);
+
+    let idleTimer = setTimeout(() => abortController.abort(), this.timeoutPerAgent);
+    const resetIdle = () => {
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => abortController.abort(), this.timeoutPerAgent);
+    };
 
     const timedContext: ToolContext = {
       abortSignal: abortController.signal,
@@ -277,13 +292,14 @@ export class SwarmCoordinator {
         task.outputSchema,
         task.onProgress ?? this.onProgress,
         prebuilt,
+        resetIdle,
       );
 
       return { status: 'completed', result, label: task.label };
     } catch (error) {
       const onProg = task.onProgress ?? this.onProgress;
       if (abortController.signal.aborted) {
-        log.warn(`Cached agent "${task.label}" timed out after ${this.timeoutPerAgent}ms`);
+        log.warn(`Cached agent "${task.label}" idle-timed out after ${this.timeoutPerAgent}ms of no progress`);
         onProg?.({ type: 'agent_error', community: task.label, error: 'timeout' });
         return { status: 'timeout', label: task.label };
       }
@@ -292,7 +308,7 @@ export class SwarmCoordinator {
       onProg?.({ type: 'agent_error', community: task.label, error: message });
       return { status: 'failed', error: message, label: task.label };
     } finally {
-      clearTimeout(timeout);
+      clearTimeout(idleTimer);
     }
   }
 }

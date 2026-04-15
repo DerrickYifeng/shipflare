@@ -1,6 +1,6 @@
 'use client';
 
-import useSWR from 'swr';
+import useSWR, { mutate as globalMutate } from 'swr';
 import { useCallback } from 'react';
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
@@ -42,6 +42,12 @@ export function useCalendar(
       }
 
       mutate();
+
+      // Progressive Today page refresh as pipeline jobs complete
+      setTimeout(() => globalMutate('/api/today'), 5_000);
+      setTimeout(() => globalMutate('/api/today'), 30_000);
+      setTimeout(() => globalMutate('/api/today'), 120_000);
+
       return res.json();
     },
     [mutate],

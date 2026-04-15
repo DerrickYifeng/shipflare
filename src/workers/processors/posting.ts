@@ -4,32 +4,22 @@ import { drafts, posts, threads, channels, activityEvents } from '@/lib/db/schem
 import { eq } from 'drizzle-orm';
 import { RedditClient } from '@/lib/reddit-client';
 import { XClient } from '@/lib/x-client';
-import { runAgent, createToolContext } from '@/bridge/agent-runner';
-import { loadAgentFromFile } from '@/bridge/load-agent';
-import { registry } from '@/tools/registry';
+import { loadSkill } from '@/core/skill-loader';
+import { runSkill } from '@/core/skill-runner';
 import { isCircuitBreakerTripped, tripCircuitBreaker } from '@/lib/circuit-breaker';
 import { canPostToSubreddit } from '@/lib/rate-limiter';
-import { enqueueXEngagement } from '@/lib/queue';
+import { enqueueEngagement } from '@/lib/queue';
 import { publishEvent } from '@/lib/redis';
 import { join } from 'path';
-import { z } from 'zod';
 import type { PostingJobData } from '@/lib/queue/types';
+import { postingOutputSchema } from '@/agents/schemas';
+import type { PostingOutput } from '@/agents/schemas';
 import { createLogger } from '@/lib/logger';
 
 const MAX_ENGAGEMENT_DEPTH = 2;
 const log = createLogger('worker:posting');
 
-const postingOutputSchema = z.object({
-  success: z.boolean(),
-  draftType: z.enum(['reply', 'original_post']).optional(),
-  commentId: z.string().nullable(),
-  postId: z.string().nullable().optional(),
-  permalink: z.string().nullable(),
-  url: z.string().nullable().optional(),
-  verified: z.boolean(),
-  shadowbanned: z.boolean(),
-  error: z.string().optional(),
-});
+const postingSkill = loadSkill(join(process.cwd(), 'src/skills/posting'));
 
 export async function processPosting(job: Job<PostingJobData>) {
   const { userId, draftId, channelId } = job.data;
@@ -85,20 +75,8 @@ export async function processPosting(job: Job<PostingJobData>) {
   const isX = channel.platform === 'x';
   const draftType = draft.draftType ?? 'reply';
 
-  // Load platform-specific agent and client
-  const toolMap = registry.toMap();
-  const cwd = process.cwd();
-
-  const agentConfig = loadAgentFromFile(
-    join(cwd, 'src/agents/posting.md'),
-    toolMap,
-  );
-
-  const context = isX
-    ? createToolContext({ xClient: XClient.fromChannel(channel) })
-    : createToolContext({ redditClient: RedditClient.fromChannel(channel) });
-
-  const userMessage = JSON.stringify({
+  // Build input for the posting skill
+  const input: Record<string, unknown> = {
     platform: isX ? 'x' : 'reddit',
     draftType,
     draftText: draft.replyBody,
@@ -113,14 +91,22 @@ export async function processPosting(job: Job<PostingJobData>) {
       tweetId: thread.externalId,
       topic: thread.community,
     } : {}),
+  };
+
+  // Inject platform client as dependency
+  const deps = isX
+    ? { xClient: XClient.fromChannel(channel) }
+    : { redditClient: RedditClient.fromChannel(channel) };
+
+  const { results, usage } = await runSkill<PostingOutput>({
+    skill: postingSkill,
+    input,
+    deps,
+    outputSchema: postingOutputSchema,
   });
 
-  const { result, usage } = await runAgent(
-    agentConfig,
-    userMessage,
-    context,
-    postingOutputSchema,
-  );
+  const result = results[0];
+  if (!result) throw new Error(`Posting skill returned no results for draft ${draftId}`);
 
   const externalId = result.commentId ?? result.postId ?? null;
   const externalUrl = isX
@@ -167,12 +153,13 @@ export async function processPosting(job: Job<PostingJobData>) {
       } else {
         // Schedule engagement monitoring at +15, +30, +60 minutes
         for (const delayMin of [15, 30, 60]) {
-          await enqueueXEngagement(
+          await enqueueEngagement(
             {
               userId,
-              tweetId: externalId,
-              originalText: draft.replyBody,
+              contentId: externalId,
+              contentText: draft.replyBody,
               productId: '',
+              platform: 'x',
             },
             delayMin * 60 * 1000,
           );

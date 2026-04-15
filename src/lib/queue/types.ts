@@ -2,7 +2,7 @@ export interface DiscoveryJobData {
   userId: string;
   productId: string;
   sources: string[];
-  platform: 'reddit' | 'x';
+  platform: string;
 }
 
 export interface ContentJobData {
@@ -40,30 +40,54 @@ export interface CodeScanJobData {
   githubToken: string;
 }
 
-export interface XMonitorJobData {
+export interface MonitorJobData {
   userId: string;
   productId: string;
+  platform: string;
 }
 
-export interface XContentCalendarJobData {
+export interface ContentCalendarJobData {
   userId: string;
   productId: string;
+  platform: string;
+  processUpcoming?: boolean; // When true, process items scheduled within next 48h, not just overdue
 }
 
-export interface XEngagementJobData {
+export interface EngagementJobData {
   userId: string;
-  tweetId: string;
-  originalText: string;
+  contentId: string;
+  contentText: string;
   productId: string;
+  platform: string;
 }
 
-export interface XMetricsJobData {
+export interface MetricsJobData {
+  userId: string;
+  platform: string;
+}
+
+export interface AnalyticsJobData {
+  userId: string;
+  platform: string;
+}
+
+export interface TodoSeedJobData {
   userId: string;
 }
 
-export interface XAnalyticsJobData {
+export interface CalibrationJobData {
   userId: string;
+  productId: string;
+  /** Max calibration rounds (default: 10). Use 3 for mini re-calibration. */
+  maxRounds?: number;
 }
+
+// Backward-compat aliases (will be removed after full migration)
+export type XMonitorJobData = MonitorJobData;
+export type XContentCalendarJobData = ContentCalendarJobData;
+export type XEngagementJobData = EngagementJobData;
+export type XMetricsJobData = MetricsJobData;
+export type XAnalyticsJobData = AnalyticsJobData;
 
 export type JobData =
   | DiscoveryJobData
@@ -73,8 +97,10 @@ export type JobData =
   | HealthScoreJobData
   | DreamJobData
   | CodeScanJobData
-  | XMonitorJobData
-  | XContentCalendarJobData
-  | XEngagementJobData
-  | XMetricsJobData
-  | XAnalyticsJobData;
+  | MonitorJobData
+  | ContentCalendarJobData
+  | EngagementJobData
+  | MetricsJobData
+  | AnalyticsJobData
+  | TodoSeedJobData
+  | CalibrationJobData;

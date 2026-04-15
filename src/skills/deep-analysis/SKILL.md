@@ -8,7 +8,7 @@ allowed-tools:
   - reddit_get_thread
   - hn_get_thread
   - classify_intent
-timeout: 30000
+timeout: 60000
 cache-safe: false
 ---
 

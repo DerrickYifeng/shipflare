@@ -177,6 +177,8 @@ export async function runAgent<T>(
     cachedTools?: Anthropic.Messages.Tool[];
     forkContextMessages?: Anthropic.Messages.MessageParam[];
   },
+  /** Called on every progress signal to reset the idle timeout in the swarm. */
+  onIdleReset?: () => void,
 ): Promise<AgentResult<T>> {
   log.debug(`Agent "${config.name}" starting (model=${config.model}, maxTurns=${config.maxTurns})`);
 
@@ -209,6 +211,8 @@ export async function runAgent<T>(
       systemBlocks: prebuilt?.systemBlocks,
     });
 
+    // API responded — reset idle timer (agent is making progress)
+    onIdleReset?.();
     tracker.add(usage, config.model);
 
     log.debug(`Agent "${config.name}" turn ${turn}: stop_reason=${response.stop_reason}, blocks=${response.content.map(b => b.type).join(',')}`);
@@ -230,6 +234,8 @@ export async function runAgent<T>(
           }
         }
         if (event.type === 'tool_done' && !event.result.is_error) {
+          // Tool completed — reset idle timer
+          onIdleReset?.();
           const input = toolUseBlocks.find((b) => b.id === event.toolUseId)?.input;
           const query = (input as Record<string, unknown>)?.query as string | undefined;
           if (onProgress && query) {
@@ -264,6 +270,7 @@ export async function runAgent<T>(
       if (orphanedToolUse.length > 0) {
         messages.push({ role: 'assistant', content: response.content });
         const toolResults = await executeTools(orphanedToolUse, config.tools, context);
+        onIdleReset?.(); // Tools executed — reset idle timer
         if (toolResults.length > 0) {
           messages.push({ role: 'user', content: toolResults });
         }
@@ -360,21 +367,56 @@ export function createToolContext(
 // ---------------------------------------------------------------------------
 
 /**
- * Extract JSON from text that may be wrapped in markdown code blocks.
- * Handles: raw JSON, ```json ... ```, ``` ... ```.
+ * Extract JSON from text that may be wrapped in markdown code blocks
+ * or have trailing content after the JSON object.
+ * Handles: raw JSON, ```json ... ```, ``` ... ```, JSON with trailing text.
  */
 function extractJson(text: string): string {
   const trimmed = text.trim();
 
-  // Try raw JSON first
-  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-    return trimmed;
-  }
-
-  // Try markdown code block
+  // Try markdown code block first (most reliable — bounded by ```)
   const codeBlockMatch = trimmed.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
   if (codeBlockMatch?.[1]) {
     return codeBlockMatch[1].trim();
+  }
+
+  // Try raw JSON — find the matching closing bracket by counting depth
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    const open = trimmed[0]!;
+    const close = open === '{' ? '}' : ']';
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+
+    for (let i = 0; i < trimmed.length; i++) {
+      const ch = trimmed[i]!;
+
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (ch === '\\' && inString) {
+        escaped = true;
+        continue;
+      }
+      if (ch === '"') {
+        inString = !inString;
+        continue;
+      }
+      if (inString) continue;
+
+      if (ch === open) depth++;
+      else if (ch === close) {
+        depth--;
+        if (depth === 0) {
+          // Found the matching close — return substring up to here
+          return trimmed.slice(0, i + 1);
+        }
+      }
+    }
+
+    // Depth never reached 0 — return as-is and let JSON.parse report the error
+    return trimmed;
   }
 
   // Fallback: try to find JSON object/array in the text

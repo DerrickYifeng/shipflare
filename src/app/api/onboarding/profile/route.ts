@@ -1,9 +1,11 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { products } from '@/lib/db/schema';
+import { products, channels, discoveryConfigs } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { auditSeo } from '@/tools/seo-audit';
+import { enqueueCalibration } from '@/lib/queue';
+import { isPlatformAvailable } from '@/lib/platform-config';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('api:onboarding');
@@ -86,6 +88,46 @@ export async function PUT(request: Request) {
       valueProp: valueProp ?? null,
       seoAuditJson: seoAudit,
     });
+
+    // Trigger calibration for new products
+    const [newProduct] = await db
+      .select({ id: products.id })
+      .from(products)
+      .where(eq(products.userId, session.user.id))
+      .limit(1);
+
+    if (newProduct) {
+      // Create default discovery configs + enqueue calibration
+      const userChannels = await db
+        .select({ platform: channels.platform })
+        .from(channels)
+        .where(eq(channels.userId, session.user.id));
+
+      const platforms = [
+        ...new Set(userChannels.map((c) => c.platform)),
+      ].filter(isPlatformAvailable);
+
+      for (const platform of platforms) {
+        await db
+          .insert(discoveryConfigs)
+          .values({
+            userId: session.user.id,
+            platform,
+            calibrationStatus: 'pending',
+          })
+          .onConflictDoNothing();
+      }
+
+      if (platforms.length > 0) {
+        await enqueueCalibration({
+          userId: session.user.id,
+          productId: newProduct.id,
+        });
+        log.info(
+          `Enqueued calibration for new product ${newProduct.id}, platforms: ${platforms.join(', ')}`,
+        );
+      }
+    }
   }
 
   return NextResponse.json({ success: true });

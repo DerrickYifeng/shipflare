@@ -15,13 +15,14 @@ import type {
 } from '@/agents/schemas';
 import { createLogger } from '@/lib/logger';
 import { join } from 'path';
+import { PLATFORMS } from '@/lib/platform-config';
 
 const log = createLogger('pipeline:full-scan');
 
 const SKILLS_DIR = join(process.cwd(), 'src', 'skills');
 const MAX_SCAN_SUBREDDITS = 3;
 const MAX_RESULTS_PER_PLATFORM = 10;
-const FALLBACK_SUBREDDITS = ['SideProject', 'startups', 'webdev'];
+const FALLBACK_SUBREDDITS = PLATFORMS.reddit.defaultSources;
 
 export interface FullScanResult {
   product: { name: string; description: string; url: string };

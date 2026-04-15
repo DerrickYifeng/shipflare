@@ -59,7 +59,7 @@ export function ProfileReviewStep({ profile, onSaved }: ProfileReviewStepProps) 
       />
 
       <div className="flex flex-col gap-1.5">
-        <label className="text-[13px] font-medium text-sf-text-primary">
+        <label className="text-[14px] tracking-[-0.224px] font-medium text-sf-text-primary">
           Description
         </label>
         <textarea
@@ -70,10 +70,10 @@ export function ProfileReviewStep({ profile, onSaved }: ProfileReviewStepProps) 
           className="
             w-full px-3 py-2
             rounded-[var(--radius-sf-md)]
-            border border-sf-border text-[15px] text-sf-text-primary
-            bg-sf-bg-primary placeholder:text-sf-text-tertiary
+            border border-[rgba(0,0,0,0.08)] text-[17px] tracking-[-0.374px] text-sf-text-primary
+            bg-sf-bg-secondary placeholder:text-sf-text-tertiary
             hover:border-sf-text-tertiary focus:border-sf-accent
-            transition-colors duration-150 resize-none
+            transition-colors duration-200 resize-none
           "
         />
       </div>
@@ -92,7 +92,7 @@ export function ProfileReviewStep({ profile, onSaved }: ProfileReviewStepProps) 
         helper="One sentence: what does your product do for users?"
       />
 
-      {error && <p className="text-[13px] text-sf-error">{error}</p>}
+      {error && <p className="text-[14px] tracking-[-0.224px] text-sf-error">{error}</p>}
 
       <Button type="submit" disabled={loading || !name || !description}>
         {loading ? 'Saving...' : 'Save and continue'}

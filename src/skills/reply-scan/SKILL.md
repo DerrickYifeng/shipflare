@@ -9,7 +9,7 @@ allowed-tools:
   - x_search
 fan-out: tweets
 max-concurrency: 3
-timeout: 30000
+timeout: 60000
 cache-safe: true
 ---
 

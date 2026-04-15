@@ -4,7 +4,8 @@ const log = createLogger('lib:xai');
 
 const XAI_BASE_URL = 'https://api.x.ai/v1';
 const XAI_MODEL = 'grok-4-fast';
-const FETCH_TIMEOUT_MS = 30_000;
+const FETCH_TIMEOUT_MS = 15_000;
+const FETCH_RETRY_TIMEOUT_MS = 30_000;
 
 export interface XSearchTweet {
   tweetId: string;
@@ -94,41 +95,27 @@ export class XAIClient {
 
     log.debug(`Searching X via xAI: "${query}"`);
 
-    // Compose abort: caller signal (from swarm timeout) + per-request timeout
-    const timeoutController = new AbortController();
-    const timeoutId = setTimeout(() => timeoutController.abort(), FETCH_TIMEOUT_MS);
-    const signal = opts?.signal
-      ? AbortSignal.any([opts.signal, timeoutController.signal])
-      : timeoutController.signal;
+    const requestBody = JSON.stringify({
+      model: XAI_MODEL,
+      tools,
+      input: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: query },
+      ],
+    });
 
-    let response: Response;
+    let data: XAIResponse;
     try {
-      response = await fetch(`${XAI_BASE_URL}/responses`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${this.apiKey}`,
-        },
-        body: JSON.stringify({
-          model: XAI_MODEL,
-          tools,
-          input: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: query },
-          ],
-        }),
-        signal,
-      });
-    } finally {
-      clearTimeout(timeoutId);
+      data = await this.fetchWithTimeout(requestBody, FETCH_TIMEOUT_MS, opts?.signal);
+    } catch (err) {
+      // On timeout, retry once with a longer timeout
+      if (err instanceof Error && err.name === 'AbortError') {
+        log.warn(`xAI search timed out after ${FETCH_TIMEOUT_MS}ms, retrying with ${FETCH_RETRY_TIMEOUT_MS}ms`);
+        data = await this.fetchWithTimeout(requestBody, FETCH_RETRY_TIMEOUT_MS, opts?.signal);
+      } else {
+        throw err;
+      }
     }
-
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => '');
-      throw new Error(`xAI API error ${response.status}: ${errorText}`);
-    }
-
-    const data = (await response.json()) as XAIResponse;
 
     const rawText = this.extractText(data);
     const tweetsFromText = this.parseTweetLines(rawText);
@@ -154,6 +141,40 @@ export class XAIClient {
       rawText,
       searchCalls: data.server_side_tool_usage?.x_search_calls ?? 0,
     };
+  }
+
+  private async fetchWithTimeout(
+    body: string,
+    timeoutMs: number,
+    callerSignal?: AbortSignal,
+  ): Promise<XAIResponse> {
+    const timeoutController = new AbortController();
+    const timeoutId = setTimeout(() => timeoutController.abort(), timeoutMs);
+    const signal = callerSignal
+      ? AbortSignal.any([callerSignal, timeoutController.signal])
+      : timeoutController.signal;
+
+    let response: Response;
+    try {
+      response = await fetch(`${XAI_BASE_URL}/responses`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.apiKey}`,
+        },
+        body,
+        signal,
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '');
+      throw new Error(`xAI API error ${response.status}: ${errorText}`);
+    }
+
+    return (await response.json()) as XAIResponse;
   }
 
   private extractText(data: XAIResponse): string {

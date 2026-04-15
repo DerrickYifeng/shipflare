@@ -10,7 +10,7 @@ import {
 import { eq, and, gte } from 'drizzle-orm';
 import { XClient, XForbiddenError } from '@/lib/x-client';
 import { publishEvent } from '@/lib/redis';
-import type { XMetricsJobData } from '@/lib/queue/types';
+import type { MetricsJobData } from '@/lib/queue/types';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('worker:x-metrics');
@@ -139,7 +139,7 @@ async function processXMetricsForUser(userId: string) {
   });
 }
 
-export async function processXMetrics(job: Job<XMetricsJobData>) {
+export async function processXMetrics(job: Job<MetricsJobData>) {
   const { userId } = job.data;
 
   if (userId === '__all__') {

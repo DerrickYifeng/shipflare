@@ -16,7 +16,7 @@ export function ActivityTimeline() {
 
   if (isLoading || events.length === 0) {
     return (
-      <div className="flex items-center justify-center h-full text-[13px] text-sf-text-tertiary">
+      <div className="flex items-center justify-center h-full text-[14px] tracking-[-0.224px] text-sf-text-tertiary">
         {isLoading ? 'Loading...' : 'No recent activity'}
       </div>
     );
@@ -36,13 +36,13 @@ export function ActivityTimeline() {
         return (
           <div
             key={event.id}
-            className="shrink-0 flex flex-col gap-1.5 p-3 bg-sf-bg-secondary rounded-[var(--radius-sf-md)] min-w-[120px]"
+            className="shrink-0 flex flex-col gap-1.5 p-3 bg-sf-bg-secondary rounded-[var(--radius-sf-md)] min-w-[120px] shadow-[0_3px_5px_rgba(0,0,0,0.04),0_6px_20px_rgba(0,0,0,0.06)]"
           >
             <Badge variant={config.variant}>{config.label}</Badge>
             {community && (
-              <span className="text-[11px] text-sf-text-secondary">{community}</span>
+              <span className="text-[12px] tracking-[-0.12px] text-sf-text-secondary">{community}</span>
             )}
-            <span className="text-[11px] text-sf-text-tertiary font-mono">{time}</span>
+            <span className="text-[12px] tracking-[-0.12px] text-sf-text-tertiary font-mono">{time}</span>
           </div>
         );
       })}

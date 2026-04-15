@@ -9,11 +9,13 @@ import type {
   HealthScoreJobData,
   DreamJobData,
   CodeScanJobData,
-  XMonitorJobData,
-  XContentCalendarJobData,
-  XEngagementJobData,
-  XMetricsJobData,
-  XAnalyticsJobData,
+  MonitorJobData,
+  ContentCalendarJobData,
+  EngagementJobData,
+  MetricsJobData,
+  AnalyticsJobData,
+  TodoSeedJobData,
+  CalibrationJobData,
 } from './types';
 
 const log = createLogger('lib:queue');
@@ -33,11 +35,18 @@ export const healthScoreQueue = new Queue<HealthScoreJobData>(
 );
 export const dreamQueue = new Queue<DreamJobData>('dream', connection);
 export const codeScanQueue = new Queue<CodeScanJobData>('code-scan', connection);
-export const xMonitorQueue = new Queue<XMonitorJobData>('x-monitor', connection);
-export const xContentCalendarQueue = new Queue<XContentCalendarJobData>('x-content-calendar', connection);
-export const xEngagementQueue = new Queue<XEngagementJobData>('x-engagement', connection);
-export const xMetricsQueue = new Queue<XMetricsJobData>('x-metrics', connection);
-export const xAnalyticsQueue = new Queue<XAnalyticsJobData>('x-analytics', connection);
+export const monitorQueue = new Queue<MonitorJobData>('monitor', connection);
+export const contentCalendarQueue = new Queue<ContentCalendarJobData>('content-calendar', connection);
+export const engagementQueue = new Queue<EngagementJobData>('engagement', connection);
+export const metricsQueue = new Queue<MetricsJobData>('metrics', connection);
+export const analyticsQueue = new Queue<AnalyticsJobData>('analytics', connection);
+
+// Backward-compat aliases (will be removed after full migration)
+export const xMonitorQueue = monitorQueue;
+export const xContentCalendarQueue = contentCalendarQueue;
+export const xEngagementQueue = engagementQueue;
+export const xMetricsQueue = metricsQueue;
+export const xAnalyticsQueue = analyticsQueue;
 
 /**
  * Enqueue a discovery scan for a user's product across sources (subreddits or topics).
@@ -129,46 +138,46 @@ export async function enqueueCodeScan(data: CodeScanJobData): Promise<string> {
 }
 
 // ----------------------------------------------------------------
-//  X Growth queues
+//  Growth queues (platform-aware)
 // ----------------------------------------------------------------
 
 /**
- * Enqueue X monitor scan: poll target accounts for new tweets.
+ * Enqueue monitor scan: poll target accounts for new posts.
  */
-export async function enqueueXMonitor(data: XMonitorJobData): Promise<void> {
-  log.debug(`Enqueued x-monitor for user ${data.userId}`);
-  await xMonitorQueue.add('scan', data, {
+export async function enqueueMonitor(data: MonitorJobData): Promise<void> {
+  log.debug(`Enqueued ${data.platform} monitor for user ${data.userId}`);
+  await monitorQueue.add('scan', data, {
     attempts: 2,
     backoff: { type: 'exponential', delay: 5000 },
   });
 }
 
 /**
- * Enqueue X content calendar processing: generate drafts for scheduled posts.
+ * Enqueue content calendar processing: generate drafts for scheduled posts.
  */
-export async function enqueueXContentCalendar(
-  data: XContentCalendarJobData,
+export async function enqueueContentCalendar(
+  data: ContentCalendarJobData,
 ): Promise<void> {
-  log.debug(`Enqueued x-content-calendar for user ${data.userId}`);
-  await xContentCalendarQueue.add('process', data, {
+  log.debug(`Enqueued ${data.platform} content-calendar for user ${data.userId}`);
+  await contentCalendarQueue.add('process', data, {
     attempts: 2,
     backoff: { type: 'exponential', delay: 3000 },
   });
 }
 
 /**
- * Enqueue X engagement monitoring for a recently posted tweet.
+ * Enqueue engagement monitoring for a recently posted piece of content.
  * Accepts a delay (ms) for scheduling checks at +15/30/60 minutes.
  */
-export async function enqueueXEngagement(
-  data: XEngagementJobData,
+export async function enqueueEngagement(
+  data: EngagementJobData,
   delayMs?: number,
 ): Promise<void> {
   log.debug(
-    `Enqueued x-engagement for tweet ${data.tweetId}` +
+    `Enqueued ${data.platform} engagement for content ${data.contentId}` +
       (delayMs ? ` (delay ${Math.round(delayMs / 1000)}s)` : ''),
   );
-  await xEngagementQueue.add('monitor', data, {
+  await engagementQueue.add('monitor', data, {
     attempts: 2,
     backoff: { type: 'exponential', delay: 3000 },
     ...(delayMs ? { delay: delayMs } : {}),
@@ -176,23 +185,66 @@ export async function enqueueXEngagement(
 }
 
 /**
- * Enqueue X metrics collection: batch-fetch tweet performance data.
+ * Enqueue metrics collection: batch-fetch post performance data.
  */
-export async function enqueueXMetrics(data: XMetricsJobData): Promise<void> {
-  log.debug(`Enqueued x-metrics for user ${data.userId}`);
-  await xMetricsQueue.add('collect', data, {
+export async function enqueueMetrics(data: MetricsJobData): Promise<void> {
+  log.debug(`Enqueued ${data.platform} metrics for user ${data.userId}`);
+  await metricsQueue.add('collect', data, {
     attempts: 3,
     backoff: { type: 'exponential', delay: 2000 },
   });
 }
 
 /**
- * Enqueue X analytics computation: aggregate metrics into insights.
+ * Enqueue analytics computation: aggregate metrics into insights.
  */
-export async function enqueueXAnalytics(data: XAnalyticsJobData): Promise<void> {
-  log.debug(`Enqueued x-analytics for user ${data.userId}`);
-  await xAnalyticsQueue.add('compute', data, {
+export async function enqueueAnalytics(data: AnalyticsJobData): Promise<void> {
+  log.debug(`Enqueued ${data.platform} analytics for user ${data.userId}`);
+  await analyticsQueue.add('compute', data, {
     attempts: 2,
     backoff: { type: 'exponential', delay: 3000 },
+  });
+}
+
+// Backward-compat function aliases (will be removed after full migration)
+export const enqueueXMonitor = enqueueMonitor;
+export const enqueueXContentCalendar = enqueueContentCalendar;
+export const enqueueXEngagement = enqueueEngagement;
+export const enqueueXMetrics = enqueueMetrics;
+export const enqueueXAnalytics = enqueueAnalytics;
+
+// ----------------------------------------------------------------
+//  Today queue
+// ----------------------------------------------------------------
+
+export const todoSeedQueue = new Queue<TodoSeedJobData>('todo-seed', connection);
+export const calibrationQueue = new Queue<CalibrationJobData>(
+  'calibration',
+  connection,
+);
+
+/**
+ * Enqueue todo seed: populate daily todo items for a user.
+ */
+export async function enqueueTodoSeed(data: TodoSeedJobData): Promise<void> {
+  log.debug(`Enqueued todo-seed for user ${data.userId}`);
+  await todoSeedQueue.add('seed', data, {
+    attempts: 2,
+    backoff: { type: 'exponential', delay: 3000 },
+  });
+}
+
+/**
+ * Enqueue discovery calibration: run the optimize loop for a user's product.
+ * No retries — partial progress is checkpointed to DB after each round.
+ */
+export async function enqueueCalibration(
+  data: CalibrationJobData,
+): Promise<void> {
+  log.debug(
+    `Enqueued calibration for product ${data.productId} (maxRounds=${data.maxRounds ?? 10})`,
+  );
+  await calibrationQueue.add('calibrate', data, {
+    attempts: 1,
   });
 }

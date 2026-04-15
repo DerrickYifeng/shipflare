@@ -46,6 +46,10 @@ next-env.d.ts
 
 # gstack
 .gstack/
+.gstack-audit/
+
+# user uploads
+/public/uploads/
 
 # claude code
 .claude/

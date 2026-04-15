@@ -15,11 +15,17 @@ Adapt queries for X style — shorter, conversational. X search via Grok underst
 
 ## Filtering Noise
 
-X search returns a LOT of self-promotion and tool roundup threads. Apply these filters BEFORE scoring:
-- **Competitor self-promo**: Tweets announcing/promoting the author's own marketing tool → relevance ≤ 0.2
-- **Tool roundup lists** ("Top 10 AI tools", "Here are 60 tools"): The author is a curator, not a potential user → relevance ≤ 0.2
-- **Generic AI news** sharing without personal pain: Not a potential user → relevance ≤ 0.1
-- Focus on tweets where the author is **asking a question**, **describing a problem**, or **venting frustration** — these are potential users
+X search returns mostly promotional and advisory content. Apply these filters BEFORE scoring:
+- **Competitor self-promo**: Author promoting their own tool → relevance ≤ 0.2, intent = 0.0
+- **Tool roundup lists** ("Top 10 tools", "Here are 60 tools"): Curator, not user → relevance ≤ 0.2
+- **Teaching/coaching threads** ("Here's how to...", "My framework..."): Giving advice, not seeking → intent ≤ 0.2
+- **Success stories** ("How I got X users", "Here's what worked"): Sharing, not seeking → intent ≤ 0.2
+- **Generic news/opinion** without personal pain: Not a potential user → relevance ≤ 0.1
+
+Only score HIGH for tweets where the author is:
+- **Asking a question** ("how do I...?", "anyone know...?")
+- **Describing their OWN struggle** ("I can't figure out...", "been trying to...")
+- **Requesting recommendations** ("what tools do you use for...?")
 
 ## Field Mapping
 

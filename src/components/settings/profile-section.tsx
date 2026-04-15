@@ -9,7 +9,7 @@ interface ProfileSectionProps {
 export function ProfileSection({ user }: ProfileSectionProps) {
   return (
     <section>
-      <h2 className="text-[15px] font-semibold text-sf-text-primary mb-4">Profile</h2>
+      <h2 className="text-[21px] font-bold tracking-[-0.12px] text-sf-text-primary mb-4">Profile</h2>
       <div className="flex items-center gap-4">
         {user.image && (
           <img
@@ -21,8 +21,8 @@ export function ProfileSection({ user }: ProfileSectionProps) {
           />
         )}
         <div>
-          <p className="text-[15px] font-medium text-sf-text-primary">{user.name ?? 'Unknown'}</p>
-          <p className="text-[13px] text-sf-text-secondary">{user.email ?? ''}</p>
+          <p className="text-[17px] tracking-[-0.374px] font-medium text-sf-text-primary">{user.name ?? 'Unknown'}</p>
+          <p className="text-[14px] tracking-[-0.224px] text-sf-text-secondary">{user.email ?? ''}</p>
         </div>
       </div>
     </section>

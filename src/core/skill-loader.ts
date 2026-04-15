@@ -145,6 +145,20 @@ export function loadSkill(skillDir: string): SkillConfig {
     }
   }
 
+  // Load shared references declared in frontmatter
+  const sharedRefPaths = Array.isArray(meta['shared-references'])
+    ? (meta['shared-references'] as string[])
+    : [];
+  const sharedRefsRoot = join(process.cwd(), 'src', 'references');
+  for (const refPath of sharedRefPaths) {
+    const fullPath = join(sharedRefsRoot, refPath);
+    const filename = refPath.split('/').pop()!;
+    // Skill-local references win on filename collision
+    if (existsSync(fullPath) && !(filename in references)) {
+      references[filename] = readFileSync(fullPath, 'utf-8');
+    }
+  }
+
   return {
     name,
     description: (meta.description as string) ?? '',

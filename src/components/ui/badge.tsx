@@ -10,10 +10,10 @@ interface BadgeProps {
 }
 
 const variantStyles: Record<BadgeVariant, string> = {
-  default: 'bg-sf-bg-tertiary text-sf-text-secondary',
-  success: 'bg-sf-success-light text-sf-success',
-  warning: 'bg-sf-warning-light text-sf-warning',
-  error: 'bg-sf-error-light text-sf-error',
+  default: 'bg-black/[0.05] text-sf-text-secondary',
+  success: 'bg-sf-success-light text-[#248a3d]',
+  warning: 'bg-sf-warning-light text-[#c67a05]',
+  error: 'bg-sf-error-light text-[#d70015]',
   accent: 'bg-sf-accent-light text-sf-accent',
 };
 
@@ -23,7 +23,7 @@ export function Badge({ children, variant = 'default', mono, className = '' }: B
       className={`
         inline-flex items-center px-2 py-0.5
         rounded-[var(--radius-sf-sm)]
-        text-[11px] font-medium leading-4
+        text-[12px] font-medium leading-4 tracking-[-0.12px]
         ${mono ? 'font-mono' : ''}
         ${variantStyles[variant]}
         ${className}

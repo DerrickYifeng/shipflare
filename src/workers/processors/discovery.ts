@@ -1,15 +1,14 @@
 import type { Job } from 'bullmq';
 import { db } from '@/lib/db';
-import { products, threads, activityEvents } from '@/lib/db/schema';
+import { products, threads, activityEvents, discoveryConfigs } from '@/lib/db/schema';
 import { channels } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
-import { RedditClient } from '@/lib/reddit-client';
-import { XAIClient } from '@/lib/xai-client';
+import { createPlatformDeps } from '@/lib/platform-deps';
 import { loadSkill } from '@/core/skill-loader';
 import { runSkill } from '@/core/skill-runner';
 import { discoveryOutputSchema } from '@/agents/schemas';
 import type { DiscoveryOutput } from '@/agents/schemas';
-import { enqueueContent, enqueueDream } from '@/lib/queue';
+import { enqueueContent, enqueueDream, enqueueDiscovery } from '@/lib/queue';
 import { publishEvent } from '@/lib/redis';
 import { join } from 'path';
 import type { DiscoveryJobData } from '@/lib/queue/types';
@@ -17,6 +16,7 @@ import { createLogger } from '@/lib/logger';
 import { MemoryStore } from '@/memory/store';
 import { AgentDream } from '@/memory/dream';
 import { buildMemoryPrompt } from '@/memory/prompt-builder';
+import { PLATFORMS, isPlatformAvailable, getPlatformConfig } from '@/lib/platform-config';
 
 const log = createLogger('worker:discovery');
 
@@ -26,6 +26,43 @@ const discoverySkill = loadSkill(
 
 export async function processDiscovery(job: Job<DiscoveryJobData>) {
   const { userId, productId, sources, platform } = job.data;
+
+  // Cron fan-out: scan all users with connected channels
+  if (userId === '__all__') {
+    const allChannels = await db
+      .select({ userId: channels.userId, platform: channels.platform })
+      .from(channels);
+
+    const userPlatforms = new Map<string, Set<string>>();
+    for (const ch of allChannels) {
+      if (!userPlatforms.has(ch.userId)) userPlatforms.set(ch.userId, new Set());
+      userPlatforms.get(ch.userId)!.add(ch.platform);
+    }
+
+    log.info(`Cron discovery fan-out: ${userPlatforms.size} users with channels`);
+
+    for (const [uid, platforms] of userPlatforms) {
+      const [product] = await db
+        .select({ id: products.id })
+        .from(products)
+        .where(eq(products.userId, uid))
+        .limit(1);
+      if (!product) continue;
+
+      for (const platformId of platforms) {
+        if (!isPlatformAvailable(platformId)) continue;
+        const config = getPlatformConfig(platformId);
+        await enqueueDiscovery({
+          userId: uid,
+          productId: product.id,
+          sources: config.defaultSources,
+          platform: platformId,
+        });
+      }
+    }
+    return;
+  }
+
   log.info(`Starting ${platform} discovery for product ${productId}, ${sources.length} sources`);
 
   // Load product
@@ -38,37 +75,66 @@ export async function processDiscovery(job: Job<DiscoveryJobData>) {
   if (!product) throw new Error(`Product not found: ${productId}`);
 
   // Initialize platform-specific client
-  const deps: Record<string, unknown> = {};
-
-  if (platform === 'reddit') {
-    const [channel] = await db
-      .select()
-      .from(channels)
-      .where(and(eq(channels.userId, userId), eq(channels.platform, 'reddit')))
-      .limit(1);
-
-    if (!channel) throw new Error('No Reddit channel connected');
-    deps.redditClient = RedditClient.fromChannel(channel);
-  } else {
-    deps.xaiClient = new XAIClient();
-  }
+  const deps = await createPlatformDeps(platform, userId);
 
   // Load memory context
   const memoryStore = new MemoryStore(productId);
   const dream = new AgentDream(memoryStore);
   const memoryPrompt = await buildMemoryPrompt(memoryStore);
 
+  // Load per-user discovery config (if calibrated)
+  const [userConfig] = await db
+    .select()
+    .from(discoveryConfigs)
+    .where(
+      and(
+        eq(discoveryConfigs.userId, userId),
+        eq(discoveryConfigs.platform, platform),
+      ),
+    )
+    .limit(1);
+
+  // Build skill input with per-user config injected
+  const skillInput: Record<string, unknown> = {
+    productName: product.name,
+    productDescription: product.description,
+    keywords: product.keywords,
+    valueProp: product.valueProp,
+    sources,
+    platform,
+  };
+
+  if (userConfig?.calibrationStatus === 'completed') {
+    skillInput.scoringConfig = {
+      weights: {
+        relevance: userConfig.weightRelevance,
+        intent: userConfig.weightIntent,
+        exposure: userConfig.weightExposure,
+        freshness: userConfig.weightFreshness,
+        engagement: userConfig.weightEngagement,
+      },
+      intentGate: userConfig.intentGate,
+      relevanceGate: userConfig.relevanceGate,
+      gateCap: userConfig.gateCap,
+    };
+    if (userConfig.customPainPhrases && userConfig.customPainPhrases.length > 0) {
+      skillInput.customPainPhrases = userConfig.customPainPhrases;
+    }
+    if (userConfig.customQueryTemplates && userConfig.customQueryTemplates.length > 0) {
+      skillInput.customQueryTemplates = userConfig.customQueryTemplates;
+    }
+    if (userConfig.strategyRules) {
+      skillInput.additionalRules = userConfig.strategyRules;
+    }
+    if (userConfig.customLowRelevancePatterns) {
+      skillInput.additionalLowRelevancePatterns = userConfig.customLowRelevancePatterns;
+    }
+  }
+
   // Run discovery skill (fan-out across sources, cache-safe)
   const result = await runSkill<DiscoveryOutput>({
     skill: discoverySkill,
-    input: {
-      productName: product.name,
-      productDescription: product.description,
-      keywords: product.keywords,
-      valueProp: product.valueProp,
-      sources,
-      platform,
-    },
+    input: skillInput,
     deps,
     memoryPrompt: memoryPrompt || undefined,
     outputSchema: discoveryOutputSchema,
@@ -109,6 +175,9 @@ export async function processDiscovery(job: Job<DiscoveryJobData>) {
       ? thread.relevanceScore / 100
       : ((thread.relevance ?? 0) + (thread.intent ?? 0)) / 2;
 
+    // Skip low-relevance threads to keep the DB clean
+    if (relevanceScore < 0.3) continue;
+
     const [inserted] = await db
       .insert(threads)
       .values({
@@ -125,7 +194,8 @@ export async function processDiscovery(job: Job<DiscoveryJobData>) {
     newThreadCount++;
 
     // Auto-enqueue content for high-relevance threads
-    if (relevanceScore >= 0.7 && inserted) {
+    const enqueueThreshold = userConfig?.enqueueThreshold ?? 0.7;
+    if (relevanceScore >= enqueueThreshold && inserted) {
       log.debug(`Auto-enqueuing content for ${platform} thread ${inserted.id} (relevance ${relevanceScore.toFixed(2)})`);
       await enqueueContent({
         userId,

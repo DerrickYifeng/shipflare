@@ -3,6 +3,7 @@
 import { useState, useCallback } from 'react';
 import { useCalendar, type CalendarItem } from '@/hooks/use-calendar';
 import { useAnalyticsSummary } from '@/hooks/use-analytics-summary';
+import { usePipeline } from '@/components/ui/pipeline-provider';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -33,23 +34,23 @@ export function UnifiedCalendar() {
   const [activeChannel, setActiveChannel] = useState('all');
   const { items, isLoading, generateWeek, cancelItem } = useCalendar('14d', activeChannel);
   const { summary } = useAnalyticsSummary();
-  const [generating, setGenerating] = useState(false);
+  const { run, isRunning } = usePipeline();
+  const generating = isRunning('generate-week');
   const [error, setError] = useState<string | null>(null);
 
   const handleGenerate = useCallback(async () => {
-    setGenerating(true);
     setError(null);
     try {
-      // When filtered to a specific channel, generate for that channel.
-      // When "all", default to 'x' (only channel available now).
-      const channel = activeChannel !== 'all' ? activeChannel : 'x';
-      await generateWeek(channel);
+      await run('generate-week', 'Generating week', async () => {
+        // When filtered to a specific channel, generate for that channel.
+        // When "all", default to 'x' (only channel available now).
+        const channel = activeChannel !== 'all' ? activeChannel : 'x';
+        await generateWeek(channel);
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Generation failed');
-    } finally {
-      setGenerating(false);
     }
-  }, [generateWeek, activeChannel]);
+  }, [generateWeek, activeChannel, run]);
 
   const handleCancel = useCallback(
     async (itemId: string) => {
@@ -96,7 +97,7 @@ export function UnifiedCalendar() {
             onClick={() => setActiveChannel(ch.id)}
             className={`
               flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-sf-md)]
-              text-[13px] font-medium transition-colors duration-150
+              text-[14px] tracking-[-0.224px] font-medium transition-colors duration-200
               ${activeChannel === ch.id
                 ? 'bg-sf-bg-tertiary text-sf-text-primary'
                 : 'text-sf-text-secondary hover:bg-sf-bg-secondary hover:text-sf-text-primary'
@@ -111,21 +112,21 @@ export function UnifiedCalendar() {
 
       {/* Analytics insights panel */}
       {summary && (
-        <div className="border border-sf-border rounded-[var(--radius-sf-lg)] p-4 mb-6 bg-sf-bg-primary">
-          <h4 className="text-[12px] font-medium text-sf-text-tertiary uppercase tracking-wider mb-3">
+        <div className="rounded-[var(--radius-sf-lg)] p-4 mb-6 bg-sf-bg-secondary shadow-[0_3px_5px_rgba(0,0,0,0.04),0_6px_20px_rgba(0,0,0,0.06)]">
+          <h4 className="text-[12px] tracking-[-0.12px] font-medium text-sf-text-tertiary uppercase mb-3">
             Performance Insights (30d)
           </h4>
           <div className="grid grid-cols-3 gap-4">
             {/* Best content types */}
             <div>
-              <p className="text-[11px] text-sf-text-tertiary mb-1.5">Best content types</p>
+              <p className="text-[12px] tracking-[-0.12px] text-sf-text-tertiary mb-1.5">Best content types</p>
               <div className="flex flex-col gap-1">
                 {(summary.bestContentTypes as Array<{ type: string; avgBookmarks: number }>)
                   .slice(0, 3)
                   .map((ct) => (
                     <div key={ct.type} className="flex items-center gap-2">
                       <Badge variant={typeColors[ct.type] ?? 'default'}>{ct.type}</Badge>
-                      <span className="text-[11px] text-sf-text-tertiary">
+                      <span className="text-[12px] tracking-[-0.12px] text-sf-text-tertiary">
                         {ct.avgBookmarks.toFixed(1)} avg bookmarks
                       </span>
                     </div>
@@ -134,14 +135,14 @@ export function UnifiedCalendar() {
             </div>
             {/* Optimal hours */}
             <div>
-              <p className="text-[11px] text-sf-text-tertiary mb-1.5">Optimal posting hours</p>
+              <p className="text-[12px] tracking-[-0.12px] text-sf-text-tertiary mb-1.5">Optimal posting hours</p>
               <div className="flex flex-wrap gap-1">
                 {(summary.bestPostingHours as Array<{ hour: number; avgEngagement: number }>)
                   .slice(0, 4)
                   .map((ph) => (
                     <span
                       key={ph.hour}
-                      className="text-[12px] font-mono text-sf-accent bg-sf-accent/10 px-1.5 py-0.5 rounded"
+                      className="text-[12px] tracking-[-0.12px] font-mono text-sf-accent bg-sf-accent/10 px-1.5 py-0.5 rounded"
                     >
                       {String(ph.hour).padStart(2, '0')}:00
                     </span>
@@ -150,8 +151,8 @@ export function UnifiedCalendar() {
             </div>
             {/* Key metrics */}
             <div>
-              <p className="text-[11px] text-sf-text-tertiary mb-1.5">Key metrics</p>
-              <div className="flex flex-col gap-0.5 text-[12px]">
+              <p className="text-[12px] tracking-[-0.12px] text-sf-text-tertiary mb-1.5">Key metrics</p>
+              <div className="flex flex-col gap-0.5 text-[12px] tracking-[-0.12px]">
                 <span className="text-sf-text-secondary">
                   {(summary.engagementRate * 100).toFixed(2)}% engagement rate
                 </span>
@@ -170,7 +171,7 @@ export function UnifiedCalendar() {
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <div>
-          <p className="text-[12px] text-sf-text-tertiary">
+          <p className="text-[12px] tracking-[-0.12px] text-sf-text-tertiary">
             {items.filter((i) => i.status === 'scheduled').length} scheduled,{' '}
             {items.filter((i) => i.status === 'posted').length} posted
           </p>
@@ -181,7 +182,7 @@ export function UnifiedCalendar() {
       </div>
 
       {/* Content mix legend */}
-      <div className="flex items-center gap-4 text-[11px] text-sf-text-tertiary mb-6">
+      <div className="flex items-center gap-4 text-[12px] tracking-[-0.12px] text-sf-text-tertiary mb-6">
         <span>Content mix:</span>
         {Object.entries(typeColors).map(([type, variant]) => (
           <span key={type} className="flex items-center gap-1">
@@ -191,23 +192,23 @@ export function UnifiedCalendar() {
       </div>
 
       {error && (
-        <div className="px-4 py-3 rounded-[var(--radius-sf-md)] bg-sf-error-light border border-sf-error/20 text-[13px] text-sf-error mb-4">
+        <div className="px-4 py-3 rounded-[var(--radius-sf-md)] bg-sf-error-light text-[14px] tracking-[-0.224px] text-sf-error mb-4">
           {error}
         </div>
       )}
 
       {items.length === 0 ? (
         <div className="flex flex-col items-center py-16">
-          <div className="w-14 h-14 mb-4 rounded-full bg-sf-bg-secondary border border-sf-border flex items-center justify-center">
+          <div className="w-14 h-14 mb-4 rounded-full bg-sf-bg-secondary shadow-[0_3px_5px_rgba(0,0,0,0.04),0_6px_20px_rgba(0,0,0,0.06)] flex items-center justify-center">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--color-sf-text-tertiary)" strokeWidth="1.5">
               <rect x="3" y="4" width="18" height="18" rx="2" />
               <path d="M16 2v4M8 2v4M3 10h18" />
             </svg>
           </div>
-          <p className="text-[14px] font-medium text-sf-text-primary mb-1">
+          <p className="text-[17px] tracking-[-0.374px] font-medium text-sf-text-primary mb-1">
             No scheduled posts
           </p>
-          <p className="text-[13px] text-sf-text-tertiary max-w-[300px] text-center">
+          <p className="text-[14px] tracking-[-0.224px] text-sf-text-tertiary max-w-[300px] text-center">
             Click <span className="font-medium text-sf-text-secondary">Generate Week</span> to
             auto-create a week of content with the optimal content mix.
           </p>
@@ -216,7 +217,7 @@ export function UnifiedCalendar() {
         <div className="flex flex-col gap-4">
           {Array.from(byDay.entries()).map(([day, dayItems]) => (
             <div key={day}>
-              <h4 className="text-[12px] font-medium text-sf-text-secondary mb-2">{day}</h4>
+              <h4 className="text-[12px] tracking-[-0.12px] font-medium text-sf-text-secondary mb-2">{day}</h4>
               <div className="flex flex-col gap-1.5">
                 {dayItems.map((item) => (
                   <CalendarItemCard
@@ -248,7 +249,7 @@ function CalendarItemCard({
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
           <ChannelIcon channel={item.channel} />
-          <span className="text-[12px] font-mono text-sf-text-tertiary tabular-nums w-14 flex-shrink-0">
+          <span className="text-[12px] tracking-[-0.12px] font-mono text-sf-text-tertiary tabular-nums w-14 flex-shrink-0">
             {new Date(item.scheduledAt).toLocaleTimeString('en-US', {
               hour: '2-digit',
               minute: '2-digit',
@@ -258,7 +259,7 @@ function CalendarItemCard({
             {item.contentType}
           </Badge>
           {item.topic && (
-            <span className="text-[13px] text-sf-text-secondary truncate">
+            <span className="text-[14px] tracking-[-0.224px] text-sf-text-secondary truncate">
               {item.topic}
             </span>
           )}
@@ -268,7 +269,7 @@ function CalendarItemCard({
             <button
               type="button"
               onClick={() => setExpanded((p) => !p)}
-              className="text-[11px] text-sf-accent hover:underline"
+              className="text-[12px] tracking-[-0.12px] text-sf-accent hover:underline"
             >
               {expanded ? 'Hide' : 'Preview'}
             </button>
@@ -278,7 +279,7 @@ function CalendarItemCard({
           </Badge>
           <button
             onClick={() => onCancel(item.id)}
-            className="text-sf-text-tertiary hover:text-sf-error transition-colors p-1"
+            className="text-sf-text-tertiary hover:text-sf-error transition-colors duration-200 p-1"
             title="Delete"
           >
             <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -289,7 +290,7 @@ function CalendarItemCard({
       </div>
       {expanded && item.draftPreview && (
         <div className="mt-2 pt-2 border-t border-sf-border animate-sf-fade-in">
-          <p className="text-[12px] text-sf-text-secondary leading-relaxed line-clamp-4">
+          <p className="text-[12px] tracking-[-0.12px] text-sf-text-secondary leading-relaxed line-clamp-4">
             {item.draftPreview}
           </p>
         </div>

@@ -11,7 +11,7 @@ import {
 } from '@/lib/db/schema';
 import { eq, and, gte, desc, sql } from 'drizzle-orm';
 import { publishEvent } from '@/lib/redis';
-import type { XAnalyticsJobData } from '@/lib/queue/types';
+import type { AnalyticsJobData } from '@/lib/queue/types';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('worker:x-analytics');
@@ -243,7 +243,7 @@ async function processXAnalyticsForUser(userId: string) {
   });
 }
 
-export async function processXAnalytics(job: Job<XAnalyticsJobData>) {
+export async function processXAnalytics(job: Job<AnalyticsJobData>) {
   const { userId } = job.data;
 
   if (userId === '__all__') {

@@ -8,6 +8,7 @@ import {
   activityEvents,
   xTargetAccounts,
   xMonitoredTweets,
+  todoItems,
 } from '@/lib/db/schema';
 import { eq, and, gt } from 'drizzle-orm';
 import { XClient, XForbiddenError } from '@/lib/x-client';
@@ -20,8 +21,9 @@ import { enqueueReview, enqueueDream } from '@/lib/queue';
 import { publishEvent } from '@/lib/redis';
 import { getRedis } from '@/lib/redis';
 import { join } from 'path';
-import type { XMonitorJobData } from '@/lib/queue/types';
+import type { MonitorJobData } from '@/lib/queue/types';
 import { createLogger } from '@/lib/logger';
+import { buildContentUrl } from '@/lib/platform-config';
 import { MemoryStore } from '@/memory/store';
 import { AgentDream } from '@/memory/dream';
 import { buildMemoryPrompt } from '@/memory/prompt-builder';
@@ -133,8 +135,8 @@ async function processXMonitorForUser(userId: string, productId: string) {
         );
 
         const tweetUrl = tweet.authorUsername
-          ? `https://x.com/${tweet.authorUsername}/status/${tweet.id}`
-          : `https://x.com/i/status/${tweet.id}`;
+          ? buildContentUrl('x', tweet.authorUsername, tweet.id)
+          : buildContentUrl('x', 'i', tweet.id);
 
         // Insert monitored tweet
         await db.insert(xMonitoredTweets).values({
@@ -280,7 +282,7 @@ async function processXMonitorForUser(userId: string, productId: string) {
           platform: 'x',
           community: `@${tweetInput.authorUsername}`,
           title: tweetInput.tweetText.slice(0, 200),
-          url: `https://x.com/${tweetInput.authorUsername}/status/${tweetInput.tweetId}`,
+          url: buildContentUrl('x', tweetInput.authorUsername, tweetInput.tweetId),
           relevanceScore: replyOutput.confidence,
         })
         .onConflictDoNothing()
@@ -319,6 +321,29 @@ async function processXMonitorForUser(userId: string, productId: string) {
         userId,
         draftId: draft.id,
         productId,
+      });
+
+      // Inject time-sensitive todo item for the Today page
+      await db
+        .insert(todoItems)
+        .values({
+          userId,
+          draftId: draft.id,
+          todoType: 'reply_thread',
+          source: 'discovery',
+          priority: 'time_sensitive',
+          title: `Reply to @${tweetInput.authorUsername}: ${tweetInput.tweetText.slice(0, 80)}...`,
+          platform: 'x',
+          community: `@${tweetInput.authorUsername}`,
+          externalUrl: buildContentUrl('x', tweetInput.authorUsername, tweetInput.tweetId),
+          confidence: replyOutput.confidence,
+          expiresAt: new Date(Date.now() + 4 * 60 * 60 * 1000),
+        })
+        .onConflictDoNothing();
+
+      await publishEvent(`shipflare:events:${userId}`, {
+        type: 'todo_added',
+        todoType: 'reply_thread',
       });
     }
 
@@ -361,7 +386,7 @@ async function processXMonitorForUser(userId: string, productId: string) {
   });
 }
 
-export async function processXMonitor(job: Job<XMonitorJobData>) {
+export async function processXMonitor(job: Job<MonitorJobData>) {
   const { userId, productId } = job.data;
 
   if (userId === '__all__') {

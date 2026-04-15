@@ -16,7 +16,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
         {label && (
           <label
             htmlFor={inputId}
-            className="text-[13px] font-medium text-sf-text-primary"
+            className="text-[14px] font-semibold text-sf-text-primary tracking-[-0.224px]"
           >
             {label}
           </label>
@@ -26,12 +26,15 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
             ref={ref}
             id={inputId}
             className={`
-              w-full min-h-[44px] px-3 py-2
-              rounded-[var(--radius-sf-md)]
-              border text-[15px] text-sf-text-primary
-              bg-sf-bg-primary placeholder:text-sf-text-tertiary
-              transition-colors duration-150
-              ${error ? 'border-sf-error' : 'border-sf-border hover:border-sf-text-tertiary focus:border-sf-accent'}
+              w-full min-h-[44px] px-[14px] py-2
+              rounded-[11px]
+              border text-[17px] tracking-[-0.374px] text-sf-text-primary
+              bg-sf-bg-secondary placeholder:text-sf-text-tertiary
+              transition-all duration-200
+              ${error
+                ? 'border-sf-error'
+                : 'border-sf-border hover:border-black/[0.16] focus:border-sf-accent focus:shadow-[0_0_0_3px_rgba(0,113,227,0.12)]'
+              }
               ${suffix ? 'pr-10' : ''}
               ${className}
             `}
@@ -46,12 +49,12 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
           )}
         </div>
         {error && (
-          <p id={`${inputId}-error`} className="text-[13px] text-sf-error">
+          <p id={`${inputId}-error`} className="text-[12px] text-sf-error tracking-[-0.12px]">
             {error}
           </p>
         )}
         {!error && helper && (
-          <p id={`${inputId}-helper`} className="text-[13px] text-sf-text-tertiary">
+          <p id={`${inputId}-helper`} className="text-[12px] text-sf-text-tertiary tracking-[-0.12px]">
             {helper}
           </p>
         )}

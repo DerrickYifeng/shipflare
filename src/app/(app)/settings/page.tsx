@@ -7,6 +7,7 @@ import { HeaderBar } from '@/components/layout/header-bar';
 import { ProfileSection } from '@/components/settings/profile-section';
 import { ConnectionsSection } from '@/components/settings/connections-section';
 import { AutomationSection } from '@/components/settings/automation-section';
+import { TimezoneSection } from '@/components/settings/timezone-section';
 import { DangerZone } from '@/components/settings/danger-zone';
 
 export default async function SettingsPage() {
@@ -33,6 +34,7 @@ export default async function SettingsPage() {
           xUsername={xChannel?.username ?? null}
         />
         <AutomationSection />
+        <TimezoneSection />
         <DangerZone />
       </div>
     </>

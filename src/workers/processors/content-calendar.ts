@@ -16,7 +16,7 @@ import type { ContentCreatorOutput } from '@/agents/schemas';
 import { enqueueReview, enqueueDream } from '@/lib/queue';
 import { publishEvent } from '@/lib/redis';
 import { join } from 'path';
-import type { XContentCalendarJobData } from '@/lib/queue/types';
+import type { ContentCalendarJobData } from '@/lib/queue/types';
 import { createLogger } from '@/lib/logger';
 import { MemoryStore } from '@/memory/store';
 import { AgentDream } from '@/memory/dream';
@@ -31,6 +31,7 @@ const contentBatchSkill = loadSkill(
 async function processXContentCalendarForUser(
   userId: string,
   productId: string,
+  processUpcoming = false,
 ) {
   log.info(`Processing X content calendar for user ${userId}`);
 
@@ -43,8 +44,11 @@ async function processXContentCalendarForUser(
 
   if (!product) throw new Error(`Product not found: ${productId}`);
 
-  // Find scheduled X items that are due
+  // Find scheduled X items that are due (or upcoming within 48h when triggered manually)
   const now = new Date();
+  const cutoff = processUpcoming
+    ? new Date(now.getTime() + 48 * 60 * 60 * 1000)
+    : now;
   const dueItems = await db
     .select()
     .from(xContentCalendar)
@@ -53,7 +57,7 @@ async function processXContentCalendarForUser(
         eq(xContentCalendar.userId, userId),
         eq(xContentCalendar.channel, 'x'),
         eq(xContentCalendar.status, 'scheduled'),
-        lte(xContentCalendar.scheduledAt, now),
+        lte(xContentCalendar.scheduledAt, cutoff),
       ),
     );
 
@@ -187,9 +191,9 @@ async function processXContentCalendarForUser(
 }
 
 export async function processXContentCalendar(
-  job: Job<XContentCalendarJobData>,
+  job: Job<ContentCalendarJobData>,
 ) {
-  const { userId, productId } = job.data;
+  const { userId, productId, processUpcoming } = job.data;
 
   if (userId === '__all__') {
     // Cron fan-out: find all users with scheduled X content and process each
@@ -222,5 +226,5 @@ export async function processXContentCalendar(
     return;
   }
 
-  await processXContentCalendarForUser(userId, productId);
+  await processXContentCalendarForUser(userId, productId, processUpcoming);
 }

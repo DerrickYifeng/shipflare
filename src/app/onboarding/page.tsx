@@ -23,13 +23,13 @@ export default function OnboardingPage() {
   };
 
   const handleComplete = () => {
-    router.push('/dashboard');
+    router.push('/today');
   };
 
   return (
     <div>
       <div className="flex items-center justify-between mb-8">
-        <h1 className="text-[18px] font-semibold text-sf-text-primary">
+        <h1 className="text-[21px] font-semibold text-sf-text-primary tracking-[0.231px] leading-[1.19]">
           {step === 0 && 'Add your product'}
           {step === 1 && 'Review your profile'}
           {step === 2 && 'Connect your accounts'}

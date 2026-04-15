@@ -29,14 +29,25 @@ const MAX_RETRIES = 3;
 /**
  * Exponential backoff with jitter.
  * Ported from engine/services/api/withRetry.ts:530-548.
+ *
+ * 529 (overloaded) uses a faster retry cycle (1s base, 1.5x, max 8s)
+ * since the condition is transient and resolves quickly.
  */
-function getRetryDelay(attempt: number, retryAfterHeader?: string | null): number {
+function getRetryDelay(attempt: number, retryAfterHeader?: string | null, status?: number): number {
   if (retryAfterHeader) {
     const seconds = parseFloat(retryAfterHeader);
     if (!isNaN(seconds) && seconds > 0) {
       return Math.min(seconds * 1000, MAX_DELAY_MS);
     }
   }
+
+  // 529 overloaded: faster retry — typically resolves in 1-3s
+  if (status === 529) {
+    const baseDelay = Math.min(1000 * Math.pow(1.5, attempt - 1), 8_000);
+    const jitter = Math.random() * 0.2 * baseDelay;
+    return baseDelay + jitter;
+  }
+
   const baseDelay = Math.min(BASE_DELAY_MS * Math.pow(2, attempt - 1), MAX_DELAY_MS);
   const jitter = Math.random() * 0.25 * baseDelay;
   return baseDelay + jitter;
@@ -56,19 +67,19 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
  * Whether an API error is retryable.
  * Ported from engine/services/api/withRetry.ts error classification.
  */
-function isRetryableError(error: unknown): { retryable: boolean; retryAfter?: string | null } {
+function isRetryableError(error: unknown): { retryable: boolean; retryAfter?: string | null; status?: number } {
   if (error instanceof Anthropic.APIError) {
     // 529 overloaded
     if (error.status === 529) {
-      return { retryable: true, retryAfter: (error.headers as Record<string, string>)?.['retry-after'] };
+      return { retryable: true, retryAfter: (error.headers as Record<string, string>)?.['retry-after'], status: 529 };
     }
     // 429 rate limit
     if (error.status === 429) {
-      return { retryable: true, retryAfter: (error.headers as Record<string, string>)?.['retry-after'] };
+      return { retryable: true, retryAfter: (error.headers as Record<string, string>)?.['retry-after'], status: 429 };
     }
     // 500/502/503 server errors
     if (error.status >= 500 && error.status < 600) {
-      return { retryable: true };
+      return { retryable: true, status: error.status };
     }
     // 413 prompt too long — caller handles this
     // 400/401/403/404 — not retryable
@@ -201,13 +212,13 @@ export async function createMessage(opts: CreateMessageOptions): Promise<CreateM
         }
       }
 
-      const { retryable, retryAfter } = isRetryableError(error);
+      const { retryable, retryAfter, status } = isRetryableError(error);
       if (!retryable || attempt === MAX_RETRIES) {
         throw error;
       }
 
-      const delay = getRetryDelay(attempt, retryAfter);
-      log.warn(`API retry ${attempt}/${MAX_RETRIES} for ${model} after ${delay.toFixed(0)}ms`);
+      const delay = getRetryDelay(attempt, retryAfter, status);
+      log.warn(`API retry ${attempt}/${MAX_RETRIES} for ${model} (status=${status ?? 'unknown'}) after ${delay.toFixed(0)}ms`);
       await sleep(delay, signal);
     }
   }

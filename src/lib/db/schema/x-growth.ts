@@ -163,3 +163,12 @@ export const xAnalyticsSummary = pgTable('x_analytics_summary', {
   totalBookmarks: integer('total_bookmarks').notNull().default(0),
   computedAt: timestamp('computed_at', { mode: 'date' }).defaultNow().notNull(),
 });
+
+/**
+ * Platform-generic aliases for code that doesn't need to be X-specific.
+ * The underlying DB tables keep their x_* names until a manual migration renames them.
+ */
+export const contentCalendar = xContentCalendar;
+export const analyticsSummary = xAnalyticsSummary;
+export const targetAccounts = xTargetAccounts;
+export const monitoredContent = xMonitoredTweets;

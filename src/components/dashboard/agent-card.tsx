@@ -72,7 +72,7 @@ export function AgentCard({
   return (
     <div
       className={`
-        bg-sf-bg-primary border border-sf-border
+        bg-sf-bg-secondary shadow-[0_3px_5px_rgba(0,0,0,0.04),0_6px_20px_rgba(0,0,0,0.06)]
         rounded-[var(--radius-sf-lg)] p-4
         flex flex-col gap-3
         animate-sf-fade-in
@@ -81,11 +81,11 @@ export function AgentCard({
     >
       {/* Header */}
       <div className="flex items-center justify-between gap-2">
-        <span className="font-mono text-[11px] font-medium uppercase tracking-wider text-sf-text-primary">
+        <span className="font-mono text-[12px] tracking-[-0.12px] font-medium uppercase text-sf-text-primary">
           {name}
         </span>
         <span
-          className={`text-[13px] leading-none ${config.colorClass} ${config.pulseClass}`}
+          className={`text-[14px] tracking-[-0.224px] leading-none ${config.colorClass} ${config.pulseClass}`}
           aria-label={`Status: ${status}`}
         >
           {config.indicator}
@@ -94,7 +94,7 @@ export function AgentCard({
 
       {/* Current task */}
       {currentTask && (
-        <p className="text-[13px] leading-snug text-sf-text-secondary line-clamp-2">
+        <p className="text-[14px] tracking-[-0.224px] leading-snug text-sf-text-secondary line-clamp-2">
           {currentTask}
         </p>
       )}
@@ -120,10 +120,10 @@ export function AgentCard({
         <div className="grid grid-cols-2 gap-x-3 gap-y-2">
           {statEntries.map(([label, value]) => (
             <div key={label} className="flex flex-col">
-              <span className="font-mono text-[18px] font-medium leading-tight text-sf-text-primary">
+              <span className="font-mono text-[18px] font-medium leading-tight text-sf-text-primary tracking-[-0.374px]">
                 {value}
               </span>
-              <span className="font-mono text-[11px] uppercase tracking-wider text-sf-text-tertiary">
+              <span className="font-mono text-[12px] tracking-[-0.12px] uppercase text-sf-text-tertiary">
                 {label}
               </span>
             </div>
@@ -133,7 +133,7 @@ export function AgentCard({
 
       {/* Cost and duration */}
       {(typeof cost === 'number' || typeof duration === 'number') && (
-        <div className="flex items-center gap-3 font-mono text-[11px] text-sf-text-tertiary">
+        <div className="flex items-center gap-3 font-mono text-[12px] tracking-[-0.12px] text-sf-text-tertiary">
           {typeof cost === 'number' && <span>{formatCost(cost)}</span>}
           {typeof cost === 'number' && typeof duration === 'number' && (
             <span aria-hidden="true">/</span>
@@ -144,15 +144,15 @@ export function AgentCard({
 
       {/* Expandable log */}
       {log && log.length > 0 && (
-        <div className="border-t border-sf-border pt-2 -mx-4 px-4">
+        <div className="border-t border-[rgba(0,0,0,0.08)] pt-2 -mx-4 px-4">
           <button
             type="button"
             onClick={() => setLogExpanded((prev) => !prev)}
             className="
               flex items-center gap-1.5
-              text-[11px] font-mono text-sf-text-tertiary
+              text-[12px] tracking-[-0.12px] font-mono text-sf-text-tertiary
               hover:text-sf-text-secondary
-              transition-colors duration-150
+              transition-colors duration-200
               cursor-pointer min-h-[32px]
             "
             aria-expanded={logExpanded}
@@ -161,7 +161,7 @@ export function AgentCard({
               width="10"
               height="10"
               viewBox="0 0 12 12"
-              className={`transition-transform duration-150 ${logExpanded ? 'rotate-90' : ''}`}
+              className={`transition-transform duration-200 ${logExpanded ? 'rotate-90' : ''}`}
               aria-hidden="true"
             >
               <path d="M4 2l4 4-4 4" fill="none" stroke="currentColor" strokeWidth="1.5" />
@@ -180,7 +180,7 @@ export function AgentCard({
                 {log.map((entry, i) => (
                   <span
                     key={i}
-                    className="font-mono text-[11px] leading-relaxed text-sf-text-secondary block"
+                    className="font-mono text-[12px] tracking-[-0.12px] leading-relaxed text-sf-text-secondary block"
                   >
                     {entry}
                   </span>

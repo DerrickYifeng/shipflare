@@ -47,6 +47,9 @@ export const drafts = pgTable('drafts', {
   reviewScore: real('review_score'),
   reviewJson: jsonb('review_json'), // { checks, issues, suggestions }
   engagementDepth: integer('engagement_depth').notNull().default(0),
+  media: jsonb('media')
+    .default([])
+    .$type<Array<{ url: string; type: 'image' | 'gif' | 'video'; alt?: string }>>(),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
 });

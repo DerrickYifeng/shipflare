@@ -30,7 +30,7 @@ export function AutomationSection() {
   if (isLoading || !preferences) {
     return (
       <section>
-        <h2 className="text-[15px] font-semibold text-sf-text-primary mb-4">Automation</h2>
+        <h2 className="text-[21px] font-bold tracking-[-0.12px] text-sf-text-primary mb-4">Automation</h2>
         <Skeleton className="h-64 w-full" />
       </section>
     );
@@ -66,15 +66,15 @@ export function AutomationSection() {
 
   return (
     <section>
-      <h2 className="text-[15px] font-semibold text-sf-text-primary mb-4">Automation</h2>
+      <h2 className="text-[21px] font-bold tracking-[-0.12px] text-sf-text-primary mb-4">Automation</h2>
 
-      <div className="flex flex-col gap-6 border border-sf-border rounded-[var(--radius-sf-lg)] p-5">
+      <div className="flex flex-col gap-6 bg-sf-bg-secondary shadow-[0_3px_5px_rgba(0,0,0,0.04),0_6px_20px_rgba(0,0,0,0.06)] rounded-[var(--radius-sf-lg)] p-5">
         {/* Auto-approve */}
         <div>
           <div className="flex items-center justify-between mb-3">
             <div>
-              <h3 className="text-[14px] font-medium text-sf-text-primary">Auto-approve</h3>
-              <p className="text-[12px] text-sf-text-tertiary mt-0.5">
+              <h3 className="text-[14px] tracking-[-0.224px] font-medium text-sf-text-primary">Auto-approve</h3>
+              <p className="text-[12px] tracking-[-0.12px] text-sf-text-tertiary mt-0.5">
                 Automatically approve high-scoring drafts
               </p>
             </div>
@@ -93,7 +93,7 @@ export function AutomationSection() {
             <div className="flex flex-col gap-3 pl-1 animate-sf-fade-in">
               {/* Threshold slider */}
               <div>
-                <label className="text-[12px] text-sf-text-secondary mb-1 block">
+                <label className="text-[12px] tracking-[-0.12px] text-sf-text-secondary mb-1 block">
                   Minimum score: {Math.round(merged.autoApproveThreshold * 100)}%
                 </label>
                 <input
@@ -108,7 +108,7 @@ export function AutomationSection() {
 
               {/* Allowed types */}
               <div>
-                <label className="text-[12px] text-sf-text-secondary mb-1 block">
+                <label className="text-[12px] tracking-[-0.12px] text-sf-text-secondary mb-1 block">
                   Allowed draft types
                 </label>
                 <div className="flex gap-2">
@@ -127,7 +127,7 @@ export function AutomationSection() {
                           }}
                           className="accent-sf-accent"
                         />
-                        <span className="text-[13px] text-sf-text-primary">{dt.label}</span>
+                        <span className="text-[14px] tracking-[-0.224px] text-sf-text-primary">{dt.label}</span>
                       </label>
                     );
                   })}
@@ -136,7 +136,7 @@ export function AutomationSection() {
 
               {/* Max per day */}
               <div>
-                <label className="text-[12px] text-sf-text-secondary mb-1 block">
+                <label className="text-[12px] tracking-[-0.12px] text-sf-text-secondary mb-1 block">
                   Max auto-approvals per day
                 </label>
                 <input
@@ -145,7 +145,7 @@ export function AutomationSection() {
                   max="100"
                   value={merged.maxAutoApprovalsPerDay}
                   onChange={(e) => patch('maxAutoApprovalsPerDay', Number(e.target.value))}
-                  className="w-20 px-2 py-1 text-[13px] bg-sf-bg-secondary border border-sf-border rounded-[var(--radius-sf-md)] text-sf-text-primary"
+                  className="w-20 px-2 py-1 text-[14px] tracking-[-0.224px] bg-[#f5f5f7] border border-[rgba(0,0,0,0.08)] rounded-[var(--radius-sf-md)] text-sf-text-primary"
                 />
               </div>
             </div>
@@ -153,12 +153,12 @@ export function AutomationSection() {
         </div>
 
         {/* Divider */}
-        <div className="border-t border-sf-border" />
+        <div className="border-t border-[rgba(0,0,0,0.08)]" />
 
         {/* Posting hours */}
         <div>
-          <h3 className="text-[14px] font-medium text-sf-text-primary mb-1">Posting hours (UTC)</h3>
-          <p className="text-[12px] text-sf-text-tertiary mb-3">
+          <h3 className="text-[14px] tracking-[-0.224px] font-medium text-sf-text-primary mb-1">Posting hours (UTC)</h3>
+          <p className="text-[12px] tracking-[-0.12px] text-sf-text-tertiary mb-3">
             Select 1-6 hours for scheduled content
           </p>
           <div className="flex flex-wrap gap-1.5">
@@ -176,7 +176,7 @@ export function AutomationSection() {
                       patch('postingHoursUtc', next);
                     }
                   }}
-                  className={`w-10 h-8 rounded-[var(--radius-sf-md)] text-[11px] font-mono transition-colors ${
+                  className={`w-10 h-8 rounded-[var(--radius-sf-md)] text-[12px] tracking-[-0.12px] font-mono transition-colors duration-200 ${
                     selected
                       ? 'bg-sf-accent text-white'
                       : 'bg-sf-bg-secondary text-sf-text-tertiary hover:text-sf-text-primary'
@@ -188,23 +188,23 @@ export function AutomationSection() {
               );
             })}
           </div>
-          <p className="text-[11px] text-sf-text-tertiary mt-1.5">
+          <p className="text-[12px] tracking-[-0.12px] text-sf-text-tertiary mt-1.5">
             Selected: {merged.postingHoursUtc.map((h) => formatHourLocal(h)).join(', ')}
           </p>
         </div>
 
         {/* Divider */}
-        <div className="border-t border-sf-border" />
+        <div className="border-t border-[rgba(0,0,0,0.08)]" />
 
         {/* Content mix */}
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <h3 className="text-[14px] font-medium text-sf-text-primary">Content mix</h3>
+            <h3 className="text-[14px] tracking-[-0.224px] font-medium text-sf-text-primary">Content mix</h3>
             <Badge variant={mixTotal === 100 ? 'success' : 'error'} mono>
               {mixTotal}%
             </Badge>
           </div>
-          <p className="text-[12px] text-sf-text-tertiary mb-3">
+          <p className="text-[12px] tracking-[-0.12px] text-sf-text-tertiary mb-3">
             Ratios for calendar content generation (must sum to 100)
           </p>
           <div className="grid grid-cols-2 gap-3">
@@ -215,30 +215,30 @@ export function AutomationSection() {
               ['contentMixProduct', 'Product'],
             ] as const).map(([key, label]) => (
               <div key={key} className="flex items-center gap-2">
-                <label className="text-[13px] text-sf-text-secondary w-24">{label}</label>
+                <label className="text-[14px] tracking-[-0.224px] text-sf-text-secondary w-24">{label}</label>
                 <input
                   type="number"
                   min="0"
                   max="100"
                   value={merged[key]}
                   onChange={(e) => patch(key, Number(e.target.value))}
-                  className="w-16 px-2 py-1 text-[13px] bg-sf-bg-secondary border border-sf-border rounded-[var(--radius-sf-md)] text-sf-text-primary text-right"
+                  className="w-16 px-2 py-1 text-[14px] tracking-[-0.224px] bg-[#f5f5f7] border border-[rgba(0,0,0,0.08)] rounded-[var(--radius-sf-md)] text-sf-text-primary text-right"
                 />
-                <span className="text-[12px] text-sf-text-tertiary">%</span>
+                <span className="text-[12px] tracking-[-0.12px] text-sf-text-tertiary">%</span>
               </div>
             ))}
           </div>
         </div>
 
         {/* Divider */}
-        <div className="border-t border-sf-border" />
+        <div className="border-t border-[rgba(0,0,0,0.08)]" />
 
         {/* Notifications */}
         <div>
-          <h3 className="text-[14px] font-medium text-sf-text-primary mb-3">Notifications</h3>
+          <h3 className="text-[14px] tracking-[-0.224px] font-medium text-sf-text-primary mb-3">Notifications</h3>
           <div className="flex flex-col gap-2">
             <label className="flex items-center justify-between cursor-pointer">
-              <span className="text-[13px] text-sf-text-secondary">Notify on new draft</span>
+              <span className="text-[14px] tracking-[-0.224px] text-sf-text-secondary">Notify on new draft</span>
               <input
                 type="checkbox"
                 checked={merged.notifyOnNewDraft}
@@ -247,7 +247,7 @@ export function AutomationSection() {
               />
             </label>
             <label className="flex items-center justify-between cursor-pointer">
-              <span className="text-[13px] text-sf-text-secondary">Notify on auto-approve</span>
+              <span className="text-[14px] tracking-[-0.224px] text-sf-text-secondary">Notify on auto-approve</span>
               <input
                 type="checkbox"
                 checked={merged.notifyOnAutoApprove}

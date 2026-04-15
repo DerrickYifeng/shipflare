@@ -7,12 +7,12 @@ interface HeaderBarProps {
 
 export function HeaderBar({ title, healthScore }: HeaderBarProps) {
   return (
-    <div className="flex items-center justify-between px-6 py-4 border-b border-sf-border bg-sf-bg-primary">
-      <h1 className="text-[18px] font-semibold text-sf-text-primary">{title}</h1>
+    <div className="flex items-center justify-between px-6 py-5">
+      <h1 className="text-[28px] font-semibold text-sf-text-primary tracking-[0.196px] leading-[1.14]">{title}</h1>
       {healthScore != null && (
         <div className="flex items-center gap-2">
           <HealthScoreRing score={healthScore} size={36} />
-          <span className="text-[13px] font-mono text-sf-text-secondary">
+          <span className="text-[14px] font-mono text-sf-text-secondary tracking-[-0.224px]">
             {healthScore}
           </span>
         </div>

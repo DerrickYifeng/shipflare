@@ -7,7 +7,7 @@ interface DiscoveryCardProps {
   url: string;
   community: string;
   relevanceScore: number;
-  postedAt: string;
+  postedAt: string | null;
   reason?: string;
   metadata?: {
     upvotes?: number;
@@ -47,13 +47,17 @@ function getSourceIcon(source: string) {
       );
     default:
       return (
-        <div className="w-4 h-4 rounded-full bg-sf-bg-tertiary" aria-hidden="true" />
+        <div className="w-4 h-4 rounded-full bg-black/[0.05]" aria-hidden="true" />
       );
   }
 }
 
-function formatTimeAgo(isoDate: string): string {
-  const seconds = Math.floor((Date.now() - new Date(isoDate).getTime()) / 1000);
+function formatTimeAgo(isoDate: string | null | undefined): string {
+  if (!isoDate) return '';
+  const ms = new Date(isoDate).getTime();
+  if (Number.isNaN(ms)) return '';
+  const seconds = Math.floor((Date.now() - ms) / 1000);
+  if (seconds < 0) return 'just now';
   const days = Math.floor(seconds / 86400);
 
   if (days > 365) return `${Math.floor(days / 365)}y ago`;
@@ -103,7 +107,7 @@ export function DiscoveryCard({
 
   const scoreColor =
     relevanceScore >= 70
-      ? 'text-sf-success'
+      ? 'text-[#248a3d]'
       : relevanceScore >= 40
         ? 'text-sf-accent'
         : 'text-sf-text-tertiary';
@@ -114,9 +118,9 @@ export function DiscoveryCard({
       target="_blank"
       rel="noopener noreferrer"
       className="
-        group flex items-stretch px-4 py-3
-        border-b border-sf-border-subtle
-        hover:bg-sf-bg-secondary transition-colors duration-150
+        group flex items-stretch px-5 py-4
+        border-b border-black/[0.04] last:border-b-0
+        hover:bg-black/[0.02] transition-colors duration-200
       "
     >
       {/* Content — left side */}
@@ -124,33 +128,35 @@ export function DiscoveryCard({
         <div className="shrink-0 mt-0.5">{getSourceIcon(source)}</div>
 
         <div className="flex-1 min-w-0">
-          <p className="text-[15px] text-sf-text-primary font-medium leading-snug line-clamp-2">
+          <p className="text-[17px] text-sf-text-primary font-medium leading-snug line-clamp-2 tracking-[-0.374px]">
             {title}
           </p>
 
           {/* Preview snippet */}
           {reason && (
-            <p className="mt-1 text-[12px] text-sf-text-secondary leading-relaxed line-clamp-2">
+            <p className="mt-1 text-[14px] text-sf-text-secondary leading-[1.43] line-clamp-2 tracking-[-0.224px]">
               {reason}
             </p>
           )}
 
-          <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+          <div className="flex items-center gap-2 mt-2 flex-wrap">
             <Badge className="shrink-0">
               {community}
             </Badge>
             {intent && <IntentBadge intent={intent} />}
-            <span className="text-[11px] text-sf-text-tertiary">
-              {formatTimeAgo(postedAt)}
-            </span>
+            {formatTimeAgo(postedAt) && (
+              <span className="text-[12px] text-sf-text-tertiary tracking-[-0.12px]">
+                {formatTimeAgo(postedAt)}
+              </span>
+            )}
             {upvotes != null && (
-              <span className="text-[11px] text-sf-text-tertiary flex items-center gap-0.5">
+              <span className="text-[12px] text-sf-text-tertiary flex items-center gap-0.5 tracking-[-0.12px]">
                 <ArrowUpIcon />
                 {formatCount(upvotes)}
               </span>
             )}
             {commentCount != null && (
-              <span className="text-[11px] text-sf-text-tertiary flex items-center gap-0.5">
+              <span className="text-[12px] text-sf-text-tertiary flex items-center gap-0.5 tracking-[-0.12px]">
                 <CommentIcon />
                 {formatCount(commentCount)}
               </span>
@@ -161,7 +167,7 @@ export function DiscoveryCard({
 
       {/* Score — right side */}
       <div className="shrink-0 flex items-center justify-center w-14 ml-3">
-        <span className={`text-[22px] font-semibold tabular-nums ${scoreColor}`}>
+        <span className={`text-[24px] font-semibold tabular-nums tracking-tight ${scoreColor}`}>
           {relevanceScore}
         </span>
       </div>

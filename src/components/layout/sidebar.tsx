@@ -3,11 +3,12 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { signOutAction } from '@/app/actions/auth';
+import { ShipFlareLogo } from '@/components/ui/shipflare-logo';
+import { usePipeline } from '@/components/ui/pipeline-provider';
 
 const navItems = [
-  { href: '/dashboard', label: 'Dashboard', icon: DashboardIcon },
+  { href: '/today', label: 'Today', icon: TodayIcon },
   { href: '/product', label: 'My Product', icon: ProductIcon },
-  { href: '/automation', label: 'Automation', icon: AutomationIcon },
   { href: '/growth', label: 'Growth', icon: GrowthIcon },
   { href: '/calendar', label: 'Calendar', icon: CalendarIcon },
   { href: '/settings', label: 'Settings', icon: SettingsIcon },
@@ -15,11 +16,13 @@ const navItems = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const { hasRunning } = usePipeline();
 
   return (
-    <aside className="hidden lg:flex flex-col w-[200px] border-r border-sf-border bg-sf-bg-primary h-screen sticky top-0">
+    <aside className="hidden lg:flex flex-col w-[200px] bg-black/[0.03] backdrop-blur-xl h-screen sticky top-0 border-r border-sf-border">
       <div className="px-5 py-5">
-        <Link href="/dashboard" className="text-[18px] font-semibold text-sf-text-primary tracking-tight inline-flex items-center min-h-[44px]">
+        <Link href="/today" className="text-[17px] font-semibold text-sf-text-primary tracking-[-0.374px] inline-flex items-center gap-2 min-h-[44px]">
+          <ShipFlareLogo size={22} />
           ShipFlare
         </Link>
       </div>
@@ -34,15 +37,18 @@ export function Sidebar() {
                   href={item.href}
                   className={`
                     flex items-center gap-3 px-3 min-h-[44px] rounded-[var(--radius-sf-md)]
-                    text-[13px] font-medium transition-colors duration-150
+                    text-[14px] tracking-[-0.224px] transition-all duration-200
                     ${isActive
-                      ? 'bg-sf-bg-secondary text-sf-text-primary'
-                      : 'text-sf-text-secondary hover:bg-sf-bg-secondary hover:text-sf-text-primary'
+                      ? 'bg-black/[0.06] text-sf-text-primary font-medium'
+                      : 'text-sf-text-secondary hover:bg-black/[0.04] hover:text-sf-text-primary'
                     }
                   `}
                 >
                   <item.icon active={isActive} />
                   {item.label}
+                  {hasRunning && item.href === '/calendar' && (
+                    <span className="ml-auto w-2 h-2 rounded-full bg-sf-accent animate-pulse" aria-label="Pipeline running" />
+                  )}
                 </Link>
               </li>
             );
@@ -54,7 +60,7 @@ export function Sidebar() {
         <form action={signOutAction}>
           <button
             type="submit"
-            className="flex items-center gap-3 w-full px-3 min-h-[44px] rounded-[var(--radius-sf-md)] text-[13px] font-medium text-sf-text-secondary hover:bg-sf-bg-secondary hover:text-sf-text-primary transition-colors duration-150"
+            className="flex items-center gap-3 w-full px-3 min-h-[44px] rounded-[var(--radius-sf-md)] text-[14px] tracking-[-0.224px] text-sf-text-secondary hover:bg-black/[0.04] hover:text-sf-text-primary transition-all duration-200"
           >
             <LogOutIcon />
             Sign out
@@ -65,13 +71,11 @@ export function Sidebar() {
   );
 }
 
-function DashboardIcon({ active }: { active: boolean }) {
+function TodayIcon({ active }: { active: boolean }) {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke={active ? 'var(--color-sf-text-primary)' : 'currentColor'} strokeWidth="1.5">
-      <rect x="1" y="1" width="6" height="6" rx="1" />
-      <rect x="9" y="1" width="6" height="6" rx="1" />
-      <rect x="1" y="9" width="6" height="6" rx="1" />
-      <rect x="9" y="9" width="6" height="6" rx="1" />
+      <circle cx="8" cy="8" r="6" />
+      <path d="M8 4v4l2.5 1.5" />
     </svg>
   );
 }
@@ -90,14 +94,6 @@ function ProductIcon({ active }: { active: boolean }) {
       <path d="M2 5l6-3 6 3-6 3-6-3z" />
       <path d="M2 5v6l6 3V8" />
       <path d="M14 5v6l-6 3V8" />
-    </svg>
-  );
-}
-
-function AutomationIcon({ active }: { active: boolean }) {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke={active ? 'var(--color-sf-text-primary)' : 'currentColor'} strokeWidth="1.5">
-      <path d="M9 1L3 9h5l-1 6 6-8H8l1-6z" />
     </svg>
   );
 }

@@ -16,14 +16,14 @@ export function ConnectAccountsStep({
 }: ConnectAccountsStepProps) {
   return (
     <div className="flex flex-col gap-6">
-      <p className="text-[15px] text-sf-text-secondary leading-relaxed">
+      <p className="text-[17px] tracking-[-0.374px] text-sf-text-secondary leading-[1.47]">
         Connect your social accounts so ShipFlare can post approved replies on your behalf.
         You can connect one or both.
       </p>
 
       <div className="flex flex-col gap-3">
         {/* Reddit */}
-        <div className="flex items-center justify-between p-4 border border-sf-border rounded-[var(--radius-sf-lg)]">
+        <div className="flex items-center justify-between p-4 bg-sf-bg-secondary shadow-[0_3px_5px_rgba(0,0,0,0.04),0_6px_20px_rgba(0,0,0,0.06)] rounded-[var(--radius-sf-lg)]">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 bg-[#FF4500]/10 rounded-[var(--radius-sf-md)] flex items-center justify-center">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="#FF4500" aria-hidden="true">
@@ -31,17 +31,17 @@ export function ConnectAccountsStep({
               </svg>
             </div>
             <div>
-              <p className="text-[13px] font-medium text-sf-text-primary">Reddit</p>
-              <p className="text-[11px] text-sf-text-tertiary">Posts, comments, community discovery</p>
+              <p className="text-[14px] tracking-[-0.224px] font-medium text-sf-text-primary">Reddit</p>
+              <p className="text-[12px] tracking-[-0.12px] text-sf-text-tertiary">Posts, comments, community discovery</p>
             </div>
             {redditConnected && (
-              <Badge variant="success" className="text-[10px]">Connected</Badge>
+              <Badge variant="success" className="text-[12px] tracking-[-0.12px]">Connected</Badge>
             )}
           </div>
           {!redditConnected && (
             <Button
               variant="secondary"
-              className="text-[13px]"
+              className="text-[14px] tracking-[-0.224px]"
               onClick={() => { window.location.href = '/api/reddit/connect'; }}
             >
               Connect
@@ -50,7 +50,7 @@ export function ConnectAccountsStep({
         </div>
 
         {/* X / Twitter */}
-        <div className="flex items-center justify-between p-4 border border-sf-border rounded-[var(--radius-sf-lg)]">
+        <div className="flex items-center justify-between p-4 bg-sf-bg-secondary shadow-[0_3px_5px_rgba(0,0,0,0.04),0_6px_20px_rgba(0,0,0,0.06)] rounded-[var(--radius-sf-lg)]">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 bg-sf-bg-tertiary rounded-[var(--radius-sf-md)] flex items-center justify-center">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="text-sf-text-primary" aria-hidden="true">
@@ -58,17 +58,17 @@ export function ConnectAccountsStep({
               </svg>
             </div>
             <div>
-              <p className="text-[13px] font-medium text-sf-text-primary">X</p>
-              <p className="text-[11px] text-sf-text-tertiary">Tweets, replies, topic discovery</p>
+              <p className="text-[14px] tracking-[-0.224px] font-medium text-sf-text-primary">X</p>
+              <p className="text-[12px] tracking-[-0.12px] text-sf-text-tertiary">Tweets, replies, topic discovery</p>
             </div>
             {xConnected && (
-              <Badge variant="success" className="text-[10px]">Connected</Badge>
+              <Badge variant="success" className="text-[12px] tracking-[-0.12px]">Connected</Badge>
             )}
           </div>
           {!xConnected && (
             <Button
               variant="secondary"
-              className="text-[13px]"
+              className="text-[14px] tracking-[-0.224px]"
               onClick={() => { window.location.href = '/api/x/connect'; }}
             >
               Connect
@@ -83,7 +83,7 @@ export function ConnectAccountsStep({
         </Button>
       </div>
 
-      <p className="text-[11px] text-sf-text-tertiary">
+      <p className="text-[12px] tracking-[-0.12px] text-sf-text-tertiary">
         You can always connect later from Settings. Discovery and content
         generation work without a connected account, but posting requires it.
       </p>

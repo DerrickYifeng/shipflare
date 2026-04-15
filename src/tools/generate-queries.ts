@@ -2,13 +2,24 @@ import { z } from 'zod';
 import { buildTool } from '@/bridge/build-tool';
 
 /**
- * Pain-point templates — how real users describe problems on Reddit.
+ * Pain-point templates — how real users describe problems.
  */
 const PAIN_TEMPLATES = [
   (kw: string) => `how to ${kw}`,
   (kw: string) => `${kw} not working`,
   (kw: string) => `need help with ${kw}`,
   (kw: string) => `can't ${kw}`,
+] as const;
+
+/**
+ * X-specific pain templates — question-only format to filter out
+ * thought leadership and promotional content on X/Twitter.
+ */
+const X_PAIN_TEMPLATES = [
+  (kw: string) => `"how do I" ${kw}`,
+  (kw: string) => `"need help" ${kw}`,
+  (kw: string) => `"can't figure out" ${kw}`,
+  (kw: string) => `"anyone know" ${kw}`,
 ] as const;
 
 /**
@@ -20,6 +31,16 @@ const SOLUTION_TEMPLATES = [
   (kw: string) => `how do you handle ${kw}`,
   (kw: string) => `recommend ${kw}`,
   (kw: string) => `struggling with ${kw}`,
+] as const;
+
+/**
+ * X-specific solution-seeking templates — explicit question format.
+ */
+const X_SOLUTION_TEMPLATES = [
+  (kw: string) => `"what tools" ${kw}`,
+  (kw: string) => `"any recommendations" ${kw}`,
+  (kw: string) => `"looking for" ${kw} tool`,
+  (kw: string) => `"does anyone" ${kw}`,
 ] as const;
 
 /**
@@ -54,6 +75,27 @@ function pickCoreKeyword(keywords: string[]): string {
 }
 
 /**
+ * Extract the core pain phrase from valueProp.
+ * Strips action prefixes ("Automates", "Simplifies", etc.) and trailing
+ * qualifier clauses ("with...", "across...", "that...") to get the
+ * user-facing problem the product solves.
+ *
+ * Example: "Automates community discovery and engagement across platforms
+ *           with AI-generated content" → "community discovery and engagement"
+ */
+function extractPainPhrase(valueProp: string): string {
+  return valueProp
+    .replace(
+      /^(Automates?|Simplif(?:y|ies)|Streamlines?|Helps?(?: you)?(?: to)?|Enables?|Provides?|Offers?|Makes? (?:it )?(?:easy|simple|fast) to)\s+/i,
+      '',
+    )
+    .split(/[.,;]|\s+(?:with|across|that|by|for|using|via|through|so)\s+/i)[0]!
+    .trim()
+    .toLowerCase()
+    .slice(0, 60);
+}
+
+/**
  * Platform-specific strategy for the 6th query slot.
  * Each platform gets a query style that matches its search semantics.
  */
@@ -83,6 +125,8 @@ export const generateQueriesTool = buildTool({
     subreddit: z.string().nullable().optional().describe('Deprecated alias for source (Reddit subreddit)'),
     topic: z.string().nullable().optional().describe('Deprecated alias for source (X/Twitter topic)'),
     platform: z.enum(['reddit', 'x', 'hn', 'generic']).optional().default('reddit').describe('Target platform'),
+    customPainPhrases: z.array(z.string()).optional().describe('Per-user custom pain phrases to append'),
+    customQueryTemplates: z.array(z.string()).optional().describe('Per-user custom query templates to append'),
   }),
   async execute(input) {
     const platform = input.platform ?? 'reddit';
@@ -108,33 +152,52 @@ export const generateQueriesTool = buildTool({
     const core = pickCoreKeyword(filtered);
     const secondary = filtered.find((kw) => kw !== core) ?? core;
     const seed = source;
+    const painPhrase = extractPainPhrase(input.valueProp);
 
     const queries: string[] = [];
 
+    // Pass 1: valueProp-derived pain query (targets the SPECIFIC problem)
     if (platform === 'reddit') {
-      // Reddit: use Reddit-specific operators
-      queries.push(quote(core));
+      queries.push(quote(painPhrase));
     } else {
-      // Other platforms: natural language queries with source context
-      queries.push(`${core} ${source}`);
+      queries.push(`${painPhrase} ${source}`);
     }
 
-    // Pass 2: Pain-point query
-    const painFn = hashSelect(PAIN_TEMPLATES, `${seed}-pain`);
+    // Pass 2: Pain-point question with keyword
+    const painTemplates = platform === 'x' ? X_PAIN_TEMPLATES : PAIN_TEMPLATES;
+    const painFn = hashSelect(painTemplates, `${seed}-pain`);
     queries.push(painFn(core));
 
-    // Pass 3-4: Solution-seeking queries
-    const solFn1 = hashSelect(SOLUTION_TEMPLATES, `${seed}-sol1`);
+    // Pass 3: Solution-seeking query
+    const solTemplates = platform === 'x' ? X_SOLUTION_TEMPLATES : SOLUTION_TEMPLATES;
+    const solFn1 = hashSelect(solTemplates, `${seed}-sol1`);
     queries.push(solFn1(core));
-    const solFn2 = hashSelect(SOLUTION_TEMPLATES, `${seed}-sol2`);
-    queries.push(solFn2(secondary));
 
-    // Pass 5: Frustration / manual-process pain
-    queries.push(`tired of manual ${core}`);
+    // Pass 4: valueProp as user frustration
+    if (platform === 'x') {
+      queries.push(`"need help" ${painPhrase}`);
+    } else {
+      queries.push(`how to ${painPhrase}`);
+    }
+
+    // Pass 5: Keyword-based frustration
+    if (platform === 'x') {
+      queries.push(`"struggling with" ${secondary}`);
+    } else {
+      queries.push(`struggling with ${secondary}`);
+    }
 
     // Pass 6: Platform-specific strategy
     const strategyFn = PASS6_STRATEGY[platform ?? 'reddit'] ?? PASS6_STRATEGY.generic;
     queries.push(strategyFn(core, secondary, source));
+
+    // Append per-user custom queries
+    for (const phrase of input.customPainPhrases ?? []) {
+      queries.push(phrase);
+    }
+    for (const template of input.customQueryTemplates ?? []) {
+      queries.push(template);
+    }
 
     // Deduplicate while preserving order
     const unique = [...new Set(queries)];

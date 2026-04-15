@@ -1,36 +1,56 @@
 @import "tailwindcss";
 
-/* ShipFlare Design System Tokens (DESIGN.md) */
+/* ShipFlare Design System — Apple-inspired (DESIGN.md) */
 @theme inline {
-  /* Override Tailwind defaults to prevent Geist/system font leaks */
-  --default-font-family: var(--font-space-grotesk), system-ui, sans-serif;
-  --default-mono-font-family: var(--font-jetbrains-mono), ui-monospace, monospace;
+  /* Override Tailwind defaults: SF Pro system stack */
+  --default-font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display",
+    "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --default-mono-font-family: "SF Mono", ui-monospace, "Cascadia Code",
+    "Fira Code", Menlo, monospace;
 
-  /* Colors */
-  --color-sf-bg-primary: #ffffff;
-  --color-sf-bg-secondary: #f8f8f8;
-  --color-sf-bg-tertiary: #f0f0f0;
-  --color-sf-border: #e5e5e5;
-  --color-sf-border-subtle: #f0f0f0;
-  --color-sf-text-primary: #1a1a1a;
-  --color-sf-text-secondary: #666666;
-  --color-sf-text-tertiary: #767676;
-  --color-sf-accent: #ff6b35;
-  --color-sf-accent-hover: #e55a2b;
-  --color-sf-accent-light: #fff5f0;
-  --color-sf-success: #16a34a;
-  --color-sf-success-light: #f0fdf4;
-  --color-sf-warning: #d97706;
-  --color-sf-warning-light: #fffbeb;
-  --color-sf-error: #dc2626;
-  --color-sf-error-light: #fef2f2;
+  /* ─── Colors ─── */
 
-  /* Fonts */
-  --font-heading: var(--font-space-grotesk), system-ui, sans-serif;
-  --font-body: var(--font-space-grotesk), system-ui, sans-serif;
-  --font-mono: var(--font-jetbrains-mono), ui-monospace, monospace;
+  /* Backgrounds */
+  --color-sf-bg-primary: #f5f5f7;
+  --color-sf-bg-secondary: #ffffff;
+  --color-sf-bg-tertiary: #ebebed;
+  --color-sf-bg-dark: #000000;
+  --color-sf-bg-dark-surface: #1d1d1f;
 
-  /* Spacing (4px base) */
+  /* Borders */
+  --color-sf-border: rgba(0, 0, 0, 0.08);
+  --color-sf-border-subtle: rgba(0, 0, 0, 0.04);
+
+  /* Text */
+  --color-sf-text-primary: #1d1d1f;
+  --color-sf-text-secondary: rgba(0, 0, 0, 0.56);
+  --color-sf-text-tertiary: rgba(0, 0, 0, 0.48);
+  --color-sf-text-on-dark: #ffffff;
+
+  /* Accent — Apple Blue */
+  --color-sf-accent: #0071e3;
+  --color-sf-accent-hover: #0077ed;
+  --color-sf-accent-light: #e8f2fc;
+  --color-sf-link: #0066cc;
+  --color-sf-link-dark: #2997ff;
+
+  /* Semantic */
+  --color-sf-success: #34c759;
+  --color-sf-success-light: #eef9f1;
+  --color-sf-warning: #ff9f0a;
+  --color-sf-warning-light: #fff8eb;
+  --color-sf-error: #ff3b30;
+  --color-sf-error-light: #fff0ef;
+
+  /* ─── Fonts ─── */
+  --font-heading: -apple-system, BlinkMacSystemFont, "SF Pro Display",
+    "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-body: -apple-system, BlinkMacSystemFont, "SF Pro Text",
+    "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-mono: "SF Mono", ui-monospace, "Cascadia Code", "Fira Code", Menlo,
+    monospace;
+
+  /* ─── Spacing (8px base) ─── */
   --spacing-sf-1: 4px;
   --spacing-sf-2: 8px;
   --spacing-sf-3: 12px;
@@ -39,48 +59,85 @@
   --spacing-sf-6: 24px;
   --spacing-sf-8: 32px;
 
-  /* Radius */
-  --radius-sf-sm: 4px;
-  --radius-sf-md: 6px;
-  --radius-sf-lg: 8px;
+  /* ─── Radius (Apple scale) ─── */
+  --radius-sf-sm: 5px;
+  --radius-sf-md: 8px;
+  --radius-sf-lg: 12px;
+  --radius-sf-pill: 980px;
   --radius-sf-full: 9999px;
 
-  /* Animations */
-  --animate-sf-score: sf-score-fill 600ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
-  --animate-sf-fade-in: sf-fade-in 200ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
-  --animate-sf-slide-up: sf-slide-up 200ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  /* ─── Shadows ─── */
+  --shadow-sf-card: 0 3px 5px rgba(0, 0, 0, 0.04),
+    0 6px 20px rgba(0, 0, 0, 0.06);
+  --shadow-sf-elevated: 3px 5px 30px 0px rgba(0, 0, 0, 0.12);
+
+  /* ─── Animations ─── */
+  --animate-sf-score: sf-score-fill 600ms cubic-bezier(0.16, 1, 0.3, 1)
+    forwards;
+  --animate-sf-fade-in: sf-fade-in 300ms cubic-bezier(0.16, 1, 0.3, 1)
+    forwards;
+  --animate-sf-slide-up: sf-slide-up 300ms cubic-bezier(0.16, 1, 0.3, 1)
+    forwards;
   --animate-sf-pulse: sf-pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-  --animate-thought-line: sf-thought-line 150ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  --animate-thought-line: sf-thought-line 200ms cubic-bezier(0.16, 1, 0.3, 1)
+    forwards;
 }
 
 @keyframes sf-score-fill {
-  from { stroke-dashoffset: var(--sf-score-circumference, 100); }
-  to { stroke-dashoffset: var(--sf-score-offset, 0); }
+  from {
+    stroke-dashoffset: var(--sf-score-circumference, 100);
+  }
+  to {
+    stroke-dashoffset: var(--sf-score-offset, 0);
+  }
 }
 
 @keyframes sf-fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 @keyframes sf-slide-up {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @keyframes sf-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
 }
 
 @keyframes sf-thought-line {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* Respect reduced motion */
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
+  *,
+  *::before,
+  *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
@@ -89,19 +146,62 @@
 
 /* Base styles */
 @layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
   body {
     background: var(--color-sf-bg-primary);
     color: var(--color-sf-text-primary);
     font-family: var(--font-body);
-    font-size: 15px;
-    line-height: 1.4;
+    font-size: 17px;
+    line-height: 1.47;
+    letter-spacing: -0.374px;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
 
-  /* Focus ring — in @layer base so utilities can override */
+  /* Focus ring — Apple Blue */
   :focus-visible {
     outline: 2px solid var(--color-sf-accent);
     outline-offset: 2px;
+  }
+
+  /* Remove focus outline on mouse click, keep for keyboard */
+  :focus:not(:focus-visible) {
+    outline: none;
+  }
+
+  /* Selection */
+  ::selection {
+    background: rgba(0, 113, 227, 0.2);
+  }
+
+  /* Smooth transitions on interactive elements */
+  a,
+  button,
+  input,
+  textarea,
+  select {
+    transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  /* Scrollbar styling — subtle, Apple-like */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.15);
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 0, 0, 0.25);
   }
 }

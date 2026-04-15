@@ -32,9 +32,9 @@ export function DangerZone() {
 
   return (
     <section>
-      <h2 className="text-[15px] font-semibold text-sf-error mb-4">Danger zone</h2>
-      <div className="p-4 border border-sf-error/20 rounded-[var(--radius-sf-lg)]">
-        <p className="text-[13px] text-sf-text-secondary mb-3">
+      <h2 className="text-[21px] font-bold tracking-[-0.12px] text-sf-error mb-4">Danger zone</h2>
+      <div className="p-4 border border-sf-error/20 rounded-[var(--radius-sf-lg)] bg-sf-bg-secondary">
+        <p className="text-[14px] tracking-[-0.224px] text-sf-text-secondary mb-3 leading-[1.47]">
           Permanently delete your account and all associated data. This action cannot be undone.
         </p>
         <Button variant="danger" onClick={() => setShowDialog(true)}>
@@ -47,7 +47,7 @@ export function DangerZone() {
         onClose={() => setShowDialog(false)}
         title="Delete account"
       >
-        <p className="text-[13px] text-sf-text-secondary mb-4">
+        <p className="text-[14px] tracking-[-0.224px] text-sf-text-secondary mb-4 leading-[1.47]">
           This will permanently delete your account, all products, drafts, posts, and
           connected accounts. Type <strong>DELETE</strong> to confirm.
         </p>
@@ -57,7 +57,7 @@ export function DangerZone() {
           placeholder="Type DELETE"
         />
         {error && (
-          <p className="text-[13px] text-sf-error mt-2">{error}</p>
+          <p className="text-[14px] tracking-[-0.224px] text-sf-error mt-2">{error}</p>
         )}
         <div className="flex justify-end gap-2 mt-4">
           <Button variant="ghost" onClick={() => setShowDialog(false)}>

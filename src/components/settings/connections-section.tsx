@@ -32,10 +32,10 @@ export function ConnectionsSection({
 
   return (
     <section>
-      <h2 className="text-[15px] font-semibold text-sf-text-primary mb-4">Connections</h2>
+      <h2 className="text-[21px] font-bold tracking-[-0.12px] text-sf-text-primary mb-4">Connections</h2>
       <div className="flex flex-col gap-3">
         {/* Reddit */}
-        <div className="flex items-center justify-between p-4 border border-sf-border rounded-[var(--radius-sf-lg)]">
+        <div className="flex items-center justify-between p-4 bg-sf-bg-secondary shadow-[0_3px_5px_rgba(0,0,0,0.04),0_6px_20px_rgba(0,0,0,0.06)] rounded-[var(--radius-sf-lg)]">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 bg-[#FF4500]/10 rounded-[var(--radius-sf-md)] flex items-center justify-center">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="#FF4500" aria-hidden="true">
@@ -43,9 +43,9 @@ export function ConnectionsSection({
               </svg>
             </div>
             <div>
-              <p className="text-[13px] font-medium text-sf-text-primary">Reddit</p>
+              <p className="text-[14px] tracking-[-0.224px] font-medium text-sf-text-primary">Reddit</p>
               {redditConnected && redditUsername && (
-                <p className="text-[11px] text-sf-text-tertiary">u/{redditUsername}</p>
+                <p className="text-[12px] tracking-[-0.12px] text-sf-text-tertiary">u/{redditUsername}</p>
               )}
             </div>
             <Badge variant={redditConnected ? 'success' : 'default'}>
@@ -64,7 +64,7 @@ export function ConnectionsSection({
         </div>
 
         {/* X */}
-        <div className="flex items-center justify-between p-4 border border-sf-border rounded-[var(--radius-sf-lg)]">
+        <div className="flex items-center justify-between p-4 bg-sf-bg-secondary shadow-[0_3px_5px_rgba(0,0,0,0.04),0_6px_20px_rgba(0,0,0,0.06)] rounded-[var(--radius-sf-lg)]">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 bg-sf-bg-tertiary rounded-[var(--radius-sf-md)] flex items-center justify-center">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="text-sf-text-primary" aria-hidden="true">
@@ -72,9 +72,9 @@ export function ConnectionsSection({
               </svg>
             </div>
             <div>
-              <p className="text-[13px] font-medium text-sf-text-primary">X</p>
+              <p className="text-[14px] tracking-[-0.224px] font-medium text-sf-text-primary">X</p>
               {xConnected && xUsername && (
-                <p className="text-[11px] text-sf-text-tertiary">@{xUsername}</p>
+                <p className="text-[12px] tracking-[-0.12px] text-sf-text-tertiary">@{xUsername}</p>
               )}
             </div>
             <Badge variant={xConnected ? 'success' : 'default'}>

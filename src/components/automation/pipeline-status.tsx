@@ -42,10 +42,10 @@ export function PipelineStatus() {
   return (
     <div className="mb-6">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-[13px] font-medium text-sf-text-secondary uppercase tracking-wider">
+        <h3 className="text-[14px] tracking-[-0.224px] font-medium text-sf-text-secondary uppercase">
           Pipeline Status
         </h3>
-        <div className="flex items-center gap-3 text-[12px] text-sf-text-tertiary">
+        <div className="flex items-center gap-3 text-[12px] tracking-[-0.12px] text-sf-text-tertiary">
           <span>{draftCounts.pending} pending</span>
           <span>{draftCounts.approved} approved</span>
           <span>{draftCounts.posted} posted</span>
@@ -56,21 +56,21 @@ export function PipelineStatus() {
         {pipelines.map((p) => (
           <div
             key={p.name}
-            className="border border-sf-border rounded-[var(--radius-sf-lg)] p-4 bg-sf-bg-primary"
+            className="rounded-[var(--radius-sf-lg)] p-4 bg-sf-bg-secondary shadow-[0_3px_5px_rgba(0,0,0,0.04),0_6px_20px_rgba(0,0,0,0.06)]"
           >
             <div className="flex items-center gap-2 mb-2">
               <span className={`w-2 h-2 rounded-full ${statusDot[p.status] ?? 'bg-sf-text-tertiary'}`} />
-              <span className="text-[14px] font-medium text-sf-text-primary">{p.name}</span>
+              <span className="text-[14px] tracking-[-0.224px] font-medium text-sf-text-primary">{p.name}</span>
               {p.errorCount > 0 && (
                 <Badge variant="error" mono>
                   {p.errorCount} err
                 </Badge>
               )}
             </div>
-            <div className="flex flex-col gap-0.5 text-[12px] text-sf-text-tertiary">
+            <div className="flex flex-col gap-0.5 text-[12px] tracking-[-0.12px] text-sf-text-tertiary">
               <span>Last: {relativeTime(p.lastRun)}</span>
               <span>Next: {relativeTime(p.nextRun)}</span>
-              <span className="text-[11px]">{p.cronDescription}</span>
+              <span className="text-[12px] tracking-[-0.12px]">{p.cronDescription}</span>
             </div>
           </div>
         ))}

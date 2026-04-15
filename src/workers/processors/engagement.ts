@@ -7,6 +7,7 @@ import {
   posts,
   threads,
   activityEvents,
+  todoItems,
 } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { XClient, XForbiddenError } from '@/lib/x-client';
@@ -17,15 +18,16 @@ import { engagementMonitorOutputSchema } from '@/agents/schemas';
 import { enqueueReview } from '@/lib/queue';
 import { publishEvent } from '@/lib/redis';
 import { join } from 'path';
-import type { XEngagementJobData } from '@/lib/queue/types';
+import type { EngagementJobData } from '@/lib/queue/types';
 import { createLogger } from '@/lib/logger';
+import { buildContentUrl } from '@/lib/platform-config';
 
 const MAX_ENGAGEMENT_DEPTH = 2;
 
 const log = createLogger('worker:x-engagement');
 
-export async function processXEngagement(job: Job<XEngagementJobData>) {
-  const { userId, tweetId, originalText, productId } = job.data;
+export async function processXEngagement(job: Job<EngagementJobData>) {
+  const { userId, contentId: tweetId, contentText: originalText, productId } = job.data;
   log.info(`Monitoring engagement for tweet ${tweetId}`);
 
   // Load X channel
@@ -130,7 +132,7 @@ export async function processXEngagement(job: Job<XEngagementJobData>) {
           platform: 'x',
           community: `@${mention.authorUsername}`,
           title: mention.text.slice(0, 200),
-          url: `https://x.com/${mention.authorUsername}/status/${mention.mentionId}`,
+          url: buildContentUrl('x', mention.authorUsername, mention.mentionId),
           relevanceScore: mention.priority === 'high' ? 0.9 : mention.priority === 'medium' ? 0.7 : 0.5,
         })
         .onConflictDoNothing()
@@ -163,6 +165,29 @@ export async function processXEngagement(job: Job<XEngagementJobData>) {
         userId,
         draftId: draft.id,
         productId,
+      });
+
+      // Inject time-sensitive todo item for the Today page
+      await db
+        .insert(todoItems)
+        .values({
+          userId,
+          draftId: draft.id,
+          todoType: 'respond_engagement',
+          source: 'engagement',
+          priority: 'time_sensitive',
+          title: `Reply to @${mention.authorUsername}: ${mention.text.slice(0, 80)}...`,
+          platform: 'x',
+          community: `@${mention.authorUsername}`,
+          externalUrl: buildContentUrl('x', mention.authorUsername, mention.mentionId),
+          confidence: mention.priority === 'high' ? 0.9 : 0.7,
+          expiresAt: new Date(Date.now() + 4 * 60 * 60 * 1000),
+        })
+        .onConflictDoNothing();
+
+      await publishEvent(`shipflare:events:${userId}`, {
+        type: 'todo_added',
+        todoType: 'respond_engagement',
       });
     }
 

@@ -43,8 +43,8 @@ export function DraftQueue() {
   if (drafts.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-center">
-        <p className="text-[15px] text-sf-text-secondary mb-1">No pending drafts</p>
-        <p className="text-[13px] text-sf-text-tertiary">
+        <p className="text-[17px] tracking-[-0.374px] text-sf-text-secondary mb-1">No pending drafts</p>
+        <p className="text-[14px] tracking-[-0.224px] text-sf-text-tertiary">
           Drafts appear here after discovery finds relevant threads.
         </p>
       </div>
@@ -64,7 +64,7 @@ export function DraftQueue() {
               key={f.value}
               type="button"
               onClick={() => setFilter(f.value)}
-              className={`px-3 py-1.5 rounded-full text-[12px] font-medium transition-colors whitespace-nowrap ${
+              className={`px-3 py-1.5 rounded-full text-[12px] tracking-[-0.12px] font-medium transition-colors duration-200 whitespace-nowrap ${
                 active
                   ? 'bg-sf-accent text-white'
                   : 'bg-sf-bg-secondary text-sf-text-secondary hover:text-sf-text-primary'

@@ -78,10 +78,10 @@ export function ContentCalendar() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h3 className="text-[13px] font-medium text-sf-text-secondary uppercase tracking-wider">
+          <h3 className="text-[14px] tracking-[-0.224px] font-medium text-sf-text-secondary uppercase">
             Content Calendar
           </h3>
-          <p className="text-[12px] text-sf-text-tertiary mt-0.5">
+          <p className="text-[12px] tracking-[-0.12px] text-sf-text-tertiary mt-0.5">
             {items.filter((i) => i.status === 'scheduled').length} scheduled,{' '}
             {items.filter((i) => i.status === 'posted').length} posted
           </p>
@@ -92,7 +92,7 @@ export function ContentCalendar() {
       </div>
 
       {/* Content mix legend */}
-      <div className="flex items-center gap-4 text-[11px] text-sf-text-tertiary">
+      <div className="flex items-center gap-4 text-[12px] tracking-[-0.12px] text-sf-text-tertiary">
         <span>Content mix:</span>
         {Object.entries(typeColors).map(([type, variant]) => (
           <span key={type} className="flex items-center gap-1">
@@ -102,23 +102,23 @@ export function ContentCalendar() {
       </div>
 
       {error && (
-        <div className="px-4 py-3 rounded-[var(--radius-sf-md)] bg-sf-error-light border border-sf-error/20 text-[13px] text-sf-error">
+        <div className="px-4 py-3 rounded-[var(--radius-sf-md)] bg-sf-error-light text-[14px] tracking-[-0.224px] text-sf-error">
           {error}
         </div>
       )}
 
       {items.length === 0 ? (
         <div className="flex flex-col items-center py-16">
-          <div className="w-14 h-14 mb-4 rounded-full bg-sf-bg-secondary border border-sf-border flex items-center justify-center">
+          <div className="w-14 h-14 mb-4 rounded-full bg-sf-bg-secondary shadow-[0_3px_5px_rgba(0,0,0,0.04),0_6px_20px_rgba(0,0,0,0.06)] flex items-center justify-center">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--color-sf-text-tertiary)" strokeWidth="1.5">
               <rect x="3" y="4" width="18" height="18" rx="2" />
               <path d="M16 2v4M8 2v4M3 10h18" />
             </svg>
           </div>
-          <p className="text-[14px] font-medium text-sf-text-primary mb-1">
+          <p className="text-[17px] tracking-[-0.374px] font-medium text-sf-text-primary mb-1">
             No scheduled posts
           </p>
-          <p className="text-[13px] text-sf-text-tertiary max-w-[300px] text-center">
+          <p className="text-[14px] tracking-[-0.224px] text-sf-text-tertiary max-w-[300px] text-center">
             Click <span className="font-medium text-sf-text-secondary">Generate Week</span> to
             auto-create a week of content with the optimal 40/30/20/10 content mix.
           </p>
@@ -127,12 +127,12 @@ export function ContentCalendar() {
         <div className="flex flex-col gap-4">
           {Array.from(byDay.entries()).map(([day, dayItems]) => (
             <div key={day}>
-              <h4 className="text-[12px] font-medium text-sf-text-secondary mb-2">{day}</h4>
+              <h4 className="text-[12px] tracking-[-0.12px] font-medium text-sf-text-secondary mb-2">{day}</h4>
               <div className="flex flex-col gap-1.5">
                 {dayItems.map((item) => (
                   <Card key={item.id} className="flex items-center justify-between gap-3 py-3">
                     <div className="flex items-center gap-3 min-w-0">
-                      <span className="text-[12px] font-mono text-sf-text-tertiary tabular-nums w-14 flex-shrink-0">
+                      <span className="text-[12px] tracking-[-0.12px] font-mono text-sf-text-tertiary tabular-nums w-14 flex-shrink-0">
                         {new Date(item.scheduledAt).toLocaleTimeString('en-US', {
                           hour: '2-digit',
                           minute: '2-digit',
@@ -142,7 +142,7 @@ export function ContentCalendar() {
                         {item.contentType}
                       </Badge>
                       {item.topic && (
-                        <span className="text-[13px] text-sf-text-secondary truncate">
+                        <span className="text-[14px] tracking-[-0.224px] text-sf-text-secondary truncate">
                           {item.topic}
                         </span>
                       )}
@@ -154,7 +154,7 @@ export function ContentCalendar() {
                       {item.status === 'scheduled' && (
                         <button
                           onClick={() => handleCancel(item.id)}
-                          className="text-sf-text-tertiary hover:text-sf-error transition-colors p-1"
+                          className="text-sf-text-tertiary hover:text-sf-error transition-colors duration-200 p-1"
                           title="Cancel"
                         >
                           <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">

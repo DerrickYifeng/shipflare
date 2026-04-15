@@ -10,7 +10,7 @@ export function ProgressDots({ steps, current }: ProgressDotsProps) {
         <div
           key={i}
           className={`
-            w-2 h-2 rounded-full transition-colors duration-150
+            w-2 h-2 rounded-full transition-colors duration-200
             ${i === current ? 'bg-sf-accent' : i < current ? 'bg-sf-text-tertiary' : 'bg-sf-border'}
           `}
           aria-hidden="true"

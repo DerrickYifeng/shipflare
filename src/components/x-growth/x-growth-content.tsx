@@ -21,14 +21,14 @@ export function XGrowthContent() {
   return (
     <div className="flex-1 p-6">
       {/* Tab bar */}
-      <div className="flex items-center gap-1 mb-6 border-b border-sf-border pb-px">
+      <div className="flex items-center gap-1 mb-6 border-b border-[rgba(0,0,0,0.08)] pb-px">
         {tabs.map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
             className={`
-              px-3 py-2 text-[13px] font-medium rounded-t-[var(--radius-sf-md)]
-              transition-colors duration-150 border-b-2 -mb-px
+              px-3 py-2 text-[14px] tracking-[-0.224px] font-medium rounded-t-[var(--radius-sf-md)]
+              transition-colors duration-200 border-b-2 -mb-px
               ${activeTab === tab.id
                 ? 'border-sf-accent text-sf-text-primary'
                 : 'border-transparent text-sf-text-secondary hover:text-sf-text-primary'

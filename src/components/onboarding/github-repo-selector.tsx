@@ -145,7 +145,7 @@ export function GitHubRepoSelector({ onExtracted, onBack }: GitHubRepoSelectorPr
     return (
       <div className="flex flex-col items-center gap-3 py-8">
         <div className="w-5 h-5 border-2 border-sf-accent border-t-transparent rounded-full animate-spin" />
-        <p className="text-[13px] text-sf-text-secondary">Loading your repos...</p>
+        <p className="text-[14px] tracking-[-0.224px] text-sf-text-secondary">Loading your repos...</p>
       </div>
     );
   }
@@ -154,11 +154,11 @@ export function GitHubRepoSelector({ onExtracted, onBack }: GitHubRepoSelectorPr
     return (
       <div className="flex flex-col items-center gap-3 py-8">
         <div className="w-5 h-5 border-2 border-sf-accent border-t-transparent rounded-full animate-spin" />
-        <p className="text-[13px] font-medium text-sf-text-primary">
+        <p className="text-[14px] tracking-[-0.224px] font-medium text-sf-text-primary">
           Scanning {selected}
         </p>
         {progress && (
-          <p className="text-[12px] text-sf-text-tertiary">{progress.message}</p>
+          <p className="text-[12px] tracking-[-0.12px] text-sf-text-tertiary">{progress.message}</p>
         )}
       </div>
     );
@@ -172,11 +172,11 @@ export function GitHubRepoSelector({ onExtracted, onBack }: GitHubRepoSelectorPr
         onChange={(e) => setSearch(e.target.value)}
       />
 
-      {error && <p className="text-[13px] text-sf-error">{error}</p>}
+      {error && <p className="text-[14px] tracking-[-0.224px] text-sf-error">{error}</p>}
 
       <div className="flex flex-col gap-1 max-h-[280px] overflow-y-auto -mx-1 px-1">
         {filtered.length === 0 && (
-          <p className="text-[13px] text-sf-text-tertiary py-4 text-center">
+          <p className="text-[14px] tracking-[-0.224px] text-sf-text-tertiary py-4 text-center">
             {search ? 'No repos match your search' : 'No public repos found'}
           </p>
         )}
@@ -189,22 +189,22 @@ export function GitHubRepoSelector({ onExtracted, onBack }: GitHubRepoSelectorPr
               flex items-start gap-3 p-3 text-left
               rounded-[var(--radius-sf-md)]
               border border-transparent
-              hover:border-sf-border hover:bg-sf-bg-secondary
-              transition-colors duration-150
+              hover:bg-sf-bg-secondary hover:shadow-[0_3px_5px_rgba(0,0,0,0.04),0_6px_20px_rgba(0,0,0,0.06)]
+              transition-all duration-200
             "
           >
             <div className="flex-1 min-w-0">
-              <p className="text-[13px] font-medium text-sf-text-primary truncate">
+              <p className="text-[14px] tracking-[-0.224px] font-medium text-sf-text-primary truncate">
                 {repo.name}
               </p>
               {repo.description && (
-                <p className="text-[11px] text-sf-text-tertiary mt-0.5 line-clamp-1">
+                <p className="text-[12px] tracking-[-0.12px] text-sf-text-tertiary mt-0.5 line-clamp-1">
                   {repo.description}
                 </p>
               )}
             </div>
             {repo.language && (
-              <span className="text-[10px] text-sf-text-tertiary bg-sf-bg-tertiary px-1.5 py-0.5 rounded shrink-0">
+              <span className="text-[12px] tracking-[-0.12px] text-sf-text-tertiary bg-sf-bg-tertiary px-1.5 py-0.5 rounded shrink-0">
                 {repo.language}
               </span>
             )}
@@ -212,7 +212,7 @@ export function GitHubRepoSelector({ onExtracted, onBack }: GitHubRepoSelectorPr
         ))}
       </div>
 
-      <p className="text-[11px] text-sf-text-tertiary">
+      <p className="text-[12px] tracking-[-0.12px] text-sf-text-tertiary">
         Showing public repos only, sorted by recent activity.
       </p>
 

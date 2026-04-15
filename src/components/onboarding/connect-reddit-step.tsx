@@ -14,7 +14,7 @@ export function ConnectRedditStep({ onComplete }: ConnectRedditStepProps) {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="text-[15px] text-sf-text-secondary leading-relaxed">
+      <div className="text-[17px] tracking-[-0.374px] text-sf-text-secondary leading-[1.47]">
         <p>
           Connect your Reddit account so ShipFlare can post approved replies on your behalf.
         </p>
@@ -36,7 +36,7 @@ export function ConnectRedditStep({ onComplete }: ConnectRedditStepProps) {
         </Button>
       </div>
 
-      <p className="text-[11px] text-sf-text-tertiary">
+      <p className="text-[12px] tracking-[-0.12px] text-sf-text-tertiary leading-[1.47]">
         You can always connect later from Settings. Discovery and content
         generation work without a connected account, but posting requires it.
       </p>

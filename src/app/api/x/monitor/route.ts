@@ -3,7 +3,7 @@ import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { xMonitoredTweets, xTargetAccounts, products } from '@/lib/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
-import { enqueueXMonitor } from '@/lib/queue';
+import { enqueueMonitor } from '@/lib/queue';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('api:x:monitor');
@@ -68,9 +68,10 @@ export async function POST() {
     );
   }
 
-  await enqueueXMonitor({
+  await enqueueMonitor({
     userId: session.user.id,
     productId: product.id,
+    platform: 'x',
   });
 
   log.info(`Manual X monitor scan triggered for user ${session.user.id}`);

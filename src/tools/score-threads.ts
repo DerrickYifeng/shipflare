@@ -6,8 +6,8 @@ import { buildTool } from '@/bridge/build-tool';
 // ---------------------------------------------------------------------------
 
 const SCORE_WEIGHTS = {
-  relevance: 0.35,
-  intent: 0.40,
+  relevance: 0.30,
+  intent: 0.45,
   exposure: 0.10,
   freshness: 0.10,
   engagement: 0.05,
@@ -33,19 +33,22 @@ function scoreEngagement(upvotes: number, comments: number): number {
   return Math.min(1.0, commentScore + ratioBonus);
 }
 
-function computeWeightedScore(dims: {
-  relevance: number;
-  intent: number;
-  exposure: number;
-  freshness: number;
-  engagement: number;
-}): number {
+function computeWeightedScore(
+  dims: {
+    relevance: number;
+    intent: number;
+    exposure: number;
+    freshness: number;
+    engagement: number;
+  },
+  weights: typeof SCORE_WEIGHTS = SCORE_WEIGHTS,
+): number {
   return (
-    dims.relevance * SCORE_WEIGHTS.relevance +
-    dims.intent * SCORE_WEIGHTS.intent +
-    dims.exposure * SCORE_WEIGHTS.exposure +
-    dims.freshness * SCORE_WEIGHTS.freshness +
-    dims.engagement * SCORE_WEIGHTS.engagement
+    dims.relevance * weights.relevance +
+    dims.intent * weights.intent +
+    dims.exposure * weights.exposure +
+    dims.freshness * weights.freshness +
+    dims.engagement * weights.engagement
   );
 }
 
@@ -78,8 +81,38 @@ export const scoreThreadsTool = buildTool({
   isReadOnly: true,
   inputSchema: z.object({
     threads: z.array(threadInputSchema),
+    config: z
+      .object({
+        weights: z
+          .object({
+            relevance: z.number().optional(),
+            intent: z.number().optional(),
+            exposure: z.number().optional(),
+            freshness: z.number().optional(),
+            engagement: z.number().optional(),
+          })
+          .optional(),
+        intentGate: z.number().optional(),
+        relevanceGate: z.number().optional(),
+        gateCap: z.number().optional(),
+      })
+      .optional()
+      .describe('Per-user scoring config overrides'),
   }),
   async execute(input) {
+    const weights = input.config?.weights
+      ? {
+          relevance: input.config.weights.relevance ?? SCORE_WEIGHTS.relevance,
+          intent: input.config.weights.intent ?? SCORE_WEIGHTS.intent,
+          exposure: input.config.weights.exposure ?? SCORE_WEIGHTS.exposure,
+          freshness: input.config.weights.freshness ?? SCORE_WEIGHTS.freshness,
+          engagement: input.config.weights.engagement ?? SCORE_WEIGHTS.engagement,
+        }
+      : SCORE_WEIGHTS;
+    const intentGateThreshold = input.config?.intentGate ?? 0.5;
+    const relevanceGateThreshold = input.config?.relevanceGate ?? 0.5;
+    const gateCapValue = input.config?.gateCap ?? 0.45;
+
     const scored = input.threads.map((t) => {
       const dims = {
         relevance: t.relevance,
@@ -88,7 +121,13 @@ export const scoreThreadsTool = buildTool({
         freshness: scoreFreshness(t.createdUtc ?? 0),
         engagement: scoreEngagement(t.score ?? 0, t.commentCount ?? 0),
       };
-      const weightedScore = computeWeightedScore(dims);
+      let weightedScore = computeWeightedScore(dims, weights);
+
+      // Intent gate: if the author isn't seeking help, cap the score.
+      // Same for relevance: topic overlap alone isn't enough.
+      if (dims.intent < intentGateThreshold || dims.relevance < relevanceGateThreshold) {
+        weightedScore = Math.min(weightedScore, gateCapValue);
+      }
 
       return {
         id: t.id,

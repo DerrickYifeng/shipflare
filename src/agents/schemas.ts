@@ -15,9 +15,10 @@ export const discoveryOutputSchema = z.object({
       scores: z.object({
         relevance: z.number(),
         intent: z.number(),
-        exposure: z.number(),
-        freshness: z.number(),
-        engagement: z.number(),
+        // Computed by score_threads — optional when LLM returns JSON directly
+        exposure: z.number().optional(),
+        freshness: z.number().optional(),
+        engagement: z.number().optional(),
       }).optional(),
       // Also accept flat relevance/intent from agents that don't use score_threads
       relevance: z.number().optional(),
@@ -25,7 +26,7 @@ export const discoveryOutputSchema = z.object({
       score: z.number().optional(),
       commentCount: z.number().optional(),
       createdUtc: z.number().optional(),
-      reason: z.string(),
+      reason: z.string().optional(),
     }),
   ),
 });
@@ -46,6 +47,36 @@ export const draftReviewOutputSchema = z.object({
   ),
   issues: z.array(z.string()),
   suggestions: z.array(z.string()),
+});
+
+/**
+ * Output schema for the analyst (deep-analysis) agent.
+ * Engagement decision with confidence, strategy, and risk factors.
+ */
+export const analystOutputSchema = z.object({
+  shouldEngage: z.boolean(),
+  confidence: z.number(),
+  strategy: z.enum(['reply_to_op', 'reply_to_comment', 'skip']),
+  targetComment: z.string().nullable(),
+  intent: z.record(z.unknown()),
+  risks: z.array(z.string()),
+  reason: z.string(),
+});
+
+/**
+ * Output schema for the posting agent.
+ * Reports whether a draft was successfully posted and verified.
+ */
+export const postingOutputSchema = z.object({
+  success: z.boolean(),
+  draftType: z.enum(['reply', 'original_post']).optional(),
+  commentId: z.string().nullable(),
+  postId: z.string().nullable().optional(),
+  permalink: z.string().nullable(),
+  url: z.string().nullable().optional(),
+  verified: z.boolean(),
+  shadowbanned: z.boolean(),
+  error: z.string().optional(),
 });
 
 /**
@@ -182,6 +213,8 @@ export type CommunityDiscoveryOutput = z.infer<typeof communityDiscoveryOutputSc
 export type CommunityIntelOutput = z.infer<typeof communityIntelOutputSchema>;
 export type ContentOutput = z.infer<typeof contentOutputSchema>;
 export type DraftReviewOutput = z.infer<typeof draftReviewOutputSchema>;
+export type AnalystOutput = z.infer<typeof analystOutputSchema>;
+export type PostingOutput = z.infer<typeof postingOutputSchema>;
 export type RunSummaryOutput = z.infer<typeof runSummaryOutputSchema>;
 export type ReplyDrafterOutput = z.infer<typeof replyDrafterOutputSchema>;
 export type ContentCreatorOutput = z.infer<typeof contentCreatorOutputSchema>;

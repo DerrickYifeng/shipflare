@@ -67,8 +67,10 @@ function ToastItem({ toast: t, onDismiss }: { toast: Toast; onDismiss: (id: stri
     <div
       className={`
         animate-sf-slide-up
-        px-4 py-3 rounded-[var(--radius-sf-md)]
-        text-[13px] font-medium shadow-lg
+        px-4 py-3 rounded-[var(--radius-sf-lg)]
+        text-[14px] font-medium tracking-[-0.224px]
+        shadow-[var(--shadow-sf-elevated)]
+        backdrop-blur-xl
         ${variantStyles[t.variant]}
       `}
       role="alert"

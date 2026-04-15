@@ -101,6 +101,7 @@ export const userPreferences = pgTable(
     contentMixProduct: integer('content_mix_product').notNull().default(10),
     notifyOnNewDraft: boolean('notify_on_new_draft').notNull().default(true),
     notifyOnAutoApprove: boolean('notify_on_auto_approve').notNull().default(true),
+    timezone: text('timezone').notNull().default('America/Los_Angeles'),
     createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
   },

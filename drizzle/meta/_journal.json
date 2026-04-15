@@ -50,6 +50,27 @@
       "when": 1776224228000,
       "tag": "0006_add_calendar_channel",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1776155872960,
+      "tag": "0007_aspiring_kitty_pryde",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1776207697396,
+      "tag": "0008_milky_lionheart",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1776300000000,
+      "tag": "0009_add_discovery_configs",
+      "breakpoints": true
     }
   ]
 }

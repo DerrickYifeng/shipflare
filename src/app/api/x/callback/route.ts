@@ -81,7 +81,7 @@ export async function GET(request: NextRequest) {
   };
 
   // Try to get X username (requires Basic tier; Free tier returns 403)
-  let username = 'x_user';
+  let username = '';
   try {
     const meResponse = await fetch('https://api.x.com/2/users/me', {
       headers: { Authorization: `Bearer ${tokens.access_token}` },
@@ -93,12 +93,10 @@ export async function GET(request: NextRequest) {
       };
       username = me.data.username;
     } else {
-      log.warn(`X /users/me unavailable (${meResponse.status}), using session name`);
-      username = session.user.name ?? session.user.email?.split('@')[0] ?? 'x_user';
+      log.warn(`X /users/me unavailable (${meResponse.status}), username will be empty`);
     }
   } catch (err) {
     log.warn(`X /users/me request failed: ${err instanceof Error ? err.message : err}`);
-    username = session.user.name ?? 'x_user';
   }
 
   // Encrypt tokens
@@ -143,7 +141,7 @@ export async function GET(request: NextRequest) {
   log.info(`X account connected: @${username}`);
 
   // Clear PKCE cookies and redirect
-  const response = NextResponse.redirect(new URL('/dashboard', request.url));
+  const response = NextResponse.redirect(new URL('/today', request.url));
   response.cookies.delete('x_code_verifier');
   response.cookies.delete('x_oauth_state');
   return response;

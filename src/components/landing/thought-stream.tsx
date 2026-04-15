@@ -376,9 +376,10 @@ export function ThoughtStream({ url, onComplete, onError }: ThoughtStreamProps) 
     <div
       ref={containerRef}
       className={`
-        rounded-[var(--radius-sf-lg)] border border-sf-border
-        bg-sf-bg-secondary px-5 py-4 min-h-[120px]
-        font-mono text-[13px] leading-relaxed
+        rounded-[var(--radius-sf-lg)]
+        bg-sf-bg-secondary shadow-[var(--shadow-sf-card)]
+        px-5 py-4 min-h-[120px]
+        font-mono text-[14px] leading-relaxed tracking-[-0.224px]
         overflow-hidden transition-opacity duration-200
         ${fading ? 'opacity-0' : 'opacity-100'}
       `}
@@ -423,11 +424,11 @@ export function ThoughtStream({ url, onComplete, onError }: ThoughtStreamProps) 
 function StatusIcon({ status }: { status: 'active' | 'done' }) {
   if (status === 'done') {
     return (
-      <span className="text-sf-success text-[11px] shrink-0 ml-3">{'\u2713'}</span>
+      <span className="text-sf-success text-[12px] shrink-0 ml-3">{'\u2713'}</span>
     );
   }
   return (
-    <span className="text-sf-accent text-[11px] shrink-0 ml-3 animate-pulse">
+    <span className="text-sf-accent text-[12px] shrink-0 ml-3 animate-pulse">
       {'\u25cf'}
     </span>
   );

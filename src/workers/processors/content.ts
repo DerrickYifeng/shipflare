@@ -1,7 +1,7 @@
 import type { Job } from 'bullmq';
 import { db } from '@/lib/db';
-import { products, threads, drafts, activityEvents } from '@/lib/db/schema';
-import { eq } from 'drizzle-orm';
+import { products, threads, drafts, activityEvents, todoItems } from '@/lib/db/schema';
+import { eq, and } from 'drizzle-orm';
 import { loadSkill } from '@/core/skill-loader';
 import { runSkill } from '@/core/skill-runner';
 import { contentOutputSchema } from '@/agents/schemas';
@@ -93,6 +93,38 @@ export async function processContent(job: Job<ContentJobData>) {
   // Enqueue review for the newly created draft
   if (inserted) {
     await enqueueReview({ userId, draftId: inserted.id, productId });
+
+    // For reply drafts, inject a todoItem directly so it appears in Today
+    // immediately (without waiting for the next seed cycle)
+    if (draftType === 'reply') {
+      const now = new Date();
+      const threadAgeHours = (now.getTime() - (thread.discoveredAt?.getTime() ?? now.getTime())) / (1000 * 60 * 60);
+      const isTimeSensitive = threadAgeHours < 4 || (thread.upvotes ?? 0) > 50;
+
+      await db
+        .insert(todoItems)
+        .values({
+          userId,
+          draftId: inserted.id,
+          todoType: 'reply_thread',
+          source: 'discovery',
+          priority: isTimeSensitive ? 'time_sensitive' : 'scheduled',
+          title: thread.title.length > 100
+            ? thread.title.slice(0, 97) + '...'
+            : thread.title,
+          platform: thread.platform ?? 'reddit',
+          community: thread.community,
+          externalUrl: thread.url,
+          confidence: result.confidence,
+          expiresAt: new Date(now.getTime() + 12 * 60 * 60 * 1000),
+        })
+        .onConflictDoNothing();
+
+      await publishEvent(`shipflare:events:${userId}`, {
+        type: 'todo_added',
+        todoType: 'reply_thread',
+      });
+    }
   }
 
   // Log activity

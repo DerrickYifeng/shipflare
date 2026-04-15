@@ -18,9 +18,9 @@ export function Toggle({ label, children, defaultOpen = false }: ToggleProps) {
         onClick={() => setOpen(!open)}
         className="
           flex items-center gap-1.5
-          text-[13px] text-sf-text-secondary
+          text-[14px] tracking-[-0.224px] text-sf-text-secondary
           hover:text-sf-text-primary
-          transition-colors duration-150
+          transition-colors duration-200
           cursor-pointer min-h-[44px]
         "
         aria-expanded={open}
@@ -29,7 +29,7 @@ export function Toggle({ label, children, defaultOpen = false }: ToggleProps) {
           width="12"
           height="12"
           viewBox="0 0 12 12"
-          className={`transition-transform duration-150 ${open ? 'rotate-90' : ''}`}
+          className={`transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
           aria-hidden="true"
         >
           <path d="M4 2l4 4-4 4" fill="none" stroke="currentColor" strokeWidth="1.5" />

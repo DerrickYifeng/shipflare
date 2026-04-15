@@ -144,9 +144,9 @@ export function CodeSnapshotSection({ snapshot, hasGitHub }: CodeSnapshotSection
   if (!snapshot && !hasGitHub) {
     return (
       <section>
-        <h2 className="text-[15px] font-semibold text-sf-text-primary mb-4">Code Snapshot</h2>
+        <h2 className="text-[21px] font-bold tracking-[-0.12px] text-sf-text-primary mb-4">Code Snapshot</h2>
         <Card>
-          <p className="text-[13px] text-sf-text-tertiary">
+          <p className="text-[14px] tracking-[-0.224px] text-sf-text-tertiary">
             Connect your GitHub account in{' '}
             <a href="/settings" className="text-sf-accent hover:underline">Settings</a>
             {' '}to import code snapshots.
@@ -160,15 +160,15 @@ export function CodeSnapshotSection({ snapshot, hasGitHub }: CodeSnapshotSection
   if (!snapshot) {
     return (
       <section>
-        <h2 className="text-[15px] font-semibold text-sf-text-primary mb-4">Code Snapshot</h2>
+        <h2 className="text-[21px] font-bold tracking-[-0.12px] text-sf-text-primary mb-4">Code Snapshot</h2>
         <Card className="flex flex-col items-center py-6">
           <GitHubIcon />
-          <p className="text-[13px] text-sf-text-secondary mt-2">
+          <p className="text-[14px] tracking-[-0.224px] text-sf-text-secondary mt-2">
             Import from your GitHub repository to extract tech stack and product details.
           </p>
           <Button
             variant="secondary"
-            className="mt-3 !min-h-[36px] !text-[13px]"
+            className="mt-3 !min-h-[36px] !text-[14px] !tracking-[-0.224px]"
             onClick={() => setShowRepoSelector(true)}
           >
             Import from GitHub
@@ -189,7 +189,7 @@ export function CodeSnapshotSection({ snapshot, hasGitHub }: CodeSnapshotSection
   // Snapshot exists
   return (
     <section>
-      <h2 className="text-[15px] font-semibold text-sf-text-primary mb-4">Code Snapshot</h2>
+      <h2 className="text-[21px] font-bold tracking-[-0.12px] text-sf-text-primary mb-4">Code Snapshot</h2>
       <Card>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -198,7 +198,7 @@ export function CodeSnapshotSection({ snapshot, hasGitHub }: CodeSnapshotSection
               href={snapshot.repoUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-[13px] font-medium text-sf-text-primary hover:text-sf-accent transition-colors"
+              className="text-[14px] tracking-[-0.224px] font-medium text-sf-text-primary hover:text-sf-accent transition-colors duration-200"
             >
               {snapshot.repoFullName}
             </a>
@@ -208,7 +208,7 @@ export function CodeSnapshotSection({ snapshot, hasGitHub }: CodeSnapshotSection
           )}
         </div>
 
-        <p className="text-[11px] text-sf-text-tertiary mt-1">
+        <p className="text-[12px] tracking-[-0.12px] text-sf-text-tertiary mt-1">
           Last scanned {formatRelativeTime(snapshot.scannedAt)}
         </p>
 
@@ -216,7 +216,7 @@ export function CodeSnapshotSection({ snapshot, hasGitHub }: CodeSnapshotSection
         <div className="mt-4 flex flex-col gap-2">
           {snapshot.techStack.languages.length > 0 && (
             <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-[11px] text-sf-text-tertiary w-20 shrink-0">Languages</span>
+              <span className="text-[12px] tracking-[-0.12px] text-sf-text-tertiary w-20 shrink-0">Languages</span>
               {snapshot.techStack.languages.map((l) => (
                 <Badge key={l} variant="accent">{l}</Badge>
               ))}
@@ -224,14 +224,14 @@ export function CodeSnapshotSection({ snapshot, hasGitHub }: CodeSnapshotSection
           )}
           {snapshot.techStack.frameworks.length > 0 && (
             <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-[11px] text-sf-text-tertiary w-20 shrink-0">Frameworks</span>
+              <span className="text-[12px] tracking-[-0.12px] text-sf-text-tertiary w-20 shrink-0">Frameworks</span>
               {snapshot.techStack.frameworks.map((f) => (
                 <Badge key={f}>{f}</Badge>
               ))}
             </div>
           )}
           <div className="flex items-center gap-1.5 flex-wrap">
-            <span className="text-[11px] text-sf-text-tertiary w-20 shrink-0">Tooling</span>
+            <span className="text-[12px] tracking-[-0.12px] text-sf-text-tertiary w-20 shrink-0">Tooling</span>
             {snapshot.techStack.hasTests && <Badge variant="success">Tests</Badge>}
             {snapshot.techStack.hasCi && <Badge variant="success">CI</Badge>}
             {snapshot.techStack.hasDocker && <Badge variant="success">Docker</Badge>}
@@ -241,16 +241,16 @@ export function CodeSnapshotSection({ snapshot, hasGitHub }: CodeSnapshotSection
         </div>
 
         {snapshot.scanSummary && (
-          <p className="text-[13px] text-sf-text-secondary mt-3 leading-relaxed">
+          <p className="text-[14px] tracking-[-0.224px] text-sf-text-secondary mt-3 leading-relaxed">
             {snapshot.scanSummary}
           </p>
         )}
 
         {/* Actions */}
-        <div className="flex gap-2 mt-4 pt-4 border-t border-sf-border">
+        <div className="flex gap-2 mt-4 pt-4 border-t border-[rgba(0,0,0,0.08)]">
           <Button
             variant="secondary"
-            className="!min-h-[36px] !text-[13px] !px-3"
+            className="!min-h-[36px] !text-[14px] !tracking-[-0.224px] !px-3"
             onClick={handleRescan}
             disabled={scanState !== 'idle'}
           >
@@ -258,7 +258,7 @@ export function CodeSnapshotSection({ snapshot, hasGitHub }: CodeSnapshotSection
           </Button>
           <Button
             variant="ghost"
-            className="!min-h-[36px] !text-[13px] !px-3"
+            className="!min-h-[36px] !text-[14px] !tracking-[-0.224px] !px-3"
             onClick={() => setShowRepoSelector(true)}
             disabled={scanState !== 'idle'}
           >
@@ -266,7 +266,7 @@ export function CodeSnapshotSection({ snapshot, hasGitHub }: CodeSnapshotSection
           </Button>
           <Button
             variant="ghost"
-            className="!min-h-[36px] !text-[13px] !px-3 ml-auto text-sf-text-tertiary"
+            className="!min-h-[36px] !text-[14px] !tracking-[-0.224px] !px-3 ml-auto text-sf-text-tertiary"
             onClick={handleRemove}
             disabled={scanState !== 'idle' || removing}
           >
@@ -278,11 +278,11 @@ export function CodeSnapshotSection({ snapshot, hasGitHub }: CodeSnapshotSection
         {scanState === 'scanning' && progress && (
           <div className="flex items-center gap-2 mt-3">
             <div className="w-4 h-4 border-2 border-sf-accent border-t-transparent rounded-full animate-spin" />
-            <p className="text-[12px] text-sf-text-tertiary">{progress.message}</p>
+            <p className="text-[12px] tracking-[-0.12px] text-sf-text-tertiary">{progress.message}</p>
           </div>
         )}
 
-        {error && <p className="text-[13px] text-sf-error mt-2">{error}</p>}
+        {error && <p className="text-[14px] tracking-[-0.224px] text-sf-error mt-2">{error}</p>}
       </Card>
 
       {showRepoSelector && (

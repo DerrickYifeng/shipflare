@@ -79,7 +79,7 @@ export function MetricsPanel() {
     <div className="flex flex-col gap-6">
       {/* Controls */}
       <div className="flex items-center justify-between">
-        <h3 className="text-[13px] font-medium text-sf-text-secondary uppercase tracking-wider">
+        <h3 className="text-[14px] tracking-[-0.224px] font-medium text-sf-text-secondary uppercase">
           Analytics
         </h3>
         <div className="flex items-center gap-2">
@@ -87,7 +87,7 @@ export function MetricsPanel() {
             <button
               key={r}
               onClick={() => setRange(r)}
-              className={`px-3 py-1.5 text-[12px] font-medium rounded-[var(--radius-sf-md)] transition-colors ${
+              className={`px-3 py-1.5 text-[12px] tracking-[-0.12px] font-medium rounded-[var(--radius-sf-md)] transition-colors duration-200 ${
                 range === r
                   ? 'bg-sf-bg-secondary text-sf-text-primary'
                   : 'text-sf-text-tertiary hover:text-sf-text-secondary'
@@ -116,16 +116,16 @@ export function MetricsPanel() {
       {/* Top tweets */}
       <div>
         <div className="flex items-center justify-between mb-3">
-          <h4 className="text-[12px] font-medium text-sf-text-tertiary uppercase tracking-wider">
+          <h4 className="text-[12px] tracking-[-0.12px] font-medium text-sf-text-tertiary uppercase">
             Top Tweets
           </h4>
           <div className="flex items-center gap-1">
-            <span className="text-[11px] text-sf-text-tertiary mr-1">Sort by</span>
+            <span className="text-[12px] tracking-[-0.12px] text-sf-text-tertiary mr-1">Sort by</span>
             {(['impressions', 'likes', 'bookmarks'] as Sort[]).map((s) => (
               <button
                 key={s}
                 onClick={() => setSort(s)}
-                className={`px-2 py-1 text-[11px] rounded-[var(--radius-sf-sm)] transition-colors ${
+                className={`px-2 py-1 text-[12px] tracking-[-0.12px] rounded-[var(--radius-sf-sm)] transition-colors duration-200 ${
                   sort === s
                     ? 'bg-sf-bg-secondary text-sf-text-primary font-medium'
                     : 'text-sf-text-tertiary hover:text-sf-text-secondary'
@@ -139,7 +139,7 @@ export function MetricsPanel() {
 
         {topTweets.length === 0 ? (
           <div className="flex flex-col items-center py-12">
-            <p className="text-[13px] text-sf-text-tertiary">
+            <p className="text-[14px] tracking-[-0.224px] text-sf-text-tertiary">
               No tweet metrics collected yet. Metrics are sampled every 6 hours.
             </p>
           </div>
@@ -147,10 +147,10 @@ export function MetricsPanel() {
           <div className="flex flex-col gap-1.5">
             {topTweets.map((tweet, i) => (
               <Card key={tweet.tweetId} className="flex items-center gap-4 py-3">
-                <span className="text-[12px] font-mono text-sf-text-tertiary w-5 text-right flex-shrink-0">
+                <span className="text-[12px] tracking-[-0.12px] font-mono text-sf-text-tertiary w-5 text-right flex-shrink-0">
                   {i + 1}
                 </span>
-                <div className="flex items-center gap-4 flex-1 min-w-0 text-[12px] text-sf-text-secondary">
+                <div className="flex items-center gap-4 flex-1 min-w-0 text-[12px] tracking-[-0.12px] text-sf-text-secondary">
                   <span className="font-mono tabular-nums" title="Impressions">
                     {formatNum(tweet.impressions)} imp
                   </span>
@@ -171,7 +171,7 @@ export function MetricsPanel() {
                   href={`https://x.com/i/status/${tweet.tweetId}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-[11px] text-sf-accent hover:underline flex-shrink-0"
+                  className="text-[12px] tracking-[-0.12px] text-sf-accent hover:underline flex-shrink-0"
                 >
                   View
                 </a>
@@ -184,7 +184,7 @@ export function MetricsPanel() {
       {/* Follower history */}
       {followerHistory.length > 1 && (
         <div>
-          <h4 className="text-[12px] font-medium text-sf-text-tertiary uppercase tracking-wider mb-3">
+          <h4 className="text-[12px] tracking-[-0.12px] font-medium text-sf-text-tertiary uppercase mb-3">
             Follower Trend
           </h4>
           <Card className="p-4">
@@ -198,14 +198,14 @@ export function MetricsPanel() {
                 return (
                   <div
                     key={i}
-                    className="flex-1 bg-sf-accent/20 hover:bg-sf-accent/40 transition-colors rounded-t-sm"
+                    className="flex-1 bg-sf-accent/20 hover:bg-sf-accent/40 transition-colors duration-200 rounded-t-sm"
                     style={{ height: `${Math.max(height, 4)}%` }}
                     title={`${snap.followerCount.toLocaleString()} followers — ${new Date(snap.snapshotAt).toLocaleDateString()}`}
                   />
                 );
               })}
             </div>
-            <div className="flex justify-between mt-1 text-[10px] text-sf-text-tertiary">
+            <div className="flex justify-between mt-1 text-[12px] tracking-[-0.12px] text-sf-text-tertiary">
               <span>{new Date(followerHistory[0].snapshotAt).toLocaleDateString()}</span>
               <span>{new Date(followerHistory[followerHistory.length - 1].snapshotAt).toLocaleDateString()}</span>
             </div>
@@ -230,15 +230,15 @@ function StatCard({
   subtitle?: string;
 }) {
   return (
-    <Card className={`flex flex-col gap-1 ${highlight ? 'border-sf-accent/30' : ''}`}>
-      <span className="text-[11px] font-medium text-sf-text-tertiary uppercase tracking-wider">
+    <Card className={`flex flex-col gap-1 ${highlight ? 'ring-1 ring-sf-accent/30' : ''}`}>
+      <span className="text-[12px] tracking-[-0.12px] font-medium text-sf-text-tertiary uppercase">
         {label}
       </span>
-      <span className={`text-[20px] font-semibold tabular-nums ${highlight ? 'text-sf-accent' : 'text-sf-text-primary'}`}>
+      <span className={`text-[21px] font-semibold tracking-[0.231px] leading-[1.19] tabular-nums ${highlight ? 'text-sf-accent' : 'text-sf-text-primary'}`}>
         {prefix}{formatNum(value)}
       </span>
       {subtitle && (
-        <span className="text-[11px] text-sf-text-tertiary">{subtitle}</span>
+        <span className="text-[12px] tracking-[-0.12px] text-sf-text-tertiary">{subtitle}</span>
       )}
     </Card>
   );

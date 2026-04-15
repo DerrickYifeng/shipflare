@@ -35,7 +35,7 @@ export function ProductSourceStep({ onExtracted }: ProductSourceStepProps) {
 
   return (
     <div className="flex flex-col gap-6">
-      <p className="text-[15px] text-sf-text-secondary leading-relaxed">
+      <p className="text-[17px] tracking-[-0.374px] text-sf-text-secondary leading-[1.47]">
         We&apos;ll scan your product to extract name, description, and keywords automatically.
       </p>
 
@@ -46,9 +46,9 @@ export function ProductSourceStep({ onExtracted }: ProductSourceStepProps) {
           onClick={() => setMethod('github')}
           className="
             flex flex-col items-start gap-2 p-4
-            border border-sf-border rounded-[var(--radius-sf-lg)]
-            hover:border-sf-text-tertiary hover:bg-sf-bg-secondary
-            transition-colors duration-150 text-left
+            bg-sf-bg-secondary shadow-[0_3px_5px_rgba(0,0,0,0.04),0_6px_20px_rgba(0,0,0,0.06)] rounded-[var(--radius-sf-lg)]
+            hover:shadow-[0_3px_8px_rgba(0,0,0,0.06),0_8px_24px_rgba(0,0,0,0.08)]
+            transition-all duration-200 text-left
           "
         >
           <div className="w-8 h-8 bg-sf-bg-tertiary rounded-[var(--radius-sf-md)] flex items-center justify-center">
@@ -57,10 +57,10 @@ export function ProductSourceStep({ onExtracted }: ProductSourceStepProps) {
             </svg>
           </div>
           <div>
-            <p className="text-[13px] font-medium text-sf-text-primary">
+            <p className="text-[14px] tracking-[-0.224px] font-medium text-sf-text-primary">
               Import from GitHub
             </p>
-            <p className="text-[11px] text-sf-text-tertiary mt-0.5">
+            <p className="text-[12px] tracking-[-0.12px] text-sf-text-tertiary mt-0.5">
               Scan your code to understand your product
             </p>
           </div>
@@ -72,9 +72,9 @@ export function ProductSourceStep({ onExtracted }: ProductSourceStepProps) {
           onClick={() => setMethod('url')}
           className="
             flex flex-col items-start gap-2 p-4
-            border border-sf-border rounded-[var(--radius-sf-lg)]
-            hover:border-sf-text-tertiary hover:bg-sf-bg-secondary
-            transition-colors duration-150 text-left
+            bg-sf-bg-secondary shadow-[0_3px_5px_rgba(0,0,0,0.04),0_6px_20px_rgba(0,0,0,0.06)] rounded-[var(--radius-sf-lg)]
+            hover:shadow-[0_3px_8px_rgba(0,0,0,0.06),0_8px_24px_rgba(0,0,0,0.08)]
+            transition-all duration-200 text-left
           "
         >
           <div className="w-8 h-8 bg-sf-bg-tertiary rounded-[var(--radius-sf-md)] flex items-center justify-center">
@@ -85,10 +85,10 @@ export function ProductSourceStep({ onExtracted }: ProductSourceStepProps) {
             </svg>
           </div>
           <div>
-            <p className="text-[13px] font-medium text-sf-text-primary">
+            <p className="text-[14px] tracking-[-0.224px] font-medium text-sf-text-primary">
               From website URL
             </p>
-            <p className="text-[11px] text-sf-text-tertiary mt-0.5">
+            <p className="text-[12px] tracking-[-0.12px] text-sf-text-tertiary mt-0.5">
               We&apos;ll scan your homepage for details
             </p>
           </div>
@@ -108,7 +108,7 @@ export function ProductSourceStep({ onExtracted }: ProductSourceStepProps) {
             seoAudit: null,
           })
         }
-        className="text-[13px] text-sf-text-tertiary hover:text-sf-text-secondary transition-colors self-start"
+        className="text-[14px] tracking-[-0.224px] text-sf-text-tertiary hover:text-sf-text-secondary transition-colors duration-200 self-start"
       >
         or enter manually &rarr;
       </button>

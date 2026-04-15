@@ -62,7 +62,7 @@ export function TargetAccounts() {
       {/* Add target form */}
       <Card className="flex flex-col gap-3 sm:flex-row sm:items-end">
         <div className="flex-1">
-          <label className="block text-[12px] font-medium text-sf-text-secondary mb-1">
+          <label className="block text-[12px] tracking-[-0.12px] font-medium text-sf-text-secondary mb-1">
             X Username
           </label>
           <input
@@ -70,18 +70,18 @@ export function TargetAccounts() {
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             placeholder="@levelsio"
-            className="w-full px-3 py-2 text-[13px] bg-sf-bg-secondary border border-sf-border rounded-[var(--radius-sf-md)] text-sf-text-primary placeholder:text-sf-text-tertiary focus:outline-none focus:ring-1 focus:ring-sf-accent"
+            className="w-full px-3 py-2 text-[14px] tracking-[-0.224px] bg-sf-bg-secondary border border-[rgba(0,0,0,0.08)] rounded-[var(--radius-sf-md)] text-sf-text-primary placeholder:text-sf-text-tertiary focus:outline-none focus:ring-1 focus:ring-sf-accent transition-shadow duration-200"
             onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
           />
         </div>
         <div>
-          <label className="block text-[12px] font-medium text-sf-text-secondary mb-1">
+          <label className="block text-[12px] tracking-[-0.12px] font-medium text-sf-text-secondary mb-1">
             Category
           </label>
           <select
             value={category}
             onChange={(e) => setCategory(e.target.value)}
-            className="px-3 py-2 text-[13px] bg-sf-bg-secondary border border-sf-border rounded-[var(--radius-sf-md)] text-sf-text-primary focus:outline-none focus:ring-1 focus:ring-sf-accent"
+            className="px-3 py-2 text-[14px] tracking-[-0.224px] bg-sf-bg-secondary border border-[rgba(0,0,0,0.08)] rounded-[var(--radius-sf-md)] text-sf-text-primary focus:outline-none focus:ring-1 focus:ring-sf-accent transition-shadow duration-200"
           >
             <option value="influencer">Influencer</option>
             <option value="competitor">Competitor</option>
@@ -95,7 +95,7 @@ export function TargetAccounts() {
       </Card>
 
       {error && (
-        <div className="px-4 py-3 rounded-[var(--radius-sf-md)] bg-sf-error-light border border-sf-error/20 text-[13px] text-sf-error">
+        <div className="px-4 py-3 rounded-[var(--radius-sf-md)] bg-sf-error-light text-[14px] tracking-[-0.224px] text-sf-error">
           {error}
         </div>
       )}
@@ -103,16 +103,16 @@ export function TargetAccounts() {
       {/* Target list */}
       {targets.length === 0 ? (
         <div className="flex flex-col items-center py-16">
-          <div className="w-14 h-14 mb-4 rounded-full bg-sf-bg-secondary border border-sf-border flex items-center justify-center">
+          <div className="w-14 h-14 mb-4 rounded-full bg-sf-bg-secondary shadow-[0_3px_5px_rgba(0,0,0,0.04),0_6px_20px_rgba(0,0,0,0.06)] flex items-center justify-center">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--color-sf-text-tertiary)" strokeWidth="1.5">
               <circle cx="12" cy="12" r="10" />
               <path d="M12 8v4M12 16h.01" />
             </svg>
           </div>
-          <p className="text-[14px] font-medium text-sf-text-primary mb-1">
+          <p className="text-[17px] tracking-[-0.374px] font-medium text-sf-text-primary mb-1">
             No targets yet
           </p>
-          <p className="text-[13px] text-sf-text-tertiary max-w-[300px] text-center">
+          <p className="text-[14px] tracking-[-0.224px] text-sf-text-tertiary max-w-[300px] text-center">
             Add X accounts to monitor. The Reply Guy Engine will scan their tweets
             and generate fast, relevant replies.
           </p>
@@ -122,14 +122,14 @@ export function TargetAccounts() {
           {targets.map((target) => (
             <Card key={target.id} className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-3 min-w-0">
-                <div className="w-8 h-8 rounded-full bg-sf-bg-secondary border border-sf-border flex items-center justify-center flex-shrink-0">
-                  <span className="text-[12px] font-semibold text-sf-text-secondary">
+                <div className="w-8 h-8 rounded-full bg-sf-bg-secondary shadow-[0_1px_3px_rgba(0,0,0,0.06)] flex items-center justify-center flex-shrink-0">
+                  <span className="text-[12px] tracking-[-0.12px] font-semibold text-sf-text-secondary">
                     {target.username[0].toUpperCase()}
                   </span>
                 </div>
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="text-[13px] font-medium text-sf-text-primary truncate">
+                    <span className="text-[14px] tracking-[-0.224px] font-medium text-sf-text-primary truncate">
                       @{target.username}
                     </span>
                     {target.category && (
@@ -139,7 +139,7 @@ export function TargetAccounts() {
                     )}
                   </div>
                   {target.displayName && (
-                    <p className="text-[12px] text-sf-text-tertiary truncate">
+                    <p className="text-[12px] tracking-[-0.12px] text-sf-text-tertiary truncate">
                       {target.displayName}
                       {target.followerCount != null && (
                         <span className="ml-2">
@@ -152,7 +152,7 @@ export function TargetAccounts() {
               </div>
               <button
                 onClick={() => handleRemove(target.id)}
-                className="text-sf-text-tertiary hover:text-sf-error transition-colors p-1 flex-shrink-0"
+                className="text-sf-text-tertiary hover:text-sf-error transition-colors duration-200 p-1 flex-shrink-0"
                 title="Remove target"
               >
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">

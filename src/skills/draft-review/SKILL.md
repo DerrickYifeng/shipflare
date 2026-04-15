@@ -7,7 +7,7 @@ model: claude-haiku-4-5-20251001
 allowed-tools: []
 fan-out: drafts
 max-concurrency: 5
-timeout: 15000
+timeout: 45000
 cache-safe: true
 ---
 
