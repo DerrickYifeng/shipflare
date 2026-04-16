@@ -1,5 +1,6 @@
 'use client';
 
+import { useMemo } from 'react';
 import { TodoCard } from './todo-card';
 import type { TodoItem } from '@/hooks/use-today';
 
@@ -11,13 +12,17 @@ interface TodoListProps {
   onReschedule: (id: string, scheduledFor: string) => void;
 }
 
-const priorityGroupLabel: Record<string, string> = {
+type Priority = 'time_sensitive' | 'scheduled' | 'optional';
+
+const GROUP_ORDER: readonly Priority[] = ['time_sensitive', 'scheduled', 'optional'] as const;
+
+const priorityGroupLabel: Record<Priority, string> = {
   time_sensitive: 'Time-sensitive',
   scheduled: 'Scheduled for today',
   optional: 'Optional',
 };
 
-const priorityGroupIcon: Record<string, string> = {
+const priorityGroupIcon: Record<Priority, string> = {
   time_sensitive: '\u26A1',
   scheduled: '\uD83D\uDCC5',
   optional: '\uD83D\uDCA1',
@@ -30,13 +35,25 @@ export function TodoList({
   onEdit,
   onReschedule,
 }: TodoListProps) {
-  // Group by priority
-  const groups = ['time_sensitive', 'scheduled', 'optional'] as const;
+  // Group by priority in a single pass. Memoized so unrelated parent re-renders
+  // (e.g. FirstRun state flipping) don't reshuffle children.
+  const grouped = useMemo(() => {
+    const buckets: Record<Priority, TodoItem[]> = {
+      time_sensitive: [],
+      scheduled: [],
+      optional: [],
+    };
+    for (const item of items) {
+      const bucket = buckets[item.priority as Priority];
+      if (bucket) bucket.push(item);
+    }
+    return buckets;
+  }, [items]);
 
   return (
     <div className="flex flex-col gap-6">
-      {groups.map((priority) => {
-        const groupItems = items.filter((i) => i.priority === priority);
+      {GROUP_ORDER.map((priority) => {
+        const groupItems = grouped[priority];
         if (groupItems.length === 0) return null;
 
         return (
