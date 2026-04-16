@@ -10,7 +10,7 @@ import {
   xMonitoredTweets,
   todoItems,
 } from '@/lib/db/schema';
-import { eq, and, gt } from 'drizzle-orm';
+import { eq, and, inArray, lt } from 'drizzle-orm';
 import { XClient, XForbiddenError } from '@/lib/x-client';
 import { XAIClient } from '@/lib/xai-client';
 import { loadSkill } from '@/core/skill-loader';
@@ -90,6 +90,21 @@ async function processXMonitorForUser(userId: string, productId: string) {
     keywords: string[];
   }> = [];
 
+  // Collect raw tweets from all target accounts first (per-target API calls
+  // must remain sequential to respect per-target sinceId cursors and rate
+  // limits), then run a single batched dedupe + bulk insert at the end.
+  type CandidateTweet = {
+    tweetId: string;
+    tweetText: string;
+    authorUsername: string;
+    targetUsername: string;
+    targetAccountId: string;
+    tweetUrl: string;
+    postedAt: Date;
+    replyDeadline: Date;
+  };
+  const candidates: CandidateTweet[] = [];
+
   // Poll each target account for new tweets
   for (const target of targets) {
     if (!target.xUserId) {
@@ -116,20 +131,6 @@ async function processXMonitorForUser(userId: string, productId: string) {
         const tweetDate = tweet.createdAt ? new Date(tweet.createdAt) : now;
         if (tweetDate < maxAge) continue;
 
-        // Check if already tracked
-        const existing = await db
-          .select()
-          .from(xMonitoredTweets)
-          .where(
-            and(
-              eq(xMonitoredTweets.userId, userId),
-              eq(xMonitoredTweets.tweetId, tweet.id),
-            ),
-          )
-          .limit(1);
-
-        if (existing.length > 0) continue;
-
         const replyDeadline = new Date(
           tweetDate.getTime() + REPLY_WINDOW_MINUTES * 60_000,
         );
@@ -138,83 +139,41 @@ async function processXMonitorForUser(userId: string, productId: string) {
           ? buildContentUrl('x', tweet.authorUsername, tweet.id)
           : buildContentUrl('x', 'i', tweet.id);
 
-        // Insert monitored tweet
-        await db.insert(xMonitoredTweets).values({
-          userId,
-          targetAccountId: target.id,
+        candidates.push({
           tweetId: tweet.id,
           tweetText: tweet.text,
           authorUsername: tweet.authorUsername ?? target.username,
+          targetUsername: target.username,
+          targetAccountId: target.id,
           tweetUrl,
           postedAt: tweetDate,
           replyDeadline,
         });
-
-        totalNewTweets++;
-
-        // Queue for reply if within reply window
-        if (replyDeadline > now) {
-          tweetsForReply.push({
-            tweetId: tweet.id,
-            tweetText: tweet.text,
-            authorUsername: tweet.authorUsername ?? target.username,
-            productName: product.name,
-            productDescription: product.description,
-            valueProp: product.valueProp ?? '',
-            keywords: product.keywords,
-          });
-        }
       }
     } catch (err) {
       if (err instanceof XForbiddenError) {
         log.warn(
           `X API 403 for @${target.username} — Basic tier required for getUserTweets. Falling back to Grok search.`,
         );
-        // Fallback: use xAI Grok search for this account
         try {
           const xaiClient = new XAIClient();
           const searchResult = await xaiClient.searchTweets(
             `from:${target.username}`,
             { maxResults: 5 },
           );
+          const replyDeadline = new Date(
+            now.getTime() + REPLY_WINDOW_MINUTES * 60_000,
+          );
           for (const tweet of searchResult.tweets) {
-            const existing = await db
-              .select()
-              .from(xMonitoredTweets)
-              .where(
-                and(
-                  eq(xMonitoredTweets.userId, userId),
-                  eq(xMonitoredTweets.tweetId, tweet.tweetId),
-                ),
-              )
-              .limit(1);
-
-            if (existing.length > 0) continue;
-
-            const replyDeadline = new Date(
-              now.getTime() + REPLY_WINDOW_MINUTES * 60_000,
-            );
-
-            await db.insert(xMonitoredTweets).values({
-              userId,
-              targetAccountId: target.id,
+            candidates.push({
               tweetId: tweet.tweetId,
               tweetText: tweet.text,
               authorUsername: tweet.authorUsername ?? target.username,
+              targetUsername: target.username,
+              targetAccountId: target.id,
               tweetUrl: tweet.url,
               postedAt: now,
               replyDeadline,
-            });
-
-            totalNewTweets++;
-            tweetsForReply.push({
-              tweetId: tweet.tweetId,
-              tweetText: tweet.text,
-              authorUsername: tweet.authorUsername ?? target.username,
-              productName: product.name,
-              productDescription: product.description,
-              valueProp: product.valueProp ?? '',
-              keywords: product.keywords,
             });
           }
         } catch (fallbackErr) {
@@ -226,27 +185,72 @@ async function processXMonitorForUser(userId: string, productId: string) {
     }
   }
 
+  // Batched dedupe: one SELECT for all candidate tweet IDs
+  if (candidates.length > 0) {
+    const candidateIds = [...new Set(candidates.map((c) => c.tweetId))];
+    const existingRows = await db
+      .select({ tweetId: xMonitoredTweets.tweetId })
+      .from(xMonitoredTweets)
+      .where(
+        and(
+          eq(xMonitoredTweets.userId, userId),
+          inArray(xMonitoredTweets.tweetId, candidateIds),
+        ),
+      );
+    const existingSet = new Set(existingRows.map((r) => r.tweetId));
+
+    const newCandidates = candidates.filter(
+      (c) => !existingSet.has(c.tweetId),
+    );
+
+    if (newCandidates.length > 0) {
+      const insertRows = newCandidates.map((c) => ({
+        userId,
+        targetAccountId: c.targetAccountId,
+        tweetId: c.tweetId,
+        tweetText: c.tweetText,
+        authorUsername: c.authorUsername,
+        tweetUrl: c.tweetUrl,
+        postedAt: c.postedAt,
+        replyDeadline: c.replyDeadline,
+      }));
+
+      await db
+        .insert(xMonitoredTweets)
+        .values(insertRows)
+        .onConflictDoNothing();
+
+      totalNewTweets += newCandidates.length;
+
+      for (const c of newCandidates) {
+        if (c.replyDeadline > now) {
+          tweetsForReply.push({
+            tweetId: c.tweetId,
+            tweetText: c.tweetText,
+            authorUsername: c.authorUsername,
+            productName: product.name,
+            productDescription: product.description,
+            valueProp: product.valueProp ?? '',
+            keywords: product.keywords,
+          });
+        }
+      }
+    }
+  }
+
   log.info(`Found ${totalNewTweets} new tweets, ${tweetsForReply.length} within reply window`);
 
-  // Expire old tweets past deadline
-  const expiredTweets = await db
-    .select()
-    .from(xMonitoredTweets)
+  // Expire old tweets past deadline in a single UPDATE
+  await db
+    .update(xMonitoredTweets)
+    .set({ status: 'expired' })
     .where(
       and(
         eq(xMonitoredTweets.userId, userId),
         eq(xMonitoredTweets.status, 'pending'),
+        lt(xMonitoredTweets.replyDeadline, now),
       ),
     );
-
-  for (const tweet of expiredTweets) {
-    if (tweet.replyDeadline < now) {
-      await db
-        .update(xMonitoredTweets)
-        .set({ status: 'expired' })
-        .where(eq(xMonitoredTweets.id, tweet.id));
-    }
-  }
 
   // Run reply-scan skill for tweets within reply window
   if (tweetsForReply.length > 0) {
