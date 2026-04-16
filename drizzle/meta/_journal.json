@@ -71,6 +71,13 @@
       "when": 1776300000000,
       "tag": "0009_add_discovery_configs",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1776383567513,
+      "tag": "0010_simple_excalibur",
+      "breakpoints": true
     }
   ]
 }
