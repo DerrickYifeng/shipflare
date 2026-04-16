@@ -8,6 +8,7 @@ import {
   jsonb,
   primaryKey,
   unique,
+  index,
 } from 'drizzle-orm/pg-core';
 import type { AdapterAccountType } from 'next-auth/adapters';
 
@@ -48,6 +49,7 @@ export const accounts = pgTable(
   },
   (account) => [
     primaryKey({ columns: [account.provider, account.providerAccountId] }),
+    index('accounts_user_idx').on(account.userId),
   ],
 );
 
