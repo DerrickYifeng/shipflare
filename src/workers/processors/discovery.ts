@@ -158,19 +158,21 @@ export async function processDiscovery(job: Job<DiscoveryJobData>) {
     log.warn(`Agent failed for "${err.label}": ${err.error}`);
   }
 
-  // Persist threads
-  let newThreadCount = 0;
+  // Persist threads (bulk insert + ON CONFLICT DO NOTHING; unique index on
+  // (userId, platform, externalId) de-dupes across concurrent fan-outs).
+  const enqueueThreshold = userConfig?.enqueueThreshold ?? 0.7;
+  const candidates: Array<{
+    userId: string;
+    externalId: string;
+    platform: string;
+    community: string;
+    title: string;
+    url: string;
+    relevanceScore: number;
+  }> = [];
+  const shouldEnqueue = new Set<string>();
+
   for (const thread of allThreads) {
-    const existing = await db
-      .select()
-      .from(threads)
-      .where(
-        and(eq(threads.userId, userId), eq(threads.externalId, thread.id)),
-      )
-      .limit(1);
-
-    if (existing.length > 0) continue;
-
     const relevanceScore = thread.relevanceScore != null
       ? thread.relevanceScore / 100
       : ((thread.relevance ?? 0) + (thread.intent ?? 0)) / 2;
@@ -178,28 +180,42 @@ export async function processDiscovery(job: Job<DiscoveryJobData>) {
     // Skip low-relevance threads to keep the DB clean
     if (relevanceScore < 0.3) continue;
 
-    const [inserted] = await db
+    candidates.push({
+      userId,
+      externalId: thread.id,
+      platform,
+      community: thread.community,
+      title: thread.title,
+      url: thread.url,
+      relevanceScore,
+    });
+
+    if (relevanceScore >= enqueueThreshold) {
+      shouldEnqueue.add(thread.id);
+    }
+  }
+
+  let newThreadCount = 0;
+  if (candidates.length > 0) {
+    const inserted = await db
       .insert(threads)
-      .values({
-        userId,
-        externalId: thread.id,
-        platform,
-        community: thread.community,
-        title: thread.title,
-        url: thread.url,
-        relevanceScore,
+      .values(candidates)
+      .onConflictDoNothing({
+        target: [threads.userId, threads.platform, threads.externalId],
       })
-      .returning();
+      .returning({ id: threads.id, externalId: threads.externalId });
 
-    newThreadCount++;
+    newThreadCount = inserted.length;
 
-    // Auto-enqueue content for high-relevance threads
-    const enqueueThreshold = userConfig?.enqueueThreshold ?? 0.7;
-    if (relevanceScore >= enqueueThreshold && inserted) {
-      log.debug(`Auto-enqueuing content for ${platform} thread ${inserted.id} (relevance ${relevanceScore.toFixed(2)})`);
+    // Auto-enqueue content only for newly-inserted high-relevance threads
+    for (const row of inserted) {
+      if (!shouldEnqueue.has(row.externalId)) continue;
+      log.debug(
+        `Auto-enqueuing content for ${platform} thread ${row.id}`,
+      );
       await enqueueContent({
         userId,
-        threadId: inserted.id,
+        threadId: row.id,
         productId,
       });
     }
@@ -237,7 +253,7 @@ export async function processDiscovery(job: Job<DiscoveryJobData>) {
     .sort((a, b) => b.count - a.count);
 
   if (topSources.length > 0) {
-    const prefix = platform === 'reddit' ? 'r/' : '';
+    const prefix = getPlatformConfig(platform).sourcePrefix ?? '';
     const summary = topSources.map((s) => `${prefix}${s.source}: ${s.count} results`).join(', ');
     await dream.logInsight(`${platform} discovery found ${allThreads.length} results (${newThreadCount} new). ${summary}`);
   }
