@@ -89,7 +89,17 @@ export function TargetAccounts() {
             <option value="media">Media</option>
           </select>
         </div>
-        <Button onClick={handleAdd} disabled={isAdding || !username.trim()}>
+        <Button
+          onClick={handleAdd}
+          disabled={isAdding || !username.trim()}
+          title={
+            isAdding
+              ? 'Adding…'
+              : !username.trim()
+                ? 'Enter an X username first'
+                : undefined
+          }
+        >
           {isAdding ? 'Adding...' : 'Add Target'}
         </Button>
       </Card>

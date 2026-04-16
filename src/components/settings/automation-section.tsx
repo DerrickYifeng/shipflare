@@ -19,6 +19,12 @@ function formatHourLocal(utcHour: number): string {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+// Compact button label: e.g. "9 AM" in user locale. Storage stays UTC.
+function formatHourButtonLabel(utcHour: number): string {
+  const d = new Date(Date.UTC(2024, 0, 1, utcHour, 0));
+  return d.toLocaleTimeString([], { hour: 'numeric' });
+}
+
 export function AutomationSection() {
   const { preferences, isLoading, update } = usePreferences();
   const { toast } = useToast();
@@ -157,7 +163,7 @@ export function AutomationSection() {
 
         {/* Posting hours */}
         <div>
-          <h3 className="text-[14px] tracking-[-0.224px] font-medium text-sf-text-primary mb-1">Posting hours (UTC)</h3>
+          <h3 className="text-[14px] tracking-[-0.224px] font-medium text-sf-text-primary mb-1">Posting hours (local time)</h3>
           <p className="text-[12px] tracking-[-0.12px] text-sf-text-tertiary mb-3">
             Select 1-6 hours for scheduled content
           </p>
@@ -176,14 +182,15 @@ export function AutomationSection() {
                       patch('postingHoursUtc', next);
                     }
                   }}
-                  className={`w-10 h-8 rounded-[var(--radius-sf-md)] text-[12px] tracking-[-0.12px] font-mono transition-colors duration-200 ${
+                  className={`min-w-[52px] h-8 px-2 rounded-[var(--radius-sf-md)] text-[12px] tracking-[-0.12px] font-mono transition-colors duration-200 ${
                     selected
                       ? 'bg-sf-accent text-white'
                       : 'bg-sf-bg-secondary text-sf-text-tertiary hover:text-sf-text-primary'
                   }`}
-                  title={formatHourLocal(h)}
+                  title={`${String(h).padStart(2, '0')}:00 UTC`}
+                  aria-label={`${String(h).padStart(2, '0')}:00 UTC (${formatHourLocal(h)} local)`}
                 >
-                  {String(h).padStart(2, '0')}
+                  {formatHourButtonLabel(h)}
                 </button>
               );
             })}
@@ -261,7 +268,17 @@ export function AutomationSection() {
         {/* Save */}
         {hasChanges && (
           <div className="flex items-center gap-3 pt-2 animate-sf-fade-in">
-            <Button onClick={handleSave} disabled={saving || mixTotal !== 100}>
+            <Button
+              onClick={handleSave}
+              disabled={saving || mixTotal !== 100}
+              title={
+                saving
+                  ? 'Saving…'
+                  : mixTotal !== 100
+                    ? `Content mix must total 100% (currently ${mixTotal}%)`
+                    : undefined
+              }
+            >
               {saving ? 'Saving...' : 'Save changes'}
             </Button>
             <Button variant="ghost" onClick={() => setDraft({})}>

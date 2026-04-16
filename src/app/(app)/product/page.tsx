@@ -1,9 +1,12 @@
+import type { Metadata } from 'next';
 import { auth } from '@/lib/auth';
 import { redirect } from 'next/navigation';
 import { db } from '@/lib/db';
 import { products, codeSnapshots, accounts } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { HeaderBar } from '@/components/layout/header-bar';
+
+export const metadata: Metadata = { title: 'My Product' };
 import { ProductInfoSection } from '@/components/product/product-info-section';
 import { CodeSnapshotSection } from '@/components/product/code-snapshot-section';
 import { WebsiteInfoSection } from '@/components/product/website-info-section';

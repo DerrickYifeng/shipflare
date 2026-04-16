@@ -2,7 +2,10 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'ShipFlare',
+  title: {
+    template: '%s · ShipFlare',
+    default: 'ShipFlare',
+  },
   description: 'AI marketing autopilot for indie developers',
   icons: {
     icon: [
