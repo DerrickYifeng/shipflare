@@ -132,9 +132,9 @@ export async function processReview(job: Job<ReviewJobData>) {
           allowedTypes.includes(draftType) &&
           todayCount < prefs.maxAutoApprovalsPerDay
         ) {
-          // Find the right channel for posting
+          // Find the right channel for posting — only need id for enqueue
           const [channel] = await db
-            .select()
+            .select({ id: channels.id })
             .from(channels)
             .where(
               and(
@@ -160,7 +160,7 @@ export async function processReview(job: Job<ReviewJobData>) {
     // Enqueue posting for auto-approved drafts (after DB update)
     if (autoApproved) {
       const [channel] = await db
-        .select()
+        .select({ id: channels.id })
         .from(channels)
         .where(
           and(

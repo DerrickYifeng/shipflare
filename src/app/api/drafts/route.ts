@@ -172,8 +172,9 @@ export async function POST(request: Request) {
 
     const platform = thread?.platform ?? 'reddit';
 
+    // Whitelist — only need id to enqueue the posting job.
     const [channel] = await db
-      .select()
+      .select({ id: channels.id })
       .from(channels)
       .where(and(eq(channels.userId, session.user.id), eq(channels.platform, platform)))
       .limit(1);

@@ -39,9 +39,13 @@ export async function POST() {
   }
 
   // Check for at least one connected channel (Reddit or X)
+  // Whitelist — we only need platform identity to route enqueues.
   const { channels } = await import('@/lib/db/schema');
   const userChannels = await db
-    .select()
+    .select({
+      id: channels.id,
+      platform: channels.platform,
+    })
     .from(channels)
     .where(eq(channels.userId, userId));
 

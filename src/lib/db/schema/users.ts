@@ -38,6 +38,11 @@ export const accounts = pgTable(
     type: text('type').$type<AdapterAccountType>().notNull(),
     provider: text('provider').notNull(),
     providerAccountId: text('providerAccountId').notNull(),
+    // TODO(security): encrypt at rest — these columns currently store GitHub
+    // OAuth tokens in plaintext, inconsistent with the `channels` table's
+    // envelope-encrypted `oauth_token_encrypted` / `refresh_token_encrypted`
+    // strategy. Tracking in audit/audit-synthesis.md Theme 4 (Security) and
+    // CLAUDE.md → "Security TODO".
     refresh_token: text('refresh_token'),
     access_token: text('access_token'),
     expires_at: integer('expires_at'),

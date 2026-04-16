@@ -18,7 +18,6 @@ export async function GET() {
 
   log.info('Reddit OAuth flow initiated');
   const state = randomBytes(16).toString('hex');
-  // TODO: Store state in session/cookie for CSRF validation on callback
 
   const params = new URLSearchParams({
     client_id: process.env.REDDIT_CLIENT_ID!,
@@ -30,5 +29,15 @@ export async function GET() {
   });
 
   const url = `https://www.reddit.com/api/v1/authorize?${params.toString()}`;
-  return NextResponse.redirect(url);
+
+  // Store state in httpOnly cookie for CSRF validation in callback
+  const response = NextResponse.redirect(url);
+  response.cookies.set('reddit_oauth_state', state, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: 600, // 10 minutes
+    path: '/',
+  });
+  return response;
 }

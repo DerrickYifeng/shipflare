@@ -2,7 +2,7 @@ import { auth } from '@/lib/auth';
 import { redirect } from 'next/navigation';
 import { db } from '@/lib/db';
 import { channels } from '@/lib/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { HeaderBar } from '@/components/layout/header-bar';
 import { ProfileSection } from '@/components/settings/profile-section';
 import { ConnectionsSection } from '@/components/settings/connections-section';
@@ -14,8 +14,16 @@ export default async function SettingsPage() {
   const session = await auth();
   if (!session?.user?.id) redirect('/');
 
+  // Whitelist select — never echo oauth token fields to the app layer
   const userChannels = await db
-    .select()
+    .select({
+      id: channels.id,
+      platform: channels.platform,
+      username: channels.username,
+      tokenExpiresAt: channels.tokenExpiresAt,
+      createdAt: channels.createdAt,
+      updatedAt: channels.updatedAt,
+    })
     .from(channels)
     .where(eq(channels.userId, session.user.id));
 

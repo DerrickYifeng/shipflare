@@ -23,8 +23,16 @@ export async function createPlatformDeps(
   platform: string,
   userId: string,
 ): Promise<Record<string, unknown>> {
+  // Explicit projection — this is the only sanctioned path where
+  // oauth tokens are read out of the DB (see CLAUDE.md → Security TODO).
   const [channel] = await db
-    .select()
+    .select({
+      id: channels.id,
+      platform: channels.platform,
+      oauthTokenEncrypted: channels.oauthTokenEncrypted,
+      refreshTokenEncrypted: channels.refreshTokenEncrypted,
+      tokenExpiresAt: channels.tokenExpiresAt,
+    })
     .from(channels)
     .where(and(eq(channels.userId, userId), eq(channels.platform, platform)))
     .limit(1);

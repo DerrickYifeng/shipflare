@@ -79,9 +79,17 @@ export async function POST(request: Request) {
     );
   }
 
-  // Load X channel for API validation
+  // Load X channel for API validation.
+  // Explicit projection — tokens are needed here to construct XClient for a
+  // one-off username lookup; keeping the field list explicit so future edits
+  // don't accidentally widen it.
   const [xChannel] = await db
-    .select()
+    .select({
+      id: channels.id,
+      oauthTokenEncrypted: channels.oauthTokenEncrypted,
+      refreshTokenEncrypted: channels.refreshTokenEncrypted,
+      tokenExpiresAt: channels.tokenExpiresAt,
+    })
     .from(channels)
     .where(
       and(
