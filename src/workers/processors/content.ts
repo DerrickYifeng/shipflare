@@ -230,11 +230,8 @@ export async function processContent(job: Job<ContentJobData>) {
           expiresAt: new Date(now.getTime() + 12 * 60 * 60 * 1000),
         })
         .onConflictDoNothing();
-
-      await publishUserEvent(userId, 'drafts', {
-        type: 'todo_added',
-        todoType: 'reply_thread',
-      });
+      // The unified `pipeline` envelope below covers the consumer refresh —
+      // `todo_added` was a redundant signal on the same `drafts` channel.
     }
   }
 

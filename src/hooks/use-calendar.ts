@@ -1,7 +1,8 @@
 'use client';
 
 import useSWR, { mutate as globalMutate } from 'swr';
-import { useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { useSSEChannel } from './use-sse-channel';
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
@@ -35,11 +36,43 @@ export function useCalendar(
   const { data, error, isLoading, mutate } = useSWR<{ items: CalendarItem[] }>(
     `/api/calendar?range=${range}&channel=${channel}`,
     fetcher,
+    // SSE drives fresh data; 60s poll is a safety-net.
     { refreshInterval: 60_000 },
   );
 
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  // Listen for calendar-related SSE events to refresh data in real-time.
+  // Publishers emit the unified `pipeline` envelope per slot and a single
+  // `plan_shell_ready` when the plan has been committed to the DB.
+  useSSEChannel('agents', (raw) => {
+    const event = raw as { type?: string; pipeline?: string };
+    if (event.type === 'plan_shell_ready') {
+      setIsGenerating(false);
+      void mutate();
+      return;
+    }
+    if (event.type === 'pipeline' && event.pipeline === 'plan') {
+      void mutate();
+      return;
+    }
+    if (event.type === 'calendar_plan_failed') {
+      setIsGenerating(false);
+      void mutate();
+    }
+  });
+
+  // Safety: clear isGenerating after 120s even if SSE never fires
+  useEffect(() => {
+    if (!isGenerating) return;
+    const timer = setTimeout(() => setIsGenerating(false), 120_000);
+    return () => clearTimeout(timer);
+  }, [isGenerating]);
+
   const generateWeek = useCallback(
     async (forChannel: string = 'x', topics?: string[]) => {
+      setIsGenerating(true);
+
       const res = await fetch('/api/calendar/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -47,20 +80,17 @@ export function useCalendar(
       });
 
       if (!res.ok) {
+        setIsGenerating(false);
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error ?? 'Failed to generate calendar');
       }
 
-      mutate();
-
-      // Progressive Today page refresh as pipeline jobs complete
-      setTimeout(() => globalMutate('/api/today'), 5_000);
+      // API returns 202 immediately. SSE will notify when the plan is ready.
+      // Keep safety-net polls for the Today page.
       setTimeout(() => globalMutate('/api/today'), 30_000);
       setTimeout(() => globalMutate('/api/today'), 120_000);
-
-      return res.json();
     },
-    [mutate],
+    [],
   );
 
   const cancelItem = useCallback(
@@ -96,5 +126,6 @@ export function useCalendar(
     generateWeek,
     cancelItem,
     mutate,
+    isGenerating,
   };
 }
