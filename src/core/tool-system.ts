@@ -52,7 +52,9 @@ export function toAnthropicTool(tool: ToolDefinition): Anthropic.Messages.Tool {
     target: 'openAi',
   });
 
-  const { $schema: _, ...schema } = jsonSchema as Record<string, unknown>;
+  // Strip the JSON Schema `$schema` meta field — Anthropic rejects it.
+  const schema = { ...(jsonSchema as Record<string, unknown>) };
+  delete schema.$schema;
 
   return {
     name: tool.name,

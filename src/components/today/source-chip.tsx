@@ -25,7 +25,6 @@ const baseClass =
 export function SourceChip({
   id,
   source,
-  platform: _platform,
   snapshot,
   onRetry,
   onFilter,

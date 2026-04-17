@@ -18,12 +18,12 @@ const WEIGHT_KEYS = [
   'weightEngagement',
 ] as const;
 
-const GATE_KEYS = ['intentGate', 'relevanceGate', 'gateCap'] as const;
+type GateKey = 'intentGate' | 'relevanceGate' | 'gateCap';
 
 /**
  * Map from optimizer output key names to DB column names.
  */
-const NUMERIC_KEY_MAP: Record<string, (typeof WEIGHT_KEYS)[number] | (typeof GATE_KEYS)[number]> = {
+const NUMERIC_KEY_MAP: Record<string, (typeof WEIGHT_KEYS)[number] | GateKey> = {
   weightRelevance: 'weightRelevance',
   weightIntent: 'weightIntent',
   weightExposure: 'weightExposure',

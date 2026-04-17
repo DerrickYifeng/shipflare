@@ -152,10 +152,7 @@ export class AgentDream {
 
     if (logs.length === 0) return [];
 
-    // 2. Load existing memory index as context
-    const existingIndex = await this.store.loadIndex();
-
-    // 3. Load full content of existing memories for context
+    // 2. Load full content of existing memories for context
     const headers = await this.store.listEntries();
     const existingMemories: string[] = [];
     for (const h of headers) {

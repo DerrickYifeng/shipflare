@@ -71,13 +71,6 @@ interface RedditThread {
   permalink: string;
 }
 
-interface RedditComment {
-  id: string;
-  permalink: string;
-  body: string;
-  author: string;
-}
-
 /**
  * Reddit OAuth API client with automatic token refresh and rate limiting.
  * Rate limit: 60 requests per minute per OAuth token.

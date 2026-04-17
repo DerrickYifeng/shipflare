@@ -5,7 +5,6 @@ import type {
   AgentResult,
   OnProgress,
   QueryParams,
-  StreamEvent,
   ToolContext,
 } from './types';
 import { createMessage, UsageTracker, addMessageCacheBreakpoint } from './api-client';

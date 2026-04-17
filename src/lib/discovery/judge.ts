@@ -82,6 +82,9 @@ const MODEL = 'claude-haiku-4-5-20251001';
 export async function judgeThreadsBatch(
   product: ProductContext,
   threads: ScoredThread[],
+  // Reserved for platform-specific prompt tuning. Kept in the signature so
+  // callers (calibrate-discovery) don't need to change when we use it.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   _platform: string,
 ): Promise<{ judgments: Judgment[]; usage: UsageSummary }> {
   if (threads.length === 0) {
@@ -176,6 +179,7 @@ export async function judgeThreadsBatch(
 // Helper: convert Zod schema to JSON Schema for outputSchema
 // ---------------------------------------------------------------------------
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function zodToJsonSchema(_schema: z.ZodType): Record<string, unknown> {
   // Minimal conversion for the specific judge schema.
   // Anthropic output_config.format.schema expects raw JSON Schema (no wrapper).

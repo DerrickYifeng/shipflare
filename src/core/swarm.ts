@@ -1,7 +1,7 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import type { z } from 'zod';
-import type { AgentConfig, AgentResult, CacheSafeParams, OnProgress, StreamEvent, ToolContext } from './types';
-import { runAgent, createToolContext } from './query-loop';
+import type { AgentConfig, AgentResult, CacheSafeParams, OnProgress, ToolContext } from './types';
+import { runAgent } from './query-loop';
 import { buildCacheSafeBlocks } from './api-client';
 import { toAnthropicTool } from './tool-system';
 import { createLogger } from '@/lib/logger';

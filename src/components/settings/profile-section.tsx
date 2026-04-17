@@ -1,3 +1,5 @@
+import Image from 'next/image';
+
 interface ProfileSectionProps {
   user: {
     name?: string | null;
@@ -12,12 +14,13 @@ export function ProfileSection({ user }: ProfileSectionProps) {
       <h2 className="text-[21px] font-bold tracking-[-0.12px] text-sf-text-primary mb-4">Profile</h2>
       <div className="flex items-center gap-4">
         {user.image && (
-          <img
+          <Image
             src={user.image}
             alt=""
             width={48}
             height={48}
             className="rounded-full"
+            unoptimized
           />
         )}
         <div>

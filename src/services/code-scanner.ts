@@ -288,11 +288,7 @@ const KEY_FILE_GLOBS = [
   'src/components/**/*.tsx',
 ];
 
-async function selectAndReadKeyFiles(
-  dir: string,
-  allFiles: string[],
-  techStack: TechStack,
-): Promise<KeyFile[]> {
+async function selectAndReadKeyFiles(dir: string): Promise<KeyFile[]> {
   const selected = new Set<string>();
 
   for (const glob of KEY_FILE_GLOBS) {
@@ -421,7 +417,7 @@ export async function scanRepo(repoDir: string): Promise<ScanResult> {
   log.info(`Tech stack: ${techStack.languages.join(', ')} / ${techStack.frameworks.join(', ')}`);
 
   // Phase 3: Read key files
-  const keyFiles = await selectAndReadKeyFiles(repoDir, allFiles, techStack);
+  const keyFiles = await selectAndReadKeyFiles(repoDir);
   log.info(`Read ${keyFiles.length} key files`);
 
   // Phase 4: Claude analysis

@@ -13,7 +13,7 @@ testWithProduct.describe('Dashboard: draft review', () => {
   }) => {
     // Seed test data
     const threads = await seedThreads(testUser.id, 3);
-    const drafts = await seedDrafts(
+    await seedDrafts(
       testUser.id,
       threads.map((t) => t.id),
     );

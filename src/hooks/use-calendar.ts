@@ -136,8 +136,9 @@ export function useCalendar(
   // `status` is authoritative once persisted; live state is a fast-path that
   // flips the card into `drafting` / `draft_created` / `failed` before the
   // next SWR revalidation completes.
-  const baseItems = data?.items ?? [];
+  const dataItems = data?.items;
   const mergedItems = useMemo(() => {
+    const baseItems = dataItems ?? [];
     if (plan.items.size === 0) return baseItems;
     return baseItems.map((item) => {
       const live = plan.items.get(item.id);
@@ -156,7 +157,7 @@ export function useCalendar(
         draftPreview: live.data?.previewBody ?? item.draftPreview,
       };
     });
-  }, [baseItems, plan.items]);
+  }, [dataItems, plan.items]);
 
   return {
     items: mergedItems,
