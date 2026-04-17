@@ -17,11 +17,11 @@ import { loadSkill } from '@/core/skill-loader';
 import { runSkill } from '@/core/skill-runner';
 import { replyDrafterOutputSchema } from '@/agents/schemas';
 import type { ReplyDrafterOutput } from '@/agents/schemas';
-import { enqueueReview, enqueueDream } from '@/lib/queue';
-import { publishEvent } from '@/lib/redis';
-import { getRedis } from '@/lib/redis';
+import { enqueueReview, enqueueDream, enqueueMonitor } from '@/lib/queue';
+import { publishEvent, getKeyValueClient } from '@/lib/redis';
 import { join } from 'path';
 import type { MonitorJobData } from '@/lib/queue/types';
+import { isFanoutJob } from '@/lib/queue/types';
 import { createLogger } from '@/lib/logger';
 import { buildContentUrl } from '@/lib/platform-config';
 import { MemoryStore } from '@/memory/store';
@@ -81,7 +81,7 @@ async function processXMonitorForUser(userId: string, productId: string) {
     return;
   }
 
-  const redis = getRedis();
+  const redis = getKeyValueClient();
   const now = new Date();
   const maxAge = new Date(now.getTime() - TWEET_MAX_AGE_MINUTES * 60_000);
   let totalNewTweets = 0;
@@ -392,21 +392,23 @@ async function processXMonitorForUser(userId: string, productId: string) {
 }
 
 export async function processXMonitor(job: Job<MonitorJobData>) {
-  const { userId, productId } = job.data;
-
-  if (userId === '__all__') {
-    // Cron fan-out: find all users with an active X channel and process each
+  if (isFanoutJob(job.data)) {
+    const platform = (job.data as { platform?: string }).platform ?? 'x';
+    // Cron fan-out: enqueue per-user monitor jobs so concurrency works.
     const xChannels = await db
       .select({ userId: channels.userId })
       .from(channels)
-      .where(eq(channels.platform, 'x'));
+      .where(eq(channels.platform, platform));
 
     const userIds = [...new Set(xChannels.map((c) => c.userId))];
-    log.info(`Cron fan-out: processing ${userIds.length} users with X channels`);
+    log.info(
+      `Cron fan-out: enqueueing ${userIds.length} per-user monitor jobs (${platform})`,
+    );
 
+    let enqueued = 0;
     for (const uid of userIds) {
       const [userProduct] = await db
-        .select()
+        .select({ id: products.id })
         .from(products)
         .where(eq(products.userId, uid))
         .limit(1);
@@ -416,14 +418,18 @@ export async function processXMonitor(job: Job<MonitorJobData>) {
         continue;
       }
 
-      try {
-        await processXMonitorForUser(uid, userProduct.id);
-      } catch (err) {
-        log.error(`X monitor failed for user ${uid}: ${err}`);
-      }
+      await enqueueMonitor({
+        userId: uid,
+        productId: userProduct.id,
+        platform,
+      });
+      enqueued++;
     }
+    log.info(`Cron fan-out enqueued ${enqueued} monitor jobs`);
     return;
   }
 
+  const data = job.data as Extract<MonitorJobData, { userId: string }>;
+  const { userId, productId } = data;
   await processXMonitorForUser(userId, productId);
 }

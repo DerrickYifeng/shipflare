@@ -1,5 +1,5 @@
 import { Worker } from 'bullmq';
-import { getRedis } from '@/lib/redis';
+import { getBullMQConnection } from '@/lib/redis';
 import { processDiscovery } from './processors/discovery';
 import { processContent } from './processors/content';
 import { processReview } from './processors/review';
@@ -20,7 +20,7 @@ import type { DiscoveryJobData, ContentJobData, ReviewJobData, PostingJobData, H
 
 const log = createLogger('workers');
 
-const connection = getRedis();
+const connection = getBullMQConnection();
 
 /**
  * Worker entry point. Runs as a separate Bun process on Railway.
@@ -164,7 +164,7 @@ async function scheduleNightlyDream() {
 async function scheduleMonitor() {
   await monitorQueue.add(
     'scheduled-scan',
-    { userId: '__all__', productId: '__all__', platform: 'x' },
+    { kind: 'fanout', schemaVersion: 1, platform: 'x' },
     {
       repeat: { pattern: '0 7 * * *' },
       jobId: 'monitor-cron',
@@ -176,7 +176,7 @@ async function scheduleMonitor() {
 async function scheduleContentCalendar() {
   await contentCalendarQueue.add(
     'scheduled-process',
-    { userId: '__all__', productId: '__all__', platform: 'x' },
+    { kind: 'fanout', schemaVersion: 1, platform: 'x' },
     {
       repeat: { pattern: '0 6 * * *' },
       jobId: 'content-calendar-cron',
@@ -188,7 +188,7 @@ async function scheduleContentCalendar() {
 async function scheduleMetrics() {
   await metricsQueue.add(
     'scheduled-collect',
-    { userId: '__all__', platform: 'x' },
+    { kind: 'fanout', schemaVersion: 1, platform: 'x' },
     {
       repeat: { pattern: '0 3 * * *' },
       jobId: 'metrics-cron',
@@ -200,7 +200,7 @@ async function scheduleMetrics() {
 async function scheduleAnalytics() {
   await analyticsQueue.add(
     'scheduled-compute',
-    { userId: '__all__', platform: 'x' },
+    { kind: 'fanout', schemaVersion: 1, platform: 'x' },
     {
       repeat: { pattern: '0 5 * * *' },
       jobId: 'analytics-cron',
@@ -212,7 +212,7 @@ async function scheduleAnalytics() {
 async function scheduleTodoSeed() {
   await todoSeedQueue.add(
     'scheduled-seed',
-    { userId: '__all__' },
+    { kind: 'fanout', schemaVersion: 1 },
     {
       repeat: { pattern: '0 * * * *' },
       jobId: 'todo-seed-cron',
@@ -236,7 +236,7 @@ async function scheduleCodeDiff() {
 async function scheduleDiscovery() {
   await discoveryQueue.add(
     'scheduled-scan',
-    { userId: '__all__', productId: '__all__', sources: [], platform: 'reddit' } as unknown as DiscoveryJobData,
+    { kind: 'fanout', schemaVersion: 1 },
     {
       repeat: { pattern: '0 8,14,20 * * *' },
       jobId: 'discovery-cron',

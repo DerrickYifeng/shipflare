@@ -11,7 +11,9 @@ import {
 } from '@/lib/db/schema';
 import { eq, and, gte, desc, sql } from 'drizzle-orm';
 import { publishEvent } from '@/lib/redis';
+import { enqueueAnalytics } from '@/lib/queue';
 import type { AnalyticsJobData } from '@/lib/queue/types';
+import { isFanoutJob } from '@/lib/queue/types';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('worker:x-analytics');
@@ -244,29 +246,25 @@ async function processXAnalyticsForUser(userId: string) {
 }
 
 export async function processXAnalytics(job: Job<AnalyticsJobData>) {
-  const { userId } = job.data;
-
-  if (userId === '__all__') {
-    // Cron fan-out: find all users with X channels
+  if (isFanoutJob(job.data)) {
+    const platform = (job.data as { platform?: string }).platform ?? 'x';
+    // Cron fan-out: enqueue per-user analytics jobs.
     const xChannels = await db
       .select({ userId: channels.userId })
       .from(channels)
-      .where(eq(channels.platform, 'x'));
+      .where(eq(channels.platform, platform));
 
     const userIds = [...new Set(xChannels.map((c) => c.userId))];
     log.info(
-      `Cron fan-out: computing analytics for ${userIds.length} users`,
+      `Cron fan-out: enqueueing ${userIds.length} per-user analytics jobs (${platform})`,
     );
 
     for (const uid of userIds) {
-      try {
-        await processXAnalyticsForUser(uid);
-      } catch (err) {
-        log.error(`X analytics failed for user ${uid}: ${err}`);
-      }
+      await enqueueAnalytics({ userId: uid, platform });
     }
     return;
   }
 
-  await processXAnalyticsForUser(userId);
+  const data = job.data as Extract<AnalyticsJobData, { userId: string }>;
+  await processXAnalyticsForUser(data.userId);
 }

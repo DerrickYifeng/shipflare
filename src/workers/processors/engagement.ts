@@ -27,7 +27,9 @@ const MAX_ENGAGEMENT_DEPTH = 2;
 const log = createLogger('worker:x-engagement');
 
 export async function processXEngagement(job: Job<EngagementJobData>) {
-  const { userId, contentId: tweetId, contentText: originalText, productId } = job.data;
+  const { userId, contentId: tweetId, productId } = job.data;
+  const legacyContentText = (job.data as { contentText?: string }).contentText;
+  const explicitDraftId = (job.data as { draftId?: string }).draftId;
   log.info(`Monitoring engagement for tweet ${tweetId}`);
 
   // Load X channel — explicit projection for XClient.fromChannel
@@ -45,6 +47,48 @@ export async function processXEngagement(job: Job<EngagementJobData>) {
   if (!xChannel) throw new Error('No X channel connected');
 
   const xClient = XClient.fromChannel(xChannel);
+
+  // Resolve the original posted text via DB lookup (payloads no longer carry
+  // contentText). Order of resolution:
+  //   1. Explicit draftId in payload
+  //   2. posts.externalId === tweetId → draft
+  //   3. legacy contentText field (for in-flight jobs enqueued before the
+  //      schema update)
+  let originalText = '';
+  if (explicitDraftId) {
+    const [d] = await db
+      .select({ replyBody: drafts.replyBody })
+      .from(drafts)
+      .where(eq(drafts.id, explicitDraftId))
+      .limit(1);
+    originalText = d?.replyBody ?? '';
+  }
+  if (!originalText) {
+    const [postRow] = await db
+      .select({ draftId: posts.draftId })
+      .from(posts)
+      .where(eq(posts.externalId, tweetId))
+      .limit(1);
+    if (postRow?.draftId) {
+      const [d] = await db
+        .select({ replyBody: drafts.replyBody })
+        .from(drafts)
+        .where(eq(drafts.id, postRow.draftId))
+        .limit(1);
+      originalText = d?.replyBody ?? '';
+    }
+  }
+  if (!originalText && legacyContentText) {
+    // Back-compat for jobs enqueued before the payload change. Remove after
+    // the engagement queue has drained (scheduled checks are at +15/30/60m).
+    originalText = legacyContentText;
+  }
+  if (!originalText) {
+    log.warn(
+      `No original text resolvable for tweet ${tweetId}; skipping engagement monitor`,
+    );
+    return;
+  }
 
   // Get authenticated user ID
   let xUserId: string;

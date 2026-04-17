@@ -14,10 +14,11 @@ import { loadSkill } from '@/core/skill-loader';
 import { runSkill } from '@/core/skill-runner';
 import { contentCreatorOutputSchema } from '@/agents/schemas';
 import type { ContentCreatorOutput } from '@/agents/schemas';
-import { enqueueReview, enqueueDream } from '@/lib/queue';
+import { enqueueReview, enqueueDream, enqueueContentCalendar } from '@/lib/queue';
 import { publishEvent } from '@/lib/redis';
 import { join } from 'path';
 import type { ContentCalendarJobData } from '@/lib/queue/types';
+import { isFanoutJob } from '@/lib/queue/types';
 import { createLogger } from '@/lib/logger';
 import { MemoryStore } from '@/memory/store';
 import { AgentDream } from '@/memory/dream';
@@ -218,21 +219,26 @@ async function processXContentCalendarForUser(
 export async function processXContentCalendar(
   job: Job<ContentCalendarJobData>,
 ) {
-  const { userId, productId, processUpcoming } = job.data;
-
-  if (userId === '__all__') {
-    // Cron fan-out: find all users with scheduled X content and process each
+  // Cron fan-out: enqueue per-user jobs so the content-calendar worker's
+  // concurrency:2 actually splits work across users. Accepts both the new
+  // discriminated-union payload and the legacy `userId === '__all__'` sentinel.
+  if (isFanoutJob(job.data)) {
+    const platform =
+      (job.data as { platform?: string }).platform ?? 'x';
     const xChannels = await db
       .select({ userId: channels.userId })
       .from(channels)
-      .where(eq(channels.platform, 'x'));
+      .where(eq(channels.platform, platform));
 
     const userIds = [...new Set(xChannels.map((c) => c.userId))];
-    log.info(`Cron fan-out: processing ${userIds.length} users with X channels`);
+    log.info(
+      `Cron fan-out: enqueueing ${userIds.length} per-user content-calendar jobs (${platform})`,
+    );
 
+    let enqueued = 0;
     for (const uid of userIds) {
       const [userProduct] = await db
-        .select()
+        .select({ id: products.id })
         .from(products)
         .where(eq(products.userId, uid))
         .limit(1);
@@ -242,14 +248,18 @@ export async function processXContentCalendar(
         continue;
       }
 
-      try {
-        await processXContentCalendarForUser(uid, userProduct.id);
-      } catch (err) {
-        log.error(`X content calendar failed for user ${uid}: ${err}`);
-      }
+      await enqueueContentCalendar({
+        userId: uid,
+        productId: userProduct.id,
+        platform,
+      });
+      enqueued++;
     }
+    log.info(`Cron fan-out enqueued ${enqueued} content-calendar jobs`);
     return;
   }
 
+  const data = job.data as Extract<ContentCalendarJobData, { userId: string }>;
+  const { userId, productId, processUpcoming } = data;
   await processXContentCalendarForUser(userId, productId, processUpcoming);
 }

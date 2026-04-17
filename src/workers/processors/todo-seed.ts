@@ -5,14 +5,16 @@ import { eq } from 'drizzle-orm';
 import { seedTodosForUser, getLocalHour } from '@/lib/today/seed';
 import { createLogger } from '@/lib/logger';
 import type { TodoSeedJobData } from '@/lib/queue/types';
+import { isFanoutJob } from '@/lib/queue/types';
 
 const log = createLogger('worker:todo-seed');
 
 export async function processTodoSeed(job: Job<TodoSeedJobData>) {
-  const { userId } = job.data;
-
-  // Cron fan-out: scan all users and seed those at 8 AM local time
-  if (userId === '__all__') {
+  // Cron fan-out: scan all users and seed those at 8 AM local time.
+  // Kept in-process (no per-user enqueue) because the per-user work is a
+  // cheap Postgres write and the outer loop skips users whose local hour
+  // isn't 8 — fanning out would enqueue mostly no-op jobs.
+  if (isFanoutJob(job.data)) {
     const allUsers = await db.select({ id: users.id }).from(users);
     const now = new Date();
     let seeded = 0;
@@ -44,6 +46,7 @@ export async function processTodoSeed(job: Job<TodoSeedJobData>) {
   }
 
   // Single user seed
-  const count = await seedTodosForUser(userId);
-  log.info(`Seeded ${count} todo items for user ${userId}`);
+  const data = job.data as Extract<TodoSeedJobData, { userId: string }>;
+  const count = await seedTodosForUser(data.userId);
+  log.info(`Seeded ${count} todo items for user ${data.userId}`);
 }

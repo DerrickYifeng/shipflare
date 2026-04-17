@@ -12,11 +12,12 @@ import { enqueueContent, enqueueDream, enqueueDiscovery } from '@/lib/queue';
 import { publishEvent } from '@/lib/redis';
 import { join } from 'path';
 import type { DiscoveryJobData } from '@/lib/queue/types';
+import { isFanoutJob } from '@/lib/queue/types';
 import { createLogger } from '@/lib/logger';
 import { MemoryStore } from '@/memory/store';
 import { AgentDream } from '@/memory/dream';
 import { buildMemoryPrompt } from '@/memory/prompt-builder';
-import { PLATFORMS, isPlatformAvailable, getPlatformConfig } from '@/lib/platform-config';
+import { isPlatformAvailable, getPlatformConfig } from '@/lib/platform-config';
 
 const log = createLogger('worker:discovery');
 
@@ -25,10 +26,11 @@ const discoverySkill = loadSkill(
 );
 
 export async function processDiscovery(job: Job<DiscoveryJobData>) {
-  const { userId, productId, sources, platform } = job.data;
-
-  // Cron fan-out: scan all users with connected channels
-  if (userId === '__all__') {
+  // Cron fan-out: enqueue per-user discovery jobs so downstream worker
+  // concurrency actually parallelizes across users. Tolerates both the new
+  // discriminated-union payload (`kind: 'fanout'`) and the legacy sentinel
+  // (`userId === '__all__'`) for in-flight jobs during rollout.
+  if (isFanoutJob(job.data)) {
     const allChannels = await db
       .select({ userId: channels.userId, platform: channels.platform })
       .from(channels);
@@ -41,7 +43,8 @@ export async function processDiscovery(job: Job<DiscoveryJobData>) {
 
     log.info(`Cron discovery fan-out: ${userPlatforms.size} users with channels`);
 
-    for (const [uid, platforms] of userPlatforms) {
+    let enqueued = 0;
+    for (const [uid, platformSet] of userPlatforms) {
       const [product] = await db
         .select({ id: products.id })
         .from(products)
@@ -49,19 +52,26 @@ export async function processDiscovery(job: Job<DiscoveryJobData>) {
         .limit(1);
       if (!product) continue;
 
-      for (const platformId of platforms) {
+      for (const platformId of platformSet) {
         if (!isPlatformAvailable(platformId)) continue;
         const config = getPlatformConfig(platformId);
+        // Fire per-user enqueue; BullMQ concurrency handles actual parallelism.
         await enqueueDiscovery({
           userId: uid,
           productId: product.id,
           sources: config.defaultSources,
           platform: platformId,
         });
+        enqueued++;
       }
     }
+    log.info(`Cron discovery fan-out enqueued ${enqueued} per-user jobs`);
     return;
   }
+
+  // Per-user payload — processor does the actual work.
+  const data = job.data as Extract<DiscoveryJobData, { userId: string }>;
+  const { userId, productId, sources, platform } = data;
 
   log.info(`Starting ${platform} discovery for product ${productId}, ${sources.length} sources`);
 

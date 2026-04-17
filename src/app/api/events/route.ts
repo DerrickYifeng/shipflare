@@ -7,6 +7,9 @@ const log = createLogger('api:events');
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+/** Force the client to reconnect after this long so connections don't live forever. */
+const MAX_CONNECTION_MS = 30 * 60 * 1000; // 30 minutes
+
 /**
  * SSE endpoint for real-time dashboard updates.
  * Each client gets its own Redis pub/sub subscriber.
@@ -24,11 +27,17 @@ export async function GET() {
   const channel = `shipflare:events:${userId}`;
   const subscriber = createPubSubSubscriber();
 
+  // Closure-scoped handles that both start() and cancel() can see.
+  let heartbeat: ReturnType<typeof setInterval> | null = null;
+  let maxAgeTimer: ReturnType<typeof setTimeout> | null = null;
+  let closed = false;
+
   const stream = new ReadableStream({
     start(controller) {
       const encoder = new TextEncoder();
 
       function send(data: string) {
+        if (closed) return;
         try {
           controller.enqueue(encoder.encode(`data: ${data}\n\n`));
         } catch {
@@ -46,20 +55,28 @@ export async function GET() {
       });
 
       // Heartbeat every 30s to keep connection alive
-      const heartbeat = setInterval(() => {
+      heartbeat = setInterval(() => {
         send(JSON.stringify({ type: 'heartbeat' }));
       }, 30_000);
 
-      // Store cleanup handler for the cancel() callback
-      const cleanup = () => {
-        clearInterval(heartbeat);
-        subscriber.unsubscribe(channel).catch(() => {});
-        subscriber.disconnect();
-      };
-      (controller as unknown as { _cleanup: () => void })._cleanup = cleanup;
+      // Force clients to reconnect after MAX_CONNECTION_MS so SSE connections
+      // don't live forever (protects against idle socket accumulation).
+      maxAgeTimer = setTimeout(() => {
+        log.info(`SSE max-age reached for user ${userId}, closing to force reconnect`);
+        send(JSON.stringify({ type: 'reconnect' }));
+        try {
+          controller.close();
+        } catch {
+          // Already closed
+        }
+      }, MAX_CONNECTION_MS);
     },
     cancel() {
+      if (closed) return;
+      closed = true;
       log.info(`SSE connection closed for user ${userId}`);
+      if (heartbeat) clearInterval(heartbeat);
+      if (maxAgeTimer) clearTimeout(maxAgeTimer);
       subscriber.unsubscribe().catch(() => {});
       subscriber.disconnect();
     },

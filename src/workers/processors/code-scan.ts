@@ -3,7 +3,7 @@ import { eq, isNotNull } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import { products, codeSnapshots, channels, discoveryConfigs } from '@/lib/db/schema';
 import { accounts } from '@/lib/db/schema/users';
-import { getRedis } from '@/lib/redis';
+import { getPubSubPublisher } from '@/lib/redis';
 import { enqueueCalibration, codeScanQueue } from '@/lib/queue';
 import { isPlatformAvailable } from '@/lib/platform-config';
 import { createLogger } from '@/lib/logger';
@@ -140,7 +140,7 @@ export async function processCodeScan(job: Job<CodeScanJobData>): Promise<void> 
 
   // Full scan (onboarding flow)
   const channel = `code-scan:${userId}`;
-  const redis = getRedis();
+  const redis = getPubSubPublisher();
 
   let cloneDir: string | null = null;
 
@@ -282,7 +282,7 @@ export async function processCodeScan(job: Job<CodeScanJobData>): Promise<void> 
 }
 
 async function publishProgress(
-  redis: ReturnType<typeof getRedis>,
+  redis: ReturnType<typeof getPubSubPublisher>,
   channel: string,
   phase: string,
   message: string,

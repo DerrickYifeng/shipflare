@@ -16,6 +16,27 @@ function lookupTool(source: ToolSource, name: string): ToolDefinition<any, any> 
 /** Lazily loaded ReAct preamble, cached after first read. */
 let reactPreambleCache: string | null = null;
 
+/**
+ * Parsed AgentConfig cache keyed by agent file path. Each `runSkill` call
+ * previously re-parsed the markdown + YAML and re-resolved tools; this cache
+ * collapses that to a single parse per process lifetime.
+ *
+ * Disable with `DISABLE_SKILL_CACHE=1` for local development so edits to
+ * agent .md files take effect without a restart.
+ */
+const agentConfigCache = new Map<string, AgentConfig>();
+
+function isCacheDisabled(): boolean {
+  return process.env.DISABLE_SKILL_CACHE === '1';
+}
+
+/**
+ * Clear the agent config cache. Primarily for tests.
+ */
+export function clearAgentConfigCache(): void {
+  agentConfigCache.clear();
+}
+
 function getReactPreamble(agentsDir: string): string {
   if (reactPreambleCache !== null) return reactPreambleCache;
   const preamblePath = join(agentsDir, 'react-preamble.md');
@@ -44,9 +65,19 @@ export function loadAgentFromFile(
   filePath: string,
   toolSource: ToolSource,
 ): AgentConfig {
+  if (!isCacheDisabled()) {
+    const cached = agentConfigCache.get(filePath);
+    if (cached) return cached;
+  }
+
   const raw = readFileSync(filePath, 'utf-8');
   const agentsDir = dirname(filePath);
-  return parseAgentMarkdown(raw, toolSource, agentsDir);
+  const parsed = parseAgentMarkdown(raw, toolSource, agentsDir);
+
+  if (!isCacheDisabled()) {
+    agentConfigCache.set(filePath, parsed);
+  }
+  return parsed;
 }
 
 /**
