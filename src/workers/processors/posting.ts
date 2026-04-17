@@ -1,10 +1,10 @@
 import type { Job } from 'bullmq';
 import { db } from '@/lib/db';
-import { drafts, posts, threads, channels, activityEvents } from '@/lib/db/schema';
+import { drafts, posts, threads, activityEvents } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { RedditClient } from '@/lib/reddit-client';
 import { XClient } from '@/lib/x-client';
-import { createClientFromChannel } from '@/lib/platform-deps';
+import { createClientFromChannelById } from '@/lib/platform-deps';
 import { PLATFORMS } from '@/lib/platform-config';
 import { loadSkill } from '@/core/skill-loader';
 import { runSkill } from '@/core/skill-runner';
@@ -72,27 +72,20 @@ export async function processPosting(job: Job<PostingJobData>) {
     }
   }
 
-  // Load channel — explicit projection for fromChannel + platform routing
-  const [channel] = await db
-    .select({
-      id: channels.id,
-      platform: channels.platform,
-      oauthTokenEncrypted: channels.oauthTokenEncrypted,
-      refreshTokenEncrypted: channels.refreshTokenEncrypted,
-      tokenExpiresAt: channels.tokenExpiresAt,
-    })
-    .from(channels)
-    .where(eq(channels.id, channelId))
-    .limit(1);
+  // Resolve client + platform via the sanctioned helper. Token-column
+  // projection stays inside platform-deps.ts; processor never sees it.
+  const resolved = await createClientFromChannelById(channelId);
+  if (!resolved) {
+    throw new Error(`Channel not found or unsupported platform: ${channelId}`);
+  }
+  const { client, platform } = resolved;
 
-  if (!channel) throw new Error(`Channel not found: ${channelId}`);
-
-  const isX = channel.platform === PLATFORMS.x.id;
+  const isX = platform === PLATFORMS.x.id;
   const draftType = draft.draftType ?? 'reply';
 
   // Build input for the posting skill
   const input: Record<string, unknown> = {
-    platform: channel.platform,
+    platform,
     draftType,
     draftText: draft.replyBody,
     // Reddit-specific
@@ -108,12 +101,6 @@ export async function processPosting(job: Job<PostingJobData>) {
     } : {}),
   };
 
-  // Inject platform client as dependency. createClientFromChannel() is the
-  // sanctioned path for processors that look up a channel by id.
-  const client = createClientFromChannel(channel.platform, channel);
-  if (!client) {
-    throw new Error(`Unsupported platform for posting: ${channel.platform}`);
-  }
   const deps: Record<string, unknown> = client instanceof XClient
     ? { xClient: client }
     : client instanceof RedditClient

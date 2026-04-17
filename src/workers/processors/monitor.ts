@@ -13,7 +13,7 @@ import {
 import { eq, and, inArray, lt } from 'drizzle-orm';
 import { XClient, XForbiddenError } from '@/lib/x-client';
 import { XAIClient } from '@/lib/xai-client';
-import { createPlatformDeps } from '@/lib/platform-deps';
+import { createPlatformDeps, createPublicPlatformDeps } from '@/lib/platform-deps';
 import { loadSkill } from '@/core/skill-loader';
 import { runSkill } from '@/core/skill-runner';
 import { replyDrafterOutputSchema } from '@/agents/schemas';
@@ -157,7 +157,13 @@ async function processXMonitorForUser(
           `X API 403 for @${target.username} — Basic tier required for getUserTweets. Falling back to Grok search.`,
         );
         try {
-          const xaiClient = new XAIClient();
+          const publicDeps = createPublicPlatformDeps(['x']);
+          const xaiClient = publicDeps.xaiClient as XAIClient | undefined;
+          if (!xaiClient) {
+            // Preserve the old `new XAIClient()` throw-on-missing-env behavior
+            // so the outer fallbackErr catch handles it identically.
+            throw new Error('XAI_API_KEY is required');
+          }
           const searchResult = await xaiClient.searchTweets(
             `from:${target.username}`,
             { maxResults: 5 },

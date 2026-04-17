@@ -85,6 +85,39 @@ export function createClientFromChannel(
 }
 
 /**
+ * Look up a channel by id, then build the platform client. Use when a caller
+ * has a channel id (e.g. a BullMQ job payload carrying channelId) and wants
+ * to stay out of the token-column read path — this helper does the SELECT
+ * internally so the caller never touches oauth_token_encrypted /
+ * refresh_token_encrypted directly.
+ *
+ * Returns { client, platform } on success, null if the channel doesn't exist
+ * or its platform has no OAuth client. Callers decide whether a null is fatal.
+ */
+export async function createClientFromChannelById(
+  channelId: string,
+): Promise<{ client: RedditClient | XClient; platform: string } | null> {
+  const [channel] = await db
+    .select({
+      id: channels.id,
+      platform: channels.platform,
+      oauthTokenEncrypted: channels.oauthTokenEncrypted,
+      refreshTokenEncrypted: channels.refreshTokenEncrypted,
+      tokenExpiresAt: channels.tokenExpiresAt,
+    })
+    .from(channels)
+    .where(eq(channels.id, channelId))
+    .limit(1);
+
+  if (!channel) return null;
+
+  const client = createClientFromChannel(channel.platform, channel);
+  if (!client) return null;
+
+  return { client, platform: channel.platform };
+}
+
+/**
  * Create read-only / anonymous platform deps for public endpoints.
  *
  * Used by `/api/scan` and CLI scripts that run before any channel is
