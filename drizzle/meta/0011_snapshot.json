@@ -565,6 +565,12 @@
           "notNull": true,
           "default": "now()"
         },
+        "post_history": {
+          "name": "post_history",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
         "updated_at": {
           "name": "updated_at",
           "type": "timestamp",
