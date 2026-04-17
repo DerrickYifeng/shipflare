@@ -56,6 +56,32 @@ export async function recordPipelineEvent(
 }
 
 /**
+ * Insert many pipeline_events rows in a single round-trip. Same error-swallow
+ * semantics as `recordPipelineEvent` — telemetry MUST NOT break the main flow.
+ *
+ * Use this when a caller has N events to record in a tight loop (e.g. discovery
+ * fan-out emitting one 'discovered' row per newly-inserted thread, + one
+ * 'gate_passed' row per gate-passing thread). Avoids N round-trips.
+ */
+export async function recordPipelineEventsBulk(
+  inputs: RecordPipelineEventInput[],
+): Promise<boolean> {
+  if (inputs.length === 0) return true;
+  try {
+    await db.insert(pipelineEvents).values(inputs);
+    return true;
+  } catch (err) {
+    log.warn('Failed to bulk record pipeline events', {
+      count: inputs.length,
+      firstStage: inputs[0]?.stage,
+      userId: inputs[0]?.userId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return false;
+  }
+}
+
+/**
  * Upsert a thread_feedback row for the discovery optimization loop. Unique
  * per (userId, threadId) — later labels overwrite earlier ones so a
  * "post" event supersedes an earlier "approve".

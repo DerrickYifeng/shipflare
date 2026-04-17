@@ -19,7 +19,8 @@ import { MemoryStore } from '@/memory/store';
 import { AgentDream } from '@/memory/dream';
 import { buildMemoryPrompt } from '@/memory/prompt-builder';
 import { isPlatformAvailable, getPlatformConfig } from '@/lib/platform-config';
-import { recordPipelineEvent } from '@/lib/pipeline-events';
+import { recordPipelineEventsBulk } from '@/lib/pipeline-events';
+import type { RecordPipelineEventInput } from '@/lib/pipeline-events';
 
 const baseLog = createLogger('worker:discovery');
 
@@ -234,13 +235,16 @@ export async function processDiscovery(job: Job<DiscoveryJobData>) {
     newThreadCount = inserted.length;
 
     // Telemetry: one pipeline_events row per newly-inserted thread at
-    // stage='discovered'. Fire-and-forget; failures do not break discovery.
+    // stage='discovered', plus one 'gate_passed' row per thread above the
+    // enqueue threshold. Fire-and-forget via a single bulk insert; failures
+    // are swallowed inside the helper and do not break discovery.
     // Share the per-thread LLM cost evenly across new rows so the funnel
     // cost total matches `result.usage.costUsd`.
     const perThreadCost =
       newThreadCount > 0 ? result.usage.costUsd / newThreadCount : 0;
+    const pipelineRows: RecordPipelineEventInput[] = [];
     for (const row of inserted) {
-      await recordPipelineEvent({
+      pipelineRows.push({
         userId,
         productId,
         threadId: row.id,
@@ -248,10 +252,8 @@ export async function processDiscovery(job: Job<DiscoveryJobData>) {
         cost: perThreadCost,
         metadata: { platform, externalId: row.externalId },
       });
-      // Threads above the enqueue threshold passed the gate — record the
-      // transition so we can show gate-pass rate in the funnel.
       if (shouldEnqueue.has(row.externalId)) {
-        await recordPipelineEvent({
+        pipelineRows.push({
           userId,
           productId,
           threadId: row.id,
@@ -260,6 +262,7 @@ export async function processDiscovery(job: Job<DiscoveryJobData>) {
         });
       }
     }
+    await recordPipelineEventsBulk(pipelineRows);
 
     // Auto-enqueue content only for newly-inserted high-relevance threads.
     // Propagate our traceId so discovery → content → review → posting stays
