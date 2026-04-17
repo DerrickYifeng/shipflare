@@ -439,6 +439,10 @@ function usePrefersReducedMotion(): boolean {
 
   useEffect(() => {
     const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    // One-shot sync from an external (browser) store on mount. The proper
+    // React 18+ idiom is `useSyncExternalStore`, but that refactor is out of
+    // scope here — this synchronous setState fires exactly once.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setReduced(mq.matches);
     const handler = (e: MediaQueryListEvent) => setReduced(e.matches);
     mq.addEventListener('change', handler);

@@ -44,6 +44,10 @@ export function LandingPage({ isAuthenticated }: LandingPageProps) {
       if (storedData) {
         try {
           const parsed = JSON.parse(storedData) as ScanResponse;
+          // Post-OAuth restore of cached scan results from sessionStorage —
+          // a one-shot sync that fires once per redirect. Proper idiom is
+          // `useSyncExternalStore`, but that refactor is out of scope here.
+          // eslint-disable-next-line react-hooks/set-state-in-effect
           setData(parsed);
           if (storedUrl) setUrl(storedUrl);
 

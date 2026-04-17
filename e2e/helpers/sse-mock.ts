@@ -23,8 +23,12 @@ export interface SSEEvent {
  */
 export async function mockEventSource(page: Page) {
   await page.addInitScript(() => {
-    // Store all fake EventSource instances so tests can dispatch events
-    (window as any).__fakeEventSources = [] as any[];
+    // Store all fake EventSource instances so tests can dispatch events.
+    // This runs in the page context, where `window` is `any`-typed by default;
+    // we cast through `unknown` to avoid a lint violation while keeping the
+    // real dynamic attachment that the browser requires.
+    const w = window as unknown as Record<string, unknown>;
+    w.__fakeEventSources = [] as unknown[];
 
     class FakeEventSource {
       url: string;
@@ -39,7 +43,7 @@ export async function mockEventSource(page: Page) {
 
       constructor(url: string) {
         this.url = url;
-        (window as any).__fakeEventSources.push(this);
+        (w.__fakeEventSources as unknown[]).push(this);
 
         // Simulate async connection open
         queueMicrotask(() => {
@@ -63,7 +67,7 @@ export async function mockEventSource(page: Page) {
     }
 
     // Replace the real EventSource
-    (window as any).EventSource = FakeEventSource;
+    w.EventSource = FakeEventSource;
   });
 }
 
@@ -72,9 +76,15 @@ export async function mockEventSource(page: Page) {
  */
 export async function emitSSEEvent(page: Page, event: SSEEvent) {
   await page.evaluate((data) => {
-    const sources = (window as any).__fakeEventSources;
+    type Handle = {
+      readyState: number;
+      onopen: ((ev: Event) => void) | null;
+      __pushEvent: (data: string) => void;
+    };
+    const sources = (window as unknown as Record<string, unknown>)
+      .__fakeEventSources as Handle[] | undefined;
     if (sources && sources.length > 0) {
-      const latest = sources[sources.length - 1];
+      const latest = sources[sources.length - 1]!;
       if (latest.readyState === 1) {
         latest.__pushEvent(data);
       } else {
@@ -129,7 +139,8 @@ export async function emitSSEToChannel(
 ) {
   await page.evaluate(
     ({ channel, payload }) => {
-      const sources = (window as any).__fakeEventSources as Array<{
+      const sources = (window as unknown as Record<string, unknown>)
+        .__fakeEventSources as Array<{
         url: string;
         readyState: number;
         onopen: ((ev: Event) => void) | null;

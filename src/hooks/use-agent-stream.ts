@@ -194,6 +194,10 @@ export function useAgentStream(): {
   const eventSourceRef = useRef<EventSource | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
+  // Holds the latest `connect` so the reconnect timer can call it without
+  // creating a temporal-dead-zone self-reference inside the useCallback body
+  // (React Compiler flags the direct self-call otherwise).
+  const connectRef = useRef<() => void>(() => undefined);
 
   const connect = useCallback(() => {
     // Prevent connection attempts after unmount
@@ -244,10 +248,16 @@ export function useAgentStream(): {
 
       reconnectTimerRef.current = setTimeout(() => {
         reconnectTimerRef.current = null;
-        connect();
+        connectRef.current();
       }, RECONNECT_DELAY_MS);
     };
   }, []);
+
+  // Keep the ref pointing at the latest `connect` so the reconnect timer
+  // always invokes the current closure.
+  useEffect(() => {
+    connectRef.current = connect;
+  }, [connect]);
 
   useEffect(() => {
     mountedRef.current = true;

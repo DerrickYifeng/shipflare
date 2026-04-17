@@ -41,7 +41,12 @@ export function useSSEChannel(
 ): void {
   const { enabled = true } = options;
   const callbackRef = useRef(onEvent);
-  callbackRef.current = onEvent;
+  // Keep the ref in sync with the latest callback without mutating during
+  // render (React Compiler's immutability rule). This effect has no deps so
+  // it runs after every render, matching the prior write-during-render.
+  useEffect(() => {
+    callbackRef.current = onEvent;
+  });
 
   useEffect(() => {
     if (!enabled) return;

@@ -109,6 +109,9 @@ function TodayContentInner({
     const storedAt = window.localStorage.getItem('shipflare:lastScanAt');
     if (storedAt) {
       const parsed = new Date(storedAt);
+      // One-shot mount-time restore from localStorage. Proper idiom is
+      // `useSyncExternalStore`, but refactoring is out of scope here.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       if (!Number.isNaN(parsed.getTime())) setLastScannedAt(parsed);
     }
     const saved = window.localStorage.getItem('shipflare:lastScanRunId');
