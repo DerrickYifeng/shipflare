@@ -170,7 +170,7 @@ export const replyDrafterOutputSchema = z.object({
   replyText: z.string(),
   confidence: z.number(),
   strategy: z.string(),
-  whyItWorks: z.string(),
+  whyItWorks: z.string().optional(),
 });
 
 /**
