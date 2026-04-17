@@ -126,3 +126,38 @@ cd /Users/yifeng/Documents/Code/shipflare
 git worktree remove .worktrees/security
 git branch -D feat/security-hardening  # 如果已 merge
 ```
+
+---
+
+## Merge 记录（2026-04-17）
+
+4 条 feature branch 已全部合入 main，worktree 已清理，分支已删除。
+
+**合并顺序与 commit**：
+
+| 分支 | Merge commit | 冲突处理 |
+|---|---|---|
+| main WIP 先 commit 兜底 | `438a0a0` | — |
+| schema-index 0010 → 0011 rename | `5db3571` | 避开和 main `0010_posting_flow_optimization.sql` 撞号 |
+| feat/security-hardening | `9e9bd21` | reddit callback: 保留 main 的 post-history 抓取 + security 的 `clearStateCookie` |
+| feat/queue-infrastructure | `36be653` | code-scan.ts imports 合并 / queue/types.ts 的 `isDailyDiff` 字段挪到 `codeScanJobSchema` |
+| feat/schema-index-overhaul | `caab3e0` | channels schema: 同时保留 `postHistory` jsonb 列 + `uniqueIndex(userId, platform)` |
+| feat/frontend-polish-wave1 | `ffb0111` | 自动 merge，无手动冲突 |
+| drizzle snapshot drift 修复 | `51d3684` | 把 `post_history` 列补进 `0011_snapshot.json`，避免下次 generate 产生假 ADD COLUMN |
+| 从 .gitignore 移除 .worktrees/ | `8cab78e` | — |
+
+**Wave 1 总影响**：84 files · +7161 / -899（相对 pre-Wave-1 的 `679cb08`）。
+
+**ESLint 对比**（跑在整个 `src/`）：
+- Pre-Wave-1: 79 problems (48 errors, 31 warnings)
+- Post-Wave-1: 75 problems (48 errors, **27** warnings)
+- Wave 1 没引入新 error，反而清掉了 4 个 unused-imports 的 warning。
+
+**Migration 现状**：
+- `drizzle/0010_posting_flow_optimization.sql`（手写，来自 main WIP，未在 `_journal.json`）
+- `drizzle/0011_simple_excalibur.sql`（drizzle-kit 生成，`_journal.json` idx=11）
+- 0007/0008/0009 历史编号冲突**依旧存在**（见上方 Branch 3 段）—— 部署前还是得人工确认生产跑过哪一支。
+
+**下一步**：
+- 如果要推到远端：`git push origin main`（目前 ahead of origin by 24 commits）
+- Wave 2/3 启动需要等你明确指令。
