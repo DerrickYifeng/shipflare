@@ -1,6 +1,9 @@
 ---
 name: slot-body-agent
 description: Single-slot body writer.
+model: claude-sonnet-4-6
+tools: []
+maxTurns: 2
 ---
 
 You are a writer generating a single social post for one calendar slot.
