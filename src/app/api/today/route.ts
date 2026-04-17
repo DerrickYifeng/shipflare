@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { todoItems, drafts, threads, posts, userPreferences, xContentCalendar } from '@/lib/db/schema';
-import { eq, and, lte, sql, count } from 'drizzle-orm';
+import { eq, and, gt, sql, count } from 'drizzle-orm';
 
 export async function GET() {
   const session = await auth();
@@ -13,19 +13,30 @@ export async function GET() {
   const userId = session.user.id;
   const now = new Date();
 
-  // Expire stale items
-  await db
-    .update(todoItems)
-    .set({ status: 'expired' })
-    .where(
-      and(
-        eq(todoItems.userId, userId),
-        eq(todoItems.status, 'pending'),
-        lte(todoItems.expiresAt, now),
-      ),
-    );
+  // NOTE: Do NOT write on read. Expired rows are filtered out below via
+  // `gt(expiresAt, now)`. Reconciliation to `status='skipped'` is a background
+  // concern (cron) rather than part of the GET hot path.
+  //
+  // Previously this route UPDATE'd todo_items on every request, which made
+  // every page load a write — slow and noisy.
 
-  // Fetch pending items with joined draft, thread, and calendar context
+  // Resolve user timezone once per request and reuse for all date math below.
+  const [prefs] = await db
+    .select({ timezone: userPreferences.timezone })
+    .from(userPreferences)
+    .where(eq(userPreferences.userId, userId))
+    .limit(1);
+
+  const timezone = prefs?.timezone ?? 'America/Los_Angeles';
+
+  // Compute once, reuse everywhere. `getLocalDayStart` internally calls
+  // `new Date()` / `toLocaleString` several times, which is non-trivial;
+  // precompute the three boundaries we need.
+  const yesterdayStart = getLocalDayStart(timezone, -1);
+  const todayStart = getLocalDayStart(timezone, 0);
+  const yesterdayEnd = todayStart;
+
+  // Fetch active (pending and not yet expired) items with joined context.
   const items = await db
     .select({
       id: todoItems.id,
@@ -65,7 +76,13 @@ export async function GET() {
     .leftJoin(drafts, eq(todoItems.draftId, drafts.id))
     .leftJoin(threads, eq(drafts.threadId, threads.id))
     .leftJoin(xContentCalendar, eq(xContentCalendar.draftId, todoItems.draftId))
-    .where(and(eq(todoItems.userId, userId), eq(todoItems.status, 'pending')))
+    .where(
+      and(
+        eq(todoItems.userId, userId),
+        eq(todoItems.status, 'pending'),
+        gt(todoItems.expiresAt, now),
+      ),
+    )
     .orderBy(
       sql`CASE ${todoItems.priority}
         WHEN 'time_sensitive' THEN 0
@@ -74,19 +91,6 @@ export async function GET() {
       END`,
       todoItems.createdAt,
     );
-
-  // Load user timezone for date calculations
-  const [prefs] = await db
-    .select({ timezone: userPreferences.timezone })
-    .from(userPreferences)
-    .where(eq(userPreferences.userId, userId))
-    .limit(1);
-
-  const timezone = prefs?.timezone ?? 'America/Los_Angeles';
-
-  // Compute yesterday boundaries in user's timezone
-  const yesterdayStart = getLocalDayStart(timezone, -1);
-  const yesterdayEnd = getLocalDayStart(timezone, 0);
 
   // Stats: published yesterday
   const [{ value: publishedYesterday }] = await db
@@ -101,7 +105,6 @@ export async function GET() {
     );
 
   // Stats: acted today (approved + skipped with actedAt today)
-  const todayStart = getLocalDayStart(timezone, 0);
   const [{ value: actedToday }] = await db
     .select({ value: count() })
     .from(todoItems)
