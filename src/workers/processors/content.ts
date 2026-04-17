@@ -48,6 +48,25 @@ export async function processContent(job: Job<ContentJobData>) {
 
   log.info(`Generating ${draftType} draft for thread ${threadId} in r/${thread.community}`);
 
+  // Thread state transition: queued → drafting. Publish unified pipeline envelope
+  // so the reply war-room UI flips the chip before the LLM call starts.
+  await db
+    .update(threads)
+    .set({ state: 'drafting', lastAttemptAt: new Date() })
+    .where(eq(threads.id, threadId));
+  await publishUserEvent(userId, 'drafts', {
+    type: 'pipeline',
+    pipeline: 'reply',
+    itemId: threadId,
+    state: 'drafting',
+  });
+  await recordPipelineEvent({
+    userId,
+    productId,
+    threadId,
+    stage: 'thread_drafting',
+  });
+
   // Load memory context
   const memoryStore = new MemoryStore(userId, productId);
   const dream = new AgentDream(memoryStore);
@@ -65,55 +84,90 @@ export async function processContent(job: Job<ContentJobData>) {
 
   const recentPostHistory = postHistoryRows.map((r) => r.text);
 
-  // Run content-gen skill (single-item fan-out)
-  const skill = loadSkill(join(SKILLS_DIR, 'content-gen'));
-  const { results, usage } = await runSkill({
-    skill,
-    input: {
-      threads: [
-        {
-          threadTitle: thread.title,
-          threadBody: thread.body ?? '',
-          subreddit: thread.community,
-          productName: product.name,
-          productDescription: product.description,
-          valueProp: product.valueProp,
-          keywords: product.keywords,
-          lifecyclePhase: product.lifecyclePhase ?? 'pre_launch',
-          draftType,
-          communityIntel,
-          ...(recentPostHistory.length > 0 ? { recentPostHistory } : {}),
-        },
-      ],
-    },
-    memoryPrompt: memoryPrompt || undefined,
-    outputSchema: contentOutputSchema,
-    runId: traceId,
-  });
+  // Run content-gen skill + draft insert, wrapped in try/catch so the
+  // thread's state transition to 'failed' runs before BullMQ retries.
+  let result: Awaited<ReturnType<typeof runSkill<typeof contentOutputSchema._type>>>['results'][number] | undefined;
+  let usage: { costUsd: number };
+  let inserted: { id: string } | undefined;
+  try {
+    const skill = loadSkill(join(SKILLS_DIR, 'content-gen'));
+    const runOut = await runSkill({
+      skill,
+      input: {
+        threads: [
+          {
+            threadTitle: thread.title,
+            threadBody: thread.body ?? '',
+            subreddit: thread.community,
+            productName: product.name,
+            productDescription: product.description,
+            valueProp: product.valueProp,
+            keywords: product.keywords,
+            lifecyclePhase: product.lifecyclePhase ?? 'pre_launch',
+            draftType,
+            communityIntel,
+            ...(recentPostHistory.length > 0 ? { recentPostHistory } : {}),
+          },
+        ],
+      },
+      memoryPrompt: memoryPrompt || undefined,
+      outputSchema: contentOutputSchema,
+      runId: traceId,
+    });
+    result = runOut.results[0];
+    usage = runOut.usage;
+    if (!result) throw new Error('Content skill returned no results');
 
-  const result = results[0];
-  if (!result) throw new Error('Content skill returned no results');
+    log.info(
+      `Draft created: confidence=${result.confidence.toFixed(2)}, cost=$${usage.costUsd.toFixed(4)}`,
+    );
 
-  log.info(`Draft created: confidence=${result.confidence.toFixed(2)}, cost=$${usage.costUsd.toFixed(4)}`);
-
-  // Insert draft — use .returning() to get the ID for review enqueue
-  const [inserted] = await db
-    .insert(drafts)
-    .values({
+    // Insert draft — use .returning() to get the ID for review enqueue
+    [inserted] = await db
+      .insert(drafts)
+      .values({
+        userId,
+        threadId,
+        draftType,
+        postTitle: result.postTitle ?? null,
+        replyBody: result.replyBody,
+        confidenceScore: result.confidence,
+        whyItWorks: result.whyItWorks,
+        ftcDisclosure: result.ftcDisclosure,
+        status: 'pending',
+      })
+      .returning({ id: drafts.id });
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    await db
+      .update(threads)
+      .set({ state: 'failed', failureReason: reason })
+      .where(eq(threads.id, threadId));
+    await publishUserEvent(userId, 'drafts', {
+      type: 'pipeline',
+      pipeline: 'reply',
+      itemId: threadId,
+      state: 'failed',
+      data: { reason },
+    });
+    await recordPipelineEvent({
       userId,
+      productId,
       threadId,
-      draftType,
-      postTitle: result.postTitle ?? null,
-      replyBody: result.replyBody,
-      confidenceScore: result.confidence,
-      whyItWorks: result.whyItWorks,
-      ftcDisclosure: result.ftcDisclosure,
-      status: 'pending',
-    })
-    .returning({ id: drafts.id });
+      stage: 'thread_failed',
+      metadata: { error: reason },
+    });
+    throw err; // BullMQ handles retry/DLQ
+  }
 
   // Enqueue review for the newly created draft
-  if (inserted) {
+  if (inserted && result) {
+    // Thread state transition: drafting → ready.
+    await db
+      .update(threads)
+      .set({ state: 'ready' })
+      .where(eq(threads.id, threadId));
+
     // Telemetry: stage='draft_created'. Duration is elapsed since the
     // 'discovered' event for the same thread if we can find one, else null.
     let durationMs: number | null = null;
@@ -139,6 +193,14 @@ export async function processContent(job: Job<ContentJobData>) {
       durationMs: durationMs ?? undefined,
       cost: usage.costUsd,
       metadata: { draftType, confidence: result.confidence },
+    });
+    await recordPipelineEvent({
+      userId,
+      productId,
+      threadId,
+      draftId: inserted.id,
+      stage: 'thread_ready',
+      cost: usage.costUsd,
     });
 
     await enqueueReview({ userId, draftId: inserted.id, productId, traceId });
@@ -189,13 +251,21 @@ export async function processContent(job: Job<ContentJobData>) {
     },
   });
 
-  // Publish SSE event
+  // Publish unified pipeline envelope for reply war-room. `inserted`/`result`
+  // are guaranteed defined here because the catch above rethrows.
   await publishUserEvent(userId, 'drafts', {
-    type: 'draft_ready',
-    threadTitle: thread.title,
-    community: thread.community,
-    confidence: result.confidence,
-    draftType,
+    type: 'pipeline',
+    pipeline: 'reply',
+    itemId: threadId,
+    state: 'ready',
+    data: {
+      draftId: inserted?.id,
+      previewBody: result?.replyBody.slice(0, 120),
+      threadTitle: thread.title,
+      community: thread.community,
+      confidence: result?.confidence,
+      draftType,
+    },
   });
 
   // --- Memory: log insights from this content run ---
