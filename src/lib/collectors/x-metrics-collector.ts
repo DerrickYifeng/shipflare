@@ -1,12 +1,8 @@
 import { db } from '@/lib/db';
-import {
-  channels,
-  posts,
-  xTweetMetrics,
-  xFollowerSnapshots,
-} from '@/lib/db/schema';
+import { posts, xTweetMetrics, xFollowerSnapshots } from '@/lib/db/schema';
 import { and, eq, gte, desc } from 'drizzle-orm';
 import { XClient, XForbiddenError } from '@/lib/x-client';
+import { createPlatformDeps } from '@/lib/platform-deps';
 import { createLogger } from '@/lib/logger';
 import type { MetricsCollector } from '@/lib/metrics-collector';
 
@@ -17,9 +13,10 @@ const BATCH_SIZE = 100;
 
 /**
  * X (Twitter) implementation of the platform-agnostic MetricsCollector
- * interface. Reads existing channel via explicit projection (no raw token
- * columns beyond what XClient.fromChannel needs) and pulls public_metrics
- * for up to the last 7 days of posts in batches of 100 tweet IDs.
+ * interface. Resolves the X channel via `createPlatformDeps`, which is the
+ * sanctioned path for token-column access (see CLAUDE.md → Security TODO).
+ * Pulls public_metrics for up to the last 7 days of posts in batches of 100
+ * tweet IDs.
  *
  * On X API 403 (Basic tier required for public_metrics) we log a warning
  * and return a zero count instead of throwing — matches the inline
@@ -30,23 +27,13 @@ export class XMetricsCollector implements MetricsCollector {
   async collectPostMetrics(
     userId: string,
   ): Promise<{ collected: number; analyzed: number }> {
-    const [xChannel] = await db
-      .select({
-        id: channels.id,
-        oauthTokenEncrypted: channels.oauthTokenEncrypted,
-        refreshTokenEncrypted: channels.refreshTokenEncrypted,
-        tokenExpiresAt: channels.tokenExpiresAt,
-      })
-      .from(channels)
-      .where(and(eq(channels.userId, userId), eq(channels.platform, 'x')))
-      .limit(1);
+    const deps = await createPlatformDeps('x', userId);
+    const xClient = deps.xClient as XClient | undefined;
 
-    if (!xChannel) {
+    if (!xClient) {
       log.warn(`No X channel for user ${userId}, skipping metrics`);
       return { collected: 0, analyzed: 0 };
     }
-
-    const xClient = XClient.fromChannel(xChannel);
 
     const lookbackDate = new Date(
       Date.now() - METRICS_LOOKBACK_DAYS * 24 * 60 * 60 * 1000,
@@ -110,20 +97,10 @@ export class XMetricsCollector implements MetricsCollector {
   }
 
   async collectUserSnapshot(userId: string): Promise<void> {
-    const [xChannel] = await db
-      .select({
-        id: channels.id,
-        oauthTokenEncrypted: channels.oauthTokenEncrypted,
-        refreshTokenEncrypted: channels.refreshTokenEncrypted,
-        tokenExpiresAt: channels.tokenExpiresAt,
-      })
-      .from(channels)
-      .where(and(eq(channels.userId, userId), eq(channels.platform, 'x')))
-      .limit(1);
+    const deps = await createPlatformDeps('x', userId);
+    const xClient = deps.xClient as XClient | undefined;
 
-    if (!xChannel) return;
-
-    const xClient = XClient.fromChannel(xChannel);
+    if (!xClient) return;
 
     try {
       const me = await xClient.getMe();

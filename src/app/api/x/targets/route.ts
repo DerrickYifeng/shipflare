@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { xTargetAccounts, channels } from '@/lib/db/schema';
+import { xTargetAccounts } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { XClient } from '@/lib/x-client';
+import { createPlatformDeps } from '@/lib/platform-deps';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('api:x:targets');
@@ -79,33 +80,17 @@ export async function POST(request: Request) {
     );
   }
 
-  // Load X channel for API validation.
-  // Explicit projection — tokens are needed here to construct XClient for a
-  // one-off username lookup; keeping the field list explicit so future edits
-  // don't accidentally widen it.
-  const [xChannel] = await db
-    .select({
-      id: channels.id,
-      oauthTokenEncrypted: channels.oauthTokenEncrypted,
-      refreshTokenEncrypted: channels.refreshTokenEncrypted,
-      tokenExpiresAt: channels.tokenExpiresAt,
-    })
-    .from(channels)
-    .where(
-      and(
-        eq(channels.userId, session.user.id),
-        eq(channels.platform, 'x'),
-      ),
-    )
-    .limit(1);
+  // Resolve X client via the sanctioned platform-deps path — keeps token
+  // column reads inside createPlatformDeps (see CLAUDE.md → Security TODO).
+  const deps = await createPlatformDeps('x', session.user.id);
+  const xClient = deps.xClient as XClient | undefined;
 
   let xUserId: string | null = null;
   let displayName: string | null = null;
   let followerCount: number | null = null;
 
-  if (xChannel) {
+  if (xClient) {
     try {
-      const xClient = XClient.fromChannel(xChannel);
       const user = await xClient.lookupUser(cleanUsername);
       xUserId = user.id;
       displayName = user.name;
