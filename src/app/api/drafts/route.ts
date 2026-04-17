@@ -1,13 +1,13 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, type NextRequest } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { drafts, threads, channels, products, xMonitoredTweets, xContentCalendar } from '@/lib/db/schema';
-import { eq, and, inArray, sql } from 'drizzle-orm';
+import { eq, and, inArray } from 'drizzle-orm';
 import { enqueuePosting, enqueueContent } from '@/lib/queue';
-import { createLogger } from '@/lib/logger';
+import { createLogger, loggerForRequest } from '@/lib/logger';
 import { PLATFORMS } from '@/lib/platform-config';
 
-const log = createLogger('api:drafts');
+const baseLog = createLogger('api:drafts');
 
 export async function GET() {
   const session = await auth();
@@ -127,7 +127,8 @@ export async function GET() {
   });
 }
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
+  const { log, traceId } = loggerForRequest(baseLog, request);
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -186,6 +187,7 @@ export async function POST(request: Request) {
         userId: session.user.id,
         draftId,
         channelId: channel.id,
+        traceId,
       });
     } else {
       const platformLabel = PLATFORMS[platform]?.displayName ?? platform;
@@ -229,10 +231,14 @@ export async function POST(request: Request) {
       threadId: draft.threadId,
       productId: product.id,
       draftType: (draft.draftType as 'reply' | 'original_post') ?? 'reply',
+      traceId,
     });
 
     log.info(`Draft ${draftId} retried, new content generation enqueued`);
   }
 
-  return NextResponse.json({ success: true });
+  return NextResponse.json(
+    { success: true, traceId },
+    { headers: { 'x-trace-id': traceId } },
+  );
 }

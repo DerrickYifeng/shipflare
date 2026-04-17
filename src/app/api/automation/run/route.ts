@@ -1,14 +1,14 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, type NextRequest } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { products } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { enqueueDiscovery } from '@/lib/queue';
 import { publishEvent } from '@/lib/redis';
-import { createLogger } from '@/lib/logger';
+import { createLogger, loggerForRequest } from '@/lib/logger';
 import { PLATFORMS, isPlatformAvailable } from '@/lib/platform-config';
 
-const log = createLogger('api:automation:run');
+const baseLog = createLogger('api:automation:run');
 
 /**
  * POST /api/automation/run
@@ -16,7 +16,8 @@ const log = createLogger('api:automation:run');
  * Triggers the full automation pipeline for the current user's product.
  * Enqueues a discovery job which cascades into content → review → posting.
  */
-export async function POST() {
+export async function POST(request: NextRequest) {
+  const { log, traceId } = loggerForRequest(baseLog, request);
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -81,6 +82,7 @@ export async function POST() {
       productId: product.id,
       sources: config.defaultSources,
       platform: platformId,
+      traceId,
     });
   }
 
@@ -88,9 +90,13 @@ export async function POST() {
     `Automation triggered for product "${product.name}" (${product.id}), platforms: ${activePlatforms.join(', ')}`,
   );
 
-  return NextResponse.json({
-    ok: true,
-    product: product.name,
-    platforms: activePlatforms,
-  });
+  return NextResponse.json(
+    {
+      ok: true,
+      product: product.name,
+      platforms: activePlatforms,
+      traceId,
+    },
+    { headers: { 'x-trace-id': traceId } },
+  );
 }

@@ -1,18 +1,19 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, type NextRequest } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { drafts, channels } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { enqueuePosting } from '@/lib/queue';
-import { createLogger } from '@/lib/logger';
+import { createLogger, loggerForRequest } from '@/lib/logger';
 
-const log = createLogger('api:discovery:approve');
+const baseLog = createLogger('api:discovery:approve');
 
 /**
  * POST /api/discovery/approve
  * Approve or skip a discovery draft.
  */
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
+  const { log, traceId } = loggerForRequest(baseLog, request);
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -87,8 +88,12 @@ export async function POST(request: Request) {
     userId: session.user.id,
     draftId,
     channelId: channel.id,
+    traceId,
   });
   log.info(`Draft ${draftId} approved, posting enqueued`);
 
-  return NextResponse.json({ success: true, status: 'approved' });
+  return NextResponse.json(
+    { success: true, status: 'approved', traceId },
+    { headers: { 'x-trace-id': traceId } },
+  );
 }

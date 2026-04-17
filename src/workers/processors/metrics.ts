@@ -13,14 +13,14 @@ import { publishEvent } from '@/lib/redis';
 import { enqueueMetrics } from '@/lib/queue';
 import type { MetricsJobData } from '@/lib/queue/types';
 import { isFanoutJob } from '@/lib/queue/types';
-import { createLogger } from '@/lib/logger';
+import { createLogger, loggerForJob, type Logger } from '@/lib/logger';
 
-const log = createLogger('worker:x-metrics');
+const baseLog = createLogger('worker:x-metrics');
 
 const METRICS_LOOKBACK_DAYS = 7;
 const BATCH_SIZE = 100;
 
-async function processXMetricsForUser(userId: string) {
+async function processXMetricsForUser(userId: string, log: Logger) {
   log.info(`Collecting X metrics for user ${userId}`);
 
   // Load X channel — explicit projection for XClient.fromChannel
@@ -153,6 +153,7 @@ async function processXMetricsForUser(userId: string) {
 }
 
 export async function processXMetrics(job: Job<MetricsJobData>) {
+  const log = loggerForJob(baseLog, job);
   if (isFanoutJob(job.data)) {
     const platform = (job.data as { platform?: string }).platform ?? 'x';
     // Cron fan-out: enqueue per-user metrics jobs.
@@ -173,5 +174,5 @@ export async function processXMetrics(job: Job<MetricsJobData>) {
   }
 
   const data = job.data as Extract<MetricsJobData, { userId: string }>;
-  await processXMetricsForUser(data.userId);
+  await processXMetricsForUser(data.userId, log);
 }

@@ -9,18 +9,18 @@ import {
   xAnalyticsSummary,
   activityEvents,
 } from '@/lib/db/schema';
-import { eq, and, gte, desc, sql } from 'drizzle-orm';
+import { eq, and, gte } from 'drizzle-orm';
 import { publishEvent } from '@/lib/redis';
 import { enqueueAnalytics } from '@/lib/queue';
 import type { AnalyticsJobData } from '@/lib/queue/types';
 import { isFanoutJob } from '@/lib/queue/types';
-import { createLogger } from '@/lib/logger';
+import { createLogger, loggerForJob, type Logger } from '@/lib/logger';
 
-const log = createLogger('worker:x-analytics');
+const baseLog = createLogger('worker:x-analytics');
 
 const ANALYTICS_LOOKBACK_DAYS = 30;
 
-async function processXAnalyticsForUser(userId: string) {
+async function processXAnalyticsForUser(userId: string, log: Logger) {
   log.info(`Computing X analytics for user ${userId}`);
 
   const periodEnd = new Date();
@@ -66,8 +66,6 @@ async function processXAnalyticsForUser(userId: string) {
   const uniqueMetrics = [...latestByTweet.values()];
 
   // Map tweetId → contentType via posts + xContentCalendar
-  const tweetIds = uniqueMetrics.map((m) => m.tweetId);
-
   const postRecords = await db
     .select({
       externalId: posts.externalId,
@@ -246,6 +244,7 @@ async function processXAnalyticsForUser(userId: string) {
 }
 
 export async function processXAnalytics(job: Job<AnalyticsJobData>) {
+  const log = loggerForJob(baseLog, job);
   if (isFanoutJob(job.data)) {
     const platform = (job.data as { platform?: string }).platform ?? 'x';
     // Cron fan-out: enqueue per-user analytics jobs.
@@ -266,5 +265,5 @@ export async function processXAnalytics(job: Job<AnalyticsJobData>) {
   }
 
   const data = job.data as Extract<AnalyticsJobData, { userId: string }>;
-  await processXAnalyticsForUser(data.userId);
+  await processXAnalyticsForUser(data.userId, log);
 }

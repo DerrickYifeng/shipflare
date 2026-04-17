@@ -3,13 +3,14 @@ import { db } from '@/lib/db';
 import { users, userPreferences } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { seedTodosForUser, getLocalHour } from '@/lib/today/seed';
-import { createLogger } from '@/lib/logger';
+import { createLogger, loggerForJob } from '@/lib/logger';
 import type { TodoSeedJobData } from '@/lib/queue/types';
 import { isFanoutJob } from '@/lib/queue/types';
 
-const log = createLogger('worker:todo-seed');
+const baseLog = createLogger('worker:todo-seed');
 
 export async function processTodoSeed(job: Job<TodoSeedJobData>) {
+  const log = loggerForJob(baseLog, job);
   // Cron fan-out: scan all users and seed those at 8 AM local time.
   // Kept in-process (no per-user enqueue) because the per-user work is a
   // cheap Postgres write and the outer loop skips users whose local hour

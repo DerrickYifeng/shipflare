@@ -6,7 +6,7 @@ import { accounts } from '@/lib/db/schema/users';
 import { getPubSubPublisher } from '@/lib/redis';
 import { enqueueCalibration, codeScanQueue } from '@/lib/queue';
 import { isPlatformAvailable } from '@/lib/platform-config';
-import { createLogger } from '@/lib/logger';
+import { createLogger, loggerForJob, type Logger } from '@/lib/logger';
 import {
   cloneRepo,
   cleanupClone,
@@ -16,7 +16,7 @@ import {
 } from '@/services/code-scanner';
 import type { CodeScanJobData } from '@/lib/queue/types';
 
-const log = createLogger('worker:code-scan');
+const baseLog = createLogger('worker:code-scan');
 
 /**
  * Daily diff: clone the repo and compare HEAD against the stored snapshot.
@@ -25,6 +25,7 @@ const log = createLogger('worker:code-scan');
 async function processDailyDiff(
   snapshot: { id: string; repoFullName: string; commitSha: string | null; userId: string },
   githubToken: string,
+  log: Logger,
 ): Promise<void> {
   let cloneDir: string | null = null;
   try {
@@ -62,7 +63,7 @@ async function processDailyDiff(
 /**
  * Cron fan-out: enqueue daily diff jobs for all users with code snapshots.
  */
-async function fanOutDailyDiff(): Promise<void> {
+async function fanOutDailyDiff(log: Logger): Promise<void> {
   // Find all code snapshots that have a repo linked
   const snapshots = await db
     .select({
@@ -108,11 +109,12 @@ async function fanOutDailyDiff(): Promise<void> {
  * Publishes progress + result via Redis pub/sub for SSE streaming.
  */
 export async function processCodeScan(job: Job<CodeScanJobData>): Promise<void> {
+  const log = loggerForJob(baseLog, job);
   const { userId, repoFullName, repoUrl, githubToken, isDailyDiff } = job.data;
 
   // Cron fan-out: enqueue individual diff jobs for all users
   if (isDailyDiff && userId === '__all__') {
-    await fanOutDailyDiff();
+    await fanOutDailyDiff(log);
     return;
   }
 
@@ -134,7 +136,7 @@ export async function processCodeScan(job: Job<CodeScanJobData>): Promise<void> 
       return;
     }
 
-    await processDailyDiff(snap, githubToken);
+    await processDailyDiff(snap, githubToken, log);
     return;
   }
 

@@ -9,16 +9,19 @@ import { publishEvent } from '@/lib/redis';
 import { enqueueDream, enqueuePosting } from '@/lib/queue';
 import { join } from 'path';
 import type { ReviewJobData } from '@/lib/queue/types';
-import { createLogger } from '@/lib/logger';
+import { getTraceId } from '@/lib/queue/types';
+import { createLogger, loggerForJob } from '@/lib/logger';
 import { MemoryStore } from '@/memory/store';
 import { AgentDream } from '@/memory/dream';
 import { buildMemoryPrompt } from '@/memory/prompt-builder';
 
-const log = createLogger('worker:review');
+const baseLog = createLogger('worker:review');
 
 const SKILLS_DIR = join(process.cwd(), 'src', 'skills');
 
 export async function processReview(job: Job<ReviewJobData>) {
+  const traceId = getTraceId(job.data, job.id);
+  const log = loggerForJob(baseLog, job);
   const { userId, draftId, productId } = job.data;
 
   // Load draft + thread + product
@@ -75,6 +78,7 @@ export async function processReview(job: Job<ReviewJobData>) {
       },
       memoryPrompt: memoryPrompt || undefined,
       outputSchema: draftReviewOutputSchema,
+      runId: traceId,
     });
 
     const result = results[0];
@@ -171,7 +175,7 @@ export async function processReview(job: Job<ReviewJobData>) {
         .limit(1);
 
       if (channel) {
-        await enqueuePosting({ userId, draftId, channelId: channel.id });
+        await enqueuePosting({ userId, draftId, channelId: channel.id, traceId });
       }
     }
 

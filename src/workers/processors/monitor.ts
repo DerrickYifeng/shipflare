@@ -21,14 +21,14 @@ import { enqueueReview, enqueueDream, enqueueMonitor } from '@/lib/queue';
 import { publishEvent, getKeyValueClient } from '@/lib/redis';
 import { join } from 'path';
 import type { MonitorJobData } from '@/lib/queue/types';
-import { isFanoutJob } from '@/lib/queue/types';
-import { createLogger } from '@/lib/logger';
+import { isFanoutJob, getTraceId } from '@/lib/queue/types';
+import { createLogger, loggerForJob, type Logger } from '@/lib/logger';
 import { buildContentUrl } from '@/lib/platform-config';
 import { MemoryStore } from '@/memory/store';
 import { AgentDream } from '@/memory/dream';
 import { buildMemoryPrompt } from '@/memory/prompt-builder';
 
-const log = createLogger('worker:x-monitor');
+const baseLog = createLogger('worker:x-monitor');
 
 const replyScanSkill = loadSkill(
   join(process.cwd(), 'src/skills/reply-scan'),
@@ -37,7 +37,12 @@ const replyScanSkill = loadSkill(
 const REPLY_WINDOW_MINUTES = 15;
 const TWEET_MAX_AGE_MINUTES = 60;
 
-async function processXMonitorForUser(userId: string, productId: string) {
+async function processXMonitorForUser(
+  userId: string,
+  productId: string,
+  traceId: string,
+  log: Logger,
+) {
   log.info(`Starting X monitor scan for user ${userId}`);
 
   // Load product
@@ -269,6 +274,7 @@ async function processXMonitorForUser(userId: string, productId: string) {
       deps: { xClient },
       memoryPrompt: memoryPrompt || undefined,
       outputSchema: replyDrafterOutputSchema,
+      runId: traceId,
     });
 
     let draftsCreated = 0;
@@ -330,6 +336,7 @@ async function processXMonitorForUser(userId: string, productId: string) {
         userId,
         draftId: draft.id,
         productId,
+        traceId,
       });
 
       // Inject time-sensitive todo item for the Today page
@@ -396,6 +403,8 @@ async function processXMonitorForUser(userId: string, productId: string) {
 }
 
 export async function processXMonitor(job: Job<MonitorJobData>) {
+  const traceId = getTraceId(job.data, job.id);
+  const log = loggerForJob(baseLog, job);
   if (isFanoutJob(job.data)) {
     const platform = (job.data as { platform?: string }).platform ?? 'x';
     // Cron fan-out: enqueue per-user monitor jobs so concurrency works.
@@ -435,5 +444,5 @@ export async function processXMonitor(job: Job<MonitorJobData>) {
 
   const data = job.data as Extract<MonitorJobData, { userId: string }>;
   const { userId, productId } = data;
-  await processXMonitorForUser(userId, productId);
+  await processXMonitorForUser(userId, productId, traceId, log);
 }

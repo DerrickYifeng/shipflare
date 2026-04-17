@@ -12,20 +12,23 @@ import { enqueueContent, enqueueDream, enqueueDiscovery } from '@/lib/queue';
 import { publishEvent } from '@/lib/redis';
 import { join } from 'path';
 import type { DiscoveryJobData } from '@/lib/queue/types';
-import { isFanoutJob } from '@/lib/queue/types';
-import { createLogger } from '@/lib/logger';
+import { isFanoutJob, getTraceId } from '@/lib/queue/types';
+import { createLogger, loggerForJob } from '@/lib/logger';
 import { MemoryStore } from '@/memory/store';
 import { AgentDream } from '@/memory/dream';
 import { buildMemoryPrompt } from '@/memory/prompt-builder';
 import { isPlatformAvailable, getPlatformConfig } from '@/lib/platform-config';
 
-const log = createLogger('worker:discovery');
+const baseLog = createLogger('worker:discovery');
 
 const discoverySkill = loadSkill(
   join(process.cwd(), 'src/skills/discovery'),
 );
 
 export async function processDiscovery(job: Job<DiscoveryJobData>) {
+  const traceId = getTraceId(job.data, job.id);
+  const log = loggerForJob(baseLog, job);
+
   // Cron fan-out: enqueue per-user discovery jobs so downstream worker
   // concurrency actually parallelizes across users. Tolerates both the new
   // discriminated-union payload (`kind: 'fanout'`) and the legacy sentinel
@@ -56,6 +59,9 @@ export async function processDiscovery(job: Job<DiscoveryJobData>) {
         if (!isPlatformAvailable(platformId)) continue;
         const config = getPlatformConfig(platformId);
         // Fire per-user enqueue; BullMQ concurrency handles actual parallelism.
+        // Each per-user job gets its own traceId minted by enqueueDiscovery;
+        // we don't propagate the cron trace because the whole fanout is just a
+        // scheduler tick, not a logical run.
         await enqueueDiscovery({
           userId: uid,
           productId: product.id,
@@ -148,6 +154,7 @@ export async function processDiscovery(job: Job<DiscoveryJobData>) {
     deps,
     memoryPrompt: memoryPrompt || undefined,
     outputSchema: discoveryOutputSchema,
+    runId: traceId,
   });
 
   // Merge and deduplicate threads
@@ -217,7 +224,9 @@ export async function processDiscovery(job: Job<DiscoveryJobData>) {
 
     newThreadCount = inserted.length;
 
-    // Auto-enqueue content only for newly-inserted high-relevance threads
+    // Auto-enqueue content only for newly-inserted high-relevance threads.
+    // Propagate our traceId so discovery → content → review → posting stays
+    // correlated for a single logical run.
     for (const row of inserted) {
       if (!shouldEnqueue.has(row.externalId)) continue;
       log.debug(
@@ -227,6 +236,7 @@ export async function processDiscovery(job: Job<DiscoveryJobData>) {
         userId,
         threadId: row.id,
         productId,
+        traceId,
       });
     }
   }

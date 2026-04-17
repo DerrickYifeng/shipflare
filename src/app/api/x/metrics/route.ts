@@ -1,11 +1,8 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { xTweetMetrics, xFollowerSnapshots, posts } from '@/lib/db/schema';
+import { xTweetMetrics, xFollowerSnapshots } from '@/lib/db/schema';
 import { eq, and, gte, desc } from 'drizzle-orm';
-import { createLogger } from '@/lib/logger';
-
-const log = createLogger('api:x:metrics');
 
 /**
  * GET /api/x/metrics
