@@ -12,18 +12,22 @@ interface ReplyScanHeaderProps {
     scanRunId: string,
     sources: Array<{ platform: string; source: string }>,
   ) => void;
-  platform?: string;
 }
 
 interface ScanResponseBody {
   scanRunId: string;
-  sources: string[];
+  platforms: string[];
+  sources: Array<{ platform: string; source: string }>;
   status?: string;
 }
 
 interface RateLimitBody {
   error: 'rate_limited';
   retryAfterSeconds: number;
+}
+
+interface ScanErrorBody {
+  error: string;
 }
 
 /**
@@ -36,7 +40,6 @@ export function ReplyScanHeader({
   lastScannedAt,
   replyCount,
   onScanStarted,
-  platform = 'reddit',
 }: ReplyScanHeaderProps) {
   const { toast } = useToast();
   const [scanning, setScanning] = useState(false);
@@ -48,7 +51,6 @@ export function ReplyScanHeader({
       const res = await fetch('/api/discovery/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ platform }),
       });
       if (res.status === 429) {
         const body = (await res.json().catch(() => ({}))) as Partial<RateLimitBody>;
@@ -57,12 +59,21 @@ export function ReplyScanHeader({
         toast(`Just scanned — next available in ${seconds}s`, 'info');
         return;
       }
+      if (res.status === 400) {
+        const body = (await res.json().catch(() => ({}))) as Partial<ScanErrorBody>;
+        toast(
+          body.error === 'no connected channels'
+            ? 'Connect a channel to start scanning for replies.'
+            : body.error ?? 'Scan failed',
+          'error',
+        );
+        return;
+      }
       if (!res.ok) {
         throw new Error(`Scan failed (${res.status})`);
       }
       const body = (await res.json()) as ScanResponseBody;
-      const sourcesTyped = body.sources.map((s) => ({ platform, source: s }));
-      onScanStarted(body.scanRunId, sourcesTyped);
+      onScanStarted(body.scanRunId, body.sources);
       if (typeof window !== 'undefined') {
         window.localStorage.setItem('shipflare:lastScanRunId', body.scanRunId);
         window.localStorage.setItem(
@@ -75,7 +86,7 @@ export function ReplyScanHeader({
     } finally {
       setScanning(false);
     }
-  }, [onScanStarted, platform, toast]);
+  }, [onScanStarted, toast]);
 
   const relTime = lastScannedAt
     ? relativeTime(lastScannedAt)
