@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { products } from '@/lib/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { enqueueDiscovery } from '@/lib/queue';
 import { publishEvent } from '@/lib/redis';
 import { createLogger } from '@/lib/logger';
@@ -38,8 +38,8 @@ export async function POST() {
     );
   }
 
-  // Check for at least one connected channel (Reddit or X)
-  // Whitelist — we only need platform identity to route enqueues.
+  // Check for at least one connected channel on any known platform.
+  // Whitelist projection — we only need platform identity to route enqueues.
   const { channels } = await import('@/lib/db/schema');
   const userChannels = await db
     .select({
@@ -49,12 +49,13 @@ export async function POST() {
     .from(channels)
     .where(eq(channels.userId, userId));
 
-  const redditChannel = userChannels.find((c) => c.platform === 'reddit');
-  const xChannel = userChannels.find((c) => c.platform === 'x');
-
-  if (!redditChannel && !xChannel) {
+  const connectedKnown = userChannels.filter((c) => c.platform in PLATFORMS);
+  if (connectedKnown.length === 0) {
+    const supported = Object.values(PLATFORMS)
+      .map((p) => p.displayName)
+      .join(' or ');
     return NextResponse.json(
-      { error: 'Connect a Reddit or X account first.', code: 'NO_CHANNEL' },
+      { error: `Connect a ${supported} account first.`, code: 'NO_CHANNEL' },
       { status: 400 },
     );
   }

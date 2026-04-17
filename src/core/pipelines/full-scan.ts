@@ -1,6 +1,6 @@
 import { scrapeUrl, analyzeProduct } from '@/tools/url-scraper';
-import { RedditClient } from '@/lib/reddit-client';
-import { XAIClient } from '@/lib/xai-client';
+import type { RedditClient } from '@/lib/reddit-client';
+import type { XAIClient } from '@/lib/xai-client';
 import { loadSkill } from '@/core/skill-loader';
 import { runSkill } from '@/core/skill-runner';
 import {
@@ -16,6 +16,7 @@ import type {
 import { createLogger } from '@/lib/logger';
 import { join } from 'path';
 import { PLATFORMS } from '@/lib/platform-config';
+import { createPublicPlatformDeps } from '@/lib/platform-deps';
 
 const log = createLogger('pipeline:full-scan');
 
@@ -56,8 +57,20 @@ export async function runFullScan(input: {
 }): Promise<FullScanResult> {
   const { url, onProgress } = input;
   const send = onProgress ?? (() => {});
-  const redditClient = input.redditClient ?? RedditClient.appOnly();
-  const xaiClient = input.xaiClient ?? (process.env.XAI_API_KEY ? new XAIClient(process.env.XAI_API_KEY) : null);
+
+  // Resolve anonymous/read-only clients via platform-deps so adding a new
+  // read-capable platform is a one-config-entry change.
+  const publicDeps = createPublicPlatformDeps();
+  const redditClient =
+    input.redditClient ?? (publicDeps.redditClient as RedditClient | undefined) ?? null;
+  const xaiClient =
+    input.xaiClient ?? (publicDeps.xaiClient as XAIClient | undefined) ?? null;
+
+  if (!redditClient) {
+    // Reddit is the primary community discovery source; refuse to run
+    // if it's unavailable rather than silently degrading to X-only.
+    throw new Error('runFullScan requires a Reddit client (app-only is sufficient)');
+  }
 
   // Step 1: Scrape + analyze
   const scraped = await scrapeUrl(url);
@@ -93,11 +106,14 @@ export async function runFullScan(input: {
     });
 
     const MIN_SUBSCRIBERS = 10_000;
+    // Community intel (rules + hot posts) is currently only produced for
+    // Reddit-shape communities (subreddits with rules/mods). When a new
+    // platform grows equivalent community metadata, add it to this filter.
     const redditCommunities = communityResult.results
       .flatMap((r) => r.communities)
       .filter(
         (c) =>
-          c.platform === 'reddit' &&
+          c.platform === PLATFORMS.reddit.id &&
           c.audienceFit >= 0.4 &&
           (c.subscribers == null || c.subscribers >= MIN_SUBSCRIBERS),
       )
@@ -157,13 +173,17 @@ export async function runFullScan(input: {
     send('community_intel_done', { intel: [], error: message });
   }
 
-  // Step 4: Thread discovery (Reddit + X in parallel via unified skill)
+  // Step 4: Thread discovery (parallel across supported platforms via unified skill)
   const discoverySkill = loadSkill(join(SKILLS_DIR, 'discovery'));
   const xTopics = xaiClient
     ? product.keywords.slice(0, 3).map((k) => k.toLowerCase())
     : [];
   const totalSources = subreddits.length + xTopics.length;
-  send('discovery_start', { totalCommunities: totalSources, platforms: xaiClient ? ['reddit', 'x'] : ['reddit'] });
+  const activePlatforms = [
+    PLATFORMS.reddit.id,
+    ...(xaiClient ? [PLATFORMS.x.id] : []),
+  ];
+  send('discovery_start', { totalCommunities: totalSources, platforms: activePlatforms });
 
   // 4a: Reddit discovery
   const redditDiscoveryPromise = runSkill<DiscoveryOutput>({
@@ -171,7 +191,7 @@ export async function runFullScan(input: {
     input: {
       ...productContext,
       sources: subreddits,
-      platform: 'reddit',
+      platform: PLATFORMS.reddit.id,
     },
     deps: { redditClient },
     outputSchema: discoveryOutputSchema,
@@ -188,11 +208,11 @@ export async function runFullScan(input: {
             input: {
               ...productContext,
               sources: xTopics,
-              platform: 'x',
+              platform: PLATFORMS.x.id,
             },
             deps: { xaiClient },
             outputSchema: discoveryOutputSchema,
-            onProgress: (event) => send(event.type, { ...event, platform: 'x' }),
+            onProgress: (event) => send(event.type, { ...event, platform: PLATFORMS.x.id }),
           });
           send('x_discovery_done', { count: xResult.results.reduce((n, r) => n + r.threads.length, 0) });
           return xResult;
@@ -209,12 +229,12 @@ export async function runFullScan(input: {
 
   for (const err of redditResult.errors) {
     log.error(`Agent "${err.label}" failed: ${err.error}`);
-    send('agent_error', { source: err.label, platform: 'reddit', error: err.error });
+    send('agent_error', { source: err.label, platform: PLATFORMS.reddit.id, error: err.error });
   }
   if (xResult) {
     for (const err of xResult.errors) {
       log.error(`Agent "${err.label}" failed: ${err.error}`);
-      send('agent_error', { source: err.label, platform: 'x', error: err.error });
+      send('agent_error', { source: err.label, platform: PLATFORMS.x.id, error: err.error });
     }
   }
 
@@ -223,7 +243,7 @@ export async function runFullScan(input: {
 
   function collectResults(
     skillResult: { results: DiscoveryOutput[] },
-    platform: 'reddit' | 'x',
+    platform: string,
   ): Array<Record<string, unknown>> {
     const collected: Array<Record<string, unknown>> = [];
     for (const discovery of skillResult.results) {
@@ -245,9 +265,11 @@ export async function runFullScan(input: {
               engagement: 50,
             };
 
-        // For Reddit, check community intel for approach recommendation
+        // communityIntel is populated only for platforms with subreddit-style
+        // rules metadata — currently Reddit. Other platforms fall through
+        // with the default 'reply' draftType.
         let draftType: string = 'reply';
-        if (platform === 'reddit') {
+        if (platform === PLATFORMS.reddit.id) {
           const subIntel = communityIntel.find(
             (ci) => ci.community.toLowerCase() === thread.community.toLowerCase(),
           );
@@ -276,8 +298,8 @@ export async function runFullScan(input: {
     return collected;
   }
 
-  const redditResults = collectResults(redditResult, 'reddit');
-  const xResults = xResult ? collectResults(xResult, 'x') : [];
+  const redditResults = collectResults(redditResult, PLATFORMS.reddit.id);
+  const xResults = xResult ? collectResults(xResult, PLATFORMS.x.id) : [];
 
   // Sort each platform by score, cap at MAX_RESULTS_PER_PLATFORM, then merge
   redditResults.sort((a, b) => (b.relevanceScore as number) - (a.relevanceScore as number));

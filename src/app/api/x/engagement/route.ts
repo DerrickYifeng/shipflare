@@ -3,9 +3,7 @@ import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { drafts, threads, posts } from '@/lib/db/schema';
 import { eq, and, ne, inArray, desc, gte } from 'drizzle-orm';
-import { createLogger } from '@/lib/logger';
-
-const log = createLogger('api:x:engagement');
+import { PLATFORMS } from '@/lib/platform-config';
 
 /**
  * GET /api/x/engagement
@@ -19,10 +17,12 @@ export async function GET() {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  // Get recent X posts (last 3 days) to show engagement context
+  // Get recent X posts (last 3 days) to show engagement context.
+  // Filter by posts.platform (authoritative) rather than the legacy
+  // numeric-externalId heuristic — see CLAUDE.md → Architecture Rules.
   const lookback = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
 
-  const recentPosts = await db
+  const xPosts = await db
     .select({
       id: posts.id,
       externalId: posts.externalId,
@@ -35,16 +35,12 @@ export async function GET() {
     .where(
       and(
         eq(posts.userId, session.user.id),
+        eq(posts.platform, PLATFORMS.x.id),
         gte(posts.postedAt, lookback),
       ),
     )
     .orderBy(desc(posts.postedAt))
     .limit(20);
-
-  // Filter to X posts (numeric external IDs)
-  const xPosts = recentPosts.filter(
-    (p) => p.externalId && /^\d+$/.test(p.externalId),
-  );
 
   // Get pending engagement reply drafts
   const engagementDrafts = await db
@@ -64,7 +60,7 @@ export async function GET() {
     .where(
       and(
         eq(drafts.userId, session.user.id),
-        eq(threads.platform, 'x'),
+        eq(threads.platform, PLATFORMS.x.id),
         ne(drafts.draftType, 'original_post'),
         inArray(drafts.status, ['pending', 'needs_revision']),
         gte(drafts.createdAt, lookback),

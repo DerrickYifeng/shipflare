@@ -4,6 +4,8 @@ import { drafts, posts, threads, channels, activityEvents } from '@/lib/db/schem
 import { eq } from 'drizzle-orm';
 import { RedditClient } from '@/lib/reddit-client';
 import { XClient } from '@/lib/x-client';
+import { createClientFromChannel } from '@/lib/platform-deps';
+import { PLATFORMS } from '@/lib/platform-config';
 import { loadSkill } from '@/core/skill-loader';
 import { runSkill } from '@/core/skill-runner';
 import { isCircuitBreakerTripped, tripCircuitBreaker } from '@/lib/circuit-breaker';
@@ -46,8 +48,10 @@ export async function processPosting(job: Job<PostingJobData>) {
 
   if (!thread) throw new Error(`Thread not found: ${draft.threadId}`);
 
-  // Reddit-only safety checks (circuit breaker + subreddit rate limit)
-  if (thread.platform !== 'x') {
+  // Reddit-only safety checks (circuit breaker + subreddit rate limit).
+  // The shadowban circuit breaker and subreddit quota are Reddit-shaped
+  // concepts; X has no equivalent per-topic cap.
+  if (thread.platform === PLATFORMS.reddit.id) {
     const breaker = await isCircuitBreakerTripped(userId);
     if (breaker.tripped) {
       log.warn(`Circuit breaker tripped for user ${userId}: ${breaker.reason}`);
@@ -78,12 +82,12 @@ export async function processPosting(job: Job<PostingJobData>) {
 
   if (!channel) throw new Error(`Channel not found: ${channelId}`);
 
-  const isX = channel.platform === 'x';
+  const isX = channel.platform === PLATFORMS.x.id;
   const draftType = draft.draftType ?? 'reply';
 
   // Build input for the posting skill
   const input: Record<string, unknown> = {
-    platform: isX ? 'x' : 'reddit',
+    platform: channel.platform,
     draftType,
     draftText: draft.replyBody,
     // Reddit-specific
@@ -99,10 +103,17 @@ export async function processPosting(job: Job<PostingJobData>) {
     } : {}),
   };
 
-  // Inject platform client as dependency
-  const deps = isX
-    ? { xClient: XClient.fromChannel(channel) }
-    : { redditClient: RedditClient.fromChannel(channel) };
+  // Inject platform client as dependency. createClientFromChannel() is the
+  // sanctioned path for processors that look up a channel by id.
+  const client = createClientFromChannel(channel.platform, channel);
+  if (!client) {
+    throw new Error(`Unsupported platform for posting: ${channel.platform}`);
+  }
+  const deps: Record<string, unknown> = client instanceof XClient
+    ? { xClient: client }
+    : client instanceof RedditClient
+      ? { redditClient: client }
+      : {};
 
   const { results, usage } = await runSkill<PostingOutput>({
     skill: postingSkill,
@@ -150,7 +161,9 @@ export async function processPosting(job: Job<PostingJobData>) {
       );
     }
 
-    // X-specific post-publish actions
+    // X-specific post-publish actions. Engagement monitoring is currently
+    // only wired for X — when another platform grows a mentions API,
+    // gate this off a platform-config capability flag instead.
     if (isX && externalId) {
       // Skip engagement monitoring for deep engagement replies
       if (draft.engagementDepth >= MAX_ENGAGEMENT_DEPTH) {
@@ -168,7 +181,7 @@ export async function processPosting(job: Job<PostingJobData>) {
               contentId: externalId,
               draftId,
               productId: '',
-              platform: 'x',
+              platform: PLATFORMS.x.id,
             },
             delayMin * 60 * 1000,
           );
