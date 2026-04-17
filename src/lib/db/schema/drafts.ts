@@ -88,6 +88,7 @@ export const posts = pgTable(
   },
   (t) => [
     index('posts_user_posted_idx').on(t.userId, desc(t.postedAt)),
+    index('posts_user_community_posted_idx').on(t.userId, t.community, desc(t.postedAt)),
     uniqueIndex('posts_platform_external_uq').on(t.platform, t.externalId),
   ],
 );
@@ -134,5 +135,6 @@ export const activityEvents = pgTable(
   },
   (t) => [
     index('activity_events_user_created_idx').on(t.userId, desc(t.createdAt)),
+    index('activity_events_user_type_created_idx').on(t.userId, t.eventType, desc(t.createdAt)),
   ],
 );

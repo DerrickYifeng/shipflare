@@ -58,13 +58,17 @@ export const accounts = pgTable(
   ],
 );
 
-export const sessions = pgTable('sessions', {
-  sessionToken: text('sessionToken').primaryKey(),
-  userId: text('userId')
-    .notNull()
-    .references(() => users.id, { onDelete: 'cascade' }),
-  expires: timestamp('expires', { mode: 'date' }).notNull(),
-});
+export const sessions = pgTable(
+  'sessions',
+  {
+    sessionToken: text('sessionToken').primaryKey(),
+    userId: text('userId')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    expires: timestamp('expires', { mode: 'date' }).notNull(),
+  },
+  (t) => [index('sessions_user_idx').on(t.userId)],
+);
 
 export const verificationTokens = pgTable(
   'verification_tokens',

@@ -67,6 +67,7 @@ const MAIN_TABLES_FOR = {
   '0010_posting_flow_optimization': [], // ALTER TABLE only — no new tables
   '0011_simple_excalibur': ['todo_items', 'user_preferences'],
   '0012_pipeline_funnel': ['pipeline_events', 'thread_feedback'],
+  '0013_cluster1_indexes': [], // CREATE INDEX CONCURRENTLY only — no new tables
 };
 
 try {
@@ -134,15 +135,30 @@ try {
       .map((s) => s.trim())
       .filter(Boolean);
 
-    await sql.begin(async (tx) => {
+    // CREATE INDEX CONCURRENTLY cannot run inside a transaction block.
+    // Detect the nontransactional directive and run each statement
+    // outside sql.begin() in that case.
+    const isNontransactional = sqlText.includes('-- drizzle-orm: nontransactional');
+
+    if (isNontransactional) {
       for (const stmt of statements) {
-        await tx.unsafe(stmt);
+        await sql.unsafe(stmt);
       }
-      await tx`
+      await sql`
         INSERT INTO drizzle.__drizzle_migrations (hash, created_at)
         VALUES (${hash}, ${when})
       `;
-    });
+    } else {
+      await sql.begin(async (tx) => {
+        for (const stmt of statements) {
+          await tx.unsafe(stmt);
+        }
+        await tx`
+          INSERT INTO drizzle.__drizzle_migrations (hash, created_at)
+          VALUES (${hash}, ${when})
+        `;
+      });
+    }
   }
 
   // Final state

@@ -62,6 +62,8 @@ export const pipelineEvents = pgTable(
       desc(t.enteredAt),
     ),
     index('pipeline_events_user_entered').on(t.userId, desc(t.enteredAt)),
+    index('pipeline_events_thread_entered_idx').on(t.threadId, desc(t.enteredAt)),
+    index('pipeline_events_draft_entered_idx').on(t.draftId, desc(t.enteredAt)),
   ],
 );
 
