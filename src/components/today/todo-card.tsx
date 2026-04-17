@@ -11,6 +11,12 @@ export interface TodoCardProps {
   onSkip: (id: string) => void;
   onEdit: (id: string, body: string) => void;
   onReschedule?: (id: string, scheduledFor: string) => void;
+  /** Highlighted as the current keyboard focus. */
+  isActive?: boolean;
+  /** Externally-triggered edit mode (keyboard `e` shortcut). */
+  forceEditing?: boolean;
+  /** Called when the external edit session ends. */
+  onEditDone?: () => void;
 }
 
 // Memoized so the list doesn't re-render every card on unrelated parent

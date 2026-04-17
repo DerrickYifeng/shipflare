@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Toggle } from '@/components/ui/toggle';
@@ -12,6 +12,9 @@ interface ReplyCardProps {
   onApprove: (id: string) => void;
   onSkip: (id: string) => void;
   onEdit: (id: string, body: string) => void;
+  isActive?: boolean;
+  forceEditing?: boolean;
+  onEditDone?: () => void;
 }
 
 const priorityBorder: Record<string, string> = {
@@ -20,20 +23,50 @@ const priorityBorder: Record<string, string> = {
   optional: 'shadow-[0_3px_5px_rgba(0,0,0,0.04),0_6px_20px_rgba(0,0,0,0.06)]',
 };
 
-export function ReplyCard({ item, onApprove, onSkip, onEdit }: ReplyCardProps) {
-  const [isEditing, setIsEditing] = useState(false);
+export function ReplyCard({
+  item,
+  onApprove,
+  onSkip,
+  onEdit,
+  isActive = false,
+  forceEditing = false,
+  onEditDone,
+}: ReplyCardProps) {
+  const [localEditing, setLocalEditing] = useState(false);
   const [editBody, setEditBody] = useState(item.draftBody ?? '');
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  // Edit mode is the union of the user-clicked local toggle and the
+  // keyboard-shortcut-driven flag from the parent. Deriving it (instead of
+  // syncing in an effect) avoids a cascading-render lint error.
+  const isEditing = localEditing || forceEditing;
+
+  // Scroll the active card into view when keyboard-navigated to.
+  useEffect(() => {
+    if (isActive) {
+      rootRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  }, [isActive]);
 
   const handleSaveEdit = () => {
     onEdit(item.id, editBody);
-    setIsEditing(false);
+    setLocalEditing(false);
+    onEditDone?.();
+  };
+
+  const handleCancelEdit = () => {
+    setLocalEditing(false);
+    onEditDone?.();
   };
 
   const hasThreadContext = item.threadUrl || item.threadBody || item.threadTitle;
+  const isOptimistic = item.status !== 'pending';
 
   return (
     <div
-      className={`rounded-[var(--radius-sf-lg)] p-4 bg-sf-bg-secondary animate-sf-fade-in ${priorityBorder[item.priority] ?? 'shadow-[0_3px_5px_rgba(0,0,0,0.04),0_6px_20px_rgba(0,0,0,0.06)]'}`}
+      ref={rootRef}
+      className={`rounded-[var(--radius-sf-lg)] p-4 bg-sf-bg-secondary animate-sf-fade-in ${priorityBorder[item.priority] ?? 'shadow-[0_3px_5px_rgba(0,0,0,0.04),0_6px_20px_rgba(0,0,0,0.06)]'} ${isActive ? 'ring-2 ring-sf-accent' : ''} ${isOptimistic ? 'opacity-60 pointer-events-none' : ''}`}
+      aria-busy={isOptimistic || undefined}
     >
       {/* Header */}
       <div className="flex items-start justify-between gap-3 mb-3">
@@ -119,7 +152,7 @@ export function ReplyCard({ item, onApprove, onSkip, onEdit }: ReplyCardProps) {
           />
           <div className="flex gap-2 mt-2">
             <Button onClick={handleSaveEdit}>Save</Button>
-            <Button variant="ghost" onClick={() => setIsEditing(false)}>
+            <Button variant="ghost" onClick={handleCancelEdit}>
               Cancel
             </Button>
           </div>
@@ -140,7 +173,7 @@ export function ReplyCard({ item, onApprove, onSkip, onEdit }: ReplyCardProps) {
         <div className="flex items-center gap-2 mt-4">
           <Button onClick={() => onApprove(item.id)}>Send</Button>
           {item.draftBody && (
-            <Button variant="ghost" onClick={() => setIsEditing(true)}>
+            <Button variant="ghost" onClick={() => setLocalEditing(true)}>
               Edit
             </Button>
           )}
