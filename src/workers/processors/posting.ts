@@ -151,13 +151,15 @@ export async function processPosting(job: Job<PostingJobData>) {
           `Skipping engagement monitoring for tweet ${externalId}: depth ${draft.engagementDepth} >= max ${MAX_ENGAGEMENT_DEPTH}`,
         );
       } else {
-        // Schedule engagement monitoring at +15, +30, +60 minutes
+        // Schedule engagement monitoring at +15, +30, +60 minutes.
+        // Pass draftId so the processor can look up the posted text directly
+        // from the DB instead of shipping it in the job payload.
         for (const delayMin of [15, 30, 60]) {
           await enqueueEngagement(
             {
               userId,
               contentId: externalId,
-              contentText: draft.replyBody,
+              draftId,
               productId: '',
               platform: 'x',
             },
