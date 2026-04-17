@@ -1,6 +1,6 @@
 ---
 name: discovery
-description: Fan-out multi-platform discovery across sources for a product
+description: Single-source discovery primitive — score threads/posts for a product on one platform source
 context: fork
 agent: discovery
 model: claude-haiku-4-5-20251001
@@ -9,7 +9,6 @@ allowed-tools:
   - reddit_search
   - x_search
   - score_threads
-fan-out: sources
 max-concurrency: 5
 timeout: 120000
 cache-safe: true
@@ -17,38 +16,37 @@ cache-safe: true
 
 # Discovery Skill
 
-Discovers threads/posts where a product can be naturally mentioned.
-Supports multiple platforms (Reddit, X) via the `platform` input field.
+Discovers threads/posts where a product can be naturally mentioned, for a
+SINGLE source at a time. Callers that need multiple sources MUST fan out at
+the processor layer (e.g., `search-source.ts`, `full-scan.ts`).
 
 ## Workflow
 
-For each source in the input, fork a discovery agent that:
+For the single source in the input, the discovery agent:
 1. Generates search queries using product context
 2. Searches the platform (Reddit or X) for matching content
 3. Assesses relevance and intent for each result
 4. Scores results with weighted multi-dimensional scoring
 
-## Fan-Out Strategy
-
-Each source gets its own agent instance. All agents share identical
-system prompt and tools for Anthropic prompt cache hits (~90% cost
-reduction on agents 2-N).
-
-The caller must pass `platform` alongside `sources`. All sources in
-one skill invocation must be the same platform (never mix Reddit
-subreddits and X topics in the same fan-out batch).
-
 ## Input
 
-```json
+```ts
 {
-  "product": { "name": "", "description": "", "keywords": [], "valueProp": "" },
-  "sources": ["SideProject", "startups", "webdev"],
-  "platform": "reddit"
+  productName: string;
+  productDescription: string;
+  keywords: string[];
+  valueProp?: string;
+  source: string;           // single source e.g. "r/SaaS" or 'x:"pricing alternative"'
+  platform: 'reddit' | 'x';
+  scoringConfig?: { ... };  // optional calibration overrides
+  customPainPhrases?: string[];
+  customQueryTemplates?: string[];
+  additionalRules?: string;
 }
 ```
 
+Single-source only. Callers that need multiple sources MUST fan out at the processor layer.
+
 ## Output
 
-Aggregated, deduplicated results with weighted scores, merged across
-all sources, deduplicated by ID, sorted by score descending.
+Flat `{ threads: [...] }` with weighted scores, deduplicated by ID, sorted by score descending.
