@@ -7,10 +7,19 @@
  *   2. For each tag, compute the SHA-256 hash drizzle uses (over the SQL file
  *      contents — the same recipe drizzle-kit/migrator uses).
  *   3. If __drizzle_migrations already has that hash, skip.
- *   4. Otherwise check "does this migration's main new table(s) already exist?"
+ *   4. If the file has `-- drizzle-orm: nontransactional`, run all statements
+ *      outside any transaction (required for CREATE INDEX CONCURRENTLY). These
+ *      migrations MUST use IF NOT EXISTS on every DDL statement so they are
+ *      idempotent and safe to run on any env regardless of prior push state.
+ *   5. Otherwise check "does this migration's main new table(s) already exist?"
  *      — if yes, we assume push had already created them; just record the
  *      migration as applied (hash + created_at) without re-running the DDL.
- *      If no, actually execute the statements (split on `--> statement-breakpoint`).
+ *      If no, actually execute the statements inside a transaction.
+ *
+ * INVARIANT: every file with `-- drizzle-orm: nontransactional` MUST use
+ * IF NOT EXISTS (or equivalent idempotent form) on all DDL statements.
+ * This script runs them unconditionally on every env that hasn't seen their
+ * hash — violating the invariant will cause duplicate-object errors.
  *
  * This is conservative: no DROPs, no re-creations, just bring the bookkeeping
  * in sync and run genuinely-new DDL.
@@ -104,9 +113,30 @@ try {
       process.exit(1);
     }
 
-    // Non-table-creation migration (rename, alter nullability, etc.). We
-    // assume `drizzle-kit push` already applied the schema change, so just
-    // record the bookkeeping row without re-running the DDL.
+    // drizzle splits statements with '--> statement-breakpoint'
+    const statements = sqlText
+      .split('--> statement-breakpoint')
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    // Nontransactional migrations MUST run their DDL every time (idempotent via
+    // IF NOT EXISTS). Running inside sql.begin() would break CONCURRENTLY.
+    // Check this FIRST, before MAIN_TABLES_FOR heuristics, so migrations like
+    // 0013 (index-only, empty mainTables) actually build their indexes on envs
+    // that need them.
+    if (sqlText.includes('-- drizzle-orm: nontransactional')) {
+      console.log(`  APPLY ${tag} (nontransactional — idempotent re-run)`);
+      for (const stmt of statements) {
+        await sql.unsafe(stmt);
+      }
+      await sql`
+        INSERT INTO drizzle.__drizzle_migrations (hash, created_at)
+        VALUES (${hash}, ${when})
+      `;
+      continue;
+    }
+
+    // Pure ALTER/rename with empty mainTables — assume push already applied.
     if (mainTables.length === 0) {
       console.log(`  MARK ${tag} (alter/rename — push already applied)`);
       await sql`
@@ -129,36 +159,15 @@ try {
     }
 
     console.log(`  APPLY ${tag}`);
-    // drizzle splits statements with '--> statement-breakpoint'
-    const statements = sqlText
-      .split('--> statement-breakpoint')
-      .map((s) => s.trim())
-      .filter(Boolean);
-
-    // CREATE INDEX CONCURRENTLY cannot run inside a transaction block.
-    // Detect the nontransactional directive and run each statement
-    // outside sql.begin() in that case.
-    const isNontransactional = sqlText.includes('-- drizzle-orm: nontransactional');
-
-    if (isNontransactional) {
+    await sql.begin(async (tx) => {
       for (const stmt of statements) {
-        await sql.unsafe(stmt);
+        await tx.unsafe(stmt);
       }
-      await sql`
+      await tx`
         INSERT INTO drizzle.__drizzle_migrations (hash, created_at)
         VALUES (${hash}, ${when})
       `;
-    } else {
-      await sql.begin(async (tx) => {
-        for (const stmt of statements) {
-          await tx.unsafe(stmt);
-        }
-        await tx`
-          INSERT INTO drizzle.__drizzle_migrations (hash, created_at)
-          VALUES (${hash}, ${when})
-        `;
-      });
-    }
+    });
   }
 
   // Final state
