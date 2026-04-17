@@ -1,6 +1,6 @@
 {
   "id": "a7e29c40-3b31-4c2f-9fd4-8c4e15d61e20",
-  "prevId": "f0307283-eb1a-4dd5-a761-fbcdff514e00",
+  "prevId": "a4b1ef22-9c5d-4a7f-b3de-72c0910fe012",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -2513,6 +2513,33 @@
       "indexes": {
         "todos_user_status_expires_idx": {
           "name": "todos_user_status_expires_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "expires_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "todo_items_user_status_expires": {
+          "name": "todo_items_user_status_expires",
           "columns": [
             {
               "expression": "user_id",
