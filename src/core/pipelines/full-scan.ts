@@ -185,37 +185,57 @@ export async function runFullScan(input: {
   ];
   send('discovery_start', { totalCommunities: totalSources, platforms: activePlatforms });
 
-  // 4a: Reddit discovery
-  const redditDiscoveryPromise = runSkill<DiscoveryOutput>({
-    skill: discoverySkill,
-    input: {
-      ...productContext,
-      sources: subreddits,
-      platform: PLATFORMS.reddit.id,
-    },
-    deps: { redditClient },
-    outputSchema: discoveryOutputSchema,
-    onProgress: (event) => send(event.type, event),
-  });
+  // Reusable per-platform discovery fan-out via Promise.all over single-source
+  // discovery skill invocations. Each source becomes its own skill call.
+  async function fanOutDiscovery(
+    sources: string[],
+    platform: string,
+    deps: { redditClient?: RedditClient; xaiClient?: XAIClient },
+    onEvent: (event: { type: string; [key: string]: unknown }) => void,
+  ) {
+    return Promise.all(
+      sources.map(async (source) => {
+        const res = await runSkill<DiscoveryOutput>({
+          skill: discoverySkill,
+          input: {
+            ...productContext,
+            source,
+            platform,
+          },
+          deps,
+          outputSchema: discoveryOutputSchema,
+          onProgress: onEvent,
+        });
+        return { source, res };
+      }),
+    );
+  }
+
+  // 4a: Reddit discovery (Promise.all fan-out over single-source discovery)
+  const redditDiscoveryPromise = fanOutDiscovery(
+    subreddits,
+    PLATFORMS.reddit.id,
+    { redditClient },
+    (event) => send(event.type, event),
+  );
 
   // 4b: X discovery (parallel, skipped if no xAI key)
   const xDiscoveryPromise = xaiClient
     ? (async () => {
         try {
           send('x_discovery_start', { topics: xTopics });
-          const xResult = await runSkill<DiscoveryOutput>({
-            skill: discoverySkill,
-            input: {
-              ...productContext,
-              sources: xTopics,
-              platform: PLATFORMS.x.id,
-            },
-            deps: { xaiClient },
-            outputSchema: discoveryOutputSchema,
-            onProgress: (event) => send(event.type, { ...event, platform: PLATFORMS.x.id }),
-          });
-          send('x_discovery_done', { count: xResult.results.reduce((n, r) => n + r.threads.length, 0) });
-          return xResult;
+          const perSource = await fanOutDiscovery(
+            xTopics,
+            PLATFORMS.x.id,
+            { xaiClient },
+            (event) => send(event.type, { ...event, platform: PLATFORMS.x.id }),
+          );
+          const total = perSource.reduce(
+            (n, { res }) => n + res.results.reduce((m, r) => m + r.threads.length, 0),
+            0,
+          );
+          send('x_discovery_done', { count: total });
+          return perSource;
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           log.warn(`X discovery failed (non-fatal): ${message}`);
@@ -225,7 +245,20 @@ export async function runFullScan(input: {
       })()
     : Promise.resolve(null);
 
-  const [redditResult, xResult] = await Promise.all([redditDiscoveryPromise, xDiscoveryPromise]);
+  const [redditPerSource, xPerSource] = await Promise.all([redditDiscoveryPromise, xDiscoveryPromise]);
+
+  // Flatten perSource arrays into an aggregate shape compatible with the
+  // downstream collectResults logic: { results: DiscoveryOutput[], errors: [] }.
+  const redditResult = {
+    results: redditPerSource.flatMap(({ res }) => res.results),
+    errors: redditPerSource.flatMap(({ res }) => res.errors),
+  };
+  const xResult = xPerSource
+    ? {
+        results: xPerSource.flatMap(({ res }) => res.results),
+        errors: xPerSource.flatMap(({ res }) => res.errors),
+      }
+    : null;
 
   for (const err of redditResult.errors) {
     log.error(`Agent "${err.label}" failed: ${err.error}`);
