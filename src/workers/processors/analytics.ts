@@ -9,7 +9,7 @@ import {
   xAnalyticsSummary,
   activityEvents,
 } from '@/lib/db/schema';
-import { eq, and, gte } from 'drizzle-orm';
+import { eq, and, gte, desc } from 'drizzle-orm';
 import { publishUserEvent } from '@/lib/redis';
 import { enqueueAnalytics } from '@/lib/queue';
 import type { AnalyticsJobData } from '@/lib/queue/types';
@@ -28,9 +28,13 @@ async function processXAnalyticsForUser(userId: string, log: Logger) {
     Date.now() - ANALYTICS_LOOKBACK_DAYS * 24 * 60 * 60 * 1000,
   );
 
-  // Fetch all metrics in the period
-  const metrics = await db
-    .select({
+  // Fetch the latest metrics sample per tweet in the period.
+  // DISTINCT ON + ORDER BY pushes the "keep newest per tweetId" dedupe into
+  // Postgres, replacing the old SELECT-all + JS Map dedupe. The ORDER BY's
+  // first column must match the DISTINCT ON key (tweet_id); sampled_at DESC
+  // is the tiebreaker that selects the newest row per tweet.
+  const uniqueMetrics = await db
+    .selectDistinctOn([xTweetMetrics.tweetId], {
       tweetId: xTweetMetrics.tweetId,
       impressions: xTweetMetrics.impressions,
       likes: xTweetMetrics.likes,
@@ -45,27 +49,17 @@ async function processXAnalyticsForUser(userId: string, log: Logger) {
         eq(xTweetMetrics.userId, userId),
         gte(xTweetMetrics.sampledAt, periodStart),
       ),
-    );
+    )
+    .orderBy(xTweetMetrics.tweetId, desc(xTweetMetrics.sampledAt));
 
-  if (metrics.length === 0) {
+  if (uniqueMetrics.length === 0) {
     log.info('No metrics data to analyze');
     return;
   }
 
-  // Dedupe: keep the latest sample per tweet
-  const latestByTweet = new Map<
-    string,
-    (typeof metrics)[number]
-  >();
-  for (const m of metrics) {
-    const existing = latestByTweet.get(m.tweetId);
-    if (!existing || m.sampledAt > existing.sampledAt) {
-      latestByTweet.set(m.tweetId, m);
-    }
-  }
-  const uniqueMetrics = [...latestByTweet.values()];
-
-  // Map tweetId → contentType via posts + xContentCalendar
+  // Map tweetId → contentType via posts + xContentCalendar.
+  // Narrowed to the analytics lookback window — older posts can't correspond
+  // to metrics in the current period, so loading them was wasted I/O.
   const postRecords = await db
     .select({
       externalId: posts.externalId,
@@ -73,7 +67,12 @@ async function processXAnalyticsForUser(userId: string, log: Logger) {
       postedAt: posts.postedAt,
     })
     .from(posts)
-    .where(eq(posts.userId, userId));
+    .where(
+      and(
+        eq(posts.userId, userId),
+        gte(posts.postedAt, periodStart),
+      ),
+    );
 
   const draftIds = postRecords
     .map((p) => p.draftId)
