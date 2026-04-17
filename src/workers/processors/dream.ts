@@ -1,15 +1,15 @@
 import type { Job } from 'bullmq';
 import type { DreamJobData } from '@/lib/queue/types';
-import { createLogger } from '@/lib/logger';
+import { createLogger, loggerForJob, type Logger } from '@/lib/logger';
 import { MemoryStore } from '@/memory/store';
 import { AgentDream } from '@/memory/dream';
 
-const log = createLogger('worker:dream');
+const baseLog = createLogger('worker:dream');
 
 /**
  * Distill a single product's accumulated logs into structured memories.
  */
-async function distillProduct(productId: string): Promise<void> {
+async function distillProduct(productId: string, log: Logger): Promise<void> {
   const store = new MemoryStore(productId);
   const dream = new AgentDream(store);
 
@@ -37,16 +37,17 @@ async function distillProduct(productId: string): Promise<void> {
  * with undistilled logs and distills each.
  */
 export async function processDream(job: Job<DreamJobData>) {
+  const log = loggerForJob(baseLog, job);
   const { productId } = job.data;
 
   if (productId === '__all__') {
     const productIds = await MemoryStore.getProductsWithUndistilledLogs();
     log.info(`Nightly distill: ${productIds.length} products with undistilled logs`);
     for (const pid of productIds) {
-      await distillProduct(pid);
+      await distillProduct(pid, log);
     }
     return;
   }
 
-  await distillProduct(productId);
+  await distillProduct(productId, log);
 }

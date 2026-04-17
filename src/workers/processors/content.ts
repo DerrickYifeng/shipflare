@@ -9,16 +9,19 @@ import { publishEvent } from '@/lib/redis';
 import { enqueueDream, enqueueReview } from '@/lib/queue';
 import { join } from 'path';
 import type { ContentJobData } from '@/lib/queue/types';
-import { createLogger } from '@/lib/logger';
+import { getTraceId } from '@/lib/queue/types';
+import { createLogger, loggerForJob } from '@/lib/logger';
 import { MemoryStore } from '@/memory/store';
 import { AgentDream } from '@/memory/dream';
 import { buildMemoryPrompt } from '@/memory/prompt-builder';
 
-const log = createLogger('worker:content');
+const baseLog = createLogger('worker:content');
 
 const SKILLS_DIR = join(process.cwd(), 'src', 'skills');
 
 export async function processContent(job: Job<ContentJobData>) {
+  const traceId = getTraceId(job.data, job.id);
+  const log = loggerForJob(baseLog, job);
   const { userId, threadId, productId } = job.data;
   const draftType = (job.data as ContentJobData & { draftType?: string }).draftType ?? 'reply';
   const communityIntel = (job.data as ContentJobData & { communityIntel?: unknown }).communityIntel;
@@ -106,7 +109,7 @@ export async function processContent(job: Job<ContentJobData>) {
 
   // Enqueue review for the newly created draft
   if (inserted) {
-    await enqueueReview({ userId, draftId: inserted.id, productId });
+    await enqueueReview({ userId, draftId: inserted.id, productId, traceId });
 
     // For reply drafts, inject a todoItem directly so it appears in Today
     // immediately (without waiting for the next seed cycle)

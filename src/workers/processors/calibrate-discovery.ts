@@ -10,7 +10,7 @@ import type { DiscoveryOutput } from '@/agents/schemas';
 import { publishEvent } from '@/lib/redis';
 import { join } from 'path';
 import type { CalibrationJobData } from '@/lib/queue/types';
-import { createLogger } from '@/lib/logger';
+import { createLogger, loggerForJob, type Logger } from '@/lib/logger';
 import { isPlatformAvailable, getPlatformConfig } from '@/lib/platform-config';
 import { judgeThreadsBatch } from '@/lib/discovery/judge';
 import type { ScoredThread } from '@/lib/discovery/judge';
@@ -18,7 +18,7 @@ import { runOptimizer } from '@/lib/discovery/optimizer';
 import { applyOptimization } from '@/lib/discovery/apply-optimization';
 import type { UsageSummary } from '@/core/types';
 
-const log = createLogger('worker:calibration');
+const baseLog = createLogger('worker:calibration');
 
 const discoverySkill = loadSkill(
   join(process.cwd(), 'src/skills/discovery'),
@@ -51,6 +51,7 @@ interface CalibrationLogEntry {
 // ---------------------------------------------------------------------------
 
 export async function processCalibration(job: Job<CalibrationJobData>) {
+  const log = loggerForJob(baseLog, job);
   const { userId, productId, maxRounds = DEFAULT_MAX_ROUNDS } = job.data;
 
   log.info(`Starting calibration for product ${productId}, user ${userId}, maxRounds=${maxRounds}`);
@@ -82,7 +83,7 @@ export async function processCalibration(job: Job<CalibrationJobData>) {
   }
 
   for (const platform of platforms) {
-    await calibratePlatform(userId, product, platform, maxRounds);
+    await calibratePlatform(userId, product, platform, maxRounds, log);
   }
 
   // Publish completion event
@@ -101,6 +102,7 @@ async function calibratePlatform(
   product: typeof products.$inferSelect,
   platform: string,
   maxRounds: number,
+  log: Logger,
 ) {
   // Load or create config
   let [config] = await db

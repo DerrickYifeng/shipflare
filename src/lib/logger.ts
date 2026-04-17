@@ -170,3 +170,61 @@ function makeLogger(module: string, boundCtx: LogContext): Logger {
 export function createLogger(prefix: string): Logger {
   return makeLogger(prefix, {});
 }
+
+/**
+ * Minimal BullMQ Job surface we read for structured context. Using a local
+ * interface avoids dragging bullmq types into lib/logger.
+ */
+interface JobLike {
+  id?: string;
+  name?: string;
+  queueName?: string;
+  data?: unknown;
+}
+
+/**
+ * Bind `traceId` / `jobId` / `queue` onto `base` from a BullMQ job. Falls
+ * back to `job.id` when the payload predates traceId threading.
+ */
+export function loggerForJob(base: Logger, job: JobLike): Logger {
+  let traceId: string | undefined;
+  if (job.data && typeof job.data === 'object') {
+    const t = (job.data as Record<string, unknown>).traceId;
+    if (typeof t === 'string' && t.length > 0) traceId = t;
+  }
+  return base.child({
+    traceId: traceId ?? job.id ?? 'unknown',
+    jobId: job.id,
+    queue: job.queueName,
+  });
+}
+
+/**
+ * Extract a traceId from an incoming HTTP Request. If the client passed
+ * `x-trace-id` we honour it (so external systems can stitch their traces);
+ * otherwise mint a fresh UUID. The returned id is safe to hand to
+ * `enqueueXxx({ ..., traceId })` so the whole API-request → BullMQ chain
+ * shares one id.
+ */
+export function traceIdFromRequest(req: { headers: { get(name: string): string | null } }): string {
+  const header = req.headers.get('x-trace-id');
+  if (header && header.trim().length > 0) return header.trim();
+  // Node >=15 ships webcrypto; prefer it but fall back for older targets.
+  if (typeof globalThis.crypto?.randomUUID === 'function') {
+    return globalThis.crypto.randomUUID();
+  }
+  // Fallback: time+rand (only reached on exotic runtimes).
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/**
+ * Convenience: bind a traceId (either supplied or auto-minted from the
+ * request) onto a base logger for one API request handler.
+ */
+export function loggerForRequest(
+  base: Logger,
+  req: { headers: { get(name: string): string | null } },
+): { log: Logger; traceId: string } {
+  const traceId = traceIdFromRequest(req);
+  return { log: base.child({ traceId }), traceId };
+}

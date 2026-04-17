@@ -18,13 +18,13 @@ import { enqueueReview, enqueueDream, enqueueContentCalendar } from '@/lib/queue
 import { publishEvent } from '@/lib/redis';
 import { join } from 'path';
 import type { ContentCalendarJobData } from '@/lib/queue/types';
-import { isFanoutJob } from '@/lib/queue/types';
-import { createLogger } from '@/lib/logger';
+import { isFanoutJob, getTraceId } from '@/lib/queue/types';
+import { createLogger, loggerForJob, type Logger } from '@/lib/logger';
 import { MemoryStore } from '@/memory/store';
 import { AgentDream } from '@/memory/dream';
 import { buildMemoryPrompt } from '@/memory/prompt-builder';
 
-const log = createLogger('worker:x-content-calendar');
+const baseLog = createLogger('worker:x-content-calendar');
 
 const contentBatchSkill = loadSkill(
   join(process.cwd(), 'src/skills/content-batch'),
@@ -33,6 +33,8 @@ const contentBatchSkill = loadSkill(
 async function processXContentCalendarForUser(
   userId: string,
   productId: string,
+  traceId: string,
+  log: Logger,
   processUpcoming = false,
 ) {
   log.info(`Processing X content calendar for user ${userId}`);
@@ -178,11 +180,13 @@ async function processXContentCalendarForUser(
       })
       .where(eq(xContentCalendar.id, calendarItem.id));
 
-    // Auto-enqueue review
+    // Auto-enqueue review — propagate traceId so calendar → review → posting
+    // all stitch together.
     await enqueueReview({
       userId,
       draftId: draft.id,
       productId,
+      traceId,
     });
   }
 
@@ -226,6 +230,8 @@ async function processXContentCalendarForUser(
 export async function processXContentCalendar(
   job: Job<ContentCalendarJobData>,
 ) {
+  const traceId = getTraceId(job.data, job.id);
+  const log = loggerForJob(baseLog, job);
   // Cron fan-out: enqueue per-user jobs so the content-calendar worker's
   // concurrency:2 actually splits work across users. Accepts both the new
   // discriminated-union payload and the legacy `userId === '__all__'` sentinel.
@@ -268,5 +274,5 @@ export async function processXContentCalendar(
 
   const data = job.data as Extract<ContentCalendarJobData, { userId: string }>;
   const { userId, productId, processUpcoming } = data;
-  await processXContentCalendarForUser(userId, productId, processUpcoming);
+  await processXContentCalendarForUser(userId, productId, traceId, log, processUpcoming);
 }

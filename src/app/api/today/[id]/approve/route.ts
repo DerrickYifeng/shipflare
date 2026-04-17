@@ -1,17 +1,18 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, type NextRequest } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { todoItems, drafts, threads, channels } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { enqueuePosting } from '@/lib/queue';
-import { createLogger } from '@/lib/logger';
+import { createLogger, loggerForRequest } from '@/lib/logger';
 
-const log = createLogger('api:today:approve');
+const baseLog = createLogger('api:today:approve');
 
 export async function PATCH(
-  _request: Request,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const { log, traceId } = loggerForRequest(baseLog, request);
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -74,6 +75,7 @@ export async function PATCH(
           userId,
           draftId: todo.draftId,
           channelId: channel.id,
+          traceId,
         });
         log.info(`Todo ${id} approved, posting enqueued for draft ${todo.draftId}`);
       } else {
@@ -88,5 +90,8 @@ export async function PATCH(
     .set({ status: 'approved', actedAt: new Date() })
     .where(eq(todoItems.id, id));
 
-  return NextResponse.json({ success: true });
+  return NextResponse.json(
+    { success: true, traceId },
+    { headers: { 'x-trace-id': traceId } },
+  );
 }

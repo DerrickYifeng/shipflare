@@ -15,7 +15,7 @@ import { processXAnalytics } from './processors/analytics';
 import { processTodoSeed } from './processors/todo-seed';
 import { processCalibration } from './processors/calibrate-discovery';
 import { dreamQueue, discoveryQueue, monitorQueue, contentCalendarQueue, metricsQueue, analyticsQueue, todoSeedQueue, codeScanQueue } from '@/lib/queue';
-import { createLogger } from '@/lib/logger';
+import { createLogger, loggerForJob } from '@/lib/logger';
 import type { DiscoveryJobData, ContentJobData, ReviewJobData, PostingJobData, HealthScoreJobData, DreamJobData, CodeScanJobData, MonitorJobData, ContentCalendarJobData, EngagementJobData, MetricsJobData, AnalyticsJobData, TodoSeedJobData, CalibrationJobData } from '@/lib/queue/types';
 
 const log = createLogger('workers');
@@ -133,16 +133,21 @@ const workers = [
   analyticsWorker, todoSeedWorker, calibrationWorker,
 ];
 
-// Log events
+// Log events — bind traceId / jobId / queue into the child logger so lifecycle
+// events land in the same structured form as processor-emitted lines.
 for (const worker of workers) {
   worker.on('active', (job) => {
-    log.debug(`[${worker.name}] job ${job.id} active`);
+    loggerForJob(log, job).debug('job active');
   });
   worker.on('completed', (job) => {
-    log.info(`[${worker.name}] job ${job.id} completed`);
+    loggerForJob(log, job).info('job completed');
   });
   worker.on('failed', (job, err) => {
-    log.error(`[${worker.name}] job ${job?.id} failed: ${err.message}`);
+    if (job) {
+      loggerForJob(log, job).error(`job failed: ${err.message}`);
+    } else {
+      log.error(`[${worker.name}] job failed (no job ref): ${err.message}`);
+    }
   });
 }
 

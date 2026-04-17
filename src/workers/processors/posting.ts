@@ -12,16 +12,19 @@ import { enqueueEngagement } from '@/lib/queue';
 import { publishEvent } from '@/lib/redis';
 import { join } from 'path';
 import type { PostingJobData } from '@/lib/queue/types';
+import { getTraceId } from '@/lib/queue/types';
 import { postingOutputSchema } from '@/agents/schemas';
 import type { PostingOutput } from '@/agents/schemas';
-import { createLogger } from '@/lib/logger';
+import { createLogger, loggerForJob } from '@/lib/logger';
 
 const MAX_ENGAGEMENT_DEPTH = 2;
-const log = createLogger('worker:posting');
+const baseLog = createLogger('worker:posting');
 
 const postingSkill = loadSkill(join(process.cwd(), 'src/skills/posting'));
 
 export async function processPosting(job: Job<PostingJobData>) {
+  const traceId = getTraceId(job.data, job.id);
+  const log = loggerForJob(baseLog, job);
   const { userId, draftId, channelId } = job.data;
 
   log.info(`Posting draft ${draftId} for user ${userId}`);
@@ -169,6 +172,7 @@ export async function processPosting(job: Job<PostingJobData>) {
               draftId,
               productId: '',
               platform: 'x',
+              traceId,
             },
             delayMin * 60 * 1000,
           );

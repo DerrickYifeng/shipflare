@@ -19,14 +19,17 @@ import { enqueueReview } from '@/lib/queue';
 import { publishEvent } from '@/lib/redis';
 import { join } from 'path';
 import type { EngagementJobData } from '@/lib/queue/types';
-import { createLogger } from '@/lib/logger';
+import { getTraceId } from '@/lib/queue/types';
+import { createLogger, loggerForJob } from '@/lib/logger';
 import { buildContentUrl } from '@/lib/platform-config';
 
 const MAX_ENGAGEMENT_DEPTH = 2;
 
-const log = createLogger('worker:x-engagement');
+const baseLog = createLogger('worker:x-engagement');
 
 export async function processXEngagement(job: Job<EngagementJobData>) {
+  const traceId = getTraceId(job.data, job.id);
+  const log = loggerForJob(baseLog, job);
   const { userId, contentId: tweetId, productId } = job.data;
   const legacyContentText = (job.data as { contentText?: string }).contentText;
   const explicitDraftId = (job.data as { draftId?: string }).draftId;
@@ -214,6 +217,7 @@ export async function processXEngagement(job: Job<EngagementJobData>) {
         userId,
         draftId: draft.id,
         productId,
+        traceId,
       });
 
       // Inject time-sensitive todo item for the Today page

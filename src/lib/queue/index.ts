@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { Queue, type JobsOptions } from 'bullmq';
 import { getBullMQConnection } from '@/lib/redis';
 import { createLogger } from '@/lib/logger';
@@ -123,19 +124,33 @@ export const xMetricsQueue = metricsQueue;
 export const xAnalyticsQueue = analyticsQueue;
 
 /**
- * Ensure every enqueued payload carries schemaVersion: 1 so consumers can
- * version-gate behaviour when we rev the contract.
+ * Ensure every enqueued payload carries schemaVersion: 1 and a traceId so
+ * consumers can version-gate behaviour when we rev the contract and callers
+ * can correlate a single logical run across enqueue → processor → downstream.
+ * If the caller already passed `traceId` (e.g. fan-out re-enqueuing child
+ * jobs), we preserve it so the chain stays stitched together.
  */
-function withSchemaVersion<T extends { schemaVersion?: number }>(data: T): T {
-  return { ...data, schemaVersion: 1 };
+function withEnvelope<T extends { schemaVersion?: number; traceId?: string }>(
+  data: T,
+): T & { schemaVersion: 1; traceId: string } {
+  return {
+    ...data,
+    schemaVersion: 1,
+    traceId: data.traceId ?? randomUUID(),
+  };
 }
 
 /** Best-effort label for log lines on discriminated-union payloads. */
 function describePayload(p: unknown): string {
   if (!p || typeof p !== 'object') return 'unknown';
   const obj = p as Record<string, unknown>;
-  if (obj.kind === 'fanout') return `fanout${obj.platform ? ` platform=${obj.platform}` : ''}`;
   const parts: string[] = [];
+  if (typeof obj.traceId === 'string') parts.push(`trace=${obj.traceId.slice(0, 8)}`);
+  if (obj.kind === 'fanout') {
+    parts.push('fanout');
+    if (typeof obj.platform === 'string') parts.push(`platform=${obj.platform}`);
+    return parts.join(' ');
+  }
   if (typeof obj.userId === 'string') parts.push(`user=${obj.userId}`);
   if (typeof obj.platform === 'string') parts.push(`platform=${obj.platform}`);
   if (typeof obj.productId === 'string') parts.push(`product=${obj.productId}`);
@@ -146,7 +161,7 @@ function describePayload(p: unknown): string {
  * Enqueue a discovery scan for a user's product across sources (subreddits or topics).
  */
 export async function enqueueDiscovery(data: DiscoveryJobData): Promise<void> {
-  const payload = discoveryJobSchema.parse(withSchemaVersion(data));
+  const payload = discoveryJobSchema.parse(withEnvelope(data));
   log.debug(`Enqueued discovery (${describePayload(payload)})`);
   await discoveryQueue.add('scan', payload, {
     attempts: 3,
@@ -158,7 +173,7 @@ export async function enqueueDiscovery(data: DiscoveryJobData): Promise<void> {
  * Enqueue content generation for a discovered thread.
  */
 export async function enqueueContent(data: ContentJobData): Promise<void> {
-  const payload = contentJobSchema.parse(withSchemaVersion(data));
+  const payload = contentJobSchema.parse(withEnvelope(data));
   log.debug(`Enqueued content for thread ${payload.threadId}`);
   await contentQueue.add('draft', payload, {
     attempts: 2,
@@ -170,7 +185,7 @@ export async function enqueueContent(data: ContentJobData): Promise<void> {
  * Enqueue review for a newly created draft.
  */
 export async function enqueueReview(data: ReviewJobData): Promise<void> {
-  const payload = reviewJobSchema.parse(withSchemaVersion(data));
+  const payload = reviewJobSchema.parse(withEnvelope(data));
   log.debug(`Enqueued review for draft ${payload.draftId}`);
   await reviewQueue.add('review', payload, {
     attempts: 2,
@@ -183,7 +198,7 @@ export async function enqueueReview(data: ReviewJobData): Promise<void> {
  * 0 retries: never risk duplicate posts.
  */
 export async function enqueuePosting(data: PostingJobData): Promise<void> {
-  const payload = postingJobSchema.parse(withSchemaVersion(data));
+  const payload = postingJobSchema.parse(withEnvelope(data));
   const delayMs = Math.floor(Math.random() * 30 * 60 * 1000);
   log.debug(`Enqueued posting for draft ${payload.draftId} (delay ${Math.round(delayMs / 1000)}s)`);
   await postingQueue.add('post', payload, {
@@ -198,7 +213,7 @@ export async function enqueuePosting(data: PostingJobData): Promise<void> {
 export async function enqueueHealthScore(
   data: HealthScoreJobData,
 ): Promise<void> {
-  const payload = healthScoreJobSchema.parse(withSchemaVersion(data));
+  const payload = healthScoreJobSchema.parse(withEnvelope(data));
   log.debug(`Enqueued health-score for user ${payload.userId}`);
   await healthScoreQueue.add('calculate', payload, {
     attempts: 3,
@@ -212,7 +227,7 @@ export async function enqueueHealthScore(
  * so multiple agent runs batch their logs before distilling.
  */
 export async function enqueueDream(data: DreamJobData): Promise<void> {
-  const payload = dreamJobSchema.parse(withSchemaVersion(data));
+  const payload = dreamJobSchema.parse(withEnvelope(data));
   log.debug(`Enqueued dream for product ${payload.productId}`);
   await dreamQueue.add('distill', payload, {
     jobId: `distill-${payload.productId}`,
@@ -227,7 +242,7 @@ export async function enqueueDream(data: DreamJobData): Promise<void> {
  * Runs in worker: clone → scan → save snapshot.
  */
 export async function enqueueCodeScan(data: CodeScanJobData): Promise<string> {
-  const payload = codeScanJobSchema.parse(withSchemaVersion(data));
+  const payload = codeScanJobSchema.parse(withEnvelope(data));
   const jobId = `code-scan-${payload.userId}-${Date.now()}`;
   log.debug(`Enqueued code-scan for ${payload.repoFullName}`);
   await codeScanQueue.add('scan', payload, {
@@ -246,7 +261,7 @@ export async function enqueueCodeScan(data: CodeScanJobData): Promise<string> {
  * Enqueue monitor scan: poll target accounts for new posts.
  */
 export async function enqueueMonitor(data: MonitorJobData): Promise<void> {
-  const payload = monitorJobSchema.parse(withSchemaVersion(data));
+  const payload = monitorJobSchema.parse(withEnvelope(data));
   log.debug(`Enqueued monitor (${describePayload(payload)})`);
   await monitorQueue.add('scan', payload, {
     attempts: 2,
@@ -260,7 +275,7 @@ export async function enqueueMonitor(data: MonitorJobData): Promise<void> {
 export async function enqueueContentCalendar(
   data: ContentCalendarJobData,
 ): Promise<void> {
-  const payload = contentCalendarJobSchema.parse(withSchemaVersion(data));
+  const payload = contentCalendarJobSchema.parse(withEnvelope(data));
   log.debug(`Enqueued content-calendar (${describePayload(payload)})`);
   await contentCalendarQueue.add('process', payload, {
     attempts: 2,
@@ -276,7 +291,7 @@ export async function enqueueEngagement(
   data: EngagementJobData,
   delayMs?: number,
 ): Promise<void> {
-  const payload = engagementJobSchema.parse(withSchemaVersion(data));
+  const payload = engagementJobSchema.parse(withEnvelope(data));
   log.debug(
     `Enqueued ${payload.platform} engagement for content ${payload.contentId}` +
       (delayMs ? ` (delay ${Math.round(delayMs / 1000)}s)` : ''),
@@ -293,7 +308,7 @@ export async function enqueueEngagement(
  * Enqueue metrics collection: batch-fetch post performance data.
  */
 export async function enqueueMetrics(data: MetricsJobData): Promise<void> {
-  const payload = metricsJobSchema.parse(withSchemaVersion(data));
+  const payload = metricsJobSchema.parse(withEnvelope(data));
   log.debug(`Enqueued metrics (${describePayload(payload)})`);
   await metricsQueue.add('collect', payload, {
     attempts: 3,
@@ -305,7 +320,7 @@ export async function enqueueMetrics(data: MetricsJobData): Promise<void> {
  * Enqueue analytics computation: aggregate metrics into insights.
  */
 export async function enqueueAnalytics(data: AnalyticsJobData): Promise<void> {
-  const payload = analyticsJobSchema.parse(withSchemaVersion(data));
+  const payload = analyticsJobSchema.parse(withEnvelope(data));
   log.debug(`Enqueued analytics (${describePayload(payload)})`);
   await analyticsQueue.add('compute', payload, {
     attempts: 2,
@@ -340,7 +355,7 @@ export const calibrationQueue = new Queue<CalibrationJobData>('calibration', {
  * Enqueue todo seed: populate daily todo items for a user.
  */
 export async function enqueueTodoSeed(data: TodoSeedJobData): Promise<void> {
-  const payload = todoSeedJobSchema.parse(withSchemaVersion(data));
+  const payload = todoSeedJobSchema.parse(withEnvelope(data));
   log.debug(`Enqueued todo-seed (${describePayload(payload)})`);
   await todoSeedQueue.add('seed', payload, {
     attempts: 2,
@@ -355,7 +370,7 @@ export async function enqueueTodoSeed(data: TodoSeedJobData): Promise<void> {
 export async function enqueueCalibration(
   data: CalibrationJobData,
 ): Promise<void> {
-  const payload = calibrationJobSchema.parse(withSchemaVersion(data));
+  const payload = calibrationJobSchema.parse(withEnvelope(data));
   log.debug(
     `Enqueued calibration for product ${payload.productId} (maxRounds=${payload.maxRounds ?? 10})`,
   );
