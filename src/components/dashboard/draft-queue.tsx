@@ -4,18 +4,22 @@ import { useState, useMemo } from 'react';
 import { useDrafts, type DraftSource } from '@/hooks/use-drafts';
 import { DraftCard } from './draft-card';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
+import { ShortcutsHelp, type ShortcutBinding } from '@/components/ui/shortcuts-help';
 
 const SOURCE_FILTERS: Array<{ value: DraftSource | 'all'; label: string }> = [
   { value: 'all', label: 'All' },
-  { value: 'monitor', label: 'Monitor' },
-  { value: 'calendar', label: 'Calendar' },
-  { value: 'engagement', label: 'Engagement' },
-  { value: 'discovery', label: 'Discovery' },
+  { value: 'monitor', label: 'Scheduled replies' },
+  { value: 'calendar', label: 'Scheduled posts' },
+  { value: 'engagement', label: 'Engage with my audience' },
+  { value: 'discovery', label: 'Community threads' },
 ];
 
 export function DraftQueue() {
   const { drafts, isLoading, approve, skip, retry } = useDrafts();
   const [filter, setFilter] = useState<DraftSource | 'all'>('all');
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [helpOpen, setHelpOpen] = useState(false);
 
   const filtered = useMemo(() => {
     if (filter === 'all') return drafts;
@@ -30,6 +34,37 @@ export function DraftQueue() {
     }
     return map;
   }, [drafts]);
+
+  const shortcutBindings: ShortcutBinding[] = useMemo(
+    () => [
+      { keys: 'j', label: 'Next draft' },
+      { keys: 'k', label: 'Previous draft' },
+      { keys: 'a', label: 'Approve current draft' },
+      { keys: 's', label: 'Skip current draft' },
+      { keys: '?', label: 'Show this help' },
+    ],
+    [],
+  );
+
+  useKeyboardShortcuts(
+    {
+      j: () =>
+        setActiveIndex((i) =>
+          Math.min(i + 1, Math.max(filtered.length - 1, 0)),
+        ),
+      k: () => setActiveIndex((i) => Math.max(i - 1, 0)),
+      a: () => {
+        const target = filtered[activeIndex];
+        if (target) void approve(target.id);
+      },
+      s: () => {
+        const target = filtered[activeIndex];
+        if (target) void skip(target.id);
+      },
+      '?': () => setHelpOpen(true),
+    },
+    [filtered, activeIndex, approve, skip],
+  );
 
   if (isLoading) {
     return (
@@ -83,16 +118,23 @@ export function DraftQueue() {
 
       {/* Draft list */}
       <div className="flex flex-col gap-2">
-        {filtered.map((draft) => (
+        {filtered.map((draft, idx) => (
           <DraftCard
             key={draft.id}
             draft={draft}
             onApprove={approve}
             onSkip={skip}
             onRetry={retry}
+            isActive={idx === activeIndex}
           />
         ))}
       </div>
+
+      <ShortcutsHelp
+        open={helpOpen}
+        onClose={() => setHelpOpen(false)}
+        bindings={shortcutBindings}
+      />
     </div>
   );
 }
