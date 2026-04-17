@@ -10,7 +10,7 @@ import {
   activityEvents,
 } from '@/lib/db/schema';
 import { eq, and, gte } from 'drizzle-orm';
-import { publishEvent } from '@/lib/redis';
+import { publishUserEvent } from '@/lib/redis';
 import { enqueueAnalytics } from '@/lib/queue';
 import type { AnalyticsJobData } from '@/lib/queue/types';
 import { isFanoutJob } from '@/lib/queue/types';
@@ -223,7 +223,7 @@ async function processXAnalyticsForUser(userId: string, log: Logger) {
   );
 
   // Publish SSE event
-  await publishEvent(`shipflare:events:${userId}`, {
+  await publishUserEvent(userId, 'agents', {
     type: 'analytics_computed',
     tweetsAnalyzed: uniqueMetrics.length,
     engagementRate,

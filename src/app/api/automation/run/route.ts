@@ -4,7 +4,8 @@ import { db } from '@/lib/db';
 import { products } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { enqueueDiscovery } from '@/lib/queue';
-import { publishEvent } from '@/lib/redis';
+import { publishUserEvent } from '@/lib/redis';
+import { clearStop } from '@/lib/automation-stop';
 import { createLogger, loggerForRequest } from '@/lib/logger';
 import { PLATFORMS, isPlatformAvailable } from '@/lib/platform-config';
 
@@ -63,9 +64,12 @@ export async function POST(request: NextRequest) {
 
   const activePlatforms: string[] = [];
 
+  // Clear any stale stop flag from a previous session so the first worker
+  // iteration doesn't immediately unwind.
+  await clearStop(userId);
+
   // Publish launch events so the UI shows agents waking up
-  const eventChannel = `shipflare:events:${userId}`;
-  await publishEvent(eventChannel, {
+  await publishUserEvent(userId, 'agents', {
     type: 'agent_start',
     agentName: 'scout',
     currentTask: 'Scanning communities...',

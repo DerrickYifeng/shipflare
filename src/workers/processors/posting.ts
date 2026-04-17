@@ -11,7 +11,7 @@ import { runSkill } from '@/core/skill-runner';
 import { isCircuitBreakerTripped, tripCircuitBreaker } from '@/lib/circuit-breaker';
 import { canPostToSubreddit } from '@/lib/rate-limiter';
 import { enqueueEngagement } from '@/lib/queue';
-import { publishEvent } from '@/lib/redis';
+import { publishUserEvent } from '@/lib/redis';
 import { join } from 'path';
 import type { PostingJobData } from '@/lib/queue/types';
 import { getTraceId } from '@/lib/queue/types';
@@ -221,7 +221,7 @@ export async function processPosting(job: Job<PostingJobData>) {
   });
 
   // Publish SSE event
-  await publishEvent(`shipflare:events:${userId}`, {
+  await publishUserEvent(userId, 'agents', {
     type: result.success ? 'post_published' : 'post_failed',
     draftType,
     community: thread.community,

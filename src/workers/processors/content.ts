@@ -5,7 +5,7 @@ import { eq, and } from 'drizzle-orm';
 import { loadSkill } from '@/core/skill-loader';
 import { runSkill } from '@/core/skill-runner';
 import { contentOutputSchema } from '@/agents/schemas';
-import { publishEvent } from '@/lib/redis';
+import { publishUserEvent } from '@/lib/redis';
 import { enqueueDream, enqueueReview } from '@/lib/queue';
 import { join } from 'path';
 import type { ContentJobData } from '@/lib/queue/types';
@@ -138,7 +138,7 @@ export async function processContent(job: Job<ContentJobData>) {
         })
         .onConflictDoNothing();
 
-      await publishEvent(`shipflare:events:${userId}`, {
+      await publishUserEvent(userId, 'drafts', {
         type: 'todo_added',
         todoType: 'reply_thread',
       });
@@ -159,7 +159,7 @@ export async function processContent(job: Job<ContentJobData>) {
   });
 
   // Publish SSE event
-  await publishEvent(`shipflare:events:${userId}`, {
+  await publishUserEvent(userId, 'drafts', {
     type: 'draft_ready',
     threadTitle: thread.title,
     community: thread.community,

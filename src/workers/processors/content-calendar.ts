@@ -15,7 +15,7 @@ import { runSkill } from '@/core/skill-runner';
 import { contentCreatorOutputSchema } from '@/agents/schemas';
 import type { ContentCreatorOutput } from '@/agents/schemas';
 import { enqueueReview, enqueueDream, enqueueContentCalendar } from '@/lib/queue';
-import { publishEvent } from '@/lib/redis';
+import { publishUserEvent } from '@/lib/redis';
 import { join } from 'path';
 import type { ContentCalendarJobData } from '@/lib/queue/types';
 import { isFanoutJob, getTraceId } from '@/lib/queue/types';
@@ -196,7 +196,7 @@ async function processXContentCalendarForUser(
   );
 
   // Publish SSE event
-  await publishEvent(`shipflare:events:${userId}`, {
+  await publishUserEvent(userId, 'agents', {
     type: 'agent_complete',
     agentName: 'content-batch',
     stats: {

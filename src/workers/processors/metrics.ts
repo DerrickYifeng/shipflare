@@ -9,7 +9,7 @@ import {
 } from '@/lib/db/schema';
 import { eq, and, gte } from 'drizzle-orm';
 import { XClient, XForbiddenError } from '@/lib/x-client';
-import { publishEvent } from '@/lib/redis';
+import { publishUserEvent } from '@/lib/redis';
 import { enqueueMetrics } from '@/lib/queue';
 import type { MetricsJobData } from '@/lib/queue/types';
 import { isFanoutJob } from '@/lib/queue/types';
@@ -132,7 +132,7 @@ async function processXMetricsForUser(userId: string, log: Logger) {
   log.info(`Collected metrics for ${metricsCollected} tweets`);
 
   // Publish SSE event
-  await publishEvent(`shipflare:events:${userId}`, {
+  await publishUserEvent(userId, 'agents', {
     type: 'agent_complete',
     agentName: 'x-metrics',
     stats: {

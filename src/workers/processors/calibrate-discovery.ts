@@ -7,7 +7,8 @@ import { loadSkill } from '@/core/skill-loader';
 import { runSkill } from '@/core/skill-runner';
 import { discoveryOutputSchema } from '@/agents/schemas';
 import type { DiscoveryOutput } from '@/agents/schemas';
-import { publishEvent } from '@/lib/redis';
+import { publishUserEvent } from '@/lib/redis';
+import { isStopRequested } from '@/lib/automation-stop';
 import { join } from 'path';
 import type { CalibrationJobData } from '@/lib/queue/types';
 import { getTraceId } from '@/lib/queue/types';
@@ -89,7 +90,7 @@ export async function processCalibration(job: Job<CalibrationJobData>) {
   }
 
   // Publish completion event
-  await publishEvent(`shipflare:events:${userId}`, {
+  await publishUserEvent(userId, 'agents', {
     type: 'calibration_complete',
     productId,
   });
@@ -146,12 +147,22 @@ async function calibratePlatform(
   const startRound = config.calibrationRound;
 
   for (let round = startRound; round < maxRounds; round++) {
+    // Co-operative stop: check between rounds so a long calibration can
+    // be aborted from the war-room Stop button without waiting for all
+    // `maxRounds` iterations to complete.
+    if (await isStopRequested(userId)) {
+      log.info(
+        `Calibration stop requested for user ${userId}, aborting at round ${round + 1}`,
+      );
+      return;
+    }
+
     log.info(
       `Calibration round ${round + 1}/${maxRounds} for ${platform}, user ${userId}`,
     );
 
     // Publish progress
-    await publishEvent(`shipflare:events:${userId}`, {
+    await publishUserEvent(userId, 'agents', {
       type: 'calibration_progress',
       platform,
       round: round + 1,

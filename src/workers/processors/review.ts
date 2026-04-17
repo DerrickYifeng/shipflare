@@ -5,7 +5,7 @@ import { eq, and, gte, sql } from 'drizzle-orm';
 import { loadSkill } from '@/core/skill-loader';
 import { runSkill } from '@/core/skill-runner';
 import { draftReviewOutputSchema } from '@/agents/schemas';
-import { publishEvent } from '@/lib/redis';
+import { publishUserEvent } from '@/lib/redis';
 import { enqueueDream, enqueuePosting } from '@/lib/queue';
 import { join } from 'path';
 import type { ReviewJobData } from '@/lib/queue/types';
@@ -180,7 +180,7 @@ export async function processReview(job: Job<ReviewJobData>) {
     }
 
     // Publish SSE event
-    await publishEvent(`shipflare:events:${userId}`, {
+    await publishUserEvent(userId, 'drafts', {
       type: autoApproved ? 'draft_auto_approved' : 'draft_reviewed',
       draftId,
       verdict: result.verdict,
