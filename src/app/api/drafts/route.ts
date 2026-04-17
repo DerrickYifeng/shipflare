@@ -5,6 +5,7 @@ import { drafts, threads, channels, products, xMonitoredTweets, xContentCalendar
 import { eq, and, inArray, sql } from 'drizzle-orm';
 import { enqueuePosting, enqueueContent } from '@/lib/queue';
 import { createLogger } from '@/lib/logger';
+import { PLATFORMS } from '@/lib/platform-config';
 
 const log = createLogger('api:drafts');
 
@@ -187,8 +188,9 @@ export async function POST(request: Request) {
         channelId: channel.id,
       });
     } else {
+      const platformLabel = PLATFORMS[platform]?.displayName ?? platform;
       return NextResponse.json(
-        { error: `No ${platform === 'x' ? 'X' : 'Reddit'} account connected. Connect your account first.` },
+        { error: `No ${platformLabel} account connected. Connect your account first.` },
         { status: 400 },
       );
     }
