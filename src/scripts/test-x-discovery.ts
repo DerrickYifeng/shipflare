@@ -142,35 +142,51 @@ async function testLevel3() {
   console.log(`Product: ${TEST_PRODUCT.productName}\n`);
 
   try {
-    const result = await runSkill<DiscoveryOutput>({
-      skill: discoverySkill,
-      input: {
-        ...TEST_PRODUCT,
-        sources: [TEST_TOPIC],
-        platform: 'x',
-      },
-      deps: { xaiClient: new XAIClient() },
-      outputSchema: discoveryOutputSchema,
-      onProgress: (event) => {
-        if ('type' in event) {
-          const e = event as Record<string, unknown>;
-          if (e.type === 'tool_start') {
-            console.log(`  [tool] ${e.toolName}${e.community ? ` (${e.community})` : ''}`);
+    // Single-source discovery: loop over sources (here just one topic).
+    const sources = [TEST_TOPIC];
+    const allThreads: DiscoveryOutput['threads'] = [];
+    const allErrors: Array<{ label: string; error: string }> = [];
+    let totalCostUsd = 0;
+    let totalInputTokens = 0;
+    let totalOutputTokens = 0;
+    let totalCacheReadTokens = 0;
+
+    for (const source of sources) {
+      const res = await runSkill<DiscoveryOutput>({
+        skill: discoverySkill,
+        input: {
+          ...TEST_PRODUCT,
+          source,
+          platform: 'x',
+        },
+        deps: { xaiClient: new XAIClient() },
+        outputSchema: discoveryOutputSchema,
+        onProgress: (event) => {
+          if ('type' in event) {
+            const e = event as Record<string, unknown>;
+            if (e.type === 'tool_start') {
+              console.log(`  [tool] ${e.toolName}${e.community ? ` (${e.community})` : ''}`);
+            }
           }
-        }
-      },
-    });
+        },
+      });
+      totalCostUsd += res.usage.costUsd;
+      totalInputTokens += res.usage.inputTokens;
+      totalOutputTokens += res.usage.outputTokens;
+      totalCacheReadTokens += res.usage.cacheReadTokens;
+      for (const r of res.results) allThreads.push(...r.threads);
+      for (const err of res.errors) allErrors.push({ label: err.label, error: err.error });
+    }
 
     console.log(`\nTime: ${elapsed(start)}`);
-    console.log(`Cost: $${result.usage.costUsd.toFixed(4)}`);
-    console.log(`Tokens: in=${result.usage.inputTokens} out=${result.usage.outputTokens} cache_read=${result.usage.cacheReadTokens}`);
-    console.log(`Errors: ${result.errors.length}`);
+    console.log(`Cost: $${totalCostUsd.toFixed(4)}`);
+    console.log(`Tokens: in=${totalInputTokens} out=${totalOutputTokens} cache_read=${totalCacheReadTokens}`);
+    console.log(`Errors: ${allErrors.length}`);
 
-    for (const err of result.errors) {
+    for (const err of allErrors) {
       console.log(`  ERROR [${err.label}]: ${err.error}`);
     }
 
-    const allThreads = result.results.flatMap((r) => r.threads);
     console.log(`\nThreads found: ${allThreads.length}\n`);
 
     const sorted = [...allThreads].sort(

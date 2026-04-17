@@ -106,26 +106,34 @@ async function main() {
     console.log();
   }
 
-  // 3. Run discovery (same pipeline as production)
+  // 3. Run discovery (loop over single-source skill — one runSkill per source)
   const start = performance.now();
 
-  const result = await runSkill<DiscoveryOutput>({
-    skill,
-    input: {
-      productName: product.name,
-      productDescription: product.description,
-      keywords: product.keywords,
-      valueProp: product.valueProp ?? '',
-      sources,
-      platform: flags.platform,
-    },
-    deps,
-    outputSchema: discoveryOutputSchema,
-  });
+  const allThreads: DiscoveryOutput['threads'] = [];
+  let totalCostUsd = 0;
+  const allErrors: Array<{ label: string; error: string }> = [];
+
+  for (const source of sources) {
+    const res = await runSkill<DiscoveryOutput>({
+      skill,
+      input: {
+        productName: product.name,
+        productDescription: product.description,
+        keywords: product.keywords,
+        valueProp: product.valueProp ?? '',
+        source,
+        platform: flags.platform,
+      },
+      deps,
+      outputSchema: discoveryOutputSchema,
+    });
+    totalCostUsd += res.usage.costUsd;
+    for (const r of res.results) allThreads.push(...r.threads);
+    for (const err of res.errors) allErrors.push({ label: err.label, error: err.error });
+  }
 
   const elapsedSec = ((performance.now() - start) / 1000).toFixed(1);
-  const threads = result.results.flatMap((r) => r.threads);
-  const sorted = [...threads].sort((a, b) => (b.relevanceScore ?? 0) - (a.relevanceScore ?? 0));
+  const sorted = [...allThreads].sort((a, b) => (b.relevanceScore ?? 0) - (a.relevanceScore ?? 0));
 
   // 4. Output
   if (flags.json) {
@@ -152,15 +160,15 @@ async function main() {
         above70: sorted.filter((t) => (t.relevanceScore ?? 0) >= 70).length,
         above50: sorted.filter((t) => (t.relevanceScore ?? 0) >= 50).length,
         elapsedSec: parseFloat(elapsedSec),
-        costUsd: result.usage.costUsd,
+        costUsd: totalCostUsd,
       },
-      errors: result.errors,
+      errors: allErrors,
     }, null, 2));
   } else {
-    console.log(`Time: ${elapsedSec}s | Cost: $${result.usage.costUsd.toFixed(4)} | Threads: ${sorted.length}`);
+    console.log(`Time: ${elapsedSec}s | Cost: $${totalCostUsd.toFixed(4)} | Threads: ${sorted.length}`);
     console.log(`Above 70: ${sorted.filter((t) => (t.relevanceScore ?? 0) >= 70).length} | Above 50: ${sorted.filter((t) => (t.relevanceScore ?? 0) >= 50).length}`);
 
-    for (const err of result.errors) {
+    for (const err of allErrors) {
       console.log(`  ERROR [${err.label}]: ${err.error}`);
     }
 
