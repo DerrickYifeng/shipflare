@@ -90,6 +90,7 @@ const MAIN_TABLES_FOR = {
   '0012_pipeline_funnel': ['pipeline_events', 'thread_feedback'],
   '0013_cluster1_indexes': [], // CREATE INDEX CONCURRENTLY only — no new tables
   '0014_wave2_constraints': [], // always-run via directive
+  '0015_agent_memories_user_id': [], // always-run via directive
 };
 
 try {
