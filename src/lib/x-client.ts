@@ -75,6 +75,11 @@ interface XTweetData {
   author_id?: string;
   created_at?: string;
   conversation_id?: string;
+  in_reply_to_user_id?: string;
+  referenced_tweets?: Array<{
+    type: 'replied_to' | 'quoted' | 'retweeted';
+    id: string;
+  }>;
   public_metrics?: {
     retweet_count: number;
     reply_count: number;
@@ -112,6 +117,11 @@ export interface XTweetResult {
   authorUsername?: string;
   createdAt?: string;
   conversationId?: string;
+  inReplyToUserId?: string;
+  referencedTweets?: Array<{
+    type: 'replied_to' | 'quoted' | 'retweeted';
+    id: string;
+  }>;
   metrics?: {
     retweets: number;
     replies: number;
@@ -255,7 +265,7 @@ export class XClient {
   // ----------------------------------------------------------------
 
   private static readonly TWEET_FIELDS =
-    'created_at,public_metrics,conversation_id,author_id';
+    'created_at,public_metrics,conversation_id,author_id,referenced_tweets,in_reply_to_user_id';
   private static readonly USER_FIELDS = 'username,name,public_metrics';
 
   /**
@@ -632,6 +642,8 @@ export class XClient {
       authorUsername: t.author_id ? userMap.get(t.author_id) : undefined,
       createdAt: t.created_at,
       conversationId: t.conversation_id,
+      inReplyToUserId: t.in_reply_to_user_id,
+      referencedTweets: t.referenced_tweets,
       metrics: t.public_metrics
         ? {
             retweets: t.public_metrics.retweet_count,

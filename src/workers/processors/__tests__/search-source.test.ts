@@ -11,7 +11,13 @@ vi.mock('@/lib/db', () => ({
 }));
 vi.mock('@/lib/platform-deps', () => ({ createPlatformDeps: async () => ({}) }));
 vi.mock('@/lib/queue', () => ({ enqueueContent: vi.fn() }));
-vi.mock('@/lib/redis', () => ({ publishUserEvent: vi.fn() }));
+vi.mock('@/lib/redis', () => ({
+  publishUserEvent: vi.fn(),
+  getKeyValueClient: () => ({
+    get: vi.fn(async () => null),
+    set: vi.fn(async () => 'OK'),
+  }),
+}));
 vi.mock('@/core/skill-runner', () => ({
   runSkill: vi.fn(async () => ({
     results: [{

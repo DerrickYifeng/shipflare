@@ -89,6 +89,9 @@ async function processXMonitorForUser(
     productDescription: string;
     valueProp: string;
     keywords: string[];
+    quotedTweetId?: string;
+    quotedText?: string;
+    quotedAuthorUsername?: string;
   }> = [];
 
   // Collect raw tweets from all target accounts first (per-target API calls
@@ -103,6 +106,9 @@ async function processXMonitorForUser(
     tweetUrl: string;
     postedAt: Date;
     replyDeadline: Date;
+    quotedTweetId?: string;
+    quotedText?: string;
+    quotedAuthorUsername?: string;
   };
   const candidates: CandidateTweet[] = [];
 
@@ -127,28 +133,85 @@ async function processXMonitorForUser(
         await redis.set(sinceKey, result.newestId);
       }
 
-      // Filter tweets within max age window
+      // Collect tweets within max age window, dropping replies/retweets and
+      // resolving quoted-tweet context for QTs in a single batched call.
+      const keptTweets: Array<{
+        tweet: typeof result.tweets[number];
+        tweetDate: Date;
+        replyDeadline: Date;
+        tweetUrl: string;
+        quotedTweetId?: string;
+      }> = [];
+      const quotedIdsToFetch = new Set<string>();
+
       for (const tweet of result.tweets) {
         const tweetDate = tweet.createdAt ? new Date(tweet.createdAt) : now;
         if (tweetDate < maxAge) continue;
 
+        const refs = tweet.referencedTweets ?? [];
+        // Skip replies (low-audience, context-brittle) and retweets (not
+        // original content from the target). Keeps originals and QTs.
+        if (refs.some((r) => r.type === 'replied_to' || r.type === 'retweeted')) {
+          continue;
+        }
+
+        const quotedRef = refs.find((r) => r.type === 'quoted');
+        if (quotedRef) quotedIdsToFetch.add(quotedRef.id);
+
         const replyDeadline = new Date(
           tweetDate.getTime() + REPLY_WINDOW_MINUTES * 60_000,
         );
-
         const tweetUrl = tweet.authorUsername
           ? buildContentUrl('x', tweet.authorUsername, tweet.id)
           : buildContentUrl('x', 'i', tweet.id);
 
+        keptTweets.push({
+          tweet,
+          tweetDate,
+          replyDeadline,
+          tweetUrl,
+          quotedTweetId: quotedRef?.id,
+        });
+      }
+
+      // Batch-fetch quoted sources (one API call per target, not per tweet).
+      const quotedMap = new Map<
+        string,
+        { text: string; authorUsername?: string }
+      >();
+      if (quotedIdsToFetch.size > 0) {
+        try {
+          const quoted = await xClient.getTweets([...quotedIdsToFetch]);
+          for (const qt of quoted) {
+            quotedMap.set(qt.id, {
+              text: qt.text,
+              authorUsername: qt.authorUsername,
+            });
+          }
+        } catch (qErr) {
+          log.warn(
+            `Failed to fetch quoted tweet context for @${target.username}: ${qErr}`,
+          );
+        }
+      }
+
+      for (const kept of keptTweets) {
+        const quoted = kept.quotedTweetId
+          ? quotedMap.get(kept.quotedTweetId)
+          : undefined;
+
         candidates.push({
-          tweetId: tweet.id,
-          tweetText: tweet.text,
-          authorUsername: tweet.authorUsername ?? target.username,
+          tweetId: kept.tweet.id,
+          tweetText: kept.tweet.text,
+          authorUsername: kept.tweet.authorUsername ?? target.username,
           targetUsername: target.username,
           targetAccountId: target.id,
-          tweetUrl,
-          postedAt: tweetDate,
-          replyDeadline,
+          tweetUrl: kept.tweetUrl,
+          postedAt: kept.tweetDate,
+          replyDeadline: kept.replyDeadline,
+          quotedTweetId: kept.quotedTweetId,
+          quotedText: quoted?.text,
+          quotedAuthorUsername: quoted?.authorUsername,
         });
       }
     } catch (err) {
@@ -164,8 +227,10 @@ async function processXMonitorForUser(
             // so the outer fallbackErr catch handles it identically.
             throw new Error('XAI_API_KEY is required');
           }
+          // Grok search doesn't return referenced_tweets metadata, so we
+          // rely on X search operators to exclude replies/retweets. Best-effort.
           const searchResult = await xaiClient.searchTweets(
-            `from:${target.username}`,
+            `from:${target.username} -is:retweet -is:reply`,
             { maxResults: 5 },
           );
           const replyDeadline = new Date(
@@ -239,6 +304,9 @@ async function processXMonitorForUser(
             productDescription: product.description,
             valueProp: product.valueProp ?? '',
             keywords: product.keywords,
+            quotedTweetId: c.quotedTweetId,
+            quotedText: c.quotedText,
+            quotedAuthorUsername: c.quotedAuthorUsername,
           });
         }
       }

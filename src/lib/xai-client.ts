@@ -51,6 +51,12 @@ export interface XSearchResult {
   searchCalls: number;
 }
 
+export interface XAuthorBio {
+  username: string;
+  bio: string | null;
+  followerCount: number | null;
+}
+
 /**
  * xAI Grok API client for searching X/Twitter content.
  * Uses the Responses API with server-side x_search tool.
@@ -141,6 +147,87 @@ export class XAIClient {
       rawText,
       searchCalls: data.server_side_tool_usage?.x_search_calls ?? 0,
     };
+  }
+
+  /**
+   * Look up a handful of X/Twitter author bios in one Grok call.
+   *
+   * Used by the discovery pipeline to filter out competitors and
+   * growth-marketing grifters before inserting candidates. Bios are fetched
+   * via Grok's server-side `x_search` tool; not guaranteed to resolve every
+   * handle (Grok returns `UNKNOWN|<handle>` for anything it can't find).
+   */
+  async fetchUserBios(
+    usernames: string[],
+    opts?: { signal?: AbortSignal },
+  ): Promise<XAuthorBio[]> {
+    const unique = [...new Set(usernames.map((u) => u.replace(/^@/, '')))].filter(
+      Boolean,
+    );
+    if (unique.length === 0) return [];
+
+    const systemPrompt = [
+      'You are an X/Twitter profile lookup assistant. For each @handle the user provides, look up the current profile and return one line in this exact format:',
+      'BIO|<handle>|<follower_count_as_integer_or_unknown>|<bio_text_on_one_line_newlines_replaced_with_space>',
+      'If you cannot find the profile, return: UNKNOWN|<handle>',
+      'Output only BIO and UNKNOWN lines, one per handle, no headers, commentary, or blank lines.',
+      'Resolve each handle exactly once, in the order provided.',
+    ].join('\n');
+
+    const requestBody = JSON.stringify({
+      model: XAI_MODEL,
+      tools: [{ type: 'x_search' }],
+      input: [
+        { role: 'system', content: systemPrompt },
+        {
+          role: 'user',
+          content: `Look up these X handles: ${unique.map((u) => `@${u}`).join(', ')}`,
+        },
+      ],
+    });
+
+    log.debug(`Fetching bios for ${unique.length} handles via xAI`);
+
+    let data: XAIResponse;
+    try {
+      data = await this.fetchWithTimeout(requestBody, FETCH_TIMEOUT_MS, opts?.signal);
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        log.warn(`xAI bio lookup timed out, retrying with longer timeout`);
+        data = await this.fetchWithTimeout(
+          requestBody,
+          FETCH_RETRY_TIMEOUT_MS,
+          opts?.signal,
+        );
+      } else {
+        throw err;
+      }
+    }
+
+    const rawText = this.extractText(data);
+    const results: XAuthorBio[] = [];
+    for (const line of rawText.split('\n')) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith('BIO|')) {
+        const parts = trimmed.split('|');
+        if (parts.length < 4) continue;
+        const handle = parts[1]!.trim().replace(/^@/, '');
+        const followerStr = parts[2]!.trim();
+        const bio = parts.slice(3).join('|').trim();
+        const followerCount = /^\d+$/.test(followerStr)
+          ? parseInt(followerStr, 10)
+          : null;
+        results.push({ username: handle, bio: bio || null, followerCount });
+      } else if (trimmed.startsWith('UNKNOWN|')) {
+        const handle = trimmed.slice('UNKNOWN|'.length).trim().replace(/^@/, '');
+        if (handle) results.push({ username: handle, bio: null, followerCount: null });
+      }
+    }
+
+    log.info(
+      `xAI bio lookup resolved ${results.filter((r) => r.bio).length}/${unique.length} handles`,
+    );
+    return results;
   }
 
   private async fetchWithTimeout(

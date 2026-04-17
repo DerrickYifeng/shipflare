@@ -4,6 +4,10 @@
 
 Use `x_search` with query strings. `source` is the topic context.
 
+## Filtering (automatic)
+
+`x_search` automatically scopes results to **original tweets only** — replies in someone else's conversation and retweets are excluded before Grok runs. You do not need to add `-is:reply` or `-is:retweet` to your queries. If you explicitly include `is:reply` or `is:retweet`, that opt-in is respected.
+
 ## Query Format
 
 Adapt queries for X style — shorter, conversational. X search via Grok understands natural language context.
