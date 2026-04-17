@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { AlertDialog } from '@/components/ui/alert-dialog';
 import { useToast } from '@/components/ui/toast';
 import { SeoAuditSection } from './seo-audit-section';
 import type { SeoAuditResult } from '@/tools/seo-audit';
@@ -19,6 +20,7 @@ export function WebsiteInfoSection({ url, seoAudit }: WebsiteInfoSectionProps) {
   const [scanning, setScanning] = useState(false);
   const [rescanning, setRescanning] = useState(false);
   const [removing, setRemoving] = useState(false);
+  const [removeOpen, setRemoveOpen] = useState(false);
   const [error, setError] = useState('');
   const router = useRouter();
   const { toast } = useToast();
@@ -87,7 +89,7 @@ export function WebsiteInfoSection({ url, seoAudit }: WebsiteInfoSectionProps) {
   };
 
   const handleRemove = async () => {
-    if (!confirm('Remove website info? SEO audit data will also be cleared.')) return;
+    setRemoveOpen(false);
     setRemoving(true);
     setError('');
 
@@ -146,13 +148,24 @@ export function WebsiteInfoSection({ url, seoAudit }: WebsiteInfoSectionProps) {
           <Button
             variant="ghost"
             className="!min-h-[32px] !text-[14px] !tracking-[-0.224px] !px-3 text-sf-text-tertiary"
-            onClick={handleRemove}
+            onClick={() => setRemoveOpen(true)}
             disabled={rescanning || removing}
           >
             {removing ? 'Removing...' : 'Remove'}
           </Button>
         </div>
       </div>
+
+      <AlertDialog
+        open={removeOpen}
+        onClose={() => setRemoveOpen(false)}
+        onConfirm={handleRemove}
+        title="Remove website info?"
+        description="The URL and SEO audit data will be cleared. You can add a website again any time."
+        confirmLabel="Remove"
+        destructive
+        confirmDisabled={removing}
+      />
 
       <Card>
         <div className="flex items-center gap-2">
