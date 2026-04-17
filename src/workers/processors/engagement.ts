@@ -2,15 +2,15 @@ import type { Job } from 'bullmq';
 import { db } from '@/lib/db';
 import {
   products,
-  channels,
   drafts,
   posts,
   threads,
   activityEvents,
   todoItems,
 } from '@/lib/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { XClient, XForbiddenError } from '@/lib/x-client';
+import { createPlatformDeps } from '@/lib/platform-deps';
 import { runAgent, createToolContext } from '@/bridge/agent-runner';
 import { loadAgentFromFile } from '@/bridge/load-agent';
 import { registry } from '@/tools/registry';
@@ -36,21 +36,11 @@ export async function processXEngagement(job: Job<EngagementJobData>) {
   const explicitDraftId = (job.data as { draftId?: string }).draftId;
   log.info(`Monitoring engagement for tweet ${tweetId}`);
 
-  // Load X channel — explicit projection for XClient.fromChannel
-  const [xChannel] = await db
-    .select({
-      id: channels.id,
-      oauthTokenEncrypted: channels.oauthTokenEncrypted,
-      refreshTokenEncrypted: channels.refreshTokenEncrypted,
-      tokenExpiresAt: channels.tokenExpiresAt,
-    })
-    .from(channels)
-    .where(and(eq(channels.userId, userId), eq(channels.platform, 'x')))
-    .limit(1);
-
-  if (!xChannel) throw new Error('No X channel connected');
-
-  const xClient = XClient.fromChannel(xChannel);
+  // Resolve X client via createPlatformDeps — sanctioned path for token-column
+  // access (see CLAUDE.md → Security TODO item 2).
+  const deps = await createPlatformDeps('x', userId);
+  const xClient = deps.xClient as XClient | undefined;
+  if (!xClient) throw new Error('No X channel connected');
 
   // Resolve the original posted text via DB lookup (payloads no longer carry
   // contentText). Order of resolution:

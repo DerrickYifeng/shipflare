@@ -13,6 +13,7 @@ import {
 import { eq, and, inArray, lt } from 'drizzle-orm';
 import { XClient, XForbiddenError } from '@/lib/x-client';
 import { XAIClient } from '@/lib/xai-client';
+import { createPlatformDeps } from '@/lib/platform-deps';
 import { loadSkill } from '@/core/skill-loader';
 import { runSkill } from '@/core/skill-runner';
 import { replyDrafterOutputSchema } from '@/agents/schemas';
@@ -54,21 +55,11 @@ async function processXMonitorForUser(
 
   if (!product) throw new Error(`Product not found: ${productId}`);
 
-  // Load X channel — explicit projection for XClient.fromChannel
-  const [xChannel] = await db
-    .select({
-      id: channels.id,
-      oauthTokenEncrypted: channels.oauthTokenEncrypted,
-      refreshTokenEncrypted: channels.refreshTokenEncrypted,
-      tokenExpiresAt: channels.tokenExpiresAt,
-    })
-    .from(channels)
-    .where(and(eq(channels.userId, userId), eq(channels.platform, 'x')))
-    .limit(1);
-
-  if (!xChannel) throw new Error('No X channel connected');
-
-  const xClient = XClient.fromChannel(xChannel);
+  // Resolve X client via createPlatformDeps — sanctioned path for token-column
+  // access (see CLAUDE.md → Security TODO item 2).
+  const deps = await createPlatformDeps('x', userId);
+  const xClient = deps.xClient as XClient | undefined;
+  if (!xClient) throw new Error('No X channel connected');
 
   // Load active target accounts
   const targets = await db

@@ -9,6 +9,7 @@ import {
 } from '@/lib/db/schema';
 import { eq, and, gte } from 'drizzle-orm';
 import { XClient, XForbiddenError } from '@/lib/x-client';
+import { createPlatformDeps } from '@/lib/platform-deps';
 import { publishUserEvent } from '@/lib/redis';
 import { enqueueMetrics } from '@/lib/queue';
 import type { MetricsJobData } from '@/lib/queue/types';
@@ -23,21 +24,11 @@ const BATCH_SIZE = 100;
 async function processXMetricsForUser(userId: string, log: Logger) {
   log.info(`Collecting X metrics for user ${userId}`);
 
-  // Load X channel — explicit projection for XClient.fromChannel
-  const [xChannel] = await db
-    .select({
-      id: channels.id,
-      oauthTokenEncrypted: channels.oauthTokenEncrypted,
-      refreshTokenEncrypted: channels.refreshTokenEncrypted,
-      tokenExpiresAt: channels.tokenExpiresAt,
-    })
-    .from(channels)
-    .where(and(eq(channels.userId, userId), eq(channels.platform, 'x')))
-    .limit(1);
-
-  if (!xChannel) throw new Error('No X channel connected');
-
-  const xClient = XClient.fromChannel(xChannel);
+  // Resolve X client via createPlatformDeps — sanctioned path for token-column
+  // access (see CLAUDE.md → Security TODO item 2).
+  const deps = await createPlatformDeps('x', userId);
+  const xClient = deps.xClient as XClient | undefined;
+  if (!xClient) throw new Error('No X channel connected');
 
   // Snapshot follower count (one per UTC day; skip if already recorded today)
   try {
