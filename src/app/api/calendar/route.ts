@@ -1,8 +1,14 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { xContentCalendar, drafts, products } from '@/lib/db/schema';
-import { eq, and, gte, desc } from 'drizzle-orm';
+import {
+  xContentCalendar,
+  drafts,
+  products,
+  posts,
+  xTweetMetrics,
+} from '@/lib/db/schema';
+import { eq, and, gte, desc, inArray } from 'drizzle-orm';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('api:calendar');
@@ -47,18 +53,82 @@ export async function GET(request: Request) {
       postedExternalId: xContentCalendar.postedExternalId,
       createdAt: xContentCalendar.createdAt,
       updatedAt: xContentCalendar.updatedAt,
+      draftStatus: drafts.status,
       draftPreview: drafts.replyBody,
+      postExternalId: posts.externalId,
+      postExternalUrl: posts.externalUrl,
+      postPlatform: posts.platform,
     })
     .from(xContentCalendar)
     .leftJoin(drafts, eq(xContentCalendar.draftId, drafts.id))
+    .leftJoin(posts, eq(posts.draftId, xContentCalendar.draftId))
     .where(and(...conditions))
     .orderBy(desc(xContentCalendar.scheduledAt))
     .limit(100);
 
+  // Pull the latest x_tweet_metrics sample for each posted external id so
+  // the calendar can show inline engagement (likes + replies) without a
+  // roundtrip to /api/analytics.
+  const tweetIds = rows
+    .map((r) => r.postExternalId)
+    .filter((id): id is string => !!id);
+
+  const metricsMap = new Map<
+    string,
+    { likes: number; replies: number; bookmarks: number }
+  >();
+  if (tweetIds.length > 0) {
+    // Pull all samples for the tweet set in one pass and keep the latest
+    // per tweet_id on the JS side — simpler than DISTINCT ON + parameter
+    // binding and still one round-trip. Ordering newest-first means the
+    // first occurrence wins.
+    const rowsMetrics = await db
+      .select({
+        tweetId: xTweetMetrics.tweetId,
+        likes: xTweetMetrics.likes,
+        replies: xTweetMetrics.replies,
+        bookmarks: xTweetMetrics.bookmarks,
+        sampledAt: xTweetMetrics.sampledAt,
+      })
+      .from(xTweetMetrics)
+      .where(
+        and(
+          eq(xTweetMetrics.userId, session.user.id),
+          inArray(xTweetMetrics.tweetId, tweetIds),
+        ),
+      )
+      .orderBy(desc(xTweetMetrics.sampledAt));
+
+    for (const r of rowsMetrics) {
+      if (metricsMap.has(r.tweetId)) continue;
+      metricsMap.set(r.tweetId, {
+        likes: r.likes,
+        replies: r.replies,
+        bookmarks: r.bookmarks,
+      });
+    }
+  }
+
   return NextResponse.json({
     items: rows.map((r) => ({
-      ...r,
+      id: r.id,
+      userId: r.userId,
+      productId: r.productId,
+      channel: r.channel,
+      scheduledAt: r.scheduledAt,
+      contentType: r.contentType,
+      status: r.status,
+      topic: r.topic,
+      draftId: r.draftId,
+      postedExternalId: r.postedExternalId,
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
       draftPreview: r.draftPreview ?? null,
+      draftStatus: r.draftStatus ?? null,
+      postUrl: r.postExternalUrl ?? null,
+      metrics: r.postExternalId
+        ? (metricsMap.get(r.postExternalId) ?? null)
+        : null,
     })),
   });
 }

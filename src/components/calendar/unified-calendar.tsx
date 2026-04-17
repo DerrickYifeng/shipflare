@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useCallback, useMemo, useState } from 'react';
+import { memo, useCallback, useMemo, useState, type MouseEvent } from 'react';
 import { useCalendar, type CalendarItem } from '@/hooks/use-calendar';
 import { useAnalyticsSummary } from '@/hooks/use-analytics-summary';
 import { usePipeline } from '@/components/ui/pipeline-provider';
@@ -313,8 +313,18 @@ const CalendarItemCard = memo(function CalendarItemCard({
   const handleCancel = useCallback(() => onCancel(item.id), [onCancel, item.id]);
   const toggleExpanded = useCallback(() => setExpanded((p) => !p), []);
 
-  return (
-    <Card className="flex flex-col py-3">
+  // When the linked draft has been posted, surface the external post URL
+  // so the whole row becomes clickable. We still keep the delete + preview
+  // buttons inside the row and stop propagation on those clicks so the
+  // outer link doesn't fire.
+  const posted = item.status === 'posted' && !!item.postUrl;
+  const stop = useCallback(
+    (e: MouseEvent) => e.stopPropagation(),
+    [],
+  );
+
+  const cardInner = (
+    <Card className={`flex flex-col py-3 ${posted ? 'hover:bg-sf-bg-tertiary transition-colors duration-150 cursor-pointer' : ''}`}>
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
           <ChannelIcon channel={item.channel} />
@@ -334,10 +344,22 @@ const CalendarItemCard = memo(function CalendarItemCard({
           )}
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
+          {posted && item.metrics && (
+            <span
+              className="flex items-center gap-2 text-[12px] tracking-[-0.12px] font-mono text-sf-text-tertiary tabular-nums"
+              aria-label="Engagement metrics"
+            >
+              <span title="Likes">{heartGlyph} {item.metrics.likes}</span>
+              <span title="Replies">{replyGlyph} {item.metrics.replies}</span>
+            </span>
+          )}
           {item.draftPreview && (
             <button
               type="button"
-              onClick={toggleExpanded}
+              onClick={(e) => {
+                stop(e);
+                toggleExpanded();
+              }}
               className="text-[12px] tracking-[-0.12px] text-sf-accent hover:underline"
             >
               {expanded ? 'Hide' : 'Preview'}
@@ -347,7 +369,10 @@ const CalendarItemCard = memo(function CalendarItemCard({
             {item.status}
           </Badge>
           <button
-            onClick={handleCancel}
+            onClick={(e) => {
+              stop(e);
+              handleCancel();
+            }}
             className="text-sf-text-tertiary hover:text-sf-error transition-colors duration-200 p-1"
             title="Delete (5s undo)"
             aria-label="Delete calendar item"
@@ -359,7 +384,10 @@ const CalendarItemCard = memo(function CalendarItemCard({
         </div>
       </div>
       {expanded && item.draftPreview && (
-        <div className="mt-2 pt-2 border-t border-sf-border animate-sf-fade-in">
+        <div
+          className="mt-2 pt-2 border-t border-sf-border animate-sf-fade-in"
+          onClick={stop}
+        >
           <p className="text-[12px] tracking-[-0.12px] text-sf-text-secondary leading-relaxed line-clamp-4">
             {item.draftPreview}
           </p>
@@ -367,7 +395,26 @@ const CalendarItemCard = memo(function CalendarItemCard({
       )}
     </Card>
   );
+
+  if (posted && item.postUrl) {
+    return (
+      <a
+        href={item.postUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="block"
+        aria-label={`Open posted content in a new tab: ${item.topic ?? item.contentType}`}
+      >
+        {cardInner}
+      </a>
+    );
+  }
+
+  return cardInner;
 });
+
+const heartGlyph = '\u2665';
+const replyGlyph = '\u21A9';
 
 function ChannelIcon({ channel }: { channel: string }) {
   if (channel === 'x') return <XChannelIcon />;

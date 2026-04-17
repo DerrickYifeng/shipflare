@@ -5,6 +5,12 @@ import { useCallback } from 'react';
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
+export interface CalendarItemMetrics {
+  likes: number;
+  replies: number;
+  bookmarks: number;
+}
+
 export interface CalendarItem {
   id: string;
   channel: string;
@@ -16,6 +22,10 @@ export interface CalendarItem {
   draftPreview: string | null;
   postedExternalId: string | null;
   createdAt: string;
+  /** Present when the linked draft has status='posted'. */
+  postUrl: string | null;
+  /** Latest x_tweet_metrics sample, if any. */
+  metrics: CalendarItemMetrics | null;
 }
 
 export function useCalendar(
