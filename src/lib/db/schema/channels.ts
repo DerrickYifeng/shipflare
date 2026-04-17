@@ -8,8 +8,9 @@ import {
   jsonb,
   index,
   uniqueIndex,
+  check,
 } from 'drizzle-orm/pg-core';
-import { desc } from 'drizzle-orm';
+import { desc, sql } from 'drizzle-orm';
 import { users } from './users';
 
 export const channels = pgTable(
@@ -27,6 +28,7 @@ export const channels = pgTable(
     refreshTokenEncrypted: text('refresh_token_encrypted').notNull(),
     tokenExpiresAt: timestamp('token_expires_at', { mode: 'date' }),
     createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
+    /** @deprecated Use channelPosts table. Removed in migration 0017. */
     postHistory:
       jsonb('post_history').$type<
         Array<{
@@ -76,5 +78,24 @@ export const threads = pgTable(
       t.platform,
       t.externalId,
     ),
+  ],
+);
+
+export const channelPosts = pgTable(
+  'channel_posts',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    channelId: text('channel_id')
+      .notNull()
+      .references(() => channels.id, { onDelete: 'cascade' }),
+    externalId: text('external_id').notNull(),
+    text: text('text').notNull(),
+    type: text('type').$type<'post' | 'reply'>().notNull(),
+    postedAt: timestamp('posted_at', { withTimezone: true, mode: 'date' }).notNull(),
+  },
+  (t) => [
+    uniqueIndex('channel_posts_channel_external_uq').on(t.channelId, t.externalId),
+    index('channel_posts_channel_posted_idx').on(t.channelId, desc(t.postedAt)),
+    check('channel_posts_type_chk', sql`${t.type} IN ('post', 'reply')`),
   ],
 );
