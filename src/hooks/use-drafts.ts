@@ -23,7 +23,14 @@ export interface Draft {
   postTitle: string | null;
   replyBody: string;
   confidenceScore: number;
+  /** Longer strategy rationale, shown behind a collapsible toggle. */
   whyItWorks: string;
+  /**
+   * One-sentence recap, default-visible under the reply body. Optional for
+   * backwards-compat with drafts that predate the agent-schema addition —
+   * consumers should fall back to the first sentence of `whyItWorks`.
+   */
+  summaryReason?: string | null;
   ftcDisclosure: string;
   status: string;
   source: DraftSource;

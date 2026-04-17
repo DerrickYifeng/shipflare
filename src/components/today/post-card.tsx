@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Toggle } from '@/components/ui/toggle';
@@ -12,6 +12,9 @@ interface PostCardProps {
   onSkip: (id: string) => void;
   onEdit: (id: string, body: string) => void;
   onReschedule?: (id: string, scheduledFor: string) => void;
+  isActive?: boolean;
+  forceEditing?: boolean;
+  onEditDone?: () => void;
 }
 
 const priorityBorder: Record<string, string> = {
@@ -42,16 +45,42 @@ function charCountColor(len: number): string {
   return 'text-sf-text-tertiary';
 }
 
-export function PostCard({ item, onApprove, onSkip, onEdit, onReschedule }: PostCardProps) {
-  const [isEditing, setIsEditing] = useState(false);
+export function PostCard({
+  item,
+  onApprove,
+  onSkip,
+  onEdit,
+  onReschedule,
+  isActive = false,
+  forceEditing = false,
+  onEditDone,
+}: PostCardProps) {
+  const [localEditing, setLocalEditing] = useState(false);
   const [editBody, setEditBody] = useState(item.draftBody ?? '');
   const [media, setMedia] = useState(item.draftMedia ?? []);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  // Derive edit mode from local toggle + keyboard-driven flag to avoid
+  // a setState-in-effect cascade.
+  const isEditing = localEditing || forceEditing;
+
+  useEffect(() => {
+    if (isActive) {
+      rootRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  }, [isActive]);
 
   const handleSaveEdit = () => {
     onEdit(item.id, editBody);
-    setIsEditing(false);
+    setLocalEditing(false);
+    onEditDone?.();
+  };
+
+  const handleCancelEdit = () => {
+    setLocalEditing(false);
+    onEditDone?.();
   };
 
   const contentType = item.calendarContentType
@@ -63,7 +92,9 @@ export function PostCard({ item, onApprove, onSkip, onEdit, onReschedule }: Post
 
   return (
     <div
-      className={`rounded-[var(--radius-sf-lg)] p-4 bg-sf-bg-secondary animate-sf-fade-in ${priorityBorder[item.priority] ?? 'shadow-[0_3px_5px_rgba(0,0,0,0.04),0_6px_20px_rgba(0,0,0,0.06)]'}`}
+      ref={rootRef}
+      className={`rounded-[var(--radius-sf-lg)] p-4 bg-sf-bg-secondary animate-sf-fade-in ${priorityBorder[item.priority] ?? 'shadow-[0_3px_5px_rgba(0,0,0,0.04),0_6px_20px_rgba(0,0,0,0.06)]'} ${isActive ? 'ring-2 ring-sf-accent' : ''} ${item.status !== 'pending' ? 'opacity-60 pointer-events-none' : ''}`}
+      aria-busy={item.status !== 'pending' || undefined}
     >
       {/* Header */}
       <div className="flex items-start justify-between gap-3 mb-3">
@@ -137,7 +168,7 @@ export function PostCard({ item, onApprove, onSkip, onEdit, onReschedule }: Post
           )}
           <div className="flex gap-2 mt-2">
             <Button onClick={handleSaveEdit}>Save</Button>
-            <Button variant="ghost" onClick={() => setIsEditing(false)}>
+            <Button variant="ghost" onClick={handleCancelEdit}>
               Cancel
             </Button>
           </div>
@@ -200,7 +231,7 @@ export function PostCard({ item, onApprove, onSkip, onEdit, onReschedule }: Post
             {item.draftBody ? 'Approve' : 'Approve Topic'}
           </Button>
           {item.draftBody && (
-            <Button variant="ghost" onClick={() => setIsEditing(true)}>
+            <Button variant="ghost" onClick={() => setLocalEditing(true)}>
               Edit
             </Button>
           )}

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { SWRConfig } from 'swr';
 import { TodayActionError, useToday } from '@/hooks/use-today';
@@ -11,6 +11,8 @@ import { CompletionState } from '@/components/today/completion-state';
 import type { YesterdayTop } from '@/components/today/completion-state';
 import { EmptyState } from '@/components/today/empty-state';
 import { FirstRun } from '@/components/today/first-run';
+import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
+import { ShortcutsHelp, type ShortcutBinding } from '@/components/ui/shortcuts-help';
 
 interface RawTodoItemPayload {
   id: string;
@@ -83,6 +85,9 @@ function TodayContentInner({
   const { toast, toastWithAction } = useToast();
   const router = useRouter();
   const [showFirstRun, setShowFirstRun] = useState(isFirstRun);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
 
   const handleItemsReady = useCallback(() => {
     setShowFirstRun(false);
@@ -154,6 +159,40 @@ function TodayContentInner({
     [rawReschedule, surfaceError],
   );
 
+  const shortcutBindings: ShortcutBinding[] = useMemo(
+    () => [
+      { keys: 'j', label: 'Next item' },
+      { keys: 'k', label: 'Previous item' },
+      { keys: 'a', label: 'Approve current item' },
+      { keys: 'e', label: 'Edit current item' },
+      { keys: 's', label: 'Skip current item' },
+      { keys: '?', label: 'Show this help' },
+    ],
+    [],
+  );
+
+  useKeyboardShortcuts(
+    {
+      j: () =>
+        setActiveIndex((i) => Math.min(i + 1, Math.max(items.length - 1, 0))),
+      k: () => setActiveIndex((i) => Math.max(i - 1, 0)),
+      a: () => {
+        const target = items[activeIndex];
+        if (target) void approve(target.id);
+      },
+      e: () => {
+        const target = items[activeIndex];
+        if (target) setEditingId(target.id);
+      },
+      s: () => {
+        const target = items[activeIndex];
+        if (target) void skip(target.id);
+      },
+      '?': () => setHelpOpen(true),
+    },
+    [items, activeIndex, approve, skip],
+  );
+
   // First-run experience
   if (showFirstRun && items.length === 0) {
     return <FirstRun onItemsReady={handleItemsReady} hasChannel={hasChannel} />;
@@ -173,6 +212,14 @@ function TodayContentInner({
           onSkip={skip}
           onEdit={edit}
           onReschedule={reschedule}
+          activeId={items[activeIndex]?.id ?? null}
+          editingId={editingId}
+          onEditDone={() => setEditingId(null)}
+        />
+        <ShortcutsHelp
+          open={helpOpen}
+          onClose={() => setHelpOpen(false)}
+          bindings={shortcutBindings}
         />
       </div>
     );

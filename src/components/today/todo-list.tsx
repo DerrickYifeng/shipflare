@@ -10,6 +10,12 @@ interface TodoListProps {
   onSkip: (id: string) => void;
   onEdit: (id: string, body: string) => void;
   onReschedule: (id: string, scheduledFor: string) => void;
+  /** The id of the keyboard-navigation focus, highlighted with a ring. */
+  activeId?: string | null;
+  /** The id of the item whose edit mode was triggered via the `e` shortcut. */
+  editingId?: string | null;
+  /** Called when the externally-triggered edit finishes (save / cancel). */
+  onEditDone?: () => void;
 }
 
 type Priority = 'time_sensitive' | 'scheduled' | 'optional';
@@ -34,6 +40,9 @@ export function TodoList({
   onSkip,
   onEdit,
   onReschedule,
+  activeId,
+  editingId,
+  onEditDone,
 }: TodoListProps) {
   // Group by priority in a single pass. Memoized so unrelated parent re-renders
   // (e.g. FirstRun state flipping) don't reshuffle children.
@@ -78,6 +87,9 @@ export function TodoList({
                   onSkip={onSkip}
                   onEdit={onEdit}
                   onReschedule={onReschedule}
+                  isActive={item.id === activeId}
+                  forceEditing={item.id === editingId}
+                  onEditDone={onEditDone}
                 />
               ))}
             </div>

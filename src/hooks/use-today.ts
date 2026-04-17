@@ -40,13 +40,27 @@ async function postJson(url: string, init?: RequestInit): Promise<void> {
   );
 }
 
+/**
+ * Optimistic status markers layered on top of the server-side `'pending'`
+ * status. The server only ever returns `'pending'` for todos; these extra
+ * values are set by the mutation helpers while a request is in flight so
+ * the UI can render an inline "sending..." / "skipping..." state instead
+ * of ripping the card out of the list (and then re-inserting it on
+ * rollback if the action fails).
+ */
+export type TodoOptimisticStatus =
+  | 'pending'
+  | 'pending_approval'
+  | 'pending_skip'
+  | 'pending_reschedule';
+
 export interface TodoItem {
   id: string;
   draftId: string | null;
   todoType: 'approve_post' | 'reply_thread' | 'respond_engagement';
   source: 'calendar' | 'discovery' | 'engagement';
   priority: 'time_sensitive' | 'scheduled' | 'optional';
-  status: 'pending';
+  status: TodoOptimisticStatus;
   title: string;
   platform: string;
   community: string | null;
@@ -104,47 +118,57 @@ export function useToday() {
     { refreshInterval: 30_000 },
   );
 
+  // Merge-by-id updater factory: produces a new TodayResponse where the
+  // targeted item is stamped with an optimistic status flag (instead of
+  // being removed). Keeps the list order stable so the card doesn't jump
+  // out from under the user while the request is in flight.
+  const markPending = useCallback(
+    (id: string, status: TodoOptimisticStatus) =>
+      (prev: TodayResponse | undefined): TodayResponse | undefined => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          items: prev.items.map((i) =>
+            i.id === id ? { ...i, status } : i,
+          ),
+        };
+      },
+    [],
+  );
+
   const approve = useCallback(
     async (id: string) => {
-      // Optimistic hide.
-      mutate(
-        (prev) =>
-          prev
-            ? { ...prev, items: prev.items.filter((i) => i.id !== id) }
-            : prev,
-        false,
-      );
+      // Capture pre-mutation snapshot so we can roll back on failure
+      // without triggering a full revalidate round-trip.
+      const snapshot = data;
+
+      mutate(markPending(id, 'pending_approval'), { revalidate: false });
       try {
         await postJson(`/api/today/${id}/approve`, { method: 'PATCH' });
       } catch (err) {
-        // Roll back the optimistic hide so the user can retry once they've
-        // fixed the underlying cause (e.g. connected their X account).
-        await mutate();
+        // Restore the exact state the user saw before the click.
+        mutate(snapshot, { revalidate: false });
         throw err;
       }
       mutate();
     },
-    [mutate],
+    [data, markPending, mutate],
   );
 
   const skip = useCallback(
     async (id: string) => {
-      mutate(
-        (prev) =>
-          prev
-            ? { ...prev, items: prev.items.filter((i) => i.id !== id) }
-            : prev,
-        false,
-      );
+      const snapshot = data;
+
+      mutate(markPending(id, 'pending_skip'), { revalidate: false });
       try {
         await postJson(`/api/today/${id}/skip`, { method: 'PATCH' });
       } catch (err) {
-        await mutate();
+        mutate(snapshot, { revalidate: false });
         throw err;
       }
       mutate();
     },
-    [mutate],
+    [data, markPending, mutate],
   );
 
   const edit = useCallback(
@@ -164,13 +188,9 @@ export function useToday() {
 
   const reschedule = useCallback(
     async (id: string, scheduledFor: string) => {
-      mutate(
-        (prev) =>
-          prev
-            ? { ...prev, items: prev.items.filter((i) => i.id !== id) }
-            : prev,
-        false,
-      );
+      const snapshot = data;
+
+      mutate(markPending(id, 'pending_reschedule'), { revalidate: false });
       try {
         await postJson(`/api/today/${id}/reschedule`, {
           method: 'PATCH',
@@ -178,12 +198,12 @@ export function useToday() {
           body: JSON.stringify({ scheduledFor }),
         });
       } catch (err) {
-        await mutate();
+        mutate(snapshot, { revalidate: false });
         throw err;
       }
       mutate();
     },
-    [mutate],
+    [data, markPending, mutate],
   );
 
   const items: TodoItem[] = (data?.items ?? []).map((item) => ({
