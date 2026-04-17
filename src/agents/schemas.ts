@@ -174,7 +174,7 @@ export const replyDrafterOutputSchema = z.object({
  */
 export const contentCreatorOutputSchema = z.object({
   tweets: z.array(z.string()),
-  linkReply: z.string().optional(),
+  linkReply: z.string().nullable().optional(),
   confidence: z.number(),
   whyItWorks: z.string(),
   summaryReason: z.string().optional(),
@@ -182,23 +182,43 @@ export const contentCreatorOutputSchema = z.object({
 });
 
 /**
- * Output schema for the calendar planner agent.
- * Generates a strategic weekly content plan based on growth phase.
+ * Output schema for the calendar planner agent (shell-only).
+ *
+ * The planner now returns a lightweight shell (time + type + topic per slot).
+ * Body generation happens downstream per-slot via the `slot-body` skill in the
+ * `calendar-slot-draft` processor. Keeping the planner short makes the first
+ * DB write fast and enables Skeleton -> Ready state transitions in the UI.
  */
 export const calendarPlanOutputSchema = z.object({
-  phase: z.number(),
-  phaseDescription: z.string(),
-  weeklyStrategy: z.string(),
-  entries: z.array(
-    z.object({
-      dayOffset: z.number(),
-      hour: z.number(),
-      contentType: z.string(),
-      topic: z.string(),
-      strategicGoal: z.string(),
-      guidelines: z.array(z.string()),
-    }),
-  ),
+  phase: z.string().min(1),
+  phaseDescription: z.string().optional(),
+  weeklyStrategy: z.string().min(1),
+  entries: z
+    .array(
+      z.object({
+        dayOffset: z.number().int().min(0).max(6),
+        hour: z.number().int().min(0).max(23),
+        contentType: z.enum([
+          'metric',
+          'educational',
+          'engagement',
+          'product',
+          'thread',
+        ]),
+        topic: z.string().min(1).max(200),
+      }),
+    )
+    .min(1),
+});
+
+/**
+ * Output schema for the `slot-body` skill.
+ * Produces the body (single tweet or thread) for a single planner slot.
+ */
+export const slotBodyOutputSchema = z.object({
+  tweets: z.array(z.string().min(1)).min(1),
+  confidence: z.number().min(0).max(1),
+  whyItWorks: z.string().min(1),
 });
 
 /**
@@ -229,4 +249,5 @@ export type RunSummaryOutput = z.infer<typeof runSummaryOutputSchema>;
 export type ReplyDrafterOutput = z.infer<typeof replyDrafterOutputSchema>;
 export type ContentCreatorOutput = z.infer<typeof contentCreatorOutputSchema>;
 export type CalendarPlanOutput = z.infer<typeof calendarPlanOutputSchema>;
+export type SlotBodyOutput = z.infer<typeof slotBodyOutputSchema>;
 export type EngagementMonitorOutput = z.infer<typeof engagementMonitorOutputSchema>;
