@@ -460,6 +460,23 @@ export const calibrationQueue = new Queue<CalibrationJobData>('calibration', {
 });
 
 /**
+ * Stalled-row sweep: repeatable BullMQ job that flips rows stuck in
+ * `state='drafting'` for >10min to `failed`. No per-tick retention needed — we
+ * want minimal redis footprint for a housekeeping job that fires every 60s.
+ */
+export const stalledRowSweepQueue = new Queue<Record<string, never>>(
+  'stalled-row-sweep',
+  {
+    ...connection,
+    defaultJobOptions: {
+      removeOnComplete: { count: 10 },
+      removeOnFail: { count: 50 },
+      attempts: 1,
+    },
+  },
+);
+
+/**
  * Enqueue todo seed: populate daily todo items for a user.
  */
 export async function enqueueTodoSeed(data: TodoSeedJobData): Promise<void> {

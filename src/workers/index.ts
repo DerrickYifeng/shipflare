@@ -17,7 +17,8 @@ import { processCalendarPlan } from './processors/calendar-plan';
 import { processCalendarSlotDraft } from './processors/calendar-slot-draft';
 import { processSearchSource } from './processors/search-source';
 import { processDiscoveryScan } from './processors/discovery-scan';
-import { dreamQueue, discoveryQueue, monitorQueue, metricsQueue, analyticsQueue, todoSeedQueue, codeScanQueue } from '@/lib/queue';
+import { processStalledRowSweep } from './processors/stalled-row-sweep';
+import { dreamQueue, discoveryQueue, monitorQueue, metricsQueue, analyticsQueue, todoSeedQueue, codeScanQueue, stalledRowSweepQueue } from '@/lib/queue';
 import { createLogger, loggerForJob } from '@/lib/logger';
 import type { DiscoveryJobData, ContentJobData, ReviewJobData, PostingJobData, HealthScoreJobData, DreamJobData, CodeScanJobData, MonitorJobData, CalendarPlanJobData, CalendarSlotDraftJobData, SearchSourceJobData, DiscoveryScanJobData, EngagementJobData, MetricsJobData, AnalyticsJobData, TodoSeedJobData, CalibrationJobData } from '@/lib/queue/types';
 
@@ -147,6 +148,12 @@ const calibrationWorker = new Worker<CalibrationJobData>(
   },
 );
 
+const stalledRowSweepWorker = new Worker<Record<string, never>>(
+  'stalled-row-sweep',
+  async (job) => processStalledRowSweep(job),
+  { ...BASE_OPTS, concurrency: 1 },
+);
+
 const workers = [
   discoveryWorker, contentWorker, reviewWorker, postingWorker,
   healthScoreWorker, dreamWorker, codeScanWorker,
@@ -154,6 +161,7 @@ const workers = [
   searchSourceWorker, discoveryScanWorker,
   engagementWorker,
   metricsWorker, analyticsWorker, todoSeedWorker, calibrationWorker,
+  stalledRowSweepWorker,
 ];
 
 // Log events — bind traceId / jobId / queue into the child logger so lifecycle
@@ -260,6 +268,20 @@ async function scheduleDiscovery() {
   );
 }
 
+// Schedule stalled-row sweep: every 60s. Housekeeping — flips rows stuck in
+// state='drafting' for >10min to 'failed'. Idempotent: BullMQ dedupes the
+// repeatable on `jobId`.
+async function scheduleStalledRowSweep() {
+  await stalledRowSweepQueue.add(
+    'sweep',
+    {},
+    {
+      repeat: { every: 60_000 },
+      jobId: 'stalled-row-sweep-repeat',
+    },
+  );
+}
+
 Promise.all([
   scheduleNightlyDream(),
   scheduleCodeDiff(),
@@ -268,11 +290,12 @@ Promise.all([
   scheduleMetrics(),
   scheduleAnalytics(),
   scheduleTodoSeed(),
+  scheduleStalledRowSweep(),
 ]).catch((err) => {
   log.error('Failed to schedule cron jobs:', err.message);
 });
 
-log.info('All workers started: discovery, content, review, posting, health-score, dream, code-scan, monitor, calendar-plan, calendar-slot-draft, search-source, discovery-scan, engagement, metrics, analytics, todo-seed, calibration. Discovery 3x/day, all others daily.');
+log.info('All workers started: discovery, content, review, posting, health-score, dream, code-scan, monitor, calendar-plan, calendar-slot-draft, search-source, discovery-scan, engagement, metrics, analytics, todo-seed, calibration, stalled-row-sweep. Discovery 3x/day, stalled sweep every 60s, all others daily.');
 
 // Graceful shutdown
 async function shutdown() {
