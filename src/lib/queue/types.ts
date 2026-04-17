@@ -252,6 +252,21 @@ export const analyticsJobSchema = z.union([
 export type AnalyticsJobData = z.input<typeof analyticsJobSchema>;
 
 // ---------------------------------------------------------------------------
+// Calendar plan
+// ---------------------------------------------------------------------------
+
+export const calendarPlanJobSchema = z.object({
+  kind: z.literal('user').optional(),
+  schemaVersion: SCHEMA_VERSION,
+  traceId: TRACE_ID,
+  userId: z.string().min(1),
+  productId: z.string().min(1),
+  channel: z.string().min(1),
+  startDate: z.string().min(1),
+});
+export type CalendarPlanJobData = z.input<typeof calendarPlanJobSchema>;
+
+// ---------------------------------------------------------------------------
 // Today / Calibration
 // ---------------------------------------------------------------------------
 
@@ -286,6 +301,61 @@ export const calibrationJobSchema = z.object({
 export type CalibrationJobData = z.input<typeof calibrationJobSchema>;
 
 // ---------------------------------------------------------------------------
+// Per-item fan-out queues (Plan + Reply journey redesign)
+// ---------------------------------------------------------------------------
+
+/**
+ * One job per planner-emitted calendar slot. Drives body generation via the
+ * slot-body skill. Deduped by `calendarItemId` so a retry of an already-ready
+ * slot is a no-op. Enqueued by `calendar-plan` after the shell pass.
+ */
+export const calendarSlotDraftJobSchema = z.object({
+  kind: z.literal('user').optional(),
+  schemaVersion: SCHEMA_VERSION,
+  traceId: TRACE_ID,
+  userId: z.string().min(1),
+  productId: z.string().min(1),
+  calendarItemId: z.string().min(1),
+  channel: z.string().min(1),
+});
+export type CalendarSlotDraftJobData = z.input<typeof calendarSlotDraftJobSchema>;
+
+/**
+ * One job per reply-discovery source (e.g. `r/SaaS`, `x:"pricing feedback"`).
+ * Deduped by `(scanRunId, platform, source)`; re-clicking Scan mints a fresh
+ * scanRunId so duplicate clicks within a run collapse but a new run always
+ * runs. Enqueued by the `discovery-scan` orchestrator.
+ */
+export const searchSourceJobSchema = z.object({
+  kind: z.literal('user').optional(),
+  schemaVersion: SCHEMA_VERSION,
+  traceId: TRACE_ID,
+  userId: z.string().min(1),
+  productId: z.string().min(1),
+  platform: z.string().min(1),
+  source: z.string().min(1),
+  scanRunId: z.string().min(1),
+});
+export type SearchSourceJobData = z.input<typeof searchSourceJobSchema>;
+
+/**
+ * Top-level scan orchestrator job. Fans out into N `search-source` jobs.
+ * `trigger` distinguishes cron sweeps from user-initiated scans and from
+ * onboarding-driven first runs for observability.
+ */
+export const discoveryScanJobSchema = z.object({
+  kind: z.literal('user').optional(),
+  schemaVersion: SCHEMA_VERSION,
+  traceId: TRACE_ID,
+  userId: z.string().min(1),
+  productId: z.string().min(1),
+  platform: z.string().min(1),
+  scanRunId: z.string().min(1),
+  trigger: z.enum(['cron', 'manual', 'onboarding']),
+});
+export type DiscoveryScanJobData = z.input<typeof discoveryScanJobSchema>;
+
+// ---------------------------------------------------------------------------
 // Back-compat aliases (will be removed after full migration)
 // ---------------------------------------------------------------------------
 
@@ -305,6 +375,10 @@ export type JobData =
   | CodeScanJobData
   | MonitorJobData
   | ContentCalendarJobData
+  | CalendarPlanJobData
+  | CalendarSlotDraftJobData
+  | SearchSourceJobData
+  | DiscoveryScanJobData
   | EngagementJobData
   | MetricsJobData
   | AnalyticsJobData

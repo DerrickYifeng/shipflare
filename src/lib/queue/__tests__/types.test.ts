@@ -1,0 +1,60 @@
+import { describe, it, expect } from 'vitest';
+import {
+  calendarSlotDraftJobSchema,
+  searchSourceJobSchema,
+  discoveryScanJobSchema,
+} from '../types';
+
+describe('new job schemas', () => {
+  it('calendar-slot-draft requires calendarItemId', () => {
+    expect(() =>
+      calendarSlotDraftJobSchema.parse({
+        schemaVersion: 1,
+        traceId: 't1',
+        userId: 'u1',
+        productId: 'p1',
+        channel: 'x',
+      }),
+    ).toThrow();
+  });
+
+  it('search-source requires source', () => {
+    expect(() =>
+      searchSourceJobSchema.parse({
+        schemaVersion: 1,
+        traceId: 't1',
+        userId: 'u1',
+        productId: 'p1',
+        platform: 'reddit',
+        scanRunId: 'scan-1',
+      }),
+    ).toThrow();
+  });
+
+  it('discovery-scan rejects unknown trigger', () => {
+    expect(() =>
+      discoveryScanJobSchema.parse({
+        schemaVersion: 1,
+        traceId: 't1',
+        userId: 'u1',
+        productId: 'p1',
+        platform: 'reddit',
+        scanRunId: 'scan-1',
+        trigger: 'frog',
+      }),
+    ).toThrow();
+  });
+
+  it('accepts valid discovery-scan job', () => {
+    const r = discoveryScanJobSchema.parse({
+      schemaVersion: 1,
+      traceId: 't1',
+      userId: 'u1',
+      productId: 'p1',
+      platform: 'reddit',
+      scanRunId: 'scan-1',
+      trigger: 'manual',
+    });
+    expect(r.trigger).toBe('manual');
+  });
+});
