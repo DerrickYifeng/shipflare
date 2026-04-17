@@ -55,7 +55,16 @@ export interface OptimizerInput {
 
 export interface OptimizerResult {
   analysis: string;
-  numericChanges?: Record<string, number>;
+  numericChanges?: {
+    weightRelevance?: number;
+    weightIntent?: number;
+    weightExposure?: number;
+    weightFreshness?: number;
+    weightEngagement?: number;
+    intentGate?: number;
+    relevanceGate?: number;
+    gateCap?: number;
+  };
   strategyRules?: string;
   customLowRelevancePatterns?: string;
   customPainPhrases?: string[];
@@ -116,7 +125,16 @@ const OPTIMIZER_SYSTEM = `You are a Discovery Optimization Agent. You analyze wh
 
 const optimizerOutputSchema = z.object({
   analysis: z.string(),
-  numericChanges: z.record(z.number()).optional(),
+  numericChanges: z.object({
+    weightRelevance: z.number().optional(),
+    weightIntent: z.number().optional(),
+    weightExposure: z.number().optional(),
+    weightFreshness: z.number().optional(),
+    weightEngagement: z.number().optional(),
+    intentGate: z.number().optional(),
+    relevanceGate: z.number().optional(),
+    gateCap: z.number().optional(),
+  }).optional(),
   strategyRules: z.string().optional(),
   customLowRelevancePatterns: z.string().optional(),
   customPainPhrases: z.array(z.string()).optional(),
@@ -175,35 +193,41 @@ export async function runOptimizer(
     maxTokens: 4096,
     promptCaching: false,
     outputSchema: {
-      name: 'optimizer_output',
-      strict: true,
-      schema: {
-        type: 'object',
-        properties: {
-          analysis: { type: 'string' },
-          numericChanges: {
-            type: 'object',
-            additionalProperties: { type: 'number' },
+      type: 'object',
+      properties: {
+        analysis: { type: 'string' },
+        numericChanges: {
+          type: 'object',
+          properties: {
+            weightRelevance: { type: 'number' },
+            weightIntent: { type: 'number' },
+            weightExposure: { type: 'number' },
+            weightFreshness: { type: 'number' },
+            weightEngagement: { type: 'number' },
+            intentGate: { type: 'number' },
+            relevanceGate: { type: 'number' },
+            gateCap: { type: 'number' },
           },
-          strategyRules: { type: 'string' },
-          customLowRelevancePatterns: { type: 'string' },
-          customPainPhrases: {
-            type: 'array',
-            items: { type: 'string' },
-          },
-          customQueryTemplates: {
-            type: 'array',
-            items: { type: 'string' },
-          },
-          platformStrategyOverride: { type: 'string' },
-          undoFromPreviousRound: {
-            type: 'array',
-            items: { type: 'string' },
-          },
+          additionalProperties: false,
         },
-        required: ['analysis'],
-        additionalProperties: false,
+        strategyRules: { type: 'string' },
+        customLowRelevancePatterns: { type: 'string' },
+        customPainPhrases: {
+          type: 'array',
+          items: { type: 'string' },
+        },
+        customQueryTemplates: {
+          type: 'array',
+          items: { type: 'string' },
+        },
+        platformStrategyOverride: { type: 'string' },
+        undoFromPreviousRound: {
+          type: 'array',
+          items: { type: 'string' },
+        },
       },
+      required: ['analysis'],
+      additionalProperties: false,
     },
   });
 

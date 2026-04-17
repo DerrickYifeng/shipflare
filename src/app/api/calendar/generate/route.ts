@@ -8,16 +8,13 @@ import {
   xAnalyticsSummary,
   products,
   userPreferences,
-  channels,
 } from '@/lib/db/schema';
 import { eq, desc, and, gte } from 'drizzle-orm';
 import {
   enqueueContentCalendar,
   enqueueMonitor,
-  enqueueDiscovery,
   todoSeedQueue,
 } from '@/lib/queue';
-import { PLATFORMS, isPlatformAvailable } from '@/lib/platform-config';
 import { loadSkill } from '@/core/skill-loader';
 import { runSkill } from '@/core/skill-runner';
 import {
@@ -128,6 +125,7 @@ export async function POST(request: Request) {
       productDescription: product.description,
       valueProp: product.valueProp ?? '',
       keywords: product.keywords,
+      lifecyclePhase: product.lifecyclePhase ?? 'pre_launch',
       followerCount: latestSnapshot?.followerCount ?? 0,
       topPerformingContent: recentMetrics,
       startDate: startDate.toISOString(),
@@ -232,36 +230,14 @@ export async function POST(request: Request) {
     platform: channel,
   });
 
-  // 3. Discovery: find threads to reply to across connected platforms
-  const userChannels = await db
-    .select({ platform: channels.platform })
-    .from(channels)
-    .where(eq(channels.userId, userId));
-
-  const connectedPlatforms = new Set(userChannels.map((c) => c.platform));
-
-  for (const [platformId, config] of Object.entries(PLATFORMS)) {
-    if (!connectedPlatforms.has(platformId) || !isPlatformAvailable(platformId)) continue;
-    await enqueueDiscovery({
-      userId,
-      productId: product.id,
-      sources: config.defaultSources,
-      platform: platformId,
-    });
-  }
-
-  // 4. Todo seeds: 2-min for calendar posts, 5-min backup for discovery replies
+  // 3. Todo seed: 2-min delay for calendar posts to get drafted first
   const ts = Date.now();
   await todoSeedQueue.add('seed', { userId }, {
     delay: 120_000,
     jobId: `generate-week-seed-${userId}-${ts}`,
   });
-  await todoSeedQueue.add('seed', { userId }, {
-    delay: 300_000,
-    jobId: `generate-week-seed-late-${userId}-${ts}`,
-  });
 
-  log.info(`Pipeline enqueued: content-calendar, monitor, discovery, todo-seed for user ${userId}`);
+  log.info(`Pipeline enqueued: content-calendar, monitor, todo-seed for user ${userId}`);
 
   return NextResponse.json({
     phase: plan.phase,
@@ -273,7 +249,6 @@ export async function POST(request: Request) {
     pipeline: {
       contentCalendar: 'queued',
       monitor: 'queued',
-      discovery: connectedPlatforms.has('reddit') || connectedPlatforms.has('x') ? 'queued' : 'skipped',
       todoSeed: 'queued',
     },
   });

@@ -140,6 +140,53 @@ export async function GET(request: NextRequest) {
 
   log.info(`X account connected: @${username}`);
 
+  // Fetch recent post history for content deduplication (best-effort)
+  try {
+    const meResp = await fetch('https://api.x.com/2/users/me', {
+      headers: { Authorization: `Bearer ${tokens.access_token}` },
+    });
+    if (meResp.ok) {
+      const meData = (await meResp.json()) as { data: { id: string } };
+      const xUserId = meData.data.id;
+
+      const tweetsResp = await fetch(
+        `https://api.x.com/2/users/${xUserId}/tweets?max_results=20&tweet.fields=created_at,conversation_id`,
+        { headers: { Authorization: `Bearer ${tokens.access_token}` } },
+      );
+
+      if (tweetsResp.ok) {
+        const tweetsData = (await tweetsResp.json()) as {
+          data?: Array<{ id: string; text: string; created_at: string; conversation_id?: string }>;
+        };
+
+        const allTweets = tweetsData.data ?? [];
+        const posts = allTweets
+          .filter((t) => !t.conversation_id || t.conversation_id === t.id)
+          .slice(0, 10)
+          .map((t) => ({ id: t.id, text: t.text, type: 'post' as const, createdAt: t.created_at }));
+        const replies = allTweets
+          .filter((t) => t.conversation_id && t.conversation_id !== t.id)
+          .slice(0, 10)
+          .map((t) => ({ id: t.id, text: t.text, type: 'reply' as const, createdAt: t.created_at }));
+
+        const postHistory = [...posts, ...replies];
+
+        if (postHistory.length > 0) {
+          const channelId = existing[0]?.id;
+          if (channelId) {
+            await db
+              .update(channels)
+              .set({ postHistory })
+              .where(eq(channels.id, channelId));
+          }
+          log.info(`Stored ${postHistory.length} post history items for @${username}`);
+        }
+      }
+    }
+  } catch (err) {
+    log.warn(`Failed to fetch X post history: ${err instanceof Error ? err.message : err}`);
+  }
+
   // Clear PKCE cookies and redirect
   const response = NextResponse.redirect(new URL('/today', request.url));
   response.cookies.delete('x_code_verifier');

@@ -16,14 +16,14 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  let body: { url?: string; name?: string; description?: string; keywords?: string[]; valueProp?: string; merge?: boolean };
+  let body: { url?: string; name?: string; description?: string; keywords?: string[]; valueProp?: string; lifecyclePhase?: string; merge?: boolean };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
 
-  const { url, name, description, keywords, valueProp, merge } = body;
+  const { url, name, description, keywords, valueProp, lifecyclePhase, merge } = body;
   log.info(`PUT /api/onboarding/profile name=${name} merge=${!!merge}`);
 
   if (!name || !description) {
@@ -45,9 +45,10 @@ export async function PUT(request: Request) {
   const PLACEHOLDER_NAMES = ['', 'Untitled Product'];
   const PLACEHOLDER_DESCS = ['', '-'];
 
-  if (existing.length > 0 && merge) {
+  const prev = existing[0] ?? null;
+
+  if (prev && merge) {
     // Merge: keep existing non-placeholder values, union keywords
-    const prev = existing[0];
     const mergedName = PLACEHOLDER_NAMES.includes(prev.name) ? name : prev.name;
     const mergedDesc = PLACEHOLDER_DESCS.includes(prev.description) ? description : prev.description;
     const mergedKeywords = [...new Set([...prev.keywords, ...(keywords ?? [])])];
@@ -61,11 +62,12 @@ export async function PUT(request: Request) {
         description: mergedDesc,
         keywords: mergedKeywords,
         valueProp: mergedValueProp,
+        ...(lifecyclePhase ? { lifecyclePhase } : {}),
         ...(seoAudit !== null ? { seoAuditJson: seoAudit } : {}),
         updatedAt: new Date(),
       })
       .where(eq(products.userId, session.user.id));
-  } else if (existing.length > 0) {
+  } else if (prev) {
     await db
       .update(products)
       .set({
@@ -74,6 +76,7 @@ export async function PUT(request: Request) {
         description,
         keywords: keywords ?? [],
         valueProp: valueProp ?? null,
+        ...(lifecyclePhase ? { lifecyclePhase } : {}),
         ...(seoAudit !== null ? { seoAuditJson: seoAudit } : {}),
         updatedAt: new Date(),
       })
@@ -86,18 +89,46 @@ export async function PUT(request: Request) {
       description,
       keywords: keywords ?? [],
       valueProp: valueProp ?? null,
+      ...(lifecyclePhase ? { lifecyclePhase } : {}),
       seoAuditJson: seoAudit,
     });
+  }
 
-    // Trigger calibration for new products
-    const [newProduct] = await db
+  // ── Trigger calibration if product identity changed ──
+  // Compare against the values that were actually written to DB
+  let finalName: string;
+  let finalDesc: string;
+  let finalKeywords: string[];
+  let finalValueProp: string | null;
+
+  if (prev && merge) {
+    finalName = PLACEHOLDER_NAMES.includes(prev.name) ? name : prev.name;
+    finalDesc = PLACEHOLDER_DESCS.includes(prev.description) ? description : prev.description;
+    finalKeywords = [...new Set([...prev.keywords, ...(keywords ?? [])])];
+    finalValueProp = prev.valueProp || valueProp || null;
+  } else {
+    finalName = name;
+    finalDesc = description;
+    finalKeywords = keywords ?? [];
+    finalValueProp = valueProp ?? null;
+  }
+
+  const coreChanged =
+    !prev ||
+    prev.name !== finalName ||
+    prev.description !== finalDesc ||
+    prev.valueProp !== finalValueProp ||
+    JSON.stringify([...prev.keywords].sort()) !==
+      JSON.stringify([...finalKeywords].sort());
+
+  if (coreChanged) {
+    const [product] = await db
       .select({ id: products.id })
       .from(products)
       .where(eq(products.userId, session.user.id))
       .limit(1);
 
-    if (newProduct) {
-      // Create default discovery configs + enqueue calibration
+    if (product) {
       const userChannels = await db
         .select({ platform: channels.platform })
         .from(channels)
@@ -108,6 +139,7 @@ export async function PUT(request: Request) {
       ].filter(isPlatformAvailable);
 
       for (const platform of platforms) {
+        // Reset calibration status so the loop runs fresh
         await db
           .insert(discoveryConfigs)
           .values({
@@ -115,16 +147,25 @@ export async function PUT(request: Request) {
             platform,
             calibrationStatus: 'pending',
           })
-          .onConflictDoNothing();
+          .onConflictDoUpdate({
+            target: [discoveryConfigs.userId, discoveryConfigs.platform],
+            set: {
+              calibrationStatus: 'pending',
+              calibrationRound: 0,
+              calibrationPrecision: null,
+              calibrationLog: null,
+              updatedAt: new Date(),
+            },
+          });
       }
 
       if (platforms.length > 0) {
         await enqueueCalibration({
           userId: session.user.id,
-          productId: newProduct.id,
+          productId: product.id,
         });
         log.info(
-          `Enqueued calibration for new product ${newProduct.id}, platforms: ${platforms.join(', ')}`,
+          `Enqueued calibration for product ${product.id} (${prev ? 'updated' : 'new'}), platforms: ${platforms.join(', ')}`,
         );
       }
     }

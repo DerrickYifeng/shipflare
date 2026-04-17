@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { drafts, threads, posts } from '@/lib/db/schema';
-import { eq, and, inArray, desc, gte } from 'drizzle-orm';
+import { eq, and, ne, inArray, desc, gte } from 'drizzle-orm';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('api:x:engagement');
@@ -65,6 +65,7 @@ export async function GET() {
       and(
         eq(drafts.userId, session.user.id),
         eq(threads.platform, 'x'),
+        ne(drafts.draftType, 'original_post'),
         inArray(drafts.status, ['pending', 'needs_revision']),
         gte(drafts.createdAt, lookback),
       ),

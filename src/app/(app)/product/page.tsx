@@ -55,6 +55,7 @@ export default async function ProductPage() {
             description: product.description,
             keywords: product.keywords,
             valueProp: product.valueProp,
+            lifecyclePhase: product.lifecyclePhase,
           }}
         />
         <CodeSnapshotSection

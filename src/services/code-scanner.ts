@@ -445,6 +445,83 @@ export async function scanRepo(repoDir: string): Promise<ScanResult> {
   };
 }
 
+// ─── Incremental Diff ──────────────────────────────────────
+
+const DIFF_ANALYZE_PROMPT = `You analyze git commit logs and diffs to identify content-worthy updates.
+Given the commit log and diff summary below, determine:
+1. Whether the changes are "meaningful" for content creation (new features, notable bug fixes, milestones).
+   Config changes, CI tweaks, dependency bumps, and formatting are NOT meaningful.
+2. If meaningful, write a 2-3 sentence content-ready summary of what changed and why it matters to users.
+
+Respond with ONLY a JSON object:
+{"meaningful": true/false, "summary": "..."}`;
+
+/**
+ * Compare a cloned repo against a previous snapshot's commit SHA.
+ * Returns whether meaningful changes exist and a content-ready summary.
+ */
+export async function diffRepo(
+  repoDir: string,
+  previousCommitSha: string | null,
+): Promise<{ hasMeaningfulChanges: boolean; diffSummary: string | null; newCommitSha: string | null }> {
+  const newSha = await getCommitSha(repoDir);
+
+  if (!newSha || newSha === previousCommitSha) {
+    return { hasMeaningfulChanges: false, diffSummary: null, newCommitSha: newSha };
+  }
+
+  if (!previousCommitSha) {
+    // First diff — no baseline to compare against, skip
+    return { hasMeaningfulChanges: false, diffSummary: null, newCommitSha: newSha };
+  }
+
+  try {
+    // Get commit log between previous and current
+    const { stdout: commitLog } = await execFileAsync(
+      'git', ['log', '--oneline', `${previousCommitSha}..HEAD`],
+      { cwd: repoDir, timeout: 10_000 },
+    );
+
+    // Get diff stats
+    const { stdout: diffStat } = await execFileAsync(
+      'git', ['diff', '--stat', `${previousCommitSha}..HEAD`],
+      { cwd: repoDir, timeout: 10_000 },
+    );
+
+    if (!commitLog.trim()) {
+      return { hasMeaningfulChanges: false, diffSummary: null, newCommitSha: newSha };
+    }
+
+    // Use Haiku to assess whether changes are content-worthy
+    const client = new Anthropic();
+    const response = await client.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 300,
+      system: DIFF_ANALYZE_PROMPT,
+      messages: [{
+        role: 'user',
+        content: `Commit log:\n${commitLog.slice(0, 2000)}\n\nDiff stats:\n${diffStat.slice(0, 2000)}`,
+      }],
+    });
+
+    const text = response.content[0]?.type === 'text' ? response.content[0].text : '';
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      return { hasMeaningfulChanges: false, diffSummary: null, newCommitSha: newSha };
+    }
+
+    const parsed = JSON.parse(jsonMatch[0]) as { meaningful: boolean; summary: string };
+    return {
+      hasMeaningfulChanges: parsed.meaningful,
+      diffSummary: parsed.meaningful ? parsed.summary : null,
+      newCommitSha: newSha,
+    };
+  } catch (error) {
+    log.error(`diffRepo failed: ${error}`);
+    return { hasMeaningfulChanges: false, diffSummary: null, newCommitSha: newSha };
+  }
+}
+
 /**
  * Get the HEAD commit SHA of a cloned repo.
  */

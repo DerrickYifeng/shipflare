@@ -14,7 +14,7 @@ import { processXMetrics } from './processors/metrics';
 import { processXAnalytics } from './processors/analytics';
 import { processTodoSeed } from './processors/todo-seed';
 import { processCalibration } from './processors/calibrate-discovery';
-import { dreamQueue, discoveryQueue, monitorQueue, contentCalendarQueue, metricsQueue, analyticsQueue, todoSeedQueue } from '@/lib/queue';
+import { dreamQueue, discoveryQueue, monitorQueue, contentCalendarQueue, metricsQueue, analyticsQueue, todoSeedQueue, codeScanQueue } from '@/lib/queue';
 import { createLogger } from '@/lib/logger';
 import type { DiscoveryJobData, ContentJobData, ReviewJobData, PostingJobData, HealthScoreJobData, DreamJobData, CodeScanJobData, MonitorJobData, ContentCalendarJobData, EngagementJobData, MetricsJobData, AnalyticsJobData, TodoSeedJobData, CalibrationJobData } from '@/lib/queue/types';
 
@@ -220,6 +220,18 @@ async function scheduleTodoSeed() {
   );
 }
 
+// Schedule daily code diff: 2am UTC (before metrics at 3am)
+async function scheduleCodeDiff() {
+  await codeScanQueue.add(
+    'daily-diff',
+    { userId: '__all__', repoFullName: '', repoUrl: '', githubToken: '', isDailyDiff: true },
+    {
+      repeat: { pattern: '0 2 * * *' },
+      jobId: 'code-diff-cron',
+    },
+  );
+}
+
 // Schedule discovery: 3x daily (8am, 2pm, 8pm UTC)
 async function scheduleDiscovery() {
   await discoveryQueue.add(
@@ -234,6 +246,7 @@ async function scheduleDiscovery() {
 
 Promise.all([
   scheduleNightlyDream(),
+  scheduleCodeDiff(),
   scheduleDiscovery(),
   scheduleMonitor(),
   scheduleContentCalendar(),

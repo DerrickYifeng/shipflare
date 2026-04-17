@@ -38,6 +38,8 @@ export interface CodeScanJobData {
   repoFullName: string;
   repoUrl: string;
   githubToken: string;
+  /** When true, perform incremental diff instead of full scan */
+  isDailyDiff?: boolean;
 }
 
 export interface MonitorJobData {

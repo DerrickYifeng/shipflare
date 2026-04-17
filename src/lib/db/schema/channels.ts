@@ -5,6 +5,7 @@ import {
   real,
   integer,
   boolean,
+  jsonb,
 } from 'drizzle-orm/pg-core';
 import { users } from './users';
 
@@ -21,6 +22,15 @@ export const channels = pgTable('channels', {
   refreshTokenEncrypted: text('refresh_token_encrypted').notNull(),
   tokenExpiresAt: timestamp('token_expires_at', { mode: 'date' }),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
+  postHistory:
+    jsonb('post_history').$type<
+      Array<{
+        id: string;
+        text: string;
+        type: 'post' | 'reply';
+        createdAt: string;
+      }>
+    >(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
 });
 

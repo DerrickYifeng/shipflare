@@ -85,16 +85,16 @@ export const scoreThreadsTool = buildTool({
       .object({
         weights: z
           .object({
-            relevance: z.number().optional(),
-            intent: z.number().optional(),
-            exposure: z.number().optional(),
-            freshness: z.number().optional(),
-            engagement: z.number().optional(),
+            relevance: z.number().nullable().optional(),
+            intent: z.number().nullable().optional(),
+            exposure: z.number().nullable().optional(),
+            freshness: z.number().nullable().optional(),
+            engagement: z.number().nullable().optional(),
           })
           .optional(),
-        intentGate: z.number().optional(),
-        relevanceGate: z.number().optional(),
-        gateCap: z.number().optional(),
+        intentGate: z.number().nullable().optional(),
+        relevanceGate: z.number().nullable().optional(),
+        gateCap: z.number().nullable().optional(),
       })
       .optional()
       .describe('Per-user scoring config overrides'),

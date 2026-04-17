@@ -480,6 +480,56 @@ export class RedditClient {
     return me;
   }
 
+  /**
+   * Fetch a user's recent submissions (self-posts).
+   */
+  async getUserPosts(
+    username: string,
+    limit = 10,
+  ): Promise<Array<{ id: string; text: string; createdAt: string }>> {
+    const data = await this.get(
+      `/user/${username}/submitted?sort=new&limit=${limit}&type=links`,
+    );
+    const listing = data as {
+      data: {
+        children: Array<{
+          data: { id: string; title: string; selftext: string; created_utc: number };
+        }>;
+      };
+    };
+    return (listing.data?.children ?? []).map((c) => ({
+      id: c.data.id,
+      text: c.data.selftext
+        ? `${c.data.title}\n${c.data.selftext}`.slice(0, 500)
+        : c.data.title,
+      createdAt: new Date(c.data.created_utc * 1000).toISOString(),
+    }));
+  }
+
+  /**
+   * Fetch a user's recent comments.
+   */
+  async getUserComments(
+    username: string,
+    limit = 10,
+  ): Promise<Array<{ id: string; text: string; createdAt: string }>> {
+    const data = await this.get(
+      `/user/${username}/comments?sort=new&limit=${limit}`,
+    );
+    const listing = data as {
+      data: {
+        children: Array<{
+          data: { id: string; body: string; created_utc: number };
+        }>;
+      };
+    };
+    return (listing.data?.children ?? []).map((c) => ({
+      id: c.data.id,
+      text: c.data.body.slice(0, 500),
+      createdAt: new Date(c.data.created_utc * 1000).toISOString(),
+    }));
+  }
+
   private async ensureValidToken(): Promise<void> {
     const now = new Date();
     const bufferDate = new Date(

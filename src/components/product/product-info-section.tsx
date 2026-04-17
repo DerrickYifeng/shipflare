@@ -8,11 +8,20 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/components/ui/toast';
 
+const PHASE_CONFIG = {
+  pre_launch: { label: 'Pre-Launch', description: 'Building & validating', variant: 'warning' as const },
+  launched: { label: 'Launched', description: 'Live with real users', variant: 'success' as const },
+  scaling: { label: 'Scaling', description: 'Growing & expanding', variant: 'accent' as const },
+} as const;
+
+type LifecyclePhase = keyof typeof PHASE_CONFIG;
+
 interface ProductData {
   name: string;
   description: string;
   keywords: string[];
   valueProp: string | null;
+  lifecyclePhase: string;
 }
 
 interface ProductInfoSectionProps {
@@ -25,11 +34,42 @@ export function ProductInfoSection({ product }: ProductInfoSectionProps) {
   const [description, setDescription] = useState(product.description);
   const [keywords, setKeywords] = useState(product.keywords.join(', '));
   const [valueProp, setValueProp] = useState(product.valueProp ?? '');
+  const [phase, setPhase] = useState<LifecyclePhase>(
+    (product.lifecyclePhase as LifecyclePhase) || 'pre_launch',
+  );
+  const [savingPhase, setSavingPhase] = useState(false);
   const [saving, setSaving] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [error, setError] = useState('');
   const router = useRouter();
   const { toast } = useToast();
+
+  const handlePhaseChange = async (newPhase: LifecyclePhase) => {
+    if (newPhase === phase) return;
+    setSavingPhase(true);
+    setError('');
+
+    try {
+      const res = await fetch('/api/product/phase', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lifecyclePhase: newPhase }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error ?? 'Failed to update phase');
+      }
+
+      setPhase(newPhase);
+      toast(`Phase updated to ${PHASE_CONFIG[newPhase].label}`);
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update phase');
+    } finally {
+      setSavingPhase(false);
+    }
+  };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -95,6 +135,7 @@ export function ProductInfoSection({ product }: ProductInfoSectionProps) {
     setDescription(product.description);
     setKeywords(product.keywords.join(', '));
     setValueProp(product.valueProp ?? '');
+    setPhase((product.lifecyclePhase as LifecyclePhase) || 'pre_launch');
     setError('');
     setEditing(false);
   };
@@ -187,6 +228,38 @@ export function ProductInfoSection({ product }: ProductInfoSectionProps) {
 
       <Card>
         <p className="text-[17px] tracking-[-0.374px] font-medium text-sf-text-primary">{product.name}</p>
+
+        <div className="flex gap-1 mt-3" role="radiogroup" aria-label="Product lifecycle phase">
+          {(Object.entries(PHASE_CONFIG) as [LifecyclePhase, typeof PHASE_CONFIG[LifecyclePhase]][]).map(
+            ([key, config]) => (
+              <button
+                key={key}
+                type="button"
+                role="radio"
+                aria-checked={phase === key}
+                disabled={savingPhase}
+                onClick={() => handlePhaseChange(key)}
+                className={`
+                  px-2.5 py-1 rounded-[var(--radius-sf-sm)]
+                  text-[12px] font-medium leading-4 tracking-[-0.12px]
+                  transition-all duration-200 cursor-pointer
+                  ${phase === key
+                    ? key === 'pre_launch'
+                      ? 'bg-sf-warning-light text-[#c67a05] ring-1 ring-[#c67a05]/20'
+                      : key === 'launched'
+                        ? 'bg-sf-success-light text-[#248a3d] ring-1 ring-[#248a3d]/20'
+                        : 'bg-sf-accent-light text-sf-accent ring-1 ring-sf-accent/20'
+                    : 'bg-transparent text-sf-text-tertiary hover:text-sf-text-secondary hover:bg-black/[0.03]'
+                  }
+                  ${savingPhase ? 'opacity-60' : ''}
+                `}
+              >
+                {config.label}
+              </button>
+            ),
+          )}
+        </div>
+
         <p className="text-[14px] tracking-[-0.224px] text-sf-text-secondary mt-3 leading-[1.47]">
           {product.description}
         </p>

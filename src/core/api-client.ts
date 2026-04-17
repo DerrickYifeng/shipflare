@@ -179,17 +179,18 @@ export async function createMessage(opts: CreateMessageOptions): Promise<CreateM
     }
 
     try {
-      const response = await getClient().messages.create(
+      const stream = getClient().messages.stream(
         {
           model,
           max_tokens: maxTokens,
           system: systemBlocks,
           messages,
           ...(cachedTools ? { tools: cachedTools } : {}),
-          ...(outputSchema ? { output_format: { type: 'json_schema', json_schema: outputSchema } } : {}),
+          ...(outputSchema ? { output_config: { format: { type: 'json_schema' as const, schema: outputSchema } } } : {}),
         },
         { signal },
       );
+      const response = await stream.finalMessage();
 
       const rawUsage = response.usage as unknown as Record<string, number>;
       const usage = {

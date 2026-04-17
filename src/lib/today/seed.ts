@@ -4,11 +4,10 @@ import {
   drafts,
   threads,
   xContentCalendar,
-  xMonitoredTweets,
   userPreferences,
   products,
 } from '@/lib/db/schema';
-import { eq, and, sql, gte, lte, inArray, isNull, count } from 'drizzle-orm';
+import { eq, and, sql, gte, lte, count } from 'drizzle-orm';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('lib:today:seed');
@@ -120,14 +119,14 @@ export async function seedTodosForUser(userId: string): Promise<number> {
         eq(xContentCalendar.userId, userId),
         gte(xContentCalendar.scheduledAt, dayStart),
         lte(xContentCalendar.scheduledAt, dayEnd),
-        inArray(xContentCalendar.status, ['scheduled', 'draft_created']),
+        eq(xContentCalendar.status, 'draft_created'),
       ),
     );
 
   for (const cal of calendarItems) {
     if (newItems.length >= remaining) break;
 
-    // Skip if a todo already exists for this draft
+    // Skip if a todo already exists for this calendar item
     if (cal.draftId) {
       const [existing] = await db
         .select({ id: todoItems.id })
@@ -136,6 +135,21 @@ export async function seedTodosForUser(userId: string): Promise<number> {
           and(
             eq(todoItems.userId, userId),
             eq(todoItems.draftId, cal.draftId),
+          ),
+        )
+        .limit(1);
+      if (existing) continue;
+    } else {
+      // No draft yet — dedup by scheduledFor to prevent duplicates across seed runs
+      const [existing] = await db
+        .select({ id: todoItems.id })
+        .from(todoItems)
+        .where(
+          and(
+            eq(todoItems.userId, userId),
+            eq(todoItems.source, 'calendar'),
+            eq(todoItems.status, 'pending'),
+            eq(todoItems.scheduledFor, cal.scheduledAt),
           ),
         )
         .limit(1);
@@ -158,87 +172,12 @@ export async function seedTodosForUser(userId: string): Promise<number> {
     });
   }
 
-  // 2. Discovery: top relevant threads with pending drafts
-  const discoveryDrafts = await db
-    .select({
-      draftId: drafts.id,
-      draftType: drafts.draftType,
-      replyBody: drafts.replyBody,
-      confidenceScore: drafts.confidenceScore,
-      threadTitle: threads.title,
-      threadCommunity: threads.community,
-      threadUrl: threads.url,
-      threadPlatform: threads.platform,
-      threadUpvotes: threads.upvotes,
-      threadDiscoveredAt: threads.discoveredAt,
-      engagementDepth: drafts.engagementDepth,
-    })
-    .from(drafts)
-    .innerJoin(threads, eq(drafts.threadId, threads.id))
-    .leftJoin(
-      xMonitoredTweets,
-      and(
-        eq(threads.externalId, xMonitoredTweets.tweetId),
-        eq(xMonitoredTweets.userId, userId),
-      ),
-    )
-    .leftJoin(xContentCalendar, eq(xContentCalendar.draftId, drafts.id))
-    .where(
-      and(
-        eq(drafts.userId, userId),
-        eq(drafts.status, 'pending'),
-        eq(drafts.engagementDepth, 0),
-        isNull(xMonitoredTweets.id), // not a monitor tweet
-        isNull(xContentCalendar.id), // not a calendar item
-      ),
-    )
-    .orderBy(sql`${drafts.confidenceScore} DESC`)
-    .limit(3);
+  // Discovery items are no longer seeded into Today —
+  // they surface in the dedicated Discovery panel instead.
 
   const now = new Date();
 
-  for (const d of discoveryDrafts) {
-    if (newItems.length >= remaining) break;
-
-    // Skip if todo already exists for this draft
-    const [existing] = await db
-      .select({ id: todoItems.id })
-      .from(todoItems)
-      .where(
-        and(eq(todoItems.userId, userId), eq(todoItems.draftId, d.draftId)),
-      )
-      .limit(1);
-    if (existing) continue;
-
-    // Priority classification
-    const threadAgeHours =
-      (now.getTime() - d.threadDiscoveredAt.getTime()) / (1000 * 60 * 60);
-    const isTimeSensitive =
-      threadAgeHours < 4 || (d.threadUpvotes ?? 0) > 50;
-
-    newItems.push({
-      userId,
-      draftId: d.draftId,
-      todoType: d.draftType === 'reply' ? 'reply_thread' : 'approve_post',
-      source: 'discovery',
-      priority: isTimeSensitive
-        ? 'time_sensitive'
-        : d.confidenceScore < 0.7
-          ? 'optional'
-          : 'scheduled',
-      status: 'pending',
-      title: d.threadTitle.length > 100
-        ? d.threadTitle.slice(0, 97) + '...'
-        : d.threadTitle,
-      platform: d.threadPlatform ?? 'reddit',
-      community: d.threadCommunity,
-      externalUrl: d.threadUrl,
-      confidence: d.confidenceScore,
-      expiresAt: dayEnd,
-    });
-  }
-
-  // 3. Engagement: replies/mentions needing response
+  // 2. Engagement: replies/mentions needing response
   const engagementDrafts = await db
     .select({
       draftId: drafts.id,

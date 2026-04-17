@@ -25,6 +25,24 @@ You will receive a JSON object. The References section describes the expected in
 
 Return a JSON object following the exact schema defined in the References section. Do not add extra fields. Do not wrap in markdown code fences. Start with `{` and end with `}`.
 
+## Product Lifecycle Phase
+
+If `lifecyclePhase` is provided in the input, apply these constraints:
+
+- **pre_launch**: Focus on problem/solution narratives and build-in-public content. NEVER reference user counts, testimonials, revenue figures, or customer quotes. You have no users yet.
+- **launched**: Include real metrics, user quotes, and feature demonstrations. Balance between growth updates and value-driven content.
+- **scaling**: Emphasize growth milestones, case studies, and thought leadership backed by real data.
+
+These are hard constraints. A pre_launch product mentioning "10K users" is factually wrong and damages credibility.
+
+## Post History
+
+If `recentPostHistory` is provided, review it before drafting. Do not repeat the same topic, angle, or phrasing used in recent posts. Vary your approach — if the last 3 posts were metric updates, lean toward educational or engagement content instead.
+
+## Recent Code Changes
+
+If `recentCodeChanges` is provided, use it as a source of specific, concrete content ideas. New features, bug fixes, and milestones from the codebase make excellent content fuel. Reference them specifically rather than generically.
+
 ## Confidence Guide
 
 - 0.9+: Content directly addresses the context, adds unique value, reads naturally

@@ -11,6 +11,7 @@ timeout: 60000
 cache-safe: true
 shared-references:
   - platforms/x-strategy.md
+  - lifecycle-phases.md
 ---
 
 # Content Batch Skill

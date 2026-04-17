@@ -40,6 +40,16 @@ You will receive one or more strategy reference documents in your system prompt 
 5. **Assign strategic topics** — not generic labels, but specific, actionable topic descriptions the content creator can execute on
 6. **Set posting times** according to the phase's recommended schedule (use UTC hours)
 
+## Product Lifecycle Phase
+
+If `lifecyclePhase` is provided in the input, apply it as an additional constraint on top of the growth phase:
+
+- **pre_launch**: Do NOT generate topics that reference user metrics, testimonials, signups, revenue, or customer quotes. Focus on problem/solution narratives, build-in-public progress, technical decisions, and validation signals.
+- **launched**: Lean toward metric and product content types. User stories and case studies are now valid topics.
+- **scaling**: Favor thought leadership, in-depth case studies, and industry analysis topics.
+
+The lifecycle phase and growth phase work together: a pre_launch product in Phase 1 (0-500 followers) should still follow Phase 1's content mix ratios, but every topic must respect the pre_launch content constraints.
+
 ## Planning Rules
 
 - Follow the content mix ratios for the detected phase exactly

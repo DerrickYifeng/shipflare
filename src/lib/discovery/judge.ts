@@ -176,31 +176,27 @@ export async function judgeThreadsBatch(
 // Helper: convert Zod schema to JSON Schema for outputSchema
 // ---------------------------------------------------------------------------
 
-function zodToJsonSchema(schema: z.ZodType): Record<string, unknown> {
+function zodToJsonSchema(_schema: z.ZodType): Record<string, unknown> {
   // Minimal conversion for the specific judge schema.
-  // The Anthropic API accepts JSON Schema for structured output.
+  // Anthropic output_config.format.schema expects raw JSON Schema (no wrapper).
   return {
-    name: 'judge_output',
-    strict: true,
-    schema: {
-      type: 'object',
-      properties: {
-        judgments: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: {
-              id: { type: 'string' },
-              isPotentialUser: { type: 'boolean' },
-              reason: { type: 'string' },
-            },
-            required: ['id', 'isPotentialUser', 'reason'],
-            additionalProperties: false,
+    type: 'object',
+    properties: {
+      judgments: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            isPotentialUser: { type: 'boolean' },
+            reason: { type: 'string' },
           },
+          required: ['id', 'isPotentialUser', 'reason'],
+          additionalProperties: false,
         },
       },
-      required: ['judgments'],
-      additionalProperties: false,
     },
+    required: ['judgments'],
+    additionalProperties: false,
   };
 }

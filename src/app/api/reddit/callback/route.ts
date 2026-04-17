@@ -117,5 +117,39 @@ export async function GET(request: NextRequest) {
   }
 
   log.info(`Reddit account connected: u/${me.name}`);
+
+  // Fetch recent post history for content deduplication (best-effort)
+  try {
+    const { RedditClient } = await import('@/lib/reddit-client');
+    const channelId = existing[0]?.id ?? '';
+    if (channelId) {
+      const client = new RedditClient(
+        channelId,
+        encryptedAccess,
+        encryptedRefresh,
+        expiresAt,
+      );
+      const [userPosts, userComments] = await Promise.all([
+        client.getUserPosts(me.name, 10),
+        client.getUserComments(me.name, 10),
+      ]);
+
+      const postHistory = [
+        ...userPosts.map((p) => ({ ...p, type: 'post' as const })),
+        ...userComments.map((c) => ({ ...c, type: 'reply' as const })),
+      ];
+
+      if (postHistory.length > 0) {
+        await db
+          .update(channels)
+          .set({ postHistory })
+          .where(eq(channels.id, channelId));
+        log.info(`Stored ${postHistory.length} post history items for u/${me.name}`);
+      }
+    }
+  } catch (err) {
+    log.warn(`Failed to fetch Reddit post history: ${err instanceof Error ? err.message : err}`);
+  }
+
   return NextResponse.redirect(new URL('/today', request.url));
 }

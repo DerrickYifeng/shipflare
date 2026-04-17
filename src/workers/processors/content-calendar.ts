@@ -7,6 +7,7 @@ import {
   threads,
   activityEvents,
   xContentCalendar,
+  codeSnapshots,
 } from '@/lib/db/schema';
 import { eq, and, lte } from 'drizzle-orm';
 import { loadSkill } from '@/core/skill-loader';
@@ -68,6 +69,27 @@ async function processXContentCalendarForUser(
 
   log.info(`Found ${dueItems.length} due calendar items`);
 
+  // Load channel post history for deduplication
+  const [channel] = await db
+    .select({ postHistory: channels.postHistory })
+    .from(channels)
+    .where(and(eq(channels.userId, userId), eq(channels.platform, 'x')))
+    .limit(1);
+
+  const recentPostHistory = (channel?.postHistory ?? [])
+    .filter((p) => !!p?.text)
+    .map((p) => p.text)
+    .slice(0, 20);
+
+  // Load code snapshot for recent changes context
+  const [snapshot] = await db
+    .select({ diffSummary: codeSnapshots.diffSummary, changesDetected: codeSnapshots.changesDetected })
+    .from(codeSnapshots)
+    .where(eq(codeSnapshots.productId, productId))
+    .limit(1);
+
+  const recentCodeChanges = snapshot?.changesDetected ? snapshot.diffSummary ?? undefined : undefined;
+
   // Build calendar items for the skill (strategy is auto-injected via skill references)
   const calendarItems = dueItems.map((item) => ({
     contentType: item.contentType,
@@ -76,7 +98,10 @@ async function processXContentCalendarForUser(
     productDescription: product.description,
     valueProp: product.valueProp ?? '',
     keywords: product.keywords,
+    lifecyclePhase: product.lifecyclePhase ?? 'pre_launch',
     isThread: item.contentType === 'thread',
+    ...(recentPostHistory.length > 0 ? { recentPostHistory } : {}),
+    ...(recentCodeChanges ? { recentCodeChanges } : {}),
   }));
 
   // Load memory

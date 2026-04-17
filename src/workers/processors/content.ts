@@ -1,6 +1,6 @@
 import type { Job } from 'bullmq';
 import { db } from '@/lib/db';
-import { products, threads, drafts, activityEvents, todoItems } from '@/lib/db/schema';
+import { products, threads, drafts, activityEvents, todoItems, channels } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { loadSkill } from '@/core/skill-loader';
 import { runSkill } from '@/core/skill-runner';
@@ -46,6 +46,18 @@ export async function processContent(job: Job<ContentJobData>) {
   const dream = new AgentDream(memoryStore);
   const memoryPrompt = await buildMemoryPrompt(memoryStore);
 
+  // Load channel post history for deduplication
+  const [channel] = await db
+    .select({ postHistory: channels.postHistory })
+    .from(channels)
+    .where(and(eq(channels.userId, userId), eq(channels.platform, thread.platform ?? 'reddit')))
+    .limit(1);
+
+  const recentPostHistory = (channel?.postHistory ?? [])
+    .filter((p) => !!p?.text)
+    .map((p) => p.text)
+    .slice(0, 20);
+
   // Run content-gen skill (single-item fan-out)
   const skill = loadSkill(join(SKILLS_DIR, 'content-gen'));
   const { results, usage } = await runSkill({
@@ -60,8 +72,10 @@ export async function processContent(job: Job<ContentJobData>) {
           productDescription: product.description,
           valueProp: product.valueProp,
           keywords: product.keywords,
+          lifecyclePhase: product.lifecyclePhase ?? 'pre_launch',
           draftType,
           communityIntel,
+          ...(recentPostHistory.length > 0 ? { recentPostHistory } : {}),
         },
       ],
     },

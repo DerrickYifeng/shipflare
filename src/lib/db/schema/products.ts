@@ -13,6 +13,7 @@ export const products = pgTable('products', {
   description: text('description').notNull(),
   keywords: text('keywords').array().notNull().default([]),
   valueProp: text('value_prop'),
+  lifecyclePhase: text('lifecycle_phase').notNull().default('pre_launch'),
   seoAuditJson: jsonb('seo_audit_json'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
