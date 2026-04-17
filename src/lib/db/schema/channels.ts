@@ -5,7 +5,6 @@ import {
   real,
   integer,
   boolean,
-  jsonb,
   index,
   uniqueIndex,
   check,
@@ -28,16 +27,6 @@ export const channels = pgTable(
     refreshTokenEncrypted: text('refresh_token_encrypted').notNull(),
     tokenExpiresAt: timestamp('token_expires_at', { mode: 'date' }),
     createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
-    /** @deprecated Use channelPosts table. Removed in migration 0017. */
-    postHistory:
-      jsonb('post_history').$type<
-        Array<{
-          id: string;
-          text: string;
-          type: 'post' | 'reply';
-          createdAt: string;
-        }>
-      >(),
     updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
   },
   (t) => [

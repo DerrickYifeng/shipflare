@@ -134,7 +134,6 @@ export const activityEvents = pgTable(
     createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
   },
   (t) => [
-    index('activity_events_user_created_idx').on(t.userId, desc(t.createdAt)),
     index('activity_events_user_type_created_idx').on(t.userId, t.eventType, desc(t.createdAt)),
   ],
 );

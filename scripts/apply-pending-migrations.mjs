@@ -92,6 +92,7 @@ const MAIN_TABLES_FOR = {
   '0014_wave2_constraints': [], // always-run via directive
   '0015_agent_memories_user_id': [], // always-run via directive
   '0016_channel_posts': [], // always-run via directive
+  '0017_cleanup': [], // always-run via directive
 };
 
 try {
