@@ -112,10 +112,34 @@ function parseSimpleYaml(yaml: string): Record<string, unknown> {
 // ---------------------------------------------------------------------------
 
 /**
+ * In-process cache of parsed SkillConfigs keyed by skill directory.
+ *
+ * Parsing a skill walks the FS (SKILL.md + references/*.md + shared refs),
+ * splits frontmatter and re-reads each file — expensive to do on every
+ * `runSkill` call. Set `DISABLE_SKILL_CACHE=1` for local dev so edits to
+ * SKILL.md / references take effect without a restart.
+ */
+const skillCache = new Map<string, SkillConfig>();
+
+function isCacheDisabled(): boolean {
+  return process.env.DISABLE_SKILL_CACHE === '1';
+}
+
+/** Clear the skill cache. Primarily for tests. */
+export function clearSkillCache(): void {
+  skillCache.clear();
+}
+
+/**
  * Load a single SKILL.md from a skill directory.
  * Parses YAML frontmatter and returns a SkillConfig.
  */
 export function loadSkill(skillDir: string): SkillConfig {
+  if (!isCacheDisabled()) {
+    const cached = skillCache.get(skillDir);
+    if (cached) return cached;
+  }
+
   const skillPath = join(skillDir, 'SKILL.md');
   if (!existsSync(skillPath)) {
     throw new Error(`SKILL.md not found in ${skillDir}`);
@@ -159,7 +183,7 @@ export function loadSkill(skillDir: string): SkillConfig {
     }
   }
 
-  return {
+  const config: SkillConfig = {
     name,
     description: (meta.description as string) ?? '',
     context: (meta.context as 'inline' | 'fork') ?? 'fork',
@@ -174,6 +198,11 @@ export function loadSkill(skillDir: string): SkillConfig {
     prompt: body!.trim(),
     references: Object.keys(references).length > 0 ? references : undefined,
   };
+
+  if (!isCacheDisabled()) {
+    skillCache.set(skillDir, config);
+  }
+  return config;
 }
 
 /**
