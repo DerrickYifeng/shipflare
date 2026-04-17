@@ -1,7 +1,7 @@
 import type { Job } from 'bullmq';
 import { db } from '@/lib/db';
 import { drafts, posts, activityEvents, healthScores } from '@/lib/db/schema';
-import { eq, and, gte } from 'drizzle-orm';
+import { eq, and, gte, sql } from 'drizzle-orm';
 import type { HealthScoreJobData } from '@/lib/queue/types';
 import { createLogger, loggerForJob } from '@/lib/logger';
 
@@ -22,57 +22,58 @@ export async function processHealthScore(job: Job<HealthScoreJobData>) {
   log.info(`Calculating health score for user ${userId}`);
   const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
-  // S1: Pipeline activity (discovery scans + drafts created in last 7 days)
-  const recentDrafts = await db
-    .select()
+  // S1 + S2: recent drafts count + average confidence (last 7 days).
+  // SQL aggregate replaces the old SELECT * + JS reduce.
+  const [draftAgg] = await db
+    .select({
+      count: sql<number>`count(*)::int`,
+      avgConfidence: sql<number | null>`avg(${drafts.confidenceScore})::real`,
+    })
     .from(drafts)
     .where(and(eq(drafts.userId, userId), gte(drafts.createdAt, weekAgo)));
 
-  const draftCount = recentDrafts.length;
+  const draftCount = draftAgg?.count ?? 0;
   const s1 = Math.min(1.0, draftCount / 10); // 10 drafts/week = 100%
+  const s2 = draftAgg?.avgConfidence ?? 0;
 
-  // S2: Average confidence of recent drafts
-  const avgConfidence =
-    draftCount > 0
-      ? recentDrafts.reduce((sum, d) => sum + d.confidenceScore, 0) /
-        draftCount
-      : 0;
-  const s2 = avgConfidence;
-
-  // S3: Engagement (posts with verified status in last 7 days)
-  const recentPosts = await db
-    .select()
+  // S3 + S4 (partial): recent post aggregates (last 7 days).
+  //   postCount         — total posts in window (for S3 gate)
+  //   verifiedCount     — posts with status='verified' (S3 numerator)
+  //   activeDayCount    — distinct calendar days with ≥1 post (S4 numerator)
+  // One round-trip instead of SELECT * + JS filter/Set.
+  const [postAgg] = await db
+    .select({
+      count: sql<number>`count(*)::int`,
+      verifiedCount: sql<number>`count(*) filter (where ${posts.status} = 'verified')::int`,
+      activeDayCount: sql<number>`count(distinct date_trunc('day', ${posts.postedAt}))::int`,
+    })
     .from(posts)
     .where(and(eq(posts.userId, userId), gte(posts.postedAt, weekAgo)));
 
-  const verifiedCount = recentPosts.filter(
-    (p) => p.status === 'verified',
-  ).length;
-  const postCount = recentPosts.length;
+  const postCount = postAgg?.count ?? 0;
+  const verifiedCount = postAgg?.verifiedCount ?? 0;
+  const activeDayCount = postAgg?.activeDayCount ?? 0;
   const ENGAGEMENT_BASELINE = 20; // Hardcoded for Phase 1
   const s3 = postCount > 0 ? Math.min(1.0, verifiedCount / ENGAGEMENT_BASELINE) : 0;
 
-  // S4: Consistency (posting regularity, only if >= 5 total drafts)
-  const allDrafts = await db
-    .select()
+  // S4 gate: lifetime draft count (unbounded by time — the "cold start" test).
+  const [allDraftAgg] = await db
+    .select({ count: sql<number>`count(*)::int` })
     .from(drafts)
     .where(eq(drafts.userId, userId));
 
-  const totalDrafts = allDrafts.length;
+  const totalDrafts = allDraftAgg?.count ?? 0;
   const isColdStart = totalDrafts < 5;
 
   let s4 = 0;
   if (!isColdStart) {
-    // Days with at least one post in last 7 days
-    const uniqueDays = new Set(
-      recentPosts.map((p) => p.postedAt.toISOString().slice(0, 10)),
-    );
-    s4 = Math.min(1.0, uniqueDays.size / 5); // 5 active days = 100%
+    // Days with at least one post in last 7 days — from SQL aggregate above.
+    s4 = Math.min(1.0, activeDayCount / 5); // 5 active days = 100%
   }
 
   // S5: Safety (no circuit breaker trips in last 7 days)
-  const breakerTrips = await db
-    .select()
+  const [breakerAgg] = await db
+    .select({ count: sql<number>`count(*)::int` })
     .from(activityEvents)
     .where(
       and(
@@ -82,7 +83,7 @@ export async function processHealthScore(job: Job<HealthScoreJobData>) {
       ),
     );
 
-  const s5 = breakerTrips.length === 0 ? 1.0 : 0.0;
+  const s5 = (breakerAgg?.count ?? 0) === 0 ? 1.0 : 0.0;
 
   // Weighted score
   let score: number;
