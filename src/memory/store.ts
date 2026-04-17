@@ -11,7 +11,10 @@ import { MEMORY_CONFIG } from './types';
  * Same interface as engine's memdir but backed by PostgreSQL.
  */
 export class MemoryStore {
-  constructor(private readonly productId: string) {}
+  constructor(
+    private readonly userId: string,
+    private readonly productId: string,
+  ) {}
 
   /**
    * Get all productIds that have undistilled log entries.
@@ -122,6 +125,7 @@ export class MemoryStore {
     await db
       .insert(agentMemories)
       .values({
+        userId: this.userId,
         productId: this.productId,
         name: entry.name,
         description: entry.description,

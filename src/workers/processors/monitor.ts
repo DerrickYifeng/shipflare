@@ -255,7 +255,7 @@ async function processXMonitorForUser(
 
   // Run reply-scan skill for tweets within reply window
   if (tweetsForReply.length > 0) {
-    const memoryStore = new MemoryStore(productId);
+    const memoryStore = new MemoryStore(userId, productId);
     const dream = new AgentDream(memoryStore);
     const memoryPrompt = await buildMemoryPrompt(memoryStore);
 

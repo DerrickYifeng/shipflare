@@ -48,7 +48,7 @@ export async function processContent(job: Job<ContentJobData>) {
   log.info(`Generating ${draftType} draft for thread ${threadId} in r/${thread.community}`);
 
   // Load memory context
-  const memoryStore = new MemoryStore(productId);
+  const memoryStore = new MemoryStore(userId, productId);
   const dream = new AgentDream(memoryStore);
   const memoryPrompt = await buildMemoryPrompt(memoryStore);
 

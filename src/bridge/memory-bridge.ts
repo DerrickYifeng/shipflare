@@ -44,7 +44,7 @@ export async function loadFullContext(
   productId: string,
 ): Promise<string> {
   const productContext = await loadProductContext(userId);
-  const store = new MemoryStore(productId);
+  const store = new MemoryStore(userId, productId);
   const memoryPrompt = await buildMemoryPrompt(store);
 
   const parts = [productContext, memoryPrompt].filter(Boolean);

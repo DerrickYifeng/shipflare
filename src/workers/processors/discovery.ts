@@ -103,7 +103,7 @@ export async function processDiscovery(job: Job<DiscoveryJobData>) {
   const deps = await createPlatformDeps(platform, userId);
 
   // Load memory context
-  const memoryStore = new MemoryStore(productId);
+  const memoryStore = new MemoryStore(userId, productId);
   const dream = new AgentDream(memoryStore);
   const memoryPrompt = await buildMemoryPrompt(memoryStore);
 

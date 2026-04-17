@@ -53,7 +53,7 @@ export async function processReview(job: Job<ReviewJobData>) {
   log.info(`Reviewing draft ${draftId} for ${thread.community}`);
 
   // Load memory context
-  const memoryStore = new MemoryStore(productId);
+  const memoryStore = new MemoryStore(userId, productId);
   const dream = new AgentDream(memoryStore);
   const memoryPrompt = await buildMemoryPrompt(memoryStore);
 
