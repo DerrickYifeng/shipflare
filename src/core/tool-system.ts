@@ -1,7 +1,7 @@
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { z } from 'zod';
 import type Anthropic from '@anthropic-ai/sdk';
-import type { ToolDefinition, ToolContext } from './types';
+import type { ToolDefinition, ToolContext, AnyToolDefinition } from './types';
 
 // ---------------------------------------------------------------------------
 // buildTool factory (ported from engine/Tool.ts:749-792, merged with bridge)
@@ -70,11 +70,11 @@ export function toAnthropicTool(tool: ToolDefinition): Anthropic.Messages.Tool {
  * Replaces ad-hoc Map<string, ToolDefinition> in bridge/load-agent.ts.
  */
 export class ToolRegistry {
-  private readonly tools = new Map<string, ToolDefinition<any, any>>();
+  private readonly tools = new Map<string, AnyToolDefinition>();
   private readonly aliases = new Map<string, string>();
 
   /** Register a tool. Overwrites if name already exists. */
-  register(tool: ToolDefinition<any, any>): void {
+  register(tool: AnyToolDefinition): void {
     this.tools.set(tool.name, tool);
     if (tool.aliases) {
       for (const alias of tool.aliases) {
@@ -84,18 +84,18 @@ export class ToolRegistry {
   }
 
   /** Lookup by name or alias. Returns undefined if not found. */
-  get(name: string): ToolDefinition<any, any> | undefined {
+  get(name: string): AnyToolDefinition | undefined {
     return this.tools.get(name) ?? this.tools.get(this.aliases.get(name) ?? '');
   }
 
   /** Return all registered tools. */
-  getAll(): ToolDefinition<any, any>[] {
+  getAll(): AnyToolDefinition[] {
     return Array.from(this.tools.values());
   }
 
   /** Return a subset of tools matching the given names. */
-  getForAgent(names: string[]): ToolDefinition<any, any>[] {
-    const result: ToolDefinition<any, any>[] = [];
+  getForAgent(names: string[]): AnyToolDefinition[] {
+    const result: AnyToolDefinition[] = [];
     for (const name of names) {
       const tool = this.get(name);
       if (tool) {
@@ -106,14 +106,14 @@ export class ToolRegistry {
   }
 
   /** Batch register tools from MCP discovery. */
-  loadFromMCP(tools: ToolDefinition<any, any>[]): void {
+  loadFromMCP(tools: AnyToolDefinition[]): void {
     for (const tool of tools) {
       this.register(tool);
     }
   }
 
   /** Convert to legacy Map format for bridge compatibility. */
-  toMap(): Map<string, ToolDefinition<any, any>> {
+  toMap(): Map<string, AnyToolDefinition> {
     return new Map(this.tools);
   }
 

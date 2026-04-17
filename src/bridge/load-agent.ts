@@ -1,12 +1,12 @@
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, readdirSync } from 'fs';
 import { join, dirname } from 'path';
-import type { AgentConfig, ToolDefinition } from './types';
+import type { AgentConfig, AnyToolDefinition } from './types';
 import type { ToolRegistry } from '@/core/tool-system';
 
 /** Accept either a ToolRegistry or a legacy Map for tool resolution. */
-type ToolSource = ToolRegistry | Map<string, ToolDefinition<any, any>>;
+type ToolSource = ToolRegistry | Map<string, AnyToolDefinition>;
 
-function lookupTool(source: ToolSource, name: string): ToolDefinition<any, any> | undefined {
+function lookupTool(source: ToolSource, name: string): AnyToolDefinition | undefined {
   if ('getForAgent' in source) {
     return source.get(name);
   }
@@ -87,13 +87,10 @@ export function loadAgentsFromDir(
   dirPath: string,
   toolSource: ToolSource,
 ): AgentConfig[] {
-  const { readdirSync } = require('fs') as typeof import('fs');
   const files = readdirSync(dirPath).filter(
-    (f: string) => f.endsWith('.md') && f !== 'react-preamble.md',
+    (f) => f.endsWith('.md') && f !== 'react-preamble.md',
   );
-  return files.map((f: string) =>
-    loadAgentFromFile(join(dirPath, f), toolSource),
-  );
+  return files.map((f) => loadAgentFromFile(join(dirPath, f), toolSource));
 }
 
 /**
@@ -122,7 +119,7 @@ export function parseAgentMarkdown(
 
   // Resolve tool names to ToolDefinition instances
   const toolNames: string[] = Array.isArray(meta.tools) ? meta.tools : [];
-  const tools: ToolDefinition<any, any>[] = toolNames.map((tn) => {
+  const tools: AnyToolDefinition[] = toolNames.map((tn) => {
     const tool = lookupTool(toolSource, tn);
     if (!tool) {
       throw new Error(`Agent "${name}": unknown tool "${tn}"`);

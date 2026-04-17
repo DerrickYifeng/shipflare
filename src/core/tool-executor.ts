@@ -1,5 +1,5 @@
 import type Anthropic from '@anthropic-ai/sdk';
-import type { ToolDefinition, ToolContext, ToolResult, StreamEvent } from './types';
+import type { ToolContext, ToolResult, StreamEvent, AnyToolDefinition } from './types';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('core:tools');
@@ -22,7 +22,7 @@ interface ToolBatch {
  */
 export function partitionToolCalls(
   blocks: Anthropic.Messages.ToolUseBlock[],
-  tools: ToolDefinition<any, any>[],
+  tools: AnyToolDefinition[],
 ): ToolBatch[] {
   return blocks.reduce((acc: ToolBatch[], block) => {
     const tool = tools.find((t) => t.name === block.name);
@@ -47,7 +47,7 @@ export function partitionToolCalls(
  */
 async function executeSingleTool(
   block: Anthropic.Messages.ToolUseBlock,
-  tools: ToolDefinition<any, any>[],
+  tools: AnyToolDefinition[],
   context: ToolContext,
 ): Promise<{ result: ToolResult; durationMs: number }> {
   const start = Date.now();
@@ -70,8 +70,12 @@ async function executeSingleTool(
     if (Array.isArray(inputToValidate)) {
       const result = tool.inputSchema.safeParse(inputToValidate);
       if (!result.success) {
-        // Find the first array-typed key from the schema shape and wrap
-        const shape = (tool.inputSchema as any)?._def?.shape?.();
+        // Find the first array-typed key from the schema shape and wrap.
+        // Reach into the Zod internal `_def` shape — this is a runtime
+        // introspection heuristic, not a public API.
+        type ZodShape = Record<string, { _def?: { typeName?: string } }>;
+        type ZodObjectLike = { _def?: { shape?: () => ZodShape } };
+        const shape = (tool.inputSchema as unknown as ZodObjectLike)._def?.shape?.();
         if (shape) {
           const arrayKey = Object.keys(shape).find(
             (k) => shape[k]?._def?.typeName === 'ZodArray',
@@ -132,7 +136,7 @@ async function executeSingleTool(
  */
 export async function executeTools(
   blocks: Anthropic.Messages.ToolUseBlock[],
-  tools: ToolDefinition<any, any>[],
+  tools: AnyToolDefinition[],
   context: ToolContext,
   onEvent?: (event: StreamEvent) => void,
 ): Promise<Anthropic.Messages.ToolResultBlockParam[]> {

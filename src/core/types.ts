@@ -27,6 +27,18 @@ export interface ToolDefinition<TInput = unknown, TOutput = unknown> {
 }
 
 /**
+ * Type-erased tool definition for heterogeneous collections (registries,
+ * agent `tools: [...]` arrays). Each tool validates its own input via its
+ * zod schema at execute time, so the call-site input is `unknown` here —
+ * this mirrors the old `ToolDefinition<any, any>` alias with an explicit,
+ * lint-friendly shape. Keep function-parameter variance in mind: declaring
+ * `execute` as `(input: unknown, ...)` makes this a bivariant-compatible
+ * supertype of `ToolDefinition<Specific, ...>` without any casts.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type AnyToolDefinition = ToolDefinition<any, any>;
+
+/**
  * Dependency injection context passed to tools at execution time.
  * Ported from engine's ToolUseContext (engine/Tool.ts:158).
  */
@@ -64,7 +76,7 @@ export type StreamEvent =
 export interface QueryParams {
   messages: Anthropic.Messages.MessageParam[];
   systemPrompt: string;
-  tools: ToolDefinition<any, any>[];
+  tools: AnyToolDefinition[];
   model: string;
   maxTurns: number;
   /** Maximum output tokens per API call. Default: 8192. */
@@ -92,7 +104,7 @@ export interface AgentConfig {
   name: string;
   systemPrompt: string;
   model: string;
-  tools: ToolDefinition<any, any>[];
+  tools: AnyToolDefinition[];
   maxTurns: number;
   outputSchema?: z.ZodType;
 }
@@ -107,7 +119,7 @@ export interface CacheSafeParams {
   /** Shared system prompt (base text, identical for all children). */
   systemPrompt: string;
   /** Shared tools (order and content must be identical). */
-  tools: ToolDefinition<any, any>[];
+  tools: AnyToolDefinition[];
   /** Shared model identifier. */
   model: string;
   /** Max turns per agent. */

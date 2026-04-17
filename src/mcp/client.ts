@@ -1,6 +1,35 @@
 import type { MCPServerConfig, MCPConnection, MCPToolSchema, MCPToolResult, MCPConnectionStatus } from './types';
 
 /**
+ * Minimal structural types for the MCP SDK's Client surface we consume.
+ * The SDK is imported dynamically so we can't reuse its real types without
+ * adding a hard dependency — these mirror the shapes listTools/callTool
+ * actually return (per MCP spec) and keep the `as any` casts out of the
+ * call sites.
+ */
+interface MCPContentPart {
+  type: string;
+  text?: string;
+}
+interface MCPListToolsResult {
+  tools?: Array<{
+    name: string;
+    description?: string;
+    inputSchema?: MCPToolSchema['inputSchema'];
+  }>;
+}
+interface MCPCallToolResult {
+  content?: MCPContentPart[];
+  isError?: boolean;
+}
+interface MCPSdkClient {
+  connect(transport: unknown): Promise<void>;
+  close(): Promise<void>;
+  listTools(): Promise<MCPListToolsResult>;
+  callTool(args: { name: string; arguments: Record<string, unknown> }): Promise<MCPCallToolResult>;
+}
+
+/**
  * Headless MCP client using @modelcontextprotocol/sdk.
  * Ported from engine/services/mcp/client.ts.
  *
@@ -12,7 +41,7 @@ import type { MCPServerConfig, MCPConnection, MCPToolSchema, MCPToolResult, MCPC
  * This module will throw at runtime if the SDK is not available.
  */
 export class MCPClient {
-  private client: unknown = null;
+  private client: MCPSdkClient | null = null;
   private transport: unknown = null;
   private _status: MCPConnectionStatus = 'disconnected';
   private _tools: MCPToolSchema[] = [];
@@ -45,15 +74,15 @@ export class MCPClient {
       });
 
       const { Client } = sdk;
-      this.client = new Client({ name: `shipflare-${this.config.name}`, version: '1.0.0' });
+      this.client = new Client({ name: `shipflare-${this.config.name}`, version: '1.0.0' }) as unknown as MCPSdkClient;
       this.transport = await this.createTransport();
 
-      await (this.client as any).connect(this.transport);
+      await this.client.connect(this.transport);
       this._status = 'connected';
 
       // Discover tools
-      const result = await (this.client as any).listTools();
-      this._tools = (result.tools ?? []).map((t: any) => ({
+      const result = await this.client.listTools();
+      this._tools = (result.tools ?? []).map((t) => ({
         name: t.name,
         description: t.description ?? '',
         inputSchema: t.inputSchema ?? { type: 'object', properties: {} },
@@ -69,7 +98,7 @@ export class MCPClient {
   async disconnect(): Promise<void> {
     if (this.client) {
       try {
-        await (this.client as any).close();
+        await this.client.close();
       } catch {
         // Ignore close errors
       }
@@ -87,11 +116,11 @@ export class MCPClient {
     }
 
     try {
-      const result = await (this.client as any).callTool({ name, arguments: args });
+      const result = await this.client.callTool({ name, arguments: args });
 
       const content = (result.content ?? [])
-        .map((c: any) => {
-          if (c.type === 'text') return c.text;
+        .map((c) => {
+          if (c.type === 'text') return c.text ?? '';
           return JSON.stringify(c);
         })
         .join('\n');
