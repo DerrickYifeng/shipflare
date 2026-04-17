@@ -6,6 +6,7 @@ import { eq, and, inArray } from 'drizzle-orm';
 import { enqueuePosting, enqueueContent } from '@/lib/queue';
 import { createLogger, loggerForRequest } from '@/lib/logger';
 import { PLATFORMS } from '@/lib/platform-config';
+import { recordPipelineEvent, recordThreadFeedback } from '@/lib/pipeline-events';
 
 const baseLog = createLogger('api:drafts');
 
@@ -189,6 +190,20 @@ export async function POST(request: NextRequest) {
         channelId: channel.id,
         traceId,
       });
+
+      // Telemetry: stage='approved' + thread_feedback ground-truth label.
+      await recordPipelineEvent({
+        userId: session.user.id,
+        threadId: draft.threadId,
+        draftId,
+        stage: 'approved',
+        metadata: { platform, autoApproved: false },
+      });
+      await recordThreadFeedback({
+        userId: session.user.id,
+        threadId: draft.threadId,
+        userAction: 'approve',
+      });
     } else {
       const platformLabel = PLATFORMS[platform]?.displayName ?? platform;
       return NextResponse.json(
@@ -201,6 +216,13 @@ export async function POST(request: NextRequest) {
       .update(drafts)
       .set({ status: 'skipped', updatedAt: new Date() })
       .where(eq(drafts.id, draftId));
+
+    // Ground-truth label for the discovery optimization loop.
+    await recordThreadFeedback({
+      userId: session.user.id,
+      threadId: draft.threadId,
+      userAction: 'skip',
+    });
   } else if (action === 'retry') {
     // Re-enqueue content generation for flagged/needs_revision drafts
     if (!['flagged', 'needs_revision'].includes(draft.status)) {

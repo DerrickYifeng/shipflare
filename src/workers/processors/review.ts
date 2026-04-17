@@ -14,6 +14,7 @@ import { createLogger, loggerForJob } from '@/lib/logger';
 import { MemoryStore } from '@/memory/store';
 import { AgentDream } from '@/memory/dream';
 import { buildMemoryPrompt } from '@/memory/prompt-builder';
+import { recordPipelineEvent } from '@/lib/pipeline-events';
 
 const baseLog = createLogger('worker:review');
 
@@ -160,6 +161,49 @@ export async function processReview(job: Job<ReviewJobData>) {
     }
 
     await db.update(drafts).set(updateData).where(eq(drafts.id, draftId));
+
+    // Telemetry: stage='reviewed' (always). If the verdict marked the draft
+    // as failed/flagged, also emit a 'failed' row so the funnel shows the
+    // drop-off reason.
+    await recordPipelineEvent({
+      userId,
+      productId,
+      threadId: draft.threadId,
+      draftId,
+      stage: 'reviewed',
+      cost: usage.costUsd,
+      metadata: {
+        verdict: result.verdict,
+        score: result.score,
+        autoApproved,
+      },
+    });
+    if (result.verdict === 'FAIL') {
+      await recordPipelineEvent({
+        userId,
+        productId,
+        threadId: draft.threadId,
+        draftId,
+        stage: 'failed',
+        metadata: {
+          reason: 'review_flagged',
+          verdict: result.verdict,
+          issues: result.issues,
+        },
+      });
+    }
+    // Auto-approval is a terminal user-proxy decision; record it so the
+    // funnel doesn't lose track of drafts that skip the manual approve step.
+    if (autoApproved) {
+      await recordPipelineEvent({
+        userId,
+        productId,
+        threadId: draft.threadId,
+        draftId,
+        stage: 'approved',
+        metadata: { autoApproved: true, score: result.score },
+      });
+    }
 
     // Enqueue posting for auto-approved drafts (after DB update)
     if (autoApproved) {

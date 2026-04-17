@@ -5,9 +5,11 @@
  * and user-level snapshots. The metrics processor dispatches to the
  * appropriate implementation based on the `platform` field in the job data.
  *
- * Currently only X is implemented (inline in the metrics processor).
- * When adding Reddit/LinkedIn metrics, create a new class implementing
- * this interface and register it in getMetricsCollector().
+ * Registry lives in `src/lib/collectors/index.ts`. To add a new platform:
+ *   1. Create `src/lib/collectors/<platform>-metrics-collector.ts` that
+ *      implements `MetricsCollector`.
+ *   2. Add an entry to the `collectors` map in `src/lib/collectors/index.ts`.
+ *   3. Nothing else — `getMetricsCollector()` will pick it up.
  */
 export interface MetricsCollector {
   collectPostMetrics(userId: string): Promise<{ collected: number; analyzed: number }>;
@@ -15,16 +17,12 @@ export interface MetricsCollector {
 }
 
 /**
- * Get the metrics collector for a given platform.
- * Throws for unsupported platforms.
+ * Get the metrics collector for a given platform. Returns null for
+ * platforms that don't have a collector registered yet — callers should
+ * treat that as a no-op (matches the previous return-null behaviour).
+ *
+ * Re-exported from the collectors registry so existing callers
+ * (`import { getMetricsCollector } from '@/lib/metrics-collector'`)
+ * keep working.
  */
-export function getMetricsCollector(platform: string): MetricsCollector | null {
-  switch (platform) {
-    case 'x':
-      // X metrics are currently handled inline in the metrics processor.
-      // When extracted, return new XMetricsCollector() here.
-      return null;
-    default:
-      return null;
-  }
-}
+export { getCollector as getMetricsCollector } from './collectors';

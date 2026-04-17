@@ -5,6 +5,10 @@ import { drafts, channels } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { enqueuePosting } from '@/lib/queue';
 import { createLogger, loggerForRequest } from '@/lib/logger';
+import {
+  recordPipelineEvent,
+  recordThreadFeedback,
+} from '@/lib/pipeline-events';
 
 const baseLog = createLogger('api:discovery:approve');
 
@@ -37,7 +41,11 @@ export async function POST(request: NextRequest) {
 
   // Verify draft belongs to user
   const [draft] = await db
-    .select({ id: drafts.id, status: drafts.status })
+    .select({
+      id: drafts.id,
+      status: drafts.status,
+      threadId: drafts.threadId,
+    })
     .from(drafts)
     .where(and(eq(drafts.id, draftId), eq(drafts.userId, session.user.id)))
     .limit(1);
@@ -51,6 +59,12 @@ export async function POST(request: NextRequest) {
       .update(drafts)
       .set({ status: 'skipped' })
       .where(eq(drafts.id, draftId));
+
+    await recordThreadFeedback({
+      userId: session.user.id,
+      threadId: draft.threadId,
+      userAction: 'skip',
+    });
 
     log.info(`Draft ${draftId} skipped`);
     return NextResponse.json({ success: true, status: 'skipped' });
@@ -90,6 +104,22 @@ export async function POST(request: NextRequest) {
     channelId: channel.id,
     traceId,
   });
+
+  // Telemetry: stage='approved' + thread_feedback label for the discovery
+  // optimization loop.
+  await recordPipelineEvent({
+    userId: session.user.id,
+    threadId: draft.threadId,
+    draftId,
+    stage: 'approved',
+    metadata: { platform: channel.platform, autoApproved: false },
+  });
+  await recordThreadFeedback({
+    userId: session.user.id,
+    threadId: draft.threadId,
+    userAction: 'approve',
+  });
+
   log.info(`Draft ${draftId} approved, posting enqueued`);
 
   return NextResponse.json(
