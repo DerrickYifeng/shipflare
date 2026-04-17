@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import { auth } from '@/lib/auth';
 import { redirect } from 'next/navigation';
 import { db } from '@/lib/db';
@@ -5,6 +6,8 @@ import { healthScores, products, todoItems } from '@/lib/db/schema';
 import { eq, desc } from 'drizzle-orm';
 import { HeaderBar } from '@/components/layout/header-bar';
 import { TodayContent } from './today-content';
+
+export const metadata: Metadata = { title: 'Today' };
 
 export default async function TodayPage() {
   const session = await auth();

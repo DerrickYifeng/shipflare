@@ -1,7 +1,9 @@
 'use client';
 
+import { useRouter } from 'next/navigation';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { useToast } from '@/components/ui/toast';
 
 interface ConnectionsSectionProps {
   redditConnected: boolean;
@@ -16,17 +18,24 @@ export function ConnectionsSection({
   xConnected,
   xUsername,
 }: ConnectionsSectionProps) {
+  const { toast } = useToast();
+  const router = useRouter();
+
   const handleDisconnect = async (platform: 'reddit' | 'x') => {
+    const label = platform === 'x' ? 'X' : 'Reddit';
     try {
       const res = await fetch(`/api/${platform}/disconnect`, { method: 'DELETE' });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        alert(body.error ?? `Failed to disconnect ${platform === 'x' ? 'X' : 'Reddit'} account`);
+        toast(body.error ?? `Failed to disconnect ${label} account`, 'error');
         return;
       }
-      window.location.reload();
+      toast(`${label} disconnected`, 'success');
+      // Re-fetch the server-rendered Settings page data (channels come from RSC).
+      // TODO: once /api/channels exists, use SWR mutate for a snappier update.
+      router.refresh();
     } catch {
-      alert(`Failed to disconnect ${platform === 'x' ? 'X' : 'Reddit'} account`);
+      toast(`Failed to disconnect ${label} account`, 'error');
     }
   };
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { memo, useMemo, useState, useCallback } from 'react';
 import { useMonitoredTweets } from '@/hooks/use-monitored-tweets';
 import { useDrafts } from '@/hooks/use-drafts';
 import { Card } from '@/components/ui/card';
@@ -35,6 +35,16 @@ export function ReplyQueue() {
     }
   }, [triggerScan]);
 
+  const { pendingTweets, pastTweets } = useMemo(() => {
+    const pending: typeof tweets = [];
+    const past: typeof tweets = [];
+    for (const t of tweets) {
+      if (t.status === 'pending' || t.status === 'draft_created') pending.push(t);
+      else past.push(t);
+    }
+    return { pendingTweets: pending, pastTweets: past };
+  }, [tweets]);
+
   if (isLoading) {
     return (
       <div className="flex flex-col gap-3">
@@ -44,9 +54,6 @@ export function ReplyQueue() {
       </div>
     );
   }
-
-  const pendingTweets = tweets.filter((t) => t.status === 'pending' || t.status === 'draft_created');
-  const pastTweets = tweets.filter((t) => t.status !== 'pending' && t.status !== 'draft_created');
 
   return (
     <div className="flex flex-col gap-6">
@@ -134,7 +141,7 @@ interface TweetCardProps {
   onSkipDraft?: (id: string) => void;
 }
 
-function TweetCard({ tweet, draft, onApproveDraft, onSkipDraft }: TweetCardProps) {
+const TweetCard = memo(function TweetCard({ tweet, draft, onApproveDraft, onSkipDraft }: TweetCardProps) {
   return (
     <Card className="flex flex-col gap-2">
       <div className="flex items-start justify-between gap-3">
@@ -196,4 +203,4 @@ function TweetCard({ tweet, draft, onApproveDraft, onSkipDraft }: TweetCardProps
       </div>
     </Card>
   );
-}
+});

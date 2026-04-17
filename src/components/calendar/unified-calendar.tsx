@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { memo, useCallback, useMemo, useState } from 'react';
 import { useCalendar, type CalendarItem } from '@/hooks/use-calendar';
 import { useAnalyticsSummary } from '@/hooks/use-analytics-summary';
 import { usePipeline } from '@/components/ui/pipeline-provider';
+import { useToast } from '@/components/ui/toast';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -30,13 +31,19 @@ const statusVariant: Record<string, 'default' | 'success' | 'warning' | 'accent'
   skipped: 'default',
 };
 
+const UNDO_TIMEOUT_MS = 5_000;
+
 export function UnifiedCalendar() {
   const [activeChannel, setActiveChannel] = useState('all');
   const { items, isLoading, generateWeek, cancelItem } = useCalendar('14d', activeChannel);
   const { summary } = useAnalyticsSummary();
   const { run, isRunning } = usePipeline();
+  const { toastWithAction, toast } = useToast();
   const generating = isRunning('generate-week');
   const [error, setError] = useState<string | null>(null);
+  // Locally hidden calendar items during the 5s undo window (before the API
+  // call is actually fired). Keyed by item id.
+  const [pendingDeletes, setPendingDeletes] = useState<Set<string>>(new Set());
 
   const handleGenerate = useCallback(async () => {
     setError(null);
@@ -53,15 +60,81 @@ export function UnifiedCalendar() {
   }, [generateWeek, activeChannel, run]);
 
   const handleCancel = useCallback(
-    async (itemId: string) => {
-      try {
-        await cancelItem(itemId);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Cancel failed');
-      }
+    (itemId: string) => {
+      // Soft-delete locally; fire the API call only if the user doesn't undo
+      // within 5 seconds.
+      setPendingDeletes((prev) => {
+        const next = new Set(prev);
+        next.add(itemId);
+        return next;
+      });
+
+      toastWithAction({
+        message: 'Calendar slot removed',
+        variant: 'info',
+        action: {
+          label: 'Undo',
+          onClick: () => {
+            setPendingDeletes((prev) => {
+              const next = new Set(prev);
+              next.delete(itemId);
+              return next;
+            });
+          },
+        },
+        timeoutMs: UNDO_TIMEOUT_MS,
+        onTimeout: () => {
+          // Still pending after timeout -> commit the delete server-side.
+          setPendingDeletes((prev) => {
+            if (!prev.has(itemId)) return prev; // already undone
+            const next = new Set(prev);
+            next.delete(itemId);
+            return next;
+          });
+          // Fire and forget; surface failure via toast.
+          cancelItem(itemId).catch((err: unknown) => {
+            toast(
+              err instanceof Error ? err.message : 'Cancel failed',
+              'error',
+            );
+          });
+        },
+      });
     },
-    [cancelItem],
+    [cancelItem, toast, toastWithAction],
   );
+
+  // Filter out items the user just removed (within the undo window) so they
+  // disappear from the list immediately.
+  const visibleItems = useMemo(
+    () => items.filter((i) => !pendingDeletes.has(i.id)),
+    [items, pendingDeletes],
+  );
+
+  const byDay = useMemo(() => {
+    const map = new Map<string, CalendarItem[]>();
+    for (const item of visibleItems) {
+      const day = new Date(item.scheduledAt).toLocaleDateString('en-US', {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+      });
+      const arr = map.get(day) ?? [];
+      arr.push(item);
+      map.set(day, arr);
+    }
+    return map;
+  }, [visibleItems]);
+
+  const counts = useMemo(() => {
+    let scheduled = 0;
+    let posted = 0;
+    for (const i of visibleItems) {
+      if (i.status === 'scheduled') scheduled += 1;
+      else if (i.status === 'posted') posted += 1;
+    }
+    return { scheduled, posted };
+  }, [visibleItems]);
 
   if (isLoading) {
     return (
@@ -72,19 +145,6 @@ export function UnifiedCalendar() {
         </div>
       </div>
     );
-  }
-
-  // Group by day
-  const byDay = new Map<string, typeof items>();
-  for (const item of items) {
-    const day = new Date(item.scheduledAt).toLocaleDateString('en-US', {
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-    });
-    const arr = byDay.get(day) ?? [];
-    arr.push(item);
-    byDay.set(day, arr);
   }
 
   return (
@@ -172,11 +232,15 @@ export function UnifiedCalendar() {
       <div className="flex items-center justify-between mb-4">
         <div>
           <p className="text-[12px] tracking-[-0.12px] text-sf-text-tertiary">
-            {items.filter((i) => i.status === 'scheduled').length} scheduled,{' '}
-            {items.filter((i) => i.status === 'posted').length} posted
+            {counts.scheduled} scheduled, {counts.posted} posted
           </p>
         </div>
-        <Button onClick={handleGenerate} disabled={generating} variant="secondary">
+        <Button
+          onClick={handleGenerate}
+          disabled={generating}
+          variant="secondary"
+          title={generating ? 'Generation in progress' : undefined}
+        >
           {generating ? 'Generating...' : 'Generate Week'}
         </Button>
       </div>
@@ -197,7 +261,7 @@ export function UnifiedCalendar() {
         </div>
       )}
 
-      {items.length === 0 ? (
+      {visibleItems.length === 0 ? (
         <div className="flex flex-col items-center py-16">
           <div className="w-14 h-14 mb-4 rounded-full bg-sf-bg-secondary shadow-[0_3px_5px_rgba(0,0,0,0.04),0_6px_20px_rgba(0,0,0,0.06)] flex items-center justify-center">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--color-sf-text-tertiary)" strokeWidth="1.5">
@@ -235,14 +299,19 @@ export function UnifiedCalendar() {
   );
 }
 
-function CalendarItemCard({
-  item,
-  onCancel,
-}: {
+interface CalendarItemCardProps {
   item: CalendarItem;
   onCancel: (id: string) => void;
-}) {
+}
+
+const CalendarItemCard = memo(function CalendarItemCard({
+  item,
+  onCancel,
+}: CalendarItemCardProps) {
   const [expanded, setExpanded] = useState(false);
+
+  const handleCancel = useCallback(() => onCancel(item.id), [onCancel, item.id]);
+  const toggleExpanded = useCallback(() => setExpanded((p) => !p), []);
 
   return (
     <Card className="flex flex-col py-3">
@@ -268,7 +337,7 @@ function CalendarItemCard({
           {item.draftPreview && (
             <button
               type="button"
-              onClick={() => setExpanded((p) => !p)}
+              onClick={toggleExpanded}
               className="text-[12px] tracking-[-0.12px] text-sf-accent hover:underline"
             >
               {expanded ? 'Hide' : 'Preview'}
@@ -278,9 +347,10 @@ function CalendarItemCard({
             {item.status}
           </Badge>
           <button
-            onClick={() => onCancel(item.id)}
+            onClick={handleCancel}
             className="text-sf-text-tertiary hover:text-sf-error transition-colors duration-200 p-1"
-            title="Delete"
+            title="Delete (5s undo)"
+            aria-label="Delete calendar item"
           >
             <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
               <path d="M3 3l8 8M11 3l-8 8" />
@@ -297,7 +367,7 @@ function CalendarItemCard({
       )}
     </Card>
   );
-}
+});
 
 function ChannelIcon({ channel }: { channel: string }) {
   if (channel === 'x') return <XChannelIcon />;

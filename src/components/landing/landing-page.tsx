@@ -166,6 +166,10 @@ export function LandingPage({ isAuthenticated }: LandingPageProps) {
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               placeholder="yourproduct.com"
+              aria-label="Product URL"
+              name="product-url"
+              autoComplete="url"
+              inputMode="url"
               className="
                 flex-1 min-h-[52px] px-5 py-2
                 text-[17px] tracking-[-0.374px] text-white

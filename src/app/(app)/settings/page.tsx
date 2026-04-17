@@ -1,9 +1,12 @@
+import type { Metadata } from 'next';
 import { auth } from '@/lib/auth';
 import { redirect } from 'next/navigation';
 import { db } from '@/lib/db';
 import { channels } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { HeaderBar } from '@/components/layout/header-bar';
+
+export const metadata: Metadata = { title: 'Settings' };
 import { ProfileSection } from '@/components/settings/profile-section';
 import { ConnectionsSection } from '@/components/settings/connections-section';
 import { AutomationSection } from '@/components/settings/automation-section';
