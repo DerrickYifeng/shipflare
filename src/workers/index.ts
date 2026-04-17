@@ -8,15 +8,16 @@ import { processHealthScore } from './processors/health-score';
 import { processDream } from './processors/dream';
 import { processCodeScan } from './processors/code-scan';
 import { processXMonitor } from './processors/monitor';
-import { processXContentCalendar } from './processors/content-calendar';
 import { processXEngagement } from './processors/engagement';
 import { processXMetrics } from './processors/metrics';
 import { processXAnalytics } from './processors/analytics';
 import { processTodoSeed } from './processors/todo-seed';
 import { processCalibration } from './processors/calibrate-discovery';
-import { dreamQueue, discoveryQueue, monitorQueue, contentCalendarQueue, metricsQueue, analyticsQueue, todoSeedQueue, codeScanQueue } from '@/lib/queue';
+import { processCalendarPlan } from './processors/calendar-plan';
+import { processCalendarSlotDraft } from './processors/calendar-slot-draft';
+import { dreamQueue, discoveryQueue, monitorQueue, metricsQueue, analyticsQueue, todoSeedQueue, codeScanQueue } from '@/lib/queue';
 import { createLogger, loggerForJob } from '@/lib/logger';
-import type { DiscoveryJobData, ContentJobData, ReviewJobData, PostingJobData, HealthScoreJobData, DreamJobData, CodeScanJobData, MonitorJobData, ContentCalendarJobData, EngagementJobData, MetricsJobData, AnalyticsJobData, TodoSeedJobData, CalibrationJobData } from '@/lib/queue/types';
+import type { DiscoveryJobData, ContentJobData, ReviewJobData, PostingJobData, HealthScoreJobData, DreamJobData, CodeScanJobData, MonitorJobData, CalendarPlanJobData, CalendarSlotDraftJobData, EngagementJobData, MetricsJobData, AnalyticsJobData, TodoSeedJobData, CalibrationJobData } from '@/lib/queue/types';
 
 const log = createLogger('workers');
 
@@ -86,12 +87,6 @@ const monitorWorker = new Worker<MonitorJobData>(
   { ...BASE_OPTS, concurrency: 2 },
 );
 
-const contentCalendarWorker = new Worker<ContentCalendarJobData>(
-  'content-calendar',
-  async (job) => processXContentCalendar(job),
-  { ...BASE_OPTS, concurrency: 2 },
-);
-
 const engagementWorker = new Worker<EngagementJobData>(
   'engagement',
   async (job) => processXEngagement(job),
@@ -116,6 +111,18 @@ const todoSeedWorker = new Worker<TodoSeedJobData>(
   { ...BASE_OPTS, concurrency: 1 },
 );
 
+const calendarPlanWorker = new Worker<CalendarPlanJobData>(
+  'calendar-plan',
+  async (job) => processCalendarPlan(job),
+  { ...BASE_OPTS, concurrency: 1 },
+);
+
+const calendarSlotDraftWorker = new Worker<CalendarSlotDraftJobData>(
+  'calendar-slot-draft',
+  async (job) => processCalendarSlotDraft(job),
+  { ...BASE_OPTS, concurrency: 3 },
+);
+
 const calibrationWorker = new Worker<CalibrationJobData>(
   'calibration',
   async (job) => processCalibration(job),
@@ -129,8 +136,8 @@ const calibrationWorker = new Worker<CalibrationJobData>(
 const workers = [
   discoveryWorker, contentWorker, reviewWorker, postingWorker,
   healthScoreWorker, dreamWorker, codeScanWorker,
-  monitorWorker, contentCalendarWorker, engagementWorker, metricsWorker,
-  analyticsWorker, todoSeedWorker, calibrationWorker,
+  monitorWorker, calendarPlanWorker, calendarSlotDraftWorker, engagementWorker,
+  metricsWorker, analyticsWorker, todoSeedWorker, calibrationWorker,
 ];
 
 // Log events — bind traceId / jobId / queue into the child logger so lifecycle
@@ -173,18 +180,6 @@ async function scheduleMonitor() {
     {
       repeat: { pattern: '0 7 * * *' },
       jobId: 'monitor-cron',
-    },
-  );
-}
-
-// Schedule content calendar: daily at 6am UTC (before monitor, so drafts are ready)
-async function scheduleContentCalendar() {
-  await contentCalendarQueue.add(
-    'scheduled-process',
-    { kind: 'fanout', schemaVersion: 1, platform: 'x' },
-    {
-      repeat: { pattern: '0 6 * * *' },
-      jobId: 'content-calendar-cron',
     },
   );
 }
@@ -254,7 +249,6 @@ Promise.all([
   scheduleCodeDiff(),
   scheduleDiscovery(),
   scheduleMonitor(),
-  scheduleContentCalendar(),
   scheduleMetrics(),
   scheduleAnalytics(),
   scheduleTodoSeed(),
@@ -262,7 +256,7 @@ Promise.all([
   log.error('Failed to schedule cron jobs:', err.message);
 });
 
-log.info('All workers started: discovery, content, review, posting, health-score, dream, code-scan, monitor, content-calendar, engagement, metrics, analytics, todo-seed, calibration. Discovery 3x/day, all others daily.');
+log.info('All workers started: discovery, content, review, posting, health-score, dream, code-scan, monitor, calendar-plan, calendar-slot-draft, engagement, metrics, analytics, todo-seed, calibration. Discovery 3x/day, all others daily.');
 
 // Graceful shutdown
 async function shutdown() {

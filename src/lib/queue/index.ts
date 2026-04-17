@@ -11,7 +11,6 @@ import {
   dreamJobSchema,
   codeScanJobSchema,
   monitorJobSchema,
-  contentCalendarJobSchema,
   calendarPlanJobSchema,
   calendarSlotDraftJobSchema,
   searchSourceJobSchema,
@@ -31,7 +30,6 @@ import type {
   DreamJobData,
   CodeScanJobData,
   MonitorJobData,
-  ContentCalendarJobData,
   CalendarPlanJobData,
   CalendarSlotDraftJobData,
   SearchSourceJobData,
@@ -107,10 +105,6 @@ export const monitorQueue = new Queue<MonitorJobData>('monitor', {
   ...connection,
   defaultJobOptions,
 });
-export const contentCalendarQueue = new Queue<ContentCalendarJobData>(
-  'content-calendar',
-  { ...connection, defaultJobOptions },
-);
 export const calendarPlanQueue = new Queue<CalendarPlanJobData>(
   'calendar-plan',
   { ...connection, defaultJobOptions },
@@ -184,7 +178,6 @@ export const analyticsQueue = new Queue<AnalyticsJobData>('analytics', {
 
 // Backward-compat aliases (will be removed after full migration)
 export const xMonitorQueue = monitorQueue;
-export const xContentCalendarQueue = contentCalendarQueue;
 export const xEngagementQueue = engagementQueue;
 export const xMetricsQueue = metricsQueue;
 export const xAnalyticsQueue = analyticsQueue;
@@ -336,20 +329,6 @@ export async function enqueueMonitor(data: MonitorJobData): Promise<void> {
 }
 
 /**
- * Enqueue content calendar processing: generate drafts for scheduled posts.
- */
-export async function enqueueContentCalendar(
-  data: ContentCalendarJobData,
-): Promise<void> {
-  const payload = contentCalendarJobSchema.parse(withEnvelope(data));
-  log.debug(`Enqueued content-calendar (${describePayload(payload)})`);
-  await contentCalendarQueue.add('process', payload, {
-    attempts: 2,
-    backoff: { type: 'exponential', delay: 3000 },
-  });
-}
-
-/**
  * Enqueue calendar plan generation. Runs the calendar-planner AI agent in a
  * background worker so the API can return 202 immediately.
  * Uses jobId dedup: one active plan job per user.
@@ -460,7 +439,6 @@ export async function enqueueAnalytics(data: AnalyticsJobData): Promise<void> {
 
 // Backward-compat function aliases (will be removed after full migration)
 export const enqueueXMonitor = enqueueMonitor;
-export const enqueueXContentCalendar = enqueueContentCalendar;
 export const enqueueXEngagement = enqueueEngagement;
 export const enqueueXMetrics = enqueueMetrics;
 export const enqueueXAnalytics = enqueueAnalytics;

@@ -150,34 +150,6 @@ export const monitorJobSchema = z.union([
 export type MonitorJobData = z.input<typeof monitorJobSchema>;
 
 // ---------------------------------------------------------------------------
-// Content calendar
-// ---------------------------------------------------------------------------
-
-const contentCalendarUserJobSchema = z.object({
-  kind: z.literal('user').optional(),
-  schemaVersion: SCHEMA_VERSION,
-  traceId: TRACE_ID,
-  userId: z.string().min(1),
-  productId: z.string().min(1),
-  platform: z.string().min(1),
-  /** When true, process items scheduled within next 48h, not just overdue. */
-  processUpcoming: z.boolean().optional(),
-});
-
-const contentCalendarFanoutJobSchema = z.object({
-  kind: z.literal('fanout'),
-  schemaVersion: SCHEMA_VERSION,
-  traceId: TRACE_ID,
-  platform: z.string().min(1),
-});
-
-export const contentCalendarJobSchema = z.union([
-  contentCalendarFanoutJobSchema,
-  contentCalendarUserJobSchema,
-]);
-export type ContentCalendarJobData = z.input<typeof contentCalendarJobSchema>;
-
-// ---------------------------------------------------------------------------
 // Engagement
 // ---------------------------------------------------------------------------
 
@@ -360,7 +332,6 @@ export type DiscoveryScanJobData = z.input<typeof discoveryScanJobSchema>;
 // ---------------------------------------------------------------------------
 
 export type XMonitorJobData = MonitorJobData;
-export type XContentCalendarJobData = ContentCalendarJobData;
 export type XEngagementJobData = EngagementJobData;
 export type XMetricsJobData = MetricsJobData;
 export type XAnalyticsJobData = AnalyticsJobData;
@@ -374,7 +345,6 @@ export type JobData =
   | DreamJobData
   | CodeScanJobData
   | MonitorJobData
-  | ContentCalendarJobData
   | CalendarPlanJobData
   | CalendarSlotDraftJobData
   | SearchSourceJobData
