@@ -55,6 +55,17 @@ describe('new job schemas', () => {
       scanRunId: 'scan-1',
       trigger: 'manual',
     });
+    // Narrow out the fanout variant to access `trigger`.
+    if (r.kind === 'fanout') throw new Error('expected user variant');
     expect(r.trigger).toBe('manual');
+  });
+
+  it('accepts fanout discovery-scan job', () => {
+    const r = discoveryScanJobSchema.parse({
+      kind: 'fanout',
+      schemaVersion: 1,
+      traceId: 'cron-1',
+    });
+    expect(r.kind).toBe('fanout');
   });
 });

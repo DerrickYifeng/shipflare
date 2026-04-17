@@ -314,8 +314,14 @@ export type SearchSourceJobData = z.input<typeof searchSourceJobSchema>;
  * Top-level scan orchestrator job. Fans out into N `search-source` jobs.
  * `trigger` distinguishes cron sweeps from user-initiated scans and from
  * onboarding-driven first runs for observability.
+ *
+ * The `fanout` variant is the cron entry: every 4h a single fanout job fires
+ * and the processor iterates all `(userId, platform)` pairs that have both a
+ * channel and a product, enqueueing a per-user `user` job for each. The per-
+ * user variant is the real work (which mirrors the pre-fanout shape so the
+ * manual `/api/discovery/scan` API is unchanged).
  */
-export const discoveryScanJobSchema = z.object({
+const discoveryScanUserJobSchema = z.object({
   kind: z.literal('user').optional(),
   schemaVersion: SCHEMA_VERSION,
   traceId: TRACE_ID,
@@ -325,6 +331,17 @@ export const discoveryScanJobSchema = z.object({
   scanRunId: z.string().min(1),
   trigger: z.enum(['cron', 'manual', 'onboarding']),
 });
+
+const discoveryScanFanoutJobSchema = z.object({
+  kind: z.literal('fanout'),
+  schemaVersion: SCHEMA_VERSION,
+  traceId: TRACE_ID,
+});
+
+export const discoveryScanJobSchema = z.union([
+  discoveryScanFanoutJobSchema,
+  discoveryScanUserJobSchema,
+]);
 export type DiscoveryScanJobData = z.input<typeof discoveryScanJobSchema>;
 
 // ---------------------------------------------------------------------------

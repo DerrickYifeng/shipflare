@@ -18,7 +18,7 @@ import { processCalendarSlotDraft } from './processors/calendar-slot-draft';
 import { processSearchSource } from './processors/search-source';
 import { processDiscoveryScan } from './processors/discovery-scan';
 import { processStalledRowSweep } from './processors/stalled-row-sweep';
-import { dreamQueue, discoveryQueue, monitorQueue, metricsQueue, analyticsQueue, todoSeedQueue, codeScanQueue, stalledRowSweepQueue } from '@/lib/queue';
+import { dreamQueue, discoveryQueue, discoveryScanQueue, monitorQueue, metricsQueue, analyticsQueue, todoSeedQueue, codeScanQueue, stalledRowSweepQueue } from '@/lib/queue';
 import { createLogger, loggerForJob } from '@/lib/logger';
 import type { DiscoveryJobData, ContentJobData, ReviewJobData, PostingJobData, HealthScoreJobData, DreamJobData, CodeScanJobData, MonitorJobData, CalendarPlanJobData, CalendarSlotDraftJobData, SearchSourceJobData, DiscoveryScanJobData, EngagementJobData, MetricsJobData, AnalyticsJobData, TodoSeedJobData, CalibrationJobData } from '@/lib/queue/types';
 
@@ -282,10 +282,28 @@ async function scheduleStalledRowSweep() {
   );
 }
 
+// Schedule discovery-scan cron baseline: every 4h. Fan-out entry — the
+// processor iterates all users with a channel + product and enqueues a
+// per-user scan with trigger='cron'. This guarantees fresh threads land
+// even for users who haven't opened the app today, without depending on
+// the existing 8/14/20 UTC `discovery` cron (which is the legacy path the
+// slim `discovery.ts` shim still covers for back-compat).
+async function scheduleDiscoveryScan() {
+  await discoveryScanQueue.add(
+    'fanout',
+    { kind: 'fanout', schemaVersion: 1, traceId: 'cron-discovery-scan-fanout' },
+    {
+      repeat: { every: 4 * 60 * 60 * 1000 },
+      jobId: 'discovery-scan-fanout-repeat',
+    },
+  );
+}
+
 Promise.all([
   scheduleNightlyDream(),
   scheduleCodeDiff(),
   scheduleDiscovery(),
+  scheduleDiscoveryScan(),
   scheduleMonitor(),
   scheduleMetrics(),
   scheduleAnalytics(),
@@ -295,7 +313,7 @@ Promise.all([
   log.error('Failed to schedule cron jobs:', err.message);
 });
 
-log.info('All workers started: discovery, content, review, posting, health-score, dream, code-scan, monitor, calendar-plan, calendar-slot-draft, search-source, discovery-scan, engagement, metrics, analytics, todo-seed, calibration, stalled-row-sweep. Discovery 3x/day, stalled sweep every 60s, all others daily.');
+log.info('All workers started: discovery, content, review, posting, health-score, dream, code-scan, monitor, calendar-plan, calendar-slot-draft, search-source, discovery-scan, engagement, metrics, analytics, todo-seed, calibration, stalled-row-sweep. Discovery 3x/day, discovery-scan every 4h, stalled sweep every 60s, all others daily.');
 
 // Graceful shutdown
 async function shutdown() {

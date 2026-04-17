@@ -379,13 +379,21 @@ export async function enqueueSearchSource(
 }
 
 /**
- * Enqueue a scan orchestrator job. Deduped by `scanRunId` so a mashed Scan
- * button within the same run collapses to one fan-out.
+ * Enqueue a per-user scan orchestrator job. Deduped by `scanRunId` so a mashed
+ * Scan button within the same run collapses to one fan-out. The `fanout`
+ * variant of the schema is reserved for the 4h cron entry, which is scheduled
+ * directly via `discoveryScanQueue.add('fanout', …)` at worker boot; callers
+ * of this helper always enqueue a per-user job.
  */
 export async function enqueueDiscoveryScan(
-  data: DiscoveryScanJobData,
+  data: Extract<DiscoveryScanJobData, { userId: string }>,
 ): Promise<string> {
   const payload = discoveryScanJobSchema.parse(withEnvelope(data));
+  if (payload.kind === 'fanout') {
+    throw new Error(
+      'enqueueDiscoveryScan does not accept fanout payloads; schedule via discoveryScanQueue.add directly',
+    );
+  }
   const jobId = `scan-${payload.scanRunId}`;
   log.debug(`Enqueued discovery-scan (${describePayload(payload)} trigger=${payload.trigger})`);
   const job = await discoveryScanQueue.add('scan', payload, { jobId });
