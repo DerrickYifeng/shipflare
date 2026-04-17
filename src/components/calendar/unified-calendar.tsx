@@ -3,12 +3,12 @@
 import { memo, useCallback, useMemo, useState, type MouseEvent } from 'react';
 import { useCalendar, type CalendarItem } from '@/hooks/use-calendar';
 import { useAnalyticsSummary } from '@/hooks/use-analytics-summary';
-import { usePipeline } from '@/components/ui/pipeline-provider';
 import { useToast } from '@/components/ui/toast';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
+import { PipelineHealthPill } from './pipeline-health-pill';
 
 const channels = [
   { id: 'all', label: 'All Channels' },
@@ -35,11 +35,9 @@ const UNDO_TIMEOUT_MS = 5_000;
 
 export function UnifiedCalendar() {
   const [activeChannel, setActiveChannel] = useState('all');
-  const { items, isLoading, generateWeek, cancelItem } = useCalendar('14d', activeChannel);
+  const { items, isLoading, generateWeek, cancelItem, isGenerating, plan } = useCalendar('14d', activeChannel);
   const { summary } = useAnalyticsSummary();
-  const { run, isRunning } = usePipeline();
   const { toastWithAction, toast } = useToast();
-  const generating = isRunning('generate-week');
   const [error, setError] = useState<string | null>(null);
   // Locally hidden calendar items during the 5s undo window (before the API
   // call is actually fired). Keyed by item id.
@@ -48,16 +46,14 @@ export function UnifiedCalendar() {
   const handleGenerate = useCallback(async () => {
     setError(null);
     try {
-      await run('generate-week', 'Generating week', async () => {
-        // When filtered to a specific channel, generate for that channel.
-        // When "all", default to 'x' (only channel available now).
-        const channel = activeChannel !== 'all' ? activeChannel : 'x';
-        await generateWeek(channel);
-      });
+      // When filtered to a specific channel, generate for that channel.
+      // When "all", default to 'x' (only channel available now).
+      const channel = activeChannel !== 'all' ? activeChannel : 'x';
+      await generateWeek(channel);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Generation failed');
     }
-  }, [generateWeek, activeChannel, run]);
+  }, [generateWeek, activeChannel]);
 
   const handleCancel = useCallback(
     (itemId: string) => {
@@ -148,7 +144,7 @@ export function UnifiedCalendar() {
   }
 
   return (
-    <div className="flex-1 p-6">
+    <div className="flex-1 p-6" data-shell-ready={plan.items.size > 0 ? 'true' : undefined}>
       {/* Channel filter pills */}
       <div className="flex items-center gap-1 mb-6">
         {channels.map((ch) => (
@@ -235,14 +231,17 @@ export function UnifiedCalendar() {
             {counts.scheduled} scheduled, {counts.posted} posted
           </p>
         </div>
-        <Button
-          onClick={handleGenerate}
-          disabled={generating}
-          variant="secondary"
-          title={generating ? 'Generation in progress' : undefined}
-        >
-          {generating ? 'Generating...' : 'Generate Week'}
-        </Button>
+        <div className="flex items-center gap-2">
+          <PipelineHealthPill items={plan.items} total={items.length} />
+          <Button
+            onClick={handleGenerate}
+            disabled={isGenerating}
+            variant="secondary"
+            title={isGenerating ? 'Planning in progress' : undefined}
+          >
+            {isGenerating ? 'Planning...' : 'Generate Week'}
+          </Button>
+        </div>
       </div>
 
       {/* Content mix legend */}
@@ -261,7 +260,30 @@ export function UnifiedCalendar() {
         </div>
       )}
 
-      {visibleItems.length === 0 ? (
+      {isGenerating && (
+        <div className="flex items-center gap-2.5 px-4 py-3 rounded-[var(--radius-sf-md)] bg-sf-bg-secondary mb-4 animate-sf-fade-in">
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 14 14"
+            fill="none"
+            className="animate-spin flex-shrink-0"
+          >
+            <circle cx="7" cy="7" r="5.5" stroke="var(--color-sf-border)" strokeWidth="1.5" />
+            <path
+              d="M12.5 7a5.5 5.5 0 0 0-5.5-5.5"
+              stroke="var(--color-sf-accent)"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+            />
+          </svg>
+          <span className="text-[14px] tracking-[-0.224px] text-sf-text-secondary">
+            Planning your week...
+          </span>
+        </div>
+      )}
+
+      {visibleItems.length === 0 && !isGenerating ? (
         <div className="flex flex-col items-center py-16">
           <div className="w-14 h-14 mb-4 rounded-full bg-sf-bg-secondary shadow-[0_3px_5px_rgba(0,0,0,0.04),0_6px_20px_rgba(0,0,0,0.06)] flex items-center justify-center">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--color-sf-text-tertiary)" strokeWidth="1.5">
@@ -324,7 +346,10 @@ const CalendarItemCard = memo(function CalendarItemCard({
   );
 
   const cardInner = (
-    <Card className={`flex flex-col py-3 ${posted ? 'hover:bg-sf-bg-tertiary transition-colors duration-150 cursor-pointer' : ''}`}>
+    <Card
+      data-slot-state={item.status}
+      className={`flex flex-col py-3 ${posted ? 'hover:bg-sf-bg-tertiary transition-colors duration-150 cursor-pointer' : ''}`}
+    >
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
           <ChannelIcon channel={item.channel} />

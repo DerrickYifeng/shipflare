@@ -1,8 +1,9 @@
 'use client';
 
 import useSWR, { mutate as globalMutate } from 'swr';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSSEChannel } from './use-sse-channel';
+import { useProgressiveStream } from './use-progressive-stream';
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
@@ -41,6 +42,18 @@ export function useCalendar(
   );
 
   const [isGenerating, setIsGenerating] = useState(false);
+
+  // Progressive-stream view of plan pipeline events — a per-slot snapshot
+  // map driven by the unified `pipeline` envelope. Used to hydrate card
+  // state as it streams in, independent of SWR's cache revalidation.
+  const plan = useProgressiveStream<{
+    scheduledAt?: string;
+    contentType?: string;
+    topic?: string;
+    draftId?: string;
+    previewBody?: string;
+    reason?: string;
+  }>('plan');
 
   // Listen for calendar-related SSE events to refresh data in real-time.
   // Publishers emit the unified `pipeline` envelope per slot and a single
@@ -119,13 +132,40 @@ export function useCalendar(
     [mutate],
   );
 
+  // Merge live progressive-stream state into each item. The server-rendered
+  // `status` is authoritative once persisted; live state is a fast-path that
+  // flips the card into `drafting` / `draft_created` / `failed` before the
+  // next SWR revalidation completes.
+  const baseItems = data?.items ?? [];
+  const mergedItems = useMemo(() => {
+    if (plan.items.size === 0) return baseItems;
+    return baseItems.map((item) => {
+      const live = plan.items.get(item.id);
+      if (!live) return item;
+      const mappedStatus =
+        live.state === 'ready'
+          ? 'draft_created'
+          : live.state === 'failed'
+            ? 'failed'
+            : live.state === 'drafting'
+              ? 'drafting'
+              : item.status;
+      return {
+        ...item,
+        status: mappedStatus,
+        draftPreview: live.data?.previewBody ?? item.draftPreview,
+      };
+    });
+  }, [baseItems, plan.items]);
+
   return {
-    items: data?.items ?? [],
+    items: mergedItems,
     isLoading,
     error,
     generateWeek,
     cancelItem,
     mutate,
     isGenerating,
+    plan,
   };
 }
