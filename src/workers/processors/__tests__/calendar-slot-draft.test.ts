@@ -1,23 +1,71 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Job } from 'bullmq';
 
-const mockFirst = <T>(val: T | undefined) => {
-  // Shared builder that answers both .where().limit() (calendar item + product
-  // lookups) and .innerJoin().where().orderBy().limit() (channel post history).
-  const fromBuilder = {
+type CalendarItemFixture = {
+  id: string;
+  state: 'queued' | 'drafting' | 'ready' | 'failed';
+  draftId?: string;
+  contentType: string;
+  topic: string;
+};
+
+/**
+ * Mutable holder for the `select().from(xContentCalendar).where().limit()` row
+ * so tests can swap the "state" without leaning on `vi.doMock` + module resets,
+ * which proved flaky with vitest's module cache. All other tables return empty.
+ */
+const dbState: { calendarItem: CalendarItemFixture } = {
+  calendarItem: { id: 'ci-1', state: 'queued', contentType: 'metric', topic: 't' },
+};
+
+const fromBuilder = {
+  where: () => ({
+    limit: (n: number) => {
+      void n;
+      return [dbState.calendarItem];
+    },
+  }),
+  innerJoin: () => ({
     where: () => ({
-      limit: () => (val ? [val] : []),
-    }),
-    innerJoin: () => ({
-      where: () => ({
-        orderBy: () => ({
-          limit: () => [],
-        }),
+      orderBy: () => ({
+        limit: () => [],
       }),
     }),
-  };
-  return {
-    select: () => ({ from: () => fromBuilder }),
+  }),
+};
+
+const productRow = {
+  id: 'p',
+  name: 'ShipFlare',
+  description: 'd',
+  valueProp: 'v',
+  keywords: [],
+  lifecyclePhase: 'pre_launch',
+};
+
+// Product lookup hits .from(products).where().limit(1) — return product row for
+// that specific shape. Calendar item + followers all route through the same
+// `from` builder, so we keep one factory and rely on the processor's linear
+// flow to hit calendar item first (short-circuits before product on 'ready').
+const productFromBuilder = {
+  where: () => ({ limit: () => [productRow] }),
+};
+
+let currentFromBuilder: typeof fromBuilder | typeof productFromBuilder = fromBuilder;
+let fromCallIdx = 0;
+
+vi.mock('@/lib/db', () => ({
+  db: {
+    select: () => ({
+      from: () => {
+        fromCallIdx += 1;
+        // Call order in processor: calendarItem (fromBuilder), then product
+        // (productFromBuilder), then channelPosts join (fromBuilder).
+        currentFromBuilder =
+          fromCallIdx === 2 ? productFromBuilder : fromBuilder;
+        return currentFromBuilder;
+      },
+    }),
     update: () => ({ set: () => ({ where: () => Promise.resolve() }) }),
     insert: () => ({
       values: () => ({
@@ -27,16 +75,7 @@ const mockFirst = <T>(val: T | undefined) => {
         }),
       }),
     }),
-  };
-};
-
-vi.mock('@/lib/db', () => ({
-  db: mockFirst({
-    id: 'ci-1',
-    state: 'queued',
-    contentType: 'metric',
-    topic: 't',
-  }),
+  },
 }));
 vi.mock('@/lib/queue', () => ({ enqueueReview: vi.fn() }));
 vi.mock('@/lib/redis', () => ({ publishUserEvent: vi.fn() }));
@@ -53,20 +92,18 @@ vi.mock('@/lib/pipeline-events', () => ({ recordPipelineEvent: vi.fn() }));
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.resetModules();
+  fromCallIdx = 0;
 });
 
 describe('processCalendarSlotDraft', () => {
   it('short-circuits when state=ready', async () => {
-    vi.doMock('@/lib/db', () => ({
-      db: mockFirst({
-        id: 'ci-1',
-        state: 'ready',
-        draftId: 'd-1',
-        contentType: 'metric',
-        topic: 't',
-      }),
-    }));
+    dbState.calendarItem = {
+      id: 'ci-1',
+      state: 'ready',
+      draftId: 'd-1',
+      contentType: 'metric',
+      topic: 't',
+    };
     const { processCalendarSlotDraft } = await import('../calendar-slot-draft');
     const { runSkill } = await import('@/core/skill-runner');
     await processCalendarSlotDraft({
@@ -84,14 +121,12 @@ describe('processCalendarSlotDraft', () => {
   });
 
   it('runs skill and transitions ready on success', async () => {
-    vi.doMock('@/lib/db', () => ({
-      db: mockFirst({
-        id: 'ci-1',
-        state: 'queued',
-        contentType: 'metric',
-        topic: 't',
-      }),
-    }));
+    dbState.calendarItem = {
+      id: 'ci-1',
+      state: 'queued',
+      contentType: 'metric',
+      topic: 't',
+    };
     const { processCalendarSlotDraft } = await import('../calendar-slot-draft');
     const { publishUserEvent } = await import('@/lib/redis');
     await processCalendarSlotDraft({
