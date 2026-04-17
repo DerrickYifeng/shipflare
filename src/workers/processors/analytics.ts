@@ -205,18 +205,35 @@ async function processXAnalyticsForUser(userId: string, log: Logger) {
   const engagementRate =
     totalImpressions > 0 ? totalEngagement / totalImpressions : 0;
 
-  // Insert summary
-  await db.insert(xAnalyticsSummary).values({
-    userId,
-    periodStart,
-    periodEnd,
-    bestContentTypes,
-    bestPostingHours,
-    audienceGrowthRate,
-    engagementRate,
-    totalImpressions,
-    totalBookmarks,
-  });
+  await db
+    .insert(xAnalyticsSummary)
+    .values({
+      userId,
+      periodStart,
+      periodEnd,
+      bestContentTypes,
+      bestPostingHours,
+      audienceGrowthRate,
+      engagementRate,
+      totalImpressions,
+      totalBookmarks,
+    })
+    .onConflictDoUpdate({
+      target: [
+        xAnalyticsSummary.userId,
+        xAnalyticsSummary.periodStart,
+        xAnalyticsSummary.periodEnd,
+      ],
+      set: {
+        bestContentTypes,
+        bestPostingHours,
+        audienceGrowthRate,
+        engagementRate,
+        totalImpressions,
+        totalBookmarks,
+        computedAt: new Date(),
+      },
+    });
 
   log.info(
     `Analytics computed: ${uniqueMetrics.length} tweets, engagement rate ${(engagementRate * 100).toFixed(2)}%, growth ${audienceGrowthRate.toFixed(1)}/day`,

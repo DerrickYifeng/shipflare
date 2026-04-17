@@ -4,9 +4,10 @@ import {
   text,
   timestamp,
   real,
-  unique,
+  uniqueIndex,
   index,
 } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { users } from './users';
 import { drafts } from './drafts';
 
@@ -44,7 +45,7 @@ export const todoItems = pgTable(
     userId: text('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
-    draftId: text('draft_id').references(() => drafts.id),
+    draftId: text('draft_id').references(() => drafts.id, { onDelete: 'set null' }),
     todoType: todoTypeEnum('todo_type').notNull(),
     source: todoSourceEnum('source').notNull(),
     priority: todoPriorityEnum('priority').notNull().default('optional'),
@@ -60,7 +61,7 @@ export const todoItems = pgTable(
     actedAt: timestamp('acted_at', { mode: 'date' }),
   },
   (t) => [
-    unique('todo_items_user_draft').on(t.userId, t.draftId),
+    uniqueIndex('todo_items_user_draft_partial_uq').on(t.userId, t.draftId).where(sql`"draft_id" IS NOT NULL`),
     // Hot-path index for GET /api/today — supports
     //   WHERE user_id = ? AND status = 'pending' AND expires_at > now()
     // with an index-only path on the three columns actually filtered.

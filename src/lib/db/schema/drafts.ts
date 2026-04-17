@@ -9,7 +9,7 @@ import {
   index,
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
-import { desc } from 'drizzle-orm';
+import { desc, sql } from 'drizzle-orm';
 import { users } from './users';
 import { threads } from './channels';
 
@@ -89,7 +89,7 @@ export const posts = pgTable(
   (t) => [
     index('posts_user_posted_idx').on(t.userId, desc(t.postedAt)),
     index('posts_user_community_posted_idx').on(t.userId, t.community, desc(t.postedAt)),
-    uniqueIndex('posts_platform_external_uq').on(t.platform, t.externalId),
+    uniqueIndex('posts_platform_external_uq').on(t.platform, t.externalId).where(sql`"external_id" IS NOT NULL`),
   ],
 );
 

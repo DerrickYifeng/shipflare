@@ -1,5 +1,6 @@
 import {
   pgTable,
+  pgEnum,
   text,
   timestamp,
   real,
@@ -43,6 +44,14 @@ export const xTargetAccounts = pgTable(
   (table) => [unique('x_target_accounts_user_username').on(table.userId, table.username)],
 );
 
+export const xMonitoredTweetStatusEnum = pgEnum('x_monitored_tweet_status', [
+  'pending', 'draft_created', 'replied', 'skipped', 'expired',
+]);
+
+export const xContentCalendarStatusEnum = pgEnum('x_content_calendar_status', [
+  'scheduled', 'draft_created', 'approved', 'posted', 'skipped',
+]);
+
 /**
  * Tweets from monitored target accounts.
  * Each tweet has a 15-minute reply window for maximum algorithm impact.
@@ -68,7 +77,7 @@ export const xMonitoredTweets = pgTable(
       .defaultNow()
       .notNull(),
     replyDeadline: timestamp('reply_deadline', { mode: 'date' }).notNull(),
-    status: text('status').notNull().default('pending'), // 'pending' | 'draft_created' | 'replied' | 'skipped' | 'expired'
+    status: xMonitoredTweetStatusEnum('status').notNull().default('pending'),
   },
   (table) => [
     unique('x_monitored_tweets_user_tweet').on(table.userId, table.tweetId),
@@ -99,7 +108,7 @@ export const xContentCalendar = pgTable(
     channel: text('channel').notNull().default('x'), // 'x' | 'reddit' | 'linkedin' | ...
     scheduledAt: timestamp('scheduled_at', { mode: 'date' }).notNull(),
     contentType: text('content_type').notNull(), // 'metric' | 'educational' | 'engagement' | 'product' | 'thread'
-    status: text('status').notNull().default('scheduled'), // 'scheduled' | 'draft_created' | 'approved' | 'posted' | 'skipped'
+    status: xContentCalendarStatusEnum('status').notNull().default('scheduled'),
     topic: text('topic'),
     draftId: text('draft_id').references(() => drafts.id),
     postedExternalId: text('posted_external_id'),
@@ -201,6 +210,7 @@ export const xAnalyticsSummary = pgTable(
   },
   (t) => [
     index('xas_user_computed_idx').on(t.userId, desc(t.computedAt)),
+    uniqueIndex('xas_user_period_uq').on(t.userId, t.periodStart, t.periodEnd),
   ],
 );
 

@@ -7,22 +7,34 @@
  *   2. For each tag, compute the SHA-256 hash drizzle uses (over the SQL file
  *      contents — the same recipe drizzle-kit/migrator uses).
  *   3. If __drizzle_migrations already has that hash, skip.
- *   4. If the file has `-- drizzle-orm: nontransactional`, run all statements
- *      outside any transaction (required for CREATE INDEX CONCURRENTLY). These
- *      migrations MUST use IF NOT EXISTS on every DDL statement so they are
- *      idempotent and safe to run on any env regardless of prior push state.
- *   5. Otherwise check "does this migration's main new table(s) already exist?"
- *      — if yes, we assume push had already created them; just record the
- *      migration as applied (hash + created_at) without re-running the DDL.
- *      If no, actually execute the statements inside a transaction.
+ *   4. Check for a routing directive in the SQL file:
  *
- * INVARIANT: every file with `-- drizzle-orm: nontransactional` MUST use
- * IF NOT EXISTS (or equivalent idempotent form) on all DDL statements.
- * This script runs them unconditionally on every env that hasn't seen their
- * hash — violating the invariant will cause duplicate-object errors.
+ *      -- drizzle-orm: nontransactional
+ *        Run all statements outside any transaction (required for
+ *        CREATE INDEX CONCURRENTLY). All DDL MUST use IF NOT EXISTS or
+ *        equivalent idempotent guards.
  *
- * This is conservative: no DROPs, no re-creations, just bring the bookkeeping
- * in sync and run genuinely-new DDL.
+ *      -- drizzle-orm: always-run
+ *        Run all statements inside sql.begin() unconditionally (for
+ *        ALTER TABLE, CREATE TYPE, ADD CONSTRAINT migrations not applied
+ *        by push). All DDL MUST be idempotent via information_schema /
+ *        pg_constraint guards or IF NOT EXISTS.
+ *
+ *      (no directive)
+ *        Fall through to MAIN_TABLES_FOR heuristic: if the migration's
+ *        primary tables already exist, assume push applied it and only
+ *        record the hash. Otherwise execute inside sql.begin().
+ *
+ * INVARIANTS:
+ *   - nontransactional migrations MUST use IF NOT EXISTS on every DDL
+ *     statement. Violating this causes duplicate-object errors.
+ *   - always-run migrations MUST use information_schema / pg_constraint
+ *     guards (or IF NOT EXISTS) on every DDL statement. Violating this
+ *     causes errors on envs where the DDL was already applied by push.
+ *   - Every journal tag MUST have an entry in MAIN_TABLES_FOR. Missing
+ *     entries cause an abort-on-unknown-tag safeguard to fire.
+ *
+ * This is conservative: no unguarded DROPs or re-creations.
  */
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -77,6 +89,7 @@ const MAIN_TABLES_FOR = {
   '0011_simple_excalibur': ['todo_items', 'user_preferences'],
   '0012_pipeline_funnel': ['pipeline_events', 'thread_feedback'],
   '0013_cluster1_indexes': [], // CREATE INDEX CONCURRENTLY only — no new tables
+  '0014_wave2_constraints': [], // always-run via directive
 };
 
 try {
@@ -133,6 +146,23 @@ try {
         INSERT INTO drizzle.__drizzle_migrations (hash, created_at)
         VALUES (${hash}, ${when})
       `;
+      continue;
+    }
+
+    // Always-run transactional migrations: ALTER TABLE, CREATE TYPE, ADD CONSTRAINT.
+    // DDL must be idempotent (information_schema / pg_constraint guards).
+    // Runs unconditionally inside sql.begin() on any env missing this hash.
+    if (sqlText.includes('-- drizzle-orm: always-run')) {
+      console.log(`  APPLY ${tag} (always-run — idempotent transactional DDL)`);
+      await sql.begin(async (tx) => {
+        for (const stmt of statements) {
+          await tx.unsafe(stmt);
+        }
+        await tx`
+          INSERT INTO drizzle.__drizzle_migrations (hash, created_at)
+          VALUES (${hash}, ${when})
+        `;
+      });
       continue;
     }
 

@@ -9,7 +9,9 @@ import {
   primaryKey,
   unique,
   index,
+  check,
 } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import type { AdapterAccountType } from 'next-auth/adapters';
 
 /**
@@ -116,5 +118,12 @@ export const userPreferences = pgTable(
     createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
   },
-  (table) => [unique('user_preferences_user_id').on(table.userId)],
+  (table) => [
+    unique('user_preferences_user_id').on(table.userId),
+    // CHECK is also enforced at DB level via migration 0014_wave2_constraints.
+    check(
+      'user_preferences_content_mix_sum',
+      sql`${table.contentMixMetric} + ${table.contentMixEducational} + ${table.contentMixEngagement} + ${table.contentMixProduct} = 100`,
+    ),
+  ],
 );
