@@ -8,7 +8,10 @@ import {
   jsonb,
   unique,
   index,
+  uniqueIndex,
+  date,
 } from 'drizzle-orm/pg-core';
+import { desc } from 'drizzle-orm';
 import { users } from './users';
 import { products } from './products';
 import { drafts } from './drafts';
@@ -67,33 +70,51 @@ export const xMonitoredTweets = pgTable(
     replyDeadline: timestamp('reply_deadline', { mode: 'date' }).notNull(),
     status: text('status').notNull().default('pending'), // 'pending' | 'draft_created' | 'replied' | 'skipped' | 'expired'
   },
-  (table) => [unique('x_monitored_tweets_user_tweet').on(table.userId, table.tweetId)],
+  (table) => [
+    unique('x_monitored_tweets_user_tweet').on(table.userId, table.tweetId),
+    index('xmt_user_status_deadline_idx').on(
+      table.userId,
+      table.status,
+      table.replyDeadline,
+    ),
+  ],
 );
 
 /**
  * Content calendar for scheduled original X posts.
  * Enforces content mix: 40% metric, 30% educational, 20% engagement, 10% product.
  */
-export const xContentCalendar = pgTable('x_content_calendar', {
-  id: text('id')
-    .primaryKey()
-    .$defaultFn(() => crypto.randomUUID()),
-  userId: text('user_id')
-    .notNull()
-    .references(() => users.id, { onDelete: 'cascade' }),
-  productId: text('product_id')
-    .notNull()
-    .references(() => products.id, { onDelete: 'cascade' }),
-  channel: text('channel').notNull().default('x'), // 'x' | 'reddit' | 'linkedin' | ...
-  scheduledAt: timestamp('scheduled_at', { mode: 'date' }).notNull(),
-  contentType: text('content_type').notNull(), // 'metric' | 'educational' | 'engagement' | 'product' | 'thread'
-  status: text('status').notNull().default('scheduled'), // 'scheduled' | 'draft_created' | 'approved' | 'posted' | 'skipped'
-  topic: text('topic'),
-  draftId: text('draft_id').references(() => drafts.id),
-  postedExternalId: text('posted_external_id'),
-  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
-  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
-});
+export const xContentCalendar = pgTable(
+  'x_content_calendar',
+  {
+    id: text('id')
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    productId: text('product_id')
+      .notNull()
+      .references(() => products.id, { onDelete: 'cascade' }),
+    channel: text('channel').notNull().default('x'), // 'x' | 'reddit' | 'linkedin' | ...
+    scheduledAt: timestamp('scheduled_at', { mode: 'date' }).notNull(),
+    contentType: text('content_type').notNull(), // 'metric' | 'educational' | 'engagement' | 'product' | 'thread'
+    status: text('status').notNull().default('scheduled'), // 'scheduled' | 'draft_created' | 'approved' | 'posted' | 'skipped'
+    topic: text('topic'),
+    draftId: text('draft_id').references(() => drafts.id),
+    postedExternalId: text('posted_external_id'),
+    createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('xcc_user_channel_status_scheduled_idx').on(
+      t.userId,
+      t.channel,
+      t.status,
+      t.scheduledAt,
+    ),
+  ],
+);
 
 /**
  * Tweet performance metrics sampled over time.
@@ -119,50 +140,69 @@ export const xTweetMetrics = pgTable(
     profileClicks: integer('profile_clicks').notNull().default(0),
     sampledAt: timestamp('sampled_at', { mode: 'date' }).defaultNow().notNull(),
   },
-  (table) => [index('x_tweet_metrics_user_tweet').on(table.userId, table.tweetId)],
+  (table) => [
+    index('x_tweet_metrics_user_tweet').on(table.userId, table.tweetId),
+    index('xtm_user_sampled_idx').on(table.userId, desc(table.sampledAt)),
+  ],
 );
 
 /**
  * Daily snapshots of follower count for growth tracking.
+ *
+ * `snapshotDate` is a derived date column (UTC day) used for per-day uniqueness;
+ * metrics cron runs hourly, but we only want one snapshot per user per day.
  */
-export const xFollowerSnapshots = pgTable('x_follower_snapshots', {
-  id: text('id')
-    .primaryKey()
-    .$defaultFn(() => crypto.randomUUID()),
-  userId: text('user_id')
-    .notNull()
-    .references(() => users.id, { onDelete: 'cascade' }),
-  followerCount: integer('follower_count').notNull(),
-  followingCount: integer('following_count').notNull(),
-  tweetCount: integer('tweet_count').notNull(),
-  snapshotAt: timestamp('snapshot_at', { mode: 'date' }).defaultNow().notNull(),
-});
+export const xFollowerSnapshots = pgTable(
+  'x_follower_snapshots',
+  {
+    id: text('id')
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    followerCount: integer('follower_count').notNull(),
+    followingCount: integer('following_count').notNull(),
+    tweetCount: integer('tweet_count').notNull(),
+    snapshotDate: date('snapshot_date').notNull(),
+    snapshotAt: timestamp('snapshot_at', { mode: 'date' }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex('xfs_user_date_uq').on(t.userId, t.snapshotDate),
+  ],
+);
 
 /**
  * Daily analytics summary computed from tweet metrics and follower snapshots.
  * Used by calendar planner to optimize content strategy.
  */
-export const xAnalyticsSummary = pgTable('x_analytics_summary', {
-  id: text('id')
-    .primaryKey()
-    .$defaultFn(() => crypto.randomUUID()),
-  userId: text('user_id')
-    .notNull()
-    .references(() => users.id, { onDelete: 'cascade' }),
-  periodStart: timestamp('period_start', { mode: 'date' }).notNull(),
-  periodEnd: timestamp('period_end', { mode: 'date' }).notNull(),
-  bestContentTypes: jsonb('best_content_types')
-    .notNull()
-    .$type<Array<{ type: string; avgBookmarks: number; avgImpressions: number; count: number }>>(),
-  bestPostingHours: jsonb('best_posting_hours')
-    .notNull()
-    .$type<Array<{ hour: number; avgEngagement: number }>>(),
-  audienceGrowthRate: real('audience_growth_rate').notNull().default(0),
-  engagementRate: real('engagement_rate').notNull().default(0),
-  totalImpressions: integer('total_impressions').notNull().default(0),
-  totalBookmarks: integer('total_bookmarks').notNull().default(0),
-  computedAt: timestamp('computed_at', { mode: 'date' }).defaultNow().notNull(),
-});
+export const xAnalyticsSummary = pgTable(
+  'x_analytics_summary',
+  {
+    id: text('id')
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    periodStart: timestamp('period_start', { mode: 'date' }).notNull(),
+    periodEnd: timestamp('period_end', { mode: 'date' }).notNull(),
+    bestContentTypes: jsonb('best_content_types')
+      .notNull()
+      .$type<Array<{ type: string; avgBookmarks: number; avgImpressions: number; count: number }>>(),
+    bestPostingHours: jsonb('best_posting_hours')
+      .notNull()
+      .$type<Array<{ hour: number; avgEngagement: number }>>(),
+    audienceGrowthRate: real('audience_growth_rate').notNull().default(0),
+    engagementRate: real('engagement_rate').notNull().default(0),
+    totalImpressions: integer('total_impressions').notNull().default(0),
+    totalBookmarks: integer('total_bookmarks').notNull().default(0),
+    computedAt: timestamp('computed_at', { mode: 'date' }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('xas_user_computed_idx').on(t.userId, desc(t.computedAt)),
+  ],
+);
 
 /**
  * Platform-generic aliases for code that doesn't need to be X-specific.

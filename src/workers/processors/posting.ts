@@ -128,6 +128,7 @@ export async function processPosting(job: Job<PostingJobData>) {
     await db.insert(posts).values({
       draftId,
       userId,
+      platform: thread.platform,
       externalId,
       externalUrl,
       community: thread.community,

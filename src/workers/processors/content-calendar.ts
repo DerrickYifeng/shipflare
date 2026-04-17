@@ -129,7 +129,9 @@ async function processXContentCalendarForUser(
     const replyBody = content.tweets.join('\n\n---\n\n');
     const isThread = content.tweets.length > 1;
 
-    // Create a pseudo-thread record to plug into the existing draft pipeline
+    // Create a pseudo-thread record to plug into the existing draft pipeline.
+    // onConflictDoNothing protects against retries re-processing the same
+    // calendar item (unique on user_id, platform, external_id).
     const [threadRecord] = await db
       .insert(threads)
       .values({
@@ -141,7 +143,12 @@ async function processXContentCalendarForUser(
         url: '',
         relevanceScore: content.confidence,
       })
+      .onConflictDoNothing({
+        target: [threads.userId, threads.platform, threads.externalId],
+      })
       .returning();
+
+    if (!threadRecord) continue;
 
     // Create draft with link reply metadata
     const draftData: Record<string, unknown> = {

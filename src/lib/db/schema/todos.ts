@@ -5,6 +5,7 @@ import {
   timestamp,
   real,
   unique,
+  index,
 } from 'drizzle-orm/pg-core';
 import { users } from './users';
 import { drafts } from './drafts';
@@ -60,5 +61,10 @@ export const todoItems = pgTable(
   },
   (table) => [
     unique('todo_items_user_draft').on(table.userId, table.draftId),
+    index('todos_user_status_expires_idx').on(
+      table.userId,
+      table.status,
+      table.expiresAt,
+    ),
   ],
 );

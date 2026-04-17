@@ -1,4 +1,12 @@
-import { pgTable, text, timestamp, boolean, unique } from 'drizzle-orm/pg-core';
+import {
+  pgTable,
+  text,
+  timestamp,
+  boolean,
+  unique,
+  index,
+} from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { products } from './products';
 
 /**
@@ -26,6 +34,7 @@ export const agentMemories = pgTable(
   },
   (table) => [
     unique('agent_memories_product_name_unique').on(table.productId, table.name),
+    index('am_product_type_idx').on(table.productId, table.type),
   ],
 );
 
@@ -34,14 +43,22 @@ export const agentMemories = pgTable(
  * Replaces engine's daily log files (logs/YYYY-MM-DD.md).
  * Consumed by the dream/distillation system.
  */
-export const agentMemoryLogs = pgTable('agent_memory_logs', {
-  id: text('id')
-    .primaryKey()
-    .$defaultFn(() => crypto.randomUUID()),
-  productId: text('product_id')
-    .notNull()
-    .references(() => products.id, { onDelete: 'cascade' }),
-  entry: text('entry').notNull(),
-  loggedAt: timestamp('logged_at', { mode: 'date' }).defaultNow().notNull(),
-  distilled: boolean('distilled').default(false).notNull(),
-});
+export const agentMemoryLogs = pgTable(
+  'agent_memory_logs',
+  {
+    id: text('id')
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    productId: text('product_id')
+      .notNull()
+      .references(() => products.id, { onDelete: 'cascade' }),
+    entry: text('entry').notNull(),
+    loggedAt: timestamp('logged_at', { mode: 'date' }).defaultNow().notNull(),
+    distilled: boolean('distilled').default(false).notNull(),
+  },
+  (t) => [
+    index('aml_product_distilled_logged_idx')
+      .on(t.productId, t.loggedAt)
+      .where(sql`distilled = false`),
+  ],
+);

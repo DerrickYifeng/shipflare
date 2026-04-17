@@ -39,16 +39,21 @@ async function processXMetricsForUser(userId: string) {
 
   const xClient = XClient.fromChannel(xChannel);
 
-  // Snapshot follower count
+  // Snapshot follower count (one per UTC day; skip if already recorded today)
   try {
     const me = await xClient.getMe();
     if (me.publicMetrics) {
-      await db.insert(xFollowerSnapshots).values({
-        userId,
-        followerCount: me.publicMetrics.followersCount,
-        followingCount: me.publicMetrics.followingCount,
-        tweetCount: me.publicMetrics.tweetCount,
-      });
+      const snapshotDate = new Date().toISOString().slice(0, 10);
+      await db
+        .insert(xFollowerSnapshots)
+        .values({
+          userId,
+          followerCount: me.publicMetrics.followersCount,
+          followingCount: me.publicMetrics.followingCount,
+          tweetCount: me.publicMetrics.tweetCount,
+          snapshotDate,
+        })
+        .onConflictDoNothing();
       log.info(
         `Follower snapshot: ${me.publicMetrics.followersCount} followers`,
       );
@@ -68,13 +73,14 @@ async function processXMetricsForUser(userId: string) {
     .where(
       and(
         eq(posts.userId, userId),
+        eq(posts.platform, 'x'),
         gte(posts.postedAt, lookbackDate),
       ),
     );
 
-  // Filter to only X posts (those with numeric external IDs)
+  // Only X posts with external IDs are eligible for metrics collection
   const xPosts = recentPosts.filter(
-    (p) => p.externalId && /^\d+$/.test(p.externalId),
+    (p): p is typeof p & { externalId: string } => p.externalId !== null,
   );
 
   if (xPosts.length === 0) {
