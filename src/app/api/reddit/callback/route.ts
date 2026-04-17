@@ -20,11 +20,36 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const code = searchParams.get('code');
   const error = searchParams.get('error');
+  const state = searchParams.get('state');
+
+  // Helper: clear the state cookie on every exit path
+  const clearStateCookie = (res: NextResponse) => {
+    res.cookies.set('reddit_oauth_state', '', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 0,
+      path: '/',
+    });
+    return res;
+  };
+
+  // Validate CSRF state
+  const storedState = request.cookies.get('reddit_oauth_state')?.value;
+  if (!state || !storedState || state !== storedState) {
+    log.warn('Reddit OAuth state mismatch');
+    return clearStateCookie(
+      NextResponse.json(
+        { error: 'Invalid OAuth state' },
+        { status: 400 },
+      ),
+    );
+  }
 
   if (error || !code) {
     log.warn(`Reddit OAuth denied: ${error ?? 'no code'}`);
     const redirectUrl = new URL('/onboarding?reddit_error=denied', request.url);
-    return NextResponse.redirect(redirectUrl);
+    return clearStateCookie(NextResponse.redirect(redirectUrl));
   }
 
   // Exchange code for tokens
@@ -52,7 +77,7 @@ export async function GET(request: NextRequest) {
       '/onboarding?reddit_error=token_exchange',
       request.url,
     );
-    return NextResponse.redirect(redirectUrl);
+    return clearStateCookie(NextResponse.redirect(redirectUrl));
   }
 
   const tokens = (await tokenResponse.json()) as {
@@ -72,7 +97,7 @@ export async function GET(request: NextRequest) {
       '/onboarding?reddit_error=profile_fetch',
       request.url,
     );
-    return NextResponse.redirect(redirectUrl);
+    return clearStateCookie(NextResponse.redirect(redirectUrl));
   }
 
   const me = (await meResponse.json()) as { name: string };
@@ -82,9 +107,9 @@ export async function GET(request: NextRequest) {
   const encryptedRefresh = encrypt(tokens.refresh_token);
   const expiresAt = new Date(Date.now() + tokens.expires_in * 1000);
 
-  // Upsert channel
+  // Upsert channel — only need id to decide update vs insert
   const existing = await db
-    .select()
+    .select({ id: channels.id })
     .from(channels)
     .where(
       and(
@@ -151,5 +176,5 @@ export async function GET(request: NextRequest) {
     log.warn(`Failed to fetch Reddit post history: ${err instanceof Error ? err.message : err}`);
   }
 
-  return NextResponse.redirect(new URL('/today', request.url));
+  return clearStateCookie(NextResponse.redirect(new URL('/today', request.url)));
 }

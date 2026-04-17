@@ -30,9 +30,14 @@ export async function processXEngagement(job: Job<EngagementJobData>) {
   const { userId, contentId: tweetId, contentText: originalText, productId } = job.data;
   log.info(`Monitoring engagement for tweet ${tweetId}`);
 
-  // Load X channel
+  // Load X channel — explicit projection for XClient.fromChannel
   const [xChannel] = await db
-    .select()
+    .select({
+      id: channels.id,
+      oauthTokenEncrypted: channels.oauthTokenEncrypted,
+      refreshTokenEncrypted: channels.refreshTokenEncrypted,
+      tokenExpiresAt: channels.tokenExpiresAt,
+    })
     .from(channels)
     .where(and(eq(channels.userId, userId), eq(channels.platform, 'x')))
     .limit(1);

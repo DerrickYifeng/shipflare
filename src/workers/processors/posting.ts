@@ -63,9 +63,15 @@ export async function processPosting(job: Job<PostingJobData>) {
     }
   }
 
-  // Load channel
+  // Load channel — explicit projection for fromChannel + platform routing
   const [channel] = await db
-    .select()
+    .select({
+      id: channels.id,
+      platform: channels.platform,
+      oauthTokenEncrypted: channels.oauthTokenEncrypted,
+      refreshTokenEncrypted: channels.refreshTokenEncrypted,
+      tokenExpiresAt: channels.tokenExpiresAt,
+    })
     .from(channels)
     .where(eq(channels.id, channelId))
     .limit(1);

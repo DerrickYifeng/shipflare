@@ -104,9 +104,9 @@ export async function GET(request: NextRequest) {
   const encryptedRefresh = encrypt(tokens.refresh_token);
   const expiresAt = new Date(Date.now() + tokens.expires_in * 1000);
 
-  // Upsert channel
+  // Upsert channel — only need id to decide update vs insert
   const existing = await db
-    .select()
+    .select({ id: channels.id })
     .from(channels)
     .where(
       and(

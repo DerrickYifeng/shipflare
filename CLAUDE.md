@@ -70,3 +70,24 @@ The content-batch skill demonstrates the correct pattern for multi-platform skil
 - Don't hardcode subreddit/topic lists. Use `platform-config.ts`.
 - Don't add platform checks (`if platform === 'x'`) to `skill-runner.ts` or `swarm.ts`.
   Platform awareness belongs in tools, references, and `platform-deps.ts`.
+
+## Security TODO
+
+Tracking pending security hardening beyond what `feat/security-hardening` already shipped.
+
+- **`accounts.access_token` / `accounts.refresh_token` encryption pending.**
+  The `accounts` table (Auth.js Drizzle adapter, `src/lib/db/schema/users.ts`) stores GitHub
+  OAuth tokens in plaintext. This is inconsistent with the `channels` table, whose
+  `oauth_token_encrypted` / `refresh_token_encrypted` columns are envelope-encrypted via
+  `src/lib/encryption.ts`. Deferred because the Auth.js Drizzle adapter does not expose
+  a straightforward field-level encryption hook — resolving it requires either (a)
+  wrapping the adapter with encrypt/decrypt on read/write, or (b) a two-table double-write
+  migration. See `audit/audit-synthesis.md` → Theme 4 (Security) → item 4 and
+  `audit/audit-data.md` → P0-3. Plaintext scope today: only the GitHub access token used
+  for repo read during onboarding — no posting capability, no refresh_token returned by
+  GitHub OAuth apps — so blast radius is limited to read access on the authorised repos.
+- **Only `createPlatformDeps()` in `src/lib/platform-deps.ts` + `RedditClient.fromChannel`
+  / `XClient.fromChannel` are allowed to read `channels.oauth_token_encrypted`.**
+  Every other `select().from(channels)` in `src/app/api/**` and `src/workers/**` MUST use
+  an explicit projection (`select({ id, userId, platform, username, ... })`) and omit
+  token columns. Enforced by audit Theme 4 item 3.
