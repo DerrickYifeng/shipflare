@@ -2,6 +2,7 @@
 
 import useSWR from 'swr';
 import { useCallback } from 'react';
+import { useSSEChannel } from './use-sse-channel';
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
@@ -24,8 +25,14 @@ export function useMonitoredTweets() {
   const { data, error, isLoading, mutate } = useSWR<{ tweets: MonitoredTweet[] }>(
     '/api/x/monitor',
     fetcher,
-    { refreshInterval: 15_000 },
+    // SSE drives fresh data (see `useSSEChannel` below). The 60s poll is a
+    // safety-net in case the pub/sub stream is unhealthy.
+    { refreshInterval: 60_000 },
   );
+
+  useSSEChannel('tweets', () => {
+    void mutate();
+  });
 
   const triggerScan = useCallback(async () => {
     const res = await fetch('/api/x/monitor', { method: 'POST' });
