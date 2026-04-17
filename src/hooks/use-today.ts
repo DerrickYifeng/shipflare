@@ -5,6 +5,41 @@ import { useCallback } from 'react';
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
+/**
+ * Error thrown by the today mutations when the server responds with a
+ * structured error (e.g. no connected channel). Consumers can branch on
+ * `code` to render contextual toasts instead of generic "something failed".
+ */
+export class TodayActionError extends Error {
+  constructor(
+    message: string,
+    public readonly code?: string,
+    public readonly platform?: string,
+    public readonly status?: number,
+  ) {
+    super(message);
+    this.name = 'TodayActionError';
+  }
+}
+
+async function postJson(url: string, init?: RequestInit): Promise<void> {
+  const res = await fetch(url, init);
+  if (res.ok) return;
+
+  let body: { error?: string; code?: string; platform?: string } = {};
+  try {
+    body = await res.json();
+  } catch {
+    // Non-JSON response (502/504 from the edge, etc.); fall through to generic.
+  }
+  throw new TodayActionError(
+    body.error ?? `Request failed (${res.status})`,
+    body.code,
+    body.platform,
+    res.status,
+  );
+}
+
 export interface TodoItem {
   id: string;
   draftId: string | null;
@@ -71,6 +106,7 @@ export function useToday() {
 
   const approve = useCallback(
     async (id: string) => {
+      // Optimistic hide.
       mutate(
         (prev) =>
           prev
@@ -78,7 +114,14 @@ export function useToday() {
             : prev,
         false,
       );
-      await fetch(`/api/today/${id}/approve`, { method: 'PATCH' });
+      try {
+        await postJson(`/api/today/${id}/approve`, { method: 'PATCH' });
+      } catch (err) {
+        // Roll back the optimistic hide so the user can retry once they've
+        // fixed the underlying cause (e.g. connected their X account).
+        await mutate();
+        throw err;
+      }
       mutate();
     },
     [mutate],
@@ -93,7 +136,12 @@ export function useToday() {
             : prev,
         false,
       );
-      await fetch(`/api/today/${id}/skip`, { method: 'PATCH' });
+      try {
+        await postJson(`/api/today/${id}/skip`, { method: 'PATCH' });
+      } catch (err) {
+        await mutate();
+        throw err;
+      }
       mutate();
     },
     [mutate],
@@ -101,12 +149,15 @@ export function useToday() {
 
   const edit = useCallback(
     async (id: string, body: string) => {
-      await fetch(`/api/today/${id}/edit`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ body }),
-      });
-      mutate();
+      try {
+        await postJson(`/api/today/${id}/edit`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ body }),
+        });
+      } finally {
+        mutate();
+      }
     },
     [mutate],
   );
@@ -120,11 +171,16 @@ export function useToday() {
             : prev,
         false,
       );
-      await fetch(`/api/today/${id}/reschedule`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scheduledFor }),
-      });
+      try {
+        await postJson(`/api/today/${id}/reschedule`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ scheduledFor }),
+        });
+      } catch (err) {
+        await mutate();
+        throw err;
+      }
       mutate();
     },
     [mutate],

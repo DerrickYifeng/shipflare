@@ -55,30 +55,40 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: true, status: 'skipped' });
   }
 
+  // Find the user's channel for posting
+  // TODO: determine platform from the thread record for multi-platform support
+  const [channel] = await db
+    .select({ id: channels.id, platform: channels.platform })
+    .from(channels)
+    .where(eq(channels.userId, session.user.id))
+    .limit(1);
+
+  if (!channel) {
+    // Don't claim success when the post can't actually go out. Keep the draft
+    // status at its pre-approve value so the user can retry after connecting
+    // an account.
+    log.warn(`Draft ${draftId} approve blocked: no channel for user ${session.user.id}`);
+    return NextResponse.json(
+      {
+        error: 'Connect an account (Reddit or X) to publish approved drafts.',
+        code: 'NO_CHANNEL',
+      },
+      { status: 409 },
+    );
+  }
+
   // Approve: update status and enqueue posting
   await db
     .update(drafts)
     .set({ status: 'approved' })
     .where(eq(drafts.id, draftId));
 
-  // Find the user's channel for posting
-  // TODO: determine platform from the thread record for multi-platform support
-  const [channel] = await db
-    .select({ id: channels.id })
-    .from(channels)
-    .where(eq(channels.userId, session.user.id))
-    .limit(1);
-
-  if (channel) {
-    await enqueuePosting({
-      userId: session.user.id,
-      draftId,
-      channelId: channel.id,
-    });
-    log.info(`Draft ${draftId} approved, posting enqueued`);
-  } else {
-    log.warn(`Draft ${draftId} approved but no channel found for posting`);
-  }
+  await enqueuePosting({
+    userId: session.user.id,
+    draftId,
+    channelId: channel.id,
+  });
+  log.info(`Draft ${draftId} approved, posting enqueued`);
 
   return NextResponse.json({ success: true, status: 'approved' });
 }
