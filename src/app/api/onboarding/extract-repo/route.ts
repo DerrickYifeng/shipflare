@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { getGitHubToken } from '@/lib/github';
 import { enqueueCodeScan } from '@/lib/queue';
-import { getRedis } from '@/lib/redis';
+import { getKeyValueClient } from '@/lib/redis';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('api:extract-repo');
@@ -58,7 +58,9 @@ export async function POST(request: Request) {
 
   const stream = new ReadableStream({
     async start(controller) {
-      const redis = getRedis().duplicate();
+      // pub/sub subscriber — needs its own connection separate from the
+      // shared key/value client (Redis pub/sub is stateful per socket).
+      const redis = getKeyValueClient().duplicate();
 
       const cleanup = () => {
         redis.unsubscribe(channel).catch(() => {});

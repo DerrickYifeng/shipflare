@@ -2,7 +2,7 @@ import type { Job } from 'bullmq';
 import { eq } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import { products, codeSnapshots } from '@/lib/db/schema';
-import { getRedis } from '@/lib/redis';
+import { getPubSubPublisher } from '@/lib/redis';
 import { createLogger } from '@/lib/logger';
 import {
   cloneRepo,
@@ -21,7 +21,7 @@ const log = createLogger('worker:code-scan');
 export async function processCodeScan(job: Job<CodeScanJobData>): Promise<void> {
   const { userId, repoFullName, repoUrl, githubToken } = job.data;
   const channel = `code-scan:${userId}`;
-  const redis = getRedis();
+  const redis = getPubSubPublisher();
 
   let cloneDir: string | null = null;
 
@@ -141,7 +141,7 @@ export async function processCodeScan(job: Job<CodeScanJobData>): Promise<void> 
 }
 
 async function publishProgress(
-  redis: ReturnType<typeof getRedis>,
+  redis: ReturnType<typeof getPubSubPublisher>,
   channel: string,
   phase: string,
   message: string,
