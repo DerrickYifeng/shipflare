@@ -112,3 +112,44 @@ export async function publishEvent(
 ): Promise<void> {
   await getPubSubPublisher().publish(channel, JSON.stringify(data));
 }
+
+/**
+ * Typed channel buckets for user-scoped SSE events.
+ *
+ * Consumers (the `/api/events` SSE endpoint) can subscribe either to the
+ * root namespace (`shipflare:events:${userId}`) to receive everything, or to
+ * one of the per-channel namespaces below to receive a filtered slice.
+ *
+ * Kept narrow on purpose — any new bucket should be a deliberate decision,
+ * not a typo magnet. If you need a new bucket, add it here and wire up the
+ * `/api/events` `?channel=` validation to accept it.
+ */
+export type UserEventChannel = 'agents' | 'drafts' | 'tweets';
+
+/**
+ * Publish an event for `userId` into a given logical channel.
+ *
+ * Dual-writes to:
+ *   1. `shipflare:events:${userId}`            — root bucket, back-compat for
+ *      existing consumers that subscribe to the root key without a filter.
+ *   2. `shipflare:events:${userId}:${channel}` — per-channel bucket, used by
+ *      `/api/events?channel=<channel>` so the reply-queue / drafts UI can
+ *      subscribe to only the events they care about.
+ *
+ * Each publisher picks the right `channel` based on what it emits:
+ *   - `drafts`  : new / reviewed / auto-approved drafts (the reply queue refreshes)
+ *   - `tweets`  : monitored tweets, engagement mentions (the tweet list refreshes)
+ *   - `agents`  : everything else — agent lifecycle, analytics, calibration
+ */
+export async function publishUserEvent(
+  userId: string,
+  channel: UserEventChannel,
+  data: Record<string, unknown>,
+): Promise<void> {
+  const payload = JSON.stringify(data);
+  const publisher = getPubSubPublisher();
+  await Promise.all([
+    publisher.publish(`shipflare:events:${userId}`, payload),
+    publisher.publish(`shipflare:events:${userId}:${channel}`, payload),
+  ]);
+}

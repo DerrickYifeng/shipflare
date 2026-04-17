@@ -1,5 +1,7 @@
+import type { NextRequest } from 'next/server';
 import { auth } from '@/lib/auth';
 import { createPubSubSubscriber } from '@/lib/redis';
+import type { UserEventChannel } from '@/lib/redis';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('api:events');
@@ -10,21 +12,50 @@ export const dynamic = 'force-dynamic';
 /** Force the client to reconnect after this long so connections don't live forever. */
 const MAX_CONNECTION_MS = 30 * 60 * 1000; // 30 minutes
 
+const KNOWN_CHANNELS: ReadonlySet<UserEventChannel> = new Set<UserEventChannel>([
+  'agents',
+  'drafts',
+  'tweets',
+]);
+
+function parseChannel(value: string | null): UserEventChannel | 'all' {
+  if (value === null || value === 'all' || value === '') return 'all';
+  if ((KNOWN_CHANNELS as ReadonlySet<string>).has(value)) {
+    return value as UserEventChannel;
+  }
+  // Unknown values fall back to 'all' so a client typo doesn't silently
+  // subscribe them to a dead channel that never sees a message.
+  return 'all';
+}
+
 /**
  * SSE endpoint for real-time dashboard updates.
  * Each client gets its own Redis pub/sub subscriber.
- * Channel: shipflare:events:{userId}
+ *
+ * Channels:
+ *   - `?channel=all` (default) — subscribe to `shipflare:events:{userId}`
+ *     which receives every event (back-compat).
+ *   - `?channel=agents|drafts|tweets` — subscribe to the per-channel namespace
+ *     `shipflare:events:{userId}:{channel}` so the client only wakes up for
+ *     events it actually cares about.
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
     return new Response('Unauthorized', { status: 401 });
   }
 
   const userId = session.user.id;
-  log.info(`SSE connection opened for user ${userId}`);
+  const channelParam = parseChannel(request.nextUrl.searchParams.get('channel'));
+  const subscribeTo =
+    channelParam === 'all'
+      ? `shipflare:events:${userId}`
+      : `shipflare:events:${userId}:${channelParam}`;
 
-  const channel = `shipflare:events:${userId}`;
+  log.info(
+    `SSE connection opened for user ${userId} (channel=${channelParam})`,
+  );
+
   const subscriber = createPubSubSubscriber();
 
   // Closure-scoped handles that both start() and cancel() can see.
@@ -45,9 +76,9 @@ export async function GET() {
         }
       }
 
-      // Subscribe to user's event channel
-      subscriber.subscribe(channel).then(() => {
-        send(JSON.stringify({ type: 'connected' }));
+      // Subscribe to the resolved channel
+      subscriber.subscribe(subscribeTo).then(() => {
+        send(JSON.stringify({ type: 'connected', channel: channelParam }));
       });
 
       subscriber.on('message', (_ch: string, message: string) => {
@@ -74,7 +105,7 @@ export async function GET() {
     cancel() {
       if (closed) return;
       closed = true;
-      log.info(`SSE connection closed for user ${userId}`);
+      log.info(`SSE connection closed for user ${userId} (channel=${channelParam})`);
       if (heartbeat) clearInterval(heartbeat);
       if (maxAgeTimer) clearTimeout(maxAgeTimer);
       subscriber.unsubscribe().catch(() => {});

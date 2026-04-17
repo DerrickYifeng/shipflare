@@ -9,7 +9,8 @@ import { runSkill } from '@/core/skill-runner';
 import { discoveryOutputSchema } from '@/agents/schemas';
 import type { DiscoveryOutput } from '@/agents/schemas';
 import { enqueueContent, enqueueDream, enqueueDiscovery } from '@/lib/queue';
-import { publishEvent } from '@/lib/redis';
+import { publishUserEvent } from '@/lib/redis';
+import { isStopRequested } from '@/lib/automation-stop';
 import { join } from 'path';
 import type { DiscoveryJobData } from '@/lib/queue/types';
 import { isFanoutJob, getTraceId } from '@/lib/queue/types';
@@ -54,6 +55,13 @@ export async function processDiscovery(job: Job<DiscoveryJobData>) {
         .where(eq(products.userId, uid))
         .limit(1);
       if (!product) continue;
+
+      // Co-operative stop: skip users who've pressed the war-room Stop
+      // button so the fan-out doesn't re-kick a run they just cancelled.
+      if (await isStopRequested(uid)) {
+        log.info(`Skipping cron fan-out for user ${uid} — stop requested`);
+        continue;
+      }
 
       for (const platformId of platformSet) {
         if (!isPlatformAvailable(platformId)) continue;
@@ -227,17 +235,27 @@ export async function processDiscovery(job: Job<DiscoveryJobData>) {
     // Auto-enqueue content only for newly-inserted high-relevance threads.
     // Propagate our traceId so discovery → content → review → posting stays
     // correlated for a single logical run.
-    for (const row of inserted) {
-      if (!shouldEnqueue.has(row.externalId)) continue;
-      log.debug(
-        `Auto-enqueuing content for ${platform} thread ${row.id}`,
+    //
+    // Co-operative stop: if the user hit Stop between discovery finishing
+    // and us fanning out to content, don't queue more work.
+    const stopped = await isStopRequested(userId);
+    if (stopped) {
+      log.info(
+        `Stop requested for user ${userId}; skipping content enqueue for ${inserted.length} threads`,
       );
-      await enqueueContent({
-        userId,
-        threadId: row.id,
-        productId,
-        traceId,
-      });
+    } else {
+      for (const row of inserted) {
+        if (!shouldEnqueue.has(row.externalId)) continue;
+        log.debug(
+          `Auto-enqueuing content for ${platform} thread ${row.id}`,
+        );
+        await enqueueContent({
+          userId,
+          threadId: row.id,
+          productId,
+          traceId,
+        });
+      }
     }
   }
 
@@ -255,7 +273,7 @@ export async function processDiscovery(job: Job<DiscoveryJobData>) {
   });
 
   // Publish SSE event
-  await publishEvent(`shipflare:events:${userId}`, {
+  await publishUserEvent(userId, 'agents', {
     type: 'agent_complete',
     agentName: 'scout',
     platform,

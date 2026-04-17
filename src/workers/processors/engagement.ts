@@ -16,7 +16,7 @@ import { loadAgentFromFile } from '@/bridge/load-agent';
 import { registry } from '@/tools/registry';
 import { engagementMonitorOutputSchema } from '@/agents/schemas';
 import { enqueueReview } from '@/lib/queue';
-import { publishEvent } from '@/lib/redis';
+import { publishUserEvent } from '@/lib/redis';
 import { join } from 'path';
 import type { EngagementJobData } from '@/lib/queue/types';
 import { getTraceId } from '@/lib/queue/types';
@@ -238,7 +238,7 @@ export async function processXEngagement(job: Job<EngagementJobData>) {
         })
         .onConflictDoNothing();
 
-      await publishEvent(`shipflare:events:${userId}`, {
+      await publishUserEvent(userId, 'tweets', {
         type: 'todo_added',
         todoType: 'respond_engagement',
       });
@@ -246,7 +246,7 @@ export async function processXEngagement(job: Job<EngagementJobData>) {
 
     // Publish SSE event for high-priority engagement
     if (actionableMentions.some((m) => m.priority === 'high')) {
-      await publishEvent(`shipflare:events:${userId}`, {
+      await publishUserEvent(userId, 'tweets', {
         type: 'engagement_alert',
         tweetId,
         highPriorityCount: actionableMentions.filter(

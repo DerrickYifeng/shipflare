@@ -2,6 +2,7 @@
 
 import useSWR from 'swr';
 import { useCallback } from 'react';
+import { useSSEChannel } from './use-sse-channel';
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
@@ -50,8 +51,14 @@ export function useDrafts() {
   const { data, error, isLoading, mutate } = useSWR<{ drafts: Draft[] }>(
     '/api/drafts',
     fetcher,
-    { refreshInterval: 30_000 },
+    // SSE drives fresh data (see `useSSEChannel` below). The 60s poll is a
+    // safety-net in case the pub/sub stream is unhealthy.
+    { refreshInterval: 60_000 },
   );
+
+  useSSEChannel('drafts', () => {
+    void mutate();
+  });
 
   const performAction = useCallback(
     async (draftId: string, action: string) => {

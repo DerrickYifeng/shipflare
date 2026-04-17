@@ -7,19 +7,46 @@ import { useToast } from '@/components/ui/toast';
 
 type AgentMap = Record<string, AgentState>;
 
+export interface AgentErrorEntry {
+  /** Local id — monotonic per provider instance. */
+  id: number;
+  /** Wall-clock timestamp in ms. */
+  timestamp: number;
+  /** Processor / agent that emitted the error (best effort). */
+  processor?: string;
+  /** Human-readable error message. */
+  message: string;
+  /** Optional correlation id for log-grep. */
+  traceId?: string;
+  /** Full raw payload for the drawer — everything the producer sent. */
+  payload: Record<string, unknown>;
+}
+
 interface AgentStreamContextValue {
   agents: AgentMap;
   isConnected: boolean;
+  /** Latest-first list of error events received since this provider mounted. */
+  errors: AgentErrorEntry[];
+  /** Drop an error from the list (e.g. after the user dismisses it). */
+  dismissError: (id: number) => void;
+  /** Wipe the whole error list. */
+  clearErrors: () => void;
 }
 
 const AgentStreamContext = createContext<AgentStreamContextValue>({
   agents: {},
   isConnected: false,
+  errors: [],
+  dismissError: () => {},
+  clearErrors: () => {},
 });
 
 export function useAgentStreamContext(): AgentStreamContextValue {
   return useContext(AgentStreamContext);
 }
+
+/** Bump every time we push a new error into the list. */
+let nextErrorId = 1;
 
 // ---------------------------------------------------------------------------
 // Event types (duplicated from use-agent-stream to keep the provider standalone)
@@ -34,6 +61,8 @@ type SSEEvent =
   | { type: 'tool_call'; agentName: AgentName; toolName: string; args?: string }
   | { type: 'draft_reviewed'; agentName: AgentName; draftId?: string; verdict?: string; score?: number; community?: string; stats?: Record<string, number | string> }
   | { type: 'draft_auto_approved'; draftId?: string; verdict?: string; score?: number; community?: string }
+  | { type: 'error'; message?: string; error?: string; processor?: string; agentName?: AgentName; traceId?: string }
+  | { type: 'stop_requested' }
   | { type: 'connected' }
   | { type: 'heartbeat' };
 
@@ -138,7 +167,16 @@ function applyEvent(agents: AgentMap, event: SSEEvent): AgentMap {
 export function AgentStreamProvider({ children }: { children: ReactNode }) {
   const [agents, setAgents] = useState<AgentMap>({});
   const [isConnected, setIsConnected] = useState(false);
+  const [errors, setErrors] = useState<AgentErrorEntry[]>([]);
   const { toast } = useToast();
+
+  const dismissError = useCallback((id: number) => {
+    setErrors((prev) => prev.filter((e) => e.id !== id));
+  }, []);
+
+  const clearErrors = useCallback(() => {
+    setErrors([]);
+  }, []);
 
   const eventSourceRef = useRef<EventSource | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -173,6 +211,21 @@ export function AgentStreamProvider({ children }: { children: ReactNode }) {
       }
 
       if (event.type === 'heartbeat') {
+        return;
+      }
+
+      if (event.type === 'error') {
+        const message = event.message ?? event.error ?? 'Unknown error';
+        const entry: AgentErrorEntry = {
+          id: nextErrorId++,
+          timestamp: Date.now(),
+          processor: event.processor ?? event.agentName,
+          message,
+          traceId: event.traceId,
+          payload: event as unknown as Record<string, unknown>,
+        };
+        setErrors((prev) => [entry, ...prev].slice(0, 50));
+        toastRef.current(`Agent error: ${message}`, 'error');
         return;
       }
 
@@ -230,7 +283,9 @@ export function AgentStreamProvider({ children }: { children: ReactNode }) {
   }, [connect]);
 
   return (
-    <AgentStreamContext.Provider value={{ agents, isConnected }}>
+    <AgentStreamContext.Provider
+      value={{ agents, isConnected, errors, dismissError, clearErrors }}
+    >
       {children}
     </AgentStreamContext.Provider>
   );

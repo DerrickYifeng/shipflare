@@ -2,17 +2,23 @@
 
 import { useState, useCallback } from 'react';
 import { AgentGrid } from '@/components/dashboard/agent-grid';
-import { useAgentStreamContext } from '@/hooks/agent-stream-provider';
+import {
+  useAgentStreamContext,
+  type AgentErrorEntry,
+} from '@/hooks/agent-stream-provider';
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
+import { ErrorDrawer } from '@/components/automation/error-drawer';
 
 type RunState = 'idle' | 'launching' | 'running' | 'error';
 
 export function AgentsWarRoom() {
-  const { agents, isConnected } = useAgentStreamContext();
+  const { agents, isConnected, errors, dismissError } = useAgentStreamContext();
   const [runState, setRunState] = useState<RunState>('idle');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [showConnectDialog, setShowConnectDialog] = useState(false);
+  const [stopping, setStopping] = useState(false);
+  const [drawerError, setDrawerError] = useState<AgentErrorEntry | null>(null);
 
   // Detect if any agent is currently active
   const hasActiveAgent = Object.values(agents).some((a) => a.status === 'active');
@@ -49,6 +55,23 @@ export function AgentsWarRoom() {
     }
   }, []);
 
+  const handleStop = useCallback(async () => {
+    setStopping(true);
+    try {
+      const res = await fetch('/api/automation/stop', { method: 'POST' });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setErrorMsg(data.error ?? 'Failed to stop automation');
+      }
+    } catch {
+      setErrorMsg('Network error — could not reach server');
+    } finally {
+      setStopping(false);
+    }
+  }, []);
+
+  const latestError = errors[0] ?? null;
+
   // Map hook's lowercase keys to AgentGrid's Title-case keys
   const gridAgents: Record<string, (typeof agents)[string]> = {};
   for (const [key, state] of Object.entries(agents)) {
@@ -72,29 +95,64 @@ export function AgentsWarRoom() {
           />
         </div>
 
-        <Button
-          onClick={handleTrigger}
-          disabled={effectiveState === 'launching' || hasActiveAgent}
-          variant={hasActiveAgent ? 'secondary' : 'primary'}
-          className="gap-2"
-        >
-          {effectiveState === 'launching' ? (
-            <>
-              <Spinner />
-              Launching...
-            </>
-          ) : hasActiveAgent ? (
-            <>
-              <PulsingDot />
-              Running
-            </>
-          ) : (
-            <>
-              <PlayIcon />
-              Run Automation
-            </>
+        <div className="flex items-center gap-2">
+          {latestError && (
+            <button
+              type="button"
+              onClick={() => setDrawerError(latestError)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-sf-md)] bg-sf-error-light text-sf-error text-[12px] font-medium hover:opacity-80 transition-opacity"
+              aria-label="View error details"
+            >
+              <ErrorIcon />
+              {errors.length > 1 ? `${errors.length} errors` : '1 error'}
+            </button>
           )}
-        </Button>
+
+          {hasActiveAgent && (
+            <Button
+              onClick={handleStop}
+              disabled={stopping}
+              variant="secondary"
+              className="gap-2"
+            >
+              {stopping ? (
+                <>
+                  <Spinner />
+                  Stopping...
+                </>
+              ) : (
+                <>
+                  <StopIcon />
+                  Stop
+                </>
+              )}
+            </Button>
+          )}
+
+          <Button
+            onClick={handleTrigger}
+            disabled={effectiveState === 'launching' || hasActiveAgent}
+            variant={hasActiveAgent ? 'secondary' : 'primary'}
+            className="gap-2"
+          >
+            {effectiveState === 'launching' ? (
+              <>
+                <Spinner />
+                Launching...
+              </>
+            ) : hasActiveAgent ? (
+              <>
+                <PulsingDot />
+                Running
+              </>
+            ) : (
+              <>
+                <PlayIcon />
+                Run Automation
+              </>
+            )}
+          </Button>
+        </div>
       </div>
 
       {/* Error banner */}
@@ -124,6 +182,15 @@ export function AgentsWarRoom() {
       ) : (
         <AgentGrid agents={gridAgents} />
       )}
+
+      <ErrorDrawer
+        open={drawerError !== null}
+        error={drawerError}
+        onClose={() => {
+          if (drawerError) dismissError(drawerError.id);
+          setDrawerError(null);
+        }}
+      />
 
       {/* Connect account dialog */}
       <Dialog
@@ -171,6 +238,30 @@ function PlayIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
       <path d="M3 1.5v11l9-5.5L3 1.5z" />
+    </svg>
+  );
+}
+
+function StopIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+      <rect x="2" y="2" width="8" height="8" rx="1" />
+    </svg>
+  );
+}
+
+function ErrorIcon() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 12 12"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    >
+      <circle cx="6" cy="6" r="5" />
+      <path d="M6 3.5v3M6 8.5v.01" strokeLinecap="round" />
     </svg>
   );
 }

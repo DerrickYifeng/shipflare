@@ -18,7 +18,7 @@ import { runSkill } from '@/core/skill-runner';
 import { replyDrafterOutputSchema } from '@/agents/schemas';
 import type { ReplyDrafterOutput } from '@/agents/schemas';
 import { enqueueReview, enqueueDream, enqueueMonitor } from '@/lib/queue';
-import { publishEvent, getKeyValueClient } from '@/lib/redis';
+import { publishUserEvent, getKeyValueClient } from '@/lib/redis';
 import { join } from 'path';
 import type { MonitorJobData } from '@/lib/queue/types';
 import { isFanoutJob, getTraceId } from '@/lib/queue/types';
@@ -357,7 +357,7 @@ async function processXMonitorForUser(
         })
         .onConflictDoNothing();
 
-      await publishEvent(`shipflare:events:${userId}`, {
+      await publishUserEvent(userId, 'tweets', {
         type: 'todo_added',
         todoType: 'reply_thread',
       });
@@ -368,7 +368,7 @@ async function processXMonitorForUser(
     );
 
     // Publish SSE event
-    await publishEvent(`shipflare:events:${userId}`, {
+    await publishUserEvent(userId, 'tweets', {
       type: 'agent_complete',
       agentName: 'reply-drafter',
       stats: {
