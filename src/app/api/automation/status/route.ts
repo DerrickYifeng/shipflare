@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { activityEvents, drafts } from '@/lib/db/schema';
-import { eq, and, gte, inArray, sql, desc } from 'drizzle-orm';
+import { eq, and, gte, sql, desc } from 'drizzle-orm';
 
 interface PipelineInfo {
   name: string;

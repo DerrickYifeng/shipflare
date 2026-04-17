@@ -3,9 +3,6 @@ import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { todoItems, drafts, threads, posts, userPreferences, xContentCalendar } from '@/lib/db/schema';
 import { eq, and, lte, sql, count } from 'drizzle-orm';
-import { createLogger } from '@/lib/logger';
-
-const log = createLogger('api:today');
 
 export async function GET() {
   const session = await auth();

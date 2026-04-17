@@ -3,9 +3,6 @@ import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { drafts, threads, posts } from '@/lib/db/schema';
 import { eq, and, ne, inArray, desc, gte } from 'drizzle-orm';
-import { createLogger } from '@/lib/logger';
-
-const log = createLogger('api:x:engagement');
 
 /**
  * GET /api/x/engagement

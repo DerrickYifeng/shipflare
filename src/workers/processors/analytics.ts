@@ -66,8 +66,6 @@ async function processXAnalyticsForUser(userId: string, log: Logger) {
   const uniqueMetrics = [...latestByTweet.values()];
 
   // Map tweetId → contentType via posts + xContentCalendar
-  const tweetIds = uniqueMetrics.map((m) => m.tweetId);
-
   const postRecords = await db
     .select({
       externalId: posts.externalId,

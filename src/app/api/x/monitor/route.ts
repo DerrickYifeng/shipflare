@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { xMonitoredTweets, xTargetAccounts, products } from '@/lib/db/schema';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, desc } from 'drizzle-orm';
 import { enqueueMonitor } from '@/lib/queue';
 import { createLogger } from '@/lib/logger';
 
