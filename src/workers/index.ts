@@ -15,9 +15,11 @@ import { processTodoSeed } from './processors/todo-seed';
 import { processCalibration } from './processors/calibrate-discovery';
 import { processCalendarPlan } from './processors/calendar-plan';
 import { processCalendarSlotDraft } from './processors/calendar-slot-draft';
+import { processSearchSource } from './processors/search-source';
+import { processDiscoveryScan } from './processors/discovery-scan';
 import { dreamQueue, discoveryQueue, monitorQueue, metricsQueue, analyticsQueue, todoSeedQueue, codeScanQueue } from '@/lib/queue';
 import { createLogger, loggerForJob } from '@/lib/logger';
-import type { DiscoveryJobData, ContentJobData, ReviewJobData, PostingJobData, HealthScoreJobData, DreamJobData, CodeScanJobData, MonitorJobData, CalendarPlanJobData, CalendarSlotDraftJobData, EngagementJobData, MetricsJobData, AnalyticsJobData, TodoSeedJobData, CalibrationJobData } from '@/lib/queue/types';
+import type { DiscoveryJobData, ContentJobData, ReviewJobData, PostingJobData, HealthScoreJobData, DreamJobData, CodeScanJobData, MonitorJobData, CalendarPlanJobData, CalendarSlotDraftJobData, SearchSourceJobData, DiscoveryScanJobData, EngagementJobData, MetricsJobData, AnalyticsJobData, TodoSeedJobData, CalibrationJobData } from '@/lib/queue/types';
 
 const log = createLogger('workers');
 
@@ -123,6 +125,18 @@ const calendarSlotDraftWorker = new Worker<CalendarSlotDraftJobData>(
   { ...BASE_OPTS, concurrency: 3 },
 );
 
+const searchSourceWorker = new Worker<SearchSourceJobData>(
+  'search-source',
+  async (job) => processSearchSource(job),
+  { ...BASE_OPTS, concurrency: 6, lockDuration: 45_000 },
+);
+
+const discoveryScanWorker = new Worker<DiscoveryScanJobData>(
+  'discovery-scan',
+  async (job) => processDiscoveryScan(job),
+  { ...BASE_OPTS, concurrency: 2, lockDuration: 15_000 },
+);
+
 const calibrationWorker = new Worker<CalibrationJobData>(
   'calibration',
   async (job) => processCalibration(job),
@@ -136,7 +150,9 @@ const calibrationWorker = new Worker<CalibrationJobData>(
 const workers = [
   discoveryWorker, contentWorker, reviewWorker, postingWorker,
   healthScoreWorker, dreamWorker, codeScanWorker,
-  monitorWorker, calendarPlanWorker, calendarSlotDraftWorker, engagementWorker,
+  monitorWorker, calendarPlanWorker, calendarSlotDraftWorker,
+  searchSourceWorker, discoveryScanWorker,
+  engagementWorker,
   metricsWorker, analyticsWorker, todoSeedWorker, calibrationWorker,
 ];
 
@@ -256,7 +272,7 @@ Promise.all([
   log.error('Failed to schedule cron jobs:', err.message);
 });
 
-log.info('All workers started: discovery, content, review, posting, health-score, dream, code-scan, monitor, calendar-plan, calendar-slot-draft, engagement, metrics, analytics, todo-seed, calibration. Discovery 3x/day, all others daily.');
+log.info('All workers started: discovery, content, review, posting, health-score, dream, code-scan, monitor, calendar-plan, calendar-slot-draft, search-source, discovery-scan, engagement, metrics, analytics, todo-seed, calibration. Discovery 3x/day, all others daily.');
 
 // Graceful shutdown
 async function shutdown() {
