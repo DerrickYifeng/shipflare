@@ -14,6 +14,9 @@ import { createLogger, loggerForJob } from '@/lib/logger';
 import { MemoryStore } from '@/memory/store';
 import { AgentDream } from '@/memory/dream';
 import { buildMemoryPrompt } from '@/memory/prompt-builder';
+import { recordPipelineEvent } from '@/lib/pipeline-events';
+import { pipelineEvents } from '@/lib/db/schema';
+import { desc } from 'drizzle-orm';
 
 const baseLog = createLogger('worker:content');
 
@@ -110,6 +113,33 @@ export async function processContent(job: Job<ContentJobData>) {
 
   // Enqueue review for the newly created draft
   if (inserted) {
+    // Telemetry: stage='draft_created'. Duration is elapsed since the
+    // 'discovered' event for the same thread if we can find one, else null.
+    let durationMs: number | null = null;
+    try {
+      const [discoveredEvent] = await db
+        .select({ enteredAt: pipelineEvents.enteredAt })
+        .from(pipelineEvents)
+        .where(eq(pipelineEvents.threadId, threadId))
+        .orderBy(desc(pipelineEvents.enteredAt))
+        .limit(1);
+      if (discoveredEvent) {
+        durationMs = Date.now() - discoveredEvent.enteredAt.getTime();
+      }
+    } catch {
+      // non-fatal — leave durationMs null
+    }
+    await recordPipelineEvent({
+      userId,
+      productId,
+      threadId,
+      draftId: inserted.id,
+      stage: 'draft_created',
+      durationMs: durationMs ?? undefined,
+      cost: usage.costUsd,
+      metadata: { draftType, confidence: result.confidence },
+    });
+
     await enqueueReview({ userId, draftId: inserted.id, productId, traceId });
 
     // For reply drafts, inject a todoItem directly so it appears in Today

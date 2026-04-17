@@ -18,6 +18,7 @@ import { MemoryStore } from '@/memory/store';
 import { AgentDream } from '@/memory/dream';
 import { buildMemoryPrompt } from '@/memory/prompt-builder';
 import { isPlatformAvailable, getPlatformConfig } from '@/lib/platform-config';
+import { recordPipelineEvent } from '@/lib/pipeline-events';
 
 const baseLog = createLogger('worker:discovery');
 
@@ -223,6 +224,34 @@ export async function processDiscovery(job: Job<DiscoveryJobData>) {
       .returning({ id: threads.id, externalId: threads.externalId });
 
     newThreadCount = inserted.length;
+
+    // Telemetry: one pipeline_events row per newly-inserted thread at
+    // stage='discovered'. Fire-and-forget; failures do not break discovery.
+    // Share the per-thread LLM cost evenly across new rows so the funnel
+    // cost total matches `result.usage.costUsd`.
+    const perThreadCost =
+      newThreadCount > 0 ? result.usage.costUsd / newThreadCount : 0;
+    for (const row of inserted) {
+      await recordPipelineEvent({
+        userId,
+        productId,
+        threadId: row.id,
+        stage: 'discovered',
+        cost: perThreadCost,
+        metadata: { platform, externalId: row.externalId },
+      });
+      // Threads above the enqueue threshold passed the gate — record the
+      // transition so we can show gate-pass rate in the funnel.
+      if (shouldEnqueue.has(row.externalId)) {
+        await recordPipelineEvent({
+          userId,
+          productId,
+          threadId: row.id,
+          stage: 'gate_passed',
+          metadata: { platform, enqueueThreshold },
+        });
+      }
+    }
 
     // Auto-enqueue content only for newly-inserted high-relevance threads.
     // Propagate our traceId so discovery → content → review → posting stays

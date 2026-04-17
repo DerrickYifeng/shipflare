@@ -19,6 +19,7 @@ import { postingOutputSchema } from '@/agents/schemas';
 import type { PostingOutput } from '@/agents/schemas';
 import { createLogger, loggerForJob } from '@/lib/logger';
 import { getCostForRun } from '@/lib/cost-bucket';
+import { recordPipelineEvent, recordThreadFeedback } from '@/lib/pipeline-events';
 
 const MAX_ENGAGEMENT_DEPTH = 2;
 const baseLog = createLogger('worker:posting');
@@ -141,14 +142,34 @@ export async function processPosting(job: Job<PostingJobData>) {
     log.info(`Posted ${draftType} ${externalId} to r/${thread.community}`);
 
     // Insert post record
-    await db.insert(posts).values({
-      draftId,
+    const [insertedPost] = await db
+      .insert(posts)
+      .values({
+        draftId,
+        userId,
+        platform: thread.platform,
+        externalId,
+        externalUrl,
+        community: thread.community,
+        status: result.verified ? 'verified' : 'posted',
+      })
+      .returning({ id: posts.id });
+
+    // Telemetry: stage='posted'. Upsert thread_feedback so the ground-truth
+    // label for this thread reflects the terminal user disposition ('post'
+    // supersedes an earlier 'approve').
+    await recordPipelineEvent({
       userId,
-      platform: thread.platform,
-      externalId,
-      externalUrl,
-      community: thread.community,
-      status: result.verified ? 'verified' : 'posted',
+      threadId: draft.threadId,
+      draftId,
+      postId: insertedPost?.id,
+      stage: 'posted',
+      metadata: { platform: thread.platform, externalId, draftType },
+    });
+    await recordThreadFeedback({
+      userId,
+      threadId: draft.threadId,
+      userAction: 'post',
     });
 
     // Update draft status
@@ -202,6 +223,20 @@ export async function processPosting(job: Job<PostingJobData>) {
       .update(drafts)
       .set({ status: 'failed', updatedAt: new Date() })
       .where(eq(drafts.id, draftId));
+
+    // Telemetry: terminal failure at the posting stage. Keep metadata
+    // minimal to avoid leaking provider error bodies into the funnel.
+    await recordPipelineEvent({
+      userId,
+      threadId: draft.threadId,
+      draftId,
+      stage: 'failed',
+      metadata: {
+        reason: 'post_failed',
+        platform: thread.platform,
+        error: result.error ?? 'unknown',
+      },
+    });
   }
 
   // Log activity

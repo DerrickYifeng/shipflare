@@ -22,6 +22,7 @@ import type { EngagementJobData } from '@/lib/queue/types';
 import { getTraceId } from '@/lib/queue/types';
 import { createLogger, loggerForJob } from '@/lib/logger';
 import { buildContentUrl } from '@/lib/platform-config';
+import { recordPipelineEvent } from '@/lib/pipeline-events';
 
 const MAX_ENGAGEMENT_DEPTH = 2;
 
@@ -211,6 +212,22 @@ export async function processXEngagement(job: Job<EngagementJobData>) {
         .returning();
 
       draftsCreated++;
+
+      // Telemetry: stage='engaged' — an engagement-reply draft was created
+      // in response to a mention. Distinct from 'draft_created' so the
+      // funnel can show engagement-driven drafts separately.
+      await recordPipelineEvent({
+        userId,
+        productId,
+        threadId: threadRecord.id,
+        draftId: draft.id,
+        stage: 'engaged',
+        metadata: {
+          tweetId,
+          priority: mention.priority,
+          authorUsername: mention.authorUsername,
+        },
+      });
 
       // Auto-enqueue review
       await enqueueReview({
