@@ -1,0 +1,119 @@
+'use client';
+
+import { useCallback, useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { useToast } from '@/components/ui/toast';
+
+interface ReplyScanHeaderProps {
+  lastScannedAt: Date | null;
+  replyCount: number;
+  onScanStarted: (
+    scanRunId: string,
+    sources: Array<{ platform: string; source: string }>,
+  ) => void;
+  platform?: string;
+}
+
+interface ScanResponseBody {
+  scanRunId: string;
+  sources: string[];
+  status?: string;
+}
+
+interface RateLimitBody {
+  error: 'rate_limited';
+  retryAfterSeconds: number;
+}
+
+/**
+ * Header above the Today reply surface. Shows when the last scan ran, how
+ * many replies are currently available, and a Scan button that posts to
+ * `/api/discovery/scan`. On 429 we surface the server-provided debounce
+ * window via toast and shake the button briefly.
+ */
+export function ReplyScanHeader({
+  lastScannedAt,
+  replyCount,
+  onScanStarted,
+  platform = 'reddit',
+}: ReplyScanHeaderProps) {
+  const { toast } = useToast();
+  const [scanning, setScanning] = useState(false);
+  const [shakeKey, setShakeKey] = useState(0);
+
+  const handleScan = useCallback(async () => {
+    setScanning(true);
+    try {
+      const res = await fetch('/api/discovery/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ platform }),
+      });
+      if (res.status === 429) {
+        const body = (await res.json().catch(() => ({}))) as Partial<RateLimitBody>;
+        const seconds = body.retryAfterSeconds ?? 60;
+        setShakeKey((k) => k + 1);
+        toast(`Just scanned — next available in ${seconds}s`, 'info');
+        return;
+      }
+      if (!res.ok) {
+        throw new Error(`Scan failed (${res.status})`);
+      }
+      const body = (await res.json()) as ScanResponseBody;
+      const sourcesTyped = body.sources.map((s) => ({ platform, source: s }));
+      onScanStarted(body.scanRunId, sourcesTyped);
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem('shipflare:lastScanRunId', body.scanRunId);
+        window.localStorage.setItem(
+          'shipflare:lastScanAt',
+          new Date().toISOString(),
+        );
+      }
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Scan failed', 'error');
+    } finally {
+      setScanning(false);
+    }
+  }, [onScanStarted, platform, toast]);
+
+  const relTime = lastScannedAt
+    ? relativeTime(lastScannedAt)
+    : 'Never scanned — try it now.';
+
+  return (
+    <div className="flex items-start justify-between gap-4 mb-6">
+      <div className="min-w-0">
+        <h3 className="text-[17px] tracking-[-0.374px] font-medium text-sf-text-primary">
+          Replies
+        </h3>
+        <p className="text-[14px] tracking-[-0.224px] text-sf-text-tertiary mt-0.5">
+          Last scan: {relTime}
+          {replyCount > 0 && ` · ${replyCount} replies generated`}
+        </p>
+      </div>
+      <div className="flex items-center gap-2 flex-shrink-0">
+        <Badge variant="default">Auto-scans every 4h</Badge>
+        <Button
+          key={shakeKey}
+          onClick={handleScan}
+          disabled={scanning}
+          variant="secondary"
+          className={shakeKey > 0 ? 'animate-sf-fade-in' : ''}
+        >
+          {scanning ? 'Scanning…' : 'Scan for replies'}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function relativeTime(d: Date): string {
+  const ms = Date.now() - d.getTime();
+  const min = Math.floor(ms / 60_000);
+  if (min < 1) return 'just now';
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  return `${Math.floor(hr / 24)}d ago`;
+}
