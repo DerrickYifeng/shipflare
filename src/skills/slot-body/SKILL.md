@@ -1,7 +1,7 @@
 ---
 name: slot-body
 description: Generate a single tweet or thread body for one planner slot (calendar-slot-draft fan-out).
-agent: agent.md
+agent: slot-body-agent
 model: claude-sonnet-4-6
 maxTurns: 4
 cache-safe: true
