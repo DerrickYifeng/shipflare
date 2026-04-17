@@ -11,6 +11,39 @@ import { createLogger } from '@/lib/logger';
 const log = createLogger('pipeline-events');
 
 /**
+ * Pipeline the event belongs to in the unified per-item fan-out envelope.
+ */
+export type Pipeline = 'plan' | 'reply' | 'discovery';
+
+/**
+ * Per-item lifecycle state carried in the SSE envelope. `searching` and
+ * `searched` are discovery-source states; the other four apply to plan
+ * slots and reply threads.
+ */
+export type ItemState =
+  | 'queued'
+  | 'drafting'
+  | 'ready'
+  | 'failed'
+  | 'searching'
+  | 'searched';
+
+/**
+ * Unified SSE envelope emitted by the plan / reply / discovery pipelines.
+ *
+ * - `itemId` is the calendarItemId, threadId, or `{platform}:{source}` chip key.
+ * - `seq` is an optional monotonically-increasing sequence number the client
+ *   uses to drop out-of-order duplicates from reconnect bursts.
+ */
+export interface PipelineEvent<T = Record<string, unknown>> {
+  pipeline: Pipeline;
+  itemId: string;
+  state: ItemState;
+  data?: T;
+  seq?: number;
+}
+
+/**
  * Stage enum as a string-literal union. Not a pg enum so we can add stages
  * without a migration — the DB column is plain `text`. Keep in sync with
  * the dashboard funnel view so unknown stages don't silently disappear.
@@ -23,7 +56,22 @@ export type PipelineStage =
   | 'approved'
   | 'posted'
   | 'engaged'
-  | 'failed';
+  | 'failed'
+  // Pipeline P: calendar fan-out
+  | 'plan_shell_ready'
+  | 'slot_drafting'
+  | 'slot_ready'
+  | 'slot_failed'
+  // Pipeline R: per-source fan-out
+  | 'scan_started'
+  | 'source_queued'
+  | 'source_searching'
+  | 'source_searched'
+  | 'source_failed'
+  // Pipeline R: per-thread drafting
+  | 'thread_drafting'
+  | 'thread_ready'
+  | 'thread_failed';
 
 export type RecordPipelineEventInput = Omit<
   NewPipelineEvent,
