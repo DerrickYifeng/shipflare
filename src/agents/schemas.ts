@@ -139,12 +139,18 @@ export const communityIntelOutputSchema = z.object({
 /**
  * Output schema for the content agent.
  * Includes optional postTitle for original_post type.
+ *
+ * `summaryReason` is a new one-sentence default-visible recap shown under the
+ * reply body in the DraftCard. `whyItWorks` remains the deep strategy recap
+ * shown behind a "See detailed reasoning" toggle. Optional for backwards
+ * compatibility with drafts stored before the field was introduced.
  */
 export const contentOutputSchema = z.object({
   replyBody: z.string(),
   postTitle: z.string().optional(),
   confidence: z.number(),
   whyItWorks: z.string(),
+  summaryReason: z.string().optional(),
   ftcDisclosure: z.string(),
 });
 
@@ -162,12 +168,16 @@ export const replyDrafterOutputSchema = z.object({
 /**
  * Output schema for the content creator (content-batch skill).
  * Generates original post or thread content for the content calendar.
+ *
+ * `summaryReason` is the one-sentence default-visible recap; `whyItWorks`
+ * is the longer strategy rationale shown behind a collapsible toggle.
  */
 export const contentCreatorOutputSchema = z.object({
   tweets: z.array(z.string()),
   linkReply: z.string().optional(),
   confidence: z.number(),
   whyItWorks: z.string(),
+  summaryReason: z.string().optional(),
   contentType: z.string(),
 });
 
