@@ -21,81 +21,75 @@ export async function PATCH(
   const { id } = await params;
   const userId = session.user.id;
 
-  // Verify ownership and status
-  const [todo] = await db
-    .select()
+  // Single-round-trip ownership + draft + thread + channel resolution.
+  // LEFT JOINs handle the legitimate "todo with no draft" case (after H6b
+  // the draft_id FK ON DELETE SET NULL means a todo can outlive its draft);
+  // INNER would silently drop those valid rows.
+  const [row] = await db
+    .select({
+      todoStatus: todoItems.status,
+      draftId: drafts.id,
+      threadPlatform: threads.platform,
+      channelId: channels.id,
+    })
     .from(todoItems)
+    .leftJoin(drafts, eq(todoItems.draftId, drafts.id))
+    .leftJoin(threads, eq(drafts.threadId, threads.id))
+    .leftJoin(
+      channels,
+      and(eq(channels.userId, userId), eq(channels.platform, threads.platform)),
+    )
     .where(and(eq(todoItems.id, id), eq(todoItems.userId, userId)))
     .limit(1);
 
-  if (!todo) {
+  if (!row) {
     return NextResponse.json({ error: 'Todo not found' }, { status: 404 });
   }
 
-  if (todo.status !== 'pending') {
+  if (row.todoStatus !== 'pending') {
     return NextResponse.json(
       { error: 'Todo already processed' },
       { status: 400 },
     );
   }
 
-  // If linked to a draft, approve the draft and enqueue posting
-  if (todo.draftId) {
+  // If linked to a draft, approve the draft and enqueue posting.
+  // drafts.threadId is NOT NULL and threads.platform is NOT NULL, so when
+  // row.draftId is present row.threadPlatform is guaranteed non-null.
+  if (row.draftId) {
+    const draftId = row.draftId;
+    const platform = row.threadPlatform ?? 'reddit';
+
     await db
       .update(drafts)
       .set({ status: 'approved', updatedAt: new Date() })
-      .where(eq(drafts.id, todo.draftId));
+      .where(eq(drafts.id, draftId));
 
-    // Find draft's thread to determine platform
-    const [draft] = await db
-      .select({ threadId: drafts.threadId })
-      .from(drafts)
-      .where(eq(drafts.id, todo.draftId))
-      .limit(1);
-
-    if (draft) {
-      const [thread] = await db
-        .select({ platform: threads.platform })
-        .from(threads)
-        .where(eq(threads.id, draft.threadId))
-        .limit(1);
-
-      const platform = thread?.platform ?? 'reddit';
-
-      const [channel] = await db
-        .select({ id: channels.id })
-        .from(channels)
-        .where(
-          and(eq(channels.userId, userId), eq(channels.platform, platform)),
-        )
-        .limit(1);
-
-      if (channel) {
-        await enqueuePosting({
-          userId,
-          draftId: todo.draftId,
-          channelId: channel.id,
-          traceId,
-        });
-        log.info(`Todo ${id} approved, posting enqueued for draft ${todo.draftId}`);
-      } else {
-        // Don't silently swallow — the user needs to know their approval won't
-        // result in a post. Roll back the draft-status change so they can
-        // retry after connecting the account.
-        log.warn(`Todo ${id} approve blocked: no ${platform} channel for user ${userId}`);
-        await db
-          .update(drafts)
-          .set({ status: 'pending', updatedAt: new Date() })
-          .where(eq(drafts.id, todo.draftId));
-        return NextResponse.json(
-          {
-            error: `Connect your ${platform === 'x' ? 'X' : platform} account to publish this post.`,
-            code: 'NO_CHANNEL',
-            platform,
-          },
-          { status: 409 },
-        );
-      }
+    if (row.channelId) {
+      await enqueuePosting({
+        userId,
+        draftId,
+        channelId: row.channelId,
+        traceId,
+      });
+      log.info(`Todo ${id} approved, posting enqueued for draft ${draftId}`);
+    } else {
+      // Don't silently swallow — the user needs to know their approval won't
+      // result in a post. Roll back the draft-status change so they can
+      // retry after connecting the account.
+      log.warn(`Todo ${id} approve blocked: no ${platform} channel for user ${userId}`);
+      await db
+        .update(drafts)
+        .set({ status: 'pending', updatedAt: new Date() })
+        .where(eq(drafts.id, draftId));
+      return NextResponse.json(
+        {
+          error: `Connect your ${platform === 'x' ? 'X' : platform} account to publish this post.`,
+          code: 'NO_CHANNEL',
+          platform,
+        },
+        { status: 409 },
+      );
     }
   }
 
