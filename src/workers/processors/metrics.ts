@@ -10,7 +10,9 @@ import {
 import { eq, and, gte } from 'drizzle-orm';
 import { XClient, XForbiddenError } from '@/lib/x-client';
 import { publishEvent } from '@/lib/redis';
+import { enqueueMetrics } from '@/lib/queue';
 import type { MetricsJobData } from '@/lib/queue/types';
+import { isFanoutJob } from '@/lib/queue/types';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('worker:x-metrics');
@@ -140,27 +142,25 @@ async function processXMetricsForUser(userId: string) {
 }
 
 export async function processXMetrics(job: Job<MetricsJobData>) {
-  const { userId } = job.data;
-
-  if (userId === '__all__') {
-    // Cron fan-out: find all users with an active X channel and process each
+  if (isFanoutJob(job.data)) {
+    const platform = (job.data as { platform?: string }).platform ?? 'x';
+    // Cron fan-out: enqueue per-user metrics jobs.
     const xChannels = await db
       .select({ userId: channels.userId })
       .from(channels)
-      .where(eq(channels.platform, 'x'));
+      .where(eq(channels.platform, platform));
 
     const userIds = [...new Set(xChannels.map((c) => c.userId))];
-    log.info(`Cron fan-out: collecting metrics for ${userIds.length} users with X channels`);
+    log.info(
+      `Cron fan-out: enqueueing ${userIds.length} per-user metrics jobs (${platform})`,
+    );
 
     for (const uid of userIds) {
-      try {
-        await processXMetricsForUser(uid);
-      } catch (err) {
-        log.error(`X metrics failed for user ${uid}: ${err}`);
-      }
+      await enqueueMetrics({ userId: uid, platform });
     }
     return;
   }
 
-  await processXMetricsForUser(userId);
+  const data = job.data as Extract<MetricsJobData, { userId: string }>;
+  await processXMetricsForUser(data.userId);
 }
