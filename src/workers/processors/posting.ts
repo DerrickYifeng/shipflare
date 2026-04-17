@@ -16,6 +16,7 @@ import { getTraceId } from '@/lib/queue/types';
 import { postingOutputSchema } from '@/agents/schemas';
 import type { PostingOutput } from '@/agents/schemas';
 import { createLogger, loggerForJob } from '@/lib/logger';
+import { getCostForRun } from '@/lib/cost-bucket';
 
 const MAX_ENGAGEMENT_DEPTH = 2;
 const baseLog = createLogger('worker:posting');
@@ -112,6 +113,7 @@ export async function processPosting(job: Job<PostingJobData>) {
     input,
     deps,
     outputSchema: postingOutputSchema,
+    runId: traceId,
   });
 
   const result = results[0];
@@ -211,5 +213,19 @@ export async function processPosting(job: Job<PostingJobData>) {
     draftType,
     community: thread.community,
     shadowbanned: result.shadowbanned,
+  });
+
+  // Terminal cost roll-up for the whole discovery → content → review → posting
+  // chain keyed by traceId. Safe even if earlier stages never contributed
+  // (returns a zeroed snapshot).
+  const runCost = await getCostForRun(traceId);
+  log.info('Run cost total', {
+    costUsd: runCost.costUsd,
+    inputTokens: runCost.inputTokens,
+    outputTokens: runCost.outputTokens,
+    cacheReadTokens: runCost.cacheReadTokens,
+    cacheWriteTokens: runCost.cacheWriteTokens,
+    turns: runCost.turns,
+    models: runCost.models,
   });
 }

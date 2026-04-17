@@ -154,6 +154,7 @@ export async function processDiscovery(job: Job<DiscoveryJobData>) {
     deps,
     memoryPrompt: memoryPrompt || undefined,
     outputSchema: discoveryOutputSchema,
+    runId: traceId,
   });
 
   // Merge and deduplicate threads

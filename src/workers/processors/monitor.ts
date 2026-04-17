@@ -274,6 +274,7 @@ async function processXMonitorForUser(
       deps: { xClient },
       memoryPrompt: memoryPrompt || undefined,
       outputSchema: replyDrafterOutputSchema,
+      runId: traceId,
     });
 
     let draftsCreated = 0;

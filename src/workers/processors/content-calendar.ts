@@ -119,6 +119,7 @@ async function processXContentCalendarForUser(
     deps: {},
     memoryPrompt: memoryPrompt || undefined,
     outputSchema: contentCreatorOutputSchema,
+    runId: traceId,
   });
 
   let draftsCreated = 0;

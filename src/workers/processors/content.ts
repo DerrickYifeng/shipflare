@@ -84,6 +84,7 @@ export async function processContent(job: Job<ContentJobData>) {
     },
     memoryPrompt: memoryPrompt || undefined,
     outputSchema: contentOutputSchema,
+    runId: traceId,
   });
 
   const result = results[0];

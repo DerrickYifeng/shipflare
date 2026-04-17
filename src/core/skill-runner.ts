@@ -2,13 +2,13 @@ import { join } from 'path';
 import type { z } from 'zod';
 import type { SkillConfig } from './skill-loader';
 import type { AgentProgressEvent, OnProgress, UsageSummary } from './types';
-import type { ToolContext } from './types';
 import { SwarmCoordinator } from './swarm';
 import type { AgentTaskResult, CachedAgentTask } from './swarm';
 import { loadAgentFromFile } from '@/bridge/load-agent';
 import { registry } from '@/tools/registry';
 import { createToolContext } from './query-loop';
 import { createLogger } from '@/lib/logger';
+import { addCost } from '@/lib/cost-bucket';
 
 const log = createLogger('core:skill');
 
@@ -29,6 +29,14 @@ export interface SkillRunConfig<T = unknown> {
   outputSchema?: z.ZodType<T>;
   /** Progress callback for SSE streaming. */
   onProgress?: OnProgress;
+  /**
+   * Correlate this skill run's token/USD spend with an outer logical run
+   * (typically the BullMQ job's traceId). When set, the final merged
+   * UsageSummary is added to the Redis-backed per-run cost bucket so
+   * downstream stages can query the running total via
+   * `getCostForRun(runId)`. Safe to omit in one-off scripts / tests.
+   */
+  runId?: string;
 }
 
 export interface SkillRunResult<T = unknown> {
@@ -103,7 +111,7 @@ function collectResults<T>(
  * agents 2-N share the Anthropic prompt cache prefix.
  */
 export async function runSkill<T>(config: SkillRunConfig<T>): Promise<SkillRunResult<T>> {
-  const { skill, input, deps = {}, memoryPrompt, outputSchema, onProgress } = config;
+  const { skill, input, deps = {}, memoryPrompt, outputSchema, onProgress, runId } = config;
   log.info(`Running skill "${skill.name}" fanOut=${skill.fanOut ?? 'none'}`);
 
   // Load agent definition
@@ -184,8 +192,10 @@ export async function runSkill<T>(config: SkillRunConfig<T>): Promise<SkillRunRe
     }
 
     const { results, usages, errors } = collectResults(taskResults);
+    const merged = mergeUsage(usages);
     log.info(`Skill "${skill.name}" complete: ${results.length} results, ${errors.length} errors`);
-    return { results, usage: mergeUsage(usages), errors };
+    if (runId) await addCost(runId, merged);
+    return { results, usage: merged, errors };
   }
 
   // Single agent mode
@@ -199,6 +209,7 @@ export async function runSkill<T>(config: SkillRunConfig<T>): Promise<SkillRunRe
     onProgress,
   );
 
+  if (runId) await addCost(runId, result.usage);
   return {
     results: [result.result],
     usage: result.usage,

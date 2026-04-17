@@ -78,6 +78,7 @@ export async function processReview(job: Job<ReviewJobData>) {
       },
       memoryPrompt: memoryPrompt || undefined,
       outputSchema: draftReviewOutputSchema,
+      runId: traceId,
     });
 
     const result = results[0];

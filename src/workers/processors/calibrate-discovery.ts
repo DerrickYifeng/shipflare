@@ -10,6 +10,7 @@ import type { DiscoveryOutput } from '@/agents/schemas';
 import { publishEvent } from '@/lib/redis';
 import { join } from 'path';
 import type { CalibrationJobData } from '@/lib/queue/types';
+import { getTraceId } from '@/lib/queue/types';
 import { createLogger, loggerForJob, type Logger } from '@/lib/logger';
 import { isPlatformAvailable, getPlatformConfig } from '@/lib/platform-config';
 import { judgeThreadsBatch } from '@/lib/discovery/judge';
@@ -52,6 +53,7 @@ interface CalibrationLogEntry {
 
 export async function processCalibration(job: Job<CalibrationJobData>) {
   const log = loggerForJob(baseLog, job);
+  const traceId = getTraceId(job.data, job.id);
   const { userId, productId, maxRounds = DEFAULT_MAX_ROUNDS } = job.data;
 
   log.info(`Starting calibration for product ${productId}, user ${userId}, maxRounds=${maxRounds}`);
@@ -83,7 +85,7 @@ export async function processCalibration(job: Job<CalibrationJobData>) {
   }
 
   for (const platform of platforms) {
-    await calibratePlatform(userId, product, platform, maxRounds, log);
+    await calibratePlatform(userId, product, platform, maxRounds, log, traceId);
   }
 
   // Publish completion event
@@ -103,6 +105,7 @@ async function calibratePlatform(
   platform: string,
   maxRounds: number,
   log: Logger,
+  traceId: string,
 ) {
   // Load or create config
   let [config] = await db
@@ -163,6 +166,7 @@ async function calibratePlatform(
       platform,
       userId,
       config,
+      traceId,
     );
     roundCostUsd += discoveryResult.usage.costUsd;
 
@@ -386,6 +390,7 @@ async function runDiscoveryWithConfig(
   platform: string,
   userId: string,
   config: typeof discoveryConfigs.$inferSelect,
+  traceId: string,
 ): Promise<DiscoveryWithConfigResult> {
   const platformConfig = getPlatformConfig(platform);
   const deps = await createPlatformDeps(platform, userId);
@@ -434,6 +439,7 @@ async function runDiscoveryWithConfig(
     input,
     deps,
     outputSchema: discoveryOutputSchema,
+    runId: traceId,
   });
 
   // Merge and deduplicate threads
