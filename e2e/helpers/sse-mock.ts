@@ -91,16 +91,67 @@ export async function emitSSEEvent(page: Page, event: SSEEvent) {
 
 /**
  * Pushes a sequence of SSE events with an optional delay between each.
+ *
+ * Accepts two shapes for backward compatibility:
+ *  1. Flat `SSEEvent[]` — routed to the most recent FakeEventSource (legacy).
+ *  2. `{ channel, event }[]` — routed to every FakeEventSource whose URL
+ *     subscribes to `?channel=<channel>` (or to all sources if none match).
+ *     Use this when the page opens multiple parallel streams (e.g. Today
+ *     opens `agents` + `drafts` at once) and you need to target one of them.
  */
 export async function emitSSESequence(
   page: Page,
-  events: SSEEvent[],
+  events: SSEEvent[] | Array<{ channel: string; event: unknown }>,
   delayMs = 100,
 ) {
-  for (const event of events) {
-    await emitSSEEvent(page, event);
+  for (const entry of events) {
+    if (entry && typeof entry === 'object' && 'channel' in entry && 'event' in entry) {
+      const { channel, event } = entry as { channel: string; event: unknown };
+      await emitSSEToChannel(page, channel, event);
+    } else {
+      await emitSSEEvent(page, entry as SSEEvent);
+    }
     if (delayMs > 0) {
       await page.waitForTimeout(delayMs);
     }
   }
+}
+
+/**
+ * Push a single event to every FakeEventSource subscribed to `channel`.
+ * Falls back to broadcasting to all sources if none match — consumers filter
+ * on envelope shape (`pipeline`, `type`) so extra deliveries are harmless.
+ */
+export async function emitSSEToChannel(
+  page: Page,
+  channel: string,
+  event: unknown,
+) {
+  await page.evaluate(
+    ({ channel, payload }) => {
+      const sources = (window as any).__fakeEventSources as Array<{
+        url: string;
+        readyState: number;
+        onopen: ((ev: Event) => void) | null;
+        __pushEvent: (data: string) => void;
+      }> | undefined;
+      if (!sources || sources.length === 0) return;
+      const match = (s: { url: string }) =>
+        s.url.includes(`channel=${channel}`) || (channel === 'all' && !s.url.includes('channel='));
+      const targets = sources.filter(match);
+      const deliverTo = targets.length > 0 ? targets : sources;
+      for (const src of deliverTo) {
+        if (src.readyState === 1) {
+          src.__pushEvent(payload);
+        } else {
+          const origOnOpen = src.onopen;
+          src.onopen = (ev: Event) => {
+            if (origOnOpen) origOnOpen(ev);
+            src.__pushEvent(payload);
+          };
+        }
+      }
+    },
+    { channel, payload: JSON.stringify(event) },
+  );
 }

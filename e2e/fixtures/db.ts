@@ -103,6 +103,41 @@ export async function seedChannel(
   return values;
 }
 
+/**
+ * Seed a single `todo_items` row for `userId`. Used by the reply-scan E2E to
+ * short-circuit the server-side first-run check
+ * (`isFirstRun = !existing` → true when there are no todo rows at all).
+ * Defaults to an already-expired row so the /api/today `WHERE status='pending'
+ * AND expires_at > now()` filter returns zero items and the Today page still
+ * renders the EmptyState + scan surface.
+ */
+export async function seedTodoItem(
+  userId: string,
+  overrides: Partial<{
+    status: 'pending' | 'approved' | 'skipped' | 'expired';
+    expiresAt: Date;
+    todoType: 'approve_post' | 'reply_thread' | 'respond_engagement';
+    source: 'calendar' | 'discovery' | 'engagement';
+    priority: 'time_sensitive' | 'scheduled' | 'optional';
+    platform: string;
+  }> = {},
+) {
+  const expiresAt = overrides.expiresAt ?? new Date(Date.now() - 60_000);
+  const row = {
+    id: crypto.randomUUID(),
+    userId,
+    todoType: overrides.todoType ?? 'approve_post',
+    source: overrides.source ?? 'calendar',
+    priority: overrides.priority ?? 'optional',
+    status: overrides.status ?? 'expired',
+    title: 'Test seed (for non-first-run state)',
+    platform: overrides.platform ?? 'reddit',
+    expiresAt,
+  };
+  await db.insert(schema.todoItems).values(row);
+  return row;
+}
+
 export async function cleanupUser(userId: string) {
   // Cascade delete handles everything
   await db.delete(schema.users).where(eq(schema.users.id, userId));

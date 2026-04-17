@@ -27,6 +27,13 @@ export default defineConfig({
         viewport: { width: 1280, height: 720 },
       },
     },
+    {
+      name: 'perf',
+      testMatch: /.*\.perf\.ts/,
+      retries: 0,
+      timeout: 180_000,
+      use: { baseURL: process.env.BASE_URL ?? 'http://localhost:3000' },
+    },
   ],
 
   webServer: {
