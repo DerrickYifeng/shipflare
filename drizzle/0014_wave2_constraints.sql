@@ -46,15 +46,21 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 --> statement-breakpoint
--- H5a: convert x_monitored_tweets.status from text to enum (no-op if already enum)
+-- H5a: convert x_monitored_tweets.status from text to enum (no-op if already enum).
+-- DROP DEFAULT first: PostgreSQL cannot auto-cast a column's DEFAULT expression during
+-- ALTER COLUMN TYPE even when a USING clause handles existing row values. The default
+-- must be dropped, the type changed, then the typed default re-applied.
 DO $$ BEGIN
   IF (
     SELECT data_type FROM information_schema.columns
     WHERE table_name = 'x_monitored_tweets' AND column_name = 'status'
   ) = 'text' THEN
+    ALTER TABLE "x_monitored_tweets" ALTER COLUMN "status" DROP DEFAULT;
     ALTER TABLE "x_monitored_tweets"
       ALTER COLUMN "status" TYPE "x_monitored_tweet_status"
       USING "status"::"x_monitored_tweet_status";
+    ALTER TABLE "x_monitored_tweets"
+      ALTER COLUMN "status" SET DEFAULT 'pending'::"x_monitored_tweet_status";
   END IF;
 END $$;
 
@@ -67,15 +73,19 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 --> statement-breakpoint
--- H5b: convert x_content_calendar.status from text to enum (no-op if already enum)
+-- H5b: convert x_content_calendar.status from text to enum (no-op if already enum).
+-- Same DROP DEFAULT / ALTER TYPE / SET DEFAULT dance as H5a — see comment there.
 DO $$ BEGIN
   IF (
     SELECT data_type FROM information_schema.columns
     WHERE table_name = 'x_content_calendar' AND column_name = 'status'
   ) = 'text' THEN
+    ALTER TABLE "x_content_calendar" ALTER COLUMN "status" DROP DEFAULT;
     ALTER TABLE "x_content_calendar"
       ALTER COLUMN "status" TYPE "x_content_calendar_status"
       USING "status"::"x_content_calendar_status";
+    ALTER TABLE "x_content_calendar"
+      ALTER COLUMN "status" SET DEFAULT 'scheduled'::"x_content_calendar_status";
   END IF;
 END $$;
 
