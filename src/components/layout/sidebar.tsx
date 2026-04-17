@@ -11,6 +11,7 @@ const navItems = [
   { href: '/product', label: 'My Product', icon: ProductIcon },
   { href: '/growth', label: 'Growth', icon: GrowthIcon },
   { href: '/calendar', label: 'Calendar', icon: CalendarIcon },
+  { href: '/dashboard', label: 'Metrics', icon: MetricsIcon },
   { href: '/settings', label: 'Settings', icon: SettingsIcon },
 ];
 
@@ -112,6 +113,17 @@ function CalendarIcon({ active }: { active: boolean }) {
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke={active ? 'var(--color-sf-text-primary)' : 'currentColor'} strokeWidth="1.5">
       <rect x="2" y="3" width="12" height="12" rx="1" />
       <path d="M11 1v4M5 1v4M2 7h12" />
+    </svg>
+  );
+}
+
+function MetricsIcon({ active }: { active: boolean }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke={active ? 'var(--color-sf-text-primary)' : 'currentColor'} strokeWidth="1.5">
+      <path d="M2 13h12" />
+      <rect x="3" y="8" width="2.5" height="4" />
+      <rect x="7" y="5" width="2.5" height="7" />
+      <rect x="11" y="3" width="2.5" height="9" />
     </svg>
   );
 }
