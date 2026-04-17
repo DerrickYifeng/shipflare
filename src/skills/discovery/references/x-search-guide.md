@@ -15,7 +15,7 @@ Adapt queries for X style — shorter, conversational. X search via Grok underst
 - Focus on QUESTION-format queries: "how do I", "anyone know", "need help with"
 - Target frustration and pain: "struggling with", "can't figure out", "tired of"
 - Avoid generic tool/category queries — these attract promoters, not users
-- Think about how real indie devs/founders ask for help on X
+- Think about how real people in the product's target audience ask for help on X — adapt to the user's vertical (founders, creators, operators, D2C buyers, specific professions, etc.)
 
 ## Filtering Noise
 

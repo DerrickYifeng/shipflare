@@ -120,6 +120,8 @@ If removing your reply wouldn't change the conversation, it shouldn't exist. Eit
 
 ## Examples — good vs bad by register
 
+> **Examples are illustrative, not domain-specific.** The sample tweets below skew toward SaaS/indie-hacker because that's a common vertical, but the same archetype structures apply to ANY domain the user's product serves — D2C brands, creator tools, agencies, local businesses, fitness, fintech, etc. When the input tweet is from a different vertical, substitute analogous concepts (e.g. "$10k MRR" → "$10k/day revenue" for D2C; "hired first engineer" → "hired first VA" for a solo service business; "killed onboarding" → "killed the setup call" for a self-serve offering). The registers, archetypes, length rules, and forbidden phrases don't change.
+
 ### R1 — Milestone: "finally hit $10k MRR 🎉"
 - BAD (156): "Congratulations!! This is a huge milestone and a testament to your hard work. Would love to hear more about what marketing channels worked best for you!"
 - GOOD (48): "huge. what's the channel that finally clicked?"
