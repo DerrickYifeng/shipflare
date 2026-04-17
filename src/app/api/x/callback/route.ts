@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { channels } from '@/lib/db/schema';
+import { channelPosts } from '@/lib/db/schema/channels';
 import { encrypt } from '@/lib/encryption';
 import { eq, and } from 'drizzle-orm';
 import { createLogger } from '@/lib/logger';
@@ -170,15 +171,23 @@ export async function GET(request: NextRequest) {
           .map((t) => ({ id: t.id, text: t.text, type: 'reply' as const, createdAt: t.created_at }));
 
         const postHistory = [...posts, ...replies];
+        const channelId = existing[0]?.id;
 
-        if (postHistory.length > 0) {
-          const channelId = existing[0]?.id;
-          if (channelId) {
-            await db
-              .update(channels)
-              .set({ postHistory })
-              .where(eq(channels.id, channelId));
-          }
+        if (channelId) {
+          await db.transaction(async (tx) => {
+            await tx.delete(channelPosts).where(eq(channelPosts.channelId, channelId));
+            if (postHistory.length > 0) {
+              await tx.insert(channelPosts).values(
+                postHistory.map((p) => ({
+                  channelId,
+                  externalId: p.id,
+                  text: p.text,
+                  type: p.type,
+                  postedAt: new Date(p.createdAt),
+                })),
+              );
+            }
+          });
           log.info(`Stored ${postHistory.length} post history items for @${username}`);
         }
       }

@@ -1,6 +1,7 @@
 import type { Job } from 'bullmq';
 import { db } from '@/lib/db';
 import { products, threads, drafts, activityEvents, todoItems, channels } from '@/lib/db/schema';
+import { channelPosts } from '@/lib/db/schema/channels';
 import { eq, and } from 'drizzle-orm';
 import { loadSkill } from '@/core/skill-loader';
 import { runSkill } from '@/core/skill-runner';
@@ -52,17 +53,17 @@ export async function processContent(job: Job<ContentJobData>) {
   const dream = new AgentDream(memoryStore);
   const memoryPrompt = await buildMemoryPrompt(memoryStore);
 
-  // Load channel post history for deduplication
-  const [channel] = await db
-    .select({ postHistory: channels.postHistory })
-    .from(channels)
+  // Load recent channel posts for deduplication — most-recent-first, text only.
+  // Replaces the old JSONB channels.post_history read; see 0016 / channelPosts.
+  const postHistoryRows = await db
+    .select({ text: channelPosts.text })
+    .from(channelPosts)
+    .innerJoin(channels, eq(channelPosts.channelId, channels.id))
     .where(and(eq(channels.userId, userId), eq(channels.platform, thread.platform ?? 'reddit')))
-    .limit(1);
+    .orderBy(desc(channelPosts.postedAt))
+    .limit(20);
 
-  const recentPostHistory = (channel?.postHistory ?? [])
-    .filter((p) => !!p?.text)
-    .map((p) => p.text)
-    .slice(0, 20);
+  const recentPostHistory = postHistoryRows.map((r) => r.text);
 
   // Run content-gen skill (single-item fan-out)
   const skill = loadSkill(join(SKILLS_DIR, 'content-gen'));
