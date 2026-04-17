@@ -2,15 +2,34 @@
 
 import { useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import { SWRConfig } from 'swr';
 import { TodayActionError, useToday } from '@/hooks/use-today';
+import type { TodayStats } from '@/hooks/use-today';
 import { useToast } from '@/components/ui/toast';
 import { TodoList } from '@/components/today/todo-list';
 import { CompletionState } from '@/components/today/completion-state';
+import type { YesterdayTop } from '@/components/today/completion-state';
 import { EmptyState } from '@/components/today/empty-state';
 import { FirstRun } from '@/components/today/first-run';
 
+interface RawTodoItemPayload {
+  id: string;
+  // The full payload is structurally validated on the client by useToday's
+  // derivation — we only need a loose shape here because this value is
+  // round-tripped through SWR cache as-is.
+  [key: string]: unknown;
+}
+
+interface TodayFallbackData {
+  items: RawTodoItemPayload[];
+  stats: TodayStats;
+}
+
 interface TodayContentProps {
   isFirstRun: boolean;
+  hasChannel: boolean;
+  fallbackData: TodayFallbackData;
+  yesterdayTop: YesterdayTop | null;
 }
 
 function platformLabel(platform: string | undefined): string {
@@ -20,7 +39,37 @@ function platformLabel(platform: string | undefined): string {
   return platform.charAt(0).toUpperCase() + platform.slice(1);
 }
 
-export function TodayContent({ isFirstRun }: TodayContentProps) {
+export function TodayContent({
+  isFirstRun,
+  hasChannel,
+  fallbackData,
+  yesterdayTop,
+}: TodayContentProps) {
+  return (
+    // Seed SWR's cache with the server-rendered payload so the first render
+    // skips the client fetch + loading flash. `useToday()` (and any other
+    // consumer keyed on '/api/today') picks this up transparently.
+    <SWRConfig value={{ fallback: { '/api/today': fallbackData } }}>
+      <TodayContentInner
+        isFirstRun={isFirstRun}
+        hasChannel={hasChannel}
+        yesterdayTop={yesterdayTop}
+      />
+    </SWRConfig>
+  );
+}
+
+interface TodayContentInnerProps {
+  isFirstRun: boolean;
+  hasChannel: boolean;
+  yesterdayTop: YesterdayTop | null;
+}
+
+function TodayContentInner({
+  isFirstRun,
+  hasChannel,
+  yesterdayTop,
+}: TodayContentInnerProps) {
   const {
     items,
     stats,
@@ -43,7 +92,6 @@ export function TodayContent({ isFirstRun }: TodayContentProps) {
   const surfaceError = useCallback(
     (err: unknown, fallback: string) => {
       if (err instanceof TodayActionError && err.code === 'NO_CHANNEL') {
-        // Give the user a one-click path to fix the underlying issue.
         toastWithAction({
           message: `Connect ${platformLabel(err.platform)} to publish this post.`,
           variant: 'warning',
@@ -108,7 +156,7 @@ export function TodayContent({ isFirstRun }: TodayContentProps) {
 
   // First-run experience
   if (showFirstRun && items.length === 0) {
-    return <FirstRun onItemsReady={handleItemsReady} />;
+    return <FirstRun onItemsReady={handleItemsReady} hasChannel={hasChannel} />;
   }
 
   if (isLoading) {
@@ -132,7 +180,7 @@ export function TodayContent({ isFirstRun }: TodayContentProps) {
 
   // Distinguish completion vs empty
   if (stats.acted_today > 0) {
-    return <CompletionState stats={stats} />;
+    return <CompletionState stats={stats} yesterdayTop={yesterdayTop} />;
   }
 
   return <EmptyState />;

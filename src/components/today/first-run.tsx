@@ -5,9 +5,14 @@ import Link from 'next/link';
 
 interface FirstRunProps {
   onItemsReady: () => void;
+  /** Whether the user has at least one connected publishing channel. */
+  hasChannel?: boolean;
 }
 
-export function FirstRun({ onItemsReady }: FirstRunProps) {
+export function FirstRun({ onItemsReady, hasChannel = true }: FirstRunProps) {
+  // hasChannel drives the timeout copy — see the SSE-driven rewrite that
+  // replaces this placeholder.
+  void hasChannel;
   const [status, setStatus] = useState<'seeding' | 'polling' | 'timeout'>('seeding');
   const [elapsed, setElapsed] = useState(0);
   const startedRef = useRef(false);
