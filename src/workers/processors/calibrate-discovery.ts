@@ -407,19 +407,17 @@ async function runDiscoveryWithConfig(
   const deps = await createPlatformDeps(platform, userId);
   const sources = platformConfig.defaultSources;
 
-  // Build input with per-user config injected
-  const input: Record<string, unknown> = {
+  // Build common input with per-user config injected
+  const commonInput: Record<string, unknown> = {
     productName: product.name,
     productDescription: product.description,
     keywords: product.keywords,
     valueProp: product.valueProp,
-    sources,
-    platform,
   };
 
   // Inject per-user config overrides
   if (config.calibrationStatus === 'running' || config.calibrationStatus === 'completed') {
-    input.scoringConfig = {
+    commonInput.scoringConfig = {
       weights: {
         relevance: config.weightRelevance,
         intent: config.weightIntent,
@@ -432,37 +430,57 @@ async function runDiscoveryWithConfig(
       gateCap: config.gateCap,
     };
     if (config.customPainPhrases && config.customPainPhrases.length > 0) {
-      input.customPainPhrases = config.customPainPhrases;
+      commonInput.customPainPhrases = config.customPainPhrases;
     }
     if (config.customQueryTemplates && config.customQueryTemplates.length > 0) {
-      input.customQueryTemplates = config.customQueryTemplates;
+      commonInput.customQueryTemplates = config.customQueryTemplates;
     }
     if (config.strategyRules) {
-      input.additionalRules = config.strategyRules;
+      commonInput.additionalRules = config.strategyRules;
     }
     if (config.customLowRelevancePatterns) {
-      input.additionalLowRelevancePatterns = config.customLowRelevancePatterns;
+      commonInput.additionalLowRelevancePatterns = config.customLowRelevancePatterns;
     }
   }
 
-  const result = await runSkill<DiscoveryOutput>({
-    skill: discoverySkill,
-    input,
-    deps,
-    outputSchema: discoveryOutputSchema,
-    runId: traceId,
-  });
-
-  // Merge and deduplicate threads
+  // Fan out over sources serially — one runSkill call per source.
   const seenIds = new Set<string>();
   const allThreads: DiscoveryOutput['threads'] = [];
-  for (const discovery of result.results) {
-    for (const thread of discovery.threads) {
-      if (seenIds.has(thread.id)) continue;
-      seenIds.add(thread.id);
-      allThreads.push(thread);
+  const combinedUsage: UsageSummary = {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    costUsd: 0,
+    model: '',
+    turns: 0,
+  };
+
+  for (const source of sources) {
+    const result = await runSkill<DiscoveryOutput>({
+      skill: discoverySkill,
+      input: { ...commonInput, source, platform },
+      deps,
+      outputSchema: discoveryOutputSchema,
+      runId: traceId,
+    });
+
+    combinedUsage.inputTokens += result.usage.inputTokens;
+    combinedUsage.outputTokens += result.usage.outputTokens;
+    combinedUsage.cacheReadTokens += result.usage.cacheReadTokens;
+    combinedUsage.cacheWriteTokens += result.usage.cacheWriteTokens;
+    combinedUsage.costUsd += result.usage.costUsd;
+    combinedUsage.turns += result.usage.turns;
+    if (!combinedUsage.model) combinedUsage.model = result.usage.model;
+
+    for (const discovery of result.results) {
+      for (const thread of discovery.threads) {
+        if (seenIds.has(thread.id)) continue;
+        seenIds.add(thread.id);
+        allThreads.push(thread);
+      }
     }
   }
 
-  return { threads: allThreads, usage: result.usage };
+  return { threads: allThreads, usage: combinedUsage };
 }
