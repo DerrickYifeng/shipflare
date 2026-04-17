@@ -1,16 +1,19 @@
 'use client';
 
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { SWRConfig } from 'swr';
 import { TodayActionError, useToday } from '@/hooks/use-today';
-import type { TodayStats } from '@/hooks/use-today';
+import type { TodayStats, TodoItem } from '@/hooks/use-today';
 import { useToast } from '@/components/ui/toast';
 import { TodoList } from '@/components/today/todo-list';
 import { CompletionState } from '@/components/today/completion-state';
 import type { YesterdayTop } from '@/components/today/completion-state';
 import { EmptyState } from '@/components/today/empty-state';
 import { FirstRun } from '@/components/today/first-run';
+import { ReplyScanHeader } from '@/components/today/reply-scan-header';
+import { SourceProgressRail } from '@/components/today/source-progress-rail';
+import { ReplyRail } from '@/components/today/reply-rail';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
 import { ShortcutsHelp, type ShortcutBinding } from '@/components/ui/shortcuts-help';
 
@@ -88,6 +91,89 @@ function TodayContentInner({
   const [activeIndex, setActiveIndex] = useState(0);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
+
+  // Scan state lives at the page level so the header, chip rail, and reply
+  // rail stay in sync when a scan kicks off or a source is retried.
+  const [scanRunId, setScanRunId] = useState<string | null>(null);
+  const [scanSources, setScanSources] = useState<
+    Array<{ platform: string; source: string }>
+  >([]);
+  const [sourceFilter, setSourceFilter] = useState<string | null>(null);
+  const [lastScannedAt, setLastScannedAt] = useState<Date | null>(null);
+
+  // Resume an in-flight scan across reloads. If the saved scanRunId has
+  // already finished (no queued/searching sources), drop it so the chips
+  // don't resurrect stale state.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const storedAt = window.localStorage.getItem('shipflare:lastScanAt');
+    if (storedAt) {
+      const parsed = new Date(storedAt);
+      if (!Number.isNaN(parsed.getTime())) setLastScannedAt(parsed);
+    }
+    const saved = window.localStorage.getItem('shipflare:lastScanRunId');
+    if (!saved) return;
+    let cancelled = false;
+    fetch(`/api/discovery/scan-status?scanRunId=${encodeURIComponent(saved)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then(
+        (
+          body: {
+            sources?: Array<{
+              platform: string;
+              source: string;
+              state: string;
+            }>;
+          } | null,
+        ) => {
+          if (cancelled || !body?.sources?.length) return;
+          const active = body.sources.some(
+            (s) => s.state === 'queued' || s.state === 'searching',
+          );
+          if (active) {
+            setScanRunId(saved);
+            setScanSources(
+              body.sources.map(({ platform, source }) => ({
+                platform,
+                source,
+              })),
+            );
+          }
+        },
+      )
+      .catch(() => {
+        // Silently ignore — resume is a best-effort nicety.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleScanStarted = useCallback(
+    (
+      runId: string,
+      sources: Array<{ platform: string; source: string }>,
+    ) => {
+      setScanRunId(runId);
+      setScanSources(sources);
+      setLastScannedAt(new Date());
+    },
+    [],
+  );
+
+  const handleRetrySource = useCallback(
+    async (platform: string, source: string) => {
+      if (!scanRunId) return;
+      await fetch('/api/discovery/retry-source', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scanRunId, platform, source }),
+      }).catch(() => {
+        // Surface-less — SourceChip will flip back to failed on its own.
+      });
+    },
+    [scanRunId],
+  );
 
   const handleItemsReady = useCallback(() => {
     setShowFirstRun(false);
@@ -202,12 +288,46 @@ function TodayContentInner({
     return null; // loading.tsx handles this
   }
 
+  // Split reply-thread todos into their own rail so the scan surface reads
+  // like a time-critical queue instead of getting lost under the grouped
+  // TodoList below.
+  const isReplyThread = (t: TodoItem) => t.todoType === 'reply_thread';
+  const replyItems = items.filter(isReplyThread);
+  const nonReplyItems = items.filter((t) => !isReplyThread(t));
+
+  const scanSurface = (
+    <>
+      <ReplyScanHeader
+        lastScannedAt={lastScannedAt}
+        replyCount={replyItems.length}
+        onScanStarted={handleScanStarted}
+      />
+      <SourceProgressRail
+        sources={scanSources}
+        scanRunId={scanRunId}
+        onFilterChange={setSourceFilter}
+        onRetrySource={handleRetrySource}
+      />
+      <ReplyRail
+        replyItems={replyItems}
+        sourceFilter={sourceFilter}
+        onApprove={approve}
+        onSkip={skip}
+        onEdit={edit}
+        activeId={items[activeIndex]?.id ?? null}
+        editingId={editingId}
+        onEditDone={() => setEditingId(null)}
+      />
+    </>
+  );
+
   // Active: items to process
   if (items.length > 0) {
     return (
       <div className="p-4 lg:p-6 max-w-2xl">
+        {scanSurface}
         <TodoList
-          items={items}
+          items={nonReplyItems}
           onApprove={approve}
           onSkip={skip}
           onEdit={edit}
@@ -225,10 +345,21 @@ function TodayContentInner({
     );
   }
 
-  // Distinguish completion vs empty
+  // Distinguish completion vs empty — still offer the scan surface so the
+  // user can kick off a manual scan even when the todo list is clear.
   if (stats.acted_today > 0) {
-    return <CompletionState stats={stats} yesterdayTop={yesterdayTop} />;
+    return (
+      <div className="p-4 lg:p-6 max-w-2xl">
+        {scanSurface}
+        <CompletionState stats={stats} yesterdayTop={yesterdayTop} />
+      </div>
+    );
   }
 
-  return <EmptyState />;
+  return (
+    <div className="p-4 lg:p-6 max-w-2xl">
+      {scanSurface}
+      <EmptyState />
+    </div>
+  );
 }
