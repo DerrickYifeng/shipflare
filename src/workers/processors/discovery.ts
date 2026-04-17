@@ -1,42 +1,28 @@
 import type { Job } from 'bullmq';
+import { eq } from 'drizzle-orm';
 import { db } from '@/lib/db';
-import { products, threads, activityEvents, discoveryConfigs } from '@/lib/db/schema';
-import { channels } from '@/lib/db/schema';
-import { eq, and } from 'drizzle-orm';
-import { createPlatformDeps } from '@/lib/platform-deps';
-import { loadSkill } from '@/core/skill-loader';
-import { runSkill } from '@/core/skill-runner';
-import { discoveryOutputSchema } from '@/agents/schemas';
-import type { DiscoveryOutput } from '@/agents/schemas';
-import { enqueueContent, enqueueDream, enqueueDiscovery } from '@/lib/queue';
-import { publishUserEvent } from '@/lib/redis';
+import { channels, products } from '@/lib/db/schema';
+import { enqueueDiscoveryScan } from '@/lib/queue';
 import { isStopRequested } from '@/lib/automation-stop';
-import { join } from 'path';
-import type { DiscoveryJobData } from '@/lib/queue/types';
-import { isFanoutJob, getTraceId } from '@/lib/queue/types';
+import { isPlatformAvailable } from '@/lib/platform-config';
 import { createLogger, loggerForJob } from '@/lib/logger';
-import { MemoryStore } from '@/memory/store';
-import { AgentDream } from '@/memory/dream';
-import { buildMemoryPrompt } from '@/memory/prompt-builder';
-import { isPlatformAvailable, getPlatformConfig } from '@/lib/platform-config';
-import { recordPipelineEventsBulk } from '@/lib/pipeline-events';
-import type { RecordPipelineEventInput } from '@/lib/pipeline-events';
+import type { DiscoveryJobData } from '@/lib/queue/types';
+import { isFanoutJob } from '@/lib/queue/types';
+import { randomUUID } from 'node:crypto';
 
 const baseLog = createLogger('worker:discovery');
 
-const discoverySkill = loadSkill(
-  join(process.cwd(), 'src/skills/discovery'),
-);
-
+/**
+ * Slim shim. Delegates all real work to `discovery-scan.ts` (which fans out
+ * per-source `search-source` jobs). Kept so existing cron and API callers
+ * that still enqueue `discovery` jobs keep functioning during rollout.
+ */
 export async function processDiscovery(job: Job<DiscoveryJobData>) {
-  const traceId = getTraceId(job.data, job.id);
   const log = loggerForJob(baseLog, job);
 
-  // Cron fan-out: enqueue per-user discovery jobs so downstream worker
-  // concurrency actually parallelizes across users. Tolerates both the new
-  // discriminated-union payload (`kind: 'fanout'`) and the legacy sentinel
-  // (`userId === '__all__'`) for in-flight jobs during rollout.
   if (isFanoutJob(job.data)) {
+    // Cron tick: one discovery-scan job per (user, connected platform).
+    // Explicit projection on `channels` — never select token columns here.
     const allChannels = await db
       .select({ userId: channels.userId, platform: channels.platform })
       .from(channels);
@@ -47,10 +33,9 @@ export async function processDiscovery(job: Job<DiscoveryJobData>) {
       userPlatforms.get(ch.userId)!.add(ch.platform);
     }
 
-    log.info(`Cron discovery fan-out: ${userPlatforms.size} users with channels`);
-
     let enqueued = 0;
     for (const [uid, platformSet] of userPlatforms) {
+      if (await isStopRequested(uid)) continue;
       const [product] = await db
         .select({ id: products.id })
         .from(products)
@@ -58,282 +43,33 @@ export async function processDiscovery(job: Job<DiscoveryJobData>) {
         .limit(1);
       if (!product) continue;
 
-      // Co-operative stop: skip users who've pressed the war-room Stop
-      // button so the fan-out doesn't re-kick a run they just cancelled.
-      if (await isStopRequested(uid)) {
-        log.info(`Skipping cron fan-out for user ${uid} — stop requested`);
-        continue;
-      }
-
-      for (const platformId of platformSet) {
-        if (!isPlatformAvailable(platformId)) continue;
-        const config = getPlatformConfig(platformId);
-        // Fire per-user enqueue; BullMQ concurrency handles actual parallelism.
-        // Each per-user job gets its own traceId minted by enqueueDiscovery;
-        // we don't propagate the cron trace because the whole fanout is just a
-        // scheduler tick, not a logical run.
-        await enqueueDiscovery({
+      for (const platform of platformSet) {
+        if (!isPlatformAvailable(platform)) continue;
+        await enqueueDiscoveryScan({
+          schemaVersion: 1,
+          traceId: randomUUID(),
           userId: uid,
           productId: product.id,
-          sources: config.defaultSources,
-          platform: platformId,
+          platform,
+          scanRunId: `cron-${Date.now()}-${randomUUID().slice(0, 8)}`,
+          trigger: 'cron',
         });
         enqueued++;
       }
     }
-    log.info(`Cron discovery fan-out enqueued ${enqueued} per-user jobs`);
+    log.info(`cron fan-out: enqueued ${enqueued} discovery-scan jobs`);
     return;
   }
 
-  // Per-user payload — processor does the actual work.
+  // Per-user trigger — delegate to discovery-scan by minting a scanRunId.
   const data = job.data as Extract<DiscoveryJobData, { userId: string }>;
-  const { userId, productId, sources, platform } = data;
-
-  log.info(`Starting ${platform} discovery for product ${productId}, ${sources.length} sources`);
-
-  // Load product
-  const [product] = await db
-    .select()
-    .from(products)
-    .where(eq(products.id, productId))
-    .limit(1);
-
-  if (!product) throw new Error(`Product not found: ${productId}`);
-
-  // Initialize platform-specific client
-  const deps = await createPlatformDeps(platform, userId);
-
-  // Load memory context
-  const memoryStore = new MemoryStore(userId, productId);
-  const dream = new AgentDream(memoryStore);
-  const memoryPrompt = await buildMemoryPrompt(memoryStore);
-
-  // Load per-user discovery config (if calibrated)
-  const [userConfig] = await db
-    .select()
-    .from(discoveryConfigs)
-    .where(
-      and(
-        eq(discoveryConfigs.userId, userId),
-        eq(discoveryConfigs.platform, platform),
-      ),
-    )
-    .limit(1);
-
-  // Build skill input with per-user config injected
-  const skillInput: Record<string, unknown> = {
-    productName: product.name,
-    productDescription: product.description,
-    keywords: product.keywords,
-    valueProp: product.valueProp,
-    sources,
-    platform,
-  };
-
-  if (userConfig?.calibrationStatus === 'completed') {
-    skillInput.scoringConfig = {
-      weights: {
-        relevance: userConfig.weightRelevance,
-        intent: userConfig.weightIntent,
-        exposure: userConfig.weightExposure,
-        freshness: userConfig.weightFreshness,
-        engagement: userConfig.weightEngagement,
-      },
-      intentGate: userConfig.intentGate,
-      relevanceGate: userConfig.relevanceGate,
-      gateCap: userConfig.gateCap,
-    };
-    if (userConfig.customPainPhrases && userConfig.customPainPhrases.length > 0) {
-      skillInput.customPainPhrases = userConfig.customPainPhrases;
-    }
-    if (userConfig.customQueryTemplates && userConfig.customQueryTemplates.length > 0) {
-      skillInput.customQueryTemplates = userConfig.customQueryTemplates;
-    }
-    if (userConfig.strategyRules) {
-      skillInput.additionalRules = userConfig.strategyRules;
-    }
-    if (userConfig.customLowRelevancePatterns) {
-      skillInput.additionalLowRelevancePatterns = userConfig.customLowRelevancePatterns;
-    }
-  }
-
-  // Run discovery skill (fan-out across sources, cache-safe)
-  const result = await runSkill<DiscoveryOutput>({
-    skill: discoverySkill,
-    input: skillInput,
-    deps,
-    memoryPrompt: memoryPrompt || undefined,
-    outputSchema: discoveryOutputSchema,
-    runId: traceId,
+  await enqueueDiscoveryScan({
+    schemaVersion: 1,
+    traceId: randomUUID(),
+    userId: data.userId,
+    productId: data.productId,
+    platform: data.platform,
+    scanRunId: `manual-${Date.now()}-${randomUUID().slice(0, 8)}`,
+    trigger: 'manual',
   });
-
-  // Merge and deduplicate threads
-  const seenIds = new Set<string>();
-  const allThreads: DiscoveryOutput['threads'] = [];
-
-  for (const discovery of result.results) {
-    for (const thread of discovery.threads) {
-      if (seenIds.has(thread.id)) continue;
-      seenIds.add(thread.id);
-      allThreads.push(thread);
-    }
-  }
-
-  log.info(`${platform} discovery found ${allThreads.length} results across ${sources.length} sources, cost $${result.usage.costUsd.toFixed(4)}`);
-
-  for (const err of result.errors) {
-    log.warn(`Agent failed for "${err.label}": ${err.error}`);
-  }
-
-  // Persist threads (bulk insert + ON CONFLICT DO NOTHING; unique index on
-  // (userId, platform, externalId) de-dupes across concurrent fan-outs).
-  const enqueueThreshold = userConfig?.enqueueThreshold ?? 0.7;
-  const candidates: Array<{
-    userId: string;
-    externalId: string;
-    platform: string;
-    community: string;
-    title: string;
-    url: string;
-    relevanceScore: number;
-  }> = [];
-  const shouldEnqueue = new Set<string>();
-
-  for (const thread of allThreads) {
-    const relevanceScore = thread.relevanceScore != null
-      ? thread.relevanceScore / 100
-      : ((thread.relevance ?? 0) + (thread.intent ?? 0)) / 2;
-
-    // Skip low-relevance threads to keep the DB clean
-    if (relevanceScore < 0.3) continue;
-
-    candidates.push({
-      userId,
-      externalId: thread.id,
-      platform,
-      community: thread.community,
-      title: thread.title,
-      url: thread.url,
-      relevanceScore,
-    });
-
-    if (relevanceScore >= enqueueThreshold) {
-      shouldEnqueue.add(thread.id);
-    }
-  }
-
-  let newThreadCount = 0;
-  if (candidates.length > 0) {
-    const inserted = await db
-      .insert(threads)
-      .values(candidates)
-      .onConflictDoNothing({
-        target: [threads.userId, threads.platform, threads.externalId],
-      })
-      .returning({ id: threads.id, externalId: threads.externalId });
-
-    newThreadCount = inserted.length;
-
-    // Telemetry: one pipeline_events row per newly-inserted thread at
-    // stage='discovered', plus one 'gate_passed' row per thread above the
-    // enqueue threshold. Fire-and-forget via a single bulk insert; failures
-    // are swallowed inside the helper and do not break discovery.
-    // Share the per-thread LLM cost evenly across new rows so the funnel
-    // cost total matches `result.usage.costUsd`.
-    const perThreadCost =
-      newThreadCount > 0 ? result.usage.costUsd / newThreadCount : 0;
-    const pipelineRows: RecordPipelineEventInput[] = [];
-    for (const row of inserted) {
-      pipelineRows.push({
-        userId,
-        productId,
-        threadId: row.id,
-        stage: 'discovered',
-        cost: perThreadCost,
-        metadata: { platform, externalId: row.externalId },
-      });
-      if (shouldEnqueue.has(row.externalId)) {
-        pipelineRows.push({
-          userId,
-          productId,
-          threadId: row.id,
-          stage: 'gate_passed',
-          metadata: { platform, enqueueThreshold },
-        });
-      }
-    }
-    await recordPipelineEventsBulk(pipelineRows);
-
-    // Auto-enqueue content only for newly-inserted high-relevance threads.
-    // Propagate our traceId so discovery → content → review → posting stays
-    // correlated for a single logical run.
-    //
-    // Co-operative stop: if the user hit Stop between discovery finishing
-    // and us fanning out to content, don't queue more work.
-    const stopped = await isStopRequested(userId);
-    if (stopped) {
-      log.info(
-        `Stop requested for user ${userId}; skipping content enqueue for ${inserted.length} threads`,
-      );
-    } else {
-      for (const row of inserted) {
-        if (!shouldEnqueue.has(row.externalId)) continue;
-        log.debug(
-          `Auto-enqueuing content for ${platform} thread ${row.id}`,
-        );
-        await enqueueContent({
-          userId,
-          threadId: row.id,
-          productId,
-          traceId,
-        });
-      }
-    }
-  }
-
-  // Log activity
-  await db.insert(activityEvents).values({
-    userId,
-    eventType: 'discovery_scan',
-    metadataJson: {
-      platform,
-      sources,
-      resultsFound: allThreads.length,
-      newResults: newThreadCount,
-      cost: result.usage.costUsd,
-    },
-  });
-
-  // Publish SSE event
-  await publishUserEvent(userId, 'agents', {
-    type: 'agent_complete',
-    agentName: 'scout',
-    platform,
-    stats: { resultsFound: allThreads.length, newResults: newThreadCount },
-    cost: result.usage.costUsd,
-  });
-
-  // Memory: log insights from this discovery run
-  const topSources = sources
-    .map((source) => {
-      const count = allThreads.filter((t) => t.community === source).length;
-      return { source, count };
-    })
-    .filter((s) => s.count > 0)
-    .sort((a, b) => b.count - a.count);
-
-  if (topSources.length > 0) {
-    const prefix = getPlatformConfig(platform).sourcePrefix ?? '';
-    const summary = topSources.map((s) => `${prefix}${s.source}: ${s.count} results`).join(', ');
-    await dream.logInsight(`${platform} discovery found ${allThreads.length} results (${newThreadCount} new). ${summary}`);
-  }
-
-  for (const err of result.errors) {
-    await dream.logInsight(`Discovery agent failed for "${err.label}" (${platform}): ${err.error}`);
-  }
-
-  // Check if distillation should be triggered
-  if (await dream.shouldDistill()) {
-    await enqueueDream({ productId });
-  }
 }
