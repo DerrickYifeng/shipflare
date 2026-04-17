@@ -394,7 +394,7 @@ export async function enqueueDiscoveryScan(
       'enqueueDiscoveryScan does not accept fanout payloads; schedule via discoveryScanQueue.add directly',
     );
   }
-  const jobId = `scan-${payload.scanRunId}`;
+  const jobId = `scan-${payload.scanRunId}-${payload.platform}`;
   log.debug(`Enqueued discovery-scan (${describePayload(payload)} trigger=${payload.trigger})`);
   const job = await discoveryScanQueue.add('scan', payload, { jobId });
   return job.id ?? jobId;
