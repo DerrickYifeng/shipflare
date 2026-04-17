@@ -32,3 +32,11 @@ export {
   todoStatusEnum,
 } from './todos';
 export { discoveryConfigs } from './discovery-configs';
+export {
+  pipelineEvents,
+  threadFeedback,
+  type PipelineEvent,
+  type NewPipelineEvent,
+  type ThreadFeedback,
+  type NewThreadFeedback,
+} from './pipeline-events';
