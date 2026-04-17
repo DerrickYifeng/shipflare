@@ -6,6 +6,7 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
+import { AlertDialog } from '@/components/ui/alert-dialog';
 import { GitHubRepoSelector } from '@/components/onboarding/github-repo-selector';
 import { useToast } from '@/components/ui/toast';
 import type { TechStack } from '@/types/code-scanner';
@@ -30,6 +31,7 @@ export function CodeSnapshotSection({ snapshot, hasGitHub }: CodeSnapshotSection
   const [progress, setProgress] = useState<{ phase: string; message: string } | null>(null);
   const [showRepoSelector, setShowRepoSelector] = useState(false);
   const [removing, setRemoving] = useState(false);
+  const [removeOpen, setRemoveOpen] = useState(false);
   const [error, setError] = useState('');
   const router = useRouter();
   const { toast } = useToast();
@@ -124,7 +126,7 @@ export function CodeSnapshotSection({ snapshot, hasGitHub }: CodeSnapshotSection
   };
 
   const handleRemove = async () => {
-    if (!confirm('Remove this code snapshot? You can import a new one later.')) return;
+    setRemoveOpen(false);
     setRemoving(true);
     setError('');
 
@@ -267,7 +269,7 @@ export function CodeSnapshotSection({ snapshot, hasGitHub }: CodeSnapshotSection
           <Button
             variant="ghost"
             className="!min-h-[36px] !text-[14px] !tracking-[-0.224px] !px-3 ml-auto text-sf-text-tertiary"
-            onClick={handleRemove}
+            onClick={() => setRemoveOpen(true)}
             disabled={scanState !== 'idle' || removing}
           >
             {removing ? 'Removing...' : 'Remove'}
@@ -293,6 +295,17 @@ export function CodeSnapshotSection({ snapshot, hasGitHub }: CodeSnapshotSection
           />
         </Dialog>
       )}
+
+      <AlertDialog
+        open={removeOpen}
+        onClose={() => setRemoveOpen(false)}
+        onConfirm={handleRemove}
+        title="Remove code snapshot?"
+        description="The stored repo scan and tech stack will be cleared. You can re-import from GitHub any time."
+        confirmLabel="Remove"
+        destructive
+        confirmDisabled={removing}
+      />
     </section>
   );
 }

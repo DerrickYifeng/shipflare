@@ -6,6 +6,7 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { AlertDialog } from '@/components/ui/alert-dialog';
 import { useToast } from '@/components/ui/toast';
 
 const PHASE_CONFIG = {
@@ -40,6 +41,7 @@ export function ProductInfoSection({ product }: ProductInfoSectionProps) {
   const [savingPhase, setSavingPhase] = useState(false);
   const [saving, setSaving] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const [resetOpen, setResetOpen] = useState(false);
   const [error, setError] = useState('');
   const router = useRouter();
   const { toast } = useToast();
@@ -104,7 +106,7 @@ export function ProductInfoSection({ product }: ProductInfoSectionProps) {
   };
 
   const handleReset = async () => {
-    if (!confirm('Clear all product info? Fields will be reset to empty.')) return;
+    setResetOpen(false);
     setResetting(true);
     setError('');
 
@@ -218,13 +220,24 @@ export function ProductInfoSection({ product }: ProductInfoSectionProps) {
           <Button
             variant="ghost"
             className="!min-h-[32px] !text-[14px] !tracking-[-0.224px] !px-3 text-sf-text-tertiary"
-            onClick={handleReset}
+            onClick={() => setResetOpen(true)}
             disabled={resetting}
           >
             {resetting ? 'Clearing...' : 'Reset'}
           </Button>
         </div>
       </div>
+
+      <AlertDialog
+        open={resetOpen}
+        onClose={() => setResetOpen(false)}
+        onConfirm={handleReset}
+        title="Clear product info?"
+        description="All fields will be reset to empty. You can re-scan your website or GitHub repo later to repopulate them."
+        confirmLabel="Clear"
+        destructive
+        confirmDisabled={resetting}
+      />
 
       <Card>
         <p className="text-[17px] tracking-[-0.374px] font-medium text-sf-text-primary">{product.name}</p>

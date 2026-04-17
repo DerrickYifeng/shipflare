@@ -77,7 +77,22 @@ export async function PATCH(
         });
         log.info(`Todo ${id} approved, posting enqueued for draft ${todo.draftId}`);
       } else {
-        log.warn(`No ${platform} channel found for user ${userId}`);
+        // Don't silently swallow — the user needs to know their approval won't
+        // result in a post. Roll back the draft-status change so they can
+        // retry after connecting the account.
+        log.warn(`Todo ${id} approve blocked: no ${platform} channel for user ${userId}`);
+        await db
+          .update(drafts)
+          .set({ status: 'pending', updatedAt: new Date() })
+          .where(eq(drafts.id, todo.draftId));
+        return NextResponse.json(
+          {
+            error: `Connect your ${platform === 'x' ? 'X' : platform} account to publish this post.`,
+            code: 'NO_CHANNEL',
+            platform,
+          },
+          { status: 409 },
+        );
       }
     }
   }
