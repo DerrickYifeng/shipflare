@@ -67,6 +67,12 @@ const threadInputSchema = z.object({
   commentCount: z.number().nullable().optional().describe('Number of comments'),
   createdUtc: z.number().nullable().optional().describe('Unix timestamp of creation'),
   reason: z.string().describe('Why this thread is relevant'),
+  // Optional pass-through fields for UI display on the Today reply card.
+  // Reddit: body = selftext; X: body = tweet text. Truncated by the
+  // upstream search tool; we do not re-truncate.
+  body: z.string().nullable().optional(),
+  author: z.string().nullable().optional(),
+  postedAt: z.string().nullable().optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -146,6 +152,9 @@ export const scoreThreadsTool = buildTool({
         commentCount: t.commentCount ?? 0,
         createdUtc: t.createdUtc ?? 0,
         reason: t.reason,
+        body: t.body ?? undefined,
+        author: t.author ?? undefined,
+        postedAt: t.postedAt ?? undefined,
       };
     });
 

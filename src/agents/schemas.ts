@@ -27,6 +27,14 @@ export const discoveryOutputSchema = z.object({
       commentCount: z.number().optional(),
       createdUtc: z.number().optional(),
       reason: z.string().optional(),
+      // Original post body — Reddit selftext (already truncated to 500 chars by
+      // the search tool) or tweet text. Pass-through so the UI can show the
+      // full context without a second fetch. Optional because some sources
+      // (HN, certain X search fallbacks) don't return a body field.
+      body: z.string().optional(),
+      author: z.string().optional(),
+      upvotes: z.number().optional(),
+      postedAt: z.string().optional(),
     }),
   ),
 });

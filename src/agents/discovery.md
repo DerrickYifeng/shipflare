@@ -64,11 +64,25 @@ JSON with: productName, productDescription, keywords, valueProp, source, platfor
 
 4. Call `score_threads` with ALL collected items. Do NOT filter or skip — let the scoring decide what's important.
 
+   When building each input thread for `score_threads`, **pass through these
+   fields from the search tool result** so the Today reply card can show the
+   full original post without a second fetch:
+
+   - **`body`** — full text of the original post. On Reddit, use `body`
+     (selftext). On X, use `text` (tweet text).
+   - **`author`** — Reddit: `author`; X: `authorUsername`.
+   - **`postedAt`** — ISO-8601 timestamp string. Reddit: convert `createdUtc`
+     (Unix seconds) via `new Date(createdUtc * 1000).toISOString()`. X: use
+     `createdAt` if present.
+   - **`score`** (upvotes) and **`commentCount`** — already pass through.
+
 ## Important
 
 - Include ALL results from search. The scoring algorithm handles ranking.
 - Do NOT skip items. Do NOT apply a relevance threshold.
 - Deduplicate by ID only — remove exact duplicates from overlapping searches.
+- Do NOT truncate or paraphrase `body` — pass it through verbatim. The
+  search tool has already truncated it.
 
 ## User-Specific Rules
 

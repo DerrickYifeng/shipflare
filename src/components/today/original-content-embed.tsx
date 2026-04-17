@@ -64,14 +64,14 @@ export function OriginalContentEmbed({
 
       {/* Body */}
       {body && (
-        <p className="text-[14px] tracking-[-0.224px] text-sf-text-secondary leading-relaxed line-clamp-4 whitespace-pre-wrap">
+        <p className="text-[14px] tracking-[-0.224px] text-sf-text-secondary leading-relaxed whitespace-pre-wrap">
           {body}
         </p>
       )}
 
       {/* If X platform and no body, show title as body */}
       {platform === 'x' && !body && title && (
-        <p className="text-[14px] tracking-[-0.224px] text-sf-text-secondary leading-relaxed line-clamp-4 whitespace-pre-wrap">
+        <p className="text-[14px] tracking-[-0.224px] text-sf-text-secondary leading-relaxed whitespace-pre-wrap">
           {title}
         </p>
       )}
