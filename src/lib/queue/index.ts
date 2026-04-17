@@ -1,4 +1,4 @@
-import { randomUUID } from 'crypto';
+import { randomUUID, createHash } from 'crypto';
 import { Queue, type JobsOptions } from 'bullmq';
 import { getBullMQConnection } from '@/lib/redis';
 import { createLogger } from '@/lib/logger';
@@ -12,6 +12,10 @@ import {
   codeScanJobSchema,
   monitorJobSchema,
   contentCalendarJobSchema,
+  calendarPlanJobSchema,
+  calendarSlotDraftJobSchema,
+  searchSourceJobSchema,
+  discoveryScanJobSchema,
   engagementJobSchema,
   metricsJobSchema,
   analyticsJobSchema,
@@ -28,6 +32,10 @@ import type {
   CodeScanJobData,
   MonitorJobData,
   ContentCalendarJobData,
+  CalendarPlanJobData,
+  CalendarSlotDraftJobData,
+  SearchSourceJobData,
+  DiscoveryScanJobData,
   EngagementJobData,
   MetricsJobData,
   AnalyticsJobData,
@@ -103,6 +111,64 @@ export const contentCalendarQueue = new Queue<ContentCalendarJobData>(
   'content-calendar',
   { ...connection, defaultJobOptions },
 );
+export const calendarPlanQueue = new Queue<CalendarPlanJobData>(
+  'calendar-plan',
+  { ...connection, defaultJobOptions },
+);
+
+/**
+ * Per-slot body generation. One job per planner-emitted calendar slot; drives
+ * the slot-body skill. `removeOnFail` bumped to 1000/7d for DLQ forensics on
+ * the fan-out path — first-class retries + visible failures are the point.
+ */
+export const calendarSlotDraftQueue = new Queue<CalendarSlotDraftJobData>(
+  'calendar-slot-draft',
+  {
+    ...connection,
+    defaultJobOptions: {
+      removeOnComplete: { count: 500, age: 24 * 3600 },
+      removeOnFail: { count: 1000, age: 7 * 24 * 3600 },
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 5000 },
+    },
+  },
+);
+
+/**
+ * Per-source reply discovery. One job per Reddit subreddit / X query. Enqueued
+ * by the discovery-scan orchestrator; writes threads rows and fans out to
+ * content.ts for above-gate candidates.
+ */
+export const searchSourceQueue = new Queue<SearchSourceJobData>(
+  'search-source',
+  {
+    ...connection,
+    defaultJobOptions: {
+      removeOnComplete: { count: 500, age: 24 * 3600 },
+      removeOnFail: { count: 1000, age: 7 * 24 * 3600 },
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 5000 },
+    },
+  },
+);
+
+/**
+ * Top-level scan orchestrator. Lightweight — no LLM — just fans out into
+ * search-source jobs. Lower retention because each scan logs its own events.
+ */
+export const discoveryScanQueue = new Queue<DiscoveryScanJobData>(
+  'discovery-scan',
+  {
+    ...connection,
+    defaultJobOptions: {
+      removeOnComplete: { count: 200, age: 24 * 3600 },
+      removeOnFail: { count: 200, age: 7 * 24 * 3600 },
+      attempts: 2,
+      backoff: { type: 'fixed', delay: 2000 },
+    },
+  },
+);
+
 export const engagementQueue = new Queue<EngagementJobData>('engagement', {
   ...connection,
   defaultJobOptions,
@@ -281,6 +347,70 @@ export async function enqueueContentCalendar(
     attempts: 2,
     backoff: { type: 'exponential', delay: 3000 },
   });
+}
+
+/**
+ * Enqueue calendar plan generation. Runs the calendar-planner AI agent in a
+ * background worker so the API can return 202 immediately.
+ * Uses jobId dedup: one active plan job per user.
+ */
+export async function enqueueCalendarPlan(
+  data: CalendarPlanJobData,
+): Promise<string> {
+  const payload = calendarPlanJobSchema.parse(withEnvelope(data));
+  const jobId = `calendar-plan-${payload.userId}`;
+  log.debug(`Enqueued calendar-plan (${describePayload(payload)})`);
+  await calendarPlanQueue.add('plan', payload, {
+    jobId,
+    attempts: 2,
+    backoff: { type: 'exponential', delay: 5000 },
+  });
+  return jobId;
+}
+
+/**
+ * Enqueue body generation for one calendar slot. Deduped on the slot id so
+ * a double-enqueue collapses — BullMQ drops the second add when a job with
+ * the same jobId is already waiting / active / delayed.
+ */
+export async function enqueueCalendarSlotDraft(
+  data: CalendarSlotDraftJobData,
+): Promise<string> {
+  const payload = calendarSlotDraftJobSchema.parse(withEnvelope(data));
+  const jobId = `cslot-${payload.calendarItemId}`;
+  log.debug(`Enqueued calendar-slot-draft (${describePayload(payload)})`);
+  const job = await calendarSlotDraftQueue.add('draft', payload, { jobId });
+  return job.id ?? jobId;
+}
+
+/**
+ * Enqueue one reply-discovery source job. Deduped by `(scanRunId, platform,
+ * source)`; the source portion is SHA1'd to keep jobIds bounded and
+ * redis-safe for sources containing whitespace/punctuation.
+ */
+export async function enqueueSearchSource(
+  data: SearchSourceJobData,
+): Promise<string> {
+  const payload = searchSourceJobSchema.parse(withEnvelope(data));
+  const sourceHash = createHash('sha1').update(payload.source).digest('hex').slice(0, 10);
+  const jobId = `ssrc-${payload.scanRunId}-${payload.platform}-${sourceHash}`;
+  log.debug(`Enqueued search-source (${describePayload(payload)} source=${payload.source})`);
+  const job = await searchSourceQueue.add('search', payload, { jobId });
+  return job.id ?? jobId;
+}
+
+/**
+ * Enqueue a scan orchestrator job. Deduped by `scanRunId` so a mashed Scan
+ * button within the same run collapses to one fan-out.
+ */
+export async function enqueueDiscoveryScan(
+  data: DiscoveryScanJobData,
+): Promise<string> {
+  const payload = discoveryScanJobSchema.parse(withEnvelope(data));
+  const jobId = `scan-${payload.scanRunId}`;
+  log.debug(`Enqueued discovery-scan (${describePayload(payload)} trigger=${payload.trigger})`);
+  const job = await discoveryScanQueue.add('scan', payload, { jobId });
+  return job.id ?? jobId;
 }
 
 /**
