@@ -23,6 +23,19 @@ export interface PlatformConfig {
   replyWindowMinutes?: number;
   /** Character limit for replies on this platform. */
   charLimit?: number;
+  /**
+   * Whether the platform supports read-only / anonymous discovery
+   * (e.g. Reddit public JSON, xAI Grok search). Drives `createPublicPlatformDeps()`.
+   */
+  supportsAnonymousRead?: boolean;
+  /**
+   * Regex that matches this platform's external IDs. Used only for legacy
+   * records where the `platform` column isn't joined through. Prefer
+   * `threads.platform` / `posts.platform` for routing whenever possible.
+   */
+  externalIdPattern?: RegExp;
+  /** Builds a user-facing URL for a piece of content on this platform. */
+  buildContentUrl?: (username: string, contentId: string) => string;
 }
 
 export const PLATFORMS: Record<string, PlatformConfig> = {
@@ -34,6 +47,10 @@ export const PLATFORMS: Record<string, PlatformConfig> = {
     sourcePrefix: 'r/',
     replyWindowMinutes: 60,
     charLimit: 10_000,
+    supportsAnonymousRead: true,
+    // Reddit IDs are base-36 — letters + digits. No stable discriminator regex.
+    buildContentUrl: (_username, contentId) =>
+      `https://reddit.com/comments/${contentId}`,
   },
   x: {
     id: 'x',
@@ -43,6 +60,11 @@ export const PLATFORMS: Record<string, PlatformConfig> = {
     sourceLabel: 'topic',
     replyWindowMinutes: 15,
     charLimit: 280,
+    supportsAnonymousRead: true,
+    // X/Twitter tweet IDs are purely numeric (snowflake IDs).
+    externalIdPattern: /^\d+$/,
+    buildContentUrl: (username, contentId) =>
+      `https://x.com/${username}/status/${contentId}`,
   },
 };
 
@@ -66,19 +88,29 @@ export function isPlatformAvailable(platform: string): boolean {
 }
 
 /**
+ * List all known platform IDs.
+ */
+export function listPlatforms(): string[] {
+  return Object.keys(PLATFORMS);
+}
+
+/**
+ * List platforms that are both known and have their env guard satisfied.
+ */
+export function listAvailablePlatforms(): string[] {
+  return listPlatforms().filter(isPlatformAvailable);
+}
+
+/**
  * Build a user-facing content URL from platform + username + content ID.
+ * Looks up the per-platform `buildContentUrl` hook; falls back to `contentId`
+ * for unknown platforms so callers don't need to null-check.
  */
 export function buildContentUrl(
   platform: string,
   username: string,
   contentId: string,
 ): string {
-  switch (platform) {
-    case 'x':
-      return `https://x.com/${username}/status/${contentId}`;
-    case 'reddit':
-      return `https://reddit.com/comments/${contentId}`;
-    default:
-      return contentId;
-  }
+  const config = PLATFORMS[platform];
+  return config?.buildContentUrl?.(username, contentId) ?? contentId;
 }
