@@ -1,40 +1,19 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import {
-  xContentCalendar,
-  xFollowerSnapshots,
-  xTweetMetrics,
-  xAnalyticsSummary,
-  products,
-  userPreferences,
-} from '@/lib/db/schema';
-import { eq, desc, and, gte } from 'drizzle-orm';
-import {
-  enqueueContentCalendar,
-  enqueueMonitor,
-  todoSeedQueue,
-} from '@/lib/queue';
-import { loadSkill } from '@/core/skill-loader';
-import { runSkill } from '@/core/skill-runner';
-import {
-  calendarPlanOutputSchema,
-  type CalendarPlanOutput,
-} from '@/agents/schemas';
-import { MemoryStore } from '@/memory/store';
-import { buildMemoryPrompt } from '@/memory/prompt-builder';
+import { products } from '@/lib/db/schema';
+import { eq } from 'drizzle-orm';
+import { enqueueCalendarPlan } from '@/lib/queue';
 import { createLogger } from '@/lib/logger';
-import { join } from 'path';
 
 const log = createLogger('api:calendar:generate');
 
-const plannerSkill = loadSkill(
-  join(process.cwd(), 'src/skills/calendar-planner'),
-);
-
 /**
  * POST /api/calendar/generate
- * Generate a strategic weekly content calendar using the planner agent.
+ * Enqueue calendar plan generation as a background job.
+ * Returns 202 immediately — the shell planner runs in a BullMQ worker and
+ * notifies the frontend via SSE (`type: 'pipeline', pipeline: 'plan'`) as
+ * each slot hydrates.
  */
 export async function POST(request: Request) {
   const session = await auth();
@@ -44,18 +23,18 @@ export async function POST(request: Request) {
 
   let body: { channel?: string; startDate?: string };
   try {
-    body = await request.json();
+    body = (await request.json()) as { channel?: string; startDate?: string };
   } catch {
     body = {};
   }
 
   const channel = body.channel ?? 'x';
+  const userId = session.user.id;
 
-  // Load product
   const [product] = await db
-    .select()
+    .select({ id: products.id })
     .from(products)
-    .where(eq(products.userId, session.user.id))
+    .where(eq(products.userId, userId))
     .limit(1);
 
   if (!product) {
@@ -65,191 +44,18 @@ export async function POST(request: Request) {
     );
   }
 
-  // Get latest follower count
-  const [latestSnapshot] = await db
-    .select()
-    .from(xFollowerSnapshots)
-    .where(eq(xFollowerSnapshots.userId, session.user.id))
-    .orderBy(desc(xFollowerSnapshots.snapshotAt))
-    .limit(1);
-
-  // Get recent tweet performance (top 10 by bookmarks in last 30 days)
-  const recentMetrics = await db
-    .select({
-      tweetId: xTweetMetrics.tweetId,
-      impressions: xTweetMetrics.impressions,
-      bookmarks: xTweetMetrics.bookmarks,
-      likes: xTweetMetrics.likes,
-      replies: xTweetMetrics.replies,
-      retweets: xTweetMetrics.retweets,
-    })
-    .from(xTweetMetrics)
-    .where(eq(xTweetMetrics.userId, session.user.id))
-    .orderBy(desc(xTweetMetrics.bookmarks))
-    .limit(10);
-
-  // Get latest analytics summary (computed daily by analytics worker)
-  const [analyticsSummary] = await db
-    .select()
-    .from(xAnalyticsSummary)
-    .where(eq(xAnalyticsSummary.userId, session.user.id))
-    .orderBy(desc(xAnalyticsSummary.computedAt))
-    .limit(1);
-
-  // Get user preferences for posting hours and content mix
-  const [prefs] = await db
-    .select()
-    .from(userPreferences)
-    .where(eq(userPreferences.userId, session.user.id))
-    .limit(1);
-
-  // Build memory context
-  const memoryStore = new MemoryStore(product.id);
-  const memoryPrompt = await buildMemoryPrompt(memoryStore);
-
   const startDate = body.startDate ? new Date(body.startDate) : new Date();
   startDate.setMinutes(0, 0, 0);
   startDate.setHours(startDate.getHours() + 1);
 
-  // Run planner skill
-  log.info(`Running calendar planner for channel=${channel}, followerCount=${latestSnapshot?.followerCount ?? 0}`);
-
-  // Use configured posting hours, falling back to defaults
-  const postingHours = (prefs?.postingHoursUtc as number[]) ?? [14, 17, 21];
-
-  const result = await runSkill<CalendarPlanOutput>({
-    skill: plannerSkill,
-    input: {
-      channel,
-      productName: product.name,
-      productDescription: product.description,
-      valueProp: product.valueProp ?? '',
-      keywords: product.keywords,
-      lifecyclePhase: product.lifecyclePhase ?? 'pre_launch',
-      followerCount: latestSnapshot?.followerCount ?? 0,
-      topPerformingContent: recentMetrics,
-      startDate: startDate.toISOString(),
-      postingHours,
-      contentMix: prefs
-        ? {
-            metric: prefs.contentMixMetric,
-            educational: prefs.contentMixEducational,
-            engagement: prefs.contentMixEngagement,
-            product: prefs.contentMixProduct,
-          }
-        : undefined,
-      ...(analyticsSummary
-        ? {
-            analyticsInsights: {
-              bestContentTypes: analyticsSummary.bestContentTypes,
-              bestPostingHours: analyticsSummary.bestPostingHours,
-              audienceGrowthRate: analyticsSummary.audienceGrowthRate,
-              engagementRate: analyticsSummary.engagementRate,
-            },
-          }
-        : {}),
-    },
-    deps: {},
-    memoryPrompt: memoryPrompt || undefined,
-    outputSchema: calendarPlanOutputSchema,
-  });
-
-  if (result.errors.length > 0) {
-    log.error(`Planner failed: ${result.errors.map((e) => e.error).join(', ')}`);
-    return NextResponse.json(
-      { error: 'Calendar planning failed. Please try again.' },
-      { status: 500 },
-    );
-  }
-
-  const plan = result.results[0];
-  if (!plan || plan.entries.length === 0) {
-    return NextResponse.json(
-      { error: 'Planner returned empty calendar.' },
-      { status: 500 },
-    );
-  }
-
-  // Map planner entries to calendar records
-  const userId = session.user!.id!;
-  const entries = plan.entries.map((entry) => {
-    const scheduledAt = new Date(startDate);
-    scheduledAt.setDate(scheduledAt.getDate() + entry.dayOffset);
-    scheduledAt.setHours(entry.hour, 0, 0, 0);
-
-    return {
-      userId,
-      productId: product.id,
-      channel,
-      scheduledAt,
-      contentType: entry.contentType,
-      topic: entry.topic,
-    };
-  });
-
-  // Clear future scheduled-only items to prevent duplicates on re-generate
-  // Keep items with draft_created/approved/posted status (already in progress)
-  const deleted = await db
-    .delete(xContentCalendar)
-    .where(
-      and(
-        eq(xContentCalendar.userId, userId),
-        eq(xContentCalendar.status, 'scheduled'),
-        gte(xContentCalendar.scheduledAt, new Date()),
-      ),
-    )
-    .returning({ id: xContentCalendar.id });
-
-  if (deleted.length > 0) {
-    log.info(`Cleared ${deleted.length} old scheduled calendar items`);
-  }
-
-  const created = await db
-    .insert(xContentCalendar)
-    .values(entries)
-    .returning();
-
-  log.info(
-    `Generated ${created.length} strategic calendar entries (phase ${plan.phase}, channel: ${channel}), cost $${result.usage.costUsd.toFixed(4)}`,
-  );
-
-  // --- Pipeline: enqueue downstream jobs to populate Today ---
-
-  // 1. Content-calendar: generate drafts for items within next 48h
-  await enqueueContentCalendar({
+  const jobId = await enqueueCalendarPlan({
     userId,
     productId: product.id,
-    platform: channel,
-    processUpcoming: true,
+    channel,
+    startDate: startDate.toISOString(),
   });
 
-  // 2. Monitor: find reply targets from target accounts
-  await enqueueMonitor({
-    userId,
-    productId: product.id,
-    platform: channel,
-  });
+  log.info(`Calendar plan enqueued for channel=${channel}, jobId=${jobId}`);
 
-  // 3. Todo seed: 2-min delay for calendar posts to get drafted first
-  const ts = Date.now();
-  await todoSeedQueue.add('seed', { userId }, {
-    delay: 120_000,
-    jobId: `generate-week-seed-${userId}-${ts}`,
-  });
-
-  log.info(`Pipeline enqueued: content-calendar, monitor, todo-seed for user ${userId}`);
-
-  return NextResponse.json({
-    phase: plan.phase,
-    phaseDescription: plan.phaseDescription,
-    weeklyStrategy: plan.weeklyStrategy,
-    generated: created.length,
-    items: created,
-    cost: result.usage.costUsd,
-    pipeline: {
-      contentCalendar: 'queued',
-      monitor: 'queued',
-      todoSeed: 'queued',
-    },
-  });
+  return NextResponse.json({ status: 'queued', jobId }, { status: 202 });
 }
