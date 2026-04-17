@@ -34,6 +34,16 @@
  *   - Every journal tag MUST have an entry in MAIN_TABLES_FOR. Missing
  *     entries cause an abort-on-unknown-tag safeguard to fire.
  *
+ * Destructive-op policy:
+ *   Destructive operations (DROP TABLE, ALTER TABLE ... DROP COLUMN, TRUNCATE)
+ *   require explicit acknowledgment via the ALLOW_DESTRUCTIVE=1 env var.
+ *   The preferred pattern for column removal is rename-then-drop over two
+ *   migrations: rename with a _deprecated_YYYYMMDD suffix (preserves data for
+ *   a 60-90 day cooldown), then drop in a follow-up migration after that window.
+ *
+ *   NOT flagged as destructive: DROP INDEX (no data), DROP CONSTRAINT
+ *   (replacement constraint assumed), DELETE FROM ... WHERE (scoped dedupes).
+ *
  * This is conservative: no unguarded DROPs or re-creations.
  */
 import { readFileSync } from 'node:fs';
@@ -109,6 +119,45 @@ try {
 
   const existing = await sql`SELECT hash FROM drizzle.__drizzle_migrations`;
   const existingHashes = new Set(existing.map((r) => r.hash));
+
+  // Destructive-op guard: scan pending migrations for data-destroying ops.
+  // Aborts unless ALLOW_DESTRUCTIVE=1 is set. Does not flag DROP INDEX,
+  // DROP CONSTRAINT, or scoped DELETE FROM ... WHERE.
+  // SQL comments are stripped before scanning to avoid false positives from
+  // commented-out historical references.
+  if (!process.env.ALLOW_DESTRUCTIVE) {
+    const destructivePatterns = [
+      /DROP\s+TABLE/i,
+      /ALTER\s+TABLE\b[\s\S]*?\bDROP\s+COLUMN/i,
+      /TRUNCATE\s/i,
+    ];
+    const hits = [];
+    for (const entry of journal.entries) {
+      const { tag } = entry;
+      const sqlPath = resolve(drizzleDir, `${tag}.sql`);
+      const sqlText = readFileSync(sqlPath, 'utf8');
+      const hash = hashSql(sqlText);
+      if (existingHashes.has(hash)) continue;
+      const sqlForScan = sqlText
+        .replace(/--[^\n]*/g, '')
+        .replace(/\/\*[\s\S]*?\*\//g, '');
+      for (const pattern of destructivePatterns) {
+        if (pattern.test(sqlForScan)) {
+          hits.push(`   ${tag}:\t${sqlForScan.match(pattern)?.[0].trim()}`);
+          break;
+        }
+      }
+    }
+    if (hits.length > 0) {
+      console.error('\n\u274c Destructive operations detected in pending migrations:');
+      for (const h of hits) console.error(h);
+      console.error('\nRefusing to apply. To proceed intentionally:');
+      console.error('   ALLOW_DESTRUCTIVE=1 DATABASE_URL=... node scripts/apply-pending-migrations.mjs\n');
+      process.exitCode = 1;
+      await sql.end();
+      process.exit(1);
+    }
+  }
 
   for (const entry of journal.entries) {
     const { tag, when } = entry;
