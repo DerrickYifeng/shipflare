@@ -11,6 +11,7 @@ import {
 } from 'drizzle-orm/pg-core';
 import { desc, sql } from 'drizzle-orm';
 import { users } from './users';
+import { xContentCalendarItemStateEnum } from './x-growth';
 
 export const channels = pgTable(
   'channels',
@@ -59,6 +60,11 @@ export const threads = pgTable(
     discoveredAt: timestamp('discovered_at', { mode: 'date' })
       .defaultNow()
       .notNull(),
+    state: xContentCalendarItemStateEnum('state').notNull().default('queued'),
+    failureReason: text('failure_reason'),
+    retryCount: integer('retry_count').notNull().default(0),
+    lastAttemptAt: timestamp('last_attempt_at', { mode: 'date' }),
+    sourceJobId: text('source_job_id'),
   },
   (t) => [
     index('threads_user_discovered_idx').on(t.userId, desc(t.discoveredAt)),

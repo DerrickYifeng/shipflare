@@ -127,6 +127,13 @@
       "when": 1779800000000,
       "tag": "0017_cleanup",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1776423383623,
+      "tag": "0018_generate_week_fanout",
+      "breakpoints": true
     }
   ]
 }

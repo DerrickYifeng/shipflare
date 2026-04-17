@@ -52,6 +52,13 @@ export const xContentCalendarStatusEnum = pgEnum('x_content_calendar_status', [
   'scheduled', 'draft_created', 'approved', 'posted', 'skipped',
 ]);
 
+export const xContentCalendarItemStateEnum = pgEnum('x_content_calendar_item_state', [
+  'queued',
+  'drafting',
+  'ready',
+  'failed',
+]);
+
 /**
  * Tweets from monitored target accounts.
  * Each tweet has a 15-minute reply window for maximum algorithm impact.
@@ -112,6 +119,10 @@ export const xContentCalendar = pgTable(
     topic: text('topic'),
     draftId: text('draft_id').references(() => drafts.id),
     postedExternalId: text('posted_external_id'),
+    state: xContentCalendarItemStateEnum('state').notNull().default('queued'),
+    failureReason: text('failure_reason'),
+    retryCount: integer('retry_count').notNull().default(0),
+    lastAttemptAt: timestamp('last_attempt_at', { mode: 'date' }),
     createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
   },
