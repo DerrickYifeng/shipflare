@@ -61,15 +61,10 @@ export const todoItems = pgTable(
   },
   (t) => [
     unique('todo_items_user_draft').on(t.userId, t.draftId),
-    index('todos_user_status_expires_idx').on(
-      t.userId,
-      t.status,
-      t.expiresAt,
-    ),
     // Hot-path index for GET /api/today — supports
     //   WHERE user_id = ? AND status = 'pending' AND expires_at > now()
     // with an index-only path on the three columns actually filtered.
-    index('todo_items_user_status_expires').on(
+    index('todos_user_status_expires_idx').on(
       t.userId,
       t.status,
       t.expiresAt,
