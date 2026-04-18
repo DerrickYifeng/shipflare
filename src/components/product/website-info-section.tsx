@@ -105,27 +105,52 @@ export function WebsiteInfoSection({ url, seoAudit }: WebsiteInfoSectionProps) {
     }
   };
 
-  // No website — show add form
+  // No website — show empty state with explicit Add CTA. We intentionally
+  // do NOT fall back to a repo URL here; the SEO audit and discovery queries
+  // should draw from the product's real homepage copy, not a README.
   if (!url) {
     return (
       <section>
-        <h2 className="text-[21px] font-bold tracking-[-0.12px] text-sf-text-primary mb-4">Website</h2>
+        <h2 className="text-[21px] font-bold tracking-[-0.12px] text-sf-text-primary mb-4">
+          Website
+        </h2>
         <Card>
-          <form onSubmit={handleAddWebsite} className="flex flex-col gap-4">
-            <Input
-              label="Product URL"
-              placeholder="https://your-product.com"
-              type="url"
-              value={inputUrl}
-              onChange={(e) => setInputUrl(e.target.value)}
-              helper="We'll scan your page and update product details automatically."
-              required
-            />
-            {error && <p className="text-[14px] tracking-[-0.224px] text-sf-error">{error}</p>}
-            <Button type="submit" disabled={scanning || !inputUrl}>
-              {scanning ? 'Scanning...' : 'Scan website'}
-            </Button>
-          </form>
+          <div className="flex flex-col items-center text-center py-6 gap-4">
+            <div className="w-12 h-12 rounded-full bg-sf-bg-secondary flex items-center justify-center">
+              <WebIcon />
+            </div>
+            <div className="flex flex-col gap-1 max-w-sm">
+              <p className="text-[15px] tracking-[-0.24px] font-medium text-sf-text-primary">
+                No website connected
+              </p>
+              <p className="text-[13px] tracking-[-0.16px] text-sf-text-tertiary leading-[1.5]">
+                Add your product homepage so ShipFlare can anchor replies and
+                recommendations to what it actually does — not a code repo.
+              </p>
+            </div>
+            <form
+              onSubmit={handleAddWebsite}
+              className="flex flex-col gap-3 w-full max-w-sm"
+            >
+              <Input
+                label="Product URL"
+                placeholder="https://your-product.com"
+                type="url"
+                value={inputUrl}
+                onChange={(e) => setInputUrl(e.target.value)}
+                helper="We'll scan your page and update product details automatically."
+                required
+              />
+              {error && (
+                <p className="text-[14px] tracking-[-0.224px] text-sf-error">
+                  {error}
+                </p>
+              )}
+              <Button type="submit" disabled={scanning || !inputUrl}>
+                {scanning ? 'Scanning...' : 'Add website'}
+              </Button>
+            </form>
+          </div>
         </Card>
       </section>
     );
