@@ -45,7 +45,8 @@ agents 2-N).
       "productName": "ShipFlare",
       "productDescription": "...",
       "valueProp": "...",
-      "keywords": ["indie hacker", "SaaS"]
+      "keywords": ["indie hacker", "SaaS"],
+      "canMentionProduct": false
     }
   ]
 }
