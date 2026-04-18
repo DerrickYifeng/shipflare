@@ -56,3 +56,37 @@ export function decrypt(encryptedString: string): string {
 
   return decrypted;
 }
+
+/**
+ * Detects our `iv:tag:ciphertext` format cheaply, without running AES.
+ * Used to route lazy-migration reads (plaintext fallback) without false positives.
+ */
+export function isEncrypted(value: string): boolean {
+  const parts = value.split(':');
+  if (parts.length !== 3) return false;
+  const [iv, tag, ct] = parts;
+  // iv + tag are fixed-length hex; ct is even-length hex.
+  return (
+    iv!.length === IV_LENGTH * 2 &&
+    tag!.length === TAG_LENGTH * 2 &&
+    /^[0-9a-f]+$/.test(iv!) &&
+    /^[0-9a-f]+$/.test(tag!) &&
+    /^[0-9a-f]*$/.test(ct!) &&
+    ct!.length % 2 === 0
+  );
+}
+
+export function encryptNullable(value: string | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  return encrypt(value);
+}
+
+/**
+ * Decrypt if the value looks encrypted; otherwise return as-is.
+ * Supports lazy migration of legacy plaintext rows.
+ */
+export function maybeDecrypt(value: string | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  if (!isEncrypted(value)) return value;
+  return decrypt(value);
+}

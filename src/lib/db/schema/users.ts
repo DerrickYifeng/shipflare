@@ -41,11 +41,13 @@ export const accounts = pgTable(
     type: text('type').$type<AdapterAccountType>().notNull(),
     provider: text('provider').notNull(),
     providerAccountId: text('providerAccountId').notNull(),
-    // TODO(security): encrypt at rest — these columns currently store GitHub
-    // OAuth tokens in plaintext, inconsistent with the `channels` table's
-    // envelope-encrypted `oauth_token_encrypted` / `refresh_token_encrypted`
-    // strategy. Tracking in audit/audit-synthesis.md Theme 4 (Security) and
-    // CLAUDE.md → "Security TODO".
+    // OAuth tokens are envelope-encrypted via the DrizzleAdapter wrapper in
+    // `src/lib/auth/index.ts` (see `account-encryption.ts`). Column names are
+    // kept as-is because Auth.js's Drizzle adapter requires this exact shape;
+    // the values written to them are ciphertext in `iv:tag:ct` form.
+    // Reads outside of the adapter (e.g., `getGitHubToken`) must go through
+    // `maybeDecrypt` to handle both encrypted and any legacy plaintext rows
+    // the backfill script has not yet migrated.
     refresh_token: text('refresh_token'),
     access_token: text('access_token'),
     expires_at: integer('expires_at'),
