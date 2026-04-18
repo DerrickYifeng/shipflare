@@ -2,10 +2,27 @@
 
 import { memo, useCallback, useMemo, useState } from 'react';
 import { useCalendar, type CalendarItem } from '@/hooks/use-calendar';
+import { useServerTruthButtonState } from '@/hooks/use-server-truth-button';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
+
+/**
+ * Whether any calendar item is scheduled within the next 7 days (and hasn't
+ * been skipped). Pulled out of the component so `Date.now()` reads aren't
+ * flagged as impure during render — the function is called once per render
+ * with the current items array, which is the expected React idiom.
+ */
+function hasUpcomingWeek(items: CalendarItem[]): boolean {
+  if (items.length === 0) return false;
+  const nowMs = Date.now();
+  const weekEndMs = nowMs + 7 * 24 * 60 * 60 * 1000;
+  return items.some((item) => {
+    const t = new Date(item.scheduledAt).getTime();
+    return t >= nowMs && t <= weekEndMs && item.status !== 'skipped';
+  });
+}
 
 const typeColors: Record<string, 'accent' | 'success' | 'warning' | 'error' | 'default'> = {
   metric: 'accent',
@@ -24,19 +41,42 @@ const statusVariant: Record<string, 'default' | 'success' | 'warning' | 'accent'
 };
 
 export function ContentCalendar() {
-  const { items, isLoading, generateWeek, cancelItem } = useCalendar('14d');
-  const [generating, setGenerating] = useState(false);
+  const {
+    items,
+    isLoading,
+    generateWeek,
+    cancelItem,
+    isGenerating,
+  } = useCalendar('14d');
   const [error, setError] = useState<string | null>(null);
 
+  // Derive disabled state from server truth, not ephemeral component state.
+  // `alreadyExists` collapses the window to "do we already have content
+  // scheduled for the next 7 days?" — if yes, regenerating would be a no-op.
+  // `localInFlight` is the SSE-driven `isGenerating` flag from useCalendar;
+  // the hook OR's it with `/api/jobs/in-flight?kind=calendar-plan` so a
+  // reload mid-generation keeps the button locked.
+  const hasWeekScheduled = hasUpcomingWeek(items);
+
+  const buttonState = useServerTruthButtonState({
+    kind: 'calendar-plan',
+    signals: {
+      alreadyExists: hasWeekScheduled,
+      alreadyExistsLabel: 'Generated for this week',
+      alreadyExistsReason:
+        'A week of content is already scheduled — cancel items you no longer want before regenerating.',
+      localInFlight: isGenerating,
+      inFlightLabel: 'Queued…',
+      inFlightReason: 'Calendar plan is running — new cards will appear as they draft.',
+    },
+  });
+
   const handleGenerate = useCallback(async () => {
-    setGenerating(true);
     setError(null);
     try {
       await generateWeek();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Generation failed');
-    } finally {
-      setGenerating(false);
     }
   }, [generateWeek]);
 
@@ -99,10 +139,10 @@ export function ContentCalendar() {
         </div>
         <Button
           onClick={handleGenerate}
-          disabled={generating}
-          title={generating ? 'Generation in progress' : undefined}
+          disabled={buttonState.disabled}
+          title={buttonState.reason}
         >
-          {generating ? 'Generating...' : 'Generate Week'}
+          {buttonState.label ?? 'Generate Week'}
         </Button>
       </div>
 

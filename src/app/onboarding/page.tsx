@@ -6,6 +6,7 @@ import { ProgressDots } from '@/components/ui/progress-dots';
 import { ProductSourceStep } from '@/components/onboarding/product-source-step';
 import { ProfileReviewStep } from '@/components/onboarding/profile-review-step';
 import { ConnectAccountsStep } from '@/components/onboarding/connect-accounts-step';
+import { activatePostOnboarding } from '@/app/actions/activation';
 import type { ExtractedProfile } from '@/types/onboarding';
 
 export default function OnboardingPage() {
@@ -22,7 +23,15 @@ export default function OnboardingPage() {
     setStep(2);
   };
 
-  const handleComplete = () => {
+  const handleComplete = async () => {
+    // Fire-and-forget from the user's perspective — the server action
+    // enqueues calendar-plan jobs per connected platform; failures are
+    // logged server-side but must not block navigation to /today.
+    try {
+      await activatePostOnboarding();
+    } catch {
+      // Swallowed: the Today page surfaces empty/error states on its own.
+    }
     router.push('/today');
   };
 

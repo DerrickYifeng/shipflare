@@ -358,7 +358,7 @@ export function LandingPage({ isAuthenticated }: LandingPageProps) {
         <footer className="bg-sf-bg-dark text-white/48 pb-10">
           <div className="max-w-[980px] mx-auto px-8 w-full">
             <div className="flex items-center justify-center gap-6 text-[12px] tracking-[-0.12px]">
-              <span>Scans Reddit, HN, X &amp; more</span>
+              <span>Scans X for relevant threads</span>
               <span className="w-px h-3 bg-white/20" aria-hidden="true" />
               <span>No sign-up required to try</span>
               <span className="w-px h-3 bg-white/20" aria-hidden="true" />

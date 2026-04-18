@@ -351,7 +351,7 @@ async function processXMonitorForUser(
     );
 
     let draftsCreated = 0;
-    let totalCostUsd = 0;
+    const totalCostUsd = 0;
 
     for (let i = 0; i < hardenedResults.length; i++) {
       const replyOutput = hardenedResults[i]!;

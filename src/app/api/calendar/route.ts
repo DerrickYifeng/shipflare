@@ -8,7 +8,7 @@ import {
   posts,
   xTweetMetrics,
 } from '@/lib/db/schema';
-import { eq, and, gte, desc, inArray } from 'drizzle-orm';
+import { eq, and, gte, desc, asc, inArray } from 'drizzle-orm';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('api:calendar');
@@ -63,7 +63,7 @@ export async function GET(request: Request) {
     .leftJoin(drafts, eq(xContentCalendar.draftId, drafts.id))
     .leftJoin(posts, eq(posts.draftId, xContentCalendar.draftId))
     .where(and(...conditions))
-    .orderBy(desc(xContentCalendar.scheduledAt))
+    .orderBy(asc(xContentCalendar.scheduledAt))
     .limit(100);
 
   // Pull the latest x_tweet_metrics sample for each posted external id so

@@ -22,7 +22,7 @@ export function DiscoveryFeed() {
       <div className="flex flex-col items-center justify-center py-12 text-center">
         <p className="text-[17px] tracking-[-0.374px] text-sf-text-secondary mb-1">No threads discovered</p>
         <p className="text-[14px] tracking-[-0.224px] text-sf-text-tertiary">
-          Run a discovery scan to find relevant Reddit threads.
+          Run a discovery scan to find relevant conversations.
         </p>
       </div>
     );

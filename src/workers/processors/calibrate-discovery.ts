@@ -1,4 +1,5 @@
 import type { Job } from 'bullmq';
+import { randomUUID } from 'node:crypto';
 import { db } from '@/lib/db';
 import { products, channels, discoveryConfigs } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
@@ -7,8 +8,9 @@ import { loadSkill } from '@/core/skill-loader';
 import { runSkill } from '@/core/skill-runner';
 import { discoveryOutputSchema } from '@/agents/schemas';
 import type { DiscoveryOutput } from '@/agents/schemas';
-import { publishUserEvent } from '@/lib/redis';
+import { publishUserEvent, getKeyValueClient } from '@/lib/redis';
 import { isStopRequested } from '@/lib/automation-stop';
+import { enqueueDiscoveryScan } from '@/lib/queue';
 import { join } from 'path';
 import type { CalibrationJobData } from '@/lib/queue/types';
 import { getTraceId } from '@/lib/queue/types';
@@ -287,6 +289,7 @@ async function calibratePlatform(
       log.info(
         `Calibration complete for ${platform}: precision=${(precision * 100).toFixed(0)}% after ${round + 1} rounds`,
       );
+      await maybeAutoScan(userId, product.id, platform, log, traceId);
       return;
     }
 
@@ -384,6 +387,7 @@ async function calibratePlatform(
     log.info(
       `Calibration finished for ${platform} after ${maxRounds} rounds (best-effort, precision=${lastPrecision != null ? (lastPrecision * 100).toFixed(0) + '%' : 'unknown'})`,
     );
+    await maybeAutoScan(userId, product.id, platform, log, traceId);
   }
 }
 
@@ -483,4 +487,56 @@ async function runDiscoveryWithConfig(
   }
 
   return { threads: allThreads, usage: combinedUsage };
+}
+
+// ---------------------------------------------------------------------------
+// Post-calibration auto-scan
+// ---------------------------------------------------------------------------
+
+/**
+ * Enqueue a discovery scan immediately after calibration completes (either
+ * target-reached or exhausted-rounds path) so the user lands on `/today`
+ * with threads flowing instead of an empty queue.
+ *
+ * Deduped via a 30-minute Redis lock keyed on `(userId, platform)` so
+ * back-to-back calibrations (e.g. a re-run triggered by a product edit) do
+ * not double-scan.
+ */
+async function maybeAutoScan(
+  userId: string,
+  productId: string,
+  platform: string,
+  log: Logger,
+  traceId: string,
+): Promise<void> {
+  const lockKey = `autoscan:${userId}:${platform}`;
+  const kv = getKeyValueClient();
+  const acquired = await kv.set(lockKey, '1', 'EX', 30 * 60, 'NX');
+  if (acquired !== 'OK') {
+    log.info(
+      `auto-scan skipped (lock held) user=${userId} platform=${platform}`,
+    );
+    return;
+  }
+
+  try {
+    const scanRunId = `autoscan-${Date.now()}-${randomUUID().slice(0, 8)}`;
+    const jobId = await enqueueDiscoveryScan({
+      schemaVersion: 1,
+      traceId,
+      userId,
+      productId,
+      platform,
+      scanRunId,
+      trigger: 'onboarding',
+    });
+    log.info(
+      `auto-scan enqueued user=${userId} platform=${platform} scanRunId=${scanRunId} jobId=${jobId}`,
+    );
+  } catch (err: unknown) {
+    log.error(
+      `auto-scan enqueue failed user=${userId} platform=${platform}:`,
+      err instanceof Error ? err.message : String(err),
+    );
+  }
 }

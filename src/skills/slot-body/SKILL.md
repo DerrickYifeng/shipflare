@@ -11,6 +11,7 @@ shared-references:
   - platforms/x-strategy.md
 references:
   - ./references/x-content-guide.md
+  - ./references/content-safety.md
 ---
 
 # slot-body
@@ -22,6 +23,7 @@ produce the body text for that slot. One LLM call, one slot.
 
 ```ts
 {
+  platform: 'x' | 'reddit';   // which channel the post is for
   contentType: 'metric' | 'educational' | 'engagement' | 'product' | 'thread';
   angle: 'claim' | 'story' | 'contrarian' | 'howto' | 'data' | 'case' | 'synthesis';
   topic: string;
@@ -46,3 +48,6 @@ returns `tweets: [string]`. A thread returns `tweets` of length >=2.
 - Do not restate the topic literally.
 - Do not repeat recent post content verbatim (compare against `recentPostHistory`).
 - Defer all platform-specific style to `references/x-content-guide.md`.
+- Follow `references/content-safety.md` for cross-platform and numeric-claim
+  guardrails — drafts that fail those rules are hard-rejected downstream by
+  `@/lib/content/validators`.

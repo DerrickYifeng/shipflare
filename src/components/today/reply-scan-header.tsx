@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useState } from 'react';
+import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/toast';
@@ -8,6 +9,14 @@ import { useToast } from '@/components/ui/toast';
 interface ReplyScanHeaderProps {
   lastScannedAt: Date | null;
   replyCount: number;
+  /**
+   * Whether the signed-in user has at least one connected platform channel.
+   * Server-rendered truth threaded from the Today page. When `false` the
+   * Scan button disables and a deep-link micro-CTA to /settings#connections
+   * replaces the toast fallback (toast still fires for mid-session
+   * disconnects surfaced via the 400 branch).
+   */
+  hasConnectedChannel: boolean;
   onScanStarted: (
     scanRunId: string,
     sources: Array<{ platform: string; source: string }>,
@@ -39,6 +48,7 @@ interface ScanErrorBody {
 export function ReplyScanHeader({
   lastScannedAt,
   replyCount,
+  hasConnectedChannel,
   onScanStarted,
 }: ReplyScanHeaderProps) {
   const { toast } = useToast();
@@ -103,17 +113,32 @@ export function ReplyScanHeader({
           {replyCount > 0 && ` · ${replyCount} replies generated`}
         </p>
       </div>
-      <div className="flex items-center gap-2 flex-shrink-0">
-        <Badge variant="default">Auto-scans every 4h</Badge>
-        <Button
-          key={shakeKey}
-          onClick={handleScan}
-          disabled={scanning}
-          variant="secondary"
-          className={shakeKey > 0 ? 'animate-sf-fade-in' : ''}
-        >
-          {scanning ? 'Scanning…' : 'Scan for replies'}
-        </Button>
+      <div className="flex flex-col items-end gap-1 flex-shrink-0">
+        <div className="flex items-center gap-2">
+          <Badge variant="default">Auto-scans every 4h</Badge>
+          <Button
+            key={shakeKey}
+            onClick={handleScan}
+            disabled={scanning || !hasConnectedChannel}
+            variant="secondary"
+            className={shakeKey > 0 ? 'animate-sf-fade-in' : ''}
+            title={
+              !hasConnectedChannel
+                ? 'Connect a channel before scanning for replies'
+                : undefined
+            }
+          >
+            {scanning ? 'Scanning…' : 'Scan for replies'}
+          </Button>
+        </div>
+        {!hasConnectedChannel && (
+          <Link
+            href="/settings#connections"
+            className="text-[12px] tracking-[-0.12px] text-sf-accent hover:underline"
+          >
+            Connect an X account →
+          </Link>
+        )}
       </div>
     </div>
   );

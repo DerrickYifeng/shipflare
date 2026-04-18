@@ -15,6 +15,59 @@ import {
   diffRepo,
 } from '@/services/code-scanner';
 import type { CodeScanJobData } from '@/lib/queue/types';
+import type { ScanResult } from '@/types/code-scanner';
+
+/**
+ * Best-effort homepage extraction from a scanned repo. Returns null when no
+ * real product URL is found — callers then leave `products.url` null rather
+ * than falling back to the repo URL (which is preserved separately in
+ * `code_snapshots.repo_url`).
+ *
+ * Priority:
+ *  1. `package.json → homepage` (excluding github.com to avoid re-leaking the
+ *     repo URL when authors point homepage at their own repo).
+ *  2. First non-github, non-package-registry absolute URL in the README.
+ */
+function extractHomepage(scan: ScanResult): string | null {
+  // 1. package.json homepage field. The ManifestInfo type currently doesn't
+  //    carry this through, so re-parse the raw key file when present.
+  const pkgFile = scan.keyFiles.find((f) => f.path.endsWith('package.json'));
+  if (pkgFile) {
+    try {
+      const pkg = JSON.parse(pkgFile.content) as { homepage?: unknown };
+      if (typeof pkg.homepage === 'string' && isPlausibleHomepage(pkg.homepage)) {
+        return pkg.homepage;
+      }
+    } catch {
+      // malformed JSON — fall through
+    }
+  }
+
+  // 2. Scan README for the first plausible homepage URL.
+  if (scan.readme) {
+    const matches = scan.readme.match(/https?:\/\/[^\s)'"<>\]]+/g) ?? [];
+    for (const url of matches) {
+      if (isPlausibleHomepage(url)) return url;
+    }
+  }
+
+  return null;
+}
+
+function isPlausibleHomepage(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    if (!host) return false;
+    if (host.endsWith('github.com') || host.endsWith('github.io')) return false;
+    if (host.endsWith('npmjs.com') || host.endsWith('npmjs.org')) return false;
+    if (host.endsWith('gitlab.com') || host.endsWith('bitbucket.org')) return false;
+    if (host.endsWith('shields.io') || host.endsWith('badge.fury.io')) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 const baseLog = createLogger('worker:code-scan');
 
@@ -149,6 +202,11 @@ export async function processCodeScan(job: Job<CodeScanJobData>): Promise<void> 
     await publishProgress(redis, channel, 'scanning', 'Scanning files...');
     const scanResult = await scanRepo(cloneDir);
 
+    // Pull a real homepage out of the README / package.json when possible.
+    // Falls back to null so we don't leak the repo URL into products.url;
+    // the repo URL is still preserved on code_snapshots.repo_url.
+    const homepage = extractHomepage(scanResult);
+
     // Phase 3: Get commit SHA
     const commitSha = await getCommitSha(cloneDir);
 
@@ -167,12 +225,14 @@ export async function processCodeScan(job: Job<CodeScanJobData>): Promise<void> 
     if (existingProducts[0]) {
       productId = existingProducts[0].id;
     } else {
-      // Create a product from scan results
+      // Create a product from scan results. Only populate `url` when we
+      // recovered a real homepage — the repo URL continues to live on
+      // code_snapshots.repo_url.
       const [newProduct] = await db
         .insert(products)
         .values({
           userId,
-          url: repoUrl,
+          url: homepage,
           name: scanResult.productAnalysis.productName,
           description: scanResult.productAnalysis.oneLiner,
           keywords: scanResult.productAnalysis.keywords,
@@ -239,9 +299,10 @@ export async function processCodeScan(job: Job<CodeScanJobData>): Promise<void> 
       });
     }
 
-    // Phase 5: Publish result
+    // Phase 5: Publish result. `url` is the extracted homepage (or null) —
+    // never the repo URL, which stays on code_snapshots.repo_url.
     const extractedProfile = {
-      url: repoUrl,
+      url: homepage,
       name: scanResult.productAnalysis.productName,
       description: scanResult.productAnalysis.oneLiner,
       keywords: scanResult.productAnalysis.keywords,

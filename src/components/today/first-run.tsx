@@ -48,6 +48,8 @@ interface SSEAgentEvent {
     | 'agent_start'
     | 'agent_complete'
     | 'draft_reviewed'
+    | 'discovery_start'
+    | 'discovery_complete'
     | 'connected'
     | 'heartbeat'
     | string;
@@ -57,9 +59,9 @@ interface SSEAgentEvent {
 function agentToStage(agentName: string | undefined): Stage | null {
   if (!agentName) return null;
   if (agentName === 'scout') return 'scout';
-  // No explicit 'discovery' backend agent today — scout complete means the
-  // discovery/ingest phase is effectively done. Leave the slot advancing on
-  // content start below.
+  // `discovery` now has a real bracketing pair emitted by discovery-scan.ts —
+  // see the 'discovery_start' / 'discovery_complete' handlers below. Keep
+  // this mapping narrow so stray agentName='discovery' events don't collide.
   if (agentName === 'content-batch' || agentName === 'reply-drafter') {
     return 'content';
   }
@@ -114,11 +116,24 @@ export function FirstRun({ onItemsReady, hasChannel = true }: FirstRunProps) {
 
         const stage = agentToStage(event.agentName);
 
-        if (event.type === 'agent_start' && stage) {
+        if (event.type === 'discovery_start') {
+          // Backend now emits a synthetic bracket between scout and content.
+          // Park progress at the 'discovery' slot so the bar doesn't stall
+          // while search-source jobs churn.
+          setStageIdx((prev) => Math.max(prev, STAGES.indexOf('discovery')));
+        } else if (event.type === 'discovery_complete') {
+          setStageIdx((prev) => Math.max(prev, STAGES.indexOf('discovery') + 1));
+        } else if (event.type === 'agent_start' && stage) {
           setStageIdx((prev) => Math.max(prev, STAGES.indexOf(stage)));
         } else if (event.type === 'agent_complete' && stage) {
-          // Advance *past* the completed stage.
-          setStageIdx((prev) => Math.max(prev, STAGES.indexOf(stage) + 1));
+          // Advance *past* the completed stage. Fallback: if we observe
+          // scout_complete but never get the synthetic discovery pair, jump
+          // forward by 2 so we don't freeze at 25%.
+          if (event.agentName === 'scout') {
+            setStageIdx((prev) => Math.max(prev, STAGES.indexOf('discovery') + 1));
+          } else {
+            setStageIdx((prev) => Math.max(prev, STAGES.indexOf(stage) + 1));
+          }
         } else if (event.type === 'draft_reviewed' && !reviewSeen) {
           reviewSeen = true;
           setStageIdx((prev) => Math.max(prev, STAGES.indexOf('review') + 1));
@@ -134,7 +149,10 @@ export function FirstRun({ onItemsReady, hasChannel = true }: FirstRunProps) {
       // fall back to time-based progress.
     }
 
-    // 3. Poll /api/today for item arrival.
+    // 3. Poll /api/today for item arrival. 2s during first-run only — the
+    //    tighter cadence avoids visible 5s discrete jumps while a scan
+    //    hydrates. The interval is torn down the moment items arrive so it
+    //    doesn't bleed into the steady-state session.
     pollInterval = setInterval(async () => {
       try {
         const res = await fetch('/api/today');
@@ -160,7 +178,7 @@ export function FirstRun({ onItemsReady, hasChannel = true }: FirstRunProps) {
         if (eventSource) eventSource.close();
         setTimedOut(true);
       }
-    }, 5000);
+    }, 2000);
 
     // 4. Tick for elapsed time + graceful fallback animation when SSE is
     //    unreachable. When SSE *is* live, the stage idx is driven by real
@@ -188,7 +206,23 @@ export function FirstRun({ onItemsReady, hasChannel = true }: FirstRunProps) {
     ? stageIdx
     : Math.max(stageIdx, fallbackStageIdx);
 
-  const progress = Math.min((effectiveStageIdx / STAGES.length) * 100, 100);
+  // Coarse progress from the stage index: fills ~25% per stage.
+  const coarseProgress = Math.min(
+    (effectiveStageIdx / STAGES.length) * 100,
+    100,
+  );
+  // Micro-tween: always overlay a slow time-based fill so a silent-but-
+  // connected SSE doesn't leave the bar stuck. Within each stage we grant
+  // up to 20% of a slot's width over 15s to hint that *something* is still
+  // happening. Reset each time a real SSE event bumps stageIdx.
+  const tweenSeconds = Math.min(elapsed % 15, 15);
+  const perStageSlot = 100 / STAGES.length;
+  const microTween = Math.min((tweenSeconds / 15) * perStageSlot * 0.2, perStageSlot);
+  const blendedProgress = Math.min(coarseProgress + microTween, 100);
+  // Cap at 90% until review actually completes — the final 10% belongs to
+  // the `items arrived` moment so the bar never "finishes" prematurely.
+  const reviewDone = effectiveStageIdx >= STAGES.length;
+  const progress = reviewDone ? 100 : Math.min(blendedProgress, 90);
   const currentStage: Stage =
     STAGES[Math.min(effectiveStageIdx, STAGES.length - 1)];
 
