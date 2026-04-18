@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
+import { isPlatformAvailable } from '@/lib/platform-config';
 
 interface ConnectionsSectionProps {
   redditConnected: boolean;
@@ -20,6 +21,9 @@ export function ConnectionsSection({
 }: ConnectionsSectionProps) {
   const { toast } = useToast();
   const router = useRouter();
+  // Hide the Reddit row entirely when the platform is disabled via
+  // platform-config. Flipping the `enabled` flag brings it back.
+  const showReddit = isPlatformAvailable('reddit');
 
   const handleDisconnect = async (platform: 'reddit' | 'x') => {
     const label = platform === 'x' ? 'X' : 'Reddit';
@@ -43,7 +47,8 @@ export function ConnectionsSection({
     <section>
       <h2 className="text-[21px] font-bold tracking-[-0.12px] text-sf-text-primary mb-4">Connections</h2>
       <div className="flex flex-col gap-3">
-        {/* Reddit */}
+        {/* Reddit — gated behind platform-config `enabled` for the X-only MVP. */}
+        {showReddit && (
         <div className="flex items-center justify-between p-4 bg-sf-bg-secondary shadow-[0_3px_5px_rgba(0,0,0,0.04),0_6px_20px_rgba(0,0,0,0.06)] rounded-[var(--radius-sf-lg)]">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 bg-[#FF4500]/10 rounded-[var(--radius-sf-md)] flex items-center justify-center">
@@ -71,6 +76,7 @@ export function ConnectionsSection({
             </Button>
           )}
         </div>
+        )}
 
         {/* X */}
         <div className="flex items-center justify-between p-4 bg-sf-bg-secondary shadow-[0_3px_5px_rgba(0,0,0,0.04),0_6px_20px_rgba(0,0,0,0.06)] rounded-[var(--radius-sf-lg)]">

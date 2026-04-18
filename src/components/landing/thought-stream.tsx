@@ -2,6 +2,19 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { LegacyScanResult } from '@/types/discovery';
+import { PLATFORMS } from '@/lib/platform-config';
+
+/**
+ * Build the per-source label used in the thought-stream. Pulls the platform's
+ * `sourcePrefix` from platform-config when available ("r/" for Reddit) so
+ * X-only topics render as the bare source string and Reddit lines keep the
+ * familiar `r/subreddit` shorthand.
+ */
+function formatSourceLabel(platform: string | undefined, source: string): string {
+  if (!platform) return source;
+  const prefix = PLATFORMS[platform]?.sourcePrefix ?? '';
+  return `${prefix}${source}`;
+}
 
 interface ThoughtLine {
   id: string;
@@ -28,8 +41,13 @@ export function ThoughtStream({ url, onComplete, onError }: ThoughtStreamProps) 
   const containerRef = useRef<HTMLDivElement>(null);
   const prefersReducedMotion = usePrefersReducedMotion();
 
-  // Track per-community state outside React state to avoid stale closures
-  const agentState = useRef<Record<string, { queries: number; results: number }>>({});
+  // Track per-community state outside React state to avoid stale closures.
+  // `platform` is captured on first observation so downstream events that
+  // omit it (e.g. `complete` iterating by line-id) can still render the
+  // correct prefix.
+  const agentState = useRef<
+    Record<string, { queries: number; results: number; platform?: string }>
+  >({});
 
   const analyzeText = `analyzing ${new URL(url).hostname.replace(/^www\./, '')}...`;
 
@@ -205,15 +223,22 @@ export function ThoughtStream({ url, onComplete, onError }: ThoughtStreamProps) 
       case 'tool_call_start': {
         const query = data.query as string;
         const sub = data.community as string;
+        const platform = data.platform as string | undefined;
         if (!sub || !query) break;
 
         // Init state for this community
         if (!agentState.current[sub]) {
-          agentState.current[sub] = { queries: 0, results: 0 };
+          agentState.current[sub] = { queries: 0, results: 0, platform };
+        } else if (platform && !agentState.current[sub].platform) {
+          agentState.current[sub].platform = platform;
         }
         agentState.current[sub].queries++;
 
         const lineId = `agent-${sub}`;
+        const label = formatSourceLabel(
+          agentState.current[sub].platform,
+          sub,
+        );
 
         setLines((prev) => {
           const exists = prev.some((l) => l.id === lineId);
@@ -221,7 +246,7 @@ export function ThoughtStream({ url, onComplete, onError }: ThoughtStreamProps) 
             // Update existing line with current query
             return prev.map((l) =>
               l.id === lineId
-                ? { ...l, text: `r/${sub} \u2014 "${query}"`, status: 'active' as const }
+                ? { ...l, text: `${label} \u2014 "${query}"`, status: 'active' as const }
                 : l,
             );
           }
@@ -230,7 +255,7 @@ export function ThoughtStream({ url, onComplete, onError }: ThoughtStreamProps) 
             ...prev,
             {
               id: lineId,
-              text: `r/${sub} \u2014 "${query}"`,
+              text: `${label} \u2014 "${query}"`,
               indent: true,
               status: 'active' as const,
             },
@@ -241,6 +266,7 @@ export function ThoughtStream({ url, onComplete, onError }: ThoughtStreamProps) 
 
       case 'tool_call_done': {
         const sub = data.community as string;
+        const platform = data.platform as string | undefined;
         const resultCount = data.resultCount as number | undefined;
         if (!sub) break;
 
@@ -248,14 +274,16 @@ export function ThoughtStream({ url, onComplete, onError }: ThoughtStreamProps) 
         if (state && resultCount) {
           state.results += resultCount;
         }
+        if (state && platform && !state.platform) state.platform = platform;
 
         const lineId = `agent-${sub}`;
         const total = state?.results ?? 0;
+        const label = formatSourceLabel(state?.platform, sub);
 
         setLines((prev) =>
           prev.map((l) =>
             l.id === lineId
-              ? { ...l, text: `r/${sub} \u2014 ${total > 0 ? `${total} found so far...` : 'searching...'}`, status: 'active' as const }
+              ? { ...l, text: `${label} \u2014 ${total > 0 ? `${total} found so far...` : 'searching...'}`, status: 'active' as const }
               : l,
           ),
         );
@@ -264,14 +292,19 @@ export function ThoughtStream({ url, onComplete, onError }: ThoughtStreamProps) 
 
       case 'scoring': {
         const sub = data.community as string;
+        const platform = data.platform as string | undefined;
         if (sub) {
+          if (agentState.current[sub] && platform && !agentState.current[sub].platform) {
+            agentState.current[sub].platform = platform;
+          }
           // Per-agent scoring — update the community line
           const lineId = `agent-${sub}`;
           const total = agentState.current[sub]?.results ?? 0;
+          const label = formatSourceLabel(agentState.current[sub]?.platform, sub);
           setLines((prev) =>
             prev.map((l) =>
               l.id === lineId
-                ? { ...l, text: `r/${sub} \u2014 scoring ${total} threads...`, status: 'active' as const }
+                ? { ...l, text: `${label} \u2014 scoring ${total} threads...`, status: 'active' as const }
                 : l,
             ),
           );
@@ -294,8 +327,10 @@ export function ThoughtStream({ url, onComplete, onError }: ThoughtStreamProps) 
           const updated = prev.map((l) => {
             if (l.id.startsWith('agent-')) {
               const sub = l.id.replace('agent-', '');
-              const total = agentState.current[sub]?.results ?? 0;
-              return { ...l, text: `r/${sub} \u2014 ${total} threads`, status: 'done' as const };
+              const state = agentState.current[sub];
+              const total = state?.results ?? 0;
+              const label = formatSourceLabel(state?.platform, sub);
+              return { ...l, text: `${label} \u2014 ${total} threads`, status: 'done' as const };
             }
             if (l.id === 'thread-searching') {
               return { ...l, status: 'done' as const };
@@ -339,20 +374,29 @@ export function ThoughtStream({ url, onComplete, onError }: ThoughtStreamProps) 
       }
 
       case 'agent_error': {
-        const sub = data.community as string;
+        const sub = (data.community ?? data.source) as string;
+        const platform = data.platform as string | undefined;
+        if (!sub) break;
+        if (agentState.current[sub] && platform && !agentState.current[sub].platform) {
+          agentState.current[sub].platform = platform;
+        }
         const lineId = `agent-${sub}`;
+        const label = formatSourceLabel(
+          agentState.current[sub]?.platform ?? platform,
+          sub,
+        );
         setLines((prev) => {
           const exists = prev.some((l) => l.id === lineId);
           if (exists) {
             return prev.map((l) =>
               l.id === lineId
-                ? { ...l, text: `r/${sub} \u2014 failed`, status: 'done' as const }
+                ? { ...l, text: `${label} \u2014 failed`, status: 'done' as const }
                 : l,
             );
           }
           return [
             ...prev,
-            { id: lineId, text: `r/${sub} \u2014 failed`, indent: true, status: 'done' as const },
+            { id: lineId, text: `${label} \u2014 failed`, indent: true, status: 'done' as const },
           ];
         });
         break;

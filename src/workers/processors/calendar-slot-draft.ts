@@ -14,6 +14,12 @@ import { channelPosts } from '@/lib/db/schema/channels';
 import { loadSkill } from '@/core/skill-loader';
 import { runSkill } from '@/core/skill-runner';
 import { slotBodyOutputSchema, type SlotBodyOutput } from '@/agents/schemas';
+import {
+  runContentValidators,
+  buildRepairPrompt,
+  summarizeFailures,
+  type ContentValidatorFailure,
+} from '@/lib/content/validators';
 import { enqueueReview } from '@/lib/queue';
 import { publishUserEvent } from '@/lib/redis';
 import { MemoryStore } from '@/memory/store';
@@ -27,6 +33,47 @@ import { loadVoiceBlockForUser } from '@/lib/voice/inject';
 const baseLog = createLogger('worker:calendar-slot-draft');
 const slotBodySkill = loadSkill(join(process.cwd(), 'src/skills/slot-body'));
 
+const MAX_REGEN_ATTEMPTS = 2;
+
+type SlotBodySkillInput = Record<string, unknown> & {
+  platform: string;
+  contentType: string;
+  angle: string;
+  topic: string;
+  thesis: string;
+  thesisSource: string;
+  pillar?: string;
+  product: {
+    name: string;
+    description: string;
+    valueProp: string;
+    keywords: string[];
+    lifecyclePhase: string;
+  };
+  recentPostHistory: string[];
+  priorAnglesThisWeek: Array<{ angle: string; topic: string; body: string }>;
+  voiceBlock: string | null;
+  isThread: boolean;
+  repairPrompt?: string;
+};
+
+/**
+ * Validate each tweet in the slot-body output as a standalone post. Returns
+ * the first tweet that fails (so the repair prompt can target it) along with
+ * the aggregated failure list.
+ */
+function validateSlotBody(
+  body: SlotBodyOutput,
+  platform: string,
+): { ok: boolean; failures: ContentValidatorFailure[] } {
+  const allFailures: ContentValidatorFailure[] = [];
+  for (const tweet of body.tweets) {
+    const res = runContentValidators({ text: tweet, platform, kind: 'post' });
+    if (!res.ok) allFailures.push(...res.failures);
+  }
+  return { ok: allFailures.length === 0, failures: allFailures };
+}
+
 /**
  * Process one planner-emitted calendar slot. Generates the body (single tweet
  * or thread) via the `slot-body` skill, writes a draft + thread row, and emits
@@ -35,6 +82,14 @@ const slotBodySkill = loadSkill(join(process.cwd(), 'src/skills/slot-body'));
  * Idempotent on `state === 'ready'`: a retry or duplicate enqueue for an
  * already-hydrated slot is a no-op. `state` transitions:
  *   queued -> drafting -> (ready | failed)
+ *
+ * Content-validator integration: drafts that fail the shared validator
+ * pipeline (length, platform-leak, hallucinated-stats) trigger up to two
+ * regeneration attempts. If the final attempt still fails, the draft is
+ * still persisted but marked `needs_revision` with the validator failures
+ * stored on `drafts.reviewJson` so the approval UI can surface them. The
+ * calendar slot state still moves to `ready` — we never auto-discard
+ * content, only flag it for human review.
  */
 export async function processCalendarSlotDraft(
   job: Job<CalendarSlotDraftJobData>,
@@ -122,34 +177,70 @@ export async function processCalendarSlotDraft(
   const memoryPrompt = await buildMemoryPrompt(memoryStore);
   const voiceBlock = await loadVoiceBlockForUser(userId, channel);
 
-  const res = await runSkill<SlotBodyOutput>({
-    skill: slotBodySkill,
-    input: {
-      contentType: item.contentType,
-      angle: item.angle,
-      topic: item.topic ?? '',
-      thesis: theme.thesis,
-      thesisSource: theme.thesisSource,
-      pillar: theme.pillar ?? undefined,
-      product: {
-        name: product.name,
-        description: product.description,
-        valueProp: product.valueProp ?? '',
-        keywords: product.keywords,
-        lifecyclePhase: product.lifecyclePhase ?? 'pre_launch',
-      },
-      recentPostHistory: postHistoryRows.map((r) => r.text),
-      priorAnglesThisWeek,
-      voiceBlock,
-      isThread: item.contentType === 'thread',
+  const baseInput: SlotBodySkillInput = {
+    platform: channel,
+    contentType: item.contentType,
+    angle: item.angle ?? 'claim',
+    topic: item.topic ?? '',
+    thesis: theme.thesis,
+    thesisSource: theme.thesisSource,
+    pillar: theme.pillar ?? undefined,
+    product: {
+      name: product.name,
+      description: product.description,
+      valueProp: product.valueProp ?? '',
+      keywords: product.keywords,
+      lifecyclePhase: product.lifecyclePhase ?? 'pre_launch',
     },
+    recentPostHistory: postHistoryRows.map((r) => r.text),
+    priorAnglesThisWeek,
+    voiceBlock,
+    isThread: item.contentType === 'thread',
+  };
+
+  let res = await runSkill<SlotBodyOutput>({
+    skill: slotBodySkill,
+    input: baseInput,
     deps: {},
     memoryPrompt: memoryPrompt || undefined,
     outputSchema: slotBodyOutputSchema,
     runId: traceId,
   });
 
-  if (res.errors.length > 0 || !res.results[0]?.tweets?.length) {
+  let body = res.results[0];
+  let lastFailures: ContentValidatorFailure[] = [];
+
+  for (let attempt = 0; attempt <= MAX_REGEN_ATTEMPTS; attempt += 1) {
+    if (res.errors.length > 0 || !body?.tweets?.length) break;
+
+    const validation = validateSlotBody(body, channel);
+    if (validation.ok) {
+      lastFailures = [];
+      break;
+    }
+
+    lastFailures = validation.failures;
+    log.warn(
+      `slot-body content validators failed (attempt ${attempt + 1}/${MAX_REGEN_ATTEMPTS + 1}): ` +
+        summarizeFailures(validation.failures),
+      { calendarItemId },
+    );
+
+    if (attempt === MAX_REGEN_ATTEMPTS) break;
+
+    const repairPrompt = buildRepairPrompt(validation.failures, channel);
+    res = await runSkill<SlotBodyOutput>({
+      skill: slotBodySkill,
+      input: { ...baseInput, repairPrompt },
+      deps: {},
+      memoryPrompt: memoryPrompt || undefined,
+      outputSchema: slotBodyOutputSchema,
+      runId: traceId,
+    });
+    body = res.results[0];
+  }
+
+  if (res.errors.length > 0 || !body?.tweets?.length) {
     const reason = res.errors[0]?.error ?? 'empty output';
     await db
       .update(xContentCalendar)
@@ -171,9 +262,16 @@ export async function processCalendarSlotDraft(
     return;
   }
 
-  const body = res.results[0];
   const replyBody = body.tweets.join('\n\n---\n\n');
   const isThread = body.tweets.length > 1;
+  const needsReview = lastFailures.length > 0;
+
+  if (needsReview) {
+    log.info(
+      `slot ${calendarItemId} needs review after ${MAX_REGEN_ATTEMPTS} regen attempt(s): ` +
+        summarizeFailures(lastFailures),
+    );
+  }
 
   const [threadRecord] = await db
     .insert(threads)
@@ -206,6 +304,17 @@ export async function processCalendarSlotDraft(
       replyBody,
       confidenceScore: body.confidence,
       whyItWorks: body.whyItWorks,
+      ...(needsReview
+        ? {
+            status: 'needs_revision' as const,
+            reviewVerdict: 'REVISE',
+            reviewJson: {
+              source: 'content-validator',
+              summary: summarizeFailures(lastFailures),
+              failures: lastFailures,
+            },
+          }
+        : {}),
     })
     .returning();
 
@@ -219,16 +328,31 @@ export async function processCalendarSlotDraft(
     pipeline: 'plan',
     itemId: calendarItemId,
     state: 'ready',
-    data: { draftId: draft.id, previewBody: replyBody.slice(0, 120) },
+    data: {
+      draftId: draft.id,
+      previewBody: replyBody.slice(0, 120),
+      ...(needsReview ? { needsReview: true } : {}),
+    },
   });
   await recordPipelineEvent({
     userId,
     productId,
     threadId: threadRecord.id,
     draftId: draft.id,
+    // Always use `slot_ready`; the `needsReview` flag in metadata lets
+    // funnel consumers distinguish auto-ready from human-review drafts
+    // without widening the PipelineStage union.
     stage: 'slot_ready',
     cost: res.usage.costUsd,
-    metadata: { calendarItemId },
+    metadata: {
+      calendarItemId,
+      ...(needsReview
+        ? {
+            needsReview: true,
+            contentValidatorFailures: summarizeFailures(lastFailures),
+          }
+        : {}),
+    },
   });
 
   await enqueueReview({ userId, draftId: draft.id, productId, traceId });

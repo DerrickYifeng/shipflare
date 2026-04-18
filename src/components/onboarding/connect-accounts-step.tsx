@@ -2,6 +2,7 @@
 
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { isPlatformAvailable } from '@/lib/platform-config';
 
 interface ConnectAccountsStepProps {
   onComplete: () => void;
@@ -16,15 +17,19 @@ export function ConnectAccountsStep({
   redditConnected,
   xConnected,
 }: ConnectAccountsStepProps) {
+  // Hidden behind the platform registry. When Reddit flips `enabled: true`
+  // in platform-config, this section reappears automatically — no copy diff.
+  const showReddit = isPlatformAvailable('reddit');
+
   return (
     <div className="flex flex-col gap-6">
       <p className="text-[17px] tracking-[-0.374px] text-sf-text-secondary leading-[1.47]">
-        Connect your social accounts so ShipFlare can post approved replies on your behalf.
-        You can connect one or both.
+        Connect your X account so ShipFlare can post approved replies on your behalf.
       </p>
 
       <div className="flex flex-col gap-3">
-        {/* Reddit */}
+        {/* Reddit — hidden for the X-only MVP via platform-config enabled flag. */}
+        {showReddit && (
         <div className="flex items-center justify-between p-4 bg-sf-bg-secondary shadow-[0_3px_5px_rgba(0,0,0,0.04),0_6px_20px_rgba(0,0,0,0.06)] rounded-[var(--radius-sf-lg)]">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 bg-[#FF4500]/10 rounded-[var(--radius-sf-md)] flex items-center justify-center">
@@ -50,6 +55,7 @@ export function ConnectAccountsStep({
             </Button>
           )}
         </div>
+        )}
 
         {/* X / Twitter */}
         <div className="flex items-center justify-between p-4 bg-sf-bg-secondary shadow-[0_3px_5px_rgba(0,0,0,0.04),0_6px_20px_rgba(0,0,0,0.06)] rounded-[var(--radius-sf-lg)]">

@@ -31,3 +31,9 @@ export {
   type ContentValidatorResult,
   type ContentValidatorFailure,
 } from './pipeline';
+
+export {
+  buildRepairPrompt,
+  summarizeFailures,
+  getPostAndReplyLimits,
+} from './repair-prompt';

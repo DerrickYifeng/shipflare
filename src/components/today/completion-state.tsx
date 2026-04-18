@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import type { TodayStats } from '@/hooks/use-today';
+import { PLATFORMS } from '@/lib/platform-config';
 
 export interface YesterdayTop {
   id: string;
@@ -21,9 +22,10 @@ interface CompletionStateProps {
 }
 
 function communityLabel(platform: string, community: string): string {
-  if (platform === 'reddit') return `r/${community}`;
-  if (platform === 'x') return community;
-  return community;
+  // Derive the prefix from platform-config rather than hardcoding platform
+  // literals, so a new platform entry lights up the UI automatically.
+  const prefix = PLATFORMS[platform]?.sourcePrefix ?? '';
+  return `${prefix}${community}`;
 }
 
 function titleFor(top: YesterdayTop): string {

@@ -83,7 +83,7 @@ export function ProfileReviewStep({ profile, onSaved, onBack }: ProfileReviewSte
         label="Keywords"
         value={keywords}
         onChange={(e) => setKeywords(e.target.value)}
-        helper="Comma-separated. These help us find relevant Reddit threads."
+        helper="Comma-separated. These help us find relevant conversations to join."
       />
 
       <Input
