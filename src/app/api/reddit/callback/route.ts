@@ -6,6 +6,7 @@ import { channelPosts } from '@/lib/db/schema/channels';
 import { encrypt } from '@/lib/encryption';
 import { eq, and } from 'drizzle-orm';
 import { createLogger } from '@/lib/logger';
+import { PLATFORMS } from '@/lib/platform-config';
 
 const log = createLogger('api:reddit');
 
@@ -16,6 +17,16 @@ export async function GET(request: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.redirect(new URL('/', request.url));
+  }
+
+  // Reddit can be flipped off at the product level via platform-config. When
+  // disabled, short-circuit the callback with a friendly redirect so a bounce
+  // from a stale Reddit OAuth window doesn't surface a 5xx.
+  if (PLATFORMS.reddit?.enabled === false) {
+    log.info('Reddit OAuth callback hit while platform is disabled — redirecting');
+    return NextResponse.redirect(
+      new URL('/settings?connections=reddit-coming-soon', request.url),
+    );
   }
 
   const { searchParams } = new URL(request.url);
