@@ -80,3 +80,26 @@ jobs:
 
       - name: Build
         run: bun run build
+
+  # Deploys web + worker services to Railway on pushes to main (production) or
+  # dev (staging). Disabled by default — set the `DEPLOY_ENABLED` repo variable
+  # (Settings → Secrets and variables → Actions → Variables) to `true` AND add
+  # the `RAILWAY_TOKEN` secret to activate. Remember to turn off Railway's
+  # native GitHub auto-deploy once this is live so CI is the only deploy gate.
+  deploy:
+    name: Deploy to Railway
+    needs: verify
+    if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') && vars.DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      RAILWAY_ENV: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+      - name: Deploy web service
+        run: railway up --environment $RAILWAY_ENV --service web
+      - name: Deploy worker service
+        run: railway up --environment $RAILWAY_ENV --service worker
