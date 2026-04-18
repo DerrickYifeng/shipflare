@@ -141,6 +141,13 @@
       "when": 1776473208108,
       "tag": "0019_weekly_themes",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1776474827467,
+      "tag": "0020_voice_profiles",
+      "breakpoints": true
     }
   ]
 }

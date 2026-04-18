@@ -32,6 +32,7 @@ produce the body text for that slot. One LLM call, one slot.
   recentPostHistory: string[];
   priorAnglesThisWeek: Array<{ angle: string; topic: string; body: string }>;
   isThread: boolean;
+  voiceBlock: string | null;
 }
 ```
 

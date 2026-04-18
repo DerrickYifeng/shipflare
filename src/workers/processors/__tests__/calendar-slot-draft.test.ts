@@ -105,6 +105,7 @@ vi.mock('@/lib/db', () => ({
     }),
   },
 }));
+vi.mock('@/lib/voice/inject', () => ({ loadVoiceBlockForUser: async () => null }));
 vi.mock('@/lib/queue', () => ({ enqueueReview: vi.fn() }));
 vi.mock('@/lib/redis', () => ({ publishUserEvent: vi.fn() }));
 vi.mock('@/core/skill-runner', () => ({

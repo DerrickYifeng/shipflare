@@ -452,6 +452,13 @@ export const enqueueXMetrics = enqueueMetrics;
 export const enqueueXAnalytics = enqueueAnalytics;
 
 // ----------------------------------------------------------------
+//  Voice extraction queue
+// ----------------------------------------------------------------
+
+export { voiceExtractQueue, enqueueVoiceExtract } from './voice-extract';
+export type { VoiceExtractJobData } from './voice-extract';
+
+// ----------------------------------------------------------------
 //  Today queue
 // ----------------------------------------------------------------
 

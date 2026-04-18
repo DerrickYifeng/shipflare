@@ -49,7 +49,8 @@ agents 2-N).
       "productDescription": "...",
       "valueProp": "...",
       "keywords": ["indie hacker", "SaaS"],
-      "canMentionProduct": false
+      "canMentionProduct": false,
+      "voiceBlock": null
     }
   ]
 }
