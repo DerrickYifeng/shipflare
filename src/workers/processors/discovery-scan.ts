@@ -80,6 +80,15 @@ export async function processDiscoveryScan(job: Job<DiscoveryScanJobData>) {
   const data = job.data as Extract<DiscoveryScanJobData, { userId: string }>;
   const { userId, productId, platform, scanRunId } = data;
 
+  // Synthetic `discovery_start` — there's no real discovery agent the
+  // first-run progress bar can hook into between scout_complete and
+  // content_start, so we emit a bracketing pair from this processor.
+  await publishUserEvent(userId, 'agents', {
+    type: 'discovery_start',
+    scanRunId,
+    platform,
+  });
+
   const [product] = await db
     .select()
     .from(products)
@@ -132,4 +141,14 @@ export async function processDiscoveryScan(job: Job<DiscoveryScanJobData>) {
   log.info(
     `discovery-scan fanned out ${sources.length} search-source jobs (scanRunId=${scanRunId})`,
   );
+
+  // Close the synthetic discovery bracket. The per-source search jobs enqueue
+  // content downstream; emitting here keeps the first-run progress bar moving
+  // forward even when scouts return zero hits.
+  await publishUserEvent(userId, 'agents', {
+    type: 'discovery_complete',
+    scanRunId,
+    platform,
+    sourcesCount: sources.length,
+  });
 }
