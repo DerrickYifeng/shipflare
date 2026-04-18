@@ -14,6 +14,7 @@ specific **angle** — a role in the week's arc.
 
 ```ts
 {
+  platform: 'x' | 'reddit';        // which channel the post is for
   contentType: 'metric' | 'educational' | 'engagement' | 'product' | 'thread';
   angle: 'claim' | 'story' | 'contrarian' | 'howto' | 'data' | 'case' | 'synthesis';
   topic: string;
@@ -75,6 +76,19 @@ from the first token.
 4. **Respect lifecycle phase.** `pre_launch` forbids user-metric, testimonial,
    signup-count, revenue, and customer-quote references even if the angle is
    `data` or `case`.
+5. **Platform-aware writing (hard).** You are writing for the platform named
+   in the input's `platform` field. Do not name other platforms (e.g.,
+   mentioning Reddit, `r/...`, subreddit, upvote, or karma when writing for
+   X) unless the `thesis` explicitly contrasts them — and when it does, keep
+   the contrast inside a single sentence using a marker like "unlike", "vs",
+   or "instead of". Cross-platform references without contrast are treated
+   as validation failures and the draft will be rejected.
+6. **No hallucinated statistics (hard).** Do not invent numeric claims.
+   Percentages ("40%"), multipliers ("10x"), "over N" and "up to N" are
+   only permitted when you have an explicit citation ("according to ...",
+   "per <Source>", "source: ...", a URL, or an @handle) in the same
+   sentence. If you do not have a real citation, **remove the number** —
+   rewrite the claim as a qualitative statement instead.
 
 ## Thread format (when `isThread: true`)
 
