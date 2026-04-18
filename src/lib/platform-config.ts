@@ -6,11 +6,31 @@
  * to processors, routes, or core pipelines.
  */
 
+/**
+ * Kind of content being written/validated. Most platforms have different
+ * caps for a standalone post vs. a reply inside a thread (X's 280 vs. our
+ * self-imposed 240 for replies so we keep room for context).
+ */
+export type ContentKind = 'post' | 'reply';
+
+export interface PlatformCharLimits {
+  post: number;
+  reply: number;
+}
+
 export interface PlatformConfig {
   /** Unique identifier used in DB, queue jobs, and routing. */
   id: string;
   /** Human-readable name for UI display. */
   displayName: string;
+  /**
+   * Whether this platform is enabled for the current product release.
+   * Set to `false` to hide the platform from onboarding, settings, landing,
+   * and any `listAvailablePlatforms()` fan-out without tearing out the
+   * workers, schema, or client code that still reference it. The MVP ships
+   * X only; Reddit flips back to `true` once the channel is re-opened.
+   */
+  enabled: boolean;
   /** Fallback discovery sources when a user hasn't configured their own. */
   defaultSources: string[];
   /** Env var that must be set for this platform to be available. */
@@ -21,7 +41,18 @@ export interface PlatformConfig {
   sourcePrefix?: string;
   /** Default reply window in minutes for the monitor pipeline. */
   replyWindowMinutes?: number;
-  /** Character limit for replies on this platform. */
+  /**
+   * Character limit for this platform, broken down by content kind so the
+   * validator pipeline and UI can pull the right cap without hardcoding.
+   * `post` is the platform's hard ceiling; `reply` is our self-imposed cap
+   * (usually tighter to leave room for anchor context).
+   */
+  maxCharLength: PlatformCharLimits;
+  /**
+   * @deprecated Use `maxCharLength.post` / `maxCharLength.reply` or
+   * `getPlatformCharLimits()`. Retained so any external caller that still
+   * reads this field keeps compiling until it migrates.
+   */
   charLimit?: number;
   /**
    * Whether the platform supports read-only / anonymous discovery
@@ -42,10 +73,13 @@ export const PLATFORMS: Record<string, PlatformConfig> = {
   reddit: {
     id: 'reddit',
     displayName: 'Reddit',
+    // MVP ships X-only. Flip to `true` to re-enable Reddit across the product.
+    enabled: false,
     defaultSources: ['SideProject', 'startups', 'webdev'],
     sourceLabel: 'subreddit',
     sourcePrefix: 'r/',
     replyWindowMinutes: 60,
+    maxCharLength: { post: 40_000, reply: 10_000 },
     charLimit: 10_000,
     supportsAnonymousRead: true,
     // Reddit IDs are base-36 — letters + digits. No stable discriminator regex.
@@ -55,10 +89,12 @@ export const PLATFORMS: Record<string, PlatformConfig> = {
   x: {
     id: 'x',
     displayName: 'X (Twitter)',
+    enabled: true,
     defaultSources: ['SaaS', 'startup tools', 'indie hacker'],
     envGuard: 'XAI_API_KEY',
     sourceLabel: 'topic',
     replyWindowMinutes: 15,
+    maxCharLength: { post: 280, reply: 240 },
     charLimit: 280,
     supportsAnonymousRead: true,
     // X/Twitter tweet IDs are purely numeric (snowflake IDs).
@@ -78,27 +114,44 @@ export function getPlatformConfig(platform: string): PlatformConfig {
 }
 
 /**
- * Check whether a platform's required env var is set.
+ * Check whether a platform is registered, enabled for this release, AND has
+ * its env guard satisfied. The `enabled` flag is the product-level switch;
+ * `envGuard` is the deployment-level switch. Both must pass.
  */
 export function isPlatformAvailable(platform: string): boolean {
   const config = PLATFORMS[platform];
   if (!config) return false;
+  if (config.enabled === false) return false;
   if (!config.envGuard) return true;
   return !!process.env[config.envGuard];
 }
 
 /**
- * List all known platform IDs.
+ * List all known platform IDs (regardless of enabled / env state). Use this
+ * when you need the full registry — e.g. validator sibling-platform lookup.
  */
 export function listPlatforms(): string[] {
   return Object.keys(PLATFORMS);
 }
 
 /**
- * List platforms that are both known and have their env guard satisfied.
+ * List platforms that are registered, enabled, and have their env guard
+ * satisfied — i.e. safe to surface in UI and fan out to.
  */
 export function listAvailablePlatforms(): string[] {
   return listPlatforms().filter(isPlatformAvailable);
+}
+
+/**
+ * Get the character limit for a platform + content kind. Throws on unknown
+ * platform so callers fail loud instead of silently writing past X's 280.
+ */
+export function getPlatformCharLimits(
+  platform: string,
+  kind: ContentKind,
+): number {
+  const config = getPlatformConfig(platform);
+  return config.maxCharLength[kind];
 }
 
 /**
