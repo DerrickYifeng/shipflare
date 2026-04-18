@@ -18,9 +18,11 @@ import { processCalendarSlotDraft } from './processors/calendar-slot-draft';
 import { processSearchSource } from './processors/search-source';
 import { processDiscoveryScan } from './processors/discovery-scan';
 import { processStalledRowSweep } from './processors/stalled-row-sweep';
-import { dreamQueue, discoveryQueue, discoveryScanQueue, monitorQueue, metricsQueue, analyticsQueue, todoSeedQueue, codeScanQueue, stalledRowSweepQueue } from '@/lib/queue';
+import { processVoiceExtract } from './processors/voice-extract';
+import { dreamQueue, discoveryQueue, discoveryScanQueue, monitorQueue, metricsQueue, analyticsQueue, todoSeedQueue, codeScanQueue, stalledRowSweepQueue, voiceExtractQueue } from '@/lib/queue';
 import { createLogger, loggerForJob } from '@/lib/logger';
 import type { DiscoveryJobData, ContentJobData, ReviewJobData, PostingJobData, HealthScoreJobData, DreamJobData, CodeScanJobData, MonitorJobData, CalendarPlanJobData, CalendarSlotDraftJobData, SearchSourceJobData, DiscoveryScanJobData, EngagementJobData, MetricsJobData, AnalyticsJobData, TodoSeedJobData, CalibrationJobData } from '@/lib/queue/types';
+import type { VoiceExtractJobData } from '@/lib/queue/voice-extract';
 
 const log = createLogger('workers');
 
@@ -154,6 +156,12 @@ const stalledRowSweepWorker = new Worker<Record<string, never>>(
   { ...BASE_OPTS, concurrency: 1 },
 );
 
+const voiceExtractWorker = new Worker<VoiceExtractJobData>(
+  'voice-extract',
+  async (job) => processVoiceExtract(job),
+  { ...BASE_OPTS, concurrency: 1 },
+);
+
 const workers = [
   discoveryWorker, contentWorker, reviewWorker, postingWorker,
   healthScoreWorker, dreamWorker, codeScanWorker,
@@ -161,7 +169,7 @@ const workers = [
   searchSourceWorker, discoveryScanWorker,
   engagementWorker,
   metricsWorker, analyticsWorker, todoSeedWorker, calibrationWorker,
-  stalledRowSweepWorker,
+  stalledRowSweepWorker, voiceExtractWorker,
 ];
 
 // Log events — bind traceId / jobId / queue into the child logger so lifecycle
@@ -313,7 +321,7 @@ Promise.all([
   log.error('Failed to schedule cron jobs:', err.message);
 });
 
-log.info('All workers started: discovery, content, review, posting, health-score, dream, code-scan, monitor, calendar-plan, calendar-slot-draft, search-source, discovery-scan, engagement, metrics, analytics, todo-seed, calibration, stalled-row-sweep. Discovery 3x/day, discovery-scan every 4h, stalled sweep every 60s, all others daily.');
+log.info('All workers started: discovery, content, review, posting, health-score, dream, code-scan, monitor, calendar-plan, calendar-slot-draft, search-source, discovery-scan, engagement, metrics, analytics, todo-seed, calibration, stalled-row-sweep, voice-extract. Discovery 3x/day, discovery-scan every 4h, stalled sweep every 60s, all others daily.');
 
 // Graceful shutdown
 async function shutdown() {
