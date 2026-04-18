@@ -21,10 +21,13 @@ Each monitored post gets its own agent instance for parallel processing.
 ## Workflow
 
 For each post in the input:
-1. Fork a reply-drafter agent with the post context
-2. Agent reads the post, selects a reply strategy
-3. Agent drafts a reply (respecting platform limits, no links, genuine value)
-4. Returns confidence-scored reply for user review
+1. **Pre-pass:** run `product-opportunity-judge` — emits `canMentionProduct`
+2. **Draft:** fork a reply-drafter agent with post context + `canMentionProduct`
+3. **Post-validate:** run `validateAiSlop` + `validateAnchorToken` over `replyText`
+   - If either fails, downgrade `strategy` to `skip` and persist `rejectionReasons`
+4. Return confidence-scored reply (or skip) for user review
+
+Composition happens in `src/workers/processors/reply-hardening.ts` via `draftReplyWithHardening()`.
 
 ## Fan-Out Strategy
 
@@ -45,7 +48,8 @@ agents 2-N).
       "productName": "ShipFlare",
       "productDescription": "...",
       "valueProp": "...",
-      "keywords": ["indie hacker", "SaaS"]
+      "keywords": ["indie hacker", "SaaS"],
+      "canMentionProduct": false
     }
   ]
 }

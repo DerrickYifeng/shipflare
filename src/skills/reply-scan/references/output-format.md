@@ -38,5 +38,5 @@ Return EXACTLY this structure:
   - **0.5–0.7**: Generic or only loosely connected to the author's actual point.
   - **<0.5**: Skip — no clean archetype fit, or the post doesn't warrant a reply from this account.
   - A short, dry one-liner that lands can score 0.95. Length is not a proxy for quality — shorter and truer scores higher than longer and more "comprehensive".
-- **strategy** (required, string): One of the archetype names defined in the X Reply Rules: `warm_congrats_question`, `tiny_data_point`, `reframe_mechanism`, `solidarity_specific`, `me_too_twist`, `direct_answer`, `one_question_pushback`, `agree_with_extension`, `dry_joke`, `correction_with_receipt`, `specific_noticing`, `proof_of_work`, `adjacent_reference`, `specific_follow_up_question`, `skip`.
+- **strategy** (required, string): One of the archetype names defined in the X Reply Rules: `supportive_peer`, `data_add`, `contrarian`, `question_extender`, `anecdote`, `dry_wit`, `skip`.
 - **whyItWorks** (optional, string, ≤5 words): A short tag like `correction with receipt` or `dry one-liner`. It is a label, not a justification. Omit the field entirely if you'd need a sentence to explain the reply — that's a signal the reply is over-thought.

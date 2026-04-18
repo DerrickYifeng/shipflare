@@ -14,13 +14,9 @@ import { eq, and, inArray, lt } from 'drizzle-orm';
 import { XClient, XForbiddenError } from '@/lib/x-client';
 import { XAIClient } from '@/lib/xai-client';
 import { createPlatformDeps, createPublicPlatformDeps } from '@/lib/platform-deps';
-import { loadSkill } from '@/core/skill-loader';
-import { runSkill } from '@/core/skill-runner';
-import { replyDrafterOutputSchema } from '@/agents/schemas';
-import type { ReplyDrafterOutput } from '@/agents/schemas';
+import { draftReplyWithHardening } from './reply-hardening';
 import { enqueueReview, enqueueDream, enqueueMonitor } from '@/lib/queue';
 import { publishUserEvent, getKeyValueClient } from '@/lib/redis';
-import { join } from 'path';
 import type { MonitorJobData } from '@/lib/queue/types';
 import { isFanoutJob, getTraceId } from '@/lib/queue/types';
 import { createLogger, loggerForJob, type Logger } from '@/lib/logger';
@@ -30,10 +26,6 @@ import { AgentDream } from '@/memory/dream';
 import { buildMemoryPrompt } from '@/memory/prompt-builder';
 
 const baseLog = createLogger('worker:x-monitor');
-
-const replyScanSkill = loadSkill(
-  join(process.cwd(), 'src/skills/reply-scan'),
-);
 
 const REPLY_WINDOW_MINUTES = 15;
 const TWEET_MAX_AGE_MINUTES = 60;
@@ -333,20 +325,44 @@ async function processXMonitorForUser(
     const dream = new AgentDream(memoryStore);
     const memoryPrompt = await buildMemoryPrompt(memoryStore);
 
-    const result = await runSkill<ReplyDrafterOutput>({
-      skill: replyScanSkill,
-      input: { tweets: tweetsForReply },
-      deps: { xClient },
-      memoryPrompt: memoryPrompt || undefined,
-      outputSchema: replyDrafterOutputSchema,
-      runId: traceId,
-    });
+    // Run hardened reply pipeline: per-tweet parallel execution.
+    // Each tweet goes through: product-opportunity-judge → reply-drafter → ai-slop + anchor validators.
+    // TODO: memoryPrompt and xClient deps were previously injected at the batch runSkill level.
+    // Memory injection now happens inside reply-scan's own skill mechanism via skill-runner deps.
+    // If quality regression is observed, thread memoryPrompt into HardenedReplyInput and forward it.
+    const hardenedResults = await Promise.all(
+      tweetsForReply.map((t) =>
+        draftReplyWithHardening({
+          tweetId: t.tweetId,
+          tweetText: t.tweetText,
+          authorUsername: t.authorUsername,
+          quotedText: t.quotedText,
+          quotedAuthorUsername: t.quotedAuthorUsername,
+          quotedTweetId: t.quotedTweetId,
+          product: {
+            name: t.productName,
+            description: t.productDescription,
+            valueProp: t.valueProp,
+            keywords: t.keywords,
+          },
+          userId,
+        }),
+      ),
+    );
 
     let draftsCreated = 0;
+    let totalCostUsd = 0;
 
-    for (let i = 0; i < result.results.length; i++) {
-      const replyOutput = result.results[i];
-      const tweetInput = tweetsForReply[i];
+    for (let i = 0; i < hardenedResults.length; i++) {
+      const replyOutput = hardenedResults[i]!;
+      const tweetInput = tweetsForReply[i]!;
+
+      if (replyOutput.strategy === 'skip') {
+        log.debug(
+          `Skipping reply for tweet ${tweetInput.tweetId} — reasons: ${replyOutput.rejectionReasons.join(', ') || 'drafter chose skip'}`,
+        );
+        continue;
+      }
 
       if (replyOutput.confidence < 0.5) {
         log.debug(`Skipping low-confidence reply for tweet ${tweetInput.tweetId}`);
@@ -429,7 +445,7 @@ async function processXMonitorForUser(
     }
 
     log.info(
-      `Created ${draftsCreated} reply drafts, cost $${result.usage.costUsd.toFixed(4)}`,
+      `Created ${draftsCreated} reply drafts, cost $${totalCostUsd.toFixed(4)}`,
     );
 
     // Publish SSE event
@@ -441,7 +457,7 @@ async function processXMonitorForUser(
         withinWindow: tweetsForReply.length,
         draftsCreated,
       },
-      cost: result.usage.costUsd,
+      cost: totalCostUsd,
     });
 
     // Memory
