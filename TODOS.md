@@ -1,5 +1,21 @@
 # TODOS
 
+## Now — UX Polish
+
+### Today → Approval Inbox Redesign
+- **What:** Reframe `/today` from a task list that tells the user what to do into an approval inbox where agents surface drafts/decisions and the user approves, edits, or rejects. Copy, visual hierarchy, and CTA labels should all reinforce "you're the boss, agents did the work."
+- **Why:** Current flow feels coercive — user reported it "forces" them to act. Boss/employee framing increases perceived value and reduces guilt-driven churn; matches the product's positioning (agents do marketing for you).
+- **Context:** Route lives at `src/app/(app)/today/` (`page.tsx`, `today-content.tsx`). Likely needs: per-item status pills ("Drafted by Content Agent"), approve/edit/reject actions, empty-state that celebrates agents working rather than nagging the user. Pairs conceptually with the Warroom item below.
+- **Depends on:** None — pure frontend/copy pass on existing data.
+- **Source:** User feedback, 2026-04-17.
+
+### Agent Warroom Animation
+- **What:** Upgrade the existing `AgentsWarRoom` on `/automation` into an animated office scene — agent "characters" move between desks, hand off work, and display live status (Idle / Searching / Drafting / Posting / Error). Status should reflect real job state from the worker queue.
+- **Why:** Makes the invisible agent work visible and entertaining. Reinforces the "boss watching employees" frame from the Today redesign. Strong visual differentiator vs. competitors' dashboards.
+- **Context:** Component at `src/app/(app)/automation/agents-war-room.tsx` (wired in `automation/page.tsx:6`). Real agent states come from worker processors in `src/workers/processors/*`. Use compositor-friendly properties only (`transform`, `opacity`) per web perf rules. Respect `prefers-reduced-motion`.
+- **Depends on:** Stable job-state feed (SSE or polling) from the automation pipeline — partially wired via `PipelineStatus`.
+- **Source:** User feedback, 2026-04-17.
+
 ## Phase 2
 
 ### Stripe Payment Integration
