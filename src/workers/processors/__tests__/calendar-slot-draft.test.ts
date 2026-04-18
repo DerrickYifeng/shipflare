@@ -7,6 +7,9 @@ type CalendarItemFixture = {
   draftId?: string;
   contentType: string;
   topic: string;
+  isWhiteSpace?: boolean;
+  angle?: string;
+  themeId?: string;
 };
 
 /**
@@ -15,23 +18,18 @@ type CalendarItemFixture = {
  * which proved flaky with vitest's module cache. All other tables return empty.
  */
 const dbState: { calendarItem: CalendarItemFixture } = {
-  calendarItem: { id: 'ci-1', state: 'queued', contentType: 'metric', topic: 't' },
+  calendarItem: {
+    id: 'ci-1', state: 'queued', contentType: 'metric', topic: 't',
+    isWhiteSpace: false, angle: 'claim', themeId: 'theme-1',
+  },
 };
 
-const fromBuilder = {
-  where: () => ({
-    limit: (n: number) => {
-      void n;
-      return [dbState.calendarItem];
-    },
-  }),
-  innerJoin: () => ({
-    where: () => ({
-      orderBy: () => ({
-        limit: () => [],
-      }),
-    }),
-  }),
+const themeRow = {
+  id: 'theme-1',
+  thesis: 'test thesis',
+  thesisSource: 'fallback',
+  pillar: null,
+  fallbackMode: null,
 };
 
 const productRow = {
@@ -43,15 +41,12 @@ const productRow = {
   lifecyclePhase: 'pre_launch',
 };
 
-// Product lookup hits .from(products).where().limit(1) — return product row for
-// that specific shape. Calendar item + followers all route through the same
-// `from` builder, so we keep one factory and rely on the processor's linear
-// flow to hit calendar item first (short-circuits before product on 'ready').
-const productFromBuilder = {
-  where: () => ({ limit: () => [productRow] }),
-};
-
-let currentFromBuilder: typeof fromBuilder | typeof productFromBuilder = fromBuilder;
+// Call order in processor (non-whiteSpace, queued):
+//  1: calendarItem  — from(xContentCalendar).where().limit()
+//  2: product       — from(products).where().limit()
+//  3: postHistory   — from(channelPosts).innerJoin().where().orderBy().limit()
+//  4: theme         — from(weeklyThemes).where().limit()
+//  5: priorAngles   — from(xContentCalendar).leftJoin().where()
 let fromCallIdx = 0;
 
 vi.mock('@/lib/db', () => ({
@@ -59,11 +54,44 @@ vi.mock('@/lib/db', () => ({
     select: () => ({
       from: () => {
         fromCallIdx += 1;
-        // Call order in processor: calendarItem (fromBuilder), then product
-        // (productFromBuilder), then channelPosts join (fromBuilder).
-        currentFromBuilder =
-          fromCallIdx === 2 ? productFromBuilder : fromBuilder;
-        return currentFromBuilder;
+        const idx = fromCallIdx;
+
+        if (idx === 1) {
+          // calendarItem
+          return {
+            where: () => ({
+              limit: () => [dbState.calendarItem],
+            }),
+          };
+        }
+        if (idx === 2) {
+          // product
+          return {
+            where: () => ({ limit: () => [productRow] }),
+          };
+        }
+        if (idx === 3) {
+          // postHistory (innerJoin)
+          return {
+            innerJoin: () => ({
+              where: () => ({
+                orderBy: () => ({ limit: () => [] }),
+              }),
+            }),
+          };
+        }
+        if (idx === 4) {
+          // theme
+          return {
+            where: () => ({ limit: () => [themeRow] }),
+          };
+        }
+        // idx === 5: priorAngles (leftJoin)
+        return {
+          leftJoin: () => ({
+            where: () => [],
+          }),
+        };
       },
     }),
     update: () => ({ set: () => ({ where: () => Promise.resolve() }) }),
@@ -93,6 +121,10 @@ vi.mock('@/lib/pipeline-events', () => ({ recordPipelineEvent: vi.fn() }));
 beforeEach(() => {
   vi.clearAllMocks();
   fromCallIdx = 0;
+  dbState.calendarItem = {
+    id: 'ci-1', state: 'queued', contentType: 'metric', topic: 't',
+    isWhiteSpace: false, angle: 'claim', themeId: 'theme-1',
+  };
 });
 
 describe('processCalendarSlotDraft', () => {
@@ -103,6 +135,9 @@ describe('processCalendarSlotDraft', () => {
       draftId: 'd-1',
       contentType: 'metric',
       topic: 't',
+      isWhiteSpace: false,
+      angle: 'claim',
+      themeId: 'theme-1',
     };
     const { processCalendarSlotDraft } = await import('../calendar-slot-draft');
     const { runSkill } = await import('@/core/skill-runner');
@@ -126,6 +161,9 @@ describe('processCalendarSlotDraft', () => {
       state: 'queued',
       contentType: 'metric',
       topic: 't',
+      isWhiteSpace: false,
+      angle: 'claim',
+      themeId: 'theme-1',
     };
     const { processCalendarSlotDraft } = await import('../calendar-slot-draft');
     const { publishUserEvent } = await import('@/lib/redis');

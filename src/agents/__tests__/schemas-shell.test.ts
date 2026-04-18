@@ -5,12 +5,16 @@ describe('calendarPlanOutputSchema (shell)', () => {
   it('rejects entries that include body fields', () => {
     const bad = {
       phase: 'growth',
-      weeklyStrategy: 's',
+      weeklyStrategy: 'weekly-strategy-s',
+      thesis: 'thesis-long-enough',
+      thesisSource: 'milestone',
+      whiteSpaceDayOffsets: [],
       entries: [
         {
           dayOffset: 0,
           hour: 14,
           contentType: 'metric',
+          angle: 'claim',
           topic: 't',
           tweets: ['x'],
         },
@@ -24,9 +28,12 @@ describe('calendarPlanOutputSchema (shell)', () => {
   it('accepts minimal valid shell', () => {
     const ok = calendarPlanOutputSchema.parse({
       phase: 'growth',
-      weeklyStrategy: 's',
+      weeklyStrategy: 'weekly-strategy-s',
+      thesis: 'thesis-long-enough',
+      thesisSource: 'milestone',
+      whiteSpaceDayOffsets: [],
       entries: [
-        { dayOffset: 0, hour: 14, contentType: 'metric', topic: 'MRR' },
+        { dayOffset: 0, hour: 14, contentType: 'metric', angle: 'claim', topic: 'MRR' },
       ],
     });
     expect(ok.entries).toHaveLength(1);

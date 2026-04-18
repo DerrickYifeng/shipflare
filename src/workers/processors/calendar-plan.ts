@@ -8,6 +8,7 @@ import {
   products,
   userPreferences,
   activityEvents,
+  weeklyThemes,
 } from '@/lib/db/schema';
 import { eq, desc, and, gte, inArray } from 'drizzle-orm';
 import { loadSkill } from '@/core/skill-loader';
@@ -159,24 +160,72 @@ export async function processCalendarPlan(job: Job<CalendarPlanJobData>) {
     throw new Error('Planner returned empty calendar');
   }
 
-  // Map planner entries to calendar records. Seed `state: 'queued'` explicitly
-  // so the downstream slot-body fan-out has an unambiguous starting state
-  // even if the DB default shifts.
-  const entries = plan.entries.map((entry) => {
-    const scheduledAt = new Date(startDate);
-    scheduledAt.setDate(scheduledAt.getDate() + entry.dayOffset);
-    scheduledAt.setHours(entry.hour, 0, 0, 0);
-
-    return {
+  // Insert weekly_themes row first so entries can link to it.
+  const [themeRow] = await db
+    .insert(weeklyThemes)
+    .values({
       userId,
       productId,
       channel,
-      scheduledAt,
-      contentType: entry.contentType,
-      topic: entry.topic,
-      state: 'queued' as const,
-    };
-  });
+      weekStart: startDate,
+      thesis: plan.thesis,
+      pillar: plan.pillar ?? null,
+      thesisSource: plan.thesisSource,
+      fallbackMode: plan.fallbackMode ?? null,
+      milestoneContext: plan.milestoneContext ?? null,
+    })
+    .returning();
+
+  if (!themeRow) throw new Error('failed to insert weekly_themes row');
+
+  // Build one row per (day, hour) pair. White-space days are flagged with
+  // isWhiteSpace: true and state: 'ready' so the slot-body fan-out skips them.
+  // Active days get angle + themeId from the planner output.
+  const whiteSpace = new Set(plan.whiteSpaceDayOffsets ?? []);
+  const entries: Array<typeof xContentCalendar.$inferInsert> = [];
+
+  for (let day = 0; day < 7; day++) {
+    for (const hour of postingHours) {
+      const scheduledAt = new Date(startDate);
+      scheduledAt.setDate(scheduledAt.getDate() + day);
+      scheduledAt.setHours(hour, 0, 0, 0);
+
+      if (whiteSpace.has(day)) {
+        // White-space slot: reserved for reactive posting; not drafted.
+        entries.push({
+          userId,
+          productId,
+          channel,
+          scheduledAt,
+          contentType: 'engagement', // placeholder; UI renders as "reactive"
+          topic: null,
+          themeId: themeRow.id,
+          angle: null,
+          isWhiteSpace: true,
+          state: 'ready', // white-space slots do not need drafting
+        });
+        continue;
+      }
+
+      const match = plan.entries.find(
+        (e) => e.dayOffset === day && e.hour === hour,
+      );
+      if (!match) continue;
+
+      entries.push({
+        userId,
+        productId,
+        channel,
+        scheduledAt,
+        contentType: match.contentType,
+        topic: match.topic,
+        themeId: themeRow.id,
+        angle: match.angle,
+        isWhiteSpace: false,
+        state: 'queued' as const,
+      });
+    }
+  }
 
   // Clear pre-existing future shells in the plan pipeline to prevent duplicates
   // on re-generate. Only in-flight shell states are safe to drop — ready /
@@ -207,8 +256,11 @@ export async function processCalendarPlan(job: Job<CalendarPlanJobData>) {
 
   // Emit per-slot `queued` events so the UI can render the skeleton grid
   // immediately, then a single `plan_shell_ready` envelope for page-level
-  // strategy copy. Reply-target scanning is decoupled — see discovery-scan.
+  // strategy copy. White-space rows are not queued for drafting — the
+  // plan_shell_ready envelope carries their IDs so the UI can mark them reactive.
+  // Reply-target scanning is decoupled — see discovery-scan.
   for (const row of created) {
+    if (row.isWhiteSpace) continue; // white-space is not a queued draft slot
     await publishUserEvent(userId, 'agents', {
       type: 'pipeline',
       pipeline: 'plan',
@@ -237,6 +289,7 @@ export async function processCalendarPlan(job: Job<CalendarPlanJobData>) {
 
   // Pipeline: per-slot fan-out only. Reply search is decoupled — see discovery-scan.
   for (const row of created) {
+    if (row.isWhiteSpace) continue; // white space is not drafted
     await enqueueCalendarSlotDraft({
       schemaVersion: 1,
       traceId,

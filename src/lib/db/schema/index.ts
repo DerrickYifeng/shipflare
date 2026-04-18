@@ -11,6 +11,7 @@ export {
 } from './drafts';
 export { agentMemories, agentMemoryLogs } from './memories';
 export { codeSnapshots } from './code-snapshots';
+export * from './weekly-themes';
 export {
   xTargetAccounts,
   xMonitoredTweets,

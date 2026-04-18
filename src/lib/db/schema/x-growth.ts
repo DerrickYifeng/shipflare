@@ -16,6 +16,7 @@ import { desc } from 'drizzle-orm';
 import { users } from './users';
 import { products } from './products';
 import { drafts } from './drafts';
+import { weeklyThemes } from './weekly-themes';
 
 /**
  * Target accounts to monitor for the Reply Guy Engine.
@@ -123,6 +124,9 @@ export const xContentCalendar = pgTable(
     failureReason: text('failure_reason'),
     retryCount: integer('retry_count').notNull().default(0),
     lastAttemptAt: timestamp('last_attempt_at', { mode: 'date' }),
+    angle: text('angle'),
+    themeId: text('theme_id').references(() => weeklyThemes.id, { onDelete: 'set null' }),
+    isWhiteSpace: boolean('is_white_space').notNull().default(false),
     createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
   },
@@ -133,6 +137,7 @@ export const xContentCalendar = pgTable(
       t.status,
       t.scheduledAt,
     ),
+    index('xcc_theme_idx').on(t.themeId),
   ],
 );
 
