@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import { SWRConfig } from 'swr';
-import type { PropsWithChildren } from 'react';
+import type { PropsWithChildren, ReactElement } from 'react';
 
 import { useServerTruthButtonState } from '../use-server-truth-button';
 
@@ -11,7 +11,7 @@ import { useServerTruthButtonState } from '../use-server-truth-button';
  * responses don't leak between cases. `dedupingInterval: 0` forces SWR to
  * actually re-run the fetcher instead of collapsing repeat calls.
  */
-function wrapper({ children }: PropsWithChildren): JSX.Element {
+function wrapper({ children }: PropsWithChildren): ReactElement {
   return (
     <SWRConfig
       value={{ provider: () => new Map(), dedupingInterval: 0 }}

@@ -303,6 +303,7 @@ function TodayContentInner({
       <ReplyScanHeader
         lastScannedAt={lastScannedAt}
         replyCount={replyItems.length}
+        hasConnectedChannel={hasChannel}
         onScanStarted={handleScanStarted}
       />
       <SourceProgressRail
