@@ -209,12 +209,12 @@ export const contentCreatorOutputSchema = z.object({
  */
 export const calendarPlanOutputSchema = z.object({
   phase: z.string().min(1),
-  phaseDescription: z.string().optional(),
+  phaseDescription: z.string().nullable().optional(),
   weeklyStrategy: z.string().min(1),
   thesis: z.string().min(8).max(280),
   thesisSource: z.enum(['milestone', 'top_reply_ratio', 'fallback', 'manual']),
-  pillar: z.string().max(60).optional(),
-  milestoneContext: z.string().max(500).optional(),
+  pillar: z.string().max(60).nullable().optional(),
+  milestoneContext: z.string().max(500).nullable().optional(),
   fallbackMode: z
     .enum(['trigger_interview', 'teardown', 'principle_week', 'reader_week'])
     .nullable()

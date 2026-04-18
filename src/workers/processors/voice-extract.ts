@@ -12,7 +12,7 @@ import {
 import { createPlatformDeps } from '@/lib/platform-deps';
 import { recordPipelineEvent } from '@/lib/pipeline-events';
 import { createLogger, loggerForJob } from '@/lib/logger';
-import type { XClient } from '@/lib/x-client';
+import { XForbiddenError, type XClient } from '@/lib/x-client';
 import type { VoiceExtractJobData } from '@/lib/queue/voice-extract';
 import { getTraceId } from '@/lib/queue/types';
 
@@ -76,13 +76,24 @@ export async function processVoiceExtract(job: Job<VoiceExtractJobData>) {
     return;
   }
 
-  // Resolve the X platform user ID so we can fetch their timeline.
-  const me = await xClient.getMe();
-
-  // Fetch up to 200 recent tweets (X API max per call).
-  const { tweets: rawTweets } = await xClient.getUserTweets(me.id, {
-    maxResults: 200,
-  });
+  // Free X API tier cannot read /users/me or /users/:id/tweets — catch the 403
+  // and exit cleanly. The structured voice profile (archetype, banned words,
+  // emoji policy, humor register, worldview) still flows through buildVoiceBlock
+  // via the Settings UI; only auto-extracted style card + sample tweets are missing.
+  let rawTweets: Awaited<ReturnType<XClient['getUserTweets']>>['tweets'];
+  try {
+    const me = await xClient.getMe();
+    const res = await xClient.getUserTweets(me.id, { maxResults: 200 });
+    rawTweets = res.tweets;
+  } catch (err) {
+    if (err instanceof XForbiddenError) {
+      log.warn(
+        `X API forbidden for user ${userId} (likely free-tier); voice extraction skipped. Use Settings → Voice to paste samples or hand-write the style card.`,
+      );
+      return;
+    }
+    throw err;
+  }
 
   // Rank by engagement and cap at SAMPLE_LIMIT.
   const ranked = rawTweets
