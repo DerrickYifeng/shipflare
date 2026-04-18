@@ -33,6 +33,7 @@ export {
   todoStatusEnum,
 } from './todos';
 export { discoveryConfigs } from './discovery-configs';
+export * from './voice-profiles';
 export {
   pipelineEvents,
   threadFeedback,
