@@ -71,7 +71,9 @@ export type PipelineStage =
   // Pipeline R: per-thread drafting
   | 'thread_drafting'
   | 'thread_ready'
-  | 'thread_failed';
+  | 'thread_failed'
+  // Voice extraction lifecycle
+  | 'voice_extracted';
 
 export type RecordPipelineEventInput = Omit<
   NewPipelineEvent,

@@ -74,7 +74,9 @@ describe('voice block injection contract', () => {
       id: 'j',
       data: { schemaVersion: 1, userId: 'u', productId: 'p', calendarItemId: 'cal-1', channel: 'x' },
     } as never);
-    const input = runSkillMock.mock.calls[0][0].input;
+    const calls = runSkillMock.mock.calls as unknown as Array<[{ input: { voiceBlock: string } }]>;
+    expect(calls.length).toBeGreaterThan(0);
+    const input = calls[0][0].input;
     expect(input.voiceBlock).toContain('test-block');
   });
 });
