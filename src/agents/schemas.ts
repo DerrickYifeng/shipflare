@@ -169,7 +169,15 @@ export const contentOutputSchema = z.object({
 export const replyDrafterOutputSchema = z.object({
   replyText: z.string(),
   confidence: z.number(),
-  strategy: z.string(),
+  strategy: z.enum([
+    'supportive_peer',
+    'data_add',
+    'contrarian',
+    'question_extender',
+    'anecdote',
+    'dry_wit',
+    'skip',
+  ]),
   whyItWorks: z.string().optional(),
 });
 
