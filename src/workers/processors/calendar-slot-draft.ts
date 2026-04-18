@@ -22,6 +22,7 @@ import { createLogger, loggerForJob } from '@/lib/logger';
 import type { CalendarSlotDraftJobData } from '@/lib/queue/types';
 import { getTraceId } from '@/lib/queue/types';
 import { recordPipelineEvent } from '@/lib/pipeline-events';
+import { loadVoiceBlockForUser } from '@/lib/voice/inject';
 
 const baseLog = createLogger('worker:calendar-slot-draft');
 const slotBodySkill = loadSkill(join(process.cwd(), 'src/skills/slot-body'));
@@ -119,6 +120,7 @@ export async function processCalendarSlotDraft(
 
   const memoryStore = new MemoryStore(userId, productId);
   const memoryPrompt = await buildMemoryPrompt(memoryStore);
+  const voiceBlock = await loadVoiceBlockForUser(userId, channel);
 
   const res = await runSkill<SlotBodyOutput>({
     skill: slotBodySkill,
@@ -138,6 +140,7 @@ export async function processCalendarSlotDraft(
       },
       recentPostHistory: postHistoryRows.map((r) => r.text),
       priorAnglesThisWeek,
+      voiceBlock,
       isThread: item.contentType === 'thread',
     },
     deps: {},

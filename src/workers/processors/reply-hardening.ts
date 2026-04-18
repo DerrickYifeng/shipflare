@@ -4,6 +4,7 @@ import { runSkill } from '@/core/skill-runner';
 import { validateAiSlop } from '@/lib/reply/ai-slop-validator';
 import { validateAnchorToken } from '@/lib/reply/anchor-token-validator';
 import type { ReplyDrafterOutput, ProductOpportunityJudgeOutput } from '@/agents/schemas';
+import { loadVoiceBlockForUser } from '@/lib/voice/inject';
 
 // Pre-load both skills at module init (same pattern as monitor.ts for replyScanSkill)
 const judgeSkill = loadSkill(
@@ -65,10 +66,14 @@ export async function draftReplyWithHardening(
 
   const canMentionProduct = judgment.allowMention && judgment.confidence >= 0.6;
 
+  const voiceBlock = input.userId
+    ? await loadVoiceBlockForUser(input.userId, 'x')
+    : null;
+
   // Step 2: reply-drafter with canMentionProduct injected into the tweet context.
   const drafterRes = await runSkill<ReplyDrafterOutput>({
     skill: replyScanSkill,
-    input: { tweets: [{ ...input, canMentionProduct }] },
+    input: { tweets: [{ ...input, canMentionProduct, voiceBlock }] },
   });
 
   const draft = drafterRes.results[0] as ReplyDrafterOutput | undefined;

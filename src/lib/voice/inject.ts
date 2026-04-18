@@ -4,6 +4,10 @@
  * string (or null when profile is absent).
  */
 
+import { db } from '@/lib/db';
+import { voiceProfiles } from '@/lib/db/schema';
+import { and, eq } from 'drizzle-orm';
+
 export interface VoiceProfileRow {
   register: string;
   pronouns: string;
@@ -108,4 +112,23 @@ export function buildVoiceBlock(
   parts.push('</voice_profile>');
 
   return parts.join('\n');
+}
+
+/**
+ * Fetch voice profile for (userId, channel) and build the injection block.
+ * Returns null when no profile exists — callers proceed with defaults.
+ */
+export async function loadVoiceBlockForUser(
+  userId: string,
+  channel: string,
+  options: BuildVoiceBlockOptions = {},
+): Promise<string | null> {
+  const [profile] = await db
+    .select()
+    .from(voiceProfiles)
+    .where(and(eq(voiceProfiles.userId, userId), eq(voiceProfiles.channel, channel)))
+    .limit(1);
+
+  if (!profile) return null;
+  return buildVoiceBlock(profile as VoiceProfileRow, options);
 }

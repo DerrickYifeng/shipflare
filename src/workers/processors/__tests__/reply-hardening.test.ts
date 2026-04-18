@@ -4,6 +4,7 @@ const runSkillMock = vi.fn();
 
 vi.mock('@/lib/db', () => ({ db: {} }));
 vi.mock('@/lib/platform-deps', () => ({ createPlatformDeps: async () => ({}) }));
+vi.mock('@/lib/voice/inject', () => ({ loadVoiceBlockForUser: async () => null }));
 vi.mock('@/lib/redis', () => ({ publishUserEvent: vi.fn() }));
 vi.mock('@/lib/pipeline-events', () => ({ recordPipelineEvent: vi.fn() }));
 vi.mock('@/memory/store', () => ({ MemoryStore: class {} }));

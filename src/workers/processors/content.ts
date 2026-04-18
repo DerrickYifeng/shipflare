@@ -18,6 +18,7 @@ import { buildMemoryPrompt } from '@/memory/prompt-builder';
 import { recordPipelineEvent } from '@/lib/pipeline-events';
 import { pipelineEvents } from '@/lib/db/schema';
 import { desc } from 'drizzle-orm';
+import { loadVoiceBlockForUser } from '@/lib/voice/inject';
 
 const baseLog = createLogger('worker:content');
 
@@ -83,6 +84,7 @@ export async function processContent(job: Job<ContentJobData>) {
     .limit(20);
 
   const recentPostHistory = postHistoryRows.map((r) => r.text);
+  const voiceBlock = await loadVoiceBlockForUser(userId, thread.platform ?? 'reddit');
 
   // Run content-gen skill + draft insert, wrapped in try/catch so the
   // thread's state transition to 'failed' runs before BullMQ retries.
@@ -106,6 +108,7 @@ export async function processContent(job: Job<ContentJobData>) {
             lifecyclePhase: product.lifecyclePhase ?? 'pre_launch',
             draftType,
             communityIntel,
+            voiceBlock,
             ...(recentPostHistory.length > 0 ? { recentPostHistory } : {}),
           },
         ],

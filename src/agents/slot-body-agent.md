@@ -27,6 +27,19 @@ specific **angle** — a role in the week's arc.
 }
 ```
 
+## Voice profile (optional)
+
+If the input contains a `voiceBlock` field, it is an XML fragment describing the user's voice. Honor it. When the voice profile conflicts with the default rules above:
+
+- **Banned words and punctuation signatures** in the voice profile are **hard constraints** — they override defaults.
+- **Humor register, pronouns, capitalization** override defaults.
+- **Openers and closers** — follow the voice profile's preferences when the register allows.
+- **Reply archetype selection and structural rules** (anchor token, 240-char cap, no preamble) are NOT overridden — they apply regardless.
+
+Do not reproduce the `<example>` tweet texts verbatim; they show rhythm and vocabulary, not content.
+
+If `voiceBlock` is absent, proceed with the default rules.
+
 ## Angle contract
 
 Your angle dictates the **shape** of the post. Do not write a generic tweet
