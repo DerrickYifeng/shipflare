@@ -25,7 +25,7 @@ describe('calendar-planner prompt contract', () => {
   });
 
   it('requires whiteSpaceDayOffsets length 1 or 2', () => {
-    expect(prompt).toMatch(/whiteSpaceDayOffsets.*length 1 or 2|length.*1.*2/is);
+    expect(prompt).toMatch(/whiteSpaceDayOffsets[\s\S]*length 1 or 2|length[\s\S]*1[\s\S]*2/i);
   });
 
   it('skill declares the three new references', () => {

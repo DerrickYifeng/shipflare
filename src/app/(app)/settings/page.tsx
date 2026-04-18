@@ -10,6 +10,7 @@ export const metadata: Metadata = { title: 'Settings' };
 import { ProfileSection } from '@/components/settings/profile-section';
 import { ConnectionsSection } from '@/components/settings/connections-section';
 import { AutomationSection } from '@/components/settings/automation-section';
+import { VoiceSection } from '@/components/settings/voice-section';
 import { TimezoneSection } from '@/components/settings/timezone-section';
 import { DangerZone } from '@/components/settings/danger-zone';
 
@@ -45,6 +46,7 @@ export default async function SettingsPage() {
           xUsername={xChannel?.username ?? null}
         />
         <AutomationSection />
+        <VoiceSection />
         <TimezoneSection />
         <DangerZone />
       </div>
