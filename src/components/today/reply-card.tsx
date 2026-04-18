@@ -5,7 +5,19 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Toggle } from '@/components/ui/toggle';
 import { OriginalContentEmbed } from './original-content-embed';
+import { getPlatformCharLimits, PLATFORMS } from '@/lib/platform-config';
 import type { TodoItem } from '@/hooks/use-today';
+
+/**
+ * Platform-aware reply cap. Falls back to 240 (X reply cap) when the
+ * platform isn't registered — better to under-estimate than silently
+ * accept a draft that will fail server-side.
+ */
+function getReplyCap(platform: string): number {
+  return PLATFORMS[platform]
+    ? getPlatformCharLimits(platform, 'reply')
+    : 240;
+}
 
 interface ReplyCardProps {
   item: TodoItem;
@@ -40,6 +52,12 @@ export function ReplyCard({
   // keyboard-shortcut-driven flag from the parent. Deriving it (instead of
   // syncing in an effect) avoids a cascading-render lint error.
   const isEditing = localEditing || forceEditing;
+
+  const replyCap = getReplyCap(item.platform);
+  const activeBody = isEditing ? editBody : item.draftBody ?? '';
+  const replyCharCount = activeBody.length;
+  const overBy = Math.max(0, replyCharCount - replyCap);
+  const isOverCap = overBy > 0;
 
   // Scroll the active card into view when keyboard-navigated to.
   useEffect(() => {
@@ -138,6 +156,17 @@ export function ReplyCard({
           <p className="text-[14px] tracking-[-0.224px] text-sf-text-primary leading-relaxed whitespace-pre-wrap">
             {item.draftBody}
           </p>
+          <p
+            className={`font-mono text-[12px] tracking-[-0.12px] mt-2 tabular-nums ${
+              isOverCap
+                ? 'text-sf-error'
+                : replyCharCount > replyCap - 20
+                  ? 'text-sf-warning'
+                  : 'text-sf-text-tertiary'
+            }`}
+          >
+            {replyCharCount}/{replyCap}
+          </p>
         </div>
       )}
 
@@ -150,6 +179,17 @@ export function ReplyCard({
             className="w-full bg-[#f5f5f7] border border-[rgba(0,0,0,0.08)] rounded-[var(--radius-sf-md)] p-3 text-[14px] tracking-[-0.224px] text-sf-text-primary leading-relaxed resize-y min-h-[80px] focus:outline-none focus:ring-1 focus:ring-sf-accent transition-colors duration-200"
             rows={4}
           />
+          <p
+            className={`font-mono text-[12px] tracking-[-0.12px] mt-1 tabular-nums ${
+              isOverCap
+                ? 'text-sf-error'
+                : replyCharCount > replyCap - 20
+                  ? 'text-sf-warning'
+                  : 'text-sf-text-tertiary'
+            }`}
+          >
+            {replyCharCount}/{replyCap}
+          </p>
           <div className="flex gap-2 mt-2">
             <Button onClick={handleSaveEdit}>Save</Button>
             <Button variant="ghost" onClick={handleCancelEdit}>
@@ -170,16 +210,37 @@ export function ReplyCard({
 
       {/* Actions */}
       {!isEditing && (
-        <div className="flex items-center gap-2 mt-4">
-          <Button onClick={() => onApprove(item.id)}>Send</Button>
-          {item.draftBody && (
-            <Button variant="ghost" onClick={() => setLocalEditing(true)}>
-              Edit
+        <div className="flex flex-col gap-2 mt-4">
+          <div className="flex items-center gap-2">
+            <Button
+              onClick={() => onApprove(item.id)}
+              disabled={isOverCap}
+              title={
+                isOverCap
+                  ? `Reply is ${overBy} chars over the ${replyCap} cap`
+                  : undefined
+              }
+            >
+              Send
             </Button>
+            {item.draftBody && (
+              <Button variant="ghost" onClick={() => setLocalEditing(true)}>
+                Edit
+              </Button>
+            )}
+            <Button variant="ghost" onClick={() => onSkip(item.id)}>
+              Skip
+            </Button>
+          </div>
+          {isOverCap && (
+            <button
+              type="button"
+              onClick={() => setLocalEditing(true)}
+              className="self-start text-[12px] tracking-[-0.12px] text-sf-error hover:underline"
+            >
+              Trim before approving — {overBy} char{overBy === 1 ? '' : 's'} over
+            </button>
           )}
-          <Button variant="ghost" onClick={() => onSkip(item.id)}>
-            Skip
-          </Button>
         </div>
       )}
     </div>
