@@ -246,6 +246,34 @@ export const engagementMonitorOutputSchema = z.object({
   ),
 });
 
+/**
+ * Output schema for the product-opportunity-judge agent.
+ * Decides whether a reply draft may organically mention the user's product.
+ *
+ * Green-light signals are narrow: the OP must explicitly invite a tool/product
+ * recommendation, be debugging a problem this product solves, complain about a
+ * direct competitor's failure mode, ask for a case study, or invite a review.
+ *
+ * Hard mutes: milestone, vulnerable, grief, political, career-layoff.
+ */
+export const productOpportunityJudgeOutputSchema = z.object({
+  allowMention: z.boolean(),
+  signal: z.enum([
+    'tool_question',
+    'debug_problem_fit',
+    'competitor_complaint',
+    'case_study_request',
+    'review_invitation',
+    'milestone_celebration',
+    'vulnerable_post',
+    'grief_or_layoff',
+    'political',
+    'no_fit',
+  ]),
+  confidence: z.number().min(0).max(1),
+  reason: z.string().min(1).max(200),
+});
+
 export type DiscoveryOutput = z.infer<typeof discoveryOutputSchema>;
 export type CommunityDiscoveryOutput = z.infer<typeof communityDiscoveryOutputSchema>;
 export type CommunityIntelOutput = z.infer<typeof communityIntelOutputSchema>;
@@ -259,3 +287,4 @@ export type ContentCreatorOutput = z.infer<typeof contentCreatorOutputSchema>;
 export type CalendarPlanOutput = z.infer<typeof calendarPlanOutputSchema>;
 export type SlotBodyOutput = z.infer<typeof slotBodyOutputSchema>;
 export type EngagementMonitorOutput = z.infer<typeof engagementMonitorOutputSchema>;
+export type ProductOpportunityJudgeOutput = z.infer<typeof productOpportunityJudgeOutputSchema>;
