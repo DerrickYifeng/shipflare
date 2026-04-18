@@ -134,6 +134,13 @@
       "when": 1776423383623,
       "tag": "0018_generate_week_fanout",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1776473208108,
+      "tag": "0019_weekly_themes",
+      "breakpoints": true
     }
   ]
 }

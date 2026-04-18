@@ -190,17 +190,28 @@ export const contentCreatorOutputSchema = z.object({
 });
 
 /**
- * Output schema for the calendar planner agent (shell-only).
+ * Output schema for the calendar planner agent (thesis + angles model).
  *
- * The planner now returns a lightweight shell (time + type + topic per slot).
- * Body generation happens downstream per-slot via the `slot-body` skill in the
- * `calendar-slot-draft` processor. Keeping the planner short makes the first
- * DB write fast and enables Skeleton -> Ready state transitions in the UI.
+ * The planner picks ONE thesis per week and distributes 7 angles across the days.
+ * `contentType` is retained as a *format* dimension (metric/educational/…)
+ * but is now a weak bias — the primary organising axis is `angle`.
+ *
+ * `whiteSpaceDayOffsets` lists days deliberately left un-drafted for reactive
+ * posts. The slot-body processor skips these.
  */
 export const calendarPlanOutputSchema = z.object({
   phase: z.string().min(1),
   phaseDescription: z.string().optional(),
   weeklyStrategy: z.string().min(1),
+  thesis: z.string().min(8).max(280),
+  thesisSource: z.enum(['milestone', 'top_reply_ratio', 'fallback', 'manual']),
+  pillar: z.string().max(60).optional(),
+  milestoneContext: z.string().max(500).optional(),
+  fallbackMode: z
+    .enum(['trigger_interview', 'teardown', 'principle_week', 'reader_week'])
+    .nullable()
+    .optional(),
+  whiteSpaceDayOffsets: z.array(z.number().int().min(0).max(6)).max(3),
   entries: z
     .array(
       z.object({
@@ -212,6 +223,15 @@ export const calendarPlanOutputSchema = z.object({
           'engagement',
           'product',
           'thread',
+        ]),
+        angle: z.enum([
+          'claim',
+          'story',
+          'contrarian',
+          'howto',
+          'data',
+          'case',
+          'synthesis',
         ]),
         topic: z.string().min(1).max(200),
       }),
