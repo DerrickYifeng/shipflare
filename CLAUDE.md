@@ -97,17 +97,16 @@ The content-batch skill demonstrates the correct pattern for multi-platform skil
 
 Tracking pending security hardening beyond what `feat/security-hardening` already shipped.
 
-- **`accounts.access_token` / `accounts.refresh_token` encryption pending.**
-  The `accounts` table (Auth.js Drizzle adapter, `src/lib/db/schema/users.ts`) stores GitHub
-  OAuth tokens in plaintext. This is inconsistent with the `channels` table, whose
-  `oauth_token_encrypted` / `refresh_token_encrypted` columns are envelope-encrypted via
-  `src/lib/encryption.ts`. Deferred because the Auth.js Drizzle adapter does not expose
-  a straightforward field-level encryption hook — resolving it requires either (a)
-  wrapping the adapter with encrypt/decrypt on read/write, or (b) a two-table double-write
-  migration. See `audit/audit-synthesis.md` → Theme 4 (Security) → item 4 and
-  `audit/audit-data.md` → P0-3. Plaintext scope today: only the GitHub access token used
-  for repo read during onboarding — no posting capability, no refresh_token returned by
-  GitHub OAuth apps — so blast radius is limited to read access on the authorised repos.
+- **`accounts.access_token` / `accounts.refresh_token` encryption — DONE (approach a).**
+  The `accounts` table (Auth.js Drizzle adapter, `src/lib/db/schema/users.ts`) stores
+  GitHub OAuth tokens envelope-encrypted via the wrapped DrizzleAdapter in
+  `src/lib/auth/index.ts`. Encrypt/decrypt helpers live in
+  `src/lib/auth/account-encryption.ts`; reads outside the adapter use
+  `maybeDecrypt` (via `getGitHubToken`) so legacy plaintext rows keep working
+  until backfilled by `scripts/encrypt-account-tokens.ts --commit`. Run that
+  script once per environment after deploy. `DELETE /api/account` also now
+  calls GitHub's `DELETE /applications/{client_id}/grant` before DB cascade so
+  re-signing-in after deletion re-prompts consent instead of silently relinking.
 - **Only the three helpers in `src/lib/platform-deps.ts` (`createPlatformDeps`,
   `createClientFromChannel`, `createPublicPlatformDeps`) plus `RedditClient.fromChannel`
   / `XClient.fromChannel` / `RedditClient.appOnly` are allowed to read
