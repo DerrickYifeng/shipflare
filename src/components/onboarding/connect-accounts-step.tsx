@@ -5,12 +5,14 @@ import { Badge } from '@/components/ui/badge';
 
 interface ConnectAccountsStepProps {
   onComplete: () => void;
+  onBack: () => void;
   redditConnected?: boolean;
   xConnected?: boolean;
 }
 
 export function ConnectAccountsStep({
   onComplete,
+  onBack,
   redditConnected,
   xConnected,
 }: ConnectAccountsStepProps) {
@@ -78,6 +80,9 @@ export function ConnectAccountsStep({
       </div>
 
       <div className="flex items-center gap-3">
+        <Button variant="ghost" onClick={onBack}>
+          Back
+        </Button>
         <Button variant="ghost" onClick={onComplete}>
           Skip for now
         </Button>

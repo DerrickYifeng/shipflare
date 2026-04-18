@@ -39,9 +39,18 @@ export default function OnboardingPage() {
 
       {step === 0 && <ProductSourceStep onExtracted={handleExtracted} />}
       {step === 1 && profile && (
-        <ProfileReviewStep profile={profile} onSaved={handleProfileSaved} />
+        <ProfileReviewStep
+          profile={profile}
+          onSaved={handleProfileSaved}
+          onBack={() => setStep(0)}
+        />
       )}
-      {step === 2 && <ConnectAccountsStep onComplete={handleComplete} />}
+      {step === 2 && (
+        <ConnectAccountsStep
+          onComplete={handleComplete}
+          onBack={() => setStep(1)}
+        />
+      )}
     </div>
   );
 }

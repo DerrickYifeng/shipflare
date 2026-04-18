@@ -8,9 +8,10 @@ import type { ExtractedProfile } from '@/types/onboarding';
 interface ProfileReviewStepProps {
   profile: ExtractedProfile;
   onSaved: () => void;
+  onBack: () => void;
 }
 
-export function ProfileReviewStep({ profile, onSaved }: ProfileReviewStepProps) {
+export function ProfileReviewStep({ profile, onSaved, onBack }: ProfileReviewStepProps) {
   const [name, setName] = useState(profile.name);
   const [description, setDescription] = useState(profile.description);
   const [keywords, setKeywords] = useState(profile.keywords.join(', '));
@@ -94,9 +95,14 @@ export function ProfileReviewStep({ profile, onSaved }: ProfileReviewStepProps) 
 
       {error && <p className="text-[14px] tracking-[-0.224px] text-sf-error">{error}</p>}
 
-      <Button type="submit" disabled={loading || !name || !description}>
-        {loading ? 'Saving...' : 'Save and continue'}
-      </Button>
+      <div className="flex items-center gap-3">
+        <Button type="submit" disabled={loading || !name || !description}>
+          {loading ? 'Saving...' : 'Save and continue'}
+        </Button>
+        <Button type="button" variant="ghost" onClick={onBack}>
+          Back
+        </Button>
+      </div>
     </form>
   );
 }
