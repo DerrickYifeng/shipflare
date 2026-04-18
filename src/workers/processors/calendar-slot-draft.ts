@@ -8,6 +8,7 @@ import {
   drafts,
   xContentCalendar,
   channels,
+  weeklyThemes,
 } from '@/lib/db/schema';
 import { channelPosts } from '@/lib/db/schema/channels';
 import { loadSkill } from '@/core/skill-loader';
@@ -50,6 +51,10 @@ export async function processCalendarSlotDraft(
     log.warn(`calendarItem ${calendarItemId} not found; discarding`);
     return;
   }
+  if (item.isWhiteSpace) {
+    log.info(`slot ${calendarItemId} is white-space; no draft needed`);
+    return;
+  }
   if (item.state === 'ready' && item.draftId) {
     log.info(`slot ${calendarItemId} already ready; skipping`);
     return;
@@ -82,6 +87,36 @@ export async function processCalendarSlotDraft(
     .orderBy(desc(channelPosts.postedAt))
     .limit(20);
 
+  const [theme] = await db
+    .select()
+    .from(weeklyThemes)
+    .where(eq(weeklyThemes.id, item.themeId!))
+    .limit(1);
+  if (!theme) throw new Error(`theme ${item.themeId} gone`);
+
+  const priorAnglesRows = await db
+    .select({
+      angle: xContentCalendar.angle,
+      topic: xContentCalendar.topic,
+      replyBody: drafts.replyBody,
+    })
+    .from(xContentCalendar)
+    .leftJoin(drafts, eq(drafts.id, xContentCalendar.draftId))
+    .where(
+      and(
+        eq(xContentCalendar.themeId, theme.id),
+        eq(xContentCalendar.state, 'ready'),
+      ),
+    );
+
+  const priorAnglesThisWeek = priorAnglesRows
+    .filter((r) => r.angle && r.topic && r.replyBody)
+    .map((r) => ({
+      angle: r.angle!,
+      topic: r.topic!,
+      body: r.replyBody!,
+    }));
+
   const memoryStore = new MemoryStore(userId, productId);
   const memoryPrompt = await buildMemoryPrompt(memoryStore);
 
@@ -89,7 +124,11 @@ export async function processCalendarSlotDraft(
     skill: slotBodySkill,
     input: {
       contentType: item.contentType,
+      angle: item.angle,
       topic: item.topic ?? '',
+      thesis: theme.thesis,
+      thesisSource: theme.thesisSource,
+      pillar: theme.pillar ?? undefined,
       product: {
         name: product.name,
         description: product.description,
@@ -98,6 +137,7 @@ export async function processCalendarSlotDraft(
         lifecyclePhase: product.lifecyclePhase ?? 'pre_launch',
       },
       recentPostHistory: postHistoryRows.map((r) => r.text),
+      priorAnglesThisWeek,
       isThread: item.contentType === 'thread',
     },
     deps: {},

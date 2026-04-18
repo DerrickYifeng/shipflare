@@ -23,9 +23,14 @@ produce the body text for that slot. One LLM call, one slot.
 ```ts
 {
   contentType: 'metric' | 'educational' | 'engagement' | 'product' | 'thread';
+  angle: 'claim' | 'story' | 'contrarian' | 'howto' | 'data' | 'case' | 'synthesis';
   topic: string;
-  product: { name, description, valueProp, keywords, lifecyclePhase };
-  recentPostHistory?: string[];
+  thesis: string;
+  thesisSource: 'milestone' | 'top_reply_ratio' | 'fallback' | 'manual';
+  pillar?: string;
+  product: { name; description; valueProp; keywords; lifecyclePhase };
+  recentPostHistory: string[];
+  priorAnglesThisWeek: Array<{ angle: string; topic: string; body: string }>;
   isThread: boolean;
 }
 ```
