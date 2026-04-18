@@ -26,7 +26,7 @@ const selectQueue: unknown[][] = [];
 vi.mock('@/lib/db', () => ({
   db: {
     select: () => {
-      const chain: Record<string, Function> = {};
+      const chain: Record<string, (...args: unknown[]) => unknown> = {};
       const terminal = () => selectQueue.shift() ?? [];
       chain.from = () => ({
         where: () => ({ limit: terminal, orderBy: () => ({ limit: terminal }) }),

@@ -20,7 +20,7 @@ function popSelect(): unknown[] { return selectQueue.shift() ?? []; }
 vi.mock('@/lib/db', () => ({
   db: {
     select: () => {
-      const chain: Record<string, Function> = {};
+      const chain: Record<string, (...args: unknown[]) => unknown> = {};
       const terminal = () => popSelect();
       chain.from = () => ({
         where: () => ({ limit: terminal, orderBy: () => ({ limit: terminal }) }),
