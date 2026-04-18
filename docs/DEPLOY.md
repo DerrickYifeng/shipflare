@@ -108,10 +108,13 @@ Railway will run the build command on every deploy, but migrations must run sepa
 In `web` → **Settings → Deploy → Custom Start Command**:
 
 ```bash
-bun run db:push && bun run start
+bun run db:migrate && bun run start
 ```
 
-`drizzle-kit push` is idempotent — safe to run on every deploy.
+`drizzle-kit migrate` replays `drizzle/*.sql` in order and records applied
+versions in `__drizzle_migrations`. Never use `drizzle-kit push` in prod —
+push diffs live schema against the TS schema and can break on enum
+dependencies or partial prior state.
 
 ### Option B — Manual migration via Railway CLI
 
@@ -120,7 +123,7 @@ Run once before first traffic, then after every migration PR:
 ```bash
 railway login
 railway link          # select the ShipFlare project
-railway run bun run db:push --service web
+railway run bun run db:migrate --service web
 ```
 
 **First-deploy extra step:** Run the token encryption backfill once (per CLAUDE.md Security TODO):
