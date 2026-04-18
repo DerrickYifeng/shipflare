@@ -135,12 +135,12 @@ This is idempotent — safe to re-run, but only needed once per environment afte
 
 ## Step 6 — Health Checks
 
-The MVP ships with a `/api/health` endpoint returning `{ ok, db, redis, ts }`.
+The MVP ships with a `/api/healthz` endpoint (Kubernetes convention — public, unauthenticated) returning `{ ok, db, redis, ts }`. Note: `/api/health` is a separate **authenticated** endpoint serving the app's health-score UI — do NOT point Railway at it.
 
-1. In Railway's `web` service → **Settings → Networking → Health Check Path:** `/api/health`.
+1. In Railway's `web` service → **Settings → Networking → Health Check Path:** `/api/healthz`.
 2. **Health Check Timeout:** 10 seconds (default is fine).
 
-Railway will wait for a 200 from `/api/health` before routing traffic to a new deploy. On 503 (DB or Redis down), traffic keeps flowing to the previous deploy.
+Railway will wait for a 200 from `/api/healthz` before routing traffic to a new deploy. On 503 (DB or Redis down), traffic keeps flowing to the previous deploy.
 
 ---
 
@@ -179,7 +179,7 @@ This is optional but saves ~50% image size on Railway. Deploy without it first, 
 1. Push `main` (or merge the `feat/mvp-launch-ready` PR).
 2. Watch both services in Railway. `web` should deploy in ~2–4 min; `worker` in ~1–2 min.
 3. Tail logs: both services should print their startup banners without errors.
-4. Verify health: `curl https://<your-domain>/api/health` should return `{"ok":true,"db":true,"redis":true,"ts":"..."}`.
+4. Verify health: `curl https://<your-domain>/api/healthz` should return `{"ok":true,"db":true,"redis":true,"ts":"..."}`.
 5. Open the app in a browser — landing page should load with X-only copy (no Reddit references).
 
 If anything fails, check:
@@ -290,7 +290,7 @@ If a deploy goes bad:
 The MVP ships with stdout logging only. Before real user traffic:
 - [ ] Wire Sentry (or equivalent) into web + worker — see TODOS.md Phase 2 "Error Monitoring".
 - [ ] Set a Railway webhook to a Slack channel for deploy failures.
-- [ ] Configure a simple uptime probe (BetterUptime, Cronitor) against `/api/health`.
+- [ ] Configure a simple uptime probe (BetterUptime, Cronitor) against `/api/healthz`.
 
 ---
 
