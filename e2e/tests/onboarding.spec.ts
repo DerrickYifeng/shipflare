@@ -40,6 +40,31 @@ test.describe('Onboarding: complete flow', () => {
     await page.waitForURL('**/onboarding');
     await expect(page.getByRole('heading', { name: 'Add your product' })).toBeVisible();
   });
+
+  test('Back returns to chooser from step 1 (both extract and manual paths)', async ({
+    authenticatedPage: page,
+  }) => {
+    await mockExtractSuccess(page);
+    await page.goto('/onboarding');
+
+    // Extract path: URL → step 1 → Back → chooser
+    await expect(page.getByRole('heading', { name: 'Add your product' })).toBeVisible();
+    await page.getByRole('button', { name: 'From website URL' }).click();
+    await page.getByPlaceholder('https://your-product.com').fill('https://shipflare.dev');
+    await page.getByRole('button', { name: 'Scan website' }).click();
+
+    await expect(page.getByRole('heading', { name: 'Review your profile' })).toBeVisible();
+    await page.getByRole('button', { name: 'Back' }).click();
+    await expect(page.getByRole('heading', { name: 'Add your product' })).toBeVisible();
+
+    // Manual path: "or enter manually" → step 1 (empty) → Back → chooser
+    await page.getByRole('button', { name: /enter manually/i }).click();
+    await expect(page.getByRole('heading', { name: 'Review your profile' })).toBeVisible();
+    await expect(page.getByLabel('Product name')).toHaveValue('');
+
+    await page.getByRole('button', { name: 'Back' }).click();
+    await expect(page.getByRole('heading', { name: 'Add your product' })).toBeVisible();
+  });
 });
 
 testWithProduct.describe('Onboarding: with product', () => {
