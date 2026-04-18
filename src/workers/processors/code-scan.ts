@@ -2,11 +2,11 @@ import type { Job } from 'bullmq';
 import { eq, isNotNull } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import { products, codeSnapshots, channels, discoveryConfigs } from '@/lib/db/schema';
-import { accounts } from '@/lib/db/schema/users';
 import { getPubSubPublisher } from '@/lib/redis';
 import { enqueueCalibration, codeScanQueue } from '@/lib/queue';
 import { isPlatformAvailable } from '@/lib/platform-config';
 import { createLogger, loggerForJob, type Logger } from '@/lib/logger';
+import { getGitHubToken } from '@/lib/github';
 import {
   cloneRepo,
   cleanupClone,
@@ -78,14 +78,8 @@ async function fanOutDailyDiff(log: Logger): Promise<void> {
   log.info(`Daily diff fan-out: ${snapshots.length} repos to check`);
 
   for (const snap of snapshots) {
-    // Resolve GitHub token from the user's Auth.js accounts table
-    const [ghAccount] = await db
-      .select({ accessToken: accounts.access_token })
-      .from(accounts)
-      .where(eq(accounts.userId, snap.userId))
-      .limit(1);
-
-    if (!ghAccount?.accessToken) {
+    const accessToken = await getGitHubToken(snap.userId);
+    if (!accessToken) {
       log.warn(`No GitHub token for user ${snap.userId}, skipping daily diff`);
       continue;
     }
@@ -96,7 +90,7 @@ async function fanOutDailyDiff(log: Logger): Promise<void> {
         userId: snap.userId,
         repoFullName: snap.repoFullName,
         repoUrl: '',
-        githubToken: ghAccount.accessToken,
+        githubToken: accessToken,
         isDailyDiff: true,
       },
       { jobId: `daily-diff-${snap.id}-${Date.now()}` },
