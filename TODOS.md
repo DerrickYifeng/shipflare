@@ -18,6 +18,13 @@
 
 ## Phase 2
 
+### Replace `git clone` in code-scanner with GitHub API
+- **What:** Rewrite `cloneRepo()` in `src/services/code-scanner.ts` to fetch repo contents via GitHub's REST API (`GET /repos/{owner}/{repo}/tarball/{ref}` for bulk extraction, or `GET /repos/{owner}/{repo}/git/trees/{sha}?recursive=1` + `GET /repos/{owner}/{repo}/contents/{path}` for selective reads). Remove the `git` dependency from `nixpacks.toml`.
+- **Why:** Eliminates the system-level `git` dependency (smaller container, smaller attack surface). Removes the token-in-URL anti-pattern (`https://x-access-token:${token}@github.com/...`) in favor of `Authorization: Bearer` headers. Tarball download avoids cloning `.git/` history and lets us stream-filter by path before unpacking large repos.
+- **Context:** Current implementation at `src/services/code-scanner.ts:37-53` shell-outs to `git clone --depth 1 --single-branch`, which required shipping `git` in the Railway Nixpacks image (`nixpacks.toml` added 2026-04-19 as a hotfix). The scanner only reads a few manifest + key files (see `MAX_KEY_FILES = 10`), so a full git clone is already overkill. Swap to GitHub API using the existing token from `getGitHubToken()`. Keep the `cleanupClone()` contract so callers don't change.
+- **Depends on:** None — self-contained refactor in `code-scanner.ts`.
+- **Source:** Follow-up from the onboarding `Executable not found in $PATH: "git"` fix, 2026-04-19.
+
 ### Stripe Payment Integration
 - **What:** Add Stripe checkout to enable paid subscriptions.
 - **Why:** Can't validate willingness-to-pay without the ability to charge. Competitors charge $3/comment (ReplyAgent) or monthly subscriptions.
