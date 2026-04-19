@@ -19,6 +19,9 @@ export {
   xTweetMetrics,
   xFollowerSnapshots,
   xAnalyticsSummary,
+  xMonitoredTweetStatusEnum,
+  xContentCalendarStatusEnum,
+  xContentCalendarItemStateEnum,
   // Platform-generic aliases
   contentCalendar,
   analyticsSummary,

@@ -47,9 +47,10 @@ async function main(): Promise<void> {
     console.log(`\nTables before wipe (${before.length}):`);
     for (const t of before) console.log(`  - ${t.tablename}`);
 
-    console.log('\nDropping and recreating public schema...');
+    console.log('\nDropping and recreating public + drizzle schemas...');
     await sql.unsafe(`
-      DROP SCHEMA public CASCADE;
+      DROP SCHEMA IF EXISTS public CASCADE;
+      DROP SCHEMA IF EXISTS drizzle CASCADE;
       CREATE SCHEMA public;
       GRANT ALL ON SCHEMA public TO postgres;
       GRANT ALL ON SCHEMA public TO public;
