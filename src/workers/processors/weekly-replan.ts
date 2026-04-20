@@ -1,8 +1,9 @@
 import type { Job } from 'bullmq';
-import { and, eq } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import { strategicPaths, users } from '@/lib/db/schema';
 import { getKeyValueClient } from '@/lib/redis';
+import { runTacticalReplan } from '@/lib/re-plan';
 import { createLogger, loggerForJob } from '@/lib/logger';
 
 const log = createLogger('worker:weekly-replan');
@@ -39,15 +40,15 @@ async function acquireLock(
 
 /**
  * Monday 00:00 UTC cron. For every user with an active strategic
- * path, run a tactical replan for the coming week.
+ * path, run the tactical planner for the coming week and persist the
+ * new plan_items row. Idempotent via per-(user, week) Redis lock.
  *
- * Phase 7 scope: find candidate users + acquire the per-user lock +
- * log an "enqueued" line. The actual tactical-planner invocation +
- * plan_items insert lands in Phase 8 (which owns the API endpoint
- * POST /api/plan/replan that shares this code path).
+ * Shares `runTacticalReplan()` with POST /api/plan/replan — one
+ * planner invocation, identical supersede+insert transaction, differs
+ * only in the `plans.trigger` column value ('weekly' here, 'manual'
+ * for the API).
  *
- * Idempotent: the Redis lock ensures a double-fire (worker restart,
- * BullMQ cron overlap) collapses to one run per (user, week).
+ * Individual user failures are logged and do not abort the batch.
  */
 export async function processWeeklyReplan(
   job: Job<Record<string, never>>,
@@ -70,8 +71,11 @@ export async function processWeeklyReplan(
     `weekly replan: ${activePaths.length} users with active strategic paths (week=${wkKey})`,
   );
 
-  let enqueued = 0;
+  let ran = 0;
   let lockSkipped = 0;
+  let failed = 0;
+  let totalInserted = 0;
+  let totalSuperseded = 0;
 
   for (const p of activePaths) {
     const acquired = await acquireLock(p.userId, wkKey);
@@ -83,23 +87,33 @@ export async function processWeeklyReplan(
       continue;
     }
 
-    // TODO(phase-8): enqueue tactical-planner for this (userId,
-    // productId, strategicPathId, weekStart). For now we log the
-    // decision so the cron is verifiable end-to-end without waiting
-    // on Phase 8's API.
-    jlog.info(
-      `weekly replan candidate: user=${p.userId} productId=${p.productId} pathId=${p.pathId} week=${wkKey}`,
-    );
-    enqueued++;
+    try {
+      const result = await runTacticalReplan(p.userId, 'weekly');
+      if (!result.ok) {
+        failed++;
+        jlog.warn(
+          `weekly replan soft-failed user=${p.userId} code=${result.code} detail=${result.detail ?? 'none'}`,
+        );
+        continue;
+      }
+      ran++;
+      totalInserted += result.itemsInserted;
+      totalSuperseded += result.itemsSuperseded;
+      jlog.info(
+        `weekly replan user=${p.userId} inserted=${result.itemsInserted} superseded=${result.itemsSuperseded}`,
+      );
+    } catch (err) {
+      // Don't let one user's bad data abort the cron. Log and move on.
+      failed++;
+      const message = err instanceof Error ? err.message : String(err);
+      jlog.error(`weekly replan crashed user=${p.userId}: ${message}`);
+    }
   }
 
   jlog.info(
-    `weekly replan complete: ${enqueued} candidates processed, ${lockSkipped} already locked`,
+    `weekly replan complete: ran=${ran} failed=${failed} lockSkipped=${lockSkipped} inserted=${totalInserted} superseded=${totalSuperseded}`,
   );
 }
 
 // Exported for unit tests
 export { weekKey as _weekKeyForTest };
-// Silence unused-var warning on the and() import — kept for future
-// Phase 8 wiring where we filter active + non-churned users together.
-void and;
