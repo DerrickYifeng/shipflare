@@ -584,6 +584,153 @@ export const threadSentimentOutputSchema = z.object({
   rationale: z.string().min(1).max(240),
 });
 
+// ---------------------------------------------------------------------------
+// Phase 6 — strategic + tactical planner output schemas
+// ---------------------------------------------------------------------------
+
+/**
+ * A single milestone on the strategic arc. `atDayOffset` is relative to
+ * launch day (negative = pre-launch, positive = post-launch). `phase`
+ * is the phase the milestone belongs to — so the tactical planner knows
+ * when to surface it.
+ */
+export const strategicMilestoneSchema = z.object({
+  atDayOffset: z.number().int(),
+  title: z.string().min(1).max(140),
+  successMetric: z.string().min(1).max(240),
+  phase: z.enum([
+    'foundation',
+    'audience',
+    'momentum',
+    'launch',
+    'compound',
+    'steady',
+  ]),
+});
+
+/**
+ * One week of the thesis arc. The tactical planner reads
+ * `thesisArc[thisWeekIndex].theme` and anchors every content_post to it.
+ */
+export const strategicThesisWeekSchema = z.object({
+  weekStart: z.string().min(1), // ISO, Monday 00:00 UTC
+  theme: z.string().min(1).max(240),
+  angleMix: z
+    .array(
+      z.enum([
+        'claim',
+        'story',
+        'contrarian',
+        'howto',
+        'data',
+        'case',
+        'synthesis',
+      ]),
+    )
+    .min(1)
+    .max(7),
+});
+
+/**
+ * Channel-level cadence. `perWeek` is the planned post count. `preferredHours`
+ * is a small list of UTC hours the planner should prefer when allocating
+ * slots. `preferredCommunities` applies to reddit only.
+ */
+export const strategicChannelCadenceSchema = z.object({
+  perWeek: z.number().int().min(0).max(21),
+  preferredHours: z.array(z.number().int().min(0).max(23)).min(1).max(6),
+  preferredCommunities: z.array(z.string().min(1)).optional(),
+});
+
+/**
+ * Output schema for the strategic-planner agent. Mirrors the
+ * `strategic_paths` table's jsonb columns so the caller can write
+ * directly without remapping.
+ */
+export const strategicPathSchema = z.object({
+  narrative: z.string().min(200).max(2400),
+  milestones: z.array(strategicMilestoneSchema).min(3).max(12),
+  thesisArc: z.array(strategicThesisWeekSchema).min(1).max(12),
+  contentPillars: z.array(z.string().min(1).max(60)).min(3).max(4),
+  channelMix: z
+    .object({
+      x: strategicChannelCadenceSchema.optional(),
+      reddit: strategicChannelCadenceSchema.optional(),
+      email: strategicChannelCadenceSchema.optional(),
+    })
+    .refine((c) => Object.values(c).some((v) => v !== undefined), {
+      message: 'channelMix must include at least one active channel',
+    }),
+  phaseGoals: z.object({
+    foundation: z.string().min(1).max(240).optional(),
+    audience: z.string().min(1).max(240).optional(),
+    momentum: z.string().min(1).max(240).optional(),
+    launch: z.string().min(1).max(240).optional(),
+    compound: z.string().min(1).max(240).optional(),
+    steady: z.string().min(1).max(240).optional(),
+  }),
+});
+
+/**
+ * A single plan_item emitted by the tactical-planner. Mirrors the
+ * planner-visible subset of the `plan_items` table — the caller assigns
+ * id / timestamps / state columns downstream.
+ */
+export const tacticalPlanItemSchema = z.object({
+  kind: z.enum([
+    'content_post',
+    'content_reply',
+    'email_send',
+    'interview',
+    'setup_task',
+    'launch_asset',
+    'runsheet_beat',
+    'metrics_compute',
+    'analytics_summary',
+  ]),
+  userAction: z.enum(['auto', 'approve', 'manual']),
+  phase: z.enum([
+    'foundation',
+    'audience',
+    'momentum',
+    'launch',
+    'compound',
+    'steady',
+  ]),
+  channel: z.string().nullable(),
+  scheduledAt: z.string().min(1), // ISO
+  skillName: z.string().nullable(),
+  params: z.record(z.string(), z.unknown()),
+  title: z.string().min(1).max(200),
+  description: z.string().max(600).nullable(),
+});
+
+/**
+ * Output schema for the tactical-planner agent. `plan` carries the
+ * week-level framing (thesis + founder-facing notes); `items` is the
+ * concrete 7-day schedule the plan-execute dispatcher drives.
+ *
+ * Hard floor of 3 items — a week with <3 scheduled items means the
+ * planner failed to allocate cadence and the caller should retry or
+ * escalate.
+ */
+export const tacticalPlanSchema = z.object({
+  plan: z.object({
+    thesis: z.string().min(1).max(240),
+    notes: z.string().min(1).max(1200),
+  }),
+  items: z.array(tacticalPlanItemSchema).min(3).max(40),
+});
+
+export type StrategicMilestone = z.infer<typeof strategicMilestoneSchema>;
+export type StrategicThesisWeek = z.infer<typeof strategicThesisWeekSchema>;
+export type StrategicChannelCadence = z.infer<
+  typeof strategicChannelCadenceSchema
+>;
+export type StrategicPath = z.infer<typeof strategicPathSchema>;
+export type TacticalPlanItem = z.infer<typeof tacticalPlanItemSchema>;
+export type TacticalPlan = z.infer<typeof tacticalPlanSchema>;
+
 export type DraftEmailOutput = z.infer<typeof draftEmailOutputSchema>;
 export type SendEmailOutput = z.infer<typeof sendEmailOutputSchema>;
 export type AbTestSubjectOutput = z.infer<typeof abTestSubjectOutputSchema>;

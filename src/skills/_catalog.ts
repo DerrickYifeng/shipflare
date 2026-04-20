@@ -45,6 +45,7 @@ import {
   interviewQuestionsOutputSchema,
   retrospectiveOutputSchema,
   threadSentimentOutputSchema,
+  strategicPathSchema,
 } from '@/agents/schemas';
 
 /**
@@ -607,6 +608,130 @@ const classifyThreadSentimentInput = z.object({
 });
 
 // ---------------------------------------------------------------------------
+// Phase 6 — planner atoms
+// ---------------------------------------------------------------------------
+
+const phaseLiteralSchema = z.enum([
+  'foundation',
+  'audience',
+  'momentum',
+  'launch',
+  'compound',
+  'steady',
+]);
+
+const strategicPlannerInput = z.object({
+  product: z.object({
+    name: z.string().min(1),
+    description: z.string().min(1),
+    valueProp: z.string().nullable(),
+    keywords: z.array(z.string()),
+    category: z.enum([
+      'dev_tool',
+      'saas',
+      'consumer',
+      'creator_tool',
+      'agency',
+      'ai_app',
+      'other',
+    ]),
+    targetAudience: z.string().nullable(),
+  }),
+  state: z.enum(['mvp', 'launching', 'launched']),
+  currentPhase: phaseLiteralSchema,
+  launchDate: z.string().nullable(),
+  launchedAt: z.string().nullable(),
+  channels: z.array(z.enum(['x', 'reddit', 'email'])).min(1),
+  voiceProfile: z.string().nullable(),
+  recentMilestones: z.array(
+    z.object({
+      title: z.string().min(1),
+      summary: z.string().min(1),
+      source: z.enum(['commit', 'pr', 'release']),
+      atISO: z.string().min(1),
+    }),
+  ),
+});
+
+const recentMetricSchema = z.object({
+  kind: z.string().min(1),
+  value: z.number(),
+  delta: z.number().optional(),
+  note: z.string().optional(),
+});
+
+const tacticalPlannerInput = z.object({
+  strategicPath: z.object({
+    narrative: z.string().min(1),
+    thesisArc: z.array(
+      z.object({
+        weekStart: z.string().min(1),
+        theme: z.string().min(1),
+        angleMix: z.array(z.string().min(1)),
+      }),
+    ),
+    contentPillars: z.array(z.string().min(1)),
+    channelMix: z.record(
+      z.string(),
+      z.object({
+        perWeek: z.number().int().nonnegative(),
+        preferredHours: z.array(z.number().int().min(0).max(23)),
+        preferredCommunities: z.array(z.string()).optional(),
+      }),
+    ),
+    phaseGoals: z.record(z.string(), z.string()),
+    milestones: z.array(
+      z.object({
+        atDayOffset: z.number().int(),
+        title: z.string().min(1),
+        successMetric: z.string().min(1),
+        phase: phaseLiteralSchema,
+      }),
+    ),
+  }),
+  product: z.object({
+    name: z.string().min(1),
+    valueProp: z.string().nullable(),
+    currentPhase: phaseLiteralSchema,
+    state: z.enum(['mvp', 'launching', 'launched']),
+    launchDate: z.string().nullable(),
+    launchedAt: z.string().nullable(),
+  }),
+  channels: z.array(z.enum(['x', 'reddit', 'email'])).min(1),
+  weekStart: z.string().min(1),
+  weekEnd: z.string().min(1),
+  signals: z.object({
+    recentMilestones: z.array(
+      z.object({
+        title: z.string().min(1),
+        summary: z.string().min(1),
+        source: z.string().min(1),
+        atISO: z.string().min(1),
+      }),
+    ),
+    recentMetrics: z.array(recentMetricSchema),
+    stalledItems: z.array(
+      z.object({ title: z.string().min(1), kind: z.string().min(1) }),
+    ),
+    completedLastWeek: z.array(
+      z.object({ title: z.string().min(1), kind: z.string().min(1) }),
+    ),
+    currentLaunchTasks: z.array(
+      z.object({ title: z.string().min(1), kind: z.string().min(1) }),
+    ),
+  }),
+  skillCatalog: z.array(
+    z.object({
+      name: z.string().min(1),
+      description: z.string().min(1),
+      supportedKinds: z.array(z.string()),
+      channels: z.array(z.string()).optional(),
+    }),
+  ),
+  voiceBlock: z.string().nullable(),
+});
+
+// ---------------------------------------------------------------------------
 // Catalog
 // ---------------------------------------------------------------------------
 
@@ -816,6 +941,17 @@ export const SKILL_CATALOG: readonly SkillMeta[] = [
     inputSchema: compileRetrospectiveInput,
     outputSchema: retrospectiveOutputSchema,
     supportedKinds: ['analytics_summary'],
+  },
+
+  // --- Phase 6: planner atoms ---
+  {
+    name: 'strategic-planner',
+    description:
+      "Produce the durable narrative path (thesis, arc, pillars, milestones, channel mix) for one product. Runs at onboarding commit and phase change — NOT weekly. Feeds the tactical planner's every-Monday frame.",
+    inputSchema: strategicPlannerInput,
+    outputSchema: strategicPathSchema,
+    // Not schedulable as a plan_item — it's the upstream framer.
+    supportedKinds: [],
   },
 ];
 
