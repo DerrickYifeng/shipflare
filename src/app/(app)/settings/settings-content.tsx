@@ -499,34 +499,144 @@ function AccountSection({ user }: { user: SettingsUser }) {
   };
 
   return (
-    <SettingsPanel title="Account" desc="Your login info and profile.">
-      <FieldRow label="Name">{user.name ?? '—'}</FieldRow>
-      <FieldRow label="Email">{user.email ?? '—'}</FieldRow>
-      <FieldRow label="Timezone">{user.timezone ?? 'America/Los_Angeles'}</FieldRow>
-      <FieldRow label="Sign in" muted>
-        <span style={{ color: 'var(--sf-fg-3)' }}>Managed through GitHub OAuth.</span>
-      </FieldRow>
-      <FieldRow label="Delete account" muted>
-        <button
-          type="button"
-          onClick={handleDelete}
-          disabled={deleting}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      <SettingsPanel title="Account" desc="Your login info and profile.">
+        <FieldRow label="Name">{user.name ?? '—'}</FieldRow>
+        <FieldRow label="Email">{user.email ?? '—'}</FieldRow>
+        <FieldRow label="Timezone">{user.timezone ?? 'America/Los_Angeles'}</FieldRow>
+        <FieldRow label="Sign in" muted>
+          <span style={{ color: 'var(--sf-fg-3)' }}>Managed through GitHub OAuth.</span>
+        </FieldRow>
+      </SettingsPanel>
+      <DangerZone
+        title="Danger zone"
+        desc="Irreversible actions. Double-check before clicking."
+      >
+        <DangerRow
+          label="Delete account"
+          desc="Permanently wipe your account and all associated data. This cannot be undone."
+          action={
+            <button
+              type="button"
+              onClick={handleDelete}
+              disabled={deleting}
+              style={{
+                minHeight: 40,
+                padding: '0 16px',
+                borderRadius: 'var(--sf-radius-md)',
+                background: 'var(--sf-danger)',
+                color: 'var(--sf-fg-on-dark-1)',
+                border: 'none',
+                cursor: deleting ? 'not-allowed' : 'pointer',
+                fontWeight: 500,
+                fontSize: 'var(--sf-text-sm)',
+                fontFamily: 'inherit',
+                letterSpacing: 'var(--sf-track-tight)',
+                opacity: deleting ? 0.6 : 1,
+                transition: 'opacity var(--sf-dur-base) var(--sf-ease-swift)',
+              }}
+            >
+              {deleting ? 'Deleting…' : 'Permanently delete'}
+            </button>
+          }
+        />
+      </DangerZone>
+    </div>
+  );
+}
+
+/**
+ * DangerZone — visually distinct card for destructive actions. Sits BELOW
+ * the regular account settings so it's always the last thing on the tab.
+ * 1px danger border + danger-tinted header so it reads as "different".
+ */
+function DangerZone({
+  title,
+  desc,
+  children,
+}: {
+  title: string;
+  desc?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        background: 'var(--sf-paper-raised)',
+        border: '1px solid var(--sf-danger)',
+        borderRadius: 'var(--sf-radius-lg)',
+        padding: 28,
+        boxShadow: 'var(--sf-shadow-sm)',
+      }}
+    >
+      <h2
+        className="sf-h3"
+        style={{ margin: 0, color: 'var(--sf-danger-ink)' }}
+      >
+        {title}
+      </h2>
+      {desc && (
+        <p
           style={{
-            background: 'transparent',
-            border: 'none',
-            padding: 0,
-            color: 'var(--sf-danger-ink)',
-            cursor: deleting ? 'not-allowed' : 'pointer',
-            fontWeight: 600,
+            margin: '6px 0 20px',
             fontSize: 'var(--sf-text-sm)',
-            fontFamily: 'inherit',
-            opacity: deleting ? 0.6 : 1,
+            color: 'var(--sf-fg-3)',
           }}
         >
-          {deleting ? 'Deleting…' : 'Permanently delete →'}
-        </button>
-      </FieldRow>
-    </SettingsPanel>
+          {desc}
+        </p>
+      )}
+      {children}
+    </div>
+  );
+}
+
+function DangerRow({
+  label,
+  desc,
+  action,
+}: {
+  label: string;
+  desc?: string;
+  action: ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 16,
+        paddingTop: 16,
+        borderTop: '1px solid var(--sf-border-subtle)',
+        flexWrap: 'wrap',
+      }}
+    >
+      <div style={{ minWidth: 0, flex: '1 1 300px' }}>
+        <div
+          style={{
+            fontSize: 'var(--sf-text-sm)',
+            fontWeight: 600,
+            color: 'var(--sf-fg-1)',
+          }}
+        >
+          {label}
+        </div>
+        {desc && (
+          <div
+            style={{
+              marginTop: 4,
+              fontSize: 'var(--sf-text-xs)',
+              color: 'var(--sf-fg-3)',
+              lineHeight: 'var(--sf-lh-normal)',
+            }}
+          >
+            {desc}
+          </div>
+        )}
+      </div>
+      <div style={{ flexShrink: 0 }}>{action}</div>
+    </div>
   );
 }
 
