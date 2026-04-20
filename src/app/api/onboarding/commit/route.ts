@@ -8,7 +8,6 @@ import {
   strategicPaths,
   plans,
   planItems,
-  channels,
   discoveryConfigs,
 } from '@/lib/db/schema';
 import {
@@ -19,7 +18,7 @@ import { derivePhase } from '@/lib/launch-phase';
 import { validateLaunchDates } from '@/lib/launch-date-rules';
 import { acquireRateLimit } from '@/lib/rate-limit';
 import { enqueueCalibration } from '@/lib/queue';
-import { isPlatformAvailable } from '@/lib/platform-config';
+import { getUserChannels } from '@/lib/user-channels';
 import { deleteDraft } from '@/lib/onboarding-draft';
 import { recordPipelineEvent } from '@/lib/pipeline-events';
 import { createLogger, loggerForRequest } from '@/lib/logger';
@@ -287,13 +286,7 @@ export async function POST(request: NextRequest): Promise<Response> {
 
   if (changed) {
     try {
-      const userChannels = await db
-        .select({ platform: channels.platform })
-        .from(channels)
-        .where(eq(channels.userId, userId));
-      const platforms = [...new Set(userChannels.map((c) => c.platform))].filter(
-        isPlatformAvailable,
-      );
+      const platforms = await getUserChannels(userId);
 
       for (const platform of platforms) {
         await db

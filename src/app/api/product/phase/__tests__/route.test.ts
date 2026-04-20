@@ -37,16 +37,30 @@ vi.mock('@/skills/_catalog', () => ({
   SKILL_CATALOG: [],
 }));
 
+vi.mock('@/lib/platform-config', () => ({
+  isPlatformAvailable: (p: string) => ['x', 'reddit'].includes(p),
+}));
+
 let productRow: Record<string, unknown> | null = null;
+let userChannelRows: Array<{ platform: string }> = [];
 let txShouldThrow = false;
 
 vi.mock('@/lib/db', () => ({
   db: {
-    select: () => ({
-      from: () => ({
-        where: () => ({ limit: () => (productRow ? [productRow] : []) }),
-      }),
-    }),
+    select: (projection?: unknown) => {
+      const sel = projection as Record<string, unknown> | undefined;
+      const fields = sel ? Object.keys(sel) : [];
+      return {
+        from: () => ({
+          where: () => {
+            if (fields.length === 1 && fields[0] === 'platform') {
+              return userChannelRows;
+            }
+            return { limit: () => (productRow ? [productRow] : []) };
+          },
+        }),
+      };
+    },
     transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
       if (txShouldThrow) throw new Error('tx-fail');
       const tx = {
@@ -129,6 +143,7 @@ beforeEach(() => {
   allowedRL = true;
   authUserId = 'user-1';
   productRow = null;
+  userChannelRows = [];
   txShouldThrow = false;
   runSkillMock.mockReset();
 });
@@ -227,5 +242,55 @@ describe('POST /api/product/phase', () => {
     const { POST } = await import('../route');
     const res = await POST(makeReq({ state: 'mvp' }));
     expect(res.status).toBe(500);
+  });
+
+  it("feeds the planner the user's connected channels", async () => {
+    productRow = productFixture;
+    userChannelRows = [{ platform: 'x' }, { platform: 'reddit' }];
+    runSkillMock
+      .mockResolvedValueOnce({
+        results: [validPath],
+        errors: [],
+        usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0, model: 'sonnet', turns: 1 },
+      })
+      .mockResolvedValueOnce({
+        results: [validPlan],
+        errors: [],
+        usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0, model: 'haiku', turns: 1 },
+      });
+    const { POST } = await import('../route');
+    await POST(makeReq({ state: 'mvp' }));
+
+    const strategicCall = runSkillMock.mock.calls[0]?.[0] as {
+      input: { channels: string[] };
+    };
+    const tacticalCall = runSkillMock.mock.calls[1]?.[0] as {
+      input: { channels: string[] };
+    };
+    expect(strategicCall.input.channels).toEqual(['x', 'reddit']);
+    expect(tacticalCall.input.channels).toEqual(['x', 'reddit']);
+  });
+
+  it("falls back to ['x'] when the user has no connected channels", async () => {
+    productRow = productFixture;
+    userChannelRows = [];
+    runSkillMock
+      .mockResolvedValueOnce({
+        results: [validPath],
+        errors: [],
+        usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0, model: 'sonnet', turns: 1 },
+      })
+      .mockResolvedValueOnce({
+        results: [validPlan],
+        errors: [],
+        usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0, model: 'haiku', turns: 1 },
+      });
+    const { POST } = await import('../route');
+    await POST(makeReq({ state: 'mvp' }));
+
+    const strategicCall = runSkillMock.mock.calls[0]?.[0] as {
+      input: { channels: string[] };
+    };
+    expect(strategicCall.input.channels).toEqual(['x']);
   });
 });

@@ -22,6 +22,7 @@ import {
 import { derivePhase, type ProductState } from '@/lib/launch-phase';
 import { validateLaunchDates } from '@/lib/launch-date-rules';
 import { acquireRateLimit } from '@/lib/rate-limit';
+import { getUserChannels } from '@/lib/user-channels';
 import { createLogger, loggerForRequest } from '@/lib/logger';
 
 const baseLog = createLogger('api:product:phase');
@@ -154,8 +155,14 @@ export async function POST(request: NextRequest): Promise<Response> {
   const state = body.state as ProductState;
   const currentPhase = derivePhase({ state, launchDate, launchedAt });
 
+  const userChannels = await getUserChannels(userId);
+  // Fall back to ['x'] so a user with zero connected channels still gets a
+  // plan (they can only execute X-shaped skills, which is fine — the strategic
+  // planner needs at least one channel to write channelMix against).
+  const plannerChannels = userChannels.length > 0 ? userChannels : ['x'];
+
   log.info(
-    `phase change start user=${userId} state=${state} phase=${currentPhase}`,
+    `phase change start user=${userId} state=${state} phase=${currentPhase} channels=${plannerChannels.join(',')}`,
   );
 
   // Run strategic + tactical chain. Same pattern as /api/onboarding/plan
@@ -189,7 +196,7 @@ export async function POST(request: NextRequest): Promise<Response> {
           currentPhase,
           launchDate: launchDate ? launchDate.toISOString() : null,
           launchedAt: launchedAt ? launchedAt.toISOString() : null,
-          channels: ['x'], // tightened to x for now; Reddit path follows later
+          channels: plannerChannels,
           voiceProfile: null,
           recentMilestones: [],
         },
@@ -227,7 +234,7 @@ export async function POST(request: NextRequest): Promise<Response> {
             launchDate: launchDate ? launchDate.toISOString() : null,
             launchedAt: launchedAt ? launchedAt.toISOString() : null,
           },
-          channels: ['x'],
+          channels: plannerChannels,
           weekStart: weekStart.toISOString(),
           weekEnd: weekEnd.toISOString(),
           signals: {
