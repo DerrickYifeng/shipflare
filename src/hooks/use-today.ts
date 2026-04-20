@@ -110,6 +110,10 @@ function deriveCardFormat(item: RawTodoItem): 'post' | 'reply' {
 interface TodayResponse {
   items: RawTodoItem[];
   stats: TodayStats;
+  /** True iff the user has at least one plan_items row (any state). Drives
+   *  the Today-level FirstRun gate — distinguishes "no plan yet" from
+   *  "plan exists, everything handled today". */
+  hasAnyPlanItems?: boolean;
 }
 
 export function useToday() {
@@ -215,6 +219,13 @@ export function useToday() {
   return {
     items,
     stats: data?.stats ?? { published_yesterday: 0, pending_count: 0, acted_today: 0 },
+    // Fall back to items.length > 0 before the first hydration so the
+    // hook stays honest when /api/today responds without the flag (e.g.
+    // during backend rollouts that predate the field).
+    hasAnyPlanItems:
+      typeof data?.hasAnyPlanItems === 'boolean'
+        ? data.hasAnyPlanItems
+        : items.length > 0,
     isLoading,
     error,
     approve,

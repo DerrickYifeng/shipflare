@@ -126,6 +126,7 @@ function TodayContentInner({
   const {
     items,
     stats,
+    hasAnyPlanItems,
     isLoading,
     approve: rawApprove,
     skip: rawSkip,
@@ -459,8 +460,13 @@ function TodayContentInner({
     <TodayWelcomeRibbon onboardingCompletedAt={onboardingCompletedAt} />
   ) : null;
 
-  // First-run gate — show the signature "your agents are warming up" flow.
-  if (showFirstRun && items.length === 0) {
+  // First-run gate — show the signature "your agents are warming up" flow
+  // ONLY when the user genuinely has zero plan_items. A user with items
+  // (all completed / skipped today) falls through to CompletionState
+  // instead of the warmup. `hasAnyPlanItems` is the server-truth flag
+  // introduced by `/api/today` — the initial server-rendered
+  // `isFirstRun` prop handles first paint.
+  if (showFirstRun && items.length === 0 && !hasAnyPlanItems) {
     return (
       <>
         {landedHero}
