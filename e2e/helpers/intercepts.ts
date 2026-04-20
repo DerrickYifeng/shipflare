@@ -222,6 +222,102 @@ export async function mockChannels(
 }
 
 /**
+ * Intercept GET /api/onboarding/github-repos with a deterministic repo list
+ * + `username`. Used by the Stage 1 GitHub sub-flow tests.
+ */
+export async function mockGithubReposSuccess(page: Page) {
+  await page.route('**/api/onboarding/github-repos', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        username: 'test-user',
+        repos: [
+          {
+            fullName: 'test-user/shipflare',
+            name: 'shipflare',
+            description: 'AI marketing autopilot for indie devs',
+            homepage: 'https://shipflare.dev',
+            language: 'TypeScript',
+            stargazersCount: 142,
+            pushedAt: new Date(Date.now() - 2 * 3600_000).toISOString(),
+          },
+          {
+            fullName: 'test-user/scratch',
+            name: 'scratch',
+            description: 'Personal scratch repo',
+            homepage: null,
+            language: 'Shell',
+            stargazersCount: 0,
+            pushedAt: new Date(Date.now() - 7 * 86_400_000).toISOString(),
+          },
+        ],
+      }),
+    }),
+  );
+}
+
+/**
+ * Mock the SSE stream from POST /api/onboarding/extract-repo. Emits a
+ * single `type=complete` event with the same MOCK_PROFILE shape so
+ * Stage 2 resolves immediately.
+ */
+export async function mockExtractRepoSuccess(page: Page) {
+  await page.route('**/api/onboarding/extract-repo', (route) => {
+    const body = [
+      `data: ${JSON.stringify({
+        type: 'complete',
+        productAnalysis: {
+          productName: MOCK_PROFILE.name,
+          oneLiner: MOCK_PROFILE.description,
+          keywords: MOCK_PROFILE.keywords,
+          valueProp: MOCK_PROFILE.valueProp,
+        },
+      })}\n\n`,
+    ].join('');
+    route.fulfill({
+      status: 200,
+      headers: {
+        'content-type': 'text/event-stream',
+        'cache-control': 'no-cache',
+      },
+      body,
+    });
+  });
+}
+
+/**
+ * Capture every POST /api/onboarding/commit body so a test can assert the
+ * payload shape (e.g. `category`, `launchedAt`) without a second round-trip.
+ * Returns a reference that populates after the request fires.
+ */
+export async function captureCommitBody(page: Page): Promise<{
+  latest: () => Record<string, unknown> | null;
+}> {
+  const state: { body: Record<string, unknown> | null } = { body: null };
+  await page.route('**/api/onboarding/commit', async (route) => {
+    const postData = route.request().postData();
+    if (postData) {
+      try {
+        state.body = JSON.parse(postData) as Record<string, unknown>;
+      } catch {
+        /* ignore — the underlying mock still resolves */
+      }
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        success: true,
+        productId: 'prod-mock-1',
+        enqueued: [],
+      }),
+    });
+  });
+  return { latest: () => state.body };
+}
+
+/**
  * Intercept POST /api/automation/run with a successful response.
  */
 export async function mockAutomationRunSuccess(page: Page) {

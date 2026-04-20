@@ -8,35 +8,29 @@
 
 import type { Page, Route } from '@playwright/test';
 import { test, expect } from '../fixtures/auth';
-import { mkdir } from 'node:fs/promises';
-import { join } from 'node:path';
 import {
   mockExtractSuccess,
   mockExtractFailure,
+  mockExtractRepoSuccess,
+  mockGithubReposSuccess,
   mockPlanSuccess,
   mockPlanTimeout,
   mockCommitSuccess,
   mockChannels,
+  captureCommitBody,
 } from '../helpers/intercepts';
 
-// Where visual-regression screenshots land.
-const SCREENSHOT_DIR = join(
-  process.cwd(),
-  'e2e',
-  'screenshots',
-  'onboarding',
-);
-
-async function ensureScreenshotDir() {
-  await mkdir(SCREENSHOT_DIR, { recursive: true });
-}
-
+// Visual-regression shot. Delegates to Playwright's `toHaveScreenshot`,
+// which diffs against `e2e/screenshots/onboarding.spec.ts/baseline/<name>.png`
+// (path configured via snapshotPathTemplate in playwright.config.ts).
+// First run generates the baseline; subsequent runs fail the test if
+// >1% of pixels drift (see expect.toHaveScreenshot in the config).
+//
+// To intentionally update baselines after a visual change, run
+// `bun run test:e2e:visual:update` (or any `playwright test
+// --update-snapshots` invocation) and commit the new PNGs.
 async function shot(page: Page, name: string) {
-  await ensureScreenshotDir();
-  await page.screenshot({
-    path: join(SCREENSHOT_DIR, `${name}.png`),
-    fullPage: false,
-  });
+  await expect(page).toHaveScreenshot(`${name}.png`);
 }
 
 /**
@@ -391,5 +385,270 @@ test.describe('Onboarding v3: accessibility', () => {
     await expect(
       page.getByRole('radiogroup', { name: /Where's your product at\?/i }),
     ).toBeVisible();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v3 onboarding — widened coverage per gap-audit MEDIUM #18.
+//
+// The tests above only exercise the URL extract path. These cover:
+//   - GitHub source (mocked /api/onboarding/github-repos + SSE extract-repo)
+//   - category picker interaction (commit payload carries `saas`)
+//   - state='launched' path (launchedAt date picker + commit payload)
+//   - state='mvp' path (no date, commit payload has both launchDate +
+//     launchedAt null)
+//
+// `captureCommitBody` is the glue: it wraps `mockCommitSuccess` and exposes
+// the POSTed body to the test so we can assert payload shape without
+// touching Zod-strictness-sensitive backend behavior.
+// ---------------------------------------------------------------------------
+
+test.describe('Onboarding v3: GitHub source path', () => {
+  test.use({ viewport: { width: 1440, height: 900 } });
+  test.setTimeout(90_000);
+
+  test('completes via GitHub repo picker', async ({
+    authenticatedPage: page,
+  }) => {
+    await mockGithubReposSuccess(page);
+    await mockExtractRepoSuccess(page);
+    await mockPlanSuccess(page);
+    await mockCommitSuccess(page);
+    await mockChannels(page, []);
+
+    await page.goto('/onboarding');
+
+    // -- Stage 1 (source) — pick GitHub tile --
+    await page.getByRole('button', { name: /Import from GitHub/i }).click();
+
+    // The GitHub repo list renders after /api/onboarding/github-repos resolves.
+    // Pick the first repo.
+    await expect(page.getByText(/test-user\/shipflare/)).toBeVisible({
+      timeout: 10_000,
+    });
+    await page.getByText(/test-user\/shipflare/).click();
+    await page.getByRole('button', { name: /Scan repository/i }).click();
+
+    // -- Stage 2 → 3 — SSE extract-repo completes, review loads --
+    await expect(
+      page.getByRole('heading', { level: 2, name: /Here's what we found/i }),
+    ).toBeVisible({ timeout: 25_000 });
+    await expect(productNameInput(page)).toHaveValue('ShipFlare');
+    await page
+      .getByRole('button', { name: /Looks good, continue/i })
+      .click();
+
+    // -- Stage 4 → 5 — skip channel, launching default --
+    await page.getByRole('button', { name: /Skip for now/i }).click();
+
+    const planResponse = page.waitForResponse(
+      (res) =>
+        res.url().includes('/api/onboarding/plan') && res.status() === 200,
+      { timeout: 20_000 },
+    );
+    await page.getByRole('button', { name: /Generate plan/i }).click();
+    await planResponse;
+
+    // -- Stage 6 → 7 → commit --
+    await expect(
+      page.getByRole('heading', { level: 2, name: /Your launch plan/i }),
+    ).toBeVisible({ timeout: 25_000 });
+    await page.getByRole('button', { name: /Launch the agents/i }).click();
+    await page.waitForURL('**/today?from=onboarding', { timeout: 15_000 });
+  });
+});
+
+test.describe('Onboarding v3: category picker', () => {
+  test.use({ viewport: { width: 1440, height: 900 } });
+  test.setTimeout(90_000);
+
+  test('selecting SaaS propagates to commit body', async ({
+    authenticatedPage: page,
+  }) => {
+    await mockExtractSuccess(page);
+    await mockPlanSuccess(page);
+    await mockChannels(page, []);
+    const commit = await captureCommitBody(page);
+    await page.route('**/api/onboarding/github-repos', (route) =>
+      route.fulfill({
+        status: 404,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'No GitHub account linked' }),
+      }),
+    );
+
+    await page.goto('/onboarding');
+    await pickUrlMethod(page);
+    await page
+      .getByPlaceholder('https://your-product.com')
+      .fill('https://shipflare.dev');
+    await page.getByRole('button', { name: /Scan website/i }).click();
+
+    // Stage 3 — switch category to SaaS explicitly.
+    await expect(
+      page.getByRole('heading', { level: 2, name: /Here's what we found/i }),
+    ).toBeVisible({ timeout: 25_000 });
+    const categoryGroup = page.getByRole('radiogroup', {
+      name: /Product category/i,
+    });
+    await expect(categoryGroup).toBeVisible();
+    await categoryGroup.getByRole('radio', { name: 'SaaS', exact: true }).click();
+    await page.getByRole('button', { name: /Looks good, continue/i }).click();
+
+    // Skip through to commit.
+    await page.getByRole('button', { name: /Skip for now/i }).click();
+    const planResponse = page.waitForResponse(
+      (res) =>
+        res.url().includes('/api/onboarding/plan') && res.status() === 200,
+      { timeout: 20_000 },
+    );
+    await page.getByRole('button', { name: /Generate plan/i }).click();
+    await planResponse;
+    await expect(
+      page.getByRole('heading', { level: 2, name: /Your launch plan/i }),
+    ).toBeVisible({ timeout: 25_000 });
+    await page.getByRole('button', { name: /Launch the agents/i }).click();
+    await page.waitForURL('**/today?from=onboarding', { timeout: 15_000 });
+
+    const body = commit.latest();
+    expect(body).not.toBeNull();
+    const product = (body as { product?: { category?: string } } | null)
+      ?.product;
+    expect(product?.category).toBe('saas');
+  });
+});
+
+test.describe("Onboarding v3: state='launched' path", () => {
+  test.use({ viewport: { width: 1440, height: 900 } });
+  test.setTimeout(90_000);
+
+  test('launched state collects launchedAt and commits', async ({
+    authenticatedPage: page,
+  }) => {
+    await mockExtractSuccess(page);
+    await mockPlanSuccess(page);
+    await mockChannels(page, []);
+    const commit = await captureCommitBody(page);
+    await page.route('**/api/onboarding/github-repos', (route) =>
+      route.fulfill({
+        status: 404,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'No GitHub account linked' }),
+      }),
+    );
+
+    await page.goto('/onboarding');
+    await pickUrlMethod(page);
+    await page
+      .getByPlaceholder('https://your-product.com')
+      .fill('https://shipflare.dev');
+    await page.getByRole('button', { name: /Scan website/i }).click();
+    await expect(
+      page.getByRole('heading', { level: 2, name: /Here's what we found/i }),
+    ).toBeVisible({ timeout: 25_000 });
+    await page.getByRole('button', { name: /Looks good, continue/i }).click();
+    await page.getByRole('button', { name: /Skip for now/i }).click();
+
+    // Stage 5 — pick "I'm already live" to reveal launched sub-form.
+    await expect(
+      page.getByRole('heading', { level: 2, name: /Where's your product at\?/i }),
+    ).toBeVisible();
+    await page.getByText(/I'm already live/i).click();
+
+    // The launched sub-form reveals a "When did you launch?" date input +
+    // users bucket. Date picker defaults to today; set it explicitly to
+    // verify the field is plumbed.
+    await expect(page.getByText(/When did you launch\?/i)).toBeVisible();
+    const launchedDate = page.locator('input[type="date"]');
+    await launchedDate.fill('2025-10-01');
+    await page.getByRole('button', { name: '100–1k' }).click();
+
+    const planResponse = page.waitForResponse(
+      (res) =>
+        res.url().includes('/api/onboarding/plan') && res.status() === 200,
+      { timeout: 20_000 },
+    );
+    await page.getByRole('button', { name: /Generate plan/i }).click();
+    await planResponse;
+    await expect(
+      page.getByRole('heading', { level: 2, name: /Your launch plan/i }),
+    ).toBeVisible({ timeout: 25_000 });
+    await page.getByRole('button', { name: /Launch the agents/i }).click();
+    await page.waitForURL('**/today?from=onboarding', { timeout: 15_000 });
+
+    const body = commit.latest() as {
+      state?: string;
+      launchedAt?: string | null;
+      launchDate?: string | null;
+    } | null;
+    expect(body).not.toBeNull();
+    expect(body?.state).toBe('launched');
+    expect(body?.launchDate).toBeNull();
+    expect(body?.launchedAt).toMatch(/^2025-10-01T/);
+  });
+});
+
+test.describe("Onboarding v3: state='mvp' path", () => {
+  test.use({ viewport: { width: 1440, height: 900 } });
+  test.setTimeout(90_000);
+
+  test('mvp state requires no dates and commits cleanly', async ({
+    authenticatedPage: page,
+  }) => {
+    await mockExtractSuccess(page);
+    await mockPlanSuccess(page);
+    await mockChannels(page, []);
+    const commit = await captureCommitBody(page);
+    await page.route('**/api/onboarding/github-repos', (route) =>
+      route.fulfill({
+        status: 404,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'No GitHub account linked' }),
+      }),
+    );
+
+    await page.goto('/onboarding');
+    await pickUrlMethod(page);
+    await page
+      .getByPlaceholder('https://your-product.com')
+      .fill('https://shipflare.dev');
+    await page.getByRole('button', { name: /Scan website/i }).click();
+    await expect(
+      page.getByRole('heading', { level: 2, name: /Here's what we found/i }),
+    ).toBeVisible({ timeout: 25_000 });
+    await page.getByRole('button', { name: /Looks good, continue/i }).click();
+    await page.getByRole('button', { name: /Skip for now/i }).click();
+
+    // Stage 5 — pick "I'm still building".
+    await expect(
+      page.getByRole('heading', { level: 2, name: /Where's your product at\?/i }),
+    ).toBeVisible();
+    await page.getByText(/I'm still building\./i).click();
+    // mvp state renders NO conditional sub-form — no date required.
+    await expect(page.getByText(/When did you launch\?/i)).toHaveCount(0);
+    await expect(page.getByText(/Launch details/i)).toHaveCount(0);
+
+    const planResponse = page.waitForResponse(
+      (res) =>
+        res.url().includes('/api/onboarding/plan') && res.status() === 200,
+      { timeout: 20_000 },
+    );
+    await page.getByRole('button', { name: /Generate plan/i }).click();
+    await planResponse;
+    await expect(
+      page.getByRole('heading', { level: 2, name: /Your launch plan/i }),
+    ).toBeVisible({ timeout: 25_000 });
+    await page.getByRole('button', { name: /Launch the agents/i }).click();
+    await page.waitForURL('**/today?from=onboarding', { timeout: 15_000 });
+
+    const body = commit.latest() as {
+      state?: string;
+      launchDate?: string | null;
+      launchedAt?: string | null;
+    } | null;
+    expect(body).not.toBeNull();
+    expect(body?.state).toBe('mvp');
+    expect(body?.launchDate).toBeNull();
+    expect(body?.launchedAt).toBeNull();
   });
 });
