@@ -36,5 +36,18 @@ Only score HIGH for tweets where the author is:
 When collecting X results, map fields to the standard format:
 - `tweetId` → `id`
 - `text` → `title`
+- `text` → `body` (pass through the full tweet text)
+- `author` → `author`
 - `url` → `url`
-- `topic` → `community`
+- **`community`**: pass the input `source` string verbatim (e.g. `SaaS`,
+  `startup tools`). **Do NOT add any `"X - "` or `"X / "` prefix — the UI
+  renders the `𝕏 ·` mark.** All tweets from a single discovery run share
+  the same `community` value because X has no per-tweet community concept;
+  the search topic is the grouping key.
+- Do not invent a per-tweet category from the tweet content. Two tweets
+  about "growth strategy" surfaced by a `SaaS` search both have
+  `community: "SaaS"`.
+
+**Timestamp note:** `x_search` does not return tweet creation dates. Omit
+`postedAt` entirely for X results — do NOT fabricate a date. The Today
+card falls back to `discoveredAt`.

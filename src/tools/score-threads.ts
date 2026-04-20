@@ -58,7 +58,19 @@ function computeWeightedScore(
 
 const threadInputSchema = z.object({
   id: z.string(),
-  community: z.string(),
+  /**
+   * Platform-native source identifier.
+   *   Reddit: `r/{subreddit}` (e.g. `r/startups`)
+   *   X:     raw topic/query string, unprefixed (e.g. `SaaS`, `startup tools`)
+   * Do NOT pass `X - ...` or `X / ...` variants — those are agent artefacts
+   * the UI has to strip. The `𝕏 ·` mark is added at render time.
+   */
+  community: z
+    .string()
+    .refine((s) => !/^X\s*[-/]\s*/i.test(s), {
+      message:
+        'community must not have an "X -" / "X /" prefix for X platform — pass the topic verbatim',
+    }),
   title: z.string(),
   url: z.string(),
   relevance: z.number().min(0).max(1).describe('AI-assessed relevance (0-1)'),
