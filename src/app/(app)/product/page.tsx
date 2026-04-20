@@ -4,11 +4,10 @@ import { desc, eq } from 'drizzle-orm';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { products, voiceProfiles } from '@/lib/db/schema';
+import { derivePhase, type ProductState } from '@/lib/launch-phase';
 import { ProductContent, type ProductSnapshot } from './product-content';
 
 export const metadata: Metadata = { title: 'My Product' };
-
-type Phase = ProductSnapshot['lifecyclePhase'];
 
 export default async function ProductPage() {
   const session = await auth();
@@ -21,7 +20,9 @@ export default async function ProductPage() {
       keywords: products.keywords,
       valueProp: products.valueProp,
       url: products.url,
-      lifecyclePhase: products.lifecyclePhase,
+      state: products.state,
+      launchDate: products.launchDate,
+      launchedAt: products.launchedAt,
       updatedAt: products.updatedAt,
     })
     .from(products)
@@ -40,15 +41,21 @@ export default async function ProductPage() {
     .orderBy(desc(voiceProfiles.lastExtractedAt))
     .limit(1);
 
+  const state = row.state as ProductState;
+  const currentPhase = derivePhase({
+    state,
+    launchDate: row.launchDate,
+    launchedAt: row.launchedAt,
+  });
+
   const initial: ProductSnapshot = {
     name: row.name,
     description: row.description,
     keywords: row.keywords,
     valueProp: row.valueProp,
     url: row.url,
-    lifecyclePhase: (['pre_launch', 'launched', 'scaling'].includes(row.lifecyclePhase)
-      ? row.lifecyclePhase
-      : 'pre_launch') as Phase,
+    state,
+    currentPhase,
     updatedAt: row.updatedAt.toISOString(),
     voiceScannedAt: voice?.lastExtractedAt ? voice.lastExtractedAt.toISOString() : null,
   };

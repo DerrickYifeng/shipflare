@@ -24,11 +24,28 @@ import { FieldRow } from '@/components/ui/field-row';
 import { useToast } from '@/components/ui/toast';
 import { EditableValue } from './_components/editable-value';
 
-type Phase = 'pre_launch' | 'launched' | 'scaling';
-const PHASE_LABEL: Record<Phase, string> = {
-  pre_launch: 'Pre-Launch',
+type State = 'mvp' | 'launching' | 'launched';
+type LaunchPhase =
+  | 'foundation'
+  | 'audience'
+  | 'momentum'
+  | 'launch'
+  | 'compound'
+  | 'steady';
+
+const STATE_LABEL: Record<State, string> = {
+  mvp: 'MVP',
+  launching: 'Launching',
   launched: 'Launched',
-  scaling: 'Scaling',
+};
+
+const PHASE_LABEL: Record<LaunchPhase, string> = {
+  foundation: 'Foundation',
+  audience: 'Audience',
+  momentum: 'Momentum',
+  launch: 'Launch',
+  compound: 'Compound',
+  steady: 'Steady',
 };
 
 export interface ProductSnapshot {
@@ -37,7 +54,8 @@ export interface ProductSnapshot {
   keywords: string[];
   valueProp: string | null;
   url: string | null;
-  lifecyclePhase: Phase;
+  state: State;
+  currentPhase: LaunchPhase;
   updatedAt: string;
   /**
    * ISO timestamp of the most recent voice-scan extraction across channels.
@@ -125,7 +143,6 @@ export function ProductContent({ initial }: ProductContentProps) {
           description: next.description,
           keywords: next.keywords,
           valueProp: next.valueProp ?? undefined,
-          lifecyclePhase: next.lifecyclePhase,
         }),
       });
       if (!res.ok) {
@@ -208,8 +225,8 @@ export function ProductContent({ initial }: ProductContentProps) {
                       VERIFIED
                     </Badge>
                   )}
-                  <Badge variant={phaseVariant(product.lifecyclePhase)} mono>
-                    {PHASE_LABEL[product.lifecyclePhase]}
+                  <Badge variant={phaseVariant(product.currentPhase)} mono>
+                    {PHASE_LABEL[product.currentPhase]}
                   </Badge>
                 </div>
                 <p style={{ margin: '4px 0 0', fontSize: 'var(--sf-text-sm)', color: 'var(--sf-fg-3)' }}>
@@ -254,11 +271,29 @@ export function ProductContent({ initial }: ProductContentProps) {
                   onCommit={(next) => commitField({ keywords: next })}
                 />
               </FieldRow>
-              <FieldRow label="Lifecycle" muted>
-                <PhaseTabs
-                  value={product.lifecyclePhase}
-                  onChange={(next) => commitField({ lifecyclePhase: next })}
-                />
+              <FieldRow label="State" muted>
+                <span
+                  className="sf-mono"
+                  style={{
+                    fontSize: 'var(--sf-text-xs)',
+                    color: 'var(--sf-fg-2)',
+                    letterSpacing: 'var(--sf-track-mono)',
+                  }}
+                >
+                  {STATE_LABEL[product.state]}
+                </span>
+              </FieldRow>
+              <FieldRow label="Phase" muted>
+                <span
+                  className="sf-mono"
+                  style={{
+                    fontSize: 'var(--sf-text-xs)',
+                    color: 'var(--sf-fg-2)',
+                    letterSpacing: 'var(--sf-track-mono)',
+                  }}
+                >
+                  {PHASE_LABEL[product.currentPhase]}
+                </span>
               </FieldRow>
             </div>
 
@@ -394,10 +429,10 @@ export function ProductContent({ initial }: ProductContentProps) {
 }
 
 function phaseVariant(
-  phase: Phase,
+  phase: LaunchPhase,
 ): 'warning' | 'success' | 'accent' {
-  if (phase === 'launched') return 'success';
-  if (phase === 'scaling') return 'accent';
+  if (phase === 'launch') return 'success';
+  if (phase === 'compound' || phase === 'steady') return 'accent';
   return 'warning';
 }
 
@@ -440,45 +475,6 @@ function CapRow({ label, value }: { label: string; value: string }) {
       <span className="sf-mono" style={{ color: 'var(--sf-fg-1)' }}>
         {value}
       </span>
-    </div>
-  );
-}
-
-function PhaseTabs({
-  value,
-  onChange,
-}: {
-  value: Phase;
-  onChange: (next: Phase) => void;
-}) {
-  const phases: Phase[] = ['pre_launch', 'launched', 'scaling'];
-  return (
-    <div style={{ display: 'inline-flex', gap: 4 }}>
-      {phases.map((p) => {
-        const active = p === value;
-        return (
-          <button
-            key={p}
-            type="button"
-            onClick={() => onChange(p)}
-            style={{
-              padding: '4px 10px',
-              borderRadius: 'var(--sf-radius-sm)',
-              border: 'none',
-              background: active ? 'var(--sf-accent-light)' : 'transparent',
-              color: active ? 'var(--sf-link)' : 'var(--sf-fg-3)',
-              fontSize: 'var(--sf-text-xs)',
-              fontWeight: active ? 600 : 500,
-              letterSpacing: 'var(--sf-track-normal)',
-              cursor: 'pointer',
-              fontFamily: 'inherit',
-              transition: 'all var(--sf-dur-fast) var(--sf-ease-swift)',
-            }}
-          >
-            {PHASE_LABEL[p]}
-          </button>
-        );
-      })}
     </div>
   );
 }
