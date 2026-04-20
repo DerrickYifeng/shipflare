@@ -19,8 +19,8 @@
 | # | Phase | Status | Owner | Gate |
 |---|---|---|---|---|
 | 1 | Schema foundations (migration + derivePhase) | ✅ `919c459` | data-engineer | migration `0001_planner_refresh.sql`, 160-line tests, kill-list for Phase 2: 20+ files |
-| 2 | lifecyclePhase → state caller refactor (29 files) | 🔄 active | backend-engineer | `pnpm build` green, no `lifecyclePhase` greps |
-| 3 | Verify schema cleanup (residual import sweep) | ⏳ blocked by 2 | data-engineer | DB state clean |
+| 2 | lifecyclePhase → state caller refactor (29 files) | ✅ `bbe429a..7df0d6a` | backend-engineer | build green, 173/174 tests (1 flake needs Redis), 0 kill-list hits |
+| 3 | Verify schema cleanup (residual import sweep) | ✅ absorbed into #2 | backend-engineer | rolled up into Phase 2's 6 commits |
 | 4 | Atomic skills — rename survivors + skill catalog | ⏳ blocked by 3 | backend-engineer | `_catalog.ts` covers all |
 | 5 | Atomic skills — ~15 new (email, launch assets, research) | ⏳ blocked by 4 | backend-engineer | every skill IO test passes |
 | 6 | Strategic + tactical planner agents | ⏳ blocked by 5 | backend-engineer | 21 fixture tests green |
