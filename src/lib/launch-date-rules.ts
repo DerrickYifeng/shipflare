@@ -46,12 +46,20 @@ export function validateLaunchDates(
         message: 'state=launching requires launchDate',
       });
     } else {
-      const minMs = now + 7 * MS_PER_DAY;
+      // Allow same-day launch (min = start of today). The audit found
+      // that `today + 7d` rejected founders who'd already picked a launch
+      // date in the coming week — 7 days of buffer is a nice-to-have, not
+      // a hard business rule. Cap at +90d so nothing "launches" half a
+      // year out without the founder thinking about it.
+      const startOfToday = new Date(now);
+      startOfToday.setUTCHours(0, 0, 0, 0);
+      const minMs = startOfToday.getTime();
       const maxMs = now + 90 * MS_PER_DAY;
       if (launchDateMs < minMs || launchDateMs > maxMs) {
         errors.push({
           field: 'launchDate',
-          message: 'state=launching requires launchDate in [today+7d, today+90d]',
+          message:
+            'state=launching requires launchDate between today and today+90d',
         });
       }
     }

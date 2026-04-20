@@ -256,12 +256,24 @@ describe('POST /api/onboarding/commit — date validation', () => {
     expect(payload.error).toBe('invalid_dates');
   });
 
-  it('rejects state=launching with launchDate < today+7d', async () => {
+  it('accepts state=launching with launchDate today+3d (same-week launch allowed)', async () => {
     const { POST } = await import('../route');
     const res = await POST(
       makeRequest(
         bodyFor('launching', {
           launchDate: new Date(TODAY + 3 * DAY).toISOString(),
+        }),
+      ),
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it('rejects state=launching with launchDate > today+90d', async () => {
+    const { POST } = await import('../route');
+    const res = await POST(
+      makeRequest(
+        bodyFor('launching', {
+          launchDate: new Date(TODAY + 120 * DAY).toISOString(),
         }),
       ),
     );
