@@ -21,8 +21,10 @@ import { Field } from './_shared/field';
 import { FieldReveal } from './_shared/field-reveal';
 import { VoicePicker } from './_shared/voice-picker';
 import { KeywordEditor } from './_shared/keyword-editor';
+import { CategoryPicker } from './_shared/category-picker';
 import { ArrowRight, Check, GitHub, Globe } from './icons';
 import { COPY } from './_copy';
+import type { ProductCategory } from './OnboardingFlow';
 
 export interface StageReviewValue {
   name: string;
@@ -30,6 +32,7 @@ export interface StageReviewValue {
   audience: string;
   voice: string;
   keywords: string[];
+  category: ProductCategory;
 }
 
 interface StageReviewProps {
@@ -56,7 +59,7 @@ export function StageReview({
 
   useEffect(() => {
     const t = setInterval(
-      () => setRevealed((r) => (r >= 6 ? r : r + 1)),
+      () => setRevealed((r) => (r >= 7 ? r : r + 1)),
       90,
     );
     return () => clearInterval(t);
@@ -203,6 +206,19 @@ export function StageReview({
         </FieldReveal>
 
         <FieldReveal shown={revealed >= 6}>
+          <Field
+            label={COPY.stage3.fields.category.label}
+            hint={COPY.stage3.fields.category.hint}
+          >
+            <CategoryPicker
+              value={value.category}
+              onChange={(next) => update('category', next)}
+              options={COPY.stage3.categoryOptions}
+            />
+          </Field>
+        </FieldReveal>
+
+        <FieldReveal shown={revealed >= 7}>
           <div
             style={{
               marginTop: 4,

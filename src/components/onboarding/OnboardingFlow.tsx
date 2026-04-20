@@ -14,6 +14,7 @@ import { WorkArea } from './work-area';
 import { StageSource } from './stage-source';
 import { StageScanning } from './stage-scanning';
 import { StageReview } from './stage-review';
+import { inferCategory } from './_infer-category';
 import { StageConnect } from './stage-connect';
 import { StageState } from './stage-state';
 import { StagePlanBuilding } from './stage-plan-building';
@@ -463,7 +464,19 @@ function StageRouter({
       );
     }
 
-    case 'review':
+    case 'review': {
+      // Infer category from extracted signals on first entry so the
+      // Stage-3 picker starts on the best-fit option rather than
+      // "Something else". User can always override. If the draft already
+      // had a non-default category (hydrated from Redis), keep it.
+      const initialCategory: ProductCategory =
+        draft.category !== 'other'
+          ? draft.category
+          : inferCategory({
+              keywords: draft.product?.keywords ?? [],
+              description: draft.product?.description ?? '',
+              name: draft.product?.name ?? '',
+            });
       return (
         <StageReview
           initialValue={{
@@ -472,6 +485,7 @@ function StageRouter({
             audience: draft.audience,
             voice: draft.voice || 'Technical, calm, spec-like',
             keywords: draft.product?.keywords ?? [],
+            category: initialCategory,
           }}
           sourceKind={draft.sourceKind ?? 'manual'}
           sourceLabel={sourceLabelFor(draft)}
@@ -497,6 +511,7 @@ function StageRouter({
                   },
               audience: v.audience,
               voice: v.voice,
+              category: v.category,
             };
             mirrorToRedis(next);
           }}
@@ -515,6 +530,7 @@ function StageRouter({
               },
               audience: v.audience,
               voice: v.voice,
+              category: v.category,
               reviewed: true,
             };
             updateDraft(next);
@@ -523,6 +539,7 @@ function StageRouter({
           }}
         />
       );
+    }
 
     case 'connect':
       return (

@@ -116,7 +116,20 @@ export const COPY = {
         label: 'Keywords',
         hint: 'Search terms for scanning Reddit, X, and HN.',
       },
+      category: {
+        label: 'Product category',
+        hint: 'Picks the playbook ShipFlare uses — different categories get different launch plans.',
+      },
     },
+    categoryOptions: [
+      { id: 'dev_tool', label: 'Dev tool' },
+      { id: 'saas', label: 'SaaS' },
+      { id: 'consumer', label: 'Consumer app' },
+      { id: 'creator_tool', label: 'Creator tool' },
+      { id: 'agency', label: 'Agency / services' },
+      { id: 'ai_app', label: 'AI app' },
+      { id: 'other', label: 'Something else' },
+    ] as const,
     voicePresets: [
       'Technical, calm, spec-like',
       'Warm and founder-like',
