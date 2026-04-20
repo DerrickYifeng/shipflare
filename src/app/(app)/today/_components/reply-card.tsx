@@ -61,6 +61,24 @@ function relativeTime(iso: string | null): string | null {
   return `${Math.floor(hr / 24)}d`;
 }
 
+/**
+ * xAI Grok's `x_search` tool does not return tweet timestamps, and the
+ * discovery agent used to hallucinate `2021-01-01T00:00:00Z` to fill the
+ * schema. Treat that exact sentinel as "no real posted_at" so we fall back
+ * to `discoveredAt` instead of showing "1935d".
+ */
+const HALLUCINATED_POSTED_AT = '2021-01-01T00:00:00.000Z';
+
+function threadTimestamp(
+  postedAt: string | null,
+  discoveredAt: string | null,
+): { label: string | null; prefix: string } {
+  if (postedAt && postedAt !== HALLUCINATED_POSTED_AT) {
+    return { label: relativeTime(postedAt), prefix: '' };
+  }
+  return { label: relativeTime(discoveredAt), prefix: 'discovered ' };
+}
+
 export function ReplyCard({
   item,
   onApprove,
@@ -95,7 +113,10 @@ export function ReplyCard({
   // mirror that here with a visible countdown bar so the affordance doesn't
   // live solely in the toast.
   const isPosting = item.status === 'pending_approval';
-  const postedAt = relativeTime(item.threadPostedAt);
+  const { label: postedLabel, prefix: postedPrefix } = threadTimestamp(
+    item.threadPostedAt,
+    item.threadDiscoveredAt,
+  );
 
   const handleSaveEdit = () => {
     onEdit(item.id, editBody);
@@ -191,7 +212,12 @@ export function ReplyCard({
             ) : null}
           </div>
           <MetaRow>
-            {postedAt && <span style={{ whiteSpace: 'nowrap' }}>{postedAt}</span>}
+            {postedLabel && (
+              <span style={{ whiteSpace: 'nowrap' }}>
+                {postedPrefix}
+                {postedLabel}
+              </span>
+            )}
             {item.threadUpvotes != null && (
               <>
                 <Dot />

@@ -102,6 +102,7 @@ export default async function TodayPage() {
       threadUpvotes: threads.upvotes,
       threadCommentCount: threads.commentCount,
       threadPostedAt: threads.postedAt,
+      threadDiscoveredAt: threads.discoveredAt,
       calendarContentType: xContentCalendar.contentType,
       calendarScheduledAt: xContentCalendar.scheduledAt,
     })

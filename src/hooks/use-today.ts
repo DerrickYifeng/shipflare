@@ -84,6 +84,7 @@ export interface TodoItem {
   threadUpvotes: number | null;
   threadCommentCount: number | null;
   threadPostedAt: string | null;
+  threadDiscoveredAt: string | null;
   // Joined from calendar
   calendarContentType: string | null;
   calendarScheduledAt: string | null;

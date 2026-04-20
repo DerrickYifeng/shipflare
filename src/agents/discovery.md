@@ -72,8 +72,10 @@ JSON with: productName, productDescription, keywords, valueProp, source, platfor
      (selftext). On X, use `text` (tweet text).
    - **`author`** — Reddit: `author`; X: `authorUsername`.
    - **`postedAt`** — ISO-8601 timestamp string. Reddit: convert `createdUtc`
-     (Unix seconds) via `new Date(createdUtc * 1000).toISOString()`. X: use
-     `createdAt` if present.
+     (Unix seconds) via `new Date(createdUtc * 1000).toISOString()`. **X: the
+     `x_search` tool does NOT return tweet creation timestamps. Omit the
+     `postedAt` field entirely for X results — do NOT fabricate a date like
+     `2021-01-01`.** The Today card will fall back to `discoveredAt`.
    - **`score`** (upvotes) and **`commentCount`** — already pass through.
 
 ## Important

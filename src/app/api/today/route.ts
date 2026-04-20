@@ -68,6 +68,7 @@ export async function GET() {
       threadUpvotes: threads.upvotes,
       threadCommentCount: threads.commentCount,
       threadPostedAt: threads.postedAt,
+      threadDiscoveredAt: threads.discoveredAt,
       // Joined calendar fields
       calendarContentType: xContentCalendar.contentType,
       calendarScheduledAt: xContentCalendar.scheduledAt,
