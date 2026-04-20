@@ -1,4 +1,4 @@
-import { Worker } from 'bullmq';
+import { Queue, Worker } from 'bullmq';
 import { getBullMQConnection } from '@/lib/redis';
 import { processDiscovery } from './processors/discovery';
 import { processReview } from './processors/review';
@@ -14,10 +14,58 @@ import { processCalibration } from './processors/calibrate-discovery';
 import { processSearchSource } from './processors/search-source';
 import { processDiscoveryScan } from './processors/discovery-scan';
 import { processVoiceExtract } from './processors/voice-extract';
+import { processPlanExecute } from './processors/plan-execute';
+import { processPlanExecuteSweeper } from './processors/plan-execute-sweeper';
+import { processStaleSweeper } from './processors/stale-sweeper';
+import { processWeeklyReplan } from './processors/weekly-replan';
 import { dreamQueue, discoveryQueue, discoveryScanQueue, monitorQueue, metricsQueue, analyticsQueue, codeScanQueue } from '@/lib/queue';
+import type { PlanExecuteJobData } from '@/lib/queue';
 import { createLogger, loggerForJob } from '@/lib/logger';
 import type { DiscoveryJobData, ReviewJobData, PostingJobData, HealthScoreJobData, DreamJobData, CodeScanJobData, MonitorJobData, SearchSourceJobData, DiscoveryScanJobData, EngagementJobData, MetricsJobData, AnalyticsJobData, CalibrationJobData } from '@/lib/queue/types';
 import type { VoiceExtractJobData } from '@/lib/queue/voice-extract';
+
+// ----------------------------------------------------------------
+//  Phase 7 cron-only queues (no enqueue helpers — scheduled below)
+// ----------------------------------------------------------------
+
+const planExecuteSweeperQueue = new Queue<Record<string, never>>(
+  'plan-execute-sweeper',
+  {
+    connection: getBullMQConnection(),
+    defaultJobOptions: {
+      removeOnComplete: { count: 10 },
+      removeOnFail: { count: 50 },
+      attempts: 1,
+    },
+  },
+);
+
+const staleSweeperQueue = new Queue<Record<string, never>>(
+  'stale-sweeper',
+  {
+    connection: getBullMQConnection(),
+    defaultJobOptions: {
+      removeOnComplete: { count: 10 },
+      removeOnFail: { count: 50 },
+      attempts: 1,
+    },
+  },
+);
+
+const weeklyReplanQueue = new Queue<Record<string, never>>(
+  'weekly-replan',
+  {
+    connection: getBullMQConnection(),
+    defaultJobOptions: {
+      removeOnComplete: { count: 10 },
+      removeOnFail: { count: 50 },
+      // Idempotent via Redis lock inside the processor; allow 1 retry
+      // in case of a transient DB hiccup reading strategic_paths.
+      attempts: 2,
+      backoff: { type: 'exponential', delay: 30_000 },
+    },
+  },
+);
 
 const log = createLogger('workers');
 
@@ -127,6 +175,32 @@ const voiceExtractWorker = new Worker<VoiceExtractJobData>(
   { ...BASE_OPTS, concurrency: 1 },
 );
 
+// --- Phase 7: plan-execute workers ---
+
+const planExecuteWorker = new Worker<PlanExecuteJobData>(
+  'plan-execute',
+  async (job) => processPlanExecute(job),
+  { ...BASE_OPTS, concurrency: 3 },
+);
+
+const planExecuteSweeperWorker = new Worker<Record<string, never>>(
+  'plan-execute-sweeper',
+  async (job) => processPlanExecuteSweeper(job),
+  { ...BASE_OPTS, concurrency: 1 },
+);
+
+const staleSweeperWorker = new Worker<Record<string, never>>(
+  'stale-sweeper',
+  async (job) => processStaleSweeper(job),
+  { ...BASE_OPTS, concurrency: 1 },
+);
+
+const weeklyReplanWorker = new Worker<Record<string, never>>(
+  'weekly-replan',
+  async (job) => processWeeklyReplan(job),
+  { ...BASE_OPTS, concurrency: 1 },
+);
+
 const workers = [
   discoveryWorker, reviewWorker, postingWorker,
   healthScoreWorker, dreamWorker, codeScanWorker,
@@ -135,6 +209,9 @@ const workers = [
   engagementWorker,
   metricsWorker, analyticsWorker, calibrationWorker,
   voiceExtractWorker,
+  // Phase 7
+  planExecuteWorker, planExecuteSweeperWorker,
+  staleSweeperWorker, weeklyReplanWorker,
 ];
 
 // Log events — bind traceId / jobId / queue into the child logger so lifecycle
@@ -246,6 +323,49 @@ async function scheduleDiscoveryScan() {
   );
 }
 
+// Schedule plan-execute-sweeper: every 60s. Finds plan_items ready
+// for their next phase transition and enqueues plan-execute jobs.
+// Idempotent — plan-execute uses (planItemId, phase) jobId dedup so
+// re-sweeping an in-flight item is a no-op at the Redis layer.
+async function schedulePlanExecuteSweeper() {
+  await planExecuteSweeperQueue.add(
+    'sweep',
+    {},
+    {
+      repeat: { every: 60 * 1000 },
+      jobId: 'plan-execute-sweeper-repeat',
+    },
+  );
+}
+
+// Schedule stale-sweeper: every hour. Marks planned / approved rows
+// past scheduledAt + 24h as stale.
+async function scheduleStaleSweeper() {
+  await staleSweeperQueue.add(
+    'sweep',
+    {},
+    {
+      repeat: { every: 60 * 60 * 1000 },
+      jobId: 'stale-sweeper-repeat',
+    },
+  );
+}
+
+// Schedule weekly-replan: Monday 00:00 UTC. For every user with an
+// active strategic_path, enqueue a tactical-planner run for the
+// coming week. The processor acquires a per-(user, week) Redis lock
+// so double-fires from cron overlap collapse to one run.
+async function scheduleWeeklyReplan() {
+  await weeklyReplanQueue.add(
+    'replan',
+    {},
+    {
+      repeat: { pattern: '0 0 * * 1' }, // Monday 00:00 UTC
+      jobId: 'weekly-replan-cron',
+    },
+  );
+}
+
 Promise.all([
   scheduleNightlyDream(),
   scheduleCodeDiff(),
@@ -254,11 +374,14 @@ Promise.all([
   scheduleMonitor(),
   scheduleMetrics(),
   scheduleAnalytics(),
+  schedulePlanExecuteSweeper(),
+  scheduleStaleSweeper(),
+  scheduleWeeklyReplan(),
 ]).catch((err) => {
   log.error('Failed to schedule cron jobs:', err.message);
 });
 
-log.info('All workers started: discovery, review, posting, health-score, dream, code-scan, monitor, search-source, discovery-scan, engagement, metrics, analytics, calibration, voice-extract. Discovery 3x/day, discovery-scan every 4h, all others daily.');
+log.info('All workers started: discovery, review, posting, health-score, dream, code-scan, monitor, search-source, discovery-scan, engagement, metrics, analytics, calibration, voice-extract, plan-execute, plan-execute-sweeper, stale-sweeper, weekly-replan. Discovery 3x/day, discovery-scan every 4h, plan-execute-sweeper every 1m, stale-sweeper every 1h, weekly-replan Monday 00:00 UTC, all others daily.');
 
 // Graceful shutdown
 async function shutdown() {
