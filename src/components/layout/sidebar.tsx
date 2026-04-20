@@ -27,7 +27,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/product', label: 'My Product', Icon: ProductIcon },
   { href: '/growth', label: 'Growth', Icon: GrowthIcon },
   { href: '/calendar', label: 'Calendar', Icon: CalendarIcon },
-  { href: '/automation', label: 'Your AI Team', Icon: ZapIcon },
+  { href: '/team', label: 'Your AI Team', Icon: ZapIcon },
   { href: '/settings', label: 'Settings', Icon: GearIcon },
 ];
 

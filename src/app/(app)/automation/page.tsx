@@ -1,23 +1,11 @@
-import type { Metadata } from 'next';
-import { auth } from '@/lib/auth';
 import { redirect } from 'next/navigation';
-import { HeaderBar } from '@/components/layout/header-bar';
-import { PipelineStatus } from '@/components/automation/pipeline-status';
-import { AgentsWarRoom } from './agents-war-room';
 
-export const metadata: Metadata = { title: 'Automation' };
-
-export default async function AgentsPage() {
-  const session = await auth();
-  if (!session?.user?.id) redirect('/');
-
-  return (
-    <>
-      <HeaderBar title="Automation" />
-      <div className="px-6 pt-6">
-        <PipelineStatus />
-      </div>
-      <AgentsWarRoom />
-    </>
-  );
+/**
+ * `/automation` is superseded by `/team` (v2 frontend migration, Phase 6).
+ * Preserve old bookmarks/links by redirecting permanently to the new route.
+ * See TODOS.md — Phase 6 for the rationale; the isometric Your AI Team
+ * scene replaces the previous `AgentsWarRoom` grid.
+ */
+export default function AutomationRedirectPage() {
+  redirect('/team');
 }
