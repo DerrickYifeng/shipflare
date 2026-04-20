@@ -32,6 +32,11 @@ import {
   abTestSubjectOutputSchema,
   draftEmailOutputSchema,
   sendEmailOutputSchema,
+  draftWaitlistPageOutputSchema,
+  draftHunterOutreachOutputSchema,
+  draftLaunchDayCommentOutputSchema,
+  launchAssetBriefOutputSchema,
+  launchRunsheetOutputSchema,
 } from '@/agents/schemas';
 
 /**
@@ -243,6 +248,164 @@ const abTestSubjectInput = z.object({
 });
 
 // ---------------------------------------------------------------------------
+// Phase 5 — launch asset atoms
+// ---------------------------------------------------------------------------
+
+const draftWaitlistPageInput = z.object({
+  product: productContextSchema.extend({
+    url: z.string().url().optional(),
+  }),
+  audience: z.object({
+    primaryICP: z.string().min(1),
+    secondaryICP: z.string().optional(),
+  }),
+  launchTarget: z
+    .object({
+      dateISO: z.string().optional(),
+      milestoneDescription: z.string().optional(),
+    })
+    .optional(),
+  socialProof: z
+    .object({
+      accounts: z
+        .array(
+          z.object({
+            username: z.string().min(1),
+            platform: z.string().min(1),
+            followers: z.number().int().nonnegative().optional(),
+          }),
+        )
+        .optional(),
+      quoteLine: z.string().optional(),
+    })
+    .optional(),
+  voiceBlock: z.string().nullable(),
+  constraints: z
+    .object({
+      maxHeadlineChars: z.number().int().positive().optional(),
+      avoidStockPhrases: z.array(z.string()).optional(),
+      includeEmailCapture: z.boolean(),
+    })
+    .optional(),
+});
+
+const draftHunterOutreachInput = z.object({
+  hunterProfile: z.object({
+    username: z.string().min(1),
+    platform: z.enum(['producthunt', 'x']),
+    displayName: z.string().optional(),
+    bio: z.string().optional(),
+    recentHunts: z
+      .array(
+        z.object({
+          productName: z.string().min(1),
+          hunted: z.string(),
+        }),
+      )
+      .optional(),
+    recentComments: z
+      .array(
+        z.object({
+          text: z.string().min(1),
+          context: z.string().min(1),
+        }),
+      )
+      .optional(),
+    recentTweets: z.array(z.string().min(1)).optional(),
+    followers: z.number().int().nonnegative().optional(),
+  }),
+  product: productContextSchema.extend({
+    url: z.string().url().optional(),
+  }),
+  launchTarget: z.object({
+    dateISO: z.string().min(1),
+    category: z.string().optional(),
+  }),
+  founder: z.object({
+    name: z.string().min(1),
+    x: z.string().optional(),
+  }),
+  voiceBlock: z.string().nullable(),
+});
+
+const draftLaunchDayCommentInput = z.object({
+  product: productContextSchema.extend({
+    url: z.string().url().optional(),
+  }),
+  founder: z.object({
+    name: z.string().min(1),
+    why: z.string().min(1),
+    background: z.string().optional(),
+  }),
+  launchContext: z.object({
+    dateISO: z.string().min(1),
+    buildingDurationWeeks: z.number().int().positive().optional(),
+    firstMetric: z
+      .object({
+        label: z.string().min(1),
+        value: z.string().min(1),
+      })
+      .optional(),
+  }),
+  voiceBlock: z.string().nullable(),
+});
+
+const launchAssetBriefInput = z.object({
+  assetType: z.enum(['gallery_image', 'video_30s', 'og_image', 'demo_gif']),
+  product: productContextSchema.extend({
+    url: z.string().url().optional(),
+  }),
+  audience: z.object({
+    primaryICP: z.string().min(1),
+  }),
+  voice: z.object({
+    founderName: z.string().min(1),
+    styleAdjectives: z.array(z.string()).optional(),
+  }),
+  constraints: z.object({
+    brandColors: z.array(z.string()).optional(),
+    brandFont: z.string().optional(),
+    maxAssetCost: z.number().nonnegative().optional(),
+    avoidMotifs: z.array(z.string()).optional(),
+  }),
+  referenceLaunches: z
+    .array(
+      z.object({
+        productName: z.string().min(1),
+        note: z.string().min(1),
+      }),
+    )
+    .optional(),
+});
+
+const buildLaunchRunsheetInput = z.object({
+  launchDate: z.string().min(1),
+  launchTimezone: z.string().min(1),
+  product: productContextSchema,
+  channels: z
+    .array(z.enum(['x', 'reddit', 'email', 'producthunt', 'slack']))
+    .min(1),
+  audience: z
+    .object({
+      waitlistCount: z.number().int().nonnegative().optional(),
+      topSupporterCount: z.number().int().nonnegative().optional(),
+    })
+    .optional(),
+  assets: z.object({
+    hunterOutreachReady: z.boolean(),
+    launchCommentReady: z.boolean(),
+    waitlistEmailReady: z.boolean(),
+    metricsDashboardUrl: z.string().url().optional(),
+  }),
+  constraints: z
+    .object({
+      quietHours: z.tuple([z.number().int(), z.number().int()]).optional(),
+      maxBeatsPerHour: z.number().int().positive().optional(),
+    })
+    .optional(),
+});
+
+// ---------------------------------------------------------------------------
 // Catalog
 // ---------------------------------------------------------------------------
 
@@ -337,6 +500,48 @@ export const SKILL_CATALOG: readonly SkillMeta[] = [
     inputSchema: sendEmailInput,
     outputSchema: sendEmailOutputSchema,
     supportedKinds: ['email_send'],
+  },
+
+  // --- Phase 5: launch asset atoms ---
+  {
+    name: 'build-launch-runsheet',
+    description:
+      'Produce the hourly run-of-show for launch day. Each beat becomes a plan_items.kind=runsheet_beat row, optionally chained to another atomic skill via skillName.',
+    inputSchema: buildLaunchRunsheetInput,
+    outputSchema: launchRunsheetOutputSchema,
+    supportedKinds: ['launch_asset'],
+  },
+  {
+    name: 'draft-hunter-outreach',
+    description:
+      'Draft one personalized DM to one Product Hunt hunter. Hard-requires specific personalization or emits confidence < 0.4.',
+    inputSchema: draftHunterOutreachInput,
+    outputSchema: draftHunterOutreachOutputSchema,
+    supportedKinds: ['launch_asset'],
+  },
+  {
+    name: 'draft-launch-day-comment',
+    description:
+      "Draft the maker's pinned first comment for a Product Hunt launch. Hook kind is one of origin_story / problem_statement / contrarian_claim / vulnerable_confession.",
+    inputSchema: draftLaunchDayCommentInput,
+    outputSchema: draftLaunchDayCommentOutputSchema,
+    supportedKinds: ['launch_asset'],
+  },
+  {
+    name: 'draft-waitlist-page',
+    description:
+      'Draft HTML + addressable copy for one waitlist landing page. Returns both assembled HTML and a structured copy block.',
+    inputSchema: draftWaitlistPageInput,
+    outputSchema: draftWaitlistPageOutputSchema,
+    supportedKinds: ['launch_asset'],
+  },
+  {
+    name: 'generate-launch-asset-brief',
+    description:
+      'Text-only brief for a designer / video team to execute against. Does NOT render the asset. Branches by assetType (gallery_image / video_30s / og_image / demo_gif).',
+    inputSchema: launchAssetBriefInput,
+    outputSchema: launchAssetBriefOutputSchema,
+    supportedKinds: ['launch_asset'],
   },
 ];
 
