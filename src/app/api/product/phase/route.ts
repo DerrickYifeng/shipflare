@@ -64,11 +64,24 @@ function weekBounds(now: Date): { weekStart: Date; weekEnd: Date } {
 /**
  * POST /api/product/phase
  *
- * Strategic replan: the user has changed their launch situation in
- * Settings. Validates per-state date rules, updates the products row,
- * deactivates the current strategic_path, runs the strategic-planner +
- * tactical-planner chain, and replaces this week's pre-approval
- * plan_items.
+ * Strategic replan: "phase change, new path". The user has changed
+ * their launch situation in Settings (mvp ↔ launching ↔ launched,
+ * and/or the launch date shifted). Validates per-state date rules,
+ * updates the products row, deactivates the current strategic_path,
+ * runs strategic-planner + tactical-planner back-to-back, then
+ * replaces this week's pre-approval plan_items inside one transaction.
+ *
+ * Sibling endpoint:
+ *   POST /api/plan/replan — tactical replan. Use when phase and
+ *   launch date are UNchanged and you just want fresh plan_items for
+ *   the coming week. That route skips strategic-planner entirely
+ *   (reuses the active path) and only runs tactical-planner.
+ *
+ * These routes are NOT duplicates — they operate on different scopes:
+ * `phase` writes a new strategic_paths row, `replan` reuses the
+ * active one. Both eventually reach the same supersede+insert
+ * transaction shape on plan_items, but the inputs to that transaction
+ * are sourced differently.
  *
  * Replaces the old v1 PUT /api/product/phase route that just toggled
  * lifecyclePhase without re-planning.

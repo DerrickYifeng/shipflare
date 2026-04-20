@@ -11,17 +11,36 @@ const RATE_LIMIT_WINDOW_SECONDS = 30;
 /**
  * POST /api/plan/replan
  *
- * User-triggered tactical re-plan for the current week. Shares all of
- * its heavy lifting with the Monday cron processor via
- * `runTacticalReplan()` — see `src/lib/re-plan.ts`.
+ * Tactical re-plan: "same phase, new week". The user already has an
+ * active strategic_path (phase + launch date haven't changed); we
+ * want fresh plan_items for the coming week based on current signals
+ * (completed items, stalled items, new milestones). Runs ONLY the
+ * tactical-planner — the strategic path is reused as-is.
  *
- * NOT a strategic replan — phase changes + launch-date edits are
- * POST /api/product/phase.
+ * This is the same code path as the Monday weekly cron; both callers
+ * go through `runTacticalReplan()` in `src/lib/re-plan.ts`, differing
+ * only in the `plans.trigger` column value ('manual' here, 'weekly'
+ * for the cron).
+ *
+ * Sibling endpoint:
+ *   POST /api/product/phase — strategic replan. Use when the phase or
+ *   launch dates actually changed. It deactivates the old strategic_path,
+ *   runs strategic-planner + tactical-planner back-to-back, and replaces
+ *   this week's pre-approval items. See that file's header for the
+ *   full distinction.
+ *
+ * These two routes do NOT duplicate work — `replan` reads the active
+ * path and preserves it; `phase` writes a new path. A user hitting
+ * both in quick succession gets a fresh strategic path from `phase`,
+ * then a fresh tactical plan from `replan`. The tactical plan from
+ * `replan` supersedes the one `phase` just wrote for the current
+ * week (both use the same transaction shape).
  *
  *   200 { plan, itemsInserted, itemsSuperseded }
  *   401 unauthorized
  *   404 no_active_path (user hasn't completed onboarding)
- *   400 no_channels_in_path (strategic path has no channelMix — corrupt)
+ *   400 no_channels_in_path (path has no channelMix, or all channels
+ *        were disconnected in Settings — see re-plan.ts intersection logic)
  *   429 rate_limited (1 / 30s)
  *   500 replan_failed
  *   504 planner_timeout
