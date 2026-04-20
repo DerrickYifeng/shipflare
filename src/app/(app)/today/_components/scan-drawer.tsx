@@ -20,7 +20,6 @@
 import {
   type CSSProperties,
   useEffect,
-  useMemo,
   useState,
 } from 'react';
 import { Ops } from '@/components/ui/ops';
@@ -32,34 +31,50 @@ interface ScanDrawerProps {
   onClose: () => void;
   /** Cosmetic URL that types out during the typing phase. */
   url?: string;
-  /** 0..4 — owned by useScanFlow. */
+  /** 0..5 — owned by useScanFlow. */
   thoughtIdx: number;
   /** True while the BullMQ pipeline still has sources in flight. */
   isRunning: boolean;
 }
 
+/**
+ * Five-beat cinematic scan narrative. The "Adversarial review" step is the
+ * tonal payoff — it fires after most sources have returned but before drafts
+ * surface. Ported verbatim from design_handoff/source/app/motion.jsx:13-19.
+ */
 const SCAN_STEPS: ThoughtStep[] = [
   {
-    label: 'Gathering context',
+    label: 'Reading your product',
     detail: 'Product description · voice profile · banned phrases',
   },
   {
-    label: 'Searching sources',
+    label: 'Querying sources',
     detail: 'Scanning connected communities for active discussions',
   },
   {
-    label: 'Scoring candidates',
-    detail: 'Ranking by intent · asking > venting > discussing',
+    label: 'Ranking by intent',
+    detail: 'Asking > venting > discussing — highest-signal first',
   },
   {
-    label: 'Drafting replies',
-    detail: 'Reviewing tone, trimming, surfacing to your queue',
+    label: 'Adversarial review',
+    detail: 'Checking tone, FTC disclosure, voice-profile drift',
+  },
+  {
+    label: 'Surfacing to your queue',
+    detail: 'Drafting replies and revealing them on Today',
   },
 ];
 
 const DEFAULT_URL = 'linear.app';
 
 type Phase = 'idle' | 'typing' | 'thinking' | 'done';
+
+/**
+ * Extra buffer after the last typed char before we flip to "thinking".
+ * Sourced from motion.jsx — the 280ms beat gives the cursor one last blink
+ * before the scanning pill takes over.
+ */
+const TYPING_TRAIL_MS = 280;
 
 export function ScanDrawer({
   open,
@@ -68,13 +83,45 @@ export function ScanDrawer({
   thoughtIdx,
   isRunning,
 }: ScanDrawerProps) {
-  // Derive a narrative "phase" from worker state for the chrome row labels.
-  const phase: Phase = useMemo(() => {
-    if (!open) return 'idle';
-    if (thoughtIdx >= 4 && !isRunning) return 'done';
-    if (thoughtIdx >= 1) return 'thinking';
-    return 'typing';
-  }, [open, thoughtIdx, isRunning]);
+  // Explicit phase state machine, mirroring motion.jsx:32-53.
+  //
+  //   closed  → 'idle'
+  //   open    → 'typing' for (60ms * url.length + 280ms)
+  //                      → 'thinking' while isRunning / thoughtIdx < 5
+  //                      → 'done' once all beats complete and worker quiesced
+  //
+  // We intentionally avoid calling setState synchronously in an effect body
+  // (see the repo-wide react-hooks/set-state-in-effect rule). Instead,
+  // `typingDoneKey` is only ever written from inside a setTimeout callback,
+  // and a render-time `key !== openKey` comparison handles the reset when
+  // the drawer closes or URL changes — no effect-time setState required.
+  const openKey = `${open ? 1 : 0}:${url}`;
+  const [typingDoneKey, setTypingDoneKey] = useState<string | null>(null);
+  // When the key drifts (close / url change), the stored latch is stale
+  // and typing must re-run. Treat a stale key as "not yet done".
+  const typingDone = open && typingDoneKey === openKey;
+
+  useEffect(() => {
+    if (!open) return;
+    // If the latch is already for this open cycle, nothing to schedule.
+    if (typingDoneKey === openKey) return;
+    const typingMs = 60 * url.length + TYPING_TRAIL_MS;
+    const t = setTimeout(() => {
+      setTypingDoneKey(openKey);
+    }, typingMs);
+    return () => clearTimeout(t);
+  }, [open, url, openKey, typingDoneKey]);
+
+  // Synchronous phase derivation — no setState-in-effect. Guarantees the
+  // URL caret blinks *only* during the literal typing beat and flips to
+  // "done" exactly when the worker quiesces after every beat ticks over.
+  const phase: Phase = !open
+    ? 'idle'
+    : !typingDone
+      ? 'typing'
+      : !isRunning && thoughtIdx >= SCAN_STEPS.length
+        ? 'done'
+        : 'thinking';
 
   // Escape-to-close. Keyboard handler intentionally does NOT abort the
   // underlying BullMQ scan — only the drawer visibility.

@@ -90,6 +90,11 @@ export function ReplyCard({
   }, [isActive]);
 
   const isOptimistic = item.status !== 'pending';
+  // `posting` = the 5s undo window after approval. Matches INTERACTIONS.md §6
+  // (pending → posting → posted). The parent toast keeps a 5000ms timer; we
+  // mirror that here with a visible countdown bar so the affordance doesn't
+  // live solely in the toast.
+  const isPosting = item.status === 'pending_approval';
   const postedAt = relativeTime(item.threadPostedAt);
 
   const handleSaveEdit = () => {
@@ -123,13 +128,21 @@ export function ReplyCard({
     outline: isActive ? '2px solid var(--sf-signal)' : 'none',
     outlineOffset: isActive ? 2 : 0,
     overflow: 'hidden',
-    transition: 'box-shadow var(--sf-dur-base) var(--sf-ease-swift)',
+    // Default entry animation — every ReplyCard slides up on mount, not
+    // only freshly-scanned ones. Matches prototype today.jsx:204-215.
+    // NewCardReveal composes cleanly on top: its stagger delay determines
+    // when this element first renders; this animation is the gentle
+    // final arrival beat. Compositor-friendly: translate + opacity only.
+    animation: 'sf-slide-up var(--sf-dur-slow) var(--sf-ease-swift)',
+    transition: 'box-shadow var(--sf-dur-base) var(--sf-ease-swift), opacity var(--sf-dur-base) var(--sf-ease-swift)',
     opacity: isOptimistic ? 0.6 : 1,
     pointerEvents: isOptimistic ? 'none' : 'auto',
+    position: 'relative',
   };
 
   return (
     <article ref={rootRef} style={articleStyle} aria-busy={isOptimistic || undefined}>
+      {isPosting ? <PostingProgressBar durationMs={5_000} /> : null}
       {/* Header: platform glyph + author + thread meta + confidence */}
       <header
         style={{
@@ -450,5 +463,57 @@ function TextAction({
     >
       {children}
     </button>
+  );
+}
+
+/* ── Posting progress bar ──────────────────────────────────────────── */
+
+interface PostingProgressBarProps {
+  durationMs: number;
+}
+
+/**
+ * 5s undo-window visual. INTERACTIONS.md §6 state machine runs
+ * `pending → posting → posted`; this bar lives above the card header
+ * while the todo is in `posting`. If the parent undoes the approval the
+ * card's status flips back to `'pending'`, this component unmounts, and
+ * the bar goes away. No transform — just a 0→100% width tween in
+ * compositor-friendly `transform: scaleX` against `transform-origin: left`.
+ */
+function PostingProgressBar({ durationMs }: PostingProgressBarProps) {
+  // Trigger animation on mount. We rely on a single paint where scale starts
+  // at 0 then transitions to 1 over durationMs.
+  const [filled, setFilled] = useState(false);
+  useEffect(() => {
+    // Next frame kicks the transition.
+    const raf = requestAnimationFrame(() => setFilled(true));
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  return (
+    <div
+      aria-hidden="true"
+      style={{
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        height: 2,
+        overflow: 'hidden',
+        background: 'var(--sf-border-subtle)',
+        pointerEvents: 'none',
+      }}
+    >
+      <div
+        style={{
+          height: '100%',
+          width: '100%',
+          background: 'var(--sf-signal)',
+          transform: filled ? 'scaleX(1)' : 'scaleX(0)',
+          transformOrigin: 'left center',
+          transition: `transform ${durationMs}ms linear`,
+        }}
+      />
+    </div>
   );
 }

@@ -27,12 +27,14 @@ export interface ScanFlowState {
   runId: string | null;
   sources: ScanSource[];
   /**
-   * Coarse progress through the ThoughtStream narrative. Maps to:
-   *   0 Gathering context
-   *   1 Searching sources
-   *   2 Scoring candidates
-   *   3 Drafting replies
-   * `-1` means scan hasn't started; `4` means all four steps done.
+   * Coarse progress through the ThoughtStream narrative. Maps to the five
+   * beats of `SCAN_STEPS` in scan-drawer.tsx:
+   *   0 Reading your product        (no source started yet)
+   *   1 Querying sources            (any searching, <50% searched)
+   *   2 Ranking by intent           (≥50% searched)
+   *   3 Adversarial review          (all terminal, drafts pending)
+   *   4 Surfacing to your queue     (drafts surfaced, worker quiescing)
+   * `-1` means scan hasn't started; `5` means every beat has resolved.
    */
   thoughtIdx: number;
   /** Drawer visibility. Independent of worker state: Escape can hide without aborting. */
@@ -90,13 +92,15 @@ function readInitialLastScanAt(): Date | null {
 
 /**
  * Derive which ThoughtStream step we're on from the live chip state map.
- * Mapping:
- *   no source has started → 0 (Gathering — conceptually the "post scan"
- *     phase while the worker is bootstrapping)
- *   any source searching, none searched → 1 (Searching)
- *   >= half searched            → 2 (Scoring — server-side ranking)
- *   all terminal, any searched  → 3 (Drafting — content pipeline)
- *   all terminal and we saw completion → 4
+ * Tuned to the 900ms search beat + 120ms NewCardReveal stagger cadence so
+ * the 5-beat narrative runs ahead of, but stays tethered to, the real worker
+ * events. Mapping:
+ *   no source has started               → 0 (Reading your product)
+ *   any source searching, <50% searched → 1 (Querying sources)
+ *   ≥50% searched                       → 2 (Ranking by intent)
+ *   all terminal, any searched          → 3 (Adversarial review)
+ *   fully complete (worker quiesced)    → 4 (Surfacing to your queue)
+ *   complete + drafts surfaced          → 5 (all beats checked)
  */
 function deriveThoughtIdx(
   sources: ScanSource[],
@@ -104,7 +108,11 @@ function deriveThoughtIdx(
   fullyComplete: boolean,
 ): number {
   if (sources.length === 0) return -1;
-  if (fullyComplete) return 4;
+  // `fullyComplete` means every chip is terminal AND the worker has quiesced.
+  // We sit on beat 4 (Surfacing) while onComplete mutates the todo list;
+  // clearNewIds in the parent will settle us at 5 afterward. We surface 5
+  // here whenever the run is complete so ThoughtStream renders all checks.
+  if (fullyComplete) return 5;
 
   let searched = 0;
   let searching = 0;
@@ -123,9 +131,13 @@ function deriveThoughtIdx(
     }
   }
 
+  // All chips terminal + at least one successful search → Adversarial review.
   if (terminal === sources.length && searched > 0) return 3;
+  // Past the midpoint of searches → Ranking by intent.
   if (searched >= Math.ceil(sources.length / 2)) return 2;
+  // Any progress at all → Querying sources.
   if (searching > 0 || searched > 0) return 1;
+  // Worker booting, nothing in flight yet → Reading your product.
   return 0;
 }
 

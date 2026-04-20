@@ -35,6 +35,7 @@ import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Button } from '@/components/ui/button';
 import { Ops } from '@/components/ui/ops';
+import { StatusDot } from '@/components/ui/status-dot';
 import { NewCardReveal } from '@/components/ui/new-card-reveal';
 import { ShortcutsHelp, type ShortcutBinding } from '@/components/ui/shortcuts-help';
 import { HeaderBar } from '@/components/layout/header-bar';
@@ -358,12 +359,14 @@ function TodayContentInner({
       if (it.cardFormat === 'reply') rs.push(it);
       else ps.push(it);
     }
-    // Source filter is keyed as `${platform}:${source}` to match chip IDs.
-    // Match on community substring so chip id ("reddit:r/foo") filters an
-    // item with community "r/foo".
+    // Source filter is keyed as `${platform}:${source}`, matching the chip
+    // id format in source-filter-rail.tsx. Exact match avoids cross-hits
+    // like "r/dev" matching "r/devops" that the prior substring check had.
     const filtered = sourceFilterId
       ? rs.filter(
-          (r) => r.community && sourceFilterId.includes(r.community),
+          (r) =>
+            r.community !== null &&
+            `${r.platform}:${r.community}` === sourceFilterId,
         )
       : rs;
     return { replies: rs, posts: ps, filteredReplies: filtered };
@@ -388,11 +391,18 @@ function TodayContentInner({
     return null;
   }
 
-  // Meta line for HeaderBar: "{to review} to review · {shipped} shipped today · last scan {time}"
-  const metaLine = buildMeta(
-    stats.pending_count ?? items.length,
-    stats.acted_today,
-    lastScanAt,
+  // Meta line for HeaderBar: "{n} to review · ● {n} shipped today · last scan {t}"
+  //
+  // Middle segment carries a live pulsing StatusDot — pulses with
+  // --sf-signal while a scan is running, settles to --sf-success when idle.
+  // "{n} to review" is bolded in --sf-fg-2 per prototype index.html:228-237.
+  const metaLine = (
+    <MetaLine
+      toReview={stats.pending_count ?? items.length}
+      shippedToday={stats.acted_today}
+      lastScan={lastScanAt}
+      scanning={scan.isRunning}
+    />
   );
 
   const scanButton = (
@@ -431,6 +441,7 @@ function TodayContentInner({
         onFilterChange={setSourceFilterId}
         onRetrySource={retrySource}
         scanning={scan.drawerOpen && scan.isRunning}
+        totalCount={replies.length}
       />
 
       <div
@@ -617,18 +628,55 @@ function Section({ label, count, subtle, children }: SectionProps) {
   );
 }
 
-/* ── Helpers ───────────────────────────────────────────────────────── */
+/* ── Meta line ─────────────────────────────────────────────────────── */
 
-function buildMeta(
-  toReview: number,
-  shippedToday: number,
-  lastScan: Date | null,
-): string {
-  const parts: string[] = [];
-  parts.push(`${toReview} to review`);
-  parts.push(`${shippedToday} shipped today`);
-  parts.push(`last scan ${relativeScan(lastScan)}`);
-  return parts.join(' · ');
+interface MetaLineProps {
+  toReview: number;
+  shippedToday: number;
+  lastScan: Date | null;
+  scanning: boolean;
+}
+
+/**
+ * HeaderBar meta line, per prototype source/app/index.html:228-237.
+ *
+ * Layout: "{N} to review · ● {N} shipped today · last scan {t}"
+ *  - "{N} to review" is bolded in --sf-fg-2 (weight 500)
+ *  - A live StatusDot sits before "shipped today": pulses --sf-signal
+ *    while a scan runs, settles to --sf-success when the pipeline is idle
+ *  - The rest of the line keeps the standard --sf-fg-3 treatment from HeaderBar
+ */
+function MetaLine({ toReview, shippedToday, lastScan, scanning }: MetaLineProps) {
+  const separator = (
+    <span
+      aria-hidden="true"
+      style={{ margin: '0 6px', color: 'var(--sf-fg-4)' }}
+    >
+      ·
+    </span>
+  );
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        flexWrap: 'wrap',
+      }}
+    >
+      <span style={{ color: 'var(--sf-fg-2)', fontWeight: 500 }}>
+        {toReview} to review
+      </span>
+      {separator}
+      <StatusDot
+        state={scanning ? 'active' : 'success'}
+        size={6}
+        aria-label={scanning ? 'Scanning in progress' : 'Pipeline idle'}
+      />
+      <span style={{ marginLeft: 6 }}>{shippedToday} shipped today</span>
+      {separator}
+      <span>last scan {relativeScan(lastScan)}</span>
+    </span>
+  );
 }
 
 function relativeScan(d: Date | null): string {

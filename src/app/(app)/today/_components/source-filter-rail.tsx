@@ -31,7 +31,23 @@ interface SourceFilterRailProps {
   onRetrySource: (platform: string, source: string) => void;
   /** Whether a scan is in flight. Drives the staggered appearance. */
   scanning: boolean;
+  /** Total unfiltered reply count — shown on the leading "All" pill. */
+  totalCount: number;
 }
+
+/**
+ * Stagger timings sourced verbatim from INTERACTIONS.md §4 step 4
+ * ("t = 400 + i*320ms") and the prototype's `pages.jsx:269` inverse
+ * (`scanning ? 0 : i * 60`).
+ *
+ *   CHIP_STAGGER_INITIAL_MS  60   — instant mount cascade when idle
+ *   CHIP_STAGGER_SCAN_HEAD_MS 400 — hold every chip for 400ms before the
+ *                                   320ms-per-chip scan cascade fires
+ *   CHIP_STAGGER_SCAN_STEP_MS 320 — inter-chip step during an active scan
+ */
+const CHIP_STAGGER_INITIAL_MS = 60;
+const CHIP_STAGGER_SCAN_HEAD_MS = 400;
+const CHIP_STAGGER_SCAN_STEP_MS = 320;
 
 export function SourceFilterRail({
   sources,
@@ -40,6 +56,7 @@ export function SourceFilterRail({
   onFilterChange,
   onRetrySource,
   scanning,
+  totalCount,
 }: SourceFilterRailProps) {
   if (sources.length === 0) return null;
 
@@ -56,6 +73,17 @@ export function SourceFilterRail({
         marginBottom: 20,
       }}
     >
+      {/* Leading "All" pill — clears the active filter when clicked. Per
+          prototype source/app/pages.jsx:269, this is always the first chip
+          and visually distinct: ink fill when active, bordered pill otherwise. */}
+      <AllFilterPill
+        count={totalCount}
+        active={filterId === null}
+        onClick={() => onFilterChange(null)}
+        appearDelay={
+          scanning ? CHIP_STAGGER_SCAN_HEAD_MS : 0
+        }
+      />
       {sources.map((s, i) => {
         const id = `${s.platform}:${s.source}`;
         const snapshot = chipState.get(id);
@@ -82,11 +110,87 @@ export function SourceFilterRail({
               }
               onFilterChange(isFiltered ? null : id);
             }}
-            appearDelay={scanning ? 320 * i : 0}
+            // During a scan: 400ms head start, then 320ms per chip.
+            // Idle mount: 60ms per chip in source order. The "All" pill
+            // consumes index 0 of the scan cascade so the first source
+            // chip lands at 400 + 320ms.
+            appearDelay={
+              scanning
+                ? CHIP_STAGGER_SCAN_HEAD_MS +
+                  CHIP_STAGGER_SCAN_STEP_MS * (i + 1)
+                : CHIP_STAGGER_INITIAL_MS * (i + 1)
+            }
           />
         );
       })}
     </div>
+  );
+}
+
+/* ── All pill ────────────────────────────────────────────────────── */
+
+interface AllFilterPillProps {
+  count: number;
+  active: boolean;
+  onClick: () => void;
+  appearDelay: number;
+}
+
+function AllFilterPill({ count, active, onClick, appearDelay }: AllFilterPillProps) {
+  const [revealedDelay, setRevealedDelay] = useState<number | null>(
+    appearDelay === 0 ? 0 : null,
+  );
+
+  useEffect(() => {
+    if (appearDelay === 0) return;
+    const t = setTimeout(() => setRevealedDelay(appearDelay), appearDelay);
+    return () => clearTimeout(t);
+  }, [appearDelay]);
+
+  const appeared =
+    appearDelay === 0 || revealedDelay === appearDelay;
+
+  const style: CSSProperties = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+    padding: '6px 12px',
+    borderRadius: 'var(--sf-radius-pill)',
+    border: active ? '1px solid var(--sf-ink)' : '1px solid var(--sf-border)',
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    background: active ? 'var(--sf-ink)' : 'transparent',
+    color: active ? 'var(--sf-fg-on-dark-1)' : 'var(--sf-fg-2)',
+    fontSize: 'var(--sf-text-xs)',
+    fontWeight: 500,
+    letterSpacing: 'var(--sf-track-normal)',
+    opacity: appeared ? 1 : 0,
+    transform: appeared ? 'translateY(0)' : 'translateY(4px)',
+    transition:
+      'background var(--sf-dur-base) var(--sf-ease-swift), color var(--sf-dur-base) var(--sf-ease-swift), border-color var(--sf-dur-base) var(--sf-ease-swift), opacity var(--sf-dur-base), transform var(--sf-dur-base)',
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      aria-label={active ? 'All sources selected' : 'Show all sources'}
+      data-filter-id="__all__"
+      style={style}
+    >
+      <span>All</span>
+      <span
+        className="sf-mono"
+        style={{
+          marginLeft: 2,
+          letterSpacing: 'var(--sf-track-mono)',
+          color: active ? 'var(--sf-fg-on-dark-3)' : 'var(--sf-fg-4)',
+        }}
+      >
+        {count}
+      </span>
+    </button>
   );
 }
 
