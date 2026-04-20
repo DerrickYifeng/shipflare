@@ -43,7 +43,7 @@ export function HeroDemo({ headline = DEFAULT_HEADLINE, isAuthenticated }: HeroD
           alignItems: 'center',
         }}
       >
-        <div style={{ textAlign: 'center', maxWidth: 760, margin: '0 auto' }}>
+        <div style={{ textAlign: 'center', width: '100%' }}>
           <div
             className="inline-flex items-center"
             style={{
@@ -66,8 +66,10 @@ export function HeroDemo({ headline = DEFAULT_HEADLINE, isAuthenticated }: HeroD
             style={{
               margin: 0,
               color: 'var(--sf-fg-on-dark-1)',
-              fontSize: 'clamp(40px, 6vw, var(--sf-text-hero))',
+              fontSize: 'clamp(44px, 7vw, var(--sf-text-hero))',
               textWrap: 'balance',
+              maxWidth: 960,
+              marginInline: 'auto',
             }}
           >
             {headline}
@@ -78,7 +80,7 @@ export function HeroDemo({ headline = DEFAULT_HEADLINE, isAuthenticated }: HeroD
               marginTop: 20,
               color: 'var(--sf-fg-on-dark-2)',
               fontSize: 'var(--sf-text-lg)',
-              maxWidth: 560,
+              maxWidth: 720,
               marginInline: 'auto',
             }}
           >
