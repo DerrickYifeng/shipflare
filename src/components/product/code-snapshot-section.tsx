@@ -37,8 +37,8 @@ export function CodeSnapshotSection({ snapshot, hasGitHub }: CodeSnapshotSection
   const { toast } = useToast();
 
   const saveExtracted = async (data: ExtractedProfile) => {
-    const res = await fetch('/api/onboarding/profile', {
-      method: 'PUT',
+    const res = await fetch('/api/product', {
+      method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         name: data.name,

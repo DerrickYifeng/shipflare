@@ -5,7 +5,7 @@
  *
  * Click-to-edit product identity (name, description, keywords, value prop,
  * website). Optimistic UI via SWR mutate(): snapshot current data → apply
- * change locally → fire PUT /api/onboarding/profile → revalidate on success,
+ * change locally → fire PATCH /api/product → revalidate on success,
  * roll back and toast on failure.
  *
  * Pixel reference: handoff pages.jsx `MyProductView`.
@@ -134,15 +134,15 @@ export function ProductContent({ initial }: ProductContentProps) {
     // Optimistic
     await mutate(next, { revalidate: false });
     try {
-      const res = await fetch('/api/onboarding/profile', {
-        method: 'PUT',
+      const res = await fetch('/api/product', {
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           url: next.url,
           name: next.name,
           description: next.description,
           keywords: next.keywords,
-          valueProp: next.valueProp ?? undefined,
+          valueProp: next.valueProp ?? null,
         }),
       });
       if (!res.ok) {
