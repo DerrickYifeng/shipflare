@@ -85,7 +85,11 @@ const productContextSchema = z.object({
 });
 
 const draftSinglePostInput = z.object({
-  platform: z.enum(['x', 'reddit']),
+  // TODO(phase-5): widen to z.enum(['x', 'reddit']) once the Reddit content
+  // guide + agent-prompt branch land. Locked to 'x' here so callers that
+  // slip through the catalog channel filter get a Zod validation error
+  // upfront instead of crashing mid-LLM call.
+  platform: z.literal('x'),
   contentType: z.enum([
     'metric',
     'educational',

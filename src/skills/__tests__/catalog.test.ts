@@ -75,6 +75,29 @@ describe('SKILL_CATALOG', () => {
       expect(entry.channels.length).toBeGreaterThan(0);
     }
   });
+
+  it('draft-single-post rejects non-X platforms at the Zod layer', () => {
+    // Defense-in-depth: even if a caller bypasses the catalog channel filter,
+    // the input schema must refuse Reddit until Phase 5 lands the Reddit
+    // content guide + agent-prompt branch. This pins that contract so the
+    // TODO cannot silently get widened without a test failure.
+    const entry = findSkill('draft-single-post');
+    expect(entry).toBeDefined();
+    const parse = entry!.inputSchema.safeParse({
+      platform: 'reddit',
+      contentType: 'educational',
+      angle: 'claim',
+      topic: 't',
+      thesis: 'th',
+      thesisSource: 'manual',
+      product: { name: 'N', description: 'D', keywords: [] },
+      recentPostHistory: [],
+      priorAnglesThisWeek: [],
+      isThread: false,
+      voiceBlock: null,
+    });
+    expect(parse.success).toBe(false);
+  });
 });
 
 describe('findSkill', () => {
