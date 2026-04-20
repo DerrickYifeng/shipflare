@@ -11,6 +11,14 @@ vi.mock('@/lib/auth', () => ({
   auth: async () => (authUserId ? { user: { id: authUserId } } : null),
 }));
 
+let rateLimitAllowed = true;
+vi.mock('@/lib/rate-limit', () => ({
+  acquireRateLimit: vi.fn(async () => ({
+    allowed: rateLimitAllowed,
+    retryAfterSeconds: rateLimitAllowed ? 0 : 1,
+  })),
+}));
+
 const enqueuePlanExecuteMock = vi.fn(async () => 'job-id');
 vi.mock('@/lib/queue', () => ({
   enqueuePlanExecute: enqueuePlanExecuteMock,
@@ -118,6 +126,7 @@ function makeReq(path: string, method: string): NextRequest {
 
 beforeEach(() => {
   authUserId = 'user-1';
+  rateLimitAllowed = true;
   rows.clear();
   enqueuePlanExecuteMock.mockClear();
 });
@@ -300,5 +309,38 @@ describe('POST /api/plan-item/[id]/complete', () => {
     // drafted is not a manual-transition source; planned → completed is
     // the SM-allowed move. The SM should reject drafted → completed.
     expect(res.status).toBe(409);
+  });
+});
+
+describe('plan-item rate limits', () => {
+  it('approve returns 429 when rate-limited', async () => {
+    rateLimitAllowed = false;
+    seed({ state: 'ready_for_review', userAction: 'approve' });
+    const { POST } = await import('../approve/route');
+    const res = await POST(makeReq(`/api/plan-item/${VALID_ID}/approve`, 'POST'), {
+      params: Promise.resolve({ id: VALID_ID }),
+    });
+    expect(res.status).toBe(429);
+    expect(res.headers.get('Retry-After')).toBe('1');
+  });
+
+  it('skip returns 429 when rate-limited', async () => {
+    rateLimitAllowed = false;
+    seed({ state: 'planned', userAction: 'approve' });
+    const { POST } = await import('../skip/route');
+    const res = await POST(makeReq(`/api/plan-item/${VALID_ID}/skip`, 'POST'), {
+      params: Promise.resolve({ id: VALID_ID }),
+    });
+    expect(res.status).toBe(429);
+  });
+
+  it('complete returns 429 when rate-limited', async () => {
+    rateLimitAllowed = false;
+    seed({ state: 'planned', userAction: 'manual' });
+    const { POST } = await import('../complete/route');
+    const res = await POST(makeReq(`/api/plan-item/${VALID_ID}/complete`, 'POST'), {
+      params: Promise.resolve({ id: VALID_ID }),
+    });
+    expect(res.status).toBe(429);
   });
 });

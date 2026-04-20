@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { auth } from '@/lib/auth';
 import { enqueuePlanExecute } from '@/lib/queue';
+import { acquireRateLimit } from '@/lib/rate-limit';
 import {
   findOwnedPlanItem,
   paramsSchema,
@@ -9,6 +10,11 @@ import {
 import { createLogger, loggerForRequest } from '@/lib/logger';
 
 const baseLog = createLogger('api:plan-item:approve');
+
+// 1 approve per second per user. Human click cadence is nowhere near
+// this; the bound is specifically to stop a spammed button from
+// hammering the plan-execute queue.
+const RATE_LIMIT_WINDOW_SECONDS = 1;
 
 /**
  * POST /api/plan-item/:id/approve
@@ -32,6 +38,23 @@ export async function POST(
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const rl = await acquireRateLimit(
+    `plan-item:approve:${session.user.id}`,
+    RATE_LIMIT_WINDOW_SECONDS,
+  );
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: 'rate_limited', retryAfterSeconds: rl.retryAfterSeconds },
+      {
+        status: 429,
+        headers: {
+          'Retry-After': String(rl.retryAfterSeconds),
+          'x-trace-id': traceId,
+        },
+      },
+    );
   }
 
   const { id: rawId } = await params;

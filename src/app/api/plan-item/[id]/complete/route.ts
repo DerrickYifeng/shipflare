@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { auth } from '@/lib/auth';
+import { acquireRateLimit } from '@/lib/rate-limit';
 import {
   findOwnedPlanItem,
   paramsSchema,
@@ -8,6 +9,8 @@ import {
 import { createLogger, loggerForRequest } from '@/lib/logger';
 
 const baseLog = createLogger('api:plan-item:complete');
+
+const RATE_LIMIT_WINDOW_SECONDS = 1;
 
 /**
  * POST /api/plan-item/:id/complete
@@ -35,6 +38,23 @@ export async function POST(
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const rl = await acquireRateLimit(
+    `plan-item:complete:${session.user.id}`,
+    RATE_LIMIT_WINDOW_SECONDS,
+  );
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: 'rate_limited', retryAfterSeconds: rl.retryAfterSeconds },
+      {
+        status: 429,
+        headers: {
+          'Retry-After': String(rl.retryAfterSeconds),
+          'x-trace-id': traceId,
+        },
+      },
+    );
   }
 
   const { id: rawId } = await params;
