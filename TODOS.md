@@ -14,54 +14,79 @@ All 7 phases landed on `dev` (unpushed). Design handoff at `public/ShipFlare Des
 | 6 — Office | `75a4498` | `/team` isometric scene; `/automation` → 307 redirect to `/team`; sidebar label switched |
 | 7 — Landing | `b4de275` | `/` dark-only marketing; hero typing demo on transform/opacity only |
 
-## Now — v2 Follow-ups (unblock ship)
+### Post-ship polish
 
-### `/api/today/[id]/undo` endpoint
-- **What:** Implement the 5s-undo endpoint the new ReplyCard UI already POSTs to. Approval enqueues posting via BullMQ with a 5s delay; undo must cancel the delayed job before it fires. Return 200 if cancelled, 409 if already posted.
-- **Why:** Phase 4 shipped the client-side undo affordance but the server endpoint is a no-op. Users clicking undo currently see the toast dismiss but the post still ships after 5s.
-- **Context:** Existing `enqueuePosting` uses BullMQ delayed jobs. Cancellation = `job.remove()` if still delayed. See DATA_CONTRACT §1.4.
-- **Depends on:** None.
-- **Source:** Phase 4 stub, 2026-04-19.
+| Commit | What |
+|---|---|
+| `454a3f3` | `/api/today/[id]/undo` endpoint — cancels delayed BullMQ posting jobs, reverts drafts+todos status |
+| `d634614` | ReplyCard platform-native header (r/foo · @author · ↑score) + hover-liftable content link to original post |
+| `8aa2f41` | Discovery agent no longer writes `X - {topic}` community; schema refine + DB backfill |
+| `b597e41` | Stopped "1935d" hallucinated timestamps on X threads; fallback to discoveredAt |
+| `82d8bea` | Settings Account: Delete account moved to dedicated Danger zone with red border + filled button |
 
-### Product-schema extensions for Voice DNA + banned phrases
-- **What:** Add `tone`, `voiceDnaSliders` (JSONB), `bannedPhrases` (text[]) columns to `products` table + Drizzle schema. Wire the Phase 5 `/product` sliders and banned-phrases list to persist via `/api/onboarding/profile`.
-- **Why:** Phase 5 sliders and banned-phrases list are local-state-only today — changes are lost on reload. Also blocks the Voice DNA re-scan flow (currently routes to `/onboarding` as a fallback).
-- **Context:** See `src/app/(app)/product/product-content.tsx` for the UI that needs persistence.
-- **Depends on:** None.
-- **Source:** Phase 5 stub, 2026-04-19.
+---
 
-### Clock-format user preference (12h vs 24h)
-- **What:** Add `clockFormat: '12h' | '24h'` to `userPreferences` schema. Replace Phase 5's `src/lib/format-hour.ts` timezone heuristic (`Europe/*` → 24h) with the real preference.
-- **Why:** Calendar slot times currently use a heuristic that fails for Asian / African / South American timezones.
-- **Depends on:** None.
-- **Source:** Phase 5 stub, 2026-04-19.
+## Now — Dashboard fake data / missing API (audit 2026-04-19)
 
-### Worker-handoff SSE events (lights up /team walking animation)
-- **What:** Emit `handoff:start` / `handoff:end` SSE events from workers when a job transitions from one agent to another. Frontend is already wired — `src/app/(app)/team/_components/team-content.tsx` has a `walkingAgentId` state waiting for these events to trigger the walk-cycle animation.
-- **Why:** Without these events, the isometric office shows characters idling at desks instead of walking between them carrying tickets. The signature entertainment moment of Phase 6 is dormant.
-- **Context:** See `DATA_CONTRACT.md §2.3` for the event shape. Publish via `publishPipelineEvent` on the existing `/api/events?channel=agents` channel.
-- **Depends on:** None.
-- **Source:** Phase 6 stub, 2026-04-19.
+Full audit of authenticated routes. Grouped by page with exact locations.
 
-### Scheduler worker SSE emission (Kit character)
-- **What:** Wire `publishPipelineEvent({ agent: 'scheduler', status: ... })` from the scheduler processor so Kit in `/team` reflects real state.
-- **Why:** The `/team` roster claims 5 working agents but Kit is always dark — no worker emits events on the `scheduler` stream key.
-- **Depends on:** None.
-- **Source:** Phase 6 stub, 2026-04-19.
+### `/today` — mostly real; one cosmetic copy stub
 
-### Hero eyebrow metric & ThreadsSection real data
-- **What:** Replace the hardcoded "Live — 1,284 threads surfaced this week" in `src/components/marketing/hero-demo.tsx` with a real count (public aggregate endpoint). Same for ThreadsSection example replies — currently static fixtures.
-- **Why:** Marketing credibility. Real numbers > fake numbers.
-- **Context:** Could read from a cached `/api/marketing/stats` that aggregates `threads` and `posts` rows weekly.
-- **Depends on:** None.
-- **Source:** Phase 7 note, 2026-04-19.
+- [ ] **`today-content.tsx:698` "Auto-scans every 4h"** — hardcoded cadence literal. The actual cron cadence lives in the worker config, not the user's preferences, so this string can be incorrect if the cadence ever changes. Minor; fix by reading cadence from a shared constant (`DISCOVERY_CRON_MINUTES`) or hiding the sub-string when cadence is unknown.
+- Everything else real: `toReview` / `shippedToday` / `lastScan` come from `/api/today` real counts; scan triggers real BullMQ; undo endpoint shipped.
+
+### `/product` — UI slots reserved for schema that doesn't exist yet
+
+- [ ] **Product-schema extensions** — **biggest gap on this page.** Add columns to `products` table + Drizzle schema + `/api/onboarding/profile` writes:
+  - `tagline: text`
+  - `corePositioning: text`
+  - `primaryIcp: text`
+  - `competitors: text[]`
+  - `approvedLinks: text[]`
+  - `tone: jsonb` (for `{warmth, wit, formality, brevity}` 0–100 axes)
+  - `bannedPhrases: text[]`
+  - `signaturePhrases: text[]` (output of voice extraction, not user-edited)
+  - **UI slots already reserved**: `product-content.tsx:58` `PLACEHOLDER_FIELDS` + `VoiceDnaCard` sliders + BannedPhrases textarea + Signature phrases card. All currently `useState`-only; lost on reload.
+- [ ] **`product-content.tsx:105` banned phrases seeds `['crushing it', 'game-changer', 'unlock', '10x']`** — hardcoded starter list. Once persisted, either remove these seeds or move to an onboarding step.
+- [ ] **`product-content.tsx:653` Voice DNA "Signature phrases" 4 hardcoded examples** (`'Moved from Jira → Linear 8 months ago'` etc.) — should come from real voice extraction output per product.
+- [ ] **"Re-run voice scan" action routes to `/onboarding`** (no dedicated endpoint). Either build `POST /api/voice-profile/rescan` or keep the onboarding fallback and rename the affordance to "Redo voice onboarding".
+
+### `/growth` — KPIs and data tables are mostly fixtures
+
+- [ ] **`growth-content.tsx:50-58` `COMMUNITIES[]` — 7 fixture rows** (r/ExperiencedDevs, r/SaaS, r/startups, r/webdev, @founders, #buildinpublic, Ask HN). Fake `handle/members/health/fit/lastHit`. Wire to a real endpoint that aggregates `channels` + recent thread discovery counts per source.
+  - Suggested endpoint: `GET /api/growth/communities` → rows from `threads` grouped by `(platform, community)` with `count(*)`, `avg(relevance_score)`, `max(discovered_at)`.
+- [ ] **`growth-content.tsx:67-72` `KEYWORDS[]` — 4 fixture keyword triggers** (`'jira alternative'`, `'linear vs'`, etc.). Wire to real keyword watchlist from `discoveryConfigs.customPainPhrases` or a new `keyword_triggers` table.
+- [ ] **`growth-content.tsx:74-90` `ICP_LIST[]` — 3 fixture ICP cards** (Engineering manager / Early-stage founder / Senior IC). Should come from the product-schema `primaryIcp` field above (blocked by that item).
+- [ ] **`growth-content.tsx:171-172` KPI `THREADS / DAY AVG = 38` + `GATE PASS RATE = 86%`** — hardcoded strings. Compute from `pipeline_events` or `threads` rows over last 7d.
+
+### `/calendar` — one stub tied to Stripe
+
+- [ ] **`calendar-content.tsx:305` KPI `MONTHLY BUDGET = "43 / 120"`** — hardcoded. Depends on Stripe integration (budget = plan-tier limit; 43 = month-to-date sent count). Until Stripe ships, hide this card or show `—`.
+- [ ] **Clock-format user preference** — Phase 5 `format-hour.ts` uses IANA timezone heuristic (`Europe/*` → 24h). Add `clockFormat: '12h' | '24h' | 'auto'` to `userPreferences`, surface in Settings › Account.
+
+### `/settings` — Billing tab is full stub; rest is real
+
+- [ ] **Billing tab — full placeholder** ("Beta — free" plan, disabled action buttons). Blocked by Stripe integration item in Product Backlog.
+- Account / Appearance / Integrations / Safety — all real (delete, GitHub OAuth, channel connect/disconnect, `/api/preferences`).
+
+### `/team` — scene is real; animations dormant
+
+- [ ] **Worker-handoff SSE events** — emit `handoff:start` / `handoff:end` on `/api/events?channel=agents` when a job transitions agents. Frontend has `walkingAgentId` state at `team-content.tsx` waiting for these — once they fire, characters walk between desks carrying tickets. See `DATA_CONTRACT.md §2.3` for event shape.
+- [ ] **Scheduler worker SSE emission** — Kit (scheduler) always shows idle because no processor emits on the `scheduler` stream key. Wire `publishPipelineEvent({ agent: 'scheduler', status: ... })` from the scheduler processor.
+
+### `/` landing — marketing copy fixtures (lower priority)
+
+- [ ] **`hero-demo.tsx:60` + `threads-section.tsx:123` "Live — 1,284 threads surfaced this week"** — same literal in two places. Replace with a cached `GET /api/marketing/stats` weekly aggregate.
+- [ ] **`threads-section.tsx:14` `REAL_THREADS[]` — 3 fixture thread+reply examples** (r/indiehackers, @devtools, r/SaaS). Could stay as marketing copy forever OR wire to a curated public-board of anonymized shipped replies. Probably stays fixture — marketing tone is fine.
+
+---
 
 ## Product Backlog
 
 ### Stripe Payment Integration
 - **What:** Add Stripe checkout to enable paid subscriptions.
 - **Why:** Can't validate willingness-to-pay without the ability to charge. Competitors charge $3/comment (ReplyAgent) or monthly subscriptions.
-- **Context:** Pricing undefined. Needs user feedback from free beta first. Include pricing research and competitor analysis before implementing. Phase 5 Settings/Billing tab renders a placeholder ("Beta — free") awaiting this.
+- **Context:** Pricing undefined. Needs user feedback from free beta first. Include pricing research and competitor analysis before implementing. Phase 5 Settings/Billing tab renders a placeholder ("Beta — free") + `/calendar` MONTHLY BUDGET KPI both unblocked by this.
 - **Depends on:** Working product with beta users, defined pricing tiers.
 - **Source:** /plan-eng-review outside voice, 2026-04-11.
 
