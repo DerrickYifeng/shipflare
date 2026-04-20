@@ -1,23 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import {
-  calendarSlotDraftJobSchema,
   searchSourceJobSchema,
   discoveryScanJobSchema,
 } from '../types';
 
 describe('new job schemas', () => {
-  it('calendar-slot-draft requires calendarItemId', () => {
-    expect(() =>
-      calendarSlotDraftJobSchema.parse({
-        schemaVersion: 1,
-        traceId: 't1',
-        userId: 'u1',
-        productId: 'p1',
-        channel: 'x',
-      }),
-    ).toThrow();
-  });
-
   it('search-source requires source', () => {
     expect(() =>
       searchSourceJobSchema.parse({
