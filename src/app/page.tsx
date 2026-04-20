@@ -27,7 +27,10 @@ export default async function HomePage() {
   const isAuthenticated = !!session?.user?.id;
 
   return (
-    <main className="min-h-screen flex flex-col">
+    <main
+      className="min-h-screen flex flex-col"
+      style={{ background: 'var(--sf-ink)' }}
+    >
       <GlassNav isAuthenticated={isAuthenticated} />
       <HeroDemo isAuthenticated={isAuthenticated} />
       <HowItWorks />
