@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { AlertDialog } from '@/components/ui/alert-dialog';
-import { GitHubRepoSelector } from '@/components/onboarding/github-repo-selector';
+import { GitHubRepoSelector } from '@/components/product/github-repo-selector';
 import { useToast } from '@/components/ui/toast';
 import type { TechStack } from '@/types/code-scanner';
 import type { ExtractedProfile } from '@/types/onboarding';
