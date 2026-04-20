@@ -26,7 +26,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { SWRConfig, useSWRConfig } from 'swr';
 import { TodayActionError, useToday } from '@/hooks/use-today';
 import type { TodoItem, TodayStats } from '@/hooks/use-today';
@@ -41,6 +41,11 @@ import { ShortcutsHelp, type ShortcutBinding } from '@/components/ui/shortcuts-h
 import { HeaderBar } from '@/components/layout/header-bar';
 import { FirstRun } from '@/components/today/first-run';
 import { CompletionState, type YesterdayTop } from '@/components/today/completion-state';
+import { TodayLandedHero } from '@/components/today/today-landed-hero';
+import {
+  TodayWelcomeRibbon,
+  WELCOME_HERO_SEEN_KEY,
+} from '@/components/today/today-welcome-ribbon';
 import { ReplyCard } from './_components/reply-card';
 import { PostCard } from './_components/post-card';
 import { ScanDrawer } from './_components/scan-drawer';
@@ -65,6 +70,7 @@ export interface TodayContentProps {
   fallbackData: TodayFallbackData;
   yesterdayTop: YesterdayTop | null;
   lastScanAt: Date | null;
+  onboardingCompletedAt: Date | null;
 }
 
 function platformLabel(platform: string | undefined): string {
@@ -85,6 +91,7 @@ export function TodayContent({
   fallbackData,
   yesterdayTop,
   lastScanAt,
+  onboardingCompletedAt,
 }: TodayContentProps) {
   return (
     <SWRConfig value={{ fallback: { '/api/today': fallbackData } }}>
@@ -93,6 +100,7 @@ export function TodayContent({
         hasChannel={hasChannel}
         yesterdayTop={yesterdayTop}
         initialLastScanAt={lastScanAt}
+        onboardingCompletedAt={onboardingCompletedAt}
       />
     </SWRConfig>
   );
@@ -105,6 +113,7 @@ interface TodayContentInnerProps {
   hasChannel: boolean;
   yesterdayTop: YesterdayTop | null;
   initialLastScanAt: Date | null;
+  onboardingCompletedAt: Date | null;
 }
 
 function TodayContentInner({
@@ -112,6 +121,7 @@ function TodayContentInner({
   hasChannel,
   yesterdayTop,
   initialLastScanAt,
+  onboardingCompletedAt,
 }: TodayContentInnerProps) {
   const {
     items,
@@ -126,6 +136,43 @@ function TodayContentInner({
   const { toast, toastWithAction } = useToast();
   const { mutate: globalMutate } = useSWRConfig();
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // Onboarding-landed hero state — shown once when the user arrives at /today
+  // directly from the onboarding finish step. Subsequent visits within 24h
+  // fall back to the quieter welcome ribbon.
+  //
+  // We hold the hero in a useState seeded on mount (not on render) so the
+  // URL query param doesn't keep re-triggering the hero after its first
+  // collapse. `HERO_SEEN_KEY` in localStorage prevents re-show across
+  // refreshes within 24h.
+  const [showLandedHero, setShowLandedHero] = useState(false);
+  useEffect(() => {
+    if (searchParams?.get('from') !== 'onboarding') return;
+    try {
+      const seen = window.localStorage.getItem(WELCOME_HERO_SEEN_KEY);
+      if (seen) return; // already seen in the past 24h
+    } catch {
+      // localStorage unavailable — still show once this session.
+    }
+    setShowLandedHero(true);
+  }, [searchParams]);
+
+  const dismissLandedHero = useCallback(() => {
+    setShowLandedHero(false);
+    try {
+      window.localStorage.setItem(
+        WELCOME_HERO_SEEN_KEY,
+        String(Date.now()),
+      );
+    } catch {
+      /* ignore */
+    }
+    // Strip the query param so a refresh doesn't re-trigger the hero.
+    if (searchParams?.get('from') === 'onboarding') {
+      router.replace('/today');
+    }
+  }, [router, searchParams]);
 
   // Local UI state ────────────────────────────────────────────────────
   const [showFirstRun, setShowFirstRun] = useState(isFirstRun);
@@ -401,11 +448,24 @@ function TodayContentInner({
   const activeItem = items[activeIndex];
   const activeId = activeItem?.id ?? null;
 
+  // Landed hero is an overlay — renders above every other Today view until
+  // the user dismisses it (timer / scroll / CTA click). See §7 of the
+  // onboarding frontend spec.
+  const landedHero = showLandedHero ? (
+    <TodayLandedHero onDismiss={dismissLandedHero} />
+  ) : null;
+
+  const welcomeRibbon = !showLandedHero ? (
+    <TodayWelcomeRibbon onboardingCompletedAt={onboardingCompletedAt} />
+  ) : null;
+
   // First-run gate — show the signature "your agents are warming up" flow.
   if (showFirstRun && items.length === 0) {
     return (
       <>
+        {landedHero}
         <HeaderBar title="Today" />
+        {welcomeRibbon}
         <FirstRun onItemsReady={handleItemsReady} hasChannel={hasChannel} />
       </>
     );
@@ -414,7 +474,7 @@ function TodayContentInner({
   if (isLoading) {
     // loading.tsx owns the skeleton surface, but keep a guard so hooks
     // don't render a partial view if SWR hasn't hydrated yet.
-    return null;
+    return landedHero;
   }
 
   // Meta line for HeaderBar: "{n} to review · ● {n} shipped today · last scan {t}"
@@ -451,7 +511,9 @@ function TodayContentInner({
 
   return (
     <>
+      {landedHero}
       <HeaderBar title="Today" meta={metaLine} action={scanButton} />
+      {welcomeRibbon}
 
       <ScanDrawer
         open={scan.drawerOpen}

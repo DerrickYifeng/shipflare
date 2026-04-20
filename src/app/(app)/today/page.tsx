@@ -25,7 +25,10 @@ export default async function TodayPage() {
 
   // Onboarding gate — no product means the user hasn't finished setup.
   const [product] = await db
-    .select({ id: products.id })
+    .select({
+      id: products.id,
+      onboardingCompletedAt: products.onboardingCompletedAt,
+    })
     .from(products)
     .where(eq(products.userId, userId))
     .limit(1);
@@ -55,6 +58,7 @@ export default async function TodayPage() {
       fallbackData={fallbackData}
       yesterdayTop={null}
       lastScanAt={null}
+      onboardingCompletedAt={product.onboardingCompletedAt ?? null}
     />
   );
 }
