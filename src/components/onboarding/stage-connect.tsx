@@ -15,6 +15,7 @@ import {
 } from './_shared/account-card';
 import { ArrowRight, Reddit, X } from './icons';
 import { COPY } from './_copy';
+import { REDDIT_DRAFT_ENABLED } from './_feature-flags';
 
 interface ChannelRow {
   id: string;
@@ -127,6 +128,9 @@ export function StageConnect({ onBack, onContinue }: StageConnectProps) {
         onConnect={() => connect('reddit')}
         onDisconnect={() => void disconnect('reddit')}
         onRetry={() => connect('reddit')}
+        comingSoon={!REDDIT_DRAFT_ENABLED}
+        comingSoonLabel={COPY.stage4.comingSoon}
+        comingSoonTooltip={COPY.stage4.comingSoonTooltip}
       />
       <div style={{ height: 12 }} />
       <AccountCard

@@ -21,6 +21,16 @@ interface AccountCardProps {
   onConnect: () => void;
   onDisconnect: () => void;
   onRetry: () => void;
+  /**
+   * When `true`, the card shows a "Coming soon" pill next to the title,
+   * the Connect button is disabled + dimmed, and hovering the button
+   * shows the tooltip. OAuth state is still read (so a user who pre-connected
+   * in Settings still sees connected state) but the card can't drive a
+   * connect action. Per v3 gap audit finding #13 for Reddit.
+   */
+  comingSoon?: boolean;
+  comingSoonLabel?: string;
+  comingSoonTooltip?: string;
 }
 
 export function AccountCard({
@@ -34,6 +44,9 @@ export function AccountCard({
   onConnect,
   onDisconnect,
   onRetry,
+  comingSoon = false,
+  comingSoonLabel = 'Coming soon',
+  comingSoonTooltip = 'Coming soon',
 }: AccountCardProps) {
   const leftBorder =
     state === 'connected'
@@ -70,7 +83,14 @@ export function AccountCard({
           {icon}
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              flexWrap: 'wrap',
+            }}
+          >
             <span
               style={{
                 fontSize: 17,
@@ -82,6 +102,23 @@ export function AccountCard({
               {title}
             </span>
             <Pill state={state} />
+            {comingSoon && (
+              <span
+                style={{
+                  padding: '2px 8px',
+                  borderRadius: 'var(--sf-radius-sm, 5px)',
+                  background: 'var(--sf-warning-light)',
+                  color: 'var(--sf-warning-ink)',
+                  fontSize: 10,
+                  fontFamily: 'var(--sf-font-mono)',
+                  letterSpacing: '-0.08px',
+                  textTransform: 'uppercase',
+                  fontWeight: 500,
+                }}
+              >
+                {comingSoonLabel}
+              </span>
+            )}
           </div>
           <div
             style={{
@@ -94,9 +131,16 @@ export function AccountCard({
             {desc}
           </div>
         </div>
-        <div style={{ flexShrink: 0 }}>
+        <div
+          style={{ flexShrink: 0 }}
+          title={comingSoon ? comingSoonTooltip : undefined}
+        >
           {state === 'idle' && (
-            <OnbButton variant="secondary" onClick={onConnect}>
+            <OnbButton
+              variant="secondary"
+              onClick={onConnect}
+              disabled={comingSoon}
+            >
               Connect
             </OnbButton>
           )}
@@ -106,12 +150,20 @@ export function AccountCard({
             </OnbButton>
           )}
           {state === 'connected' && (
-            <OnbButton variant="ghost" onClick={onDisconnect}>
+            <OnbButton
+              variant="ghost"
+              onClick={onDisconnect}
+              disabled={comingSoon}
+            >
               Disconnect
             </OnbButton>
           )}
           {state === 'error' && (
-            <OnbButton variant="secondary" onClick={onRetry}>
+            <OnbButton
+              variant="secondary"
+              onClick={onRetry}
+              disabled={comingSoon}
+            >
               Retry
             </OnbButton>
           )}

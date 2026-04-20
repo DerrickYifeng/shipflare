@@ -155,6 +155,8 @@ export const COPY = {
     nextCta: "Next · Where's your product at?",
     errorX: "Couldn't reach X. This usually clears in a minute.",
     errorReddit: "Couldn't reach Reddit. Retry in a moment.",
+    comingSoon: 'Coming soon',
+    comingSoonTooltip: 'Reddit drafting is coming soon',
   },
   stage5: {
     kicker: 'Step 3 · State',
