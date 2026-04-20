@@ -28,7 +28,7 @@
 | 8 | API endpoints (plan, commit, draft, replan, plan-item/*) | ⏳ blocked by 7 | backend-engineer | /plan <15s, /commit tx atomic |
 | 9 | `scripts/seed-user.ts` for dogfooding | ⏳ blocked by 8 | backend-engineer | populated Today works |
 | 10 | v3 brand token refresh (Apple Blue) | ✅ `cc196e6`+`2876db7` | frontend-engineer | 0 v2-token hits, 19 UI primitives retinted |
-| 11 | Onboarding chrome (shell + primitives + copy) | 🔄 active | frontend-engineer-2 | desktop + mobile chrome pixel-perfect |
+| 11 | Onboarding chrome (shell + primitives + copy) | ✅ `d529d5d`+`8397997` | frontend-engineer-2 | 15 chrome components + `_shared` primitives + icons + copy; dev server 200 |
 | 12 | Onboarding stages (7 sub-stages, order 1→3→4→5→7→2→6) | ⏳ blocked by 8 + 11 | frontend-engineer | all stages wired to real APIs |
 | 13 | Today Landed (hero + welcome ribbon) | ⏳ blocked by 12 | frontend-engineer | fresh onboard → hero verified |
 | 14 | QA + E2E (happy paths + 4 edge cases + mobile) | ⏳ blocked by 13 | qa-engineer | Lighthouse ≥90 perf, ≥95 a11y |
