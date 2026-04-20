@@ -1,7 +1,18 @@
 # Onboarding Redesign — Backend Spec
 
 **Date:** 2026-04-19
-**Status:** Backend only. Frontend deferred until design lands.
+**Status:** PARTIALLY SUPERSEDED by
+`docs/superpowers/specs/2026-04-20-planner-and-skills-redesign-design.md`.
+
+The 2026-04-20 doc is the canonical design for planner / skill /
+`plan_items` schema. This file still stands for the onboarding-surface
+details not re-covered there: the Redis draft state (§5), the
+`/extract` / `/extract-repo` routes (§4.2), the `scripts/seed-user.ts`
+plan (§12 step 7), and the `derivePhase` helper (§2).
+
+Where this doc and 2026-04-20 conflict (launch-planner skill,
+`launch_tasks` table, single-endpoint plan/commit shape), follow 2026-04-20.
+
 **Sibling:** `docs/superpowers/specs/2026-04-19-onboarding-redesign-design.md` (full flow)
 
 Product hasn't launched. We don't keep backwards-compatibility shims,
