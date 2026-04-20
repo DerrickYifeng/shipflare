@@ -9,16 +9,25 @@ import { FooterStrip } from '@/components/marketing/footer-strip';
 
 /**
  * Marketing landing — ShipFlare v2 (Phase 7).
- * Dark-only: root container carries `.app-dark` so the paper-background
- * sections (How It Works, Safety) re-theme to their dark equivalents via
- * the globals.css `.app-dark` remap — no per-section dark branches.
+ *
+ * The handoff README specifies an alternating rhythm:
+ *   GlassNav (glass dark) → Hero (ink) → HowItWorks (paper) →
+ *   Threads (ink) → Safety (paper) → CTA (signal gradient) →
+ *   Footer (ink)
+ *
+ * **Do NOT** wrap this page in `.app-dark` — that would remap `--sf-paper`
+ * to the dark-theme equivalent and collapse every section to black, which
+ * is exactly what we don't want. Dark sections are self-contained: they
+ * explicitly set `background: var(--sf-ink)` + `color: var(--sf-fg-on-dark-*)`
+ * so they render correctly without any theme cascade. Light sections keep
+ * their natural paper palette because the root is unthemed.
  */
 export default async function HomePage() {
   const session = await auth();
   const isAuthenticated = !!session?.user?.id;
 
   return (
-    <main className="app-dark min-h-screen flex flex-col">
+    <main className="min-h-screen flex flex-col">
       <GlassNav isAuthenticated={isAuthenticated} />
       <HeroDemo isAuthenticated={isAuthenticated} />
       <HowItWorks />
