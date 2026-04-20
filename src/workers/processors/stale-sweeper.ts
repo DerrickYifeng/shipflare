@@ -2,6 +2,7 @@ import type { Job } from 'bullmq';
 import { and, eq, lt, sql } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import { planItems } from '@/lib/db/schema';
+import { recordPipelineEventsBulk } from '@/lib/pipeline-events';
 import { createLogger, loggerForJob } from '@/lib/logger';
 
 const log = createLogger('worker:stale-sweeper');
@@ -41,7 +42,7 @@ export async function processStaleSweeper(
         lt(planItems.scheduledAt, cutoff),
       ),
     )
-    .returning({ id: planItems.id });
+    .returning({ id: planItems.id, userId: planItems.userId });
 
   const markedApproved = await db
     .update(planItems)
@@ -52,9 +53,37 @@ export async function processStaleSweeper(
         lt(planItems.scheduledAt, cutoff),
       ),
     )
-    .returning({ id: planItems.id });
+    .returning({ id: planItems.id, userId: planItems.userId });
+
+  // Emit a per-user aggregate event (planned + approved staleness
+  // lumped together) so the pipeline_events feed shows the cron ran
+  // and which users had rows expire.
+  const perUser = new Map<string, { planned: number; approved: number }>();
+  for (const r of markedPlanned) {
+    const cur = perUser.get(r.userId) ?? { planned: 0, approved: 0 };
+    cur.planned++;
+    perUser.set(r.userId, cur);
+  }
+  for (const r of markedApproved) {
+    const cur = perUser.get(r.userId) ?? { planned: 0, approved: 0 };
+    cur.approved++;
+    perUser.set(r.userId, cur);
+  }
+  if (perUser.size > 0) {
+    await recordPipelineEventsBulk(
+      [...perUser.entries()].map(([userId, counts]) => ({
+        userId,
+        stage: 'sweeper_run',
+        metadata: {
+          sweeper: 'stale',
+          plannedMarked: counts.planned,
+          approvedMarked: counts.approved,
+        },
+      })),
+    );
+  }
 
   jlog.info(
-    `staleness sweep: marked ${markedPlanned.length} planned + ${markedApproved.length} approved rows as stale (cutoff ${cutoff.toISOString()})`,
+    `staleness sweep: marked ${markedPlanned.length} planned + ${markedApproved.length} approved rows as stale across ${perUser.size} users (cutoff ${cutoff.toISOString()})`,
   );
 }

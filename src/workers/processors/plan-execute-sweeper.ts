@@ -3,6 +3,7 @@ import { and, eq, inArray, lte, or } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import { planItems } from '@/lib/db/schema';
 import { enqueuePlanExecute } from '@/lib/queue/plan-execute';
+import { recordPipelineEventsBulk } from '@/lib/pipeline-events';
 import { createLogger, loggerForJob } from '@/lib/logger';
 import { nextDispatchPhase } from '@/lib/plan-state';
 
@@ -73,6 +74,7 @@ export async function processPlanExecuteSweeper(
   }
 
   let enqueued = 0;
+  const perUser = new Map<string, number>();
   for (const row of candidates) {
     const phase = nextDispatchPhase(
       row.state,
@@ -87,6 +89,7 @@ export async function processPlanExecuteSweeper(
         phase,
       });
       enqueued++;
+      perUser.set(row.userId, (perUser.get(row.userId) ?? 0) + 1);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       jlog.error(
@@ -95,7 +98,20 @@ export async function processPlanExecuteSweeper(
     }
   }
 
+  // Emit a per-user aggregate event so the pipeline_events feed shows
+  // whether this cron tick actually produced any enqueues. Swallows
+  // insert errors internally — telemetry never breaks the sweep.
+  if (perUser.size > 0) {
+    await recordPipelineEventsBulk(
+      [...perUser.entries()].map(([userId, count]) => ({
+        userId,
+        stage: 'sweeper_run',
+        metadata: { sweeper: 'plan-execute', enqueued: count },
+      })),
+    );
+  }
+
   jlog.info(
-    `swept ${candidates.length} candidates, enqueued ${enqueued} plan-execute jobs`,
+    `swept ${candidates.length} candidates, enqueued ${enqueued} plan-execute jobs across ${perUser.size} users`,
   );
 }
