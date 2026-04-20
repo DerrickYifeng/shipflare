@@ -12,6 +12,23 @@
  *     → derive Record<AgentId, AgentPanelState>
  *     → OfficeScene + AgentSidebarPanel + AgentDetailPanel
  *
+ * Pause/resume semantics:
+ *   The automation API exposes `/api/automation/{run,stop}` only — there is
+ *   no server-side pause. So the Pause/Resume control here is **local UI
+ *   only**: it freezes scene animations and mounts the PauseOverlay without
+ *   stopping workers. To actually halt the pipeline, users press Stop. This
+ *   keeps the handoff §9 behaviour ("paused=true → overlay + frozen
+ *   animations") separate from the more destructive Stop action. If a
+ *   dedicated `/pause` endpoint lands later, replace `setUiPaused(true)` with
+ *   a POST to that endpoint and drive `uiPaused` from the response.
+ *
+ * Sidebar panel (option B):
+ *   The prototype had no permanent roster — only a tap-to-reveal drawer.
+ *   Shipping added a right-rail panel as a nice-to-have. We keep it, but
+ *   hide it by default and expose a small toggle in the header so users who
+ *   want the at-a-glance view can opt in. Handoff fidelity by default,
+ *   shipped features still accessible.
+ *
  * Handoff / walk animation:
  *   We don't yet emit server-side handoff events, so the walk animation is
  *   driven client-side by `agent_complete → next-agent_start` transitions we
@@ -25,6 +42,7 @@ import {
   useEffect,
   useMemo,
   useReducer,
+  useRef,
   useState,
   type CSSProperties,
   type ReactNode,
@@ -50,6 +68,8 @@ import {
 type RunState = 'idle' | 'launching' | 'running' | 'error';
 
 const MAX_TICKER_EVENTS = 20;
+/** How long the "view log" pulse ring stays on the ticker. */
+const TICKER_PULSE_MS = 1400;
 
 export function TeamContent() {
   const { agents, isConnected } = useAgentStreamContext();
@@ -89,17 +109,58 @@ export function TeamContent() {
   // is to watch snapshot transitions.
   const tickerEvents = useTickerFromAgents(agents);
 
-  // Pause / resume → maps to /api/automation/{run,stop}.
+  // Automation control — maps to /api/automation/{run,stop}.
   const [runState, setRunState] = useState<RunState>('idle');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const hasActiveAgent = Object.values(agents).some(
     (a) => a?.status === 'active',
   );
-  const paused = !hasActiveAgent && runState !== 'launching';
+
+  // Pause is a local-UI concept: it freezes the scene without stopping
+  // workers. It's authoritative (not derived from `!hasActiveAgent`) so the
+  // overlay appears exactly when the user asks for it.
+  const [uiPaused, setUiPaused] = useState(false);
+  const handleTogglePause = useCallback(() => {
+    setUiPaused((prev) => !prev);
+  }, []);
+  const handleResume = useCallback(() => {
+    setUiPaused(false);
+  }, []);
+
+  // View log — scroll to + pulse the ticker so users find it.
+  const tickerWrapperRef = useRef<HTMLDivElement | null>(null);
+  const [tickerPulse, setTickerPulse] = useState(false);
+  const pulseTimeoutRef = useRef<number | null>(null);
+  const handleViewLog = useCallback(() => {
+    tickerWrapperRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setTickerPulse(true);
+    if (pulseTimeoutRef.current !== null) {
+      window.clearTimeout(pulseTimeoutRef.current);
+    }
+    pulseTimeoutRef.current = window.setTimeout(() => {
+      setTickerPulse(false);
+      pulseTimeoutRef.current = null;
+    }, TICKER_PULSE_MS);
+  }, []);
+  useEffect(() => {
+    return () => {
+      if (pulseTimeoutRef.current !== null) {
+        window.clearTimeout(pulseTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // Sidebar panel visibility (option B — default hidden).
+  const [showRoster, setShowRoster] = useState(false);
+  const handleToggleRoster = useCallback(() => {
+    setShowRoster((prev) => !prev);
+  }, []);
 
   const handleStart = useCallback(async () => {
     setRunState('launching');
     setErrorMsg(null);
+    // Clear any lingering UI pause so Run gives an unambiguous live view.
+    setUiPaused(false);
     try {
       const res = await fetch('/api/automation/run', { method: 'POST' });
       if (!res.ok) {
@@ -141,13 +202,47 @@ export function TeamContent() {
 
   const metaLine = `${totalCount} agents · ${queueDepth} job${queueDepth === 1 ? '' : 's'} in flight`;
 
+  const sceneGridStyle: CSSProperties = {
+    display: 'grid',
+    gridTemplateColumns: showRoster ? 'minmax(0, 1fr) minmax(280px, 340px)' : 'minmax(0, 1fr)',
+    gap: 20,
+    alignItems: 'start',
+    marginBottom: 16,
+  };
+
   return (
     <>
       <HeaderBar
         title="Your AI Team"
         meta={metaLine}
         action={
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleViewLog}
+              aria-label="View live log"
+            >
+              View log
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleTogglePause}
+              aria-pressed={uiPaused}
+              aria-label={uiPaused ? 'Resume scene' : 'Pause scene'}
+            >
+              {uiPaused ? 'Resume' : 'Pause'}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleToggleRoster}
+              aria-pressed={showRoster}
+              aria-label={showRoster ? 'Hide roster panel' : 'Show roster panel'}
+            >
+              {showRoster ? 'Hide roster' : 'Show roster'}
+            </Button>
             {hasActiveAgent ? (
               <Button variant="ghost" size="sm" onClick={handleStop}>
                 Stop
@@ -167,21 +262,22 @@ export function TeamContent() {
       />
 
       <div style={PAGE_PADDING_STYLE}>
-        <div style={TICKER_ROW_STYLE}>
-          <div style={{ flex: 1, minWidth: 0 }}>
+        <div ref={tickerWrapperRef} style={TICKER_ROW_STYLE}>
+          <div style={{ flex: 1, minWidth: 0, ...tickerPulseStyle(tickerPulse) }}>
             <HistoryTicker events={tickerEvents} />
           </div>
         </div>
 
         {errorMsg && <ErrorBanner message={errorMsg} onDismiss={() => setErrorMsg(null)} />}
 
-        <div style={SCENE_GRID_STYLE}>
+        <div style={sceneGridStyle}>
           <div style={{ position: 'relative', minWidth: 0 }}>
             <OfficeScene
               statuses={sceneStatuses}
               selectedId={selectedId}
               onSelectAgent={setSelectedId}
-              paused={paused}
+              paused={uiPaused}
+              onResume={handleResume}
               walkingAgentId={null}
               walkData={null}
               activeCount={activeCount}
@@ -194,13 +290,15 @@ export function TeamContent() {
               onClose={() => setSelectedId(null)}
             />
           </div>
-          <AgentSidebarPanel
-            states={panelStates}
-            selectedId={selectedId}
-            onSelect={setSelectedId}
-            isConnected={isConnected}
-            queueDepth={queueDepth}
-          />
+          {showRoster && (
+            <AgentSidebarPanel
+              states={panelStates}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+              isConnected={isConnected}
+              queueDepth={queueDepth}
+            />
+          )}
         </div>
 
         <p style={HINT_STYLE}>
@@ -215,6 +313,21 @@ export function TeamContent() {
 /* -----------------------------------------------------------------
  * Helpers
  * ----------------------------------------------------------------*/
+
+function tickerPulseStyle(active: boolean): CSSProperties {
+  if (!active) {
+    return {
+      borderRadius: 'var(--sf-radius-md)',
+      transition: 'box-shadow var(--sf-dur-base) var(--sf-ease-swift)',
+      boxShadow: 'none',
+    };
+  }
+  return {
+    borderRadius: 'var(--sf-radius-md)',
+    transition: 'box-shadow var(--sf-dur-base) var(--sf-ease-swift)',
+    boxShadow: '0 0 0 3px var(--sf-signal-glow)',
+  };
+}
 
 function buildPanelStates(
   agents: Record<string, StreamAgentState>,
@@ -419,14 +532,7 @@ const TICKER_ROW_STYLE: CSSProperties = {
   alignItems: 'center',
   gap: 12,
   marginBottom: 16,
-};
-
-const SCENE_GRID_STYLE: CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: 'minmax(0, 1fr) minmax(280px, 340px)',
-  gap: 20,
-  alignItems: 'start',
-  marginBottom: 16,
+  scrollMarginTop: 80,
 };
 
 const HINT_STYLE: CSSProperties = {

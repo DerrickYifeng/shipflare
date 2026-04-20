@@ -28,6 +28,7 @@ import { StatusDot } from '@/components/ui/status-dot';
 import { IsoFloor } from './iso-floor';
 import { IsoDesk } from './iso-desk';
 import { AgentSprite, type WalkData } from './agent-sprite';
+import { PauseOverlay } from './pause-overlay';
 import {
   AGENT_ROSTER,
   TILE_H,
@@ -43,6 +44,8 @@ export interface OfficeSceneProps {
   selectedId: AgentId | null;
   onSelectAgent: (id: AgentId) => void;
   paused: boolean;
+  /** Called when the PauseOverlay is clicked / activated. */
+  onResume?: () => void;
   /** When non-null, the given agent's character walks along `walk` instead
    *  of sitting at its desk. */
   walkingAgentId: AgentId | null;
@@ -59,6 +62,7 @@ export function OfficeScene({
   selectedId,
   onSelectAgent,
   paused,
+  onResume,
   walkingAgentId,
   walkData,
   activeCount,
@@ -178,6 +182,8 @@ export function OfficeScene({
       </div>
 
       <ScenePill paused={paused} activeCount={activeCount} totalCount={AGENT_ROSTER.length} />
+
+      {paused && onResume && <PauseOverlay onResume={onResume} />}
     </div>
   );
 }
