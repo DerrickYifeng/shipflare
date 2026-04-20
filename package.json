@@ -19,7 +19,8 @@
     "db:studio": "drizzle-kit studio",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:integration": "vitest run --config vitest.integration.config.ts"
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "seed-user": "bun run scripts/seed-user.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.88.0",
