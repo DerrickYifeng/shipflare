@@ -1,50 +1,107 @@
 'use client';
 
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import { signOutAction } from '@/app/actions/auth';
-import { ShipFlareLogo } from '@/components/ui/shipflare-logo';
+/**
+ * ShipFlare v2 TopNav.
+ *
+ * - 56px tall, sticky at top, glass `--sf-glass-light` + `--sf-glass-blur`.
+ * - Left: current route label as an Ops (mono uppercase) span.
+ * - Right: theme toggle, ⌘K hint, avatar gradient.
+ *
+ * See INTERACTIONS.md §2.
+ */
 
-export function TopNav() {
+import { usePathname } from 'next/navigation';
+import type { CSSProperties } from 'react';
+import { Ops } from '@/components/ui/ops';
+import { ThemeToggleButton } from './theme-toggle-button';
+
+interface TopNavProps {
+  /** Fallback label when the route isn't in the route map. */
+  fallbackLabel?: string;
+  /** User initials for avatar placeholder (unused yet but accepted for forward compat). */
+  userInitials?: string;
+  /** User image URL to render in avatar; falls back to the signal→flare gradient. */
+  userImage?: string | null;
+}
+
+const ROUTE_LABELS: Array<{ match: RegExp; label: string }> = [
+  { match: /^\/today/, label: 'Today' },
+  { match: /^\/product/, label: 'My Product' },
+  { match: /^\/growth/, label: 'Growth' },
+  { match: /^\/calendar/, label: 'Calendar' },
+  { match: /^\/automation/, label: 'Your AI Team' },
+  { match: /^\/dashboard/, label: 'Metrics' },
+  { match: /^\/settings/, label: 'Settings' },
+];
+
+const WRAPPER_STYLE: CSSProperties = {
+  height: 56,
+  borderBottom: '1px solid var(--sf-border-subtle)',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  padding: '0 24px',
+  background: 'var(--sf-glass-light)',
+  backdropFilter: 'var(--sf-glass-blur)',
+  WebkitBackdropFilter: 'var(--sf-glass-blur)',
+  position: 'sticky',
+  top: 0,
+  zIndex: 50,
+};
+
+export function TopNav({
+  fallbackLabel = 'ShipFlare',
+  userImage = null,
+}: TopNavProps = {}) {
   const pathname = usePathname();
+  const label = resolveLabel(pathname, fallbackLabel);
 
   return (
-    <header className="lg:hidden flex items-center justify-between px-4 h-12 bg-black/[0.8] backdrop-blur-[20px] backdrop-saturate-[180%] sticky top-0 z-30">
-      <Link href="/today" className="text-[14px] font-semibold text-white tracking-[-0.224px] inline-flex items-center gap-2">
-        <ShipFlareLogo size={20} />
-        ShipFlare
-      </Link>
-
-      <nav className="flex items-center gap-0.5" aria-label="Mobile navigation">
-        <NavLink href="/today" current={pathname === '/today'}>Today</NavLink>
-        <NavLink href="/product" current={pathname.startsWith('/product')}>Product</NavLink>
-        <NavLink href="/growth" current={pathname.startsWith('/growth')}>Growth</NavLink>
-        <NavLink href="/calendar" current={pathname.startsWith('/calendar')}>Calendar</NavLink>
-        <NavLink href="/settings" current={pathname.startsWith('/settings')}>Settings</NavLink>
-        <form action={signOutAction}>
-          <button
-            type="submit"
-            className="px-2.5 min-h-[44px] inline-flex items-center text-[12px] text-white/60 hover:text-white transition-colors duration-200"
-          >
-            Sign out
-          </button>
-        </form>
-      </nav>
+    <header style={WRAPPER_STYLE}>
+      <Ops>{label}</Ops>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <ThemeToggleButton />
+        <span
+          className="sf-mono"
+          aria-hidden="true"
+          style={{
+            fontSize: 'var(--sf-text-xs)',
+            color: 'var(--sf-fg-3)',
+            letterSpacing: 'var(--sf-track-mono)',
+          }}
+        >
+          ⌘K
+        </span>
+        <span
+          aria-hidden="true"
+          style={{
+            width: 28,
+            height: 28,
+            borderRadius: '50%',
+            background: 'linear-gradient(135deg, var(--sf-signal), var(--sf-flare))',
+            overflow: 'hidden',
+            display: 'inline-block',
+          }}
+        >
+          {userImage ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={userImage}
+              alt=""
+              width={28}
+              height={28}
+              style={{ width: 28, height: 28, objectFit: 'cover', display: 'block' }}
+            />
+          ) : null}
+        </span>
+      </div>
     </header>
   );
 }
 
-function NavLink({ href, current, children }: { href: string; current: boolean; children: React.ReactNode }) {
-  return (
-    <Link
-      href={href}
-      className={`px-2.5 min-h-[44px] inline-flex items-center text-[12px] transition-colors duration-200 ${
-        current
-          ? 'text-white font-medium'
-          : 'text-white/60 hover:text-white'
-      }`}
-    >
-      {children}
-    </Link>
-  );
+function resolveLabel(pathname: string, fallback: string): string {
+  for (const entry of ROUTE_LABELS) {
+    if (entry.match.test(pathname)) return entry.label;
+  }
+  return fallback;
 }
