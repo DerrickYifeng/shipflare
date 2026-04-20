@@ -1,6 +1,471 @@
 @import "tailwindcss";
 
-/* ShipFlare Design System — Apple-inspired (DESIGN.md) */
+/* =====================================================================
+   ShipFlare v2 — Design Tokens (Phase 1)
+   Signal (cool indigo) + Flare (warm amber). Geist + Geist Mono.
+   OKLCH-based for perceptual consistency.
+   Source of truth: design_handoff_shipflare_frontend/source/tokens.css
+   ===================================================================== */
+@theme {
+  /* ─── Colors (light / default) ─── */
+
+  /* Neutrals — cool-tinted, NOT pure black/white */
+  --color-sf-ink: oklch(14% 0.020 265);
+  --color-sf-ink-raised: oklch(20% 0.024 265);
+  --color-sf-paper: oklch(97.5% 0.010 75);
+  --color-sf-paper-raised: oklch(100% 0 0);
+  --color-sf-paper-sunken: oklch(94% 0.012 70);
+
+  /* Foreground on light */
+  --color-sf-fg-1: oklch(18% 0.020 265);
+  --color-sf-fg-2: oklch(35% 0.016 265);
+  --color-sf-fg-3: oklch(52% 0.012 265);
+  --color-sf-fg-4: oklch(65% 0.008 265);
+
+  /* Foreground on dark */
+  --color-sf-fg-on-dark-1: oklch(98% 0.004 85);
+  --color-sf-fg-on-dark-2: oklch(82% 0.008 85);
+  --color-sf-fg-on-dark-3: oklch(65% 0.010 260);
+  --color-sf-fg-on-dark-4: oklch(50% 0.012 260);
+
+  /* Borders */
+  --color-sf-border-v2: oklch(18% 0.025 265 / 0.12);
+  --color-sf-border-v2-subtle: oklch(18% 0.025 265 / 0.06);
+  --color-sf-border-v2-strong: oklch(18% 0.025 265 / 0.18);
+  --color-sf-border-on-dark: oklch(98% 0.004 85 / 0.10);
+
+  /* Primary accent — SIGNAL (electric indigo) */
+  --color-sf-signal: oklch(58% 0.22 258);
+  --color-sf-signal-hover: oklch(63% 0.22 258);
+  --color-sf-signal-ink: oklch(42% 0.22 258);
+  --color-sf-signal-bright: oklch(74% 0.19 258);
+  --color-sf-signal-tint: oklch(94% 0.05 258);
+  --color-sf-signal-glow: oklch(58% 0.22 258 / 0.18);
+
+  /* Secondary accent — FLARE (warm amber) */
+  --color-sf-flare: oklch(74% 0.19 52);
+  --color-sf-flare-hover: oklch(78% 0.19 52);
+  --color-sf-flare-ink: oklch(50% 0.17 48);
+  --color-sf-flare-tint: oklch(94% 0.07 65);
+  --color-sf-flare-glow: oklch(74% 0.19 52 / 0.20);
+
+  /* Semantic */
+  --color-sf-success-v2: oklch(68% 0.17 152);
+  --color-sf-success-ink: oklch(48% 0.14 152);
+  --color-sf-success-tint: oklch(95% 0.04 152);
+  --color-sf-warning-v2: oklch(76% 0.16 82);
+  --color-sf-warning-ink: oklch(52% 0.14 70);
+  --color-sf-warning-tint: oklch(95% 0.04 82);
+  --color-sf-danger: oklch(62% 0.22 25);
+  --color-sf-danger-ink: oklch(48% 0.22 25);
+  --color-sf-danger-tint: oklch(95% 0.04 25);
+
+  /* Categorical palette — 6 swatches, same chroma + lightness, varying hue */
+  --color-sf-cat-1: oklch(62% 0.19 255);
+  --color-sf-cat-2: oklch(62% 0.19 190);
+  --color-sf-cat-3: oklch(62% 0.19 140);
+  --color-sf-cat-4: oklch(62% 0.19 48);
+  --color-sf-cat-5: oklch(62% 0.19 10);
+  --color-sf-cat-6: oklch(62% 0.19 310);
+
+  /* Glass / blur */
+  --color-sf-glass-dark: oklch(13% 0.012 260 / 0.78);
+  --color-sf-glass-light: oklch(97% 0.004 85 / 0.78);
+
+  /* ─── Typography (next/font with graceful fallback) ─── */
+  --font-sf-display: var(--font-geist-sans), "Geist", "Geist Fallback", ui-sans-serif, system-ui, sans-serif;
+  --font-sf-text: var(--font-geist-sans), "Geist", "Geist Fallback", ui-sans-serif, system-ui, sans-serif;
+  --font-sf-mono: var(--font-geist-mono), "Geist Mono", "JetBrains Mono", ui-monospace, "Cascadia Code", Menlo, monospace;
+
+  /* Type scale — as text-* utilities */
+  --text-sf-hero: 64px;
+  --text-sf-h1: 44px;
+  --text-sf-h2: 32px;
+  --text-sf-h3: 22px;
+  --text-sf-lg: 18px;
+  --text-sf-base: 16px;
+  --text-sf-sm: 14px;
+  --text-sf-xs: 12px;
+  --text-sf-2xs: 10px;
+
+  /* Tracking */
+  --tracking-sf-hero: -0.022em;
+  --tracking-sf-tight: -0.016em;
+  --tracking-sf-normal: -0.011em;
+  --tracking-sf-loose: 0em;
+  --tracking-sf-mono: 0.02em;
+
+  /* Line-heights */
+  --leading-sf-tight: 1.05;
+  --leading-sf-snug: 1.18;
+  --leading-sf-normal: 1.45;
+  --leading-sf-relaxed: 1.6;
+
+  /* ─── Spacing ─── */
+  --spacing-sf-2xs: 2px;
+  --spacing-sf-xs: 4px;
+  --spacing-sf-sm: 8px;
+  --spacing-sf-md: 12px;
+  --spacing-sf-base: 16px;
+  --spacing-sf-lg: 20px;
+  --spacing-sf-xl: 24px;
+  --spacing-sf-2xl: 32px;
+  --spacing-sf-3xl: 48px;
+  --spacing-sf-4xl: 72px;
+  --spacing-sf-5xl: 120px;
+
+  /* Layout */
+  --container-sf: 1120px;
+  --container-sf-prose: 680px;
+  --container-sf-narrow: 560px;
+
+  /* ─── Radius ─── */
+  --radius-sf-v2-sm: 6px;
+  --radius-sf-v2-md: 10px;
+  --radius-sf-v2-lg: 16px;
+  --radius-sf-v2-pill: 9999px;
+
+  /* ─── Shadow ─── */
+  --shadow-sf-sm: 0 1px 2px oklch(18% 0.025 265 / 0.05), 0 2px 8px oklch(18% 0.025 265 / 0.06);
+  --shadow-sf-md: 0 2px 4px oklch(18% 0.025 265 / 0.05), 0 10px 28px oklch(18% 0.025 265 / 0.10);
+  --shadow-sf-lg: 0 10px 20px oklch(18% 0.025 265 / 0.08), 0 28px 56px oklch(18% 0.025 265 / 0.16);
+  --shadow-sf-focus: 0 0 0 3px oklch(58% 0.22 258 / 0.24);
+  --shadow-sf-glow-signal: 0 8px 24px oklch(58% 0.22 258 / 0.28);
+  --shadow-sf-glow-flare: 0 8px 24px oklch(74% 0.19 52 / 0.28);
+
+  /* ─── Motion ─── */
+  --ease-sf-swift: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-sf-smooth: cubic-bezier(0.4, 0, 0.6, 1);
+  --duration-sf-fast: 150ms;
+  --duration-sf-base: 220ms;
+  --duration-sf-slow: 320ms;
+  --duration-sf-entrance: 560ms;
+
+  /* Keyframe-driven animations exposed as Tailwind animate-* utilities */
+  --animate-sf-fade-in-v2: sf-fade-in var(--duration-sf-slow) var(--ease-sf-swift) forwards;
+  --animate-sf-slide-up-v2: sf-slide-up var(--duration-sf-slow) var(--ease-sf-swift) forwards;
+  --animate-sf-pulse-v2: sf-pulse 1.5s var(--ease-sf-smooth) infinite;
+  --animate-sf-shimmer: sf-shimmer 1.2s linear infinite;
+  --animate-sf-walk: sf-walk 0.8s var(--ease-sf-smooth) infinite;
+  --animate-sf-idle-bob: sf-idle-bob 2.2s var(--ease-sf-smooth) infinite;
+  --animate-sf-ticker: sf-ticker 24s linear infinite;
+
+  /* Z-index scale */
+  --z-sf-base: 0;
+  --z-sf-raised: 10;
+  --z-sf-sticky: 50;
+  --z-sf-overlay: 100;
+  --z-sf-modal: 200;
+  --z-sf-toast: 300;
+}
+
+/* -----------------------------------------------------------------
+   v2 CSS custom properties exposed under `--sf-*` names so existing
+   handoff markup (ScanDrawer, ReplyCard, etc.) can consume them via
+   var(--sf-signal), var(--sf-ease-swift), etc.
+   Tailwind @theme tokens above drive utility class generation; these
+   duplicates make the raw variable names available at the root.
+   ----------------------------------------------------------------- */
+:root {
+  /* Colors */
+  --sf-ink: oklch(14% 0.020 265);
+  --sf-ink-raised: oklch(20% 0.024 265);
+  --sf-paper: oklch(97.5% 0.010 75);
+  --sf-paper-raised: oklch(100% 0 0);
+  --sf-paper-sunken: oklch(94% 0.012 70);
+
+  --sf-fg-1: oklch(18% 0.020 265);
+  --sf-fg-2: oklch(35% 0.016 265);
+  --sf-fg-3: oklch(52% 0.012 265);
+  --sf-fg-4: oklch(65% 0.008 265);
+
+  --sf-fg-on-dark-1: oklch(98% 0.004 85);
+  --sf-fg-on-dark-2: oklch(82% 0.008 85);
+  --sf-fg-on-dark-3: oklch(65% 0.010 260);
+  --sf-fg-on-dark-4: oklch(50% 0.012 260);
+
+  --sf-border: oklch(18% 0.025 265 / 0.12);
+  --sf-border-subtle: oklch(18% 0.025 265 / 0.06);
+  --sf-border-strong: oklch(18% 0.025 265 / 0.18);
+  --sf-border-on-dark: oklch(98% 0.004 85 / 0.10);
+
+  --sf-signal: oklch(58% 0.22 258);
+  --sf-signal-hover: oklch(63% 0.22 258);
+  --sf-signal-ink: oklch(42% 0.22 258);
+  --sf-signal-bright: oklch(74% 0.19 258);
+  --sf-signal-tint: oklch(94% 0.05 258);
+  --sf-signal-glow: oklch(58% 0.22 258 / 0.18);
+
+  --sf-flare: oklch(74% 0.19 52);
+  --sf-flare-hover: oklch(78% 0.19 52);
+  --sf-flare-ink: oklch(50% 0.17 48);
+  --sf-flare-tint: oklch(94% 0.07 65);
+  --sf-flare-glow: oklch(74% 0.19 52 / 0.20);
+
+  --sf-success: oklch(68% 0.17 152);
+  --sf-success-ink: oklch(48% 0.14 152);
+  --sf-success-tint: oklch(95% 0.04 152);
+  --sf-warning: oklch(76% 0.16 82);
+  --sf-warning-ink: oklch(52% 0.14 70);
+  --sf-warning-tint: oklch(95% 0.04 82);
+  --sf-danger: oklch(62% 0.22 25);
+  --sf-danger-ink: oklch(48% 0.22 25);
+  --sf-danger-tint: oklch(95% 0.04 25);
+
+  --sf-cat-1: oklch(62% 0.19 255);
+  --sf-cat-2: oklch(62% 0.19 190);
+  --sf-cat-3: oklch(62% 0.19 140);
+  --sf-cat-4: oklch(62% 0.19 48);
+  --sf-cat-5: oklch(62% 0.19 10);
+  --sf-cat-6: oklch(62% 0.19 310);
+
+  /* Typography (next/font vars with graceful fallback) */
+  --sf-font-display: var(--font-geist-sans), "Geist", "Geist Fallback", ui-sans-serif, system-ui, sans-serif;
+  --sf-font-text: var(--font-geist-sans), "Geist", "Geist Fallback", ui-sans-serif, system-ui, sans-serif;
+  --sf-font-mono: var(--font-geist-mono), "Geist Mono", "JetBrains Mono", ui-monospace, "Cascadia Code", Menlo, monospace;
+
+  --sf-text-hero: 64px;
+  --sf-text-h1: 44px;
+  --sf-text-h2: 32px;
+  --sf-text-h3: 22px;
+  --sf-text-lg: 18px;
+  --sf-text-base: 16px;
+  --sf-text-sm: 14px;
+  --sf-text-xs: 12px;
+  --sf-text-2xs: 10px;
+
+  --sf-track-hero: -0.022em;
+  --sf-track-tight: -0.016em;
+  --sf-track-normal: -0.011em;
+  --sf-track-loose: 0em;
+  --sf-track-mono: 0.02em;
+
+  --sf-lh-tight: 1.05;
+  --sf-lh-snug: 1.18;
+  --sf-lh-normal: 1.45;
+  --sf-lh-relaxed: 1.6;
+
+  /* Spacing */
+  --sf-space-2xs: 2px;
+  --sf-space-xs: 4px;
+  --sf-space-sm: 8px;
+  --sf-space-md: 12px;
+  --sf-space-base: 16px;
+  --sf-space-lg: 20px;
+  --sf-space-xl: 24px;
+  --sf-space-2xl: 32px;
+  --sf-space-3xl: 48px;
+  --sf-space-4xl: 72px;
+  --sf-space-5xl: 120px;
+
+  /* Layout */
+  --sf-max-width: 1120px;
+  --sf-max-width-prose: 680px;
+  --sf-max-width-narrow: 560px;
+
+  /* Radius */
+  --sf-radius-sm: 6px;
+  --sf-radius-md: 10px;
+  --sf-radius-lg: 16px;
+  --sf-radius-pill: 9999px;
+
+  /* Shadow */
+  --sf-shadow-sm:
+    0 1px 2px oklch(18% 0.025 265 / 0.05),
+    0 2px 8px oklch(18% 0.025 265 / 0.06);
+  --sf-shadow-md:
+    0 2px 4px oklch(18% 0.025 265 / 0.05),
+    0 10px 28px oklch(18% 0.025 265 / 0.10);
+  --sf-shadow-lg:
+    0 10px 20px oklch(18% 0.025 265 / 0.08),
+    0 28px 56px oklch(18% 0.025 265 / 0.16);
+  --sf-shadow-focus: 0 0 0 3px oklch(58% 0.22 258 / 0.24);
+  --sf-shadow-glow-signal: 0 8px 24px oklch(58% 0.22 258 / 0.28);
+  --sf-shadow-glow-flare: 0 8px 24px oklch(74% 0.19 52 / 0.28);
+
+  /* Glass / blur */
+  --sf-glass-dark: oklch(13% 0.012 260 / 0.78);
+  --sf-glass-light: oklch(97% 0.004 85 / 0.78);
+  --sf-glass-blur: saturate(180%) blur(20px);
+
+  /* Motion */
+  --sf-ease-swift: cubic-bezier(0.16, 1, 0.3, 1);
+  --sf-ease-smooth: cubic-bezier(0.4, 0, 0.6, 1);
+  --sf-dur-fast: 150ms;
+  --sf-dur-base: 220ms;
+  --sf-dur-slow: 320ms;
+  --sf-dur-entrance: 560ms;
+
+  /* Z-index */
+  --sf-z-base: 0;
+  --sf-z-raised: 10;
+  --sf-z-sticky: 50;
+  --sf-z-overlay: 100;
+  --sf-z-modal: 200;
+  --sf-z-toast: 300;
+
+  /* Breakpoints (reference) */
+  --sf-bp-sm: 520px;
+  --sf-bp-md: 768px;
+  --sf-bp-lg: 1024px;
+  --sf-bp-xl: 1280px;
+}
+
+/* =====================================================================
+   v2 dark-mode remap — applied to any container with `.app-dark`.
+   Light + dark themes share components; remapping these CSS vars
+   retints every consumer with no per-component branches.
+   Copied verbatim from design_handoff_shipflare_frontend/source/app/index.html
+   ===================================================================== */
+.app-dark {
+  --sf-paper: oklch(14% 0.020 265);
+  --sf-paper-raised: oklch(19% 0.024 265);
+  --sf-paper-sunken: oklch(11% 0.018 265);
+
+  --sf-fg-1: oklch(98% 0.004 85);
+  --sf-fg-2: oklch(82% 0.008 260);
+  --sf-fg-3: oklch(64% 0.012 260);
+  --sf-fg-4: oklch(50% 0.014 260);
+
+  --sf-border: oklch(98% 0.004 85 / 0.10);
+  --sf-border-subtle: oklch(98% 0.004 85 / 0.06);
+  --sf-border-strong: oklch(98% 0.004 85 / 0.16);
+
+  --sf-signal-ink: oklch(74% 0.19 258);
+  --sf-flare-ink: oklch(80% 0.16 52);
+  --sf-success-ink: oklch(78% 0.17 152);
+  --sf-warning-ink: oklch(82% 0.16 82);
+  --sf-danger-ink: oklch(72% 0.22 25);
+
+  --sf-signal-tint: oklch(28% 0.10 258);
+  --sf-flare-tint: oklch(30% 0.11 52);
+  --sf-success-tint: oklch(26% 0.10 152);
+  --sf-warning-tint: oklch(28% 0.10 82);
+  --sf-danger-tint: oklch(28% 0.11 25);
+
+  --sf-glass-light: oklch(14% 0.020 265 / 0.72);
+
+  color: var(--sf-fg-1);
+}
+
+/* Light-theme canvas glow — subtle warm/signal gradient */
+.app-light .app-canvas {
+  background:
+    radial-gradient(900px 500px at -10% -20%, oklch(74% 0.19 258 / 0.06), transparent 60%),
+    radial-gradient(700px 400px at 110% 0%, oklch(80% 0.16 52 / 0.05), transparent 55%),
+    var(--sf-paper);
+}
+
+.app-dark .app-canvas {
+  background:
+    radial-gradient(900px 500px at -10% -20%, oklch(58% 0.22 258 / 0.12), transparent 60%),
+    radial-gradient(700px 400px at 110% 0%, oklch(74% 0.19 52 / 0.06), transparent 55%),
+    var(--sf-paper);
+}
+
+/* =====================================================================
+   v2 signature utility classes
+   ===================================================================== */
+
+/* SIGNATURE — mono uppercase ops label. This is ShipFlare's own voice. */
+.sf-ops {
+  font-family: var(--sf-font-mono);
+  font-size: var(--sf-text-xs);
+  font-weight: 500;
+  letter-spacing: var(--sf-track-mono);
+  text-transform: uppercase;
+  color: var(--sf-fg-3);
+  font-feature-settings: "tnum" 1, "cv11" 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.sf-mono {
+  font-family: var(--sf-font-mono);
+  font-feature-settings: "tnum" 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.sf-hero {
+  font-family: var(--sf-font-display);
+  font-size: var(--sf-text-hero);
+  font-weight: 600;
+  line-height: var(--sf-lh-tight);
+  letter-spacing: var(--sf-track-hero);
+}
+
+.sf-h1-v2 {
+  font-family: var(--sf-font-display);
+  font-size: var(--sf-text-h1);
+  font-weight: 600;
+  line-height: var(--sf-lh-snug);
+  letter-spacing: var(--sf-track-tight);
+}
+
+.sf-h2-v2 {
+  font-family: var(--sf-font-display);
+  font-size: var(--sf-text-h2);
+  font-weight: 600;
+  line-height: var(--sf-lh-snug);
+  letter-spacing: var(--sf-track-tight);
+}
+
+.sf-h3-v2 {
+  font-family: var(--sf-font-display);
+  font-size: var(--sf-text-h3);
+  font-weight: 600;
+  line-height: var(--sf-lh-snug);
+  letter-spacing: var(--sf-track-normal);
+}
+
+.sf-lede {
+  font-size: var(--sf-text-lg);
+  font-weight: 400;
+  line-height: var(--sf-lh-normal);
+  letter-spacing: var(--sf-track-normal);
+  color: var(--sf-fg-2);
+}
+
+.sf-container {
+  max-width: var(--sf-max-width);
+  margin: 0 auto;
+  padding-left: var(--sf-space-xl);
+  padding-right: var(--sf-space-xl);
+}
+
+.sf-container-prose {
+  max-width: var(--sf-max-width-prose);
+  margin: 0 auto;
+  padding-left: var(--sf-space-xl);
+  padding-right: var(--sf-space-xl);
+}
+
+/* =====================================================================
+   v2 keyframes (required by sf-* animations and handoff markup)
+   ===================================================================== */
+@keyframes sf-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes sf-walk {
+  0%, 100% { transform: rotate(-8deg); }
+  50% { transform: rotate(8deg); }
+}
+
+@keyframes sf-idle-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-1.5px); }
+}
+
+@keyframes sf-ticker {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+
+/* =====================================================================
+   ShipFlare v1 — Apple-inspired (DESIGN.md) — PRESERVED
+   Existing routes (today, dashboard, etc.) still consume these tokens.
+   ===================================================================== */
 @theme inline {
   /* Override Tailwind defaults: SF Pro system stack */
   --default-font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display",
