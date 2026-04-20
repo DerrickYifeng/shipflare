@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { auth } from '@/lib/auth';
 import { redirect } from 'next/navigation';
 import { db } from '@/lib/db';
-import { products, channels } from '@/lib/db/schema';
+import { products, channels, planItems } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { TodayContent } from './today-content';
 
@@ -13,10 +13,11 @@ export const metadata: Metadata = { title: 'Today' };
 export const dynamic = 'force-dynamic';
 
 /**
- * Phase 2 stub: todo_items + x_content_calendar tables were dropped when the
- * planner refresh migration landed. The real feed is rebuilt on top of
- * plan_items in Phase 8/13. Until then this page renders TodayContent with
- * an empty fallback so the UI shell stays reachable during the migration.
+ * Server-rendered shell for `/today`. Resolves the onboarding gate and
+ * seeds the client with flags it would otherwise re-fetch on mount —
+ * `hasChannel`, `isFirstRun`, and `onboardingCompletedAt`. The live
+ * plan_items feed is fetched client-side by `use-today.ts` against
+ * `/api/today`.
  */
 export default async function TodayPage() {
   const session = await auth();
@@ -34,13 +35,27 @@ export default async function TodayPage() {
     .limit(1);
   if (!product) redirect('/onboarding');
 
-  // Connected-channel gate — drives the Scan-now disabled state + FirstRun
-  // branching in a single server round-trip.
-  const [anyChannel] = await db
-    .select({ id: channels.id })
-    .from(channels)
-    .where(eq(channels.userId, userId))
-    .limit(1);
+  // Parallel reads for the three server-driven flags. First-run detection
+  // keys off `plan_items` presence — a committed product without any plan
+  // items (which happens during the minute between commit + first plan
+  // materialization, or after the planner errors out) still reads as
+  // first-run so the user sees the agent-warmup state rather than an
+  // empty inbox.
+  const [anyChannelRow, firstPlanItem] = await Promise.all([
+    db
+      .select({ id: channels.id })
+      .from(channels)
+      .where(eq(channels.userId, userId))
+      .limit(1),
+    db
+      .select({ id: planItems.id })
+      .from(planItems)
+      .where(eq(planItems.userId, userId))
+      .limit(1),
+  ]);
+
+  const hasChannel = anyChannelRow.length > 0;
+  const hasAnyPlanItems = firstPlanItem.length > 0;
 
   const fallbackData = {
     items: [],
@@ -53,8 +68,8 @@ export default async function TodayPage() {
 
   return (
     <TodayContent
-      isFirstRun={true}
-      hasChannel={!!anyChannel}
+      isFirstRun={!hasAnyPlanItems}
+      hasChannel={hasChannel}
       fallbackData={fallbackData}
       yesterdayTop={null}
       lastScanAt={null}
