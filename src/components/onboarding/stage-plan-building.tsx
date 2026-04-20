@@ -75,7 +75,22 @@ export function StagePlanBuilding({
   const responseRef = useRef<PlanResponse | null>(null);
   const stateLabel = draft.productState ?? 'launching';
 
+  // Read draft + channels via refs so the effect below can be a one-shot
+  // on mount. Using them as useEffect deps would rerun + abort the planner
+  // fetch every time OnboardingFlow's `draft` object reference changes,
+  // which happens on unrelated autosaves.
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const channelsRef = useRef(connectedChannels);
+  channelsRef.current = connectedChannels;
+
+  // One-shot on mount. React Strict Mode in dev double-invokes mount
+  // effects (mount → cleanup → mount); the `startedRef` latch stops the
+  // second invoke from firing a duplicate planner call.
+  const startedRef = useRef(false);
   useEffect(() => {
+    if (startedRef.current) return;
+    startedRef.current = true;
     const controller = new AbortController();
     const timeout = setTimeout(
       () => controller.abort(new DOMException('timeout', 'AbortError')),
@@ -84,20 +99,21 @@ export function StagePlanBuilding({
 
     (async () => {
       try {
+        const d = draftRef.current;
+        const ch = channelsRef.current;
         const body: PlanRequest = {
           product: {
-            name: draft.product?.name ?? '',
-            description: draft.product?.description ?? '',
-            valueProp: draft.product?.valueProp || null,
-            keywords: draft.product?.keywords ?? [],
+            name: d.product?.name ?? '',
+            description: d.product?.description ?? '',
+            valueProp: d.product?.valueProp || null,
+            keywords: d.product?.keywords ?? [],
             category: 'dev_tool',
-            targetAudience: draft.audience?.trim() || null,
+            targetAudience: d.audience?.trim() || null,
           },
-          channels:
-            connectedChannels.length > 0 ? connectedChannels : ['reddit', 'x'],
-          state: draft.productState ?? 'launching',
-          launchDate: toIsoOrNull(draft.launchDate),
-          voiceProfile: draft.voice || null,
+          channels: ch.length > 0 ? ch : ['reddit', 'x'],
+          state: d.productState ?? 'launching',
+          launchDate: toIsoOrNull(d.launchDate),
+          voiceProfile: d.voice || null,
         };
 
         const res = await fetch('/api/onboarding/plan', {
@@ -129,9 +145,9 @@ export function StagePlanBuilding({
 
     return () => {
       clearTimeout(timeout);
-      controller.abort();
     };
-  }, [draft, connectedChannels]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleComplete = () => {
     const r = responseRef.current;
