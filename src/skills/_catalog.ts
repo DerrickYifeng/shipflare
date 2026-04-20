@@ -46,6 +46,7 @@ import {
   retrospectiveOutputSchema,
   threadSentimentOutputSchema,
   strategicPathSchema,
+  tacticalPlanSchema,
 } from '@/agents/schemas';
 
 /**
@@ -951,6 +952,15 @@ export const SKILL_CATALOG: readonly SkillMeta[] = [
     inputSchema: strategicPlannerInput,
     outputSchema: strategicPathSchema,
     // Not schedulable as a plan_item — it's the upstream framer.
+    supportedKinds: [],
+  },
+  {
+    name: 'tactical-planner',
+    description:
+      "Read the active strategic path + this week's signals; produce concrete plan_items for the next 7 days. Runs at onboarding commit, Monday cron, and manual re-plan.",
+    inputSchema: tacticalPlannerInput,
+    outputSchema: tacticalPlanSchema,
+    // Not itself a plan_items kind; emits rows of many kinds.
     supportedKinds: [],
   },
 ];

@@ -1,0 +1,564 @@
+# Phase task templates
+
+A library of `plan_items` the tactical planner can schedule, organized
+by phase. Each template carries a `{ kind, title, description, channel,
+userAction, skillName, params }` shape the planner can adapt — it
+should fill in product-specific strings, not emit the template
+verbatim.
+
+Rules:
+- At most 2 `setup_task` + 1 `interview` per week (hard cap).
+- Never duplicate a title already in `currentLaunchTasks` or
+  `completedLastWeek`.
+- The planner picks 2-4 of these per week alongside the content slots.
+- `{product.name}` and similar placeholders get filled at emit time.
+
+---
+
+## foundation (6+ weeks before launch)
+
+Goal: de-risk positioning + plant audience seeds.
+
+### 1. setup_task — Run 5 customer interviews
+- `title`: "Run 5 discovery interviews"
+- `description`: "Follow-up 3 days after product signup (or cold
+  outreach to the target ICP). 30-minute calls, record pain points.
+  Use `generate-interview-questions` for the intent='discovery'
+  script."
+- `channel`: null
+- `userAction`: 'manual'
+- `skillName`: null
+- `params`: `{ targetCount: 5, intent: 'discovery' }`
+
+### 2. interview — Prep interview questions (discovery)
+- `title`: "Generate discovery interview questions"
+- `description`: "Exactly 10 questions tailored to {product.name} +
+  current phase. Founder uses them across the 5 scheduled interviews."
+- `channel`: null
+- `userAction`: 'approve'
+- `skillName`: 'generate-interview-questions'
+- `params`: `{ intent: 'discovery' }`
+
+### 3. setup_task — Extract voice profile
+- `title`: "Voice-scan recent posts"
+- `description`: "Run voice-extractor over the founder's last 30 X
+  posts to seed the style card. Required before any content_post
+  ships."
+- `channel`: 'x'
+- `userAction`: 'approve'
+- `skillName`: 'voice-extractor'
+- `params`: `{ platform: 'x', samplePostCount: 30 }`
+
+### 4. setup_task — Draft waitlist page
+- `title`: "Draft {product.name} waitlist page"
+- `description`: "Generate HTML + structured copy for the waitlist
+  landing. Founder hosts on their domain."
+- `channel`: null
+- `userAction`: 'approve'
+- `skillName`: 'draft-waitlist-page'
+- `params`: `{ includeEmailCapture: true }`
+
+### 5. setup_task — Nail positioning one-liner
+- `title`: "Ship a tested one-liner for {product.name}"
+- `description`: "One sentence that names the outcome + the ICP. Test
+  it on 3 people outside the product — does it survive?"
+- `channel`: null
+- `userAction`: 'manual'
+- `skillName`: null
+- `params`: `{}`
+
+### 6. content_post — Build-in-public opener
+- `title`: "First build-in-public post: why {product.name} exists"
+- `description`: "Story-angle origin. Specific problem you hit last
+  month. End on a question inviting replies."
+- `channel`: 'x'
+- `userAction`: 'approve'
+- `skillName`: 'draft-single-post'
+- `params`: `{ angle: 'story', pillar: '{contentPillars[0]}' }`
+
+### 7. email_send — Waitlist welcome drip
+- `title`: "Welcome email draft for waitlist signups"
+- `description`: "Triggered on first signup. 100-120 words, invite a
+  reply, no CTA."
+- `channel`: 'email'
+- `userAction`: 'approve'
+- `skillName`: 'draft-email'
+- `params`: `{ emailType: 'welcome' }`
+
+### 8. analytics_summary — Week 1 baseline
+- `title`: "Baseline metrics for week 1"
+- `description`: "Baseline posts published + followers + engagement
+  rate. Feeds future retros."
+- `channel`: null
+- `userAction`: 'auto'
+- `skillName`: 'analytics-summarize'
+- `params`: `{}`
+
+### 9. content_post — Contrarian week-opener
+- `title`: "Contrarian post: the category assumption {product.name} rejects"
+- `description`: "One claim against the default solution in the
+  category. Defend with a specific reason."
+- `channel`: 'x'
+- `userAction`: 'approve'
+- `skillName`: 'draft-single-post'
+- `params`: `{ angle: 'contrarian', pillar: '{contentPillars[1]}' }`
+
+### 10. setup_task — Seed waitlist with 10 founders
+- `title`: "Seed waitlist with 10 founders from your network"
+- `description`: "Warm outreach to 10 founders in the ICP. No
+  pitch — just 'I'm building X, curious if this maps to your pain.'"
+- `channel`: null
+- `userAction`: 'manual'
+- `skillName`: null
+- `params`: `{ targetCount: 10 }`
+
+---
+
+## audience (8-28 days before launch)
+
+Goal: build launch-ready audience. Weekly rhythm matters most here.
+
+### 1. content_post — Data-angle post on shipped signal
+- `title`: "Data post: what shipping {recentMilestone.title} revealed"
+- `description`: "One number + its implication. Lead with the metric,
+  unpack why it matters."
+- `channel`: 'x'
+- `userAction`: 'approve'
+- `skillName`: 'draft-single-post'
+- `params`: `{ angle: 'data', pillar: '{contentPillars[0]}' }`
+
+### 2. content_post — Howto playbook post
+- `title`: "Howto post: the 5-step workflow {product.name} enables"
+- `description`: "Imperative walkthrough of one end-to-end workflow.
+  Each step independently verifiable."
+- `channel`: 'x'
+- `userAction`: 'approve'
+- `skillName`: 'draft-single-post'
+- `params`: `{ angle: 'howto', pillar: '{contentPillars[1]}' }`
+
+### 3. content_reply — Reply-guy engine session
+- `title`: "Reply session: 5 high-signal replies this hour"
+- `description`: "Review monitor queue, draft 5 replies within the
+  15-min window. Max 3 to the same community."
+- `channel`: 'x'
+- `userAction`: 'approve'
+- `skillName`: 'draft-single-reply'
+- `params`: `{ targetCount: 5 }`
+
+### 4. setup_task — Identify and queue 20 hunters
+- `title`: "Build hunter target list for Product Hunt"
+- `description`: "20 hunters who've launched in this category in the
+  last 90 days. Store their handles + recent hunts for personalization."
+- `channel`: null
+- `userAction`: 'manual'
+- `skillName`: null
+- `params`: `{ targetCount: 20 }`
+
+### 5. launch_asset — Community rules scan (reddit)
+- `title`: "Read rules for target subreddits"
+- `description`: "Run fetch-community-rules across the 2-4 target
+  subreddits to know the self-promotion policy before posting."
+- `channel`: 'reddit'
+- `userAction`: 'approve'
+- `skillName`: 'fetch-community-rules'
+- `params`: `{}`
+
+### 6. email_send — Weekly build-in-public email
+- `title`: "Weekly update email to waitlist"
+- `description`: "One shipped milestone + one pre-launch date update.
+  120-180 words."
+- `channel`: 'email'
+- `userAction`: 'approve'
+- `skillName`: 'draft-email'
+- `params`: `{ emailType: 'drip_week_1' }`
+
+### 7. interview — Activation interviews (current signups)
+- `title`: "Run 3 activation interviews with beta users"
+- `description`: "30-min calls with users who signed up but didn't
+  activate. Use `generate-interview-questions` intent='activation'."
+- `channel`: null
+- `userAction`: 'manual'
+- `skillName`: null
+- `params`: `{ targetCount: 3, intent: 'activation' }`
+
+### 8. content_post — Case post referencing an interviewed user
+- `title`: "Case post: what {customer} discovered with {product.name}"
+- `description`: "One user's specific outcome, with consent. Reader-
+  facing generalization in the last sentence."
+- `channel`: 'x'
+- `userAction`: 'approve'
+- `skillName`: 'draft-single-post'
+- `params`: `{ angle: 'case', pillar: '{contentPillars[2]}' }`
+
+### 9. launch_asset — Community hot-posts scan
+- `title`: "Read hot posts in target subreddits"
+- `description`: "Run fetch-community-hot-posts to derive top formats
+  + a weekly insight before posting in each sub."
+- `channel`: 'reddit'
+- `userAction`: 'approve'
+- `skillName`: 'fetch-community-hot-posts'
+- `params`: `{ limit: 25 }`
+
+### 10. analytics_summary — Weekly rhythm check
+- `title`: "Analytics summary for week {weekIndex}"
+- `description`: "Compare to prior week; flag whether cadence is on
+  plan."
+- `channel`: null
+- `userAction`: 'auto'
+- `skillName`: 'analytics-summarize'
+- `params`: `{}`
+
+---
+
+## momentum (T-7 to T-1)
+
+Goal: maximize launch-day reach. Fewer net-new projects; tighten every asset.
+
+### 1. launch_asset — Draft launch-day comment
+- `title`: "Pinned maker comment for Product Hunt launch"
+- `description`: "draft-launch-day-comment with one of four hook
+  kinds. Pin within 5min of T-0."
+- `channel`: 'producthunt'
+- `userAction`: 'approve'
+- `skillName`: 'draft-launch-day-comment'
+- `params`: `{}`
+
+### 2. launch_asset — Hunter outreach batch (10 DMs)
+- `title`: "Personalized hunter DMs (batch of 10)"
+- `description`: "draft-hunter-outreach per hunter from your target
+  list. Deduplicate on (hunter, personalizationHook)."
+- `channel`: 'producthunt'
+- `userAction`: 'approve'
+- `skillName`: 'draft-hunter-outreach'
+- `params`: `{ batchSize: 10 }`
+
+### 3. launch_asset — Gallery image + video briefs
+- `title`: "Briefs for PH gallery image + 30s video"
+- `description`: "generate-launch-asset-brief for gallery_image and
+  video_30s. Designer has 3-7 days to execute."
+- `channel`: null
+- `userAction`: 'approve'
+- `skillName`: 'generate-launch-asset-brief'
+- `params`: `{ assetTypes: ['gallery_image', 'video_30s'] }`
+
+### 4. launch_asset — Build launch-day runsheet
+- `title`: "Hourly runsheet for launch day"
+- `description`: "build-launch-runsheet with T-1 through T+12 beats
+  across channels."
+- `channel`: null
+- `userAction`: 'approve'
+- `skillName`: 'build-launch-runsheet'
+- `params`: `{}`
+
+### 5. content_post — Daily thesis post
+- `title`: "Daily launch-week thesis anchor"
+- `description`: "One post per day, each a different angle on the
+  week's theme. 5 posts across the week."
+- `channel`: 'x'
+- `userAction`: 'approve'
+- `skillName`: 'draft-single-post'
+- `params`: `{ angle: 'claim' }`
+
+### 6. email_send — Pre-launch reminder to waitlist
+- `title`: "T-1 reminder email to waitlist"
+- `description`: "120-140 words. Explicit launch URL + time zone."
+- `channel`: 'email'
+- `userAction`: 'approve'
+- `skillName`: 'draft-email'
+- `params`: `{ emailType: 'drip_week_2' }`
+
+### 7. setup_task — Verify launch assets ready
+- `title`: "Pre-launch asset readiness check"
+- `description`: "Confirm gallery image / video / waitlist email /
+  first comment are all ready T-1."
+- `channel`: null
+- `userAction`: 'manual'
+- `skillName`: null
+- `params`: `{}`
+
+### 8. setup_task — Top-supporter identification
+- `title`: "Identify top 10 supporters for launch thanks"
+- `description`: "identify-top-supporters across X engagement last
+  14 days. Prep the T+2 thank-you list."
+- `channel`: null
+- `userAction`: 'approve'
+- `skillName`: 'identify-top-supporters'
+- `params`: `{ topN: 10 }`
+
+### 9. metrics_compute — Launch baseline snapshot
+- `title`: "Pre-launch metrics snapshot"
+- `description`: "Baseline for post-launch comparison. Follower count,
+  impressions, engagement rate."
+- `channel`: null
+- `userAction`: 'auto'
+- `skillName`: 'metrics-compute'
+- `params`: `{}`
+
+### 10. content_post — Contrarian pre-launch post
+- `title`: "Contrarian post: {category} assumption we're rejecting"
+- `description`: "One stated-against claim aimed at the launch week's
+  thesis."
+- `channel`: 'x'
+- `userAction`: 'approve'
+- `skillName`: 'draft-single-post'
+- `params`: `{ angle: 'contrarian' }`
+
+---
+
+## launch (T-0 day)
+
+Goal: execute the runsheet. Typically no new tactical-planner plan
+items here — the runsheet rows ARE the plan. Planner only schedules:
+
+### 1. runsheet_beat — T-0 launch post on X
+- `title`: "Post launch announcement on X"
+- `description`: "From the runsheet. Post anchored to the week's
+  thesis."
+- `channel`: 'x'
+- `userAction`: 'approve'
+- `skillName`: 'draft-single-post'
+- `params`: `{ angle: 'claim', priority: 'critical' }`
+
+### 2. runsheet_beat — Pin maker comment (T-0)
+- `title`: "Pin the pinned maker comment"
+- `description`: "Within 5 minutes of T-0."
+- `channel`: 'producthunt'
+- `userAction`: 'manual'
+- `skillName`: null
+- `params`: `{ priority: 'critical' }`
+
+### 3. runsheet_beat — Send launch-day email
+- `title`: "Send launch email to waitlist"
+- `description`: "Within 30 min of T-0."
+- `channel`: 'email'
+- `userAction`: 'approve'
+- `skillName`: 'draft-email'
+- `params`: `{ emailType: 'retro_launch', priority: 'critical' }`
+
+### 4. runsheet_beat — Thank hunter in PH thread (T+2h)
+- `title`: "Public thank-you to hunter in PH thread"
+- `description`: "Reply in the launch thread, not DM."
+- `channel`: 'producthunt'
+- `userAction`: 'manual'
+- `skillName`: null
+- `params`: `{ priority: 'critical' }`
+
+### 5. runsheet_beat — Personal replies to first 10 supporters
+- `title`: "Reply session to top 10 supporters"
+- `description`: "One personalized reply each within first 2 hours."
+- `channel`: 'x'
+- `userAction`: 'approve'
+- `skillName`: 'draft-single-reply'
+- `params`: `{ targetCount: 10, priority: 'high' }`
+
+(Planner may emit additional runsheet_beats depending on the output
+of the build-launch-runsheet skill, which runs in momentum.)
+
+---
+
+## compound (T+0 to T+30)
+
+Goal: convert launch-day audience into retention + second wave.
+
+### 1. content_post — Day 3 retro post
+- `title`: "Day-3 launch retrospective"
+- `description`: "Numbers + one surprise + one miss + next-7-day
+  focus. 200-240 words."
+- `channel`: 'x'
+- `userAction`: 'approve'
+- `skillName`: 'draft-single-post'
+- `params`: `{ angle: 'data', pillar: 'retro' }`
+
+### 2. email_send — Thank-you email to top supporters
+- `title`: "Personal thank-you emails to top 10 supporters"
+- `description`: "Individually drafted (not batch-blast). Reference
+  their specific action."
+- `channel`: 'email'
+- `userAction`: 'approve'
+- `skillName`: 'draft-email'
+- `params`: `{ emailType: 'thank_you', targetCount: 10 }`
+
+### 3. interview — Retention interviews
+- `title`: "Run 3 retention interviews"
+- `description`: "Users with ≥3 active days post-launch. Use
+  intent='retention' script."
+- `channel`: null
+- `userAction`: 'manual'
+- `skillName`: null
+- `params`: `{ targetCount: 3, intent: 'retention' }`
+
+### 4. analytics_summary — Post-launch top supporters
+- `title`: "Identify top supporters from launch week"
+- `description`: "identify-top-supporters across the 7-day launch
+  window. Feeds the thank-you list."
+- `channel`: null
+- `userAction`: 'auto'
+- `skillName`: 'identify-top-supporters'
+- `params`: `{ windowDays: 7, topN: 30 }`
+
+### 5. content_post — Case post referencing a new user
+- `title`: "Case post: an early user's specific outcome"
+- `description`: "With consent. Anchored to the week's theme."
+- `channel`: 'x'
+- `userAction`: 'approve'
+- `skillName`: 'draft-single-post'
+- `params`: `{ angle: 'case' }`
+
+### 6. setup_task — Plan next-milestone brief
+- `title`: "Write brief for v1.1 (or next milestone)"
+- `description`: "One page. Top-3 thing to do + success criterion."
+- `channel`: null
+- `userAction`: 'manual'
+- `skillName`: null
+- `params`: `{}`
+
+### 7. analytics_summary — Week-2 retention check
+- `title`: "Week-2 retention check"
+- `description`: "analytics-summarize for W2 vs W1. Flag if retention
+  drops below 40%."
+- `channel`: null
+- `userAction`: 'auto'
+- `skillName`: 'analytics-summarize'
+- `params`: `{ window: 'week' }`
+
+### 8. content_post — Synthesis post (pattern across launch week)
+- `title`: "Synthesis post: pattern across launch-week users"
+- `description`: "3+ specific observations → one pattern. Earns
+  authority by width."
+- `channel`: 'x'
+- `userAction`: 'approve'
+- `skillName`: 'draft-single-post'
+- `params`: `{ angle: 'synthesis' }`
+
+### 9. content_reply — Second-wave community posts
+- `title`: "Reply session in communities that didn't catch launch"
+- `description`: "Pick 2-3 subs/communities that missed the launch.
+  Post a teardown-style entry, not a promo."
+- `channel`: 'reddit'
+- `userAction`: 'approve'
+- `skillName`: 'draft-single-reply'
+- `params`: `{ targetCount: 3 }`
+
+### 10. launch_asset — Compile launch retrospective post
+- `title`: "Long-form launch retrospective"
+- `description`: "compile-retrospective with scope='launch'. Typically
+  runs T+5 to T+7."
+- `channel`: null
+- `userAction`: 'approve'
+- `skillName`: 'compile-retrospective'
+- `params`: `{ scope: 'launch' }`
+
+---
+
+## steady (T+30+)
+
+Goal: durable rhythm. No panic moves.
+
+### 1. content_post — Weekly thesis post
+- `title`: "This week's thesis post"
+- `description`: "Anchored to thesisArc[thisWeek].theme. Angle per
+  angleMix."
+- `channel`: 'x'
+- `userAction`: 'approve'
+- `skillName`: 'draft-single-post'
+- `params`: `{}`
+
+### 2. content_reply — Reply session
+- `title`: "Reply session for the week"
+- `description`: "5 high-signal replies within the 15-min window."
+- `channel`: 'x'
+- `userAction`: 'approve'
+- `skillName`: 'draft-single-reply'
+- `params`: `{ targetCount: 5 }`
+
+### 3. email_send — Weekly digest
+- `title`: "Weekly digest email"
+- `description`: "One insight per week. 140-220 words."
+- `channel`: 'email'
+- `userAction`: 'approve'
+- `skillName`: 'draft-email'
+- `params`: `{ emailType: 'drip_retention' }`
+
+### 4. analytics_summary — Weekly rhythm check
+- `title`: "Weekly analytics summary"
+- `description`: "analytics-summarize; recommended next moves feed
+  next week's planner run."
+- `channel`: null
+- `userAction`: 'auto'
+- `skillName`: 'analytics-summarize'
+- `params`: `{}`
+
+### 5. setup_task — Quarterly replan review
+- `title`: "Review quarterly strategic replan"
+- `description`: "Only emitted the first Monday of each quarter.
+  Triggers a strategic-planner regeneration."
+- `channel`: null
+- `userAction`: 'manual'
+- `skillName`: null
+- `params`: `{ cadence: 'quarterly' }`
+
+### 6. interview — Pricing or retention interviews
+- `title`: "Run 2 pricing / retention interviews"
+- `description`: "Rotating intent across the quarter. Use
+  generate-interview-questions."
+- `channel`: null
+- `userAction`: 'manual'
+- `skillName`: null
+- `params`: `{ targetCount: 2 }`
+
+### 7. content_post — Win-back post (cohort-specific)
+- `title`: "Win-back angle post for dormant cohort"
+- `description`: "One specific thing shipped that might bring them
+  back. Data-angle."
+- `channel`: 'x'
+- `userAction`: 'approve'
+- `skillName`: 'draft-single-post'
+- `params`: `{ angle: 'data' }`
+
+### 8. email_send — Win-back cohort email
+- `title`: "Win-back email to dormant users"
+- `description`: "Acknowledge absence briefly, one concrete change,
+  soft CTA."
+- `channel`: 'email'
+- `userAction`: 'approve'
+- `skillName`: 'draft-email'
+- `params`: `{ emailType: 'win_back' }`
+
+### 9. launch_asset — Next-milestone runsheet
+- `title`: "Runsheet for upcoming v1.x milestone"
+- `description`: "Smaller runsheet for a feature launch, not a full
+  product launch."
+- `channel`: null
+- `userAction`: 'approve'
+- `skillName`: 'build-launch-runsheet'
+- `params`: `{ scope: 'feature' }`
+
+### 10. content_post — Synthesis / case cadence
+- `title`: "Monthly case or synthesis post"
+- `description`: "Rotates between case (named user outcome) and
+  synthesis (pattern across many). One per month."
+- `channel`: 'x'
+- `userAction`: 'approve'
+- `skillName`: 'draft-single-post'
+- `params`: `{ angle: 'case' }`
+
+---
+
+## Selection guidance
+
+- **Every week** needs ≥ 1 `analytics_summary` (auto-action,
+  non-intrusive).
+- **audience+ weeks** need 1 `interview` or `setup_task` that pushes
+  the user off-platform.
+- **momentum week** should have MOSTLY prep-focused `launch_asset`
+  items, not net-new content.
+- **Any phase** — if `completedLastWeek` shows no posts, bump
+  `content_post` count by +1 above `channelMix.{ch}.perWeek`. The
+  founder skipped last week; re-plant cadence gently.
+
+## Placeholder substitution
+
+Strings containing `{product.name}`, `{contentPillars[N]}`,
+`{recentMilestone.title}`, etc. get filled at emit time. If a
+referenced field is missing, omit the placeholder rather than emit
+`{...}` literally.
