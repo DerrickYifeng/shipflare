@@ -14,6 +14,28 @@ export default defineConfig({
   reporter: 'html',
   timeout: 30_000,
 
+  // Visual-regression baselines live next to the tests so they're easy to
+  // eyeball in PR diffs. `actual` + `diff` PNGs land in `test-results/`
+  // (already gitignored) — only the blessed baseline is tracked.
+  snapshotPathTemplate:
+    '{testDir}/../screenshots/{testFileName}/baseline/{arg}{ext}',
+  expect: {
+    toHaveScreenshot: {
+      // 3% of pixels may drift. Tuned empirically: stage 3 mobile hovers
+      // around 2% drift across runs even with animations disabled + a
+      // stagger-settle wait, likely subpixel font rendering. A real
+      // visual regression (color/layout/missing element) produces 10%+
+      // diff — plenty of headroom. Lower this only after pinning the
+      // render platform.
+      maxDiffPixelRatio: 0.03,
+      // Disable the CSS-animation settling heuristic; the six-step
+      // animator pulses forever and would stall Playwright's default
+      // wait. Does NOT disable CSS transitions, which still fire on
+      // state changes — mount the stage fully before snapping.
+      animations: 'disabled',
+    },
+  },
+
   use: {
     baseURL: 'http://localhost:3000',
     trace: 'on-first-retry',

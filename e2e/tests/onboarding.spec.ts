@@ -88,10 +88,12 @@ test.describe('Onboarding v3: desktop happy URL path', () => {
     await page.getByRole('button', { name: /Scan website/i }).click();
 
     // -- Stage 2 (scanning) → Stage 3 (review) --
-    // Six-step animator runs ~5-8s. Wait for Stage 3's heading.
+    // Six-step animator runs ~5-8s. Wait for Stage 3's heading AND the
+    // staggered reveal to fully settle before snapping.
     await expect(
       page.getByRole('heading', { level: 2, name: /Here's what we found/i }),
     ).toBeVisible({ timeout: 25_000 });
+    await expect(page.getByText(/What happens next:/)).toBeVisible();
     await shot(page, 'stage3-review-desktop');
 
     // Name input is pre-filled from extract mock. The placeholder is also
@@ -309,6 +311,10 @@ test.describe('Onboarding v3: mobile viewport', () => {
     await expect(
       page.getByRole('heading', { level: 2, name: /Here's what we found/i }),
     ).toBeVisible({ timeout: 25_000 });
+    // Stage 3 reveals 6 fields staggered at 90ms intervals; the "What
+    // happens next" block appears last. Wait for it before snapping so
+    // the baseline vs actual diff isn't driven by stagger timing.
+    await expect(page.getByText(/What happens next:/)).toBeVisible();
     await shot(page, 'stage3-review-mobile');
     await page.getByRole('button', { name: /Looks good, continue/i }).click();
 
