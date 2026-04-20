@@ -70,16 +70,36 @@ function relativeTime(iso: string | null): string | null {
 const HALLUCINATED_POSTED_AT = '2021-01-01T00:00:00.000Z';
 
 /**
- * Mirror of the source-filter-rail helper: strip the noisy "X - " / "X / "
- * prefix the discovery agent writes into `community` for X threads because
- * X has no community concept. Reddit values like `r/startups` pass through.
+ * Platform-native primary identifier for the header.
+ *   Reddit → `r/{community}` (the subreddit — what matters most on Reddit)
+ *   X      → `@{author}` (X has no community concept; the author IS the handle)
+ * Returns `null` when neither is available so the caller can skip rendering.
  */
-function formatCommunityLabel(platform: string, community: string): string {
+function primaryIdentifier(
+  platform: string,
+  community: string | null | undefined,
+  author: string | null | undefined,
+): string | null {
   if (platform === 'x') {
-    const cleaned = community.replace(/^X\s*[-/]\s*/i, '').trim();
-    return cleaned || 'mentions';
+    if (!author) return null;
+    return author.startsWith('@') ? author : `@${author}`;
   }
-  return community;
+  return community || null;
+}
+
+/**
+ * Secondary line beneath the primary identifier.
+ *   Reddit → `u/{author}` (the poster; secondary to the subreddit)
+ *   X      → null (author already shown as primary)
+ */
+function secondaryIdentifier(
+  platform: string,
+  author: string | null | undefined,
+): string | null {
+  if (platform === 'reddit' && author) {
+    return author.startsWith('u/') ? author : `u/${author}`;
+  }
+  return null;
 }
 
 function threadTimestamp(
@@ -130,6 +150,12 @@ export function ReplyCard({
     item.threadPostedAt,
     item.threadDiscoveredAt,
   );
+  const primary = primaryIdentifier(
+    item.platform,
+    item.community,
+    item.threadAuthor,
+  );
+  const secondary = secondaryIdentifier(item.platform, item.threadAuthor);
 
   const handleSaveEdit = () => {
     onEdit(item.id, editBody);
@@ -177,7 +203,7 @@ export function ReplyCard({
   return (
     <article ref={rootRef} style={articleStyle} aria-busy={isOptimistic || undefined}>
       {isPosting ? <PostingProgressBar durationMs={5_000} /> : null}
-      {/* Header: platform glyph + author + thread meta + confidence */}
+      {/* Header: platform-native primary identifier + score · right-aligned badges */}
       <header
         style={{
           display: 'flex',
@@ -193,90 +219,58 @@ export function ReplyCard({
             style={{
               display: 'flex',
               alignItems: 'baseline',
-              gap: 6,
+              gap: 8,
               flexWrap: 'wrap',
             }}
           >
-            {item.threadAuthor ? (
-              item.threadUrl ? (
-                <a
-                  href={item.threadUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{
-                    fontSize: 'var(--sf-text-sm)',
-                    fontWeight: 600,
-                    color: 'var(--sf-fg-1)',
-                    textDecoration: 'none',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 4,
-                  }}
-                  title="Open original post"
-                >
-                  {item.threadAuthor}
-                  <span
-                    aria-hidden="true"
-                    style={{
-                      fontSize: 'var(--sf-text-xs)',
-                      color: 'var(--sf-signal-ink)',
-                    }}
-                  >
-                    ↗
-                  </span>
-                </a>
-              ) : (
-                <span
-                  style={{
-                    fontSize: 'var(--sf-text-sm)',
-                    fontWeight: 600,
-                    color: 'var(--sf-fg-1)',
-                  }}
-                >
-                  {item.threadAuthor}
-                </span>
-              )
-            ) : null}
-            {item.community ? (
+            {primary && (
               <span
                 style={{
-                  fontSize: 'var(--sf-text-xs)',
-                  color: 'var(--sf-fg-3)',
-                  letterSpacing: 'var(--sf-track-normal)',
-                  whiteSpace: 'nowrap',
+                  fontSize: 'var(--sf-text-sm)',
+                  fontWeight: 600,
+                  color: 'var(--sf-fg-1)',
+                  letterSpacing: 'var(--sf-track-tight)',
                 }}
               >
-                in{' '}
-                <span style={{ color: 'var(--sf-fg-2)', fontWeight: 500 }}>
-                  {formatCommunityLabel(item.platform, item.community)}
-                </span>
-              </span>
-            ) : null}
-          </div>
-          <MetaRow>
-            {postedLabel && (
-              <span style={{ whiteSpace: 'nowrap' }}>
-                {postedPrefix}
-                {postedLabel}
+                {primary}
               </span>
             )}
             {item.threadUpvotes != null && (
-              <>
-                <Dot />
-                <span style={{ whiteSpace: 'nowrap' }}>
-                  ↑ {item.threadUpvotes}
-                </span>
-              </>
+              <span
+                className="sf-mono"
+                style={{
+                  fontSize: 'var(--sf-text-xs)',
+                  color: 'var(--sf-fg-3)',
+                  letterSpacing: 'var(--sf-track-mono)',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                ↑ {item.threadUpvotes}
+              </span>
             )}
-            {item.threadCommentCount != null && (
-              <>
-                <Dot />
+          </div>
+          {(secondary || postedLabel) && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                marginTop: 2,
+                fontSize: 'var(--sf-text-xs)',
+                color: 'var(--sf-fg-3)',
+                letterSpacing: 'var(--sf-track-normal)',
+              }}
+            >
+              {secondary && <span>{secondary}</span>}
+              {secondary && postedLabel && <Dot />}
+              {postedLabel && (
                 <span style={{ whiteSpace: 'nowrap' }}>
-                  💬 {item.threadCommentCount}
+                  {postedPrefix}
+                  {postedLabel}
                 </span>
-              </>
-            )}
-          </MetaRow>
+              )}
+            </div>
+          )}
         </div>
         <div
           style={{
@@ -295,22 +289,53 @@ export function ReplyCard({
         </div>
       </header>
 
-      {/* Thread quote — blockquote style, no nested card */}
+      {/* Original content — hover-liftable, click opens threadUrl in new tab */}
       {item.threadBody ? (
-        <blockquote
-          style={{
-            margin: '14px 18px 0 18px',
-            padding: '0 0 0 14px',
-            borderLeft: '2px solid var(--sf-border)',
-            fontSize: 'var(--sf-text-sm)',
-            lineHeight: 'var(--sf-lh-normal)',
-            color: 'var(--sf-fg-2)',
-            letterSpacing: 'var(--sf-track-normal)',
-            fontStyle: 'normal',
-          }}
-        >
-          {item.threadBody}
-        </blockquote>
+        <ThreadContentLink href={item.threadUrl}>
+          <blockquote
+            style={{
+              margin: 0,
+              padding: '0 0 0 14px',
+              borderLeft: '2px solid var(--sf-border)',
+              fontSize: 'var(--sf-text-sm)',
+              lineHeight: 'var(--sf-lh-normal)',
+              color: 'var(--sf-fg-2)',
+              letterSpacing: 'var(--sf-track-normal)',
+              fontStyle: 'normal',
+            }}
+          >
+            {item.threadBody}
+          </blockquote>
+          {/* Exposure / engagement row — sits inside the clickable block
+              so "comments" and "discovered time" share the same nav affordance
+              (click anywhere on this zone → open original post). */}
+          <div
+            style={{
+              marginTop: 10,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              fontSize: 'var(--sf-text-xs)',
+              color: 'var(--sf-fg-3)',
+              letterSpacing: 'var(--sf-track-normal)',
+              flexWrap: 'wrap',
+            }}
+          >
+            {item.threadCommentCount != null && (
+              <span style={{ whiteSpace: 'nowrap' }}>
+                💬 {item.threadCommentCount}
+                {item.platform === 'x' ? ' replies' : ' comments'}
+              </span>
+            )}
+            {item.threadCommentCount != null && postedLabel && <Dot />}
+            {postedLabel && (
+              <span style={{ whiteSpace: 'nowrap' }}>
+                {postedPrefix}
+                {postedLabel}
+              </span>
+            )}
+          </div>
+        </ThreadContentLink>
       ) : null}
 
       {/* Draft reply area */}
@@ -459,28 +484,65 @@ export function ReplyCard({
   );
 }
 
-/* ── Meta row + dot ────────────────────────────────────────────────── */
-
-function MetaRow({ children }: { children: ReactNode }) {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-        fontSize: 'var(--sf-text-xs)',
-        color: 'var(--sf-fg-3)',
-        letterSpacing: 'var(--sf-track-normal)',
-        flexWrap: 'wrap',
-      }}
-    >
-      {children}
-    </div>
-  );
-}
+/* ── Dot separator ─────────────────────────────────────────────────── */
 
 function Dot() {
   return <span style={{ color: 'var(--sf-fg-4)' }}>·</span>;
+}
+
+/* ── Thread content link ───────────────────────────────────────────── */
+
+/**
+ * Wraps the original-thread blockquote + metrics in a hover-liftable
+ * anchor pointing at the source post (threadUrl). Click anywhere inside
+ * opens the tweet / Reddit post in a new tab. Compositor-friendly hover:
+ * translateY + shadow, both driven by --sf-ease-swift.
+ *
+ * Falls back to a non-interactive `<div>` when `href` is missing so the
+ * card doesn't claim an affordance it can't honour.
+ */
+function ThreadContentLink({
+  href,
+  children,
+}: {
+  href: string | null;
+  children: ReactNode;
+}) {
+  const [hover, setHover] = useState(false);
+  const sharedStyle: CSSProperties = {
+    display: 'block',
+    margin: '14px 18px 0 18px',
+    padding: '10px 14px 12px 14px',
+    borderRadius: 'var(--sf-radius-md)',
+    background: 'transparent',
+    textDecoration: 'none',
+    color: 'inherit',
+    transition:
+      'transform var(--sf-dur-base) var(--sf-ease-swift), box-shadow var(--sf-dur-base) var(--sf-ease-swift), background var(--sf-dur-base) var(--sf-ease-swift)',
+  };
+
+  if (!href) {
+    return <div style={sharedStyle}>{children}</div>;
+  }
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      title="Open original post"
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        ...sharedStyle,
+        cursor: 'pointer',
+        background: hover ? 'var(--sf-paper-sunken)' : 'transparent',
+        boxShadow: hover ? 'var(--sf-shadow-md)' : 'none',
+        transform: hover ? 'translateY(-2px)' : 'translateY(0)',
+      }}
+    >
+      {children}
+    </a>
+  );
 }
 
 /* ── Priority tag ──────────────────────────────────────────────────── */
