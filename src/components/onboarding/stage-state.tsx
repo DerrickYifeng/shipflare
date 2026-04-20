@@ -16,12 +16,14 @@ import type { LaunchChannel, ProductState, UsersBucket } from './OnboardingFlow'
 interface StageStateProps {
   productState: ProductState | null;
   launchDate: string | null;
+  launchedAt: string | null;
   launchChannel: LaunchChannel | null;
   usersBucket: UsersBucket | null;
   onBack: () => void;
   onChange: (patch: {
     productState?: ProductState;
     launchDate?: string | null;
+    launchedAt?: string | null;
     launchChannel?: LaunchChannel | null;
     usersBucket?: UsersBucket | null;
   }) => void;
@@ -31,6 +33,22 @@ interface StageStateProps {
 function defaultLaunchDate(): string {
   const d = new Date();
   d.setDate(d.getDate() + 7);
+  return d.toISOString().slice(0, 10);
+}
+
+function defaultLaunchedAt(): string {
+  // Default to today — the user most likely launched recently if they're
+  // picking "Launched · growing" in onboarding.
+  return new Date().toISOString().slice(0, 10);
+}
+
+function todayYmd(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function threeYearsAgoYmd(): string {
+  const d = new Date();
+  d.setFullYear(d.getFullYear() - 3);
   return d.toISOString().slice(0, 10);
 }
 
@@ -51,6 +69,7 @@ const miniInputStyle: React.CSSProperties = {
 export function StageState({
   productState,
   launchDate,
+  launchedAt,
   launchChannel,
   usersBucket,
   onBack,
@@ -141,44 +160,64 @@ export function StageState({
             boxShadow: 'var(--sf-shadow-card)',
           }}
         >
-          <OnbMono>{COPY.stage5.usersTitle}</OnbMono>
-          <div
-            style={{
-              marginTop: 12,
-              display: 'flex',
-              gap: 8,
-              flexWrap: 'wrap',
-            }}
-          >
-            {COPY.stage5.userBuckets.map((b) => {
-              const on = usersBucket === b;
-              return (
-                <button
-                  key={b}
-                  type="button"
-                  onClick={() => onChange({ usersBucket: b })}
-                  style={{
-                    padding: '8px 14px',
-                    borderRadius: 980,
-                    background: on ? 'var(--sf-accent)' : 'rgba(0,0,0,0.05)',
-                    color: on ? '#fff' : 'var(--sf-fg-1)',
-                    border: 'none',
-                    cursor: 'pointer',
-                    fontFamily: 'inherit',
-                    fontSize: 13,
-                    letterSpacing: '-0.16px',
-                    transition:
-                      'background 150ms cubic-bezier(0.16,1,0.3,1), color 150ms',
-                  }}
-                >
-                  {b === '100-1k'
-                    ? '100–1k'
-                    : b === '1k-10k'
-                      ? '1k–10k'
-                      : b}
-                </button>
-              );
-            })}
+          <OnbMono>When did you launch?</OnbMono>
+          <div style={{ marginTop: 12 }}>
+            <Field
+              label="Launch date"
+              hint="Any time in the last 3 years — we use this to weight compound-growth planning."
+            >
+              <input
+                type="date"
+                value={launchedAt ?? defaultLaunchedAt()}
+                min={threeYearsAgoYmd()}
+                max={todayYmd()}
+                onChange={(e) => onChange({ launchedAt: e.target.value })}
+                style={miniInputStyle}
+              />
+            </Field>
+          </div>
+          <div style={{ marginTop: 18 }}>
+            <OnbMono>{COPY.stage5.usersTitle}</OnbMono>
+            <div
+              style={{
+                marginTop: 10,
+                display: 'flex',
+                gap: 8,
+                flexWrap: 'wrap',
+              }}
+            >
+              {COPY.stage5.userBuckets.map((b) => {
+                const on = usersBucket === b;
+                return (
+                  <button
+                    key={b}
+                    type="button"
+                    onClick={() => onChange({ usersBucket: b })}
+                    style={{
+                      padding: '8px 14px',
+                      borderRadius: 980,
+                      background: on
+                        ? 'var(--sf-accent)'
+                        : 'rgba(0,0,0,0.05)',
+                      color: on ? '#fff' : 'var(--sf-fg-1)',
+                      border: 'none',
+                      cursor: 'pointer',
+                      fontFamily: 'inherit',
+                      fontSize: 13,
+                      letterSpacing: '-0.16px',
+                      transition:
+                        'background 150ms cubic-bezier(0.16,1,0.3,1), color 150ms',
+                    }}
+                  >
+                    {b === '100-1k'
+                      ? '100–1k'
+                      : b === '1k-10k'
+                        ? '1k–10k'
+                        : b}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
       )}
@@ -200,6 +239,11 @@ export function StageState({
                   productState: 'launching',
                   launchDate: defaultLaunchDate(),
                   launchChannel: launchChannel ?? 'producthunt',
+                });
+              } else if (picked === 'launched' && !launchedAt) {
+                onChange({
+                  productState: 'launched',
+                  launchedAt: defaultLaunchedAt(),
                 });
               } else if (picked !== productState) {
                 onChange({ productState: picked as ProductState });

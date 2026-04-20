@@ -101,18 +101,20 @@ export function StagePlanBuilding({
       try {
         const d = draftRef.current;
         const ch = channelsRef.current;
+        const state = d.productState ?? 'launching';
         const body: PlanRequest = {
           product: {
             name: d.product?.name ?? '',
             description: d.product?.description ?? '',
             valueProp: d.product?.valueProp || null,
             keywords: d.product?.keywords ?? [],
-            category: 'dev_tool',
+            category: d.category,
             targetAudience: d.audience?.trim() || null,
           },
           channels: ch.length > 0 ? ch : ['reddit', 'x'],
-          state: d.productState ?? 'launching',
-          launchDate: toIsoOrNull(d.launchDate),
+          state,
+          launchDate: state === 'launching' ? toIsoOrNull(d.launchDate) : null,
+          launchedAt: state === 'launched' ? toIsoOrNull(d.launchedAt) : null,
           voiceProfile: d.voice || null,
         };
 

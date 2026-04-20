@@ -31,14 +31,26 @@ export type Stage =
 export type ProductState = 'mvp' | 'launching' | 'launched';
 export type LaunchChannel = 'producthunt' | 'showhn' | 'both' | 'other';
 export type UsersBucket = '<100' | '100-1k' | '1k-10k' | '10k+';
+export type ProductCategory =
+  | 'dev_tool'
+  | 'saas'
+  | 'consumer'
+  | 'creator_tool'
+  | 'agency'
+  | 'ai_app'
+  | 'other';
 
 export interface DraftState {
   product: ExtractedProfile | null;
   audience: string;
   voice: string;
+  category: ProductCategory;
   reviewed: boolean;
   productState: ProductState | null;
+  /** Future launch date (YYYY-MM-DD) — `state='launching'` + optional for `mvp`. */
   launchDate: string | null;
+  /** Past launch date (YYYY-MM-DD) — `state='launched'` only. */
+  launchedAt: string | null;
   launchChannel: LaunchChannel | null;
   usersBucket: UsersBucket | null;
   path: StrategicPath | null;
@@ -54,9 +66,11 @@ const INITIAL_DRAFT: DraftState = {
   product: null,
   audience: '',
   voice: '',
+  category: 'other',
   reviewed: false,
   productState: null,
   launchDate: null,
+  launchedAt: null,
   launchChannel: null,
   usersBucket: null,
   path: null,
@@ -100,10 +114,14 @@ interface PersistedDraft {
   valueProp?: string | null;
   keywords?: string[];
   targetAudience?: string | null;
+  category?: ProductCategory;
   channels?: Array<'x' | 'reddit' | 'email'>;
   state?: ProductState;
   launchDate?: string | null;
   launchedAt?: string | null;
+  /** Frontend-only fields (backend schema strips these until plumbed). */
+  launchChannel?: LaunchChannel | null;
+  usersBucket?: UsersBucket | null;
   previewPath?: StrategicPath | null;
   previewPlan?: TacticalPlan | null;
 }
@@ -163,8 +181,12 @@ function applyPersistedToDraft(
     ...existing,
     product,
     audience: persisted.targetAudience ?? existing.audience,
+    category: persisted.category ?? existing.category,
     productState: persisted.state ?? existing.productState,
     launchDate: persisted.launchDate ?? existing.launchDate,
+    launchedAt: persisted.launchedAt ?? existing.launchedAt,
+    launchChannel: persisted.launchChannel ?? existing.launchChannel,
+    usersBucket: persisted.usersBucket ?? existing.usersBucket,
     path: persisted.previewPath ?? existing.path,
     plan: persisted.previewPlan ?? existing.plan,
     sourceKind,
@@ -264,8 +286,12 @@ export function OnboardingFlow({ initialStage }: OnboardingFlowProps = {}) {
         valueProp: d.product?.valueProp ?? null,
         keywords: d.product?.keywords ?? [],
         targetAudience: d.audience || null,
+        category: d.category,
         state: d.productState ?? undefined,
         launchDate: d.launchDate ?? null,
+        launchedAt: d.launchedAt ?? null,
+        launchChannel: d.launchChannel,
+        usersBucket: d.usersBucket,
         previewPath: d.path,
         previewPlan: d.plan,
       };
@@ -511,6 +537,7 @@ function StageRouter({
         <StageState
           productState={draft.productState}
           launchDate={draft.launchDate}
+          launchedAt={draft.launchedAt}
           launchChannel={draft.launchChannel}
           usersBucket={draft.usersBucket}
           onBack={() => setStage('connect')}
@@ -583,21 +610,33 @@ function StageRouter({
             if (!draft.path || !draft.plan || !draft.product) {
               throw new Error('Missing plan or product data');
             }
+            const state = draft.productState ?? 'launching';
             const body = {
               product: {
                 name: draft.product.name,
                 description: draft.product.description,
                 valueProp: draft.product.valueProp || null,
                 keywords: draft.product.keywords,
-                category: 'dev_tool' as const,
+                category: draft.category,
                 targetAudience: draft.audience || null,
                 url: draft.product.url || null,
               },
-              state: draft.productState ?? 'launching',
-              launchDate: draft.launchDate
-                ? new Date(`${draft.launchDate}T00:00:00.000Z`).toISOString()
-                : null,
-              launchedAt: null,
+              state,
+              launchDate:
+                state === 'launching' && draft.launchDate
+                  ? new Date(`${draft.launchDate}T00:00:00.000Z`).toISOString()
+                  : null,
+              launchedAt:
+                state === 'launched' && draft.launchedAt
+                  ? new Date(`${draft.launchedAt}T00:00:00.000Z`).toISOString()
+                  : null,
+              // launchChannel + usersBucket are stripped by the backend Zod
+              // schema today (stays undefined → field omitted). Left in the
+              // payload so when the schema is extended the UI ships zero
+              // extra work. Audit finding #5.
+              launchChannel:
+                state === 'launching' ? draft.launchChannel : null,
+              usersBucket: state === 'launched' ? draft.usersBucket : null,
               path: draft.path,
               plan: draft.plan,
             };
