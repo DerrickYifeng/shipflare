@@ -1,5 +1,7 @@
 # Thesis + 7 Angles Calendar Planner Implementation Plan
 
+> **SUPERSEDED** by [2026-04-20-planner-and-skills-redesign-design.md](../specs/2026-04-20-planner-and-skills-redesign-design.md). The thesis+angles model survives — it is now the output shape of the tactical planner — but the calendar-planner compound agent, x_content_calendar table, and weekly_themes table this plan described are gone.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace the "random sample of 40% metric + 30% educational + …" weekly plan with a **one-thesis-per-week + seven-angles** model (Justin Welsh Content OS + Ship 30 "one idea, 100 ways"), and give `slot-body` cross-tweet coherence so daily drafts form one narrative arc instead of 7 orphan tweets.

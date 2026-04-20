@@ -1,5 +1,7 @@
 # Plan + Reply Journey Redesign — Implementation Plan
 
+> **SUPERSEDED** by [2026-04-20-planner-and-skills-redesign-design.md](../specs/2026-04-20-planner-and-skills-redesign-design.md). The per-item fan-out pattern survives (search-source, plan-execute) but the Plan pipeline specified here — calendar-plan + calendar-slot-draft queues — has been retired. See the 2026-04-20 spec for the replacement state machine.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace monolithic LLM calls with per-item BullMQ fan-out in both the Plan pipeline (Generate Week) and the Reply pipeline (search-based discovery), adding streaming UI, state machines, and retry. Decouple the two pipelines and consolidate discovery to a single-source primitive.
