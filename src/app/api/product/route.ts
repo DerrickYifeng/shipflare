@@ -1,13 +1,14 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { products } from '@/lib/db/schema';
-import { eq } from 'drizzle-orm';
+import { products, voiceProfiles } from '@/lib/db/schema';
+import { desc, eq } from 'drizzle-orm';
 
 /**
  * GET /api/product
  * Returns the authenticated user's product snapshot. Used by the v2 My Product
- * page for SWR revalidation after inline edits.
+ * page for SWR revalidation after inline edits. Also surfaces the voice-scan
+ * completion timestamp so the identity header can render the VERIFIED badge.
  */
 export async function GET() {
   const session = await auth();
@@ -33,6 +34,13 @@ export async function GET() {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
 
+  const [voice] = await db
+    .select({ lastExtractedAt: voiceProfiles.lastExtractedAt })
+    .from(voiceProfiles)
+    .where(eq(voiceProfiles.userId, session.user.id))
+    .orderBy(desc(voiceProfiles.lastExtractedAt))
+    .limit(1);
+
   return NextResponse.json({
     name: row.name,
     description: row.description,
@@ -41,5 +49,6 @@ export async function GET() {
     url: row.url,
     lifecyclePhase: row.lifecyclePhase,
     updatedAt: row.updatedAt.toISOString(),
+    voiceScannedAt: voice?.lastExtractedAt ? voice.lastExtractedAt.toISOString() : null,
   });
 }

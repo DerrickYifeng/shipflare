@@ -1,9 +1,9 @@
 import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
-import { eq } from 'drizzle-orm';
+import { desc, eq } from 'drizzle-orm';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { products } from '@/lib/db/schema';
+import { products, voiceProfiles } from '@/lib/db/schema';
 import { ProductContent, type ProductSnapshot } from './product-content';
 
 export const metadata: Metadata = { title: 'My Product' };
@@ -30,6 +30,16 @@ export default async function ProductPage() {
 
   if (!row) redirect('/onboarding');
 
+  // The product profile is considered "VERIFIED" (i.e. voice scan completed)
+  // when any of the user's voice profiles has a non-null `lastExtractedAt`.
+  // One profile per channel; we take the most recent.
+  const [voice] = await db
+    .select({ lastExtractedAt: voiceProfiles.lastExtractedAt })
+    .from(voiceProfiles)
+    .where(eq(voiceProfiles.userId, session.user.id))
+    .orderBy(desc(voiceProfiles.lastExtractedAt))
+    .limit(1);
+
   const initial: ProductSnapshot = {
     name: row.name,
     description: row.description,
@@ -40,6 +50,7 @@ export default async function ProductPage() {
       ? row.lifecyclePhase
       : 'pre_launch') as Phase,
     updatedAt: row.updatedAt.toISOString(),
+    voiceScannedAt: voice?.lastExtractedAt ? voice.lastExtractedAt.toISOString() : null,
   };
 
   return <ProductContent initial={initial} />;

@@ -37,10 +37,25 @@ const MONTHS = [
   'Nov',
   'Dec',
 ];
-const HOURS = [9, 10, 11, 12, 13, 14, 15, 16, 17, 18];
+const DEFAULT_HOURS: readonly number[] = [9, 10, 11, 12, 13, 14, 15, 16, 17, 18];
 const ROW_H = 52;
 const TOP_PAD = 44;
-const GRID_HEIGHT = TOP_PAD + ROW_H * HOURS.length;
+
+/**
+ * Compute the hour rail for the grid. Takes the min/max hour of the current
+ * week's scheduled items, pads by one hour on each side, and clamps to
+ * [0, 23]. Falls back to 9a–6p when the week is empty. Keeps items that fall
+ * outside the usual 9–18 window (late drafts, early morning sends) visible
+ * on-grid instead of clipped.
+ */
+function computeHourRange(hoursInWeek: readonly number[]): number[] {
+  if (hoursInWeek.length === 0) return [...DEFAULT_HOURS];
+  const min = Math.max(0, Math.floor(Math.min(...hoursInWeek)) - 1);
+  const max = Math.min(23, Math.ceil(Math.max(...hoursInWeek)) + 1);
+  const range: number[] = [];
+  for (let h = min; h <= max; h += 1) range.push(h);
+  return range;
+}
 
 const fetcher = async (url: string) => {
   const res = await fetch(url);
@@ -128,6 +143,17 @@ export function CalendarContent() {
   const weekPostCount = slots.filter(
     (s) => s.kind === 'post' && weekDateKeys.includes(s.date),
   ).length;
+
+  // Dynamic hour rail: pull the min/max hour from the *current* week's items
+  // so early-morning or late-evening sends render on-grid instead of off the
+  // top/bottom. Falls back to 9a–6p when the week is empty.
+  const HOURS = useMemo(() => {
+    const hoursThisWeek = slots
+      .filter((s) => weekDateKeys.includes(s.date))
+      .map((s) => s.hour);
+    return computeHourRange(hoursThisWeek);
+  }, [slots, weekDateKeys]);
+  const GRID_HEIGHT = TOP_PAD + ROW_H * HOURS.length;
 
   const nextSendLabel = useMemo(() => {
     const upcoming = slots

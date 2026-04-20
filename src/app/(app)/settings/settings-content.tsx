@@ -25,12 +25,16 @@ import { usePreferences } from '@/hooks/use-preferences';
 
 type SectionId = 'appearance' | 'account' | 'billing' | 'integrations' | 'safety';
 
+// Order matches the handoff prototype: Theme (Appearance) lives last by
+// convention because it's a cosmetic tab. The `'appearance'` key is preserved
+// for URL-hash stability (no existing deep links to `/settings#appearance`, but
+// we keep the identifier stable in case external links appear).
 const SECTIONS: { id: SectionId; label: string }[] = [
-  { id: 'appearance', label: 'Appearance' },
   { id: 'account', label: 'Account' },
   { id: 'billing', label: 'Billing' },
   { id: 'integrations', label: 'Integrations' },
   { id: 'safety', label: 'Safety' },
+  { id: 'appearance', label: 'Appearance' },
 ];
 
 export interface SettingsUser {
@@ -52,9 +56,11 @@ interface SettingsContentProps {
 }
 
 function readInitialSection(): SectionId {
-  if (typeof window === 'undefined') return 'appearance';
+  // Default to the first section ('account') so fresh visits land on the
+  // practical tab, not the cosmetic one.
+  if (typeof window === 'undefined') return 'account';
   const hash = window.location.hash.slice(1) as SectionId;
-  return SECTIONS.some((s) => s.id === hash) ? hash : 'appearance';
+  return SECTIONS.some((s) => s.id === hash) ? hash : 'account';
 }
 
 export function SettingsContent({ user, connections }: SettingsContentProps) {

@@ -39,7 +39,46 @@ export interface ProductSnapshot {
   url: string | null;
   lifecyclePhase: Phase;
   updatedAt: string;
+  /**
+   * ISO timestamp of the most recent voice-scan extraction across channels.
+   * Non-null → the profile has been through a successful voice scan and the
+   * VERIFIED badge is shown next to the lifecycle phase.
+   */
+  voiceScannedAt: string | null;
 }
+
+/**
+ * Five product-identity fields we preserve as reserved UI slots. These live on
+ * the handoff prototype but do not yet have dedicated schema columns — see
+ * TODOS.md follow-up "Product profile: positioning / ICP / competitors /
+ * approved links schema".  Until the columns land, the rows render with an
+ * inline empty-state message so the UI slot stays claimed and users discover
+ * that running a voice scan will populate them.
+ */
+const PLACEHOLDER_FIELDS: readonly { label: string; hint: string }[] = [
+  {
+    label: 'Tagline',
+    hint: 'One tight line that sets the product apart.',
+  },
+  {
+    label: 'Core positioning',
+    hint: 'Category, wedge, and who it beats.',
+  },
+  {
+    label: 'Primary ICP',
+    hint: 'The first customer you write to by default.',
+  },
+  {
+    label: 'Competitors',
+    hint: 'The three alternatives you get compared to.',
+  },
+  {
+    label: 'Approved links',
+    hint: 'Pages safe to cite in replies (docs, changelog, launch posts).',
+  },
+];
+
+const PLACEHOLDER_EMPTY_COPY = 'Not yet captured — run voice scan';
 
 interface ProductContentProps {
   initial: ProductSnapshot;
@@ -164,6 +203,11 @@ export function ProductContent({ initial }: ProductContentProps) {
                   <h2 className="sf-h3" style={{ margin: 0, color: 'var(--sf-fg-1)' }}>
                     {product.name}
                   </h2>
+                  {product.voiceScannedAt && (
+                    <Badge variant="success" mono>
+                      VERIFIED
+                    </Badge>
+                  )}
                   <Badge variant={phaseVariant(product.lifecyclePhase)} mono>
                     {PHASE_LABEL[product.lifecyclePhase]}
                   </Badge>
@@ -199,6 +243,11 @@ export function ProductContent({ initial }: ProductContentProps) {
                   onCommit={(next) => commitField({ valueProp: next.trim() || null })}
                 />
               </FieldRow>
+              {PLACEHOLDER_FIELDS.map((f) => (
+                <FieldRow key={f.label} label={f.label} muted>
+                  <PlaceholderValue hint={f.hint} />
+                </FieldRow>
+              ))}
               <FieldRow label="Keywords">
                 <KeywordsEditor
                   value={product.keywords}
@@ -350,6 +399,38 @@ function phaseVariant(
   if (phase === 'launched') return 'success';
   if (phase === 'scaling') return 'signal';
   return 'warning';
+}
+
+/**
+ * Read-only empty-state value for FieldRows that are visible in the handoff
+ * prototype but do not yet have schema columns. The cell shows an inline
+ * message + a secondary hint describing what the field will hold once the
+ * voice scan captures it. Keeps the click-to-edit hit target empty so users
+ * don't try to type into a field that would silently drop their input.
+ */
+function PlaceholderValue({ hint }: { hint: string }) {
+  return (
+    <span
+      aria-disabled="true"
+      style={{
+        display: 'inline-flex',
+        flexDirection: 'column',
+        gap: 2,
+        color: 'var(--sf-fg-3)',
+      }}
+    >
+      <span style={{ fontStyle: 'italic' }}>{PLACEHOLDER_EMPTY_COPY}</span>
+      <span
+        style={{
+          fontSize: 11,
+          color: 'var(--sf-fg-4)',
+          lineHeight: 1.4,
+        }}
+      >
+        {hint}
+      </span>
+    </span>
+  );
 }
 
 function CapRow({ label, value }: { label: string; value: string }) {

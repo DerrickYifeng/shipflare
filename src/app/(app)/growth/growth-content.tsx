@@ -165,7 +165,9 @@ export function GrowthContent() {
         >
           {[
             { val: String(COMMUNITIES.length), label: 'ACTIVE COMMUNITIES' },
-            { val: String(KEYWORDS.length + 8), label: 'TRACKED KEYWORDS' },
+            // TODO: wire to real trackedKeywordCount when /api/keywords ships.
+            // For now, reflect the visible watchlist length (no magic padding).
+            { val: String(KEYWORDS.length), label: 'TRACKED KEYWORDS' },
             { val: '38', label: 'THREADS / DAY AVG' },
             { val: '86%', label: 'GATE PASS RATE' },
           ].map((k) => (
