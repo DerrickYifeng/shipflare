@@ -48,19 +48,21 @@ export function useTheme(): ThemeContextValue {
  * Inline script rendered in <head> via <ThemeScript />. Runs before paint so
  * the container can pick up the right class without flicker or hydration
  * mismatch. Sets `document.documentElement.dataset.sfTheme = 'dark' | 'light'`.
+ *
+ * NOTE: intentionally does NOT add `.app-dark` to <html>. The `.app-dark`
+ * class is scoped to the `AppShell` container (authenticated app) so the
+ * marketing surface at `/` — which renders its own `.app-dark` wrapper
+ * when it wants dark, and stays untinted otherwise — is not accidentally
+ * retinted by a cross-surface dark preference. The dataset seed is the
+ * only thing React reads on mount to avoid hydration mismatches.
  */
 export function ThemeScript() {
-  // Seeds the dataset so ThemeProvider.useState can read it synchronously,
-  // and also flips `.app-dark` on <html> before first paint so there's no
-  // theme flash between the server's `app-light` default and the hydrated
-  // container class.
   const script = `
 (function () {
   try {
     var stored = localStorage.getItem('${STORAGE_KEY}');
     var theme = stored === 'dark' || stored === 'light' ? stored : 'light';
     document.documentElement.dataset.sfTheme = theme;
-    if (theme === 'dark') document.documentElement.classList.add('app-dark');
   } catch (e) {
     document.documentElement.dataset.sfTheme = 'light';
   }
@@ -96,9 +98,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Persist and sync dataset + root class whenever theme changes. Keeping
-  // `.app-dark` on <html> in addition to the AppShell container means the
-  // pre-paint script and React stay aligned, preventing a theme flash.
+  // Persist and sync dataset whenever theme changes. `.app-dark` is
+  // applied ONLY to the AppShell container (see `app-shell.tsx`) so
+  // marketing routes in the same document are never retinted.
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY, theme);
@@ -108,8 +110,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     if (typeof document !== 'undefined') {
       const root = document.documentElement;
       root.dataset.sfTheme = theme;
-      root.classList.toggle('app-dark', theme === 'dark');
-      root.classList.toggle('app-light', theme === 'light');
+      // Defensive cleanup: remove any legacy `.app-dark` / `.app-light`
+      // classes that older scripts may have written to <html>.
+      root.classList.remove('app-dark');
+      root.classList.remove('app-light');
     }
   }, [theme]);
 

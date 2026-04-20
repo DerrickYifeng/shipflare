@@ -3,33 +3,24 @@
 /**
  * ShipFlare v2 Sidebar.
  *
- * - 232px fixed width, `--sf-paper-sunken` background.
- * - Signal-glow radial gradient overlay (pointer-events: none).
- * - Nav items: 36px, gradient-active for current route, subtle hover.
- * - User card pinned to bottom with gradient avatar.
+ * Responsive behavior (INTERACTIONS.md §13):
+ *  - ≥1280px → full 232px rail with labels.
+ *  - 1024–1279px → 64px icon-only rail (labels hidden, hover tooltips via title).
+ *  - <1024px → hidden by default; exposed as a top-drawer overlay toggled
+ *    from TopNav's hamburger button. Drawer open state lives in
+ *    `ShellChromeProvider` so TopNav and Sidebar stay in sync.
  *
- * See INTERACTIONS.md §1 for the exact dimensions and color values.
+ * Design tokens (paper-sunken bg, signal-glow overlay, gradient-active nav)
+ * are preserved across all three layouts.
  */
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useState, type ComponentType, type CSSProperties } from 'react';
+import { useEffect, useState, type ComponentType, type CSSProperties } from 'react';
 import { ShipFlareLogo } from '@/components/ui/shipflare-logo';
-
-interface NavItem {
-  href: string;
-  label: string;
-  Icon: ComponentType<{ className?: string }>;
-}
-
-const NAV_ITEMS: NavItem[] = [
-  { href: '/today', label: 'Today', Icon: TodayIcon },
-  { href: '/product', label: 'My Product', Icon: ProductIcon },
-  { href: '/growth', label: 'Growth', Icon: GrowthIcon },
-  { href: '/calendar', label: 'Calendar', Icon: CalendarIcon },
-  { href: '/team', label: 'Your AI Team', Icon: ZapIcon },
-  { href: '/settings', label: 'Settings', Icon: GearIcon },
-];
+import { NAV_ITEMS } from './nav-items';
+import { useShellChrome } from './shell-chrome';
+import { SHELL_BREAKPOINTS, useMediaQuery } from './use-media-query';
 
 export interface SidebarUser {
   name: string | null;
@@ -41,24 +32,130 @@ export interface SidebarProps {
   user: SidebarUser;
 }
 
+type SidebarLayout = 'full' | 'rail' | 'drawer';
+
 export function Sidebar({ user }: SidebarProps) {
-  const pathname = usePathname();
+  const isFullWidth = useMediaQuery(SHELL_BREAKPOINTS.desktopFull);
+  const isAtLeastRail = useMediaQuery(SHELL_BREAKPOINTS.desktopRail);
+  const { drawerOpen, setDrawerOpen } = useShellChrome();
+
+  // Decide which layout mode to render based on viewport.
+  // `useMediaQuery` returns false on the server and on first client render —
+  // default to `full` so the SSR tree matches the desktop baseline the
+  // marketing team sees on their primary resolution. The post-mount media
+  // listener snaps to the accurate layout within one frame.
+  const layout: SidebarLayout = isFullWidth ? 'full' : isAtLeastRail ? 'rail' : 'drawer';
+
+  // Close the drawer whenever the viewport grows past the drawer threshold —
+  // prevents the drawer from persisting as a broken overlay if the user
+  // resizes past the <1024px breakpoint while it's open.
+  useEffect(() => {
+    if (layout !== 'drawer' && drawerOpen) {
+      setDrawerOpen(false);
+    }
+  }, [layout, drawerOpen, setDrawerOpen]);
+
+  // Close the drawer on Escape. Standard modal-overlay UX; parallels
+  // the native <dialog> behavior used by CommandPalette.
+  useEffect(() => {
+    if (layout !== 'drawer' || !drawerOpen) return;
+    const handler = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setDrawerOpen(false);
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [layout, drawerOpen, setDrawerOpen]);
+
+  if (layout === 'drawer') {
+    return (
+      <>
+        {drawerOpen ? (
+          <button
+            type="button"
+            aria-label="Close navigation"
+            onClick={() => setDrawerOpen(false)}
+            style={DRAWER_BACKDROP_STYLE}
+          />
+        ) : null}
+        <aside
+          aria-label="Primary navigation"
+          aria-hidden={!drawerOpen}
+          style={{
+            ...drawerStyle(drawerOpen),
+          }}
+        >
+          <SidebarInner user={user} layout="full" onNavigate={() => setDrawerOpen(false)} />
+        </aside>
+      </>
+    );
+  }
 
   return (
     <aside
       aria-label="Primary navigation"
       style={{
-        width: 232,
+        width: layout === 'rail' ? 64 : 232,
         flexShrink: 0,
         background: 'var(--sf-paper-sunken)',
         borderRight: '1px solid var(--sf-border-subtle)',
-        padding: '16px 12px',
+        padding: layout === 'rail' ? '16px 8px' : '16px 12px',
         display: 'flex',
         flexDirection: 'column',
         position: 'relative',
         minHeight: '100vh',
+        transition: 'width var(--sf-dur-base) var(--sf-ease-swift), padding var(--sf-dur-base) var(--sf-ease-swift)',
       }}
     >
+      <SidebarInner user={user} layout={layout} />
+    </aside>
+  );
+}
+
+const DRAWER_BACKDROP_STYLE: CSSProperties = {
+  position: 'fixed',
+  inset: 0,
+  background: 'oklch(14% 0.020 265 / 0.48)',
+  backdropFilter: 'blur(4px)',
+  WebkitBackdropFilter: 'blur(4px)',
+  border: 'none',
+  padding: 0,
+  cursor: 'pointer',
+  zIndex: 99,
+  animation: 'sf-fade-in var(--sf-dur-base) var(--sf-ease-swift)',
+};
+
+function drawerStyle(open: boolean): CSSProperties {
+  return {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    bottom: 0,
+    width: 'min(280px, 80vw)',
+    zIndex: 100,
+    background: 'var(--sf-paper-sunken)',
+    borderRight: '1px solid var(--sf-border-subtle)',
+    padding: '16px 12px',
+    display: 'flex',
+    flexDirection: 'column',
+    transform: open ? 'translateX(0)' : 'translateX(-100%)',
+    transition: 'transform var(--sf-dur-base) var(--sf-ease-swift)',
+    boxShadow: open ? '0 20px 60px oklch(14% 0.020 265 / 0.35)' : 'none',
+  };
+}
+
+interface SidebarInnerProps {
+  user: SidebarUser;
+  layout: SidebarLayout;
+  /** Optional: close handler invoked after a nav item is clicked (used by drawer). */
+  onNavigate?: () => void;
+}
+
+function SidebarInner({ user, layout, onNavigate }: SidebarInnerProps) {
+  const pathname = usePathname();
+  const showLabels = layout !== 'rail';
+
+  return (
+    <>
       {/* Signal glow at top — echoes landing hero vocabulary. */}
       <div
         aria-hidden="true"
@@ -73,11 +170,13 @@ export function Sidebar({ user }: SidebarProps) {
 
       <Link
         href="/today"
+        onClick={onNavigate}
         style={{
           display: 'flex',
           alignItems: 'center',
+          justifyContent: showLabels ? 'flex-start' : 'center',
           gap: 10,
-          padding: '0 8px',
+          padding: showLabels ? '0 8px' : 0,
           height: 44,
           position: 'relative',
           textDecoration: 'none',
@@ -85,16 +184,18 @@ export function Sidebar({ user }: SidebarProps) {
         }}
       >
         <ShipFlareLogo size={24} />
-        <span
-          style={{
-            fontSize: 'var(--sf-text-base)',
-            fontWeight: 600,
-            letterSpacing: 'var(--sf-track-tight)',
-            color: 'var(--sf-fg-1)',
-          }}
-        >
-          ShipFlare
-        </span>
+        {showLabels ? (
+          <span
+            style={{
+              fontSize: 'var(--sf-text-base)',
+              fontWeight: 600,
+              letterSpacing: 'var(--sf-track-tight)',
+              color: 'var(--sf-fg-1)',
+            }}
+          >
+            ShipFlare
+          </span>
+        ) : null}
       </Link>
 
       <nav
@@ -117,13 +218,15 @@ export function Sidebar({ user }: SidebarProps) {
               label={item.label}
               Icon={item.Icon}
               isActive={isActive}
+              showLabel={showLabels}
+              onNavigate={onNavigate}
             />
           );
         })}
       </nav>
 
-      <UserCard user={user} />
-    </aside>
+      <UserCard user={user} showDetails={showLabels} onNavigate={onNavigate} />
+    </>
   );
 }
 
@@ -132,11 +235,15 @@ function SidebarNavLink({
   label,
   Icon,
   isActive,
+  showLabel,
+  onNavigate,
 }: {
   href: string;
   label: string;
   Icon: ComponentType<{ className?: string }>;
   isActive: boolean;
+  showLabel: boolean;
+  onNavigate?: () => void;
 }) {
   const [hover, setHover] = useState(false);
   const isHover = hover && !isActive;
@@ -144,9 +251,10 @@ function SidebarNavLink({
   const style: CSSProperties = {
     display: 'flex',
     alignItems: 'center',
+    justifyContent: showLabel ? 'flex-start' : 'center',
     gap: 10,
     height: 36,
-    padding: '0 10px',
+    padding: showLabel ? '0 10px' : 0,
     borderRadius: 'var(--sf-radius-md)',
     textDecoration: 'none',
     fontSize: 'var(--sf-text-sm)',
@@ -170,17 +278,28 @@ function SidebarNavLink({
     <Link
       href={href}
       aria-current={isActive ? 'page' : undefined}
+      aria-label={!showLabel ? label : undefined}
+      title={!showLabel ? label : undefined}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
+      onClick={onNavigate}
       style={style}
     >
       <Icon />
-      {label}
+      {showLabel ? label : null}
     </Link>
   );
 }
 
-function UserCard({ user }: { user: SidebarUser }) {
+function UserCard({
+  user,
+  showDetails,
+  onNavigate,
+}: {
+  user: SidebarUser;
+  showDetails: boolean;
+  onNavigate?: () => void;
+}) {
   const displayName = user.name ?? user.email ?? 'Signed in';
   const initials = deriveInitials(user.name, user.email);
   const secondary = user.email ?? 'SIGNED IN';
@@ -189,12 +308,15 @@ function UserCard({ user }: { user: SidebarUser }) {
     <Link
       href="/settings"
       aria-label="Account settings"
+      title={!showDetails ? displayName : undefined}
+      onClick={onNavigate}
       style={{
         marginTop: 'auto',
-        padding: 10,
+        padding: showDetails ? 10 : 6,
         position: 'relative',
         display: 'flex',
         alignItems: 'center',
+        justifyContent: showDetails ? 'flex-start' : 'center',
         gap: 10,
         background: 'var(--sf-paper)',
         border: '1px solid var(--sf-border-subtle)',
@@ -234,37 +356,39 @@ function UserCard({ user }: { user: SidebarUser }) {
           initials
         )}
       </span>
-      <span style={{ minWidth: 0, flex: 1 }}>
-        <span
-          style={{
-            display: 'block',
-            fontSize: 'var(--sf-text-xs)',
-            fontWeight: 500,
-            color: 'var(--sf-fg-1)',
-            letterSpacing: 'var(--sf-track-normal)',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {displayName}
+      {showDetails ? (
+        <span style={{ minWidth: 0, flex: 1 }}>
+          <span
+            style={{
+              display: 'block',
+              fontSize: 'var(--sf-text-xs)',
+              fontWeight: 500,
+              color: 'var(--sf-fg-1)',
+              letterSpacing: 'var(--sf-track-normal)',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {displayName}
+          </span>
+          <span
+            className="sf-mono"
+            style={{
+              display: 'block',
+              fontSize: 'var(--sf-text-2xs)',
+              color: 'var(--sf-fg-3)',
+              letterSpacing: 'var(--sf-track-mono)',
+              textTransform: 'uppercase',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {secondary}
+          </span>
         </span>
-        <span
-          className="sf-mono"
-          style={{
-            display: 'block',
-            fontSize: 'var(--sf-text-2xs)',
-            color: 'var(--sf-fg-3)',
-            letterSpacing: 'var(--sf-track-mono)',
-            textTransform: 'uppercase',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {secondary}
-        </span>
-      </span>
+      ) : null}
     </Link>
   );
 }
@@ -278,110 +402,4 @@ function deriveInitials(name: string | null, email: string | null): string {
   }
   const token = parts[0] ?? source;
   return token.slice(0, 2).toUpperCase();
-}
-
-/* =====================================================================
-   Icons — 16×16 stroke-1.5, match shell.jsx source.
-   ===================================================================== */
-
-function TodayIcon() {
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      aria-hidden="true"
-    >
-      <circle cx="8" cy="8" r="6" />
-      <path d="M8 4v4l2.5 1.5" />
-    </svg>
-  );
-}
-
-function ProductIcon() {
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      aria-hidden="true"
-    >
-      <path d="M2 5l6-3 6 3-6 3-6-3z" />
-      <path d="M2 5v6l6 3V8" />
-      <path d="M14 5v6l-6 3" />
-    </svg>
-  );
-}
-
-function GrowthIcon() {
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      aria-hidden="true"
-    >
-      <path d="M1 14l4-5 3 3 7-9" />
-      <path d="M11 3h4v4" />
-    </svg>
-  );
-}
-
-function CalendarIcon() {
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      aria-hidden="true"
-    >
-      <rect x="2" y="3" width="12" height="12" rx="1" />
-      <path d="M11 1v4M5 1v4M2 7h12" />
-    </svg>
-  );
-}
-
-function ZapIcon() {
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      aria-hidden="true"
-    >
-      <path d="M9 1L3 9h5l-1 6 6-8H8l1-6z" />
-    </svg>
-  );
-}
-
-function GearIcon() {
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      aria-hidden="true"
-    >
-      <circle cx="8" cy="8" r="2.5" />
-      <path d="M8 1v2M8 13v2M1 8h2M13 8h2M2.8 2.8l1.4 1.4M11.8 11.8l1.4 1.4M2.8 13.2l1.4-1.4M11.8 4.2l1.4-1.4" />
-    </svg>
-  );
 }

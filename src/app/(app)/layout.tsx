@@ -5,6 +5,7 @@ import { ToastProvider } from '@/components/ui/toast';
 import { PipelineProvider } from '@/components/ui/pipeline-provider';
 import { ThemeProvider } from '@/components/layout/theme-provider';
 import { AppShell, AppCanvas } from '@/components/layout/app-shell';
+import { ShellChromeProvider } from '@/components/layout/shell-chrome';
 import { Sidebar } from '@/components/layout/sidebar';
 import { TopNav } from '@/components/layout/top-nav';
 
@@ -28,17 +29,19 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       }}
     >
       <ThemeProvider>
-        <ToastProvider>
-          <PipelineProvider>
-            <AppShell>
-              <Sidebar user={user} />
-              <AppCanvas>
-                <TopNav userImage={user.image} />
-                <main style={{ flex: 1 }}>{children}</main>
-              </AppCanvas>
-            </AppShell>
-          </PipelineProvider>
-        </ToastProvider>
+        <ShellChromeProvider>
+          <ToastProvider>
+            <PipelineProvider>
+              <AppShell>
+                <Sidebar user={user} />
+                <AppCanvas>
+                  <TopNav userImage={user.image} />
+                  <main style={{ flex: 1 }}>{children}</main>
+                </AppCanvas>
+              </AppShell>
+            </PipelineProvider>
+          </ToastProvider>
+        </ShellChromeProvider>
       </ThemeProvider>
     </SWRConfig>
   );

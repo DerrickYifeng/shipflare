@@ -4,15 +4,21 @@
  * ShipFlare v2 TopNav.
  *
  * - 56px tall, sticky at top, glass `--sf-glass-light` + `--sf-glass-blur`.
- * - Left: current route label as an Ops (mono uppercase) span.
- * - Right: theme toggle, ⌘K hint, avatar gradient.
+ * - Left: hamburger (drawer trigger, <1024px only) + current route label.
+ * - Right: theme toggle, ⌘K hint (wired to command palette), avatar.
  *
- * See INTERACTIONS.md §2.
+ * Route labels are resolved via `resolveNavLabel` from `./nav-items` so the
+ * set never drifts from the Sidebar's NAV_ITEMS.
+ *
+ * See INTERACTIONS.md §2 and §11.
  */
 
 import { usePathname } from 'next/navigation';
 import type { CSSProperties } from 'react';
 import { Ops } from '@/components/ui/ops';
+import { resolveNavLabel } from './nav-items';
+import { useShellChrome } from './shell-chrome';
+import { SHELL_BREAKPOINTS, useMediaQuery } from './use-media-query';
 import { ThemeToggleButton } from './theme-toggle-button';
 
 interface TopNavProps {
@@ -23,16 +29,6 @@ interface TopNavProps {
   /** User image URL to render in avatar; falls back to the signal→flare gradient. */
   userImage?: string | null;
 }
-
-const ROUTE_LABELS: Array<{ match: RegExp; label: string }> = [
-  { match: /^\/today/, label: 'Today' },
-  { match: /^\/product/, label: 'My Product' },
-  { match: /^\/growth/, label: 'Growth' },
-  { match: /^\/calendar/, label: 'Calendar' },
-  { match: /^\/automation/, label: 'Your AI Team' },
-  { match: /^\/dashboard/, label: 'Metrics' },
-  { match: /^\/settings/, label: 'Settings' },
-];
 
 const WRAPPER_STYLE: CSSProperties = {
   height: 56,
@@ -54,24 +50,24 @@ export function TopNav({
   userImage = null,
 }: TopNavProps = {}) {
   const pathname = usePathname();
-  const label = resolveLabel(pathname, fallbackLabel);
+  const label = resolveNavLabel(pathname, fallbackLabel);
+  const isAtLeastRail = useMediaQuery(SHELL_BREAKPOINTS.desktopRail);
+  const { toggleDrawer, togglePalette } = useShellChrome();
+
+  // Hamburger only renders when the sidebar is in drawer mode (<1024px).
+  const showHamburger = !isAtLeastRail;
 
   return (
     <header style={WRAPPER_STYLE}>
-      <Ops>{label}</Ops>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+        {showHamburger ? (
+          <HamburgerButton onClick={toggleDrawer} />
+        ) : null}
+        <Ops>{label}</Ops>
+      </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <ThemeToggleButton />
-        <span
-          className="sf-mono"
-          aria-hidden="true"
-          style={{
-            fontSize: 'var(--sf-text-xs)',
-            color: 'var(--sf-fg-3)',
-            letterSpacing: 'var(--sf-track-mono)',
-          }}
-        >
-          ⌘K
-        </span>
+        <CommandPaletteHintButton onClick={togglePalette} />
         <span
           aria-hidden="true"
           style={{
@@ -99,9 +95,68 @@ export function TopNav({
   );
 }
 
-function resolveLabel(pathname: string, fallback: string): string {
-  for (const entry of ROUTE_LABELS) {
-    if (entry.match.test(pathname)) return entry.label;
-  }
-  return fallback;
+function HamburgerButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label="Open navigation"
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 32,
+        height: 32,
+        borderRadius: 'var(--sf-radius-md)',
+        border: '1px solid var(--sf-border-subtle)',
+        background: 'transparent',
+        color: 'var(--sf-fg-2)',
+        cursor: 'pointer',
+        fontFamily: 'inherit',
+        transition: 'all var(--sf-dur-base) var(--sf-ease-swift)',
+      }}
+    >
+      <svg
+        width="16"
+        height="16"
+        viewBox="0 0 16 16"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        aria-hidden="true"
+      >
+        <path d="M2 4h12M2 8h12M2 12h12" />
+      </svg>
+    </button>
+  );
+}
+
+function CommandPaletteHintButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label="Open command palette"
+      className="sf-mono"
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: 24,
+        padding: '0 8px',
+        borderRadius: 'var(--sf-radius-sm)',
+        border: '1px solid var(--sf-border-subtle)',
+        background: 'transparent',
+        color: 'var(--sf-fg-3)',
+        fontSize: 'var(--sf-text-xs)',
+        letterSpacing: 'var(--sf-track-mono)',
+        cursor: 'pointer',
+        fontFamily: 'inherit',
+        transition: 'all var(--sf-dur-base) var(--sf-ease-swift)',
+      }}
+    >
+      ⌘K
+    </button>
+  );
 }
