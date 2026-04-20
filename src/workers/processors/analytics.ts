@@ -5,7 +5,6 @@ import {
   posts,
   xTweetMetrics,
   xFollowerSnapshots,
-  xContentCalendar,
   xAnalyticsSummary,
   activityEvents,
 } from '@/lib/db/schema';
@@ -57,7 +56,9 @@ async function processXAnalyticsForUser(userId: string, log: Logger) {
     return;
   }
 
-  // Map tweetId → contentType via posts + xContentCalendar.
+  // Map tweetId → post (content-type lookup is stubbed out during the Phase 2
+  // migration — the old x_content_calendar source is gone and plan_items does
+  // not expose a comparable content-type column until Phase 8 rewires it).
   // Narrowed to the analytics lookback window — older posts can't correspond
   // to metrics in the current period, so loading them was wasted I/O.
   const postRecords = await db
@@ -74,32 +75,13 @@ async function processXAnalyticsForUser(userId: string, log: Logger) {
       ),
     );
 
-  const draftIds = postRecords
-    .map((p) => p.draftId)
-    .filter((id): id is string => !!id);
-
-  const calendarItems =
-    draftIds.length > 0
-      ? await db
-          .select({
-            draftId: xContentCalendar.draftId,
-            contentType: xContentCalendar.contentType,
-          })
-          .from(xContentCalendar)
-          .where(eq(xContentCalendar.userId, userId))
-      : [];
-
   // Build lookup maps
   const tweetToPost = new Map(
     postRecords
       .filter((p) => p.externalId)
       .map((p) => [p.externalId!, p]),
   );
-  const draftToContentType = new Map(
-    calendarItems
-      .filter((c) => c.draftId)
-      .map((c) => [c.draftId!, c.contentType]),
-  );
+  const draftToContentType = new Map<string, string>();
 
   // Compute best content types
   const contentTypeStats = new Map<

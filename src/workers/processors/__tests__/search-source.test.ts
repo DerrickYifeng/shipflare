@@ -10,7 +10,7 @@ vi.mock('@/lib/db', () => ({
   },
 }));
 vi.mock('@/lib/platform-deps', () => ({ createPlatformDeps: async () => ({}) }));
-vi.mock('@/lib/queue', () => ({ enqueueContent: vi.fn() }));
+vi.mock('@/lib/queue', () => ({}));
 vi.mock('@/lib/redis', () => ({
   publishUserEvent: vi.fn(),
   getKeyValueClient: () => ({
@@ -34,9 +34,8 @@ vi.mock('@/lib/pipeline-events', () => ({ recordPipelineEvent: vi.fn() }));
 beforeEach(() => vi.clearAllMocks());
 
 describe('processSearchSource', () => {
-  it('enqueues content for above-gate threads and publishes source_searched', async () => {
+  it('publishes source_searched after inserting above-gate threads', async () => {
     const { processSearchSource } = await import('../search-source');
-    const { enqueueContent } = await import('@/lib/queue');
     const { publishUserEvent } = await import('@/lib/redis');
     await processSearchSource({
       id: 'job-1',
@@ -45,7 +44,6 @@ describe('processSearchSource', () => {
         platform: 'reddit', source: 'r/SaaS', scanRunId: 'scan-1',
       },
     } as Job);
-    expect(enqueueContent).toHaveBeenCalledTimes(1);
     expect(publishUserEvent).toHaveBeenCalledWith('u', 'agents',
       expect.objectContaining({ type: 'pipeline', pipeline: 'discovery', state: 'searched' }));
   });
@@ -57,7 +55,6 @@ describe('processSearchSource', () => {
     });
     threadsReturning.mockReturnValueOnce([]);
     const { processSearchSource } = await import('../search-source');
-    const { enqueueContent } = await import('@/lib/queue');
     const { publishUserEvent } = await import('@/lib/redis');
     await processSearchSource({
       id: 'job-2',
@@ -66,7 +63,6 @@ describe('processSearchSource', () => {
         platform: 'reddit', source: 'r/empty', scanRunId: 'scan-1',
       },
     } as Job);
-    expect(enqueueContent).not.toHaveBeenCalled();
     expect(publishUserEvent).toHaveBeenCalled();
   });
 });

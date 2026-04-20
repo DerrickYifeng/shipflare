@@ -47,22 +47,6 @@ export const discoveryJobSchema = z.union([
 export type DiscoveryJobData = z.input<typeof discoveryJobSchema>;
 
 // ---------------------------------------------------------------------------
-// Content
-// ---------------------------------------------------------------------------
-
-export const contentJobSchema = z.object({
-  kind: z.literal('user').optional(),
-  schemaVersion: SCHEMA_VERSION,
-  traceId: TRACE_ID,
-  userId: z.string().min(1),
-  threadId: z.string().min(1),
-  productId: z.string().min(1),
-  draftType: z.enum(['reply', 'original_post']).optional(),
-  communityIntel: z.unknown().optional(),
-});
-export type ContentJobData = z.input<typeof contentJobSchema>;
-
-// ---------------------------------------------------------------------------
 // Review / Posting
 // ---------------------------------------------------------------------------
 
@@ -224,42 +208,8 @@ export const analyticsJobSchema = z.union([
 export type AnalyticsJobData = z.input<typeof analyticsJobSchema>;
 
 // ---------------------------------------------------------------------------
-// Calendar plan
+// Calibration
 // ---------------------------------------------------------------------------
-
-export const calendarPlanJobSchema = z.object({
-  kind: z.literal('user').optional(),
-  schemaVersion: SCHEMA_VERSION,
-  traceId: TRACE_ID,
-  userId: z.string().min(1),
-  productId: z.string().min(1),
-  channel: z.string().min(1),
-  startDate: z.string().min(1),
-});
-export type CalendarPlanJobData = z.input<typeof calendarPlanJobSchema>;
-
-// ---------------------------------------------------------------------------
-// Today / Calibration
-// ---------------------------------------------------------------------------
-
-const todoSeedUserJobSchema = z.object({
-  kind: z.literal('user').optional(),
-  schemaVersion: SCHEMA_VERSION,
-  traceId: TRACE_ID,
-  userId: z.string().min(1),
-});
-
-const todoSeedFanoutJobSchema = z.object({
-  kind: z.literal('fanout'),
-  schemaVersion: SCHEMA_VERSION,
-  traceId: TRACE_ID,
-});
-
-export const todoSeedJobSchema = z.union([
-  todoSeedFanoutJobSchema,
-  todoSeedUserJobSchema,
-]);
-export type TodoSeedJobData = z.input<typeof todoSeedJobSchema>;
 
 export const calibrationJobSchema = z.object({
   kind: z.literal('user').optional(),
@@ -273,24 +223,8 @@ export const calibrationJobSchema = z.object({
 export type CalibrationJobData = z.input<typeof calibrationJobSchema>;
 
 // ---------------------------------------------------------------------------
-// Per-item fan-out queues (Plan + Reply journey redesign)
+// Per-item fan-out queues (Reply journey)
 // ---------------------------------------------------------------------------
-
-/**
- * One job per planner-emitted calendar slot. Drives body generation via the
- * slot-body skill. Deduped by `calendarItemId` so a retry of an already-ready
- * slot is a no-op. Enqueued by `calendar-plan` after the shell pass.
- */
-export const calendarSlotDraftJobSchema = z.object({
-  kind: z.literal('user').optional(),
-  schemaVersion: SCHEMA_VERSION,
-  traceId: TRACE_ID,
-  userId: z.string().min(1),
-  productId: z.string().min(1),
-  calendarItemId: z.string().min(1),
-  channel: z.string().min(1),
-});
-export type CalendarSlotDraftJobData = z.input<typeof calendarSlotDraftJobSchema>;
 
 /**
  * One job per reply-discovery source (e.g. `r/SaaS`, `x:"pricing feedback"`).
@@ -355,21 +289,17 @@ export type XAnalyticsJobData = AnalyticsJobData;
 
 export type JobData =
   | DiscoveryJobData
-  | ContentJobData
   | ReviewJobData
   | PostingJobData
   | HealthScoreJobData
   | DreamJobData
   | CodeScanJobData
   | MonitorJobData
-  | CalendarPlanJobData
-  | CalendarSlotDraftJobData
   | SearchSourceJobData
   | DiscoveryScanJobData
   | EngagementJobData
   | MetricsJobData
   | AnalyticsJobData
-  | TodoSeedJobData
   | CalibrationJobData;
 
 // ---------------------------------------------------------------------------

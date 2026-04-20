@@ -8,7 +8,6 @@ import {
   activityEvents,
   xTargetAccounts,
   xMonitoredTweets,
-  todoItems,
 } from '@/lib/db/schema';
 import { eq, and, inArray, lt } from 'drizzle-orm';
 import { XClient, XForbiddenError } from '@/lib/x-client';
@@ -417,28 +416,9 @@ async function processXMonitorForUser(
         traceId,
       });
 
-      // Inject time-sensitive todo item for the Today page
-      await db
-        .insert(todoItems)
-        .values({
-          userId,
-          draftId: draft.id,
-          todoType: 'reply_thread',
-          source: 'discovery',
-          priority: 'time_sensitive',
-          title: `Reply to @${tweetInput.authorUsername}: ${tweetInput.tweetText.slice(0, 80)}...`,
-          platform: 'x',
-          community: `@${tweetInput.authorUsername}`,
-          externalUrl: buildContentUrl('x', tweetInput.authorUsername, tweetInput.tweetId),
-          confidence: replyOutput.confidence,
-          expiresAt: new Date(Date.now() + 4 * 60 * 60 * 1000),
-        })
-        .onConflictDoNothing();
-
-      await publishUserEvent(userId, 'tweets', {
-        type: 'todo_added',
-        todoType: 'reply_thread',
-      });
+      // (Phase 2 migration: todo_items table dropped. plan_items injection for
+      // monitor-triggered replies lands with the plan-execute dispatcher in
+      // Phase 7.)
     }
 
     log.info(

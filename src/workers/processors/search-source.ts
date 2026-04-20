@@ -6,7 +6,6 @@ import { products, threads, discoveryConfigs } from '@/lib/db/schema';
 import { loadSkill } from '@/core/skill-loader';
 import { runSkill } from '@/core/skill-runner';
 import { discoveryOutputSchema, type DiscoveryOutput } from '@/agents/schemas';
-import { enqueueContent } from '@/lib/queue';
 import { publishUserEvent } from '@/lib/redis';
 import { createPlatformDeps } from '@/lib/platform-deps';
 import { MemoryStore } from '@/memory/store';
@@ -287,10 +286,15 @@ export async function processSearchSource(job: Job<SearchSourceJobData>) {
       .returning({ id: threads.id, externalId: threads.externalId });
   }
 
-  for (const row of inserted) {
-    if (!shouldEnqueue.has(row.externalId)) continue;
-    await enqueueContent({ userId, threadId: row.id, productId, traceId });
-  }
+  // Phase 2 migration: the content queue was retired along with the
+  // compound content agent. Downstream draft generation will route through
+  // the plan-execute dispatcher in Phase 7. For now, above-gate threads are
+  // still written to the `threads` table so the reply journey UI can pick
+  // them up once that path lands.
+  void shouldEnqueue;
+  void inserted;
+  void productId;
+  void traceId;
 
   await publishUserEvent(userId, 'agents', {
     type: 'pipeline',

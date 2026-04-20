@@ -4,40 +4,32 @@ import { getBullMQConnection } from '@/lib/redis';
 import { createLogger } from '@/lib/logger';
 import {
   discoveryJobSchema,
-  contentJobSchema,
   reviewJobSchema,
   postingJobSchema,
   healthScoreJobSchema,
   dreamJobSchema,
   codeScanJobSchema,
   monitorJobSchema,
-  calendarPlanJobSchema,
-  calendarSlotDraftJobSchema,
   searchSourceJobSchema,
   discoveryScanJobSchema,
   engagementJobSchema,
   metricsJobSchema,
   analyticsJobSchema,
-  todoSeedJobSchema,
   calibrationJobSchema,
 } from './types';
 import type {
   DiscoveryJobData,
-  ContentJobData,
   ReviewJobData,
   PostingJobData,
   HealthScoreJobData,
   DreamJobData,
   CodeScanJobData,
   MonitorJobData,
-  CalendarPlanJobData,
-  CalendarSlotDraftJobData,
   SearchSourceJobData,
   DiscoveryScanJobData,
   EngagementJobData,
   MetricsJobData,
   AnalyticsJobData,
-  TodoSeedJobData,
   CalibrationJobData,
 } from './types';
 
@@ -74,10 +66,6 @@ export const discoveryQueue = new Queue<DiscoveryJobData>('discovery', {
   ...connection,
   defaultJobOptions,
 });
-export const contentQueue = new Queue<ContentJobData>('content', {
-  ...connection,
-  defaultJobOptions,
-});
 export const reviewQueue = new Queue<ReviewJobData>('review', {
   ...connection,
   defaultJobOptions,
@@ -105,33 +93,10 @@ export const monitorQueue = new Queue<MonitorJobData>('monitor', {
   ...connection,
   defaultJobOptions,
 });
-export const calendarPlanQueue = new Queue<CalendarPlanJobData>(
-  'calendar-plan',
-  { ...connection, defaultJobOptions },
-);
-
-/**
- * Per-slot body generation. One job per planner-emitted calendar slot; drives
- * the slot-body skill. `removeOnFail` bumped to 1000/7d for DLQ forensics on
- * the fan-out path — first-class retries + visible failures are the point.
- */
-export const calendarSlotDraftQueue = new Queue<CalendarSlotDraftJobData>(
-  'calendar-slot-draft',
-  {
-    ...connection,
-    defaultJobOptions: {
-      removeOnComplete: { count: 500, age: 24 * 3600 },
-      removeOnFail: { count: 1000, age: 7 * 24 * 3600 },
-      attempts: 3,
-      backoff: { type: 'exponential', delay: 5000 },
-    },
-  },
-);
 
 /**
  * Per-source reply discovery. One job per Reddit subreddit / X query. Enqueued
- * by the discovery-scan orchestrator; writes threads rows and fans out to
- * content.ts for above-gate candidates.
+ * by the discovery-scan orchestrator; writes threads rows.
  */
 export const searchSourceQueue = new Queue<SearchSourceJobData>(
   'search-source',
@@ -229,18 +194,6 @@ export async function enqueueDiscovery(data: DiscoveryJobData): Promise<void> {
 }
 
 /**
- * Enqueue content generation for a discovered thread.
- */
-export async function enqueueContent(data: ContentJobData): Promise<void> {
-  const payload = contentJobSchema.parse(withEnvelope(data));
-  log.debug(`Enqueued content for thread ${payload.threadId}`);
-  await contentQueue.add('draft', payload, {
-    attempts: 2,
-    backoff: { type: 'exponential', delay: 3000 },
-  });
-}
-
-/**
  * Enqueue review for a newly created draft.
  */
 export async function enqueueReview(data: ReviewJobData): Promise<void> {
@@ -326,40 +279,6 @@ export async function enqueueMonitor(data: MonitorJobData): Promise<void> {
     attempts: 2,
     backoff: { type: 'exponential', delay: 5000 },
   });
-}
-
-/**
- * Enqueue calendar plan generation. Runs the calendar-planner AI agent in a
- * background worker so the API can return 202 immediately.
- * Uses jobId dedup: one active plan job per user.
- */
-export async function enqueueCalendarPlan(
-  data: CalendarPlanJobData,
-): Promise<string> {
-  const payload = calendarPlanJobSchema.parse(withEnvelope(data));
-  const jobId = `calendar-plan-${payload.userId}`;
-  log.debug(`Enqueued calendar-plan (${describePayload(payload)})`);
-  await calendarPlanQueue.add('plan', payload, {
-    jobId,
-    attempts: 2,
-    backoff: { type: 'exponential', delay: 5000 },
-  });
-  return jobId;
-}
-
-/**
- * Enqueue body generation for one calendar slot. Deduped on the slot id so
- * a double-enqueue collapses — BullMQ drops the second add when a job with
- * the same jobId is already waiting / active / delayed.
- */
-export async function enqueueCalendarSlotDraft(
-  data: CalendarSlotDraftJobData,
-): Promise<string> {
-  const payload = calendarSlotDraftJobSchema.parse(withEnvelope(data));
-  const jobId = `cslot-${payload.calendarItemId}`;
-  log.debug(`Enqueued calendar-slot-draft (${describePayload(payload)})`);
-  const job = await calendarSlotDraftQueue.add('draft', payload, { jobId });
-  return job.id ?? jobId;
 }
 
 /**
@@ -459,13 +378,9 @@ export { voiceExtractQueue, enqueueVoiceExtract } from './voice-extract';
 export type { VoiceExtractJobData } from './voice-extract';
 
 // ----------------------------------------------------------------
-//  Today queue
+//  Calibration queue
 // ----------------------------------------------------------------
 
-export const todoSeedQueue = new Queue<TodoSeedJobData>('todo-seed', {
-  ...connection,
-  defaultJobOptions,
-});
 export const calibrationQueue = new Queue<CalibrationJobData>('calibration', {
   ...connection,
   defaultJobOptions: {
@@ -473,35 +388,6 @@ export const calibrationQueue = new Queue<CalibrationJobData>('calibration', {
     attempts: 1, // Calibration checkpoints progress to DB; never auto-retry
   },
 });
-
-/**
- * Stalled-row sweep: repeatable BullMQ job that flips rows stuck in
- * `state='drafting'` for >10min to `failed`. No per-tick retention needed — we
- * want minimal redis footprint for a housekeeping job that fires every 60s.
- */
-export const stalledRowSweepQueue = new Queue<Record<string, never>>(
-  'stalled-row-sweep',
-  {
-    ...connection,
-    defaultJobOptions: {
-      removeOnComplete: { count: 10 },
-      removeOnFail: { count: 50 },
-      attempts: 1,
-    },
-  },
-);
-
-/**
- * Enqueue todo seed: populate daily todo items for a user.
- */
-export async function enqueueTodoSeed(data: TodoSeedJobData): Promise<void> {
-  const payload = todoSeedJobSchema.parse(withEnvelope(data));
-  log.debug(`Enqueued todo-seed (${describePayload(payload)})`);
-  await todoSeedQueue.add('seed', payload, {
-    attempts: 2,
-    backoff: { type: 'exponential', delay: 3000 },
-  });
-}
 
 /**
  * Enqueue discovery calibration: run the optimize loop for a user's product.

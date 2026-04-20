@@ -1,7 +1,6 @@
 import { Worker } from 'bullmq';
 import { getBullMQConnection } from '@/lib/redis';
 import { processDiscovery } from './processors/discovery';
-import { processContent } from './processors/content';
 import { processReview } from './processors/review';
 import { processPosting } from './processors/posting';
 import { processHealthScore } from './processors/health-score';
@@ -11,17 +10,13 @@ import { processXMonitor } from './processors/monitor';
 import { processXEngagement } from './processors/engagement';
 import { processXMetrics } from './processors/metrics';
 import { processXAnalytics } from './processors/analytics';
-import { processTodoSeed } from './processors/todo-seed';
 import { processCalibration } from './processors/calibrate-discovery';
-import { processCalendarPlan } from './processors/calendar-plan';
-import { processCalendarSlotDraft } from './processors/calendar-slot-draft';
 import { processSearchSource } from './processors/search-source';
 import { processDiscoveryScan } from './processors/discovery-scan';
-import { processStalledRowSweep } from './processors/stalled-row-sweep';
 import { processVoiceExtract } from './processors/voice-extract';
-import { dreamQueue, discoveryQueue, discoveryScanQueue, monitorQueue, metricsQueue, analyticsQueue, todoSeedQueue, codeScanQueue, stalledRowSweepQueue } from '@/lib/queue';
+import { dreamQueue, discoveryQueue, discoveryScanQueue, monitorQueue, metricsQueue, analyticsQueue, codeScanQueue } from '@/lib/queue';
 import { createLogger, loggerForJob } from '@/lib/logger';
-import type { DiscoveryJobData, ContentJobData, ReviewJobData, PostingJobData, HealthScoreJobData, DreamJobData, CodeScanJobData, MonitorJobData, CalendarPlanJobData, CalendarSlotDraftJobData, SearchSourceJobData, DiscoveryScanJobData, EngagementJobData, MetricsJobData, AnalyticsJobData, TodoSeedJobData, CalibrationJobData } from '@/lib/queue/types';
+import type { DiscoveryJobData, ReviewJobData, PostingJobData, HealthScoreJobData, DreamJobData, CodeScanJobData, MonitorJobData, SearchSourceJobData, DiscoveryScanJobData, EngagementJobData, MetricsJobData, AnalyticsJobData, CalibrationJobData } from '@/lib/queue/types';
 import type { VoiceExtractJobData } from '@/lib/queue/voice-extract';
 
 const log = createLogger('workers');
@@ -47,12 +42,6 @@ const discoveryWorker = new Worker<DiscoveryJobData>(
   'discovery',
   async (job) => processDiscovery(job),
   { ...BASE_OPTS, concurrency: 2 },
-);
-
-const contentWorker = new Worker<ContentJobData>(
-  'content',
-  async (job) => processContent(job),
-  { ...BASE_OPTS, concurrency: 3 },
 );
 
 const reviewWorker = new Worker<ReviewJobData>(
@@ -110,24 +99,6 @@ const analyticsWorker = new Worker<AnalyticsJobData>(
   { ...BASE_OPTS, concurrency: 1 },
 );
 
-const todoSeedWorker = new Worker<TodoSeedJobData>(
-  'todo-seed',
-  async (job) => processTodoSeed(job),
-  { ...BASE_OPTS, concurrency: 1 },
-);
-
-const calendarPlanWorker = new Worker<CalendarPlanJobData>(
-  'calendar-plan',
-  async (job) => processCalendarPlan(job),
-  { ...BASE_OPTS, concurrency: 1 },
-);
-
-const calendarSlotDraftWorker = new Worker<CalendarSlotDraftJobData>(
-  'calendar-slot-draft',
-  async (job) => processCalendarSlotDraft(job),
-  { ...BASE_OPTS, concurrency: 3 },
-);
-
 const searchSourceWorker = new Worker<SearchSourceJobData>(
   'search-source',
   async (job) => processSearchSource(job),
@@ -150,12 +121,6 @@ const calibrationWorker = new Worker<CalibrationJobData>(
   },
 );
 
-const stalledRowSweepWorker = new Worker<Record<string, never>>(
-  'stalled-row-sweep',
-  async (job) => processStalledRowSweep(job),
-  { ...BASE_OPTS, concurrency: 1 },
-);
-
 const voiceExtractWorker = new Worker<VoiceExtractJobData>(
   'voice-extract',
   async (job) => processVoiceExtract(job),
@@ -163,13 +128,13 @@ const voiceExtractWorker = new Worker<VoiceExtractJobData>(
 );
 
 const workers = [
-  discoveryWorker, contentWorker, reviewWorker, postingWorker,
+  discoveryWorker, reviewWorker, postingWorker,
   healthScoreWorker, dreamWorker, codeScanWorker,
-  monitorWorker, calendarPlanWorker, calendarSlotDraftWorker,
+  monitorWorker,
   searchSourceWorker, discoveryScanWorker,
   engagementWorker,
-  metricsWorker, analyticsWorker, todoSeedWorker, calibrationWorker,
-  stalledRowSweepWorker, voiceExtractWorker,
+  metricsWorker, analyticsWorker, calibrationWorker,
+  voiceExtractWorker,
 ];
 
 // Log events — bind traceId / jobId / queue into the child logger so lifecycle
@@ -240,18 +205,6 @@ async function scheduleAnalytics() {
   );
 }
 
-// Schedule todo seed: hourly check — seeds each user when their local time is 8 AM
-async function scheduleTodoSeed() {
-  await todoSeedQueue.add(
-    'scheduled-seed',
-    { kind: 'fanout', schemaVersion: 1 },
-    {
-      repeat: { pattern: '0 * * * *' },
-      jobId: 'todo-seed-cron',
-    },
-  );
-}
-
 // Schedule daily code diff: 2am UTC (before metrics at 3am)
 async function scheduleCodeDiff() {
   await codeScanQueue.add(
@@ -272,20 +225,6 @@ async function scheduleDiscovery() {
     {
       repeat: { pattern: '0 8,14,20 * * *' },
       jobId: 'discovery-cron',
-    },
-  );
-}
-
-// Schedule stalled-row sweep: every 60s. Housekeeping — flips rows stuck in
-// state='drafting' for >10min to 'failed'. Idempotent: BullMQ dedupes the
-// repeatable on `jobId`.
-async function scheduleStalledRowSweep() {
-  await stalledRowSweepQueue.add(
-    'sweep',
-    {},
-    {
-      repeat: { every: 60_000 },
-      jobId: 'stalled-row-sweep-repeat',
     },
   );
 }
@@ -315,13 +254,11 @@ Promise.all([
   scheduleMonitor(),
   scheduleMetrics(),
   scheduleAnalytics(),
-  scheduleTodoSeed(),
-  scheduleStalledRowSweep(),
 ]).catch((err) => {
   log.error('Failed to schedule cron jobs:', err.message);
 });
 
-log.info('All workers started: discovery, content, review, posting, health-score, dream, code-scan, monitor, calendar-plan, calendar-slot-draft, search-source, discovery-scan, engagement, metrics, analytics, todo-seed, calibration, stalled-row-sweep, voice-extract. Discovery 3x/day, discovery-scan every 4h, stalled sweep every 60s, all others daily.');
+log.info('All workers started: discovery, review, posting, health-score, dream, code-scan, monitor, search-source, discovery-scan, engagement, metrics, analytics, calibration, voice-extract. Discovery 3x/day, discovery-scan every 4h, all others daily.');
 
 // Graceful shutdown
 async function shutdown() {
