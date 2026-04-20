@@ -320,6 +320,287 @@ export const voiceExtractorOutputSchema = z.object({
   confidence: z.number().min(0).max(1),
 });
 
+// ---------------------------------------------------------------------------
+// Phase 5 atomic skills — output schemas
+// ---------------------------------------------------------------------------
+
+/**
+ * Output schema for the `draft-email` skill. The agent emits subject + body
+ * for one email, branched by `emailType`. Plain-text body is required; HTML
+ * is optional so welcome / retro emails can stay plain while drip emails can
+ * layer richer markup when a template system later wants it.
+ */
+export const draftEmailOutputSchema = z.object({
+  subject: z.string().min(1).max(120),
+  bodyText: z.string().min(1),
+  bodyHtml: z.string().min(1).optional(),
+  previewText: z.string().max(120).optional(),
+});
+
+/**
+ * Output schema for the `send-email` skill. Side-effect skill — not driven
+ * by an LLM. Returns `sent: false` with a machine-readable `reason` when
+ * the provider env var is missing or the HTTP call fails, so callers can
+ * surface the limitation without a try/catch.
+ */
+export const sendEmailOutputSchema = z.object({
+  sent: z.boolean(),
+  providerMessageId: z.string().nullable(),
+  reason: z
+    .enum([
+      'sent',
+      'no_provider',
+      'provider_error',
+      'invalid_recipient',
+      'missing_from_address',
+    ])
+    .nullable(),
+});
+
+/**
+ * Output schema for the `ab-test-subject` skill. Two subject variants
+ * diverging on opener style, length, or concreteness — so the post-send
+ * winner selection (open-rate metric) has a clean signal.
+ */
+export const abTestSubjectOutputSchema = z.object({
+  variantA: z.object({
+    subject: z.string().min(1).max(120),
+    rationale: z.string().min(1).max(240),
+  }),
+  variantB: z.object({
+    subject: z.string().min(1).max(120),
+    rationale: z.string().min(1).max(240),
+  }),
+});
+
+/**
+ * Output schema for the `draft-waitlist-page` skill. HTML string + the copy
+ * broken into addressable pieces so the caller can stitch into a CMS/MDX
+ * template without re-parsing the HTML.
+ */
+export const draftWaitlistPageOutputSchema = z.object({
+  html: z.string().min(1),
+  copy: z.object({
+    headline: z.string().min(1).max(120),
+    subheadline: z.string().min(1).max(240),
+    cta: z.string().min(1).max(40),
+    valueBullets: z.array(z.string().min(1)).min(2).max(5),
+    socialProofLine: z.string().nullable().optional(),
+  }),
+});
+
+/**
+ * Output schema for the `draft-hunter-outreach` skill. One PH hunter DM,
+ * personalized to the recipient's profile. Short-by-design: PH hunters
+ * ignore walls of text.
+ */
+export const draftHunterOutreachOutputSchema = z.object({
+  dm: z.string().min(40).max(700),
+  personalizationHook: z.string().min(1).max(240),
+  confidence: z.number().min(0).max(1),
+});
+
+/**
+ * Output schema for the `draft-launch-day-comment` skill. The maker's
+ * first comment on their PH launch — usually pinned, sets tone.
+ */
+export const draftLaunchDayCommentOutputSchema = z.object({
+  comment: z.string().min(80).max(1200),
+  openingHookKind: z.enum([
+    'origin_story',
+    'problem_statement',
+    'contrarian_claim',
+    'vulnerable_confession',
+  ]),
+});
+
+/**
+ * Output schema for the `generate-launch-asset-brief` skill. Text brief
+ * for a designer to produce the actual image/video; the skill does not
+ * generate the asset. `assetType` scopes the brief.
+ */
+export const launchAssetBriefOutputSchema = z.object({
+  assetType: z.enum(['gallery_image', 'video_30s', 'og_image', 'demo_gif']),
+  title: z.string().min(1).max(120),
+  brief: z.string().min(40),
+  shotList: z.array(z.string().min(1)).min(1).max(12),
+  mustInclude: z.array(z.string().min(1)),
+  mustAvoid: z.array(z.string().min(1)),
+  referenceInspirations: z.array(z.string().min(1)).max(6).optional(),
+});
+
+/**
+ * Output schema for the `build-launch-runsheet` skill. Hourly beats from
+ * launch-day start through completion (typically T-1h through T+12h).
+ * Each beat is a `plan_items.kind='runsheet_beat'` candidate row.
+ */
+export const launchRunsheetBeatSchema = z.object({
+  hourOffset: z.number().int().min(-6).max(48),
+  channel: z.enum(['x', 'reddit', 'email', 'producthunt', 'slack', 'other']),
+  action: z.string().min(1).max(200),
+  description: z.string().min(1),
+  skillName: z.string().nullable(),
+  priority: z.enum(['critical', 'high', 'normal']),
+});
+export const launchRunsheetOutputSchema = z.object({
+  launchDate: z.string().min(1),
+  beats: z.array(launchRunsheetBeatSchema).min(6),
+  notes: z.string().nullable().optional(),
+});
+
+/**
+ * Output schema for the `extract-milestone-from-commits` skill.
+ * Takes raw git log output; returns the single highest-signal milestone
+ * or `null` when the window contains only chore/refactor activity.
+ */
+export const extractMilestoneOutputSchema = z.object({
+  milestone: z
+    .object({
+      title: z.string().min(1).max(120),
+      summary: z.string().min(1).max(400),
+      source: z.enum(['commit', 'pr', 'release']),
+      sourceRef: z.string().nullable(),
+      confidence: z.number().min(0).max(1),
+    })
+    .nullable(),
+});
+
+/**
+ * Output schema for the `fetch-community-rules` skill. Wraps the existing
+ * reddit-get-rules tool with an LLM-derived summary the planner can read
+ * without parsing the raw rule text.
+ */
+export const communityRulesOutputSchema = z.object({
+  community: z.string().min(1),
+  rulesRaw: z.array(z.string().min(1)),
+  selfPromotionPolicy: z.enum([
+    'forbidden',
+    'restricted',
+    'tolerated',
+    'welcomed',
+    'unknown',
+  ]),
+  keyConstraints: z.array(z.string().min(1)).max(8),
+  recommendation: z.string().min(1).max(400),
+});
+
+/**
+ * Output schema for the `fetch-community-hot-posts` skill. Wraps the
+ * existing reddit-hot-posts tool with an LLM insight over post patterns.
+ */
+export const communityHotPostsOutputSchema = z.object({
+  community: z.string().min(1),
+  topFormats: z.array(z.string().min(1)).min(1).max(6),
+  avgEngagement: z.object({
+    upvotes: z.number().min(0),
+    comments: z.number().min(0),
+  }),
+  insight: z.string().min(1).max(600),
+  samplePostIds: z.array(z.string()).max(10),
+});
+
+/**
+ * Output schema for the `analytics-summarize` skill. Replaces the old
+ * `analyst` agent. Plain-English weekly summary + structured numbers.
+ */
+export const analyticsSummarizeOutputSchema = z.object({
+  periodStart: z.string(),
+  periodEnd: z.string(),
+  headline: z.string().min(1).max(240),
+  summaryMd: z.string().min(1),
+  highlights: z.array(z.string().min(1)).max(6),
+  lowlights: z.array(z.string().min(1)).max(6),
+  metrics: z.object({
+    postsPublished: z.number().int().min(0),
+    repliesSent: z.number().int().min(0),
+    impressions: z.number().int().min(0),
+    engagementRate: z.number().min(0).max(1),
+    topPostId: z.string().nullable(),
+  }),
+  recommendedNextMoves: z.array(z.string().min(1)).max(5),
+});
+
+/**
+ * Output schema for the `identify-top-supporters` skill. Takes engagement
+ * data and ranks accounts that repeatedly showed up across the period.
+ */
+export const topSupportersOutputSchema = z.object({
+  supporters: z
+    .array(
+      z.object({
+        username: z.string().min(1),
+        platform: z.string().min(1),
+        interactionCount: z.number().int().positive(),
+        kinds: z.array(
+          z.enum(['reply', 'repost', 'quote', 'like', 'bookmark', 'mention']),
+        ),
+        lastSeenAt: z.string(),
+        notes: z.string().nullable(),
+      }),
+    )
+    .max(30),
+});
+
+/**
+ * Output schema for the `generate-interview-questions` skill. Phase-aware
+ * customer-interview script — planner schedules these during foundation /
+ * audience phases and again for retention interviews in compound / steady.
+ */
+export const interviewQuestionsOutputSchema = z.object({
+  intent: z.enum([
+    'discovery',
+    'activation',
+    'retention',
+    'win_back',
+    'pricing',
+  ]),
+  questions: z.array(z.string().min(1)).length(10),
+  followUpPrompts: z.array(z.string().min(1)).max(10),
+});
+
+/**
+ * Output schema for the `compile-retrospective` skill. Long-form retro post,
+ * optionally paired with a social-ready digest.
+ */
+export const retrospectiveOutputSchema = z.object({
+  longForm: z.string().min(400),
+  socialDigest: z.string().max(1000).nullable(),
+  sections: z.object({
+    whatShipped: z.string().min(1),
+    whatWorked: z.string().min(1),
+    whatDidNot: z.string().min(1),
+    whatsNext: z.string().min(1),
+  }),
+});
+
+/**
+ * Output schema for the `classify-thread-sentiment` skill. One thread →
+ * one sentiment label with a short rationale, so the planner can skew
+ * reply-angle choice.
+ */
+export const threadSentimentOutputSchema = z.object({
+  sentiment: z.enum(['pos', 'neg', 'neutral', 'mixed']),
+  confidence: z.number().min(0).max(1),
+  rationale: z.string().min(1).max(240),
+});
+
+export type DraftEmailOutput = z.infer<typeof draftEmailOutputSchema>;
+export type SendEmailOutput = z.infer<typeof sendEmailOutputSchema>;
+export type AbTestSubjectOutput = z.infer<typeof abTestSubjectOutputSchema>;
+export type DraftWaitlistPageOutput = z.infer<typeof draftWaitlistPageOutputSchema>;
+export type DraftHunterOutreachOutput = z.infer<typeof draftHunterOutreachOutputSchema>;
+export type DraftLaunchDayCommentOutput = z.infer<typeof draftLaunchDayCommentOutputSchema>;
+export type LaunchAssetBriefOutput = z.infer<typeof launchAssetBriefOutputSchema>;
+export type LaunchRunsheetOutput = z.infer<typeof launchRunsheetOutputSchema>;
+export type ExtractMilestoneOutput = z.infer<typeof extractMilestoneOutputSchema>;
+export type CommunityRulesOutput = z.infer<typeof communityRulesOutputSchema>;
+export type CommunityHotPostsOutput = z.infer<typeof communityHotPostsOutputSchema>;
+export type AnalyticsSummarizeOutput = z.infer<typeof analyticsSummarizeOutputSchema>;
+export type TopSupportersOutput = z.infer<typeof topSupportersOutputSchema>;
+export type InterviewQuestionsOutput = z.infer<typeof interviewQuestionsOutputSchema>;
+export type RetrospectiveOutput = z.infer<typeof retrospectiveOutputSchema>;
+export type ThreadSentimentOutput = z.infer<typeof threadSentimentOutputSchema>;
+
 export type DiscoveryOutput = z.infer<typeof discoveryOutputSchema>;
 export type CommunityDiscoveryOutput = z.infer<typeof communityDiscoveryOutputSchema>;
 export type CommunityIntelOutput = z.infer<typeof communityIntelOutputSchema>;

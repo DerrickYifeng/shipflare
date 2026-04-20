@@ -29,6 +29,9 @@ import {
   replyDrafterOutputSchema,
   slotBodyOutputSchema,
   voiceExtractorOutputSchema,
+  abTestSubjectOutputSchema,
+  draftEmailOutputSchema,
+  sendEmailOutputSchema,
 } from '@/agents/schemas';
 
 /**
@@ -176,6 +179,70 @@ const voiceExtractorInput = z.object({
 });
 
 // ---------------------------------------------------------------------------
+// Phase 5 — email atoms
+// ---------------------------------------------------------------------------
+
+const recipientSchema = z.object({
+  firstName: z.string().optional(),
+  email: z.string().email(),
+  context: z.string().optional(),
+  signupSource: z.string().optional(),
+});
+
+const draftEmailInput = z.object({
+  emailType: z.enum([
+    'welcome',
+    'thank_you',
+    'retro_week_1',
+    'retro_launch',
+    'drip_week_1',
+    'drip_week_2',
+    'drip_retention',
+    'win_back',
+  ]),
+  product: productContextSchema,
+  recipient: recipientSchema,
+  signature: z.object({
+    founderName: z.string().min(1),
+    founderTitle: z.string().optional(),
+  }),
+  constraints: z
+    .object({
+      maxWords: z.number().int().positive().optional(),
+      includeCTAHref: z.string().url().optional(),
+      mustMention: z.array(z.string()).optional(),
+      mustAvoid: z.array(z.string()).optional(),
+    })
+    .optional(),
+  voiceBlock: z.string().nullable(),
+});
+
+const sendEmailInput = z.object({
+  to: z.string().email(),
+  from: z.string().optional(),
+  replyTo: z.string().email().optional(),
+  subject: z.string().min(1).max(120),
+  bodyText: z.string().min(1),
+  bodyHtml: z.string().optional(),
+  tag: z.string().optional(),
+  idempotencyKey: z.string().optional(),
+});
+
+const abTestSubjectInput = z.object({
+  emailType: z.string().min(1),
+  currentSubject: z.string().min(1).max(120),
+  bodyText: z.string().min(1),
+  product: productContextSchema,
+  voiceBlock: z.string().nullable(),
+  constraints: z
+    .object({
+      maxChars: z.number().int().positive().optional(),
+      avoidEmojis: z.boolean().optional(),
+    })
+    .optional(),
+});
+
+// ---------------------------------------------------------------------------
 // Catalog
 // ---------------------------------------------------------------------------
 
@@ -242,6 +309,34 @@ export const SKILL_CATALOG: readonly SkillMeta[] = [
     inputSchema: voiceExtractorInput,
     outputSchema: voiceExtractorOutputSchema,
     supportedKinds: ['setup_task'],
+  },
+
+  // --- Phase 5: email atoms ---
+  {
+    name: 'ab-test-subject',
+    description:
+      'Generate two subject-line variants (A/B) for one drafted email. Variants must diverge on opener / specificity / length / framing.',
+    inputSchema: abTestSubjectInput,
+    outputSchema: abTestSubjectOutputSchema,
+    // Inline utility — the dispatcher inserts it between draft-email and
+    // send-email when the email-type is worth testing.
+    supportedKinds: [],
+  },
+  {
+    name: 'draft-email',
+    description:
+      'Draft one lifecycle / transactional email (welcome, thank-you, retro, drip, win-back). One LLM call per email.',
+    inputSchema: draftEmailInput,
+    outputSchema: draftEmailOutputSchema,
+    supportedKinds: ['email_send'],
+  },
+  {
+    name: 'send-email',
+    description:
+      'Send a drafted email via Resend. Side-effect skill — no LLM. Short-circuits with reason=no_provider when RESEND_API_KEY is absent.',
+    inputSchema: sendEmailInput,
+    outputSchema: sendEmailOutputSchema,
+    supportedKinds: ['email_send'],
   },
 ];
 
