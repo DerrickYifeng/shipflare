@@ -7,6 +7,7 @@ import { runSkill } from '@/core/skill-runner';
 import { SKILL_CATALOG } from '@/skills/_catalog';
 import { tacticalPlanSchema, type TacticalPlan } from '@/agents/schemas';
 import { derivePhase, type ProductState } from '@/lib/launch-phase';
+import { getUserChannels } from '@/lib/user-channels';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('lib:re-plan');
@@ -242,11 +243,19 @@ export async function runTacticalReplan(
     .filter((r) => r.userAction === 'manual' && r.state !== 'completed')
     .map((r) => ({ title: r.title, kind: r.kind }));
 
-  const channels: Array<'x' | 'reddit' | 'email'> = [];
+  // Intersect the strategic path's channelMix (the plan's intended channels)
+  // with the user's currently-connected channels. If the user disconnected
+  // a channel in Settings after the plan was written, it's no longer
+  // executable — the planner shouldn't produce plan_items for it on replan.
+  // Email is an exception: it doesn't live in the `channels` table (no
+  // OAuth), so we keep it whenever the path's channelMix lists it.
   const channelMix = row.pathChannelMix as Record<string, unknown> | null;
+  const connected = new Set(await getUserChannels(userId));
+  const channels: Array<'x' | 'reddit' | 'email'> = [];
   if (channelMix) {
     for (const k of ['x', 'reddit', 'email'] as const) {
-      if (channelMix[k]) channels.push(k);
+      if (!channelMix[k]) continue;
+      if (k === 'email' || connected.has(k)) channels.push(k);
     }
   }
   if (channels.length === 0) return { ok: false, code: 'no_channels_in_path' };

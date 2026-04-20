@@ -42,18 +42,25 @@ vi.mock('@/skills/_catalog', () => ({
 // db mock — a single row fixture drives the select chain.
 let activePathRow: Record<string, unknown> | null = null;
 let weekRows: Array<Record<string, unknown>> = [];
+let userChannelRows: Array<{ platform: string }> = [];
 let txShouldThrow = false;
 
 vi.mock('@/lib/db', () => ({
   db: {
-    select: (_projection?: unknown) => ({
-      from: () => ({
-        innerJoin: () => ({
-          where: () => ({ limit: () => (activePathRow ? [activePathRow] : []) }),
+    select: (projection?: unknown) => {
+      const fields = projection
+        ? Object.keys(projection as Record<string, unknown>)
+        : [];
+      const isChannels = fields.length === 1 && fields[0] === 'platform';
+      return {
+        from: () => ({
+          innerJoin: () => ({
+            where: () => ({ limit: () => (activePathRow ? [activePathRow] : []) }),
+          }),
+          where: () => (isChannels ? userChannelRows : weekRows),
         }),
-        where: () => weekRows,
-      }),
-    }),
+      };
+    },
     transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
       if (txShouldThrow) throw new Error('tx-fail');
       const tx = {
@@ -71,6 +78,10 @@ vi.mock('@/lib/db', () => ({
       return fn(tx);
     },
   },
+}));
+
+vi.mock('@/lib/platform-config', () => ({
+  isPlatformAvailable: (p: string) => ['x', 'reddit'].includes(p),
 }));
 
 vi.mock('drizzle-orm', async () => {
@@ -129,6 +140,7 @@ beforeEach(() => {
   authUserId = 'user-1';
   activePathRow = null;
   weekRows = [];
+  userChannelRows = [{ platform: 'x' }];
   txShouldThrow = false;
   runSkillMock.mockReset();
 });
@@ -211,5 +223,66 @@ describe('POST /api/plan/replan', () => {
     const { POST } = await import('../route');
     const res = await POST(makeReq());
     expect(res.status).toBe(500);
+  });
+
+  it('drops channels from the planner input when the user disconnected them in Settings', async () => {
+    // path has x+reddit in its channelMix, but the user only has reddit connected
+    // right now (x got disconnected after onboarding).
+    activePathRow = {
+      ...activePathFixture,
+      pathChannelMix: {
+        x: { perWeek: 4, preferredHours: [14] },
+        reddit: { perWeek: 2, preferredHours: [18] },
+      },
+    };
+    userChannelRows = [{ platform: 'reddit' }];
+    runSkillMock.mockResolvedValueOnce({
+      results: [validPlan],
+      errors: [],
+      usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0, model: 'haiku', turns: 1 },
+    });
+    const { POST } = await import('../route');
+    const res = await POST(makeReq());
+    expect(res.status).toBe(200);
+    const tacticalCall = runSkillMock.mock.calls[0]?.[0] as {
+      input: { channels: string[] };
+    };
+    expect(tacticalCall.input.channels).toEqual(['reddit']);
+  });
+
+  it('returns 400 no_channels_in_path when user disconnected every channel in the plan', async () => {
+    activePathRow = activePathFixture; // channelMix: x only
+    userChannelRows = []; // x got disconnected, nothing left (email not in mix)
+    const { POST } = await import('../route');
+    const res = await POST(makeReq());
+    expect(res.status).toBe(400);
+    const payload = (await res.json()) as { error: string };
+    expect(payload.error).toBe('no_channels_in_path');
+  });
+
+  it('keeps email in planner channels even with no channels-table row', async () => {
+    // Email isn't an OAuth platform so it doesn't appear in the channels
+    // table; getUserChannels() can't return it. The intersection logic
+    // special-cases email and keeps it whenever the path includes it.
+    activePathRow = {
+      ...activePathFixture,
+      pathChannelMix: {
+        x: { perWeek: 4, preferredHours: [14] },
+        email: { perWeek: 1, preferredHours: [9] },
+      },
+    };
+    userChannelRows = []; // no OAuth channels at all
+    runSkillMock.mockResolvedValueOnce({
+      results: [validPlan],
+      errors: [],
+      usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0, model: 'haiku', turns: 1 },
+    });
+    const { POST } = await import('../route');
+    const res = await POST(makeReq());
+    expect(res.status).toBe(200);
+    const tacticalCall = runSkillMock.mock.calls[0]?.[0] as {
+      input: { channels: string[] };
+    };
+    expect(tacticalCall.input.channels).toEqual(['email']);
   });
 });
