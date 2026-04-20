@@ -29,8 +29,9 @@ Key routing rules:
 
 2. **Reference injection over agent hardcoding.**
    Platform-specific behavior belongs in skill `references/` files, not hardcoded in agent .md
-   system prompts. The content-batch skill is the reference design: generic agent +
-   platform-specific reference docs.
+   system prompts. The `draft-single-post` skill is the reference design: generic
+   drafting prompt in SKILL.md, platform-specific rules in
+   `references/x-content-guide.md` (and one-per-platform as we add them).
 
 3. **Shared references in `src/references/`**, skill-specific in `src/skills/{name}/references/`.
    If 2+ skills use the same doc, move it to shared. Declare via `shared-references` in SKILL.md.
@@ -67,18 +68,38 @@ When adding a new channel (e.g., LinkedIn):
 - [ ] Add cases to `createPlatformDeps()`, `createClientFromChannel()`, and
       `createPublicPlatformDeps()` in `src/lib/platform-deps.ts`
 - [ ] Create reference docs for relevant skills (`*-search-guide.md`, `*-content-guide.md`, etc.)
+- [ ] If the skill fans out across platforms, add the new id to the `channels`
+      array in its `src/skills/_catalog.ts` entry so the tactical planner
+      selects it for plan items with `channel: '<new>'`.
 - [ ] Update `allowed-tools` in relevant SKILL.md frontmatters
 - [ ] NO changes needed to: skill-runner, swarm, query-loop, schemas, core agent .md files,
       `full-scan.ts`, `discovery.ts`, `posting.ts`, or `/api/automation/run`
 
-### Content-Batch Pattern (Reference Design)
+### Skill Pattern (Reference Design)
 
-The content-batch skill demonstrates the correct pattern for multi-platform skills:
-- Generic agent prompt in `src/agents/content.md` (no platform logic)
-- Platform-specific rules in `src/skills/content-batch/references/x-content-guide.md`
-- Strategy docs shared via `src/references/platforms/x-strategy.md`
-- Fan-out by `calendarItems` (platform-agnostic field)
-- Caller selects which skill and references to inject
+v3 uses atomic skills — one skill per concrete action (draft one post,
+draft one reply, judge one opportunity, etc.). `src/skills/_catalog.ts` is
+the source of truth for what ships; each entry declares `supportedKinds`
+and optional `channels` so the tactical planner can pick the right tool.
+
+The shipped content-drafting skills are the reference design for adding
+new channels:
+- `src/skills/draft-single-post/SKILL.md` — generic post-drafting prompt
+- `src/skills/draft-single-post/references/x-content-guide.md` —
+  X-specific length/tone rules
+- `src/skills/draft-single-reply/SKILL.md` + the matching reference
+- `src/references/platforms/x-strategy.md` — strategy doc shared across
+  skills via `shared-references` in SKILL.md frontmatter
+
+The planning skills (`strategic-planner`, `tactical-planner`) are
+single-pass and don't fan out by platform — they receive `channels: []`
+in their input and emit a plan whose items each carry a `channel` field
+that the caller routes to the right draft-* skill.
+
+Caller (the plan-execute worker) selects which skill to invoke based on
+`planItems.skillName` + `planItems.channel`, and which references to
+inject. No central "content-batch" orchestrator — each plan_item runs
+one atomic skill.
 
 ### What NOT to Do
 
