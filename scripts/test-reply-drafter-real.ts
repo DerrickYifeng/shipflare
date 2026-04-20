@@ -21,8 +21,8 @@ const DEFAULT_HANDLES = [
 ];
 const TWEETS_PER_HANDLE = 3;
 
-const replyScanSkill = loadSkill(
-  join(process.cwd(), 'src/skills/reply-scan'),
+const replyDraftSkill = loadSkill(
+  join(process.cwd(), 'src/skills/draft-single-reply'),
 );
 
 const bar = '─'.repeat(72);
@@ -81,7 +81,7 @@ const run = async () => {
   console.log(`\nRunning reply-drafter on ${tweets.length} real tweets…\n${bar}`);
 
   const result = await runSkill({
-    skill: replyScanSkill,
+    skill: replyDraftSkill,
     input: { tweets },
     deps: { xaiClient },
     outputSchema: replyDrafterOutputSchema,

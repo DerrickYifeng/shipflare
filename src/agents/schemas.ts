@@ -205,7 +205,7 @@ export const contentCreatorOutputSchema = z.object({
  * but is now a weak bias — the primary organising axis is `angle`.
  *
  * `whiteSpaceDayOffsets` lists days deliberately left un-drafted for reactive
- * posts. The slot-body processor skips these.
+ * posts. The draft-single-post executor skips these.
  */
 export const calendarPlanOutputSchema = z.object({
   phase: z.string().min(1),
@@ -248,8 +248,8 @@ export const calendarPlanOutputSchema = z.object({
 });
 
 /**
- * Output schema for the `slot-body` skill.
- * Produces the body (single tweet or thread) for a single planner slot.
+ * Output schema for the `draft-single-post` skill.
+ * Produces the body (single tweet or thread) for one plan_item.
  */
 export const slotBodyOutputSchema = z.object({
   tweets: z.array(z.string().min(1)).min(1),

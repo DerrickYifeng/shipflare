@@ -12,8 +12,8 @@ import { loadSkill } from '@/core/skill-loader';
 import { runSkill } from '@/core/skill-runner';
 import { replyDrafterOutputSchema } from '@/agents/schemas';
 
-const replyScanSkill = loadSkill(
-  join(process.cwd(), 'src/skills/reply-scan'),
+const replyDraftSkill = loadSkill(
+  join(process.cwd(), 'src/skills/draft-single-reply'),
 );
 
 const tweets = [
@@ -156,7 +156,7 @@ const run = async () => {
   console.log(`\nRunning reply-drafter on ${tweets.length} test tweets…\n${bar}`);
 
   const result = await runSkill({
-    skill: replyScanSkill,
+    skill: replyDraftSkill,
     input: { tweets },
     deps: {}, // drafter's x_get_tweet / x_search tools not needed for self-contained tweets
     outputSchema: replyDrafterOutputSchema,

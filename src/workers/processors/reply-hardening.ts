@@ -13,12 +13,12 @@ import type { ReplyDrafterOutput, ProductOpportunityJudgeOutput } from '@/agents
 import { loadVoiceBlockForUser } from '@/lib/voice/inject';
 import { createLogger } from '@/lib/logger';
 
-// Pre-load both skills at module init (same pattern as monitor.ts for replyScanSkill)
+// Pre-load both skills at module init (same pattern as monitor.ts for replyDraftSkill)
 const judgeSkill = loadSkill(
   join(process.cwd(), 'src/skills/product-opportunity-judge'),
 );
-const replyScanSkill = loadSkill(
-  join(process.cwd(), 'src/skills/reply-scan'),
+const replyDraftSkill = loadSkill(
+  join(process.cwd(), 'src/skills/draft-single-reply'),
 );
 
 const log = createLogger('worker:reply-hardening');
@@ -64,7 +64,7 @@ async function runReplyDrafter(
   repairPrompt: string | null,
 ): Promise<ReplyDrafterOutput | undefined> {
   const drafterRes = await runSkill<ReplyDrafterOutput>({
-    skill: replyScanSkill,
+    skill: replyDraftSkill,
     input: {
       tweets: [
         {
@@ -84,7 +84,7 @@ async function runReplyDrafter(
  *
  * Stages:
  *   1. product-opportunity-judge — determines whether the product may be mentioned
- *   2. reply-scan (reply-drafter) — drafts the reply with canMentionProduct context
+ *   2. draft-single-reply (reply-drafter) — drafts the reply with canMentionProduct context
  *   3. content-validator pipeline — length, platform-leak, hallucinated-stats
  *      with up to `MAX_REGEN_ATTEMPTS` regeneration passes
  *   4. ai-slop-validator — rejects AI-sounding preambles and banned vocabulary
@@ -95,9 +95,9 @@ async function runReplyDrafter(
  * so the caller can surface the draft for human approval rather than
  * silently discarding it.
  *
- * TODO: memory injection — the reply-scan skill receives no memoryPrompt here.
+ * TODO: memory injection — the draft-single-reply skill receives no memoryPrompt here.
  * The caller (monitor.ts) used to inject memoryPrompt at the batch runSkill level;
- * that injection now happens inside reply-scan's own skill mechanism via skill-runner
+ * that injection now happens inside the skill's own mechanism via skill-runner
  * when deps are provided. Per-tweet memory enrichment is a known limitation of this
  * per-tweet decomposition; revisit if quality regression is observed.
  */

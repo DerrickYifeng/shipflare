@@ -317,14 +317,14 @@ async function processXMonitorForUser(
       ),
     );
 
-  // Run reply-scan skill for tweets within reply window
+  // Run draft-single-reply skill for tweets within reply window
   if (tweetsForReply.length > 0) {
     const memoryStore = new MemoryStore(userId, productId);
     const dream = new AgentDream(memoryStore);
 
     // Run hardened reply pipeline: per-tweet parallel execution.
     // Each tweet goes through: product-opportunity-judge → reply-drafter → ai-slop + anchor validators.
-    // Memory injection happens inside reply-scan's own skill mechanism via skill-runner deps.
+    // Memory injection happens inside the skill's own mechanism via skill-runner deps.
     // If quality regression is observed, thread buildMemoryPrompt(memoryStore) into HardenedReplyInput and forward it.
     const hardenedResults = await Promise.all(
       tweetsForReply.map((t) =>

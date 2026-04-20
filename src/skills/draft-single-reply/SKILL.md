@@ -1,6 +1,6 @@
 ---
-name: reply-scan
-description: Fan-out reply drafting across monitored posts from target accounts
+name: draft-single-reply
+description: Draft a single reply to a monitored post or discovered thread (one LLM call per item).
 context: fork
 agent: reply-drafter
 model: claude-sonnet-4-6
@@ -13,10 +13,17 @@ timeout: 60000
 cache-safe: true
 ---
 
-# Reply Scan Skill
+# draft-single-reply
 
-Drafts high-value replies to posts from monitored target accounts.
-Each monitored post gets its own agent instance for parallel processing.
+Drafts a single reply to one monitored post or discovered thread. Pairs
+with `draft-single-post` — both are the atomic executors the tactical
+planner targets when it emits `plan_items` of kind `content_reply` /
+`content_post`. Renamed from `reply-scan` in Phase 4.
+
+Each monitored post gets its own agent instance for parallel processing;
+the fan-out key stays `tweets` for now because the monitor processor is
+the only caller. The key will generalize with the Reddit / discovery path
+when the Phase 7 plan-execute dispatcher lands.
 
 ## Workflow
 

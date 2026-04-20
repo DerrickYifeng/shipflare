@@ -1,6 +1,6 @@
 ---
-name: slot-body
-description: Generate a single tweet or thread body for one planner slot (calendar-slot-draft fan-out).
+name: draft-single-post
+description: Draft a single original post for one plan_item (one LLM call per item).
 agent: slot-body-agent
 model: claude-sonnet-4-6
 maxTurns: 4
@@ -14,10 +14,15 @@ references:
   - ./references/content-safety.md
 ---
 
-# slot-body
+# draft-single-post
 
-Given one calendar slot (content type + topic + product context + recent post history),
-produce the body text for that slot. One LLM call, one slot.
+Drafts a single original post for one `plan_item` of kind `content_post`.
+One LLM call, one item. Renamed from `slot-body` in Phase 4.
+
+Note: the prompt + references are currently X-idiomatic (character counts,
+thread semantics). Reddit support is scoped for Phase 5 — it needs a
+`reddit-content-guide.md` reference and an agent-prompt branch on `platform`.
+Until then, callers should only invoke this skill with `platform: 'x'`.
 
 ## Input
 

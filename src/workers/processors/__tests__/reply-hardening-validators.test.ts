@@ -20,7 +20,7 @@ vi.mock('@/memory/prompt-builder', () => ({ buildMemoryPrompt: async () => '' })
 vi.mock('@/core/skill-runner', () => ({ runSkill: runSkillMock }));
 vi.mock('@/core/skill-loader', () => ({
   loadSkill: (dir: string) => ({
-    name: dir.includes('product-opportunity-judge') ? 'product-opportunity-judge' : 'reply-scan',
+    name: dir.includes('product-opportunity-judge') ? 'product-opportunity-judge' : 'draft-single-reply',
   }),
 }));
 
