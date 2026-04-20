@@ -37,7 +37,8 @@ vi.mock('@/lib/redis', () => ({
 
 const runTacticalReplanMock = vi.fn();
 vi.mock('@/lib/re-plan', () => ({
-  runTacticalReplan: (...args: unknown[]) => runTacticalReplanMock(...args),
+  runTacticalReplan: (userId: string, trigger: string) =>
+    runTacticalReplanMock(userId, trigger),
 }));
 
 vi.mock('@/lib/logger', () => ({

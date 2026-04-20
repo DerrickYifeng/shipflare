@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
-import { and, eq, gte, inArray, lt, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { planItems } from '@/lib/db/schema';
+import type { PlanItemState } from '@/lib/plan-state';
 
 // V3 Today feed. Renders the user's pre-terminal plan_items
 // (planned / drafted / ready_for_review / approved) as TodoItem-shaped
@@ -16,18 +17,12 @@ import { planItems } from '@/lib/db/schema';
 // (frontend needs this to distinguish "genuinely no plan yet" from
 // "plan exists, all items completed/skipped today").
 
-type PendingState =
-  | 'planned'
-  | 'drafted'
-  | 'ready_for_review'
-  | 'approved';
-
-const PENDING_STATES: PendingState[] = [
+const PENDING_STATES = [
   'planned',
   'drafted',
   'ready_for_review',
   'approved',
-];
+] as const satisfies readonly PlanItemState[];
 
 function dayBounds(now: Date): { start: Date; end: Date } {
   const start = new Date(now);
@@ -84,7 +79,7 @@ export async function GET() {
     .where(
       and(
         eq(planItems.userId, userId),
-        inArray(planItems.state, PENDING_STATES as unknown as string[]),
+        inArray(planItems.state, PENDING_STATES),
       ),
     )
     .orderBy(planItems.scheduledAt);

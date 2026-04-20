@@ -48,7 +48,9 @@ vi.mock('@/lib/queue', () => ({
 let prevProduct: Record<string, unknown> | null = null;
 let userChannelRows: Array<{ platform: string }> = [];
 
-const updateSet = vi.fn(() => ({ where: async () => undefined }));
+const updateSet = vi.fn(
+  (_patch: Record<string, unknown>) => ({ where: async () => undefined }),
+);
 const insertOnConflict = vi.fn(async () => undefined);
 
 vi.mock('@/lib/db', () => ({
@@ -154,7 +156,7 @@ describe('PATCH /api/product', () => {
     );
     expect(res.status).toBe(200);
     expect(updateSet).toHaveBeenCalledTimes(1);
-    const patch = updateSet.mock.calls[0]?.[0] as Record<string, unknown>;
+    const patch = updateSet.mock.calls[0][0];
     // Only valueProp and updatedAt should be written on identity edit
     expect(patch.valueProp).toBe('ship faster than ever');
     expect('name' in patch).toBe(false);
@@ -201,7 +203,7 @@ describe('PATCH /api/product', () => {
         merge: true,
       }),
     );
-    const patch = updateSet.mock.calls[0]?.[0] as Record<string, unknown>;
+    const patch = updateSet.mock.calls[0][0];
     // prev.name/desc/valueProp are non-placeholder, so merge must preserve them
     expect(patch.name).toBe('ShipFlare');
     expect(patch.description).toBe('Marketing autopilot');

@@ -9,14 +9,19 @@ vi.mock('@/lib/auth', () => ({
 const findMock = vi.fn();
 const writeMock = vi.fn();
 vi.mock('@/app/api/plan-item/[id]/_helpers', () => ({
-  findOwnedPlanItem: (...args: unknown[]) => findMock(...args),
-  writePlanItemState: (...args: unknown[]) => writeMock(...args),
-  paramsSchema: { safeParse: (v: { id: string }) => ({ success: /^[0-9a-f-]{36}$/.test(v.id), data: v }) },
+  findOwnedPlanItem: (id: string, userId: string) => findMock(id, userId),
+  writePlanItemState: (row: unknown, to: string) => writeMock(row, to),
+  paramsSchema: {
+    safeParse: (v: { id: string }) => ({
+      success: /^[0-9a-f-]{36}$/.test(v.id),
+      data: v,
+    }),
+  },
 }));
 
-const enqueueMock = vi.fn(async () => undefined);
+const enqueueMock = vi.fn(async (_data: unknown) => undefined);
 vi.mock('@/lib/queue', () => ({
-  enqueuePlanExecute: (...args: unknown[]) => enqueueMock(...args),
+  enqueuePlanExecute: (data: unknown) => enqueueMock(data),
 }));
 
 vi.mock('@/lib/logger', () => ({
