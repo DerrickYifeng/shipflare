@@ -37,6 +37,12 @@ import {
   draftLaunchDayCommentOutputSchema,
   launchAssetBriefOutputSchema,
   launchRunsheetOutputSchema,
+  extractMilestoneOutputSchema,
+  communityRulesOutputSchema,
+  communityHotPostsOutputSchema,
+  analyticsSummarizeOutputSchema,
+  topSupportersOutputSchema,
+  interviewQuestionsOutputSchema,
 } from '@/agents/schemas';
 
 /**
@@ -406,6 +412,136 @@ const buildLaunchRunsheetInput = z.object({
 });
 
 // ---------------------------------------------------------------------------
+// Phase 5 — research atoms
+// ---------------------------------------------------------------------------
+
+const extractMilestoneInput = z.object({
+  window: z.object({
+    since: z.string().min(1),
+    until: z.string().min(1),
+  }),
+  entries: z
+    .array(
+      z.object({
+        sha: z.string().min(1),
+        message: z.string().min(1),
+        author: z.string().min(1),
+        timestamp: z.string().min(1),
+        type: z.enum(['commit', 'pr', 'release']).optional(),
+        ref: z.string().optional(),
+      }),
+    )
+    .min(1),
+  product: z.object({
+    name: z.string().min(1),
+    valueProp: z.string().nullable(),
+  }),
+});
+
+const fetchCommunityRulesInput = z.object({
+  community: z.string().min(1),
+  product: z.object({
+    name: z.string().min(1),
+    description: z.string().min(1),
+    valueProp: z.string().nullable(),
+  }),
+});
+
+const fetchCommunityHotPostsInput = z.object({
+  community: z.string().min(1),
+  limit: z.number().int().positive().max(100).optional(),
+  product: z.object({
+    name: z.string().min(1),
+    description: z.string().min(1),
+    valueProp: z.string().nullable(),
+  }),
+});
+
+const analyticsSummarizeInput = z.object({
+  periodStart: z.string().min(1),
+  periodEnd: z.string().min(1),
+  product: productContextSchema,
+  rawMetrics: z.object({
+    postsPublished: z.number().int().nonnegative(),
+    repliesSent: z.number().int().nonnegative(),
+    impressions: z.number().int().nonnegative(),
+    engagements: z.number().int().nonnegative(),
+    followersDelta: z.number().int(),
+    topPost: z
+      .object({
+        id: z.string().min(1),
+        snippet: z.string().min(1),
+        impressions: z.number().int().nonnegative(),
+        engagements: z.number().int().nonnegative(),
+      })
+      .optional(),
+    perChannel: z
+      .record(
+        z.string(),
+        z.object({
+          postsPublished: z.number().int().nonnegative(),
+          impressions: z.number().int().nonnegative(),
+        }),
+      )
+      .optional(),
+  }),
+  prior: z
+    .object({
+      postsPublished: z.number().int().nonnegative(),
+      repliesSent: z.number().int().nonnegative(),
+      impressions: z.number().int().nonnegative(),
+      engagements: z.number().int().nonnegative(),
+    })
+    .optional(),
+  voiceBlock: z.string().nullable(),
+});
+
+const identifyTopSupportersInput = z.object({
+  periodStart: z.string().min(1),
+  periodEnd: z.string().min(1),
+  events: z
+    .array(
+      z.object({
+        username: z.string().min(1),
+        platform: z.string().min(1),
+        kind: z.enum([
+          'reply',
+          'repost',
+          'quote',
+          'like',
+          'bookmark',
+          'mention',
+        ]),
+        timestamp: z.string().min(1),
+        note: z.string().optional(),
+      }),
+    ),
+  productName: z.string().min(1),
+});
+
+const generateInterviewQuestionsInput = z.object({
+  intent: z.enum([
+    'discovery',
+    'activation',
+    'retention',
+    'win_back',
+    'pricing',
+  ]),
+  product: productContextSchema,
+  interviewee: z.object({
+    role: z.string().optional(),
+    cohort: z.string().optional(),
+    context: z.string().optional(),
+  }),
+  constraints: z
+    .object({
+      excludeTopics: z.array(z.string()).optional(),
+      focusTopics: z.array(z.string()).optional(),
+    })
+    .optional(),
+});
+
+// ---------------------------------------------------------------------------
 // Catalog
 // ---------------------------------------------------------------------------
 
@@ -542,6 +678,60 @@ export const SKILL_CATALOG: readonly SkillMeta[] = [
     inputSchema: launchAssetBriefInput,
     outputSchema: launchAssetBriefOutputSchema,
     supportedKinds: ['launch_asset'],
+  },
+
+  // --- Phase 5: research atoms ---
+  {
+    name: 'analytics-summarize',
+    description:
+      "Turn a week of raw metrics into a planner-consumable summary. Replaces the retired 'analyst' agent; output feeds the Today dashboard and the tactical planner's next-week moves.",
+    inputSchema: analyticsSummarizeInput,
+    outputSchema: analyticsSummarizeOutputSchema,
+    supportedKinds: ['analytics_summary'],
+  },
+  {
+    name: 'extract-milestone-from-commits',
+    description:
+      'Pick the single highest-signal milestone from a window of git activity. Returns { milestone: null } for chore-only windows.',
+    inputSchema: extractMilestoneInput,
+    outputSchema: extractMilestoneOutputSchema,
+    // Research skill feeding the tactical planner's thesis pass; not a
+    // plan_items row itself.
+    supportedKinds: [],
+  },
+  {
+    name: 'fetch-community-hot-posts',
+    description:
+      "Read a community's current hot posts; return top formats, average engagement, and one actionable insight for the drafting path.",
+    inputSchema: fetchCommunityHotPostsInput,
+    outputSchema: communityHotPostsOutputSchema,
+    supportedKinds: [],
+    channels: ['reddit'],
+  },
+  {
+    name: 'fetch-community-rules',
+    description:
+      "Read a subreddit's rules and classify self-promotion policy into forbidden / restricted / tolerated / welcomed / unknown.",
+    inputSchema: fetchCommunityRulesInput,
+    outputSchema: communityRulesOutputSchema,
+    supportedKinds: [],
+    channels: ['reddit'],
+  },
+  {
+    name: 'generate-interview-questions',
+    description:
+      'Exactly 10 customer-interview questions tailored to phase + intent (discovery / activation / retention / win_back / pricing) + up to 10 reactive follow-up prompts.',
+    inputSchema: generateInterviewQuestionsInput,
+    outputSchema: interviewQuestionsOutputSchema,
+    supportedKinds: ['interview'],
+  },
+  {
+    name: 'identify-top-supporters',
+    description:
+      'Rank up to 30 accounts by weighted engagement events within a period. Weights: reply/quote/mention=4, repost/bookmark=2, like=1.',
+    inputSchema: identifyTopSupportersInput,
+    outputSchema: topSupportersOutputSchema,
+    supportedKinds: ['analytics_summary'],
   },
 ];
 
