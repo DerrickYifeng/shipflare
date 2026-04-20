@@ -11,30 +11,19 @@ export {
 } from './drafts';
 export { agentMemories, agentMemoryLogs } from './memories';
 export { codeSnapshots } from './code-snapshots';
-export * from './weekly-themes';
 export {
   xTargetAccounts,
   xMonitoredTweets,
-  xContentCalendar,
   xTweetMetrics,
   xFollowerSnapshots,
   xAnalyticsSummary,
   xMonitoredTweetStatusEnum,
-  xContentCalendarStatusEnum,
   xContentCalendarItemStateEnum,
   // Platform-generic aliases
-  contentCalendar,
   analyticsSummary,
   targetAccounts,
   monitoredContent,
 } from './x-growth';
-export {
-  todoItems,
-  todoTypeEnum,
-  todoSourceEnum,
-  todoPriorityEnum,
-  todoStatusEnum,
-} from './todos';
 export { discoveryConfigs } from './discovery-configs';
 export * from './voice-profiles';
 export {
@@ -45,3 +34,17 @@ export {
   type ThreadFeedback,
   type NewThreadFeedback,
 } from './pipeline-events';
+export {
+  strategicPaths,
+  launchPhaseEnum,
+} from './strategic-paths';
+export {
+  plans,
+  planTriggerEnum,
+} from './plans';
+export {
+  planItems,
+  planItemKindEnum,
+  planItemStateEnum,
+  planItemUserActionEnum,
+} from './plan-items';
