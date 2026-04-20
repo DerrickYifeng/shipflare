@@ -129,7 +129,11 @@ function TodayContentInner({
 
   // Local UI state ────────────────────────────────────────────────────
   const [showFirstRun, setShowFirstRun] = useState(isFirstRun);
-  const [activeIndex, setActiveIndex] = useState(0);
+  // Start at -1 so no card is keyboard-active on first render. Pressing j
+  // advances to 0 (first card); pressing k stays at the first card. Avoids
+  // the signal outline appearing on the first card before the user has
+  // actually engaged keyboard navigation.
+  const [activeIndex, setActiveIndex] = useState(-1);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const [sourceFilterId, setSourceFilterId] = useState<string | null>(null);

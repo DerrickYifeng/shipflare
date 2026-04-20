@@ -49,6 +49,25 @@ const CHIP_STAGGER_INITIAL_MS = 60;
 const CHIP_STAGGER_SCAN_HEAD_MS = 400;
 const CHIP_STAGGER_SCAN_STEP_MS = 320;
 
+/**
+ * Render chips in the platform's natural vocabulary, not the raw
+ * community string the discovery agent wrote.
+ *
+ * On Reddit, `source` is already `r/foo` — pass through.
+ * On X, the discovery agent encodes the search query as the community
+ * (e.g. `"X - social media marketing"`) because X has no real community
+ * concept and the schema requires community NOT NULL. Strip the noisy
+ * `"X - "` / `"X / "` prefix and prepend the `𝕏 ·` mark so chips read as
+ * `𝕏 · social media marketing` instead of `X - social media marketing`.
+ */
+function formatChipLabel(platform: string, source: string): string {
+  if (platform === 'x') {
+    const cleaned = source.replace(/^X\s*[-/]\s*/i, '').trim();
+    return `𝕏 · ${cleaned || 'mentions'}`;
+  }
+  return source;
+}
+
 export function SourceFilterRail({
   sources,
   chipState,
@@ -99,7 +118,7 @@ export function SourceFilterRail({
           <SourceChip
             key={id}
             id={id}
-            label={s.source}
+            label={formatChipLabel(s.platform, s.source)}
             state={chipBucket}
             count={snapshot?.data?.aboveGate ?? snapshot?.data?.found ?? 0}
             active={isFiltered}

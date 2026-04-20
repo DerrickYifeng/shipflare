@@ -69,6 +69,19 @@ function relativeTime(iso: string | null): string | null {
  */
 const HALLUCINATED_POSTED_AT = '2021-01-01T00:00:00.000Z';
 
+/**
+ * Mirror of the source-filter-rail helper: strip the noisy "X - " / "X / "
+ * prefix the discovery agent writes into `community` for X threads because
+ * X has no community concept. Reddit values like `r/startups` pass through.
+ */
+function formatCommunityLabel(platform: string, community: string): string {
+  if (platform === 'x') {
+    const cleaned = community.replace(/^X\s*[-/]\s*/i, '').trim();
+    return cleaned || 'mentions';
+  }
+  return community;
+}
+
 function threadTimestamp(
   postedAt: string | null,
   discoveredAt: string | null,
@@ -185,15 +198,44 @@ export function ReplyCard({
             }}
           >
             {item.threadAuthor ? (
-              <span
-                style={{
-                  fontSize: 'var(--sf-text-sm)',
-                  fontWeight: 600,
-                  color: 'var(--sf-fg-1)',
-                }}
-              >
-                {item.threadAuthor}
-              </span>
+              item.threadUrl ? (
+                <a
+                  href={item.threadUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    fontSize: 'var(--sf-text-sm)',
+                    fontWeight: 600,
+                    color: 'var(--sf-fg-1)',
+                    textDecoration: 'none',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                  }}
+                  title="Open original post"
+                >
+                  {item.threadAuthor}
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      fontSize: 'var(--sf-text-xs)',
+                      color: 'var(--sf-signal-ink)',
+                    }}
+                  >
+                    ↗
+                  </span>
+                </a>
+              ) : (
+                <span
+                  style={{
+                    fontSize: 'var(--sf-text-sm)',
+                    fontWeight: 600,
+                    color: 'var(--sf-fg-1)',
+                  }}
+                >
+                  {item.threadAuthor}
+                </span>
+              )
             ) : null}
             {item.community ? (
               <span
@@ -206,7 +248,7 @@ export function ReplyCard({
               >
                 in{' '}
                 <span style={{ color: 'var(--sf-fg-2)', fontWeight: 500 }}>
-                  {item.community}
+                  {formatCommunityLabel(item.platform, item.community)}
                 </span>
               </span>
             ) : null}
@@ -282,17 +324,36 @@ export function ReplyCard({
           }}
         >
           <Ops>Your draft reply</Ops>
-          <span
-            className="sf-mono"
+          <div
             style={{
-              fontSize: 'var(--sf-text-xs)',
-              color: over ? 'var(--sf-danger)' : 'var(--sf-fg-4)',
-              letterSpacing: 'var(--sf-track-mono)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
             }}
           >
-            {len}
-            {cap < 10_000 ? ` / ${cap}` : ''}
-          </span>
+            {over ? (
+              <span
+                style={{
+                  fontSize: 'var(--sf-text-xs)',
+                  color: 'var(--sf-danger)',
+                  fontWeight: 500,
+                }}
+              >
+                Too long — edit to shorten
+              </span>
+            ) : null}
+            <span
+              className="sf-mono"
+              style={{
+                fontSize: 'var(--sf-text-xs)',
+                color: over ? 'var(--sf-danger)' : 'var(--sf-fg-4)',
+                letterSpacing: 'var(--sf-track-mono)',
+              }}
+            >
+              {len}
+              {cap < 10_000 ? ` / ${cap}` : ''}
+            </span>
+          </div>
         </div>
 
         {!isEditing && item.draftBody ? (

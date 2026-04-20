@@ -30,7 +30,11 @@ export function CTASection({ isAuthenticated }: CTASectionProps) {
       id="signup"
       aria-labelledby="cta-heading"
       style={{
-        background: 'var(--sf-ink)',
+        // Signal gradient per handoff README — the visual peak of the
+        // alternating dark/light/dark/light rhythm before the footer.
+        // Matches sidebar active-nav gradient (sf-signal → deeper violet).
+        background:
+          'linear-gradient(135deg, var(--sf-signal) 0%, oklch(50% 0.22 268) 100%)',
         color: 'var(--sf-fg-on-dark-1)',
         padding: '140px 24px',
         position: 'relative',
@@ -43,7 +47,7 @@ export function CTASection({ isAuthenticated }: CTASectionProps) {
           position: 'absolute',
           inset: 0,
           background:
-            'radial-gradient(ellipse 60% 50% at 50% 40%, oklch(62% 0.19 255 / 0.20), transparent 60%)',
+            'radial-gradient(ellipse 60% 50% at 50% 40%, oklch(82% 0.14 255 / 0.25), transparent 60%)',
           pointerEvents: 'none',
         }}
       />
