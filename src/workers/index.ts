@@ -19,7 +19,7 @@ import { processSearchSource } from './processors/search-source';
 import { processDiscoveryScan } from './processors/discovery-scan';
 import { processStalledRowSweep } from './processors/stalled-row-sweep';
 import { processVoiceExtract } from './processors/voice-extract';
-import { dreamQueue, discoveryQueue, discoveryScanQueue, monitorQueue, metricsQueue, analyticsQueue, todoSeedQueue, codeScanQueue, stalledRowSweepQueue, voiceExtractQueue } from '@/lib/queue';
+import { dreamQueue, discoveryQueue, discoveryScanQueue, monitorQueue, metricsQueue, analyticsQueue, todoSeedQueue, codeScanQueue, stalledRowSweepQueue } from '@/lib/queue';
 import { createLogger, loggerForJob } from '@/lib/logger';
 import type { DiscoveryJobData, ContentJobData, ReviewJobData, PostingJobData, HealthScoreJobData, DreamJobData, CodeScanJobData, MonitorJobData, CalendarPlanJobData, CalendarSlotDraftJobData, SearchSourceJobData, DiscoveryScanJobData, EngagementJobData, MetricsJobData, AnalyticsJobData, TodoSeedJobData, CalibrationJobData } from '@/lib/queue/types';
 import type { VoiceExtractJobData } from '@/lib/queue/voice-extract';

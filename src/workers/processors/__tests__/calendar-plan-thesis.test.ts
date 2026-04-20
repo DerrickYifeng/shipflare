@@ -66,8 +66,8 @@ vi.mock('drizzle-orm', () => ({
 
 vi.mock('@/lib/db', () => {
   const db = {
-    select: (_projection?: unknown) => ({
-      from: (_table: unknown) => {
+    select: () => ({
+      from: () => {
         const idx = selectCallIndex++;
         const makeChain = (rows: unknown[]) => ({
           where: () => ({

@@ -23,7 +23,6 @@ import { createLogger, loggerForJob, type Logger } from '@/lib/logger';
 import { buildContentUrl } from '@/lib/platform-config';
 import { MemoryStore } from '@/memory/store';
 import { AgentDream } from '@/memory/dream';
-import { buildMemoryPrompt } from '@/memory/prompt-builder';
 
 const baseLog = createLogger('worker:x-monitor');
 
@@ -323,13 +322,11 @@ async function processXMonitorForUser(
   if (tweetsForReply.length > 0) {
     const memoryStore = new MemoryStore(userId, productId);
     const dream = new AgentDream(memoryStore);
-    const memoryPrompt = await buildMemoryPrompt(memoryStore);
 
     // Run hardened reply pipeline: per-tweet parallel execution.
     // Each tweet goes through: product-opportunity-judge → reply-drafter → ai-slop + anchor validators.
-    // TODO: memoryPrompt and xClient deps were previously injected at the batch runSkill level.
-    // Memory injection now happens inside reply-scan's own skill mechanism via skill-runner deps.
-    // If quality regression is observed, thread memoryPrompt into HardenedReplyInput and forward it.
+    // Memory injection happens inside reply-scan's own skill mechanism via skill-runner deps.
+    // If quality regression is observed, thread buildMemoryPrompt(memoryStore) into HardenedReplyInput and forward it.
     const hardenedResults = await Promise.all(
       tweetsForReply.map((t) =>
         draftReplyWithHardening({
