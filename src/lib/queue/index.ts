@@ -378,6 +378,17 @@ export { voiceExtractQueue, enqueueVoiceExtract } from './voice-extract';
 export type { VoiceExtractJobData } from './voice-extract';
 
 // ----------------------------------------------------------------
+//  Plan-execute queue (Phase 7)
+// ----------------------------------------------------------------
+
+export {
+  planExecuteQueue,
+  enqueuePlanExecute,
+  planExecuteJobSchema,
+} from './plan-execute';
+export type { PlanExecuteJobData } from './plan-execute';
+
+// ----------------------------------------------------------------
 //  Calibration queue
 // ----------------------------------------------------------------
 
