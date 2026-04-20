@@ -42,9 +42,9 @@ export function AgentDetailPanel({
     bottom: 0,
     width: 320,
     maxWidth: '90%',
-    background: 'var(--sf-paper)',
+    background: 'var(--sf-bg-primary)',
     borderLeft: '1px solid var(--sf-border-subtle)',
-    boxShadow: open ? 'var(--sf-shadow-lg)' : 'none',
+    boxShadow: open ? 'var(--sf-shadow-elevated)' : 'none',
     transform: open ? 'translateX(0)' : 'translateX(100%)',
     transition: 'transform var(--sf-dur-slow) var(--sf-ease-swift)',
     zIndex: 100,
@@ -185,7 +185,7 @@ function ProgressBar({ progress }: { progress: number }) {
       <div
         style={{
           height: 3,
-          background: 'var(--sf-paper-sunken)',
+          background: 'var(--sf-bg-tertiary)',
           borderRadius: 2,
           overflow: 'hidden',
         }}
@@ -194,7 +194,7 @@ function ProgressBar({ progress }: { progress: number }) {
           style={{
             width: `${Math.min(100, Math.max(0, progress * 100))}%`,
             height: '100%',
-            background: 'var(--sf-signal)',
+            background: 'var(--sf-accent)',
             transition: 'width var(--sf-dur-slow) var(--sf-ease-swift)',
           }}
         />
@@ -241,7 +241,7 @@ const CURRENT_TASK_STYLE: CSSProperties = {
 const LOG_ENTRY_STYLE: CSSProperties = {
   fontSize: 11,
   color: 'var(--sf-fg-2)',
-  background: 'var(--sf-paper-sunken)',
+  background: 'var(--sf-bg-tertiary)',
   padding: '4px 8px',
   borderRadius: 'var(--sf-radius-sm, 6px)',
   letterSpacing: 'var(--sf-track-mono)',
@@ -251,7 +251,7 @@ const LOG_ENTRY_STYLE: CSSProperties = {
 const HANDOFF_ROW_STYLE: CSSProperties = {
   padding: 10,
   borderRadius: 'var(--sf-radius-md)',
-  background: 'var(--sf-paper-sunken)',
+  background: 'var(--sf-bg-tertiary)',
 };
 
 const HANDOFF_META_STYLE: CSSProperties = {

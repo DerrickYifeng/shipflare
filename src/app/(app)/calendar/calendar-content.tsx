@@ -176,7 +176,7 @@ export function CalendarContent() {
               style={{
                 display: 'flex',
                 gap: 4,
-                background: 'var(--sf-paper-sunken)',
+                background: 'var(--sf-bg-tertiary)',
                 padding: 3,
                 borderRadius: 'var(--sf-radius-md)',
               }}
@@ -190,13 +190,13 @@ export function CalendarContent() {
                     padding: '4px 10px',
                     borderRadius: 6,
                     border: 'none',
-                    background: kindFilter === k ? 'var(--sf-paper)' : 'transparent',
+                    background: kindFilter === k ? 'var(--sf-bg-primary)' : 'transparent',
                     color: kindFilter === k ? 'var(--sf-fg-1)' : 'var(--sf-fg-3)',
                     fontWeight: kindFilter === k ? 600 : 500,
                     fontSize: 'var(--sf-text-xs)',
                     cursor: 'pointer',
                     fontFamily: 'inherit',
-                    boxShadow: kindFilter === k ? 'var(--sf-shadow-sm)' : 'none',
+                    boxShadow: kindFilter === k ? 'var(--sf-shadow-card)' : 'none',
                     textTransform: 'uppercase',
                     letterSpacing: 'var(--sf-track-mono)',
                   }}
@@ -230,7 +230,7 @@ export function CalendarContent() {
               border: '1px solid var(--sf-border)',
               borderRadius: 'var(--sf-radius-md)',
               overflow: 'hidden',
-              background: 'var(--sf-paper)',
+              background: 'var(--sf-bg-primary)',
             }}
           >
             <button
@@ -330,9 +330,9 @@ export function CalendarContent() {
                     alignItems: 'baseline',
                     gap: 8,
                     background: isToday
-                      ? 'var(--sf-signal-tint)'
+                      ? 'var(--sf-accent-light)'
                       : isWeekend
-                        ? 'var(--sf-paper-sunken)'
+                        ? 'var(--sf-bg-tertiary)'
                         : 'transparent',
                   }}
                 >
@@ -350,13 +350,13 @@ export function CalendarContent() {
                     style={{
                       fontSize: 'var(--sf-text-h4)',
                       fontWeight: isToday ? 700 : 500,
-                      color: isToday ? 'var(--sf-signal)' : 'var(--sf-fg-1)',
+                      color: isToday ? 'var(--sf-accent)' : 'var(--sf-fg-1)',
                     }}
                   >
                     {date.getDate()}
                   </span>
                   {isToday && (
-                    <Badge variant="signal" mono>
+                    <Badge variant="accent" mono>
                       TODAY
                     </Badge>
                   )}
@@ -403,9 +403,9 @@ export function CalendarContent() {
                     height: GRID_HEIGHT,
                     borderLeft: '1px solid var(--sf-border-subtle)',
                     background: isToday
-                      ? 'var(--sf-signal-tint)'
+                      ? 'var(--sf-accent-light)'
                       : isWeekend
-                        ? 'var(--sf-paper-sunken)'
+                        ? 'var(--sf-bg-tertiary)'
                         : 'transparent',
                   }}
                 >
@@ -433,7 +433,7 @@ export function CalendarContent() {
                           left: -2,
                           right: 0,
                           height: 2,
-                          background: 'var(--sf-danger)',
+                          background: 'var(--sf-error)',
                           zIndex: 10,
                         }}
                       >
@@ -445,7 +445,7 @@ export function CalendarContent() {
                             width: 8,
                             height: 8,
                             borderRadius: '50%',
-                            background: 'var(--sf-danger)',
+                            background: 'var(--sf-error)',
                           }}
                         />
                       </div>
@@ -454,15 +454,15 @@ export function CalendarContent() {
                     const top = TOP_PAD + (slot.hour - HOURS[0]!) * ROW_H;
                     const h = slot.duration * ROW_H;
                     const bg = slot.sent
-                      ? 'var(--sf-paper-sunken)'
+                      ? 'var(--sf-bg-tertiary)'
                       : slot.kind === 'reply'
-                        ? 'var(--sf-signal-tint)'
-                        : 'var(--sf-flare-tint)';
+                        ? 'var(--sf-accent-light)'
+                        : 'var(--sf-accent-light)';
                     const borderColor = slot.sent
                       ? 'var(--sf-border)'
                       : slot.kind === 'reply'
-                        ? 'var(--sf-signal)'
-                        : 'var(--sf-flare)';
+                        ? 'var(--sf-accent)'
+                        : 'var(--sf-accent)';
                     const selKey = `${dateKey}-${slot.id}`;
                     const isSel = selected === selKey;
                     return (
@@ -484,7 +484,7 @@ export function CalendarContent() {
                           textAlign: 'left',
                           cursor: 'pointer',
                           fontFamily: 'inherit',
-                          boxShadow: isSel ? 'var(--sf-shadow-md)' : 'none',
+                          boxShadow: isSel ? 'var(--sf-shadow-card-hover)' : 'none',
                           zIndex: isSel ? 20 : 5,
                           transform: isSel ? 'scale(1.02)' : 'scale(1)',
                           transition: 'transform var(--sf-dur-base) var(--sf-ease-swift), box-shadow var(--sf-dur-base) var(--sf-ease-swift)',
@@ -634,16 +634,17 @@ function KpiCard({ value, label }: { value: string | number; label: string }) {
 }
 
 function LegendDot({ kind }: { kind: 'reply' | 'post' }) {
-  const color = kind === 'reply' ? 'signal' : 'flare';
+  const color = kind === 'reply' ? 'var(--sf-accent)' : 'var(--sf-success)';
+  const tint = kind === 'reply' ? 'var(--sf-accent-light)' : 'var(--sf-success-light)';
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
       <span
         style={{
           width: 10,
           height: 10,
-          background: `var(--sf-${color}-tint)`,
-          border: `1px solid var(--sf-${color})`,
-          borderLeft: `3px solid var(--sf-${color})`,
+          background: tint,
+          border: `1px solid ${color}`,
+          borderLeft: `3px solid ${color}`,
           borderRadius: 3,
         }}
       />
@@ -680,10 +681,10 @@ function SlotDrawer({
         right: 24,
         bottom: 24,
         width: 'min(400px, calc(100vw - 48px))',
-        background: 'var(--sf-paper-raised)',
+        background: 'var(--sf-bg-secondary)',
         border: '1px solid var(--sf-border)',
         borderRadius: 'var(--sf-radius-lg)',
-        boxShadow: 'var(--sf-shadow-lg)',
+        boxShadow: 'var(--sf-shadow-elevated)',
         padding: 20,
         zIndex: 50,
       }}
@@ -736,7 +737,7 @@ function SlotDrawer({
           style={{
             margin: '12px 0 0',
             padding: 10,
-            background: 'var(--sf-paper-sunken)',
+            background: 'var(--sf-bg-tertiary)',
             borderRadius: 'var(--sf-radius-sm)',
             fontSize: 'var(--sf-text-sm)',
             color: 'var(--sf-fg-2)',
@@ -748,7 +749,7 @@ function SlotDrawer({
       )}
       <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
         <Button
-          variant="danger"
+          variant="error"
           size="sm"
           onClick={() => void onCancel(item.id)}
           disabled={item.status === 'posted'}

@@ -220,7 +220,7 @@ export function CodeSnapshotSection({ snapshot, hasGitHub }: CodeSnapshotSection
             <div className="flex items-center gap-1.5 flex-wrap">
               <span className="text-[12px] tracking-[-0.12px] text-sf-text-tertiary w-20 shrink-0">Languages</span>
               {snapshot.techStack.languages.map((l) => (
-                <Badge key={l} variant="signal">{l}</Badge>
+                <Badge key={l} variant="accent">{l}</Badge>
               ))}
             </div>
           )}

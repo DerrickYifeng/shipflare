@@ -94,7 +94,7 @@ export function ReplyCard({
           </span>
 
           {item.community && (
-            <Badge variant="signal">{item.community}</Badge>
+            <Badge variant="accent">{item.community}</Badge>
           )}
 
           <span className="font-mono text-[12px] tracking-[-0.12px] text-sf-text-tertiary uppercase">

@@ -8,18 +8,15 @@ import {
   useState,
 } from 'react';
 
-export type ButtonVariant = 'primary' | 'flare' | 'ghost' | 'ink' | 'danger';
+export type ButtonVariant = 'primary' | 'ghost' | 'ink' | 'error';
 export type ButtonSize = 'sm' | 'md' | 'lg';
 
 export interface ButtonProps
   extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'style'> {
   variant?: ButtonVariant;
   size?: ButtonSize;
-  /** Optional leading icon node. */
   icon?: ReactNode;
-  /** If true, render full-width (display: flex, width: 100%). */
   block?: boolean;
-  /** Inline style overrides. Prefer className; this is kept for dynamic values. */
   style?: CSSProperties;
 }
 
@@ -32,34 +29,28 @@ type VariantTokens = {
 
 const VARIANT_TOKENS: Record<ButtonVariant, VariantTokens> = {
   primary: {
-    background: 'var(--sf-signal)',
+    background: 'var(--sf-accent)',
     color: 'var(--sf-fg-on-dark-1)',
     border: 'none',
-    hoverBackground: 'var(--sf-signal-hover)',
-  },
-  flare: {
-    background: 'var(--sf-flare)',
-    color: 'var(--sf-ink)',
-    border: 'none',
-    hoverBackground: 'var(--sf-flare-hover)',
+    hoverBackground: 'var(--sf-accent-hover)',
   },
   ghost: {
     background: 'transparent',
     color: 'var(--sf-fg-1)',
     border: '1px solid var(--sf-border)',
-    hoverBackground: 'var(--sf-paper-sunken)',
+    hoverBackground: 'var(--sf-bg-tertiary)',
   },
   ink: {
-    background: 'var(--sf-ink)',
+    background: 'var(--sf-bg-dark)',
     color: 'var(--sf-fg-on-dark-1)',
     border: 'none',
-    hoverBackground: 'var(--sf-ink-raised)',
+    hoverBackground: 'var(--sf-bg-dark-surface)',
   },
-  danger: {
-    background: 'var(--sf-danger)',
+  error: {
+    background: 'var(--sf-error)',
     color: 'var(--sf-fg-on-dark-1)',
     border: 'none',
-    hoverBackground: 'var(--sf-danger)',
+    hoverBackground: 'var(--sf-error-ink)',
   },
 };
 
@@ -70,10 +61,9 @@ const SIZE_METRICS: Record<ButtonSize, { height: number; padding: string; fontSi
 };
 
 /**
- * ShipFlare v2 Button primitive.
- *
- * Matrix: 5 variants (primary/flare/ghost/ink/danger) × 3 sizes (sm/md/lg).
- * See INTERACTIONS.md §3 for exact hover/active states.
+ * ShipFlare v3 Button primitive.
+ * Apple-Blue primary, monochrome ghost/ink, and error. No warm-accent (flare)
+ * variant — Apple Blue is the one chromatic in v3.
  */
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
   function Button(

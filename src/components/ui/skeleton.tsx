@@ -32,7 +32,7 @@ export function Skeleton({
     height: hasClassName && height === undefined ? undefined : height ?? 12,
     borderRadius: radius,
     background:
-      'linear-gradient(90deg, var(--sf-paper-sunken) 0%, var(--sf-paper) 50%, var(--sf-paper-sunken) 100%)',
+      'linear-gradient(90deg, var(--sf-bg-tertiary) 0%, var(--sf-bg-primary) 50%, var(--sf-bg-tertiary) 100%)',
     backgroundSize: '200% 100%',
     animation: 'sf-shimmer 1.4s ease-in-out infinite',
   };

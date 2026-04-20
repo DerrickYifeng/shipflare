@@ -96,7 +96,7 @@ export function Sidebar({ user }: SidebarProps) {
       style={{
         width: layout === 'rail' ? 64 : 232,
         flexShrink: 0,
-        background: 'var(--sf-paper-sunken)',
+        background: 'var(--sf-bg-tertiary)',
         borderRight: '1px solid var(--sf-border-subtle)',
         padding: layout === 'rail' ? '16px 8px' : '16px 12px',
         display: 'flex',
@@ -132,7 +132,7 @@ function drawerStyle(open: boolean): CSSProperties {
     bottom: 0,
     width: 'min(280px, 80vw)',
     zIndex: 100,
-    background: 'var(--sf-paper-sunken)',
+    background: 'var(--sf-bg-tertiary)',
     borderRight: '1px solid var(--sf-border-subtle)',
     padding: '16px 12px',
     display: 'flex',
@@ -260,9 +260,9 @@ function SidebarNavLink({
     fontSize: 'var(--sf-text-sm)',
     letterSpacing: 'var(--sf-track-normal)',
     background: isActive
-      ? 'linear-gradient(135deg, var(--sf-signal) 0%, oklch(50% 0.22 268) 100%)'
+      ? 'linear-gradient(135deg, var(--sf-accent) 0%, oklch(50% 0.22 268) 100%)'
       : isHover
-        ? 'var(--sf-paper)'
+        ? 'var(--sf-bg-primary)'
         : 'transparent',
     color: isActive
       ? 'oklch(98% 0.004 85)'
@@ -318,7 +318,7 @@ function UserCard({
         alignItems: 'center',
         justifyContent: showDetails ? 'flex-start' : 'center',
         gap: 10,
-        background: 'var(--sf-paper)',
+        background: 'var(--sf-bg-primary)',
         border: '1px solid var(--sf-border-subtle)',
         borderRadius: 'var(--sf-radius-md)',
         textDecoration: 'none',
@@ -332,7 +332,7 @@ function UserCard({
           width: 28,
           height: 28,
           borderRadius: '50%',
-          background: 'linear-gradient(135deg, var(--sf-signal), var(--sf-flare))',
+          background: 'linear-gradient(135deg, var(--sf-accent), var(--sf-accent))',
           color: 'oklch(98% 0.004 85)',
           display: 'flex',
           alignItems: 'center',

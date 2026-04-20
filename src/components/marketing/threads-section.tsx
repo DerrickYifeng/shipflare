@@ -45,7 +45,7 @@ const REAL_THREADS: RealThread[] = [
 ];
 
 /**
- * Real threads / real replies — dark `--sf-ink` section.
+ * Real threads / real replies — dark `--sf-bg-dark` section.
  * Scroll-snap row on narrow viewports; auto-fit grid from md up.
  */
 export function ThreadsSection() {
@@ -54,7 +54,7 @@ export function ThreadsSection() {
       id="threads"
       aria-labelledby="threads-heading"
       style={{
-        background: 'var(--sf-ink)',
+        background: 'var(--sf-bg-dark)',
         color: 'var(--sf-fg-on-dark-1)',
         padding: '120px 24px',
       }}
@@ -64,7 +64,7 @@ export function ThreadsSection() {
           <span
             className="sf-ops"
             style={{
-              color: 'var(--sf-signal-bright)',
+              color: 'var(--sf-link-dark)',
               marginBottom: 12,
               display: 'block',
             }}
@@ -150,7 +150,7 @@ interface ThreadCardProps {
 
 function ThreadCard({ thread }: ThreadCardProps) {
   const cardStyle: CSSProperties = {
-    background: 'var(--sf-ink-raised)',
+    background: 'var(--sf-bg-dark-surface)',
     border: '1px solid var(--sf-border-on-dark)',
     borderRadius: 'var(--sf-radius-lg)',
     padding: 22,
@@ -170,8 +170,8 @@ function ThreadCard({ thread }: ThreadCardProps) {
               borderRadius: 'var(--sf-radius-sm)',
               fontSize: 'var(--sf-text-xs)',
               fontWeight: 500,
-              background: 'var(--sf-signal-tint)',
-              color: 'var(--sf-signal-ink)',
+              background: 'var(--sf-accent-light)',
+              color: 'var(--sf-link)',
             }}
           >
             {thread.community}
@@ -183,7 +183,7 @@ function ThreadCard({ thread }: ThreadCardProps) {
               borderRadius: 'var(--sf-radius-sm)',
               fontSize: 'var(--sf-text-xs)',
               fontWeight: 500,
-              background: 'var(--sf-success-tint)',
+              background: 'var(--sf-success-light)',
               color: 'var(--sf-success-ink)',
             }}
           >
@@ -227,7 +227,7 @@ function ThreadCard({ thread }: ThreadCardProps) {
         <div className="flex items-center" style={{ gap: 8, marginBottom: 8 }}>
           <span
             className="sf-ops"
-            style={{ color: 'var(--sf-signal-bright)', fontWeight: 600 }}
+            style={{ color: 'var(--sf-link-dark)', fontWeight: 600 }}
           >
             draft · content agent
           </span>

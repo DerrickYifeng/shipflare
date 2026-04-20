@@ -17,7 +17,7 @@ function platformBackground(platform: string): string {
   if (platform === 'x') return 'oklch(14% 0 0)';
   if (platform === 'reddit') return 'oklch(58% 0.20 30)';
   if (platform === 'hn') return 'oklch(62% 0.19 45)';
-  return 'var(--sf-signal)';
+  return 'var(--sf-accent)';
 }
 
 export function PlatformGlyph({ platform, size = 22 }: PlatformGlyphProps) {

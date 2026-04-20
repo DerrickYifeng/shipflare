@@ -74,7 +74,7 @@ export function TopNav({
             width: 28,
             height: 28,
             borderRadius: '50%',
-            background: 'linear-gradient(135deg, var(--sf-signal), var(--sf-flare))',
+            background: 'linear-gradient(135deg, var(--sf-accent), var(--sf-accent))',
             overflow: 'hidden',
             display: 'inline-block',
           }}

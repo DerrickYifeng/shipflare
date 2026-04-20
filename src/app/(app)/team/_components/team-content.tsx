@@ -325,7 +325,7 @@ function tickerPulseStyle(active: boolean): CSSProperties {
   return {
     borderRadius: 'var(--sf-radius-md)',
     transition: 'box-shadow var(--sf-dur-base) var(--sf-ease-swift)',
-    boxShadow: '0 0 0 3px var(--sf-signal-glow)',
+    boxShadow: '0 0 0 3px var(--sf-accent-glow)',
   };
 }
 
@@ -489,8 +489,8 @@ function ErrorBanner({ message, onDismiss }: ErrorBannerProps) {
         padding: '10px 14px',
         borderRadius: 'var(--sf-radius-md)',
         background: 'oklch(96% 0.02 25 / 0.6)',
-        border: '1px solid var(--sf-danger)',
-        color: 'var(--sf-danger-ink)',
+        border: '1px solid var(--sf-error)',
+        color: 'var(--sf-error-ink)',
         fontSize: 'var(--sf-text-sm)',
         display: 'flex',
         alignItems: 'center',
@@ -507,7 +507,7 @@ function ErrorBanner({ message, onDismiss }: ErrorBannerProps) {
           background: 'none',
           border: 'none',
           cursor: 'pointer',
-          color: 'var(--sf-danger-ink)',
+          color: 'var(--sf-error-ink)',
           fontSize: 16,
           lineHeight: 1,
         }}

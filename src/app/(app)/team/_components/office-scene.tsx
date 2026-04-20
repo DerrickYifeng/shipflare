@@ -105,7 +105,7 @@ export function OfficeScene({
     borderRadius: 'var(--sf-radius-lg)',
     overflow: 'hidden',
     border: '1px solid var(--sf-border-subtle)',
-    boxShadow: 'var(--sf-shadow-md)',
+    boxShadow: 'var(--sf-shadow-card-hover)',
   };
 
   const overlayStyle: CSSProperties = {
@@ -205,10 +205,10 @@ function ScenePill({ paused, activeCount, totalCount }: ScenePillProps) {
         alignItems: 'center',
         gap: 8,
         padding: '6px 10px',
-        background: 'var(--sf-paper)',
+        background: 'var(--sf-bg-primary)',
         border: '1px solid var(--sf-border-subtle)',
         borderRadius: 'var(--sf-radius-pill)',
-        boxShadow: 'var(--sf-shadow-sm)',
+        boxShadow: 'var(--sf-shadow-card)',
         pointerEvents: 'none',
       }}
     >

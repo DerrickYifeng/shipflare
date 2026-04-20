@@ -70,7 +70,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       style={{
         display: 'flex',
         minHeight: '100vh',
-        background: 'var(--sf-paper)',
+        background: 'var(--sf-bg-primary)',
         transition:
           'background var(--sf-dur-base) var(--sf-ease-swift), color var(--sf-dur-base) var(--sf-ease-swift)',
       }}

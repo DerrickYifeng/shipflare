@@ -130,9 +130,9 @@ function ToastViewport({
 
 const VARIANT_ACCENT: Record<ToastVariant, string> = {
   success: 'var(--sf-success)',
-  error: 'var(--sf-danger)',
+  error: 'var(--sf-error)',
   warning: 'var(--sf-warning)',
-  info: 'var(--sf-signal)',
+  info: 'var(--sf-accent)',
 };
 
 function ToastItem({
@@ -167,12 +167,12 @@ function ToastItem({
     minHeight: 44,
     padding: '10px 16px 10px 14px',
     borderRadius: 'var(--sf-radius-pill)',
-    background: 'var(--sf-ink)',
+    background: 'var(--sf-bg-dark)',
     color: 'var(--sf-fg-on-dark-1)',
     fontSize: 'var(--sf-text-sm)',
     fontWeight: 500,
     letterSpacing: 'var(--sf-track-normal)',
-    boxShadow: 'var(--sf-shadow-lg)',
+    boxShadow: 'var(--sf-shadow-elevated)',
     animation: 'sf-slide-up var(--sf-dur-base) var(--sf-ease-swift)',
   };
 
@@ -187,7 +187,7 @@ function ToastItem({
   const actionStyle: CSSProperties = {
     background: 'transparent',
     border: 'none',
-    color: 'var(--sf-signal-bright)',
+    color: 'var(--sf-link-dark)',
     fontSize: 'var(--sf-text-sm)',
     fontWeight: 600,
     cursor: 'pointer',

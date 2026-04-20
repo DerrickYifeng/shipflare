@@ -24,7 +24,7 @@ export interface HistoryTickerProps {
 
 const OUTER_STYLE: CSSProperties = {
   borderRadius: 'var(--sf-radius-md)',
-  background: 'var(--sf-ink)',
+  background: 'var(--sf-bg-dark)',
   color: 'var(--sf-fg-on-dark-2)',
   padding: '10px 14px',
   fontFamily: 'var(--sf-font-mono)',

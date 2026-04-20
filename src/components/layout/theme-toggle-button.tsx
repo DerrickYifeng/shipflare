@@ -2,7 +2,7 @@
 
 /**
  * Theme toggle — sun ↔ moon @ 15px. 32×32 square, --sf-radius-md.
- * No border by default; on hover bg `--sf-paper-sunken`, icon color fg-1.
+ * No border by default; on hover bg `--sf-bg-tertiary`, icon color fg-1.
  * Matches INTERACTIONS.md §2 and §8.
  */
 
@@ -32,7 +32,7 @@ export function ThemeToggleButton() {
         height: 32,
         borderRadius: 'var(--sf-radius-md)',
         border: '1px solid var(--sf-border-subtle)',
-        background: hover ? 'var(--sf-paper-sunken)' : 'transparent',
+        background: hover ? 'var(--sf-bg-tertiary)' : 'transparent',
         color: hover ? 'var(--sf-fg-1)' : 'var(--sf-fg-2)',
         cursor: 'pointer',
         fontFamily: 'inherit',

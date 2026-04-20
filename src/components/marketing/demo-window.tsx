@@ -164,9 +164,9 @@ export function DemoWindow() {
       style={{
         borderRadius: 'var(--sf-radius-lg)',
         overflow: 'hidden',
-        background: 'var(--sf-ink-raised)',
+        background: 'var(--sf-bg-dark-surface)',
         border: '1px solid var(--sf-border-on-dark)',
-        boxShadow: 'var(--sf-shadow-lg)',
+        boxShadow: 'var(--sf-shadow-elevated)',
         maxWidth: 640,
         margin: '0 auto',
         width: '100%',
@@ -174,7 +174,7 @@ export function DemoWindow() {
     >
       {/* Chrome */}
       <div style={chromeStyle}>
-        <span style={{ width: 12, height: 12, borderRadius: '50%', background: 'var(--sf-danger)' }} />
+        <span style={{ width: 12, height: 12, borderRadius: '50%', background: 'var(--sf-error)' }} />
         <span style={{ width: 12, height: 12, borderRadius: '50%', background: 'var(--sf-warning)' }} />
         <span style={{ width: 12, height: 12, borderRadius: '50%', background: 'var(--sf-success)' }} />
         <Ops tone="onDark" style={{ marginLeft: 16, color: 'var(--sf-fg-on-dark-4)' }}>
@@ -214,7 +214,7 @@ export function DemoWindow() {
             padding: '0 18px',
             borderRadius: 'var(--sf-radius-md)',
             border: 'none',
-            background: phase === 'typing' ? 'var(--sf-ink)' : 'var(--sf-signal)',
+            background: phase === 'typing' ? 'var(--sf-bg-dark)' : 'var(--sf-accent)',
             color: 'var(--sf-fg-on-dark-1)',
             fontSize: 'var(--sf-text-sm)',
             letterSpacing: 'var(--sf-track-normal)',
@@ -282,8 +282,8 @@ function ResultsList({ threadIdx }: ResultsListProps) {
                     borderRadius: 'var(--sf-radius-sm)',
                     fontSize: 'var(--sf-text-xs)',
                     fontWeight: 500,
-                    background: 'var(--sf-signal-tint)',
-                    color: 'var(--sf-signal-ink)',
+                    background: 'var(--sf-accent-light)',
+                    color: 'var(--sf-link)',
                   }}
                 >
                   {t.community}
@@ -296,7 +296,7 @@ function ResultsList({ threadIdx }: ResultsListProps) {
                     fontSize: 'var(--sf-text-xs)',
                     fontWeight: 500,
                     background:
-                      t.score >= 85 ? 'var(--sf-success-tint)' : 'var(--sf-paper-sunken)',
+                      t.score >= 85 ? 'var(--sf-success-light)' : 'var(--sf-bg-tertiary)',
                     color: t.score >= 85 ? 'var(--sf-success-ink)' : 'var(--sf-fg-2)',
                   }}
                 >

@@ -71,10 +71,10 @@ export function SignInModal({ open, onClose, onBeforeSignIn }: SignInModalProps)
       aria-labelledby="sign-in-modal-title"
       className="m-auto w-[calc(100%-2rem)] max-w-[400px] p-0 backdrop:bg-black/40 animate-sf-fade-in"
       style={{
-        background: 'var(--sf-paper-raised)',
+        background: 'var(--sf-bg-secondary)',
         color: 'var(--sf-fg-1)',
         borderRadius: 'var(--sf-radius-lg)',
-        boxShadow: 'var(--sf-shadow-lg)',
+        boxShadow: 'var(--sf-shadow-elevated)',
         border: '1px solid var(--sf-border-subtle)',
       }}
     >
@@ -140,7 +140,7 @@ export function SignInModal({ open, onClose, onBeforeSignIn }: SignInModalProps)
                   gap: 10,
                   minHeight: 44,
                   padding: '10px 20px',
-                  background: 'var(--sf-ink)',
+                  background: 'var(--sf-bg-dark)',
                   color: 'var(--sf-fg-on-dark-1)',
                   borderRadius: 'var(--sf-radius-md)',
                   border: 'none',
@@ -152,10 +152,10 @@ export function SignInModal({ open, onClose, onBeforeSignIn }: SignInModalProps)
                   fontFamily: 'inherit',
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.background = 'var(--sf-ink-raised)';
+                  e.currentTarget.style.background = 'var(--sf-bg-dark-surface)';
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'var(--sf-ink)';
+                  e.currentTarget.style.background = 'var(--sf-bg-dark)';
                 }}
               >
                 {provider.icon}

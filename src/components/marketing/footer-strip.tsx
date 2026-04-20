@@ -29,7 +29,7 @@ export function FooterStrip() {
   return (
     <footer
       style={{
-        background: 'var(--sf-ink)',
+        background: 'var(--sf-bg-dark)',
         color: 'var(--sf-fg-on-dark-4)',
         padding: 24,
         borderTop: '1px solid var(--sf-border-on-dark)',

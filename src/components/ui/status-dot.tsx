@@ -11,10 +11,10 @@ export interface StatusDotProps {
 }
 
 const STATE_COLORS: Record<StatusDotState, string> = {
-  active: 'var(--sf-signal)',
+  active: 'var(--sf-accent)',
   success: 'var(--sf-success)',
   warning: 'var(--sf-warning)',
-  danger: 'var(--sf-danger)',
+  danger: 'var(--sf-error)',
   idle: 'var(--sf-fg-4)',
 };
 

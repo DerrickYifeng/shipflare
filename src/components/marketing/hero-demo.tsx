@@ -16,7 +16,7 @@ export interface HeroDemoProps {
 const DEFAULT_HEADLINE = 'Marketing autopilot for indie developers.';
 
 /**
- * Hero section — dark `--sf-ink` bg, centered eyebrow badge, hero headline,
+ * Hero section — dark `--sf-bg-dark` bg, centered eyebrow badge, hero headline,
  * lede, CTA pair, and the auto-playing DemoWindow.
  */
 export function HeroDemo({ headline = DEFAULT_HEADLINE, isAuthenticated }: HeroDemoProps) {
@@ -26,7 +26,7 @@ export function HeroDemo({ headline = DEFAULT_HEADLINE, isAuthenticated }: HeroD
     <section
       aria-labelledby="hero-heading"
       style={{
-        background: 'var(--sf-ink)',
+        background: 'var(--sf-bg-dark)',
         color: 'var(--sf-fg-on-dark-1)',
         position: 'relative',
         overflow: 'hidden',
@@ -51,7 +51,7 @@ export function HeroDemo({ headline = DEFAULT_HEADLINE, isAuthenticated }: HeroD
               marginBottom: 24,
               padding: '6px 12px',
               borderRadius: 'var(--sf-radius-pill)',
-              background: 'var(--sf-ink-raised)',
+              background: 'var(--sf-bg-dark-surface)',
               border: '1px solid var(--sf-border-on-dark)',
             }}
           >
@@ -110,7 +110,7 @@ export function HeroDemo({ headline = DEFAULT_HEADLINE, isAuthenticated }: HeroD
                 gap: 6,
                 height: 48,
                 padding: '0 16px',
-                color: 'var(--sf-signal-bright)',
+                color: 'var(--sf-link-dark)',
                 fontSize: 'var(--sf-text-base)',
                 letterSpacing: 'var(--sf-track-normal)',
                 textDecoration: 'none',

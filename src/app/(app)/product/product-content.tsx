@@ -185,7 +185,7 @@ export function ProductContent({ initial }: ProductContentProps) {
                   color: '#fff',
                   fontWeight: 700,
                   fontSize: 26,
-                  boxShadow: 'var(--sf-shadow-sm)',
+                  boxShadow: 'var(--sf-shadow-card)',
                   flexShrink: 0,
                 }}
               >
@@ -312,8 +312,8 @@ export function ProductContent({ initial }: ProductContentProps) {
                     gap: 4,
                     padding: '3px 8px',
                     borderRadius: 'var(--sf-radius-pill)',
-                    background: 'var(--sf-danger-tint)',
-                    color: 'var(--sf-danger-ink)',
+                    background: 'var(--sf-error-light)',
+                    color: 'var(--sf-error-ink)',
                     fontSize: 'var(--sf-text-xs)',
                     fontWeight: 500,
                   }}
@@ -361,7 +361,7 @@ export function ProductContent({ initial }: ProductContentProps) {
                   margin: '0 4px',
                   padding: '1px 6px',
                   borderRadius: 3,
-                  background: 'var(--sf-paper-sunken)',
+                  background: 'var(--sf-bg-tertiary)',
                   fontFamily: 'var(--sf-font-mono)',
                   fontSize: 'var(--sf-text-xs)',
                 }}
@@ -395,9 +395,9 @@ export function ProductContent({ initial }: ProductContentProps) {
 
 function phaseVariant(
   phase: Phase,
-): 'warning' | 'success' | 'signal' {
+): 'warning' | 'success' | 'accent' {
   if (phase === 'launched') return 'success';
-  if (phase === 'scaling') return 'signal';
+  if (phase === 'scaling') return 'accent';
   return 'warning';
 }
 
@@ -465,8 +465,8 @@ function PhaseTabs({
               padding: '4px 10px',
               borderRadius: 'var(--sf-radius-sm)',
               border: 'none',
-              background: active ? 'var(--sf-signal-tint)' : 'transparent',
-              color: active ? 'var(--sf-signal-ink)' : 'var(--sf-fg-3)',
+              background: active ? 'var(--sf-accent-light)' : 'transparent',
+              color: active ? 'var(--sf-link)' : 'var(--sf-fg-3)',
               fontSize: 'var(--sf-text-xs)',
               fontWeight: active ? 600 : 500,
               letterSpacing: 'var(--sf-track-normal)',
@@ -548,9 +548,9 @@ function KeywordsEditor({
             padding: '2px 8px',
             height: 22,
             fontSize: 'var(--sf-text-xs)',
-            border: '1px solid var(--sf-signal)',
+            border: '1px solid var(--sf-accent)',
             borderRadius: 'var(--sf-radius-sm)',
-            background: 'var(--sf-paper)',
+            background: 'var(--sf-bg-primary)',
             color: 'var(--sf-fg-1)',
             outline: 'none',
             fontFamily: 'inherit',
@@ -612,8 +612,8 @@ function AddPhraseButton({ onAdd }: { onAdd: (phrase: string) => void }) {
           padding: '2px 10px',
           height: 22,
           borderRadius: 'var(--sf-radius-pill)',
-          border: '1px solid var(--sf-signal)',
-          background: 'var(--sf-paper)',
+          border: '1px solid var(--sf-accent)',
+          background: 'var(--sf-bg-primary)',
           color: 'var(--sf-fg-1)',
           fontSize: 'var(--sf-text-xs)',
           outline: 'none',
@@ -662,7 +662,7 @@ function VoiceDnaCard() {
         <h3 className="sf-h4" style={{ margin: 0, color: 'var(--sf-fg-1)' }}>
           Voice DNA
         </h3>
-        <Badge variant="signal" mono>
+        <Badge variant="accent" mono>
           TRAINED
         </Badge>
       </div>
@@ -689,7 +689,7 @@ function VoiceDnaCard() {
                 position: 'relative',
                 height: 6,
                 borderRadius: 3,
-                background: 'var(--sf-paper-sunken)',
+                background: 'var(--sf-bg-tertiary)',
               }}
             >
               <div
@@ -700,7 +700,7 @@ function VoiceDnaCard() {
                   bottom: 0,
                   width: `${tone[s.key]}%`,
                   background:
-                    'linear-gradient(90deg, var(--sf-signal), var(--sf-flare))',
+                    'linear-gradient(90deg, var(--sf-accent), var(--sf-accent))',
                   borderRadius: 3,
                 }}
               />
@@ -730,9 +730,9 @@ function VoiceDnaCard() {
                   width: 14,
                   height: 14,
                   borderRadius: 7,
-                  background: 'var(--sf-paper)',
-                  border: '2px solid var(--sf-signal)',
-                  boxShadow: 'var(--sf-shadow-sm)',
+                  background: 'var(--sf-bg-primary)',
+                  border: '2px solid var(--sf-accent)',
+                  boxShadow: 'var(--sf-shadow-card)',
                   pointerEvents: 'none',
                 }}
               />
@@ -744,7 +744,7 @@ function VoiceDnaCard() {
         style={{
           marginTop: 20,
           padding: 14,
-          background: 'var(--sf-paper-sunken)',
+          background: 'var(--sf-bg-tertiary)',
           borderRadius: 'var(--sf-radius-md)',
         }}
       >
@@ -757,7 +757,7 @@ function VoiceDnaCard() {
                 fontSize: 'var(--sf-text-sm)',
                 color: 'var(--sf-fg-1)',
                 fontStyle: 'italic',
-                borderLeft: '2px solid var(--sf-signal)',
+                borderLeft: '2px solid var(--sf-accent)',
                 paddingLeft: 10,
               }}
             >

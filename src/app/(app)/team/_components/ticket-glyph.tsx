@@ -13,8 +13,8 @@ export interface TicketGlyphProps {
 }
 
 const KIND_COLOR: Record<TicketKind, string> = {
-  draft: 'var(--sf-signal)',
-  review: 'var(--sf-flare)',
+  draft: 'var(--sf-accent)',
+  review: 'var(--sf-accent)',
   post: 'var(--sf-success)',
   done: 'oklch(60% 0.01 260)',
 };

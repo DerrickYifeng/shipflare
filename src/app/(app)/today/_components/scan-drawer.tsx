@@ -157,9 +157,9 @@ export function ScanDrawer({
         aria-label="Discovery scan in progress"
         style={{
           borderRadius: 'var(--sf-radius-lg)',
-          background: 'var(--sf-ink)',
+          background: 'var(--sf-bg-dark)',
           border: '1px solid var(--sf-border-on-dark)',
-          boxShadow: 'var(--sf-shadow-lg)',
+          boxShadow: 'var(--sf-shadow-elevated)',
           overflow: 'hidden',
         }}
       >
@@ -198,7 +198,7 @@ function DrawerChrome({
         background: 'oklch(22% 0.012 260)',
       }}
     >
-      <Dot color="var(--sf-danger)" />
+      <Dot color="var(--sf-error)" />
       <Dot color="var(--sf-warning)" />
       <Dot color="var(--sf-success)" />
       <Ops tone="onDark" style={{ marginLeft: 14 }}>
@@ -268,12 +268,12 @@ function DrawerUrlRow({ typed, phase }: { typed: string; phase: Phase }) {
     fontWeight: 600,
     background:
       phase === 'done'
-        ? 'var(--sf-success-tint)'
-        : 'var(--sf-signal-tint)',
+        ? 'var(--sf-success-light)'
+        : 'var(--sf-accent-light)',
     color:
       phase === 'done'
         ? 'var(--sf-success-ink)'
-        : 'var(--sf-signal-ink)',
+        : 'var(--sf-link)',
   };
 
   return (

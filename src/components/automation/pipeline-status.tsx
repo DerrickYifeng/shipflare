@@ -62,7 +62,7 @@ export function PipelineStatus() {
               <span className={`w-2 h-2 rounded-full ${statusDot[p.status] ?? 'bg-sf-text-tertiary'}`} />
               <span className="text-[14px] tracking-[-0.224px] font-medium text-sf-text-primary">{p.name}</span>
               {p.errorCount > 0 && (
-                <Badge variant="danger" mono>
+                <Badge variant="error" mono>
                   {p.errorCount} err
                 </Badge>
               )}

@@ -9,12 +9,12 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { TimeLeft } from '@/components/ui/time-left';
 
-const statusVariant: Record<string, 'default' | 'success' | 'warning' | 'danger' | 'signal'> = {
-  pending: 'signal',
+const statusVariant: Record<string, 'default' | 'success' | 'warning' | 'error' | 'accent'> = {
+  pending: 'accent',
   draft_created: 'warning',
   replied: 'success',
   skipped: 'default',
-  expired: 'danger',
+  expired: 'error',
 };
 
 export function ReplyQueue() {

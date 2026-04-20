@@ -13,7 +13,7 @@ export function CharCounter({ count, max, className = '' }: CharCounterProps) {
   const over = count > max;
   const near = count > max * 0.9;
   const color = over
-    ? 'var(--sf-danger-ink)'
+    ? 'var(--sf-error-ink)'
     : near
       ? 'var(--sf-warning-ink)'
       : 'var(--sf-fg-3)';

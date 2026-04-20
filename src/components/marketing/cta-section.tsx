@@ -32,7 +32,7 @@ export function CTASection({ isAuthenticated }: CTASectionProps) {
         // linear slab. Keeps the alternating rhythm's final dark beat
         // (ink → paper → ink → paper → ink+glow → ink) while marking the
         // CTA as the signature moment.
-        background: 'var(--sf-ink)',
+        background: 'var(--sf-bg-dark)',
         color: 'var(--sf-fg-on-dark-1)',
         padding: '140px 24px',
         position: 'relative',

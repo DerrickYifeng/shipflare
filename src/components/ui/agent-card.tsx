@@ -65,7 +65,7 @@ const STAT_VALUE_STYLE: CSSProperties = {
 
 const PROGRESS_TRACK_STYLE: CSSProperties = {
   height: 3,
-  background: 'var(--sf-paper-sunken)',
+  background: 'var(--sf-bg-tertiary)',
   borderRadius: 2,
   overflow: 'hidden',
   marginBottom: 10,
@@ -132,7 +132,7 @@ export function AgentCard({
             style={{
               width: `${Math.max(0, Math.min(1, renderedProgress)) * 100}%`,
               height: '100%',
-              background: 'var(--sf-signal)',
+              background: 'var(--sf-accent)',
               transition: 'width var(--sf-dur-slow) var(--sf-ease-swift)',
             }}
           />

@@ -368,7 +368,7 @@ export function GrowthContent() {
                         width: 28,
                         height: 28,
                         borderRadius: '50%',
-                        background: `conic-gradient(var(--sf-signal) ${icp.weight * 360}deg, var(--sf-paper-sunken) 0)`,
+                        background: `conic-gradient(var(--sf-accent) ${icp.weight * 360}deg, var(--sf-bg-tertiary) 0)`,
                         padding: 3,
                       }}
                     >
@@ -377,7 +377,7 @@ export function GrowthContent() {
                           width: '100%',
                           height: '100%',
                           borderRadius: '50%',
-                          background: 'var(--sf-paper)',
+                          background: 'var(--sf-bg-primary)',
                           display: 'inline-flex',
                           alignItems: 'center',
                           justifyContent: 'center',
@@ -420,15 +420,15 @@ export function GrowthContent() {
   );
 }
 
-function fitVariant(fit: Community['fit']): 'success' | 'signal' | 'default' {
+function fitVariant(fit: Community['fit']): 'success' | 'accent' | 'default' {
   if (fit === 'HIGH') return 'success';
-  if (fit === 'MEDIUM') return 'signal';
+  if (fit === 'MEDIUM') return 'accent';
   return 'default';
 }
 
-function intentVariant(intent: KeywordRow['intent']): 'success' | 'signal' | 'default' {
+function intentVariant(intent: KeywordRow['intent']): 'success' | 'accent' | 'default' {
   if (intent === 'BUYING') return 'success';
-  if (intent === 'RESEARCH') return 'signal';
+  if (intent === 'RESEARCH') return 'accent';
   return 'default';
 }
 

@@ -131,8 +131,8 @@ export function ReplyCard({
   const len = activeBody.length;
   const over = len > cap;
   const conf = item.confidence != null ? Math.round(item.confidence * 100) : null;
-  const confTone: 'success' | 'signal' | 'default' =
-    conf == null ? 'default' : conf >= 80 ? 'success' : conf >= 65 ? 'signal' : 'default';
+  const confTone: 'success' | 'accent' | 'default' =
+    conf == null ? 'default' : conf >= 80 ? 'success' : conf >= 65 ? 'accent' : 'default';
 
   useEffect(() => {
     if (isActive) {
@@ -182,10 +182,10 @@ export function ReplyCard({
 
   const articleStyle: CSSProperties = {
     borderRadius: 'var(--sf-radius-lg)',
-    background: 'var(--sf-paper-raised)',
-    boxShadow: isActive ? 'var(--sf-shadow-md)' : 'var(--sf-shadow-sm)',
+    background: 'var(--sf-bg-secondary)',
+    boxShadow: isActive ? 'var(--sf-shadow-card-hover)' : 'var(--sf-shadow-card)',
     border: '1px solid var(--sf-border-subtle)',
-    outline: isActive ? '2px solid var(--sf-signal)' : 'none',
+    outline: isActive ? '2px solid var(--sf-accent)' : 'none',
     outlineOffset: isActive ? 2 : 0,
     overflow: 'hidden',
     // Default entry animation — every ReplyCard slides up on mount, not
@@ -360,7 +360,7 @@ export function ReplyCard({
               <span
                 style={{
                   fontSize: 'var(--sf-text-xs)',
-                  color: 'var(--sf-danger)',
+                  color: 'var(--sf-error)',
                   fontWeight: 500,
                 }}
               >
@@ -371,7 +371,7 @@ export function ReplyCard({
               className="sf-mono"
               style={{
                 fontSize: 'var(--sf-text-xs)',
-                color: over ? 'var(--sf-danger)' : 'var(--sf-fg-4)',
+                color: over ? 'var(--sf-error)' : 'var(--sf-fg-4)',
                 letterSpacing: 'var(--sf-track-mono)',
               }}
             >
@@ -406,7 +406,7 @@ export function ReplyCard({
               autoFocus
               style={{
                 width: '100%',
-                background: 'var(--sf-paper-sunken)',
+                background: 'var(--sf-bg-tertiary)',
                 border: '1px solid var(--sf-border)',
                 borderRadius: 'var(--sf-radius-md)',
                 padding: 12,
@@ -461,7 +461,7 @@ export function ReplyCard({
             padding: '14px 18px',
             borderTop: '1px solid var(--sf-border-subtle)',
             marginTop: 10,
-            background: 'var(--sf-paper-sunken)',
+            background: 'var(--sf-bg-tertiary)',
           }}
         >
           <Button
@@ -535,8 +535,8 @@ function ThreadContentLink({
       style={{
         ...sharedStyle,
         cursor: 'pointer',
-        background: hover ? 'var(--sf-paper-sunken)' : 'transparent',
-        boxShadow: hover ? 'var(--sf-shadow-md)' : 'none',
+        background: hover ? 'var(--sf-bg-tertiary)' : 'transparent',
+        boxShadow: hover ? 'var(--sf-shadow-card-hover)' : 'none',
         transform: hover ? 'translateY(-2px)' : 'translateY(0)',
       }}
     >
@@ -561,8 +561,8 @@ function PriorityTag({ priority }: { priority: string }) {
         fontWeight: 600,
         letterSpacing: 'var(--sf-track-mono)',
         fontFamily: 'var(--sf-font-mono)',
-        background: 'var(--sf-danger-tint)',
-        color: 'var(--sf-danger-ink)',
+        background: 'var(--sf-error-light)',
+        color: 'var(--sf-error-ink)',
         textTransform: 'uppercase',
         whiteSpace: 'nowrap',
       }}
@@ -572,7 +572,7 @@ function PriorityTag({ priority }: { priority: string }) {
           width: 5,
           height: 5,
           borderRadius: '50%',
-          background: 'var(--sf-danger)',
+          background: 'var(--sf-error)',
           animation: 'sf-pulse 1.4s ease-in-out infinite',
         }}
       />
@@ -598,7 +598,7 @@ function TextAction({
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       style={{
-        background: hover ? 'var(--sf-paper-raised)' : 'transparent',
+        background: hover ? 'var(--sf-bg-secondary)' : 'transparent',
         border: 'none',
         cursor: 'pointer',
         padding: '6px 10px',
@@ -657,7 +657,7 @@ function PostingProgressBar({ durationMs }: PostingProgressBarProps) {
         style={{
           height: '100%',
           width: '100%',
-          background: 'var(--sf-signal)',
+          background: 'var(--sf-accent)',
           transform: filled ? 'scaleX(1)' : 'scaleX(0)',
           transformOrigin: 'left center',
           transition: `transform ${durationMs}ms linear`,

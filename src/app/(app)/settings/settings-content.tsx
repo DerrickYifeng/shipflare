@@ -148,14 +148,14 @@ function SettingsTabs({
               textAlign: 'left',
               padding: '10px 14px',
               borderRadius: 'var(--sf-radius-md)',
-              background: isActive ? 'var(--sf-paper-raised)' : 'transparent',
+              background: isActive ? 'var(--sf-bg-secondary)' : 'transparent',
               border: 'none',
               color: isActive ? 'var(--sf-fg-1)' : 'var(--sf-fg-3)',
               fontWeight: isActive ? 600 : 500,
               fontSize: 'var(--sf-text-sm)',
               cursor: 'pointer',
               fontFamily: 'inherit',
-              boxShadow: isActive ? 'var(--sf-shadow-sm)' : 'none',
+              boxShadow: isActive ? 'var(--sf-shadow-card)' : 'none',
               transition: 'all var(--sf-dur-fast) var(--sf-ease-swift)',
             }}
           >
@@ -256,7 +256,7 @@ function AppearanceSection() {
                 textAlign: 'left',
                 padding: 0,
                 background: 'transparent',
-                border: `2px solid ${selected ? 'var(--sf-signal)' : 'var(--sf-border-subtle)'}`,
+                border: `2px solid ${selected ? 'var(--sf-accent)' : 'var(--sf-border-subtle)'}`,
                 borderRadius: 'var(--sf-radius-lg)',
                 cursor: 'pointer',
                 overflow: 'hidden',
@@ -371,7 +371,7 @@ function AppearanceSection() {
               <div
                 style={{
                   padding: '12px 14px',
-                  background: 'var(--sf-paper-raised)',
+                  background: 'var(--sf-bg-secondary)',
                   display: 'flex',
                   alignItems: 'flex-start',
                   gap: 10,
@@ -383,8 +383,8 @@ function AppearanceSection() {
                     width: 16,
                     height: 16,
                     borderRadius: '50%',
-                    border: `2px solid ${selected ? 'var(--sf-signal)' : 'var(--sf-border)'}`,
-                    background: selected ? 'var(--sf-signal)' : 'transparent',
+                    border: `2px solid ${selected ? 'var(--sf-accent)' : 'var(--sf-border)'}`,
+                    background: selected ? 'var(--sf-accent)' : 'transparent',
                     flexShrink: 0,
                     marginTop: 2,
                     position: 'relative',
@@ -422,7 +422,7 @@ function AppearanceSection() {
                   >
                     {s.label}
                     {selected && (
-                      <Badge variant="signal" mono>
+                      <Badge variant="accent" mono>
                         ACTIVE
                       </Badge>
                     )}
@@ -447,7 +447,7 @@ function AppearanceSection() {
         style={{
           marginTop: 20,
           padding: '12px 14px',
-          background: 'var(--sf-paper-sunken)',
+          background: 'var(--sf-bg-tertiary)',
           borderRadius: 'var(--sf-radius-md)',
           fontSize: 'var(--sf-text-xs)',
           color: 'var(--sf-fg-3)',
@@ -524,7 +524,7 @@ function AccountSection({ user }: { user: SettingsUser }) {
                 minHeight: 40,
                 padding: '0 16px',
                 borderRadius: 'var(--sf-radius-md)',
-                background: 'var(--sf-danger)',
+                background: 'var(--sf-error)',
                 color: 'var(--sf-fg-on-dark-1)',
                 border: 'none',
                 cursor: deleting ? 'not-allowed' : 'pointer',
@@ -562,16 +562,16 @@ function DangerZone({
   return (
     <div
       style={{
-        background: 'var(--sf-paper-raised)',
-        border: '1px solid var(--sf-danger)',
+        background: 'var(--sf-bg-secondary)',
+        border: '1px solid var(--sf-error)',
         borderRadius: 'var(--sf-radius-lg)',
         padding: 28,
-        boxShadow: 'var(--sf-shadow-sm)',
+        boxShadow: 'var(--sf-shadow-card)',
       }}
     >
       <h2
         className="sf-h3"
-        style={{ margin: 0, color: 'var(--sf-danger-ink)' }}
+        style={{ margin: 0, color: 'var(--sf-error-ink)' }}
       >
         {title}
       </h2>
@@ -660,7 +660,7 @@ function BillingSection() {
             style={{
               padding: 18,
               borderRadius: 'var(--sf-radius-md)',
-              background: 'var(--sf-ink)',
+              background: 'var(--sf-bg-dark)',
               color: 'var(--sf-fg-on-dark-1)',
             }}
           >
@@ -688,7 +688,7 @@ function BillingSection() {
             style={{
               padding: 18,
               borderRadius: 'var(--sf-radius-md)',
-              background: 'var(--sf-paper-sunken)',
+              background: 'var(--sf-bg-tertiary)',
             }}
           >
             <Ops style={{ display: 'block', marginBottom: 6 }}>REPLIES THIS CYCLE</Ops>
@@ -706,7 +706,7 @@ function BillingSection() {
             style={{
               padding: 18,
               borderRadius: 'var(--sf-radius-md)',
-              background: 'var(--sf-paper-sunken)',
+              background: 'var(--sf-bg-tertiary)',
             }}
           >
             <Ops style={{ display: 'block', marginBottom: 6 }}>TEAM SEATS</Ops>
@@ -826,7 +826,7 @@ function IntegrationsSection({
               gap: 14,
               padding: 14,
               borderRadius: 'var(--sf-radius-md)',
-              background: 'var(--sf-paper-sunken)',
+              background: 'var(--sf-bg-tertiary)',
             }}
           >
             <div
@@ -834,7 +834,7 @@ function IntegrationsSection({
                 width: 36,
                 height: 36,
                 borderRadius: 8,
-                background: 'var(--sf-paper)',
+                background: 'var(--sf-bg-primary)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -983,7 +983,7 @@ function ToggleRow({
 function XTileIcon() {
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" aria-label="X">
-      <rect width="24" height="24" rx="4" fill="currentColor" style={{ color: 'var(--sf-ink)' }} />
+      <rect width="24" height="24" rx="4" fill="currentColor" style={{ color: 'var(--sf-bg-dark)' }} />
       <path
         d="M16.8 5.5h2.3l-5 5.7L20 18.5h-4.6l-3.6-4.7-4.1 4.7H5.3l5.4-6.1L5 5.5h4.7l3.2 4.3 3.9-4.3z"
         fill="#fff"

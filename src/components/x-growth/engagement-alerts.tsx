@@ -97,7 +97,7 @@ export function EngagementAlerts() {
                   </div>
                   {draft.confidenceScore > 0 && (
                     <Badge
-                      variant={draft.confidenceScore >= 0.8 ? 'success' : draft.confidenceScore >= 0.6 ? 'warning' : 'danger'}
+                      variant={draft.confidenceScore >= 0.8 ? 'success' : draft.confidenceScore >= 0.6 ? 'warning' : 'error'}
                       mono
                     >
                       {Math.round(draft.confidenceScore * 100)}%

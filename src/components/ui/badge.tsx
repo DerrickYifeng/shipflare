@@ -2,11 +2,10 @@ import type { CSSProperties, HTMLAttributes, ReactNode } from 'react';
 
 export type BadgeVariant =
   | 'default'
-  | 'signal'
-  | 'flare'
+  | 'accent'
   | 'success'
   | 'warning'
-  | 'danger';
+  | 'error';
 
 export interface BadgeProps extends Omit<HTMLAttributes<HTMLSpanElement>, 'style'> {
   variant?: BadgeVariant;
@@ -16,12 +15,11 @@ export interface BadgeProps extends Omit<HTMLAttributes<HTMLSpanElement>, 'style
 }
 
 const VARIANTS: Record<BadgeVariant, { bg: string; fg: string }> = {
-  default: { bg: 'var(--sf-paper-sunken)', fg: 'var(--sf-fg-2)' },
-  signal: { bg: 'var(--sf-signal-tint)', fg: 'var(--sf-signal-ink)' },
-  flare: { bg: 'var(--sf-flare-tint)', fg: 'var(--sf-flare-ink)' },
-  success: { bg: 'var(--sf-success-tint)', fg: 'var(--sf-success-ink)' },
-  warning: { bg: 'var(--sf-warning-tint)', fg: 'var(--sf-warning-ink)' },
-  danger: { bg: 'var(--sf-danger-tint)', fg: 'var(--sf-danger-ink)' },
+  default: { bg: 'var(--sf-bg-tertiary)', fg: 'var(--sf-fg-2)' },
+  accent:  { bg: 'var(--sf-accent-light)',  fg: 'var(--sf-link)' },
+  success: { bg: 'var(--sf-success-light)', fg: 'var(--sf-success-ink)' },
+  warning: { bg: 'var(--sf-warning-light)', fg: 'var(--sf-warning-ink)' },
+  error:   { bg: 'var(--sf-error-light)',   fg: 'var(--sf-error-ink)' },
 };
 
 /**

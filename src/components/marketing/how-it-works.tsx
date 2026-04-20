@@ -17,9 +17,9 @@ const AGENTS: AgentEntry[] = [
 ];
 
 function dotColor(accent?: AgentEntry['accent']): string {
-  if (accent === 'flare') return 'var(--sf-flare)';
+  if (accent === 'flare') return 'var(--sf-accent)';
   if (accent === 'success') return 'var(--sf-success)';
-  return 'var(--sf-signal)';
+  return 'var(--sf-accent)';
 }
 
 /**
@@ -32,7 +32,7 @@ export function HowItWorks() {
     <section
       id="how"
       aria-labelledby="how-heading"
-      style={{ background: 'var(--sf-paper)', padding: '120px 24px' }}
+      style={{ background: 'var(--sf-bg-primary)', padding: '120px 24px' }}
     >
       <div style={{ maxWidth: 'var(--sf-max-width)', margin: '0 auto' }}>
         <div style={{ maxWidth: 680, marginBottom: 56 }}>
@@ -55,10 +55,10 @@ export function HowItWorks() {
           className="grid"
           style={{
             gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-            background: 'var(--sf-paper-raised)',
+            background: 'var(--sf-bg-secondary)',
             borderRadius: 'var(--sf-radius-lg)',
             overflow: 'hidden',
-            boxShadow: 'var(--sf-shadow-sm)',
+            boxShadow: 'var(--sf-shadow-card)',
           }}
         >
           {AGENTS.map((a, i) => (

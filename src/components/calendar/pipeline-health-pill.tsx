@@ -29,9 +29,9 @@ export function PipelineHealthPill({ items, total }: PipelineHealthPillProps) {
 
   if (total === 0) return null;
 
-  const variant: 'danger' | 'warning' | 'success' =
+  const variant: 'error' | 'warning' | 'success' =
     counts.failed > 0
-      ? 'danger'
+      ? 'error'
       : counts.inFlight > 0
         ? 'warning'
         : 'success';

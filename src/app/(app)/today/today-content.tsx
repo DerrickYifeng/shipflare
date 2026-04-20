@@ -420,7 +420,7 @@ function TodayContentInner({
   // Meta line for HeaderBar: "{n} to review · ● {n} shipped today · last scan {t}"
   //
   // Middle segment carries a live pulsing StatusDot — pulses with
-  // --sf-signal while a scan is running, settles to --sf-success when idle.
+  // --sf-accent while a scan is running, settles to --sf-success when idle.
   // "{n} to review" is bolded in --sf-fg-2 per prototype index.html:228-237.
   const metaLine = (
     <MetaLine
@@ -667,7 +667,7 @@ interface MetaLineProps {
  *
  * Layout: "{N} to review · ● {N} shipped today · last scan {t}"
  *  - "{N} to review" is bolded in --sf-fg-2 (weight 500)
- *  - A live StatusDot sits before "shipped today": pulses --sf-signal
+ *  - A live StatusDot sits before "shipped today": pulses --sf-accent
  *    while a scan runs, settles to --sf-success when the pipeline is idle
  *  - The rest of the line keeps the standard --sf-fg-3 treatment from HeaderBar
  */

@@ -15,7 +15,7 @@ export function EmptyState({ title, hint, action, className = '' }: EmptyStatePr
   const container: CSSProperties = {
     padding: '48px 32px',
     textAlign: 'center',
-    background: 'var(--sf-paper-sunken)',
+    background: 'var(--sf-bg-tertiary)',
     borderRadius: 'var(--sf-radius-lg)',
     border: '1px dashed var(--sf-border)',
   };
@@ -24,7 +24,7 @@ export function EmptyState({ title, hint, action, className = '' }: EmptyStatePr
     height: 40,
     margin: '0 auto 16px',
     borderRadius: '50%',
-    background: 'var(--sf-paper-raised)',
+    background: 'var(--sf-bg-secondary)',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',

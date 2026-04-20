@@ -8,39 +8,20 @@ import {
   useState,
 } from 'react';
 
-export type PillCtaVariant = 'primary' | 'flare';
-
 export interface PillCtaProps
   extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'style'> {
-  variant?: PillCtaVariant;
   children: ReactNode;
   style?: CSSProperties;
 }
 
-const VARIANTS: Record<
-  PillCtaVariant,
-  { background: string; hover: string; color: string }
-> = {
-  primary: {
-    background: 'var(--sf-signal)',
-    hover: 'var(--sf-signal-hover)',
-    color: 'var(--sf-fg-on-dark-1)',
-  },
-  flare: {
-    background: 'var(--sf-flare)',
-    hover: 'var(--sf-flare-hover)',
-    color: 'var(--sf-ink)',
-  },
-};
-
 /**
  * Signature 48-tall capsule CTA with a trailing arrow glyph.
  * Reserved for hero-level CTAs (landing, onboarding completion).
+ * Apple-Blue only — v3 has one chromatic.
  */
 export const PillCta = forwardRef<HTMLButtonElement, PillCtaProps>(
   function PillCta(
     {
-      variant = 'primary',
       children,
       onMouseEnter,
       onMouseLeave,
@@ -52,15 +33,14 @@ export const PillCta = forwardRef<HTMLButtonElement, PillCtaProps>(
     ref,
   ) {
     const [hover, setHover] = useState(false);
-    const tokens = VARIANTS[variant];
     const style: CSSProperties = {
       display: 'inline-flex',
       alignItems: 'center',
       gap: 8,
       height: 48,
       padding: '0 24px',
-      background: hover ? tokens.hover : tokens.background,
-      color: tokens.color,
+      background: hover ? 'var(--sf-accent-hover)' : 'var(--sf-accent)',
+      color: 'var(--sf-fg-on-dark-1)',
       borderRadius: 'var(--sf-radius-pill)',
       border: 'none',
       cursor: 'pointer',

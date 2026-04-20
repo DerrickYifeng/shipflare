@@ -40,7 +40,7 @@ export function Switch({
     height: 20,
     borderRadius: 10,
     border: 'none',
-    background: on ? 'var(--sf-signal)' : 'var(--sf-paper-sunken)',
+    background: on ? 'var(--sf-accent)' : 'var(--sf-bg-tertiary)',
     position: 'relative',
     cursor: disabled ? 'not-allowed' : 'pointer',
     transition: 'background var(--sf-dur-base) var(--sf-ease-swift)',

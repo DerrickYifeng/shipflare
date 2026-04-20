@@ -3,7 +3,7 @@
 /**
  * Command palette — scaffold for INTERACTIONS.md §11 (⌘K).
  *
- * Minimum viable: centered modal on `--sf-paper-raised`, single search
+ * Minimum viable: centered modal on `--sf-bg-secondary`, single search
  * input, Escape closes, focus trapped by the native `<dialog>` element.
  * No real commands wired yet; the empty-state copy tells the user the
  * feature is coming.
@@ -35,7 +35,7 @@ const BACKDROP_STYLE: CSSProperties = {
 const PANEL_STYLE: CSSProperties = {
   width: 'min(560px, calc(100vw - 32px))',
   margin: '12vh auto 0',
-  background: 'var(--sf-paper-raised)',
+  background: 'var(--sf-bg-secondary)',
   border: '1px solid var(--sf-border-subtle)',
   borderRadius: 'var(--sf-radius-lg)',
   boxShadow:
@@ -78,7 +78,7 @@ const FOOTER_STYLE: CSSProperties = {
   justifyContent: 'space-between',
   padding: '10px 16px',
   borderTop: '1px solid var(--sf-border-subtle)',
-  background: 'var(--sf-paper-sunken)',
+  background: 'var(--sf-bg-tertiary)',
   color: 'var(--sf-fg-3)',
 };
 
@@ -149,7 +149,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
               border: '1px solid var(--sf-border-subtle)',
               borderRadius: 'var(--sf-radius-sm)',
               padding: '2px 6px',
-              background: 'var(--sf-paper-sunken)',
+              background: 'var(--sf-bg-tertiary)',
             }}
           >
             ESC

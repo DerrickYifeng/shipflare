@@ -19,11 +19,11 @@ export interface OpsProps extends Omit<HTMLAttributes<HTMLSpanElement>, 'style'>
 const TONE_COLORS: Record<OpsTone, string> = {
   dim: 'var(--sf-fg-3)',
   ink: 'var(--sf-fg-1)',
-  signal: 'var(--sf-signal-ink)',
-  flare: 'var(--sf-flare-ink)',
+  signal: 'var(--sf-link)',
+  flare: 'var(--sf-link)',
   success: 'var(--sf-success-ink)',
   warning: 'var(--sf-warning-ink)',
-  danger: 'var(--sf-danger-ink)',
+  danger: 'var(--sf-error-ink)',
   onDark: 'var(--sf-fg-on-dark-3)',
 };
 

@@ -73,5 +73,5 @@ const LABEL_STYLE: CSSProperties = {
   borderRadius: 'var(--sf-radius-pill)',
   background: 'oklch(14% 0.020 265 / 0.85)',
   border: '1px solid var(--sf-border-on-dark)',
-  boxShadow: 'var(--sf-shadow-md)',
+  boxShadow: 'var(--sf-shadow-card-hover)',
 };

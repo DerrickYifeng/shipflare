@@ -15,10 +15,10 @@ import { FooterStrip } from '@/components/marketing/footer-strip';
  *   Threads (ink) → Safety (paper) → CTA (signal gradient) →
  *   Footer (ink)
  *
- * **Do NOT** wrap this page in `.app-dark` — that would remap `--sf-paper`
+ * **Do NOT** wrap this page in `.app-dark` — that would remap `--sf-bg-primary`
  * to the dark-theme equivalent and collapse every section to black, which
  * is exactly what we don't want. Dark sections are self-contained: they
- * explicitly set `background: var(--sf-ink)` + `color: var(--sf-fg-on-dark-*)`
+ * explicitly set `background: var(--sf-bg-dark)` + `color: var(--sf-fg-on-dark-*)`
  * so they render correctly without any theme cascade. Light sections keep
  * their natural paper palette because the root is unthemed.
  */
@@ -29,7 +29,7 @@ export default async function HomePage() {
   return (
     <main
       className="min-h-screen flex flex-col"
-      style={{ background: 'var(--sf-ink)' }}
+      style={{ background: 'var(--sf-bg-dark)' }}
     >
       <GlassNav isAuthenticated={isAuthenticated} />
       <HeroDemo isAuthenticated={isAuthenticated} />

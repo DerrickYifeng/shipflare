@@ -175,10 +175,10 @@ function AllFilterPill({ count, active, onClick, appearDelay }: AllFilterPillPro
     gap: 6,
     padding: '6px 12px',
     borderRadius: 'var(--sf-radius-pill)',
-    border: active ? '1px solid var(--sf-ink)' : '1px solid var(--sf-border)',
+    border: active ? '1px solid var(--sf-bg-dark)' : '1px solid var(--sf-border)',
     cursor: 'pointer',
     fontFamily: 'inherit',
-    background: active ? 'var(--sf-ink)' : 'transparent',
+    background: active ? 'var(--sf-bg-dark)' : 'transparent',
     color: active ? 'var(--sf-fg-on-dark-1)' : 'var(--sf-fg-2)',
     fontSize: 'var(--sf-text-xs)',
     fontWeight: 500,
@@ -226,10 +226,10 @@ interface SourceChipProps {
 }
 
 const STATE_STYLES: Record<ChipState, { bg: string; fg: string }> = {
-  queued: { bg: 'var(--sf-paper-sunken)', fg: 'var(--sf-fg-4)' },
-  searching: { bg: 'var(--sf-paper-sunken)', fg: 'var(--sf-fg-2)' },
-  searched: { bg: 'var(--sf-success-tint)', fg: 'var(--sf-success-ink)' },
-  failed: { bg: 'var(--sf-danger-tint)', fg: 'var(--sf-danger-ink)' },
+  queued: { bg: 'var(--sf-bg-tertiary)', fg: 'var(--sf-fg-4)' },
+  searching: { bg: 'var(--sf-bg-tertiary)', fg: 'var(--sf-fg-2)' },
+  searched: { bg: 'var(--sf-success-light)', fg: 'var(--sf-success-ink)' },
+  failed: { bg: 'var(--sf-error-light)', fg: 'var(--sf-error-ink)' },
 };
 
 function SourceChip({
@@ -280,7 +280,7 @@ function SourceChip({
     fontSize: 'var(--sf-text-xs)',
     fontWeight: 500,
     letterSpacing: 'var(--sf-track-normal)',
-    boxShadow: active ? '0 0 0 2px var(--sf-signal)' : 'none',
+    boxShadow: active ? '0 0 0 2px var(--sf-accent)' : 'none',
     opacity: appeared ? 1 : 0,
     transform: appeared ? 'translateY(0)' : 'translateY(4px)',
     transition:

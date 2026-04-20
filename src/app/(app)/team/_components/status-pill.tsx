@@ -15,10 +15,10 @@ export interface StatusPillProps {
 
 const TONE_COLOR: Record<(typeof STATUS_META)[SceneStatus]['tone'], string> = {
   dim: 'var(--sf-fg-3)',
-  signal: 'var(--sf-signal-ink)',
-  flare: 'var(--sf-flare-ink)',
+  signal: 'var(--sf-link)',
+  flare: 'var(--sf-link)',
   success: 'var(--sf-success-ink)',
-  danger: 'var(--sf-danger-ink)',
+  danger: 'var(--sf-error-ink)',
 };
 
 const BASE_STYLE: CSSProperties = {
@@ -27,7 +27,7 @@ const BASE_STYLE: CSSProperties = {
   gap: 5,
   padding: '2px 7px',
   borderRadius: 'var(--sf-radius-pill)',
-  background: 'var(--sf-paper)',
+  background: 'var(--sf-bg-primary)',
   border: '1px solid var(--sf-border-subtle)',
   boxShadow: '0 1px 2px oklch(20% 0 0 / 0.08)',
   fontFamily: 'var(--sf-font-mono)',

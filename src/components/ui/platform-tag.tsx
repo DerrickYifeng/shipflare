@@ -19,7 +19,7 @@ export function PlatformTag({ platform, size = 22 }: PlatformTagProps) {
         ? 'oklch(14% 0 0)'
         : platform === 'hn'
           ? 'oklch(62% 0.19 45)'
-          : 'var(--sf-paper-sunken)';
+          : 'var(--sf-bg-tertiary)';
 
   const container: CSSProperties = {
     width: size,

@@ -29,28 +29,26 @@ import { StatusDot, type StatusDotState } from '@/components/ui/status-dot';
 import { ThoughtStream } from '@/components/ui/thought-stream';
 import { ToastProvider, useToast } from '@/components/ui/toast';
 
-const BUTTON_VARIANTS: ButtonVariant[] = ['primary', 'flare', 'ghost', 'ink', 'danger'];
+const BUTTON_VARIANTS: ButtonVariant[] = ['primary', 'ghost', 'ink', 'error'];
 const BUTTON_SIZES: ButtonSize[] = ['sm', 'md', 'lg'];
 const BADGE_VARIANTS: BadgeVariant[] = [
   'default',
-  'signal',
-  'flare',
+  'accent',
   'success',
   'warning',
-  'danger',
+  'error',
 ];
 const OPS_TONES: OpsTone[] = [
   'dim',
   'ink',
   'signal',
-  'flare',
   'success',
   'warning',
   'danger',
   'onDark',
 ];
 const STATUS_STATES: StatusDotState[] = ['active', 'success', 'warning', 'danger', 'idle'];
-const CARD_ACCENTS: CardAccent[] = ['signal', 'flare', 'success', 'warning', 'danger'];
+const CARD_ACCENTS: CardAccent[] = ['accent', 'success', 'warning', 'error'];
 
 const THOUGHT_STEPS = [
   { label: 'Gathering context', detail: 'Pulling brand voice + banned phrases' },
@@ -148,8 +146,8 @@ function ButtonMatrix() {
 function PillCtaRow() {
   return (
     <div style={{ display: 'flex', gap: 'var(--sf-space-md)', flexWrap: 'wrap' }}>
-      <PillCta variant="primary">Get ShipFlare free</PillCta>
-      <PillCta variant="flare">See the demo</PillCta>
+      <PillCta>Get ShipFlare free</PillCta>
+      <PillCta>See the demo</PillCta>
     </div>
   );
 }
@@ -169,7 +167,7 @@ function OpsRow() {
           style={{
             padding: 'var(--sf-space-md)',
             background:
-              tone === 'onDark' ? 'var(--sf-ink)' : 'var(--sf-paper-raised)',
+              tone === 'onDark' ? 'var(--sf-bg-dark)' : 'var(--sf-bg-secondary)',
             borderRadius: 'var(--sf-radius-md)',
             border: '1px solid var(--sf-border-subtle)',
           }}
@@ -189,7 +187,7 @@ function BadgeRow() {
           {variant}
         </Badge>
       ))}
-      <Badge variant="signal" mono>
+      <Badge variant="accent" mono>
         42 · mono
       </Badge>
       <Badge variant="warning" mono>
@@ -216,7 +214,7 @@ function StatusDotRow() {
             alignItems: 'center',
             gap: 'var(--sf-space-sm)',
             padding: 'var(--sf-space-md)',
-            background: 'var(--sf-paper-raised)',
+            background: 'var(--sf-bg-secondary)',
             borderRadius: 'var(--sf-radius-md)',
             border: '1px solid var(--sf-border-subtle)',
           }}
@@ -231,7 +229,7 @@ function StatusDotRow() {
           alignItems: 'center',
           gap: 'var(--sf-space-sm)',
           padding: 'var(--sf-space-md)',
-          background: 'var(--sf-paper-raised)',
+          background: 'var(--sf-bg-secondary)',
           borderRadius: 'var(--sf-radius-md)',
           border: '1px solid var(--sf-border-subtle)',
         }}
@@ -416,7 +414,7 @@ function ThoughtStreamRow() {
       </Card>
       <div
         style={{
-          background: 'var(--sf-ink)',
+          background: 'var(--sf-bg-dark)',
           borderRadius: 'var(--sf-radius-lg)',
           padding: 24,
         }}
@@ -442,7 +440,7 @@ function CharCounterRow() {
           padding: 'var(--sf-space-md)',
           borderRadius: 'var(--sf-radius-md)',
           border: '1px solid var(--sf-border)',
-          background: 'var(--sf-paper-raised)',
+          background: 'var(--sf-bg-secondary)',
           color: 'var(--sf-fg-1)',
           fontFamily: 'inherit',
           fontSize: 'var(--sf-text-sm)',
@@ -474,7 +472,7 @@ function ToastDemoButtons() {
         Fire error toast
       </Button>
       <Button
-        variant="flare"
+        variant="primary"
         onClick={() =>
           toastWithAction({
             message: 'Sent · undo in 5s',
@@ -536,7 +534,7 @@ function ThemeHeader({
           padding: '10px 16px',
           borderRadius: 'var(--sf-radius-pill)',
           border: '1px solid var(--sf-border-strong)',
-          background: 'var(--sf-paper-raised)',
+          background: 'var(--sf-bg-secondary)',
           color: 'var(--sf-fg-1)',
           fontFamily: 'var(--sf-font-text)',
           fontSize: 'var(--sf-text-sm)',
@@ -557,7 +555,7 @@ export default function PrimitivesShowcasePage() {
   const containerClass = dark ? 'app-dark' : 'app-light';
   const containerStyle: CSSProperties = {
     minHeight: '100vh',
-    background: 'var(--sf-paper)',
+    background: 'var(--sf-bg-primary)',
     color: 'var(--sf-fg-1)',
     fontFamily: 'var(--sf-font-text)',
     fontSize: 'var(--sf-text-base)',

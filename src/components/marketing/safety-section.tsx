@@ -61,7 +61,7 @@ const GRID_COLS = '74px 80px 54px 64px 1fr';
 function verdictVariant(verdict: ReviewCase['verdict']): BadgeVariant {
   if (verdict === 'PASS') return 'success';
   if (verdict === 'REVISE') return 'warning';
-  return 'danger';
+  return 'error';
 }
 
 /**
@@ -72,7 +72,7 @@ export function SafetySection() {
     <section
       id="safety"
       aria-labelledby="safety-heading"
-      style={{ background: 'var(--sf-paper)', padding: '120px 24px' }}
+      style={{ background: 'var(--sf-bg-primary)', padding: '120px 24px' }}
     >
       <div style={{ maxWidth: 'var(--sf-max-width)', margin: '0 auto' }}>
         <div
@@ -143,7 +143,7 @@ function SafetyItem({ title, detail }: SafetyItemProps) {
           width: 16,
           height: 16,
           borderRadius: 'var(--sf-radius-sm)',
-          background: 'var(--sf-success-tint)',
+          background: 'var(--sf-success-light)',
           color: 'var(--sf-success-ink)',
         }}
       >
@@ -188,10 +188,10 @@ function SafetyItem({ title, detail }: SafetyItemProps) {
 
 function ReviewLogCard() {
   const cardStyle: CSSProperties = {
-    background: 'var(--sf-ink-raised)',
+    background: 'var(--sf-bg-dark-surface)',
     borderRadius: 'var(--sf-radius-lg)',
     padding: 24,
-    boxShadow: 'var(--sf-shadow-lg)',
+    boxShadow: 'var(--sf-shadow-elevated)',
   };
   return (
     <div style={cardStyle}>
@@ -258,7 +258,7 @@ function ReviewLogCard() {
               className="sf-mono"
               style={{
                 fontSize: 'var(--sf-text-sm)',
-                color: c.accuracy === '✓' ? 'var(--sf-success)' : 'var(--sf-danger)',
+                color: c.accuracy === '✓' ? 'var(--sf-success)' : 'var(--sf-error)',
               }}
             >
               {c.accuracy}

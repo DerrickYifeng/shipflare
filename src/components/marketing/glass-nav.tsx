@@ -83,7 +83,7 @@ export function GlassNav({ isAuthenticated }: GlassNavProps) {
                 letterSpacing: 'var(--sf-track-normal)',
                 padding: '8px 16px',
                 borderRadius: 'var(--sf-radius-pill)',
-                background: 'var(--sf-signal)',
+                background: 'var(--sf-accent)',
                 textDecoration: 'none',
                 fontWeight: 500,
               }}
@@ -101,7 +101,7 @@ export function GlassNav({ isAuthenticated }: GlassNavProps) {
                 letterSpacing: 'var(--sf-track-normal)',
                 padding: '8px 16px',
                 borderRadius: 'var(--sf-radius-pill)',
-                background: 'var(--sf-signal)',
+                background: 'var(--sf-accent)',
                 border: 'none',
                 cursor: 'pointer',
                 fontWeight: 500,

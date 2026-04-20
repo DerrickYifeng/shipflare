@@ -106,10 +106,10 @@ export function PostCard({
 
   const articleStyle: CSSProperties = {
     borderRadius: 'var(--sf-radius-lg)',
-    background: 'var(--sf-paper-raised)',
-    boxShadow: isActive ? 'var(--sf-shadow-md)' : 'var(--sf-shadow-sm)',
+    background: 'var(--sf-bg-secondary)',
+    boxShadow: isActive ? 'var(--sf-shadow-card-hover)' : 'var(--sf-shadow-card)',
     border: '1px solid var(--sf-border-subtle)',
-    outline: isActive ? '2px solid var(--sf-signal)' : 'none',
+    outline: isActive ? '2px solid var(--sf-accent)' : 'none',
     outlineOffset: isActive ? 2 : 0,
     overflow: 'hidden',
     opacity: isOptimistic ? 0.6 : 1,
@@ -175,8 +175,8 @@ export function PostCard({
               fontWeight: 600,
               fontFamily: 'var(--sf-font-mono)',
               letterSpacing: 'var(--sf-track-mono)',
-              background: 'var(--sf-signal-tint)',
-              color: 'var(--sf-signal-ink)',
+              background: 'var(--sf-accent-light)',
+              color: 'var(--sf-link)',
               whiteSpace: 'nowrap',
               flexShrink: 0,
             }}
@@ -241,7 +241,7 @@ export function PostCard({
             autoFocus
             style={{
               width: '100%',
-              background: 'var(--sf-paper-sunken)',
+              background: 'var(--sf-bg-tertiary)',
               border: '1px solid var(--sf-border)',
               borderRadius: 'var(--sf-radius-md)',
               padding: 12,
@@ -285,7 +285,7 @@ export function PostCard({
           gap: 4,
           padding: '12px 18px',
           borderTop: '1px solid var(--sf-border-subtle)',
-          background: 'var(--sf-paper-sunken)',
+          background: 'var(--sf-bg-tertiary)',
         }}
       >
         {!isEditing ? (
@@ -333,7 +333,7 @@ export function PostCard({
           className="sf-mono"
           style={{
             fontSize: 'var(--sf-text-xs)',
-            color: over ? 'var(--sf-danger)' : 'var(--sf-fg-4)',
+            color: over ? 'var(--sf-error)' : 'var(--sf-fg-4)',
             letterSpacing: 'var(--sf-track-mono)',
           }}
         >
@@ -385,7 +385,7 @@ function TextAction({
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       style={{
-        background: hover ? 'var(--sf-paper-raised)' : 'transparent',
+        background: hover ? 'var(--sf-bg-secondary)' : 'transparent',
         border: 'none',
         cursor: 'pointer',
         padding: '6px 10px',

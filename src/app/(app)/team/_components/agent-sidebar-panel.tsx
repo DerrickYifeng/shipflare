@@ -129,7 +129,7 @@ function AgentRosterRow({ agent, state, isSelected, onSelect }: AgentRosterRowPr
     background: 'transparent',
     cursor: 'pointer',
     outline: isSelected
-      ? '2px solid var(--sf-signal)'
+      ? '2px solid var(--sf-accent)'
       : hover
         ? '1px solid var(--sf-border)'
         : '1px solid transparent',
@@ -169,7 +169,7 @@ interface BlockedHintProps {
 
 export function BlockedHint({ reason }: BlockedHintProps) {
   return (
-    <Card padding={14} accent="danger">
+    <Card padding={14} accent="error">
       <Ops tone="danger" style={{ display: 'block', marginBottom: 4 }}>
         NEEDS YOU
       </Ops>

@@ -27,7 +27,7 @@ export function HealthMeter({ value, variant = 'bar', size = 132 }: HealthMeterP
 
 function colorFor(v01: number): string {
   if (v01 > 0.75) return 'var(--sf-success)';
-  if (v01 > 0.55) return 'var(--sf-signal)';
+  if (v01 > 0.55) return 'var(--sf-accent)';
   return 'var(--sf-warning)';
 }
 
@@ -41,7 +41,7 @@ function HealthBar({ value }: { value: number }) {
         width: 56,
         height: 4,
         borderRadius: 2,
-        background: 'var(--sf-paper-sunken)',
+        background: 'var(--sf-bg-tertiary)',
         position: 'relative',
       }}
     >
@@ -96,7 +96,7 @@ function HealthDial({ value, size }: { value: number; size: number }) {
           cy={center}
           r={radius}
           fill="none"
-          stroke="var(--sf-paper-sunken)"
+          stroke="var(--sf-bg-tertiary)"
           strokeWidth={strokeWidth}
           strokeDasharray={`${arcLength} ${2 * Math.PI * radius}`}
           strokeLinecap="round"

@@ -1,16 +1,14 @@
 import type { CSSProperties, HTMLAttributes, ReactNode } from 'react';
 
 /**
- * Accepts any `--sf-*` color token name (without the `--sf-` prefix)
- * to paint as the left-edge accent stripe. Example: `accent="signal"`
- * renders a 3px bar in `var(--sf-signal)`.
+ * Accepts a semantic color name (matches a `--sf-*` color token).
+ * Example: `accent="accent"` paints a 3px bar in `var(--sf-accent)`.
  */
 export type CardAccent =
-  | 'signal'
-  | 'flare'
+  | 'accent'
   | 'success'
   | 'warning'
-  | 'danger'
+  | 'error'
   | (string & {});
 
 export interface CardProps extends Omit<HTMLAttributes<HTMLDivElement>, 'style'> {
@@ -23,7 +21,7 @@ export interface CardProps extends Omit<HTMLAttributes<HTMLDivElement>, 'style'>
 }
 
 /**
- * Raised paper surface — the default container for content blocks.
+ * Raised surface — the default container for content blocks.
  * The `accent` prop paints a 3px left stripe in the chosen brand color.
  */
 export function Card({
@@ -35,9 +33,9 @@ export function Card({
   ...rest
 }: CardProps) {
   const style: CSSProperties = {
-    background: 'var(--sf-paper-raised)',
-    borderRadius: 'var(--sf-radius-lg)',
-    boxShadow: 'var(--sf-shadow-sm)',
+    background: 'var(--sf-bg-secondary)',
+    borderRadius: 'var(--sf-radius-xl)',
+    boxShadow: 'var(--sf-shadow-card)',
     padding,
     position: 'relative',
     overflow: 'hidden',
