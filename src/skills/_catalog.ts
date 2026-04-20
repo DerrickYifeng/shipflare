@@ -43,6 +43,8 @@ import {
   analyticsSummarizeOutputSchema,
   topSupportersOutputSchema,
   interviewQuestionsOutputSchema,
+  retrospectiveOutputSchema,
+  threadSentimentOutputSchema,
 } from '@/agents/schemas';
 
 /**
@@ -542,6 +544,69 @@ const generateInterviewQuestionsInput = z.object({
 });
 
 // ---------------------------------------------------------------------------
+// Phase 5 — utility atoms
+// ---------------------------------------------------------------------------
+
+const compileRetrospectiveInput = z.object({
+  scope: z.enum(['launch', 'sprint', 'quarter']),
+  period: z.object({
+    start: z.string().min(1),
+    end: z.string().min(1),
+  }),
+  product: z.object({
+    name: z.string().min(1),
+    valueProp: z.string().nullable(),
+  }),
+  metrics: z.object({
+    postsPublished: z.number().int().nonnegative().optional(),
+    repliesSent: z.number().int().nonnegative().optional(),
+    impressions: z.number().int().nonnegative().optional(),
+    followersDelta: z.number().int().optional(),
+    emailsSent: z.number().int().nonnegative().optional(),
+    newSignups: z.number().int().nonnegative().optional(),
+    activationRate: z.number().min(0).max(1).optional(),
+    revenueDelta: z.number().optional(),
+    featuresShipped: z.array(z.string()).optional(),
+  }),
+  moments: z
+    .array(
+      z.object({
+        at: z.string().min(1),
+        kind: z.enum(['win', 'miss', 'surprise', 'decision']),
+        summary: z.string().min(1),
+      }),
+    )
+    .optional(),
+  voiceBlock: z.string().nullable(),
+  emitSocialDigest: z.boolean().optional(),
+});
+
+const classifyThreadSentimentInput = z.object({
+  thread: z.object({
+    title: z.string().min(1),
+    body: z.string().nullable(),
+    commentCount: z.number().int().nonnegative(),
+    topComments: z
+      .array(
+        z.object({
+          author: z.string().min(1),
+          text: z.string().min(1),
+          score: z.number().optional(),
+        }),
+      )
+      .optional(),
+    platform: z.string().min(1),
+    community: z.string().optional(),
+  }),
+  product: z
+    .object({
+      name: z.string().min(1),
+      keywords: z.array(z.string()),
+    })
+    .optional(),
+});
+
+// ---------------------------------------------------------------------------
 // Catalog
 // ---------------------------------------------------------------------------
 
@@ -731,6 +796,25 @@ export const SKILL_CATALOG: readonly SkillMeta[] = [
       'Rank up to 30 accounts by weighted engagement events within a period. Weights: reply/quote/mention=4, repost/bookmark=2, like=1.',
     inputSchema: identifyTopSupportersInput,
     outputSchema: topSupportersOutputSchema,
+    supportedKinds: ['analytics_summary'],
+  },
+
+  // --- Phase 5: utility atoms ---
+  {
+    name: 'classify-thread-sentiment',
+    description:
+      'Classify one thread into pos / neg / neutral / mixed with confidence and rationale. Lightweight (Haiku) classifier used inline during reply discovery.',
+    inputSchema: classifyThreadSentimentInput,
+    outputSchema: threadSentimentOutputSchema,
+    // Inline utility, not planner-scheduled.
+    supportedKinds: [],
+  },
+  {
+    name: 'compile-retrospective',
+    description:
+      'Compile one retrospective post at launch / sprint / quarter scope, with four mandatory sections and an optional social digest.',
+    inputSchema: compileRetrospectiveInput,
+    outputSchema: retrospectiveOutputSchema,
     supportedKinds: ['analytics_summary'],
   },
 ];
