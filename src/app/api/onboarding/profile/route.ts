@@ -16,14 +16,14 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  let body: { url?: string; name?: string; description?: string; keywords?: string[]; valueProp?: string; lifecyclePhase?: string; merge?: boolean };
+  let body: { url?: string; name?: string; description?: string; keywords?: string[]; valueProp?: string; merge?: boolean };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
 
-  const { url, name, description, keywords, valueProp, lifecyclePhase, merge } = body;
+  const { url, name, description, keywords, valueProp, merge } = body;
   log.info(`PUT /api/onboarding/profile name=${name} merge=${!!merge}`);
 
   if (!name || !description) {
@@ -62,7 +62,6 @@ export async function PUT(request: Request) {
         description: mergedDesc,
         keywords: mergedKeywords,
         valueProp: mergedValueProp,
-        ...(lifecyclePhase ? { lifecyclePhase } : {}),
         ...(seoAudit !== null ? { seoAuditJson: seoAudit } : {}),
         updatedAt: new Date(),
       })
@@ -76,7 +75,6 @@ export async function PUT(request: Request) {
         description,
         keywords: keywords ?? [],
         valueProp: valueProp ?? null,
-        ...(lifecyclePhase ? { lifecyclePhase } : {}),
         ...(seoAudit !== null ? { seoAuditJson: seoAudit } : {}),
         updatedAt: new Date(),
       })
@@ -89,7 +87,6 @@ export async function PUT(request: Request) {
       description,
       keywords: keywords ?? [],
       valueProp: valueProp ?? null,
-      ...(lifecyclePhase ? { lifecyclePhase } : {}),
       seoAuditJson: seoAudit,
     });
   }

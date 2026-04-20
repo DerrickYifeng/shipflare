@@ -3,6 +3,7 @@ import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { products, voiceProfiles } from '@/lib/db/schema';
 import { desc, eq } from 'drizzle-orm';
+import { derivePhase, type ProductState } from '@/lib/launch-phase';
 
 /**
  * GET /api/product
@@ -23,7 +24,11 @@ export async function GET() {
       keywords: products.keywords,
       valueProp: products.valueProp,
       url: products.url,
-      lifecyclePhase: products.lifecyclePhase,
+      state: products.state,
+      launchDate: products.launchDate,
+      launchedAt: products.launchedAt,
+      targetAudience: products.targetAudience,
+      category: products.category,
       updatedAt: products.updatedAt,
     })
     .from(products)
@@ -41,13 +46,25 @@ export async function GET() {
     .orderBy(desc(voiceProfiles.lastExtractedAt))
     .limit(1);
 
+  const state = row.state as ProductState;
+  const currentPhase = derivePhase({
+    state,
+    launchDate: row.launchDate,
+    launchedAt: row.launchedAt,
+  });
+
   return NextResponse.json({
     name: row.name,
     description: row.description,
     keywords: row.keywords,
     valueProp: row.valueProp,
     url: row.url,
-    lifecyclePhase: row.lifecyclePhase,
+    state,
+    launchDate: row.launchDate ? row.launchDate.toISOString() : null,
+    launchedAt: row.launchedAt ? row.launchedAt.toISOString() : null,
+    targetAudience: row.targetAudience,
+    category: row.category,
+    currentPhase,
     updatedAt: row.updatedAt.toISOString(),
     voiceScannedAt: voice?.lastExtractedAt ? voice.lastExtractedAt.toISOString() : null,
   });
