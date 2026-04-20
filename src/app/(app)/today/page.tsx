@@ -14,13 +14,12 @@ import {
   channels,
 } from '@/lib/db/schema';
 import { eq, and, desc, gt, sql, count } from 'drizzle-orm';
-import { HeaderBar } from '@/components/layout/header-bar';
 import { TodayContent } from './today-content';
 
 export const metadata: Metadata = { title: 'Today' };
 
-// Always render fresh — Today is the hot dashboard and its data
-// (todo_items, stats) changes minute-to-minute.
+// Today is the hot dashboard — its data (todo_items, stats) changes minute
+// to minute, so we never want a cached render.
 export const dynamic = 'force-dynamic';
 
 export default async function TodayPage() {
@@ -28,32 +27,32 @@ export default async function TodayPage() {
   if (!session?.user?.id) redirect('/');
   const userId = session.user.id;
 
-  // Check onboarding
+  // Onboarding gate — no product means the user hasn't finished setup.
   const [product] = await db
     .select()
     .from(products)
     .where(eq(products.userId, userId))
     .limit(1);
-
   if (!product) redirect('/onboarding');
 
-  // Get latest health score
+  // Health score — surfaced in the CompletionState footer when idle.
   const [latestScore] = await db
     .select()
     .from(healthScores)
     .where(eq(healthScores.userId, userId))
     .orderBy(desc(healthScores.calculatedAt))
     .limit(1);
+  void latestScore; // Retained so future UI can surface the score beside HeaderBar.
 
-  // Determine first-run: has the user ever had any todo items?
+  // First-run gate: has the user ever had any todo items?
   const [existing] = await db
     .select({ id: todoItems.id })
     .from(todoItems)
     .where(eq(todoItems.userId, userId))
     .limit(1);
 
-  // Does the user have any connected channel? Drives the first-run timeout
-  // branching in the FirstRun component without a second client fetch.
+  // Connected-channel gate — drives the Scan-now disabled state + FirstRun
+  // branching in a single server round-trip.
   const [anyChannel] = await db
     .select({ id: channels.id })
     .from(channels)
@@ -62,7 +61,7 @@ export default async function TodayPage() {
 
   const now = new Date();
 
-  // Resolve timezone once for day-boundary math.
+  // Timezone for day-boundary math.
   const [prefs] = await db
     .select({ timezone: userPreferences.timezone })
     .from(userPreferences)
@@ -73,8 +72,7 @@ export default async function TodayPage() {
   const yesterdayStart = getLocalDayStart(timezone, -1);
   const todayStart = getLocalDayStart(timezone, 0);
 
-  // Fetch the same payload that /api/today would return, so SWR can hydrate
-  // without a client-side refetch flash.
+  // The same payload `/api/today` returns, so SWR hydrates without a flash.
   const items = await db
     .select({
       id: todoItems.id,
@@ -149,9 +147,8 @@ export default async function TodayPage() {
       ),
     );
 
-  // Yesterday's top post — surfaced in CompletionState.
-  // Ordered by threadUpvotes desc as a best-effort engagement proxy (source
-  // thread upvotes, since posts table doesn't carry metrics); falls back to
+  // Yesterday's top post — surfaced inside CompletionState. Ordered by
+  // threadUpvotes desc as a best-effort engagement proxy; falls back to
   // most-recent when metrics are null.
   const [yesterdayTop] = await db
     .select({
@@ -180,6 +177,17 @@ export default async function TodayPage() {
     .orderBy(desc(threads.upvotes), desc(posts.postedAt))
     .limit(1);
 
+  // Most recent "posted" wall clock as a best-effort last-scan proxy. We
+  // don't persist scan-runs server-side today; client falls back to
+  // localStorage. This keeps the meta line useful on first render without
+  // a new schema migration.
+  const [lastPosted] = await db
+    .select({ at: posts.postedAt })
+    .from(posts)
+    .where(eq(posts.userId, userId))
+    .orderBy(desc(posts.postedAt))
+    .limit(1);
+
   const fallbackData = {
     items,
     stats: {
@@ -190,15 +198,13 @@ export default async function TodayPage() {
   };
 
   return (
-    <>
-      <HeaderBar title="Today" healthScore={latestScore?.score ?? null} />
-      <TodayContent
-        isFirstRun={!existing}
-        hasChannel={!!anyChannel}
-        fallbackData={fallbackData}
-        yesterdayTop={yesterdayTop ?? null}
-      />
-    </>
+    <TodayContent
+      isFirstRun={!existing}
+      hasChannel={!!anyChannel}
+      fallbackData={fallbackData}
+      yesterdayTop={yesterdayTop ?? null}
+      lastScanAt={lastPosted?.at ?? null}
+    />
   );
 }
 
