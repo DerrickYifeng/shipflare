@@ -30,11 +30,13 @@ export function CTASection({ isAuthenticated }: CTASectionProps) {
       id="signup"
       aria-labelledby="cta-heading"
       style={{
-        // Signal gradient per handoff README — the visual peak of the
-        // alternating dark/light/dark/light rhythm before the footer.
-        // Matches sidebar active-nav gradient (sf-signal → deeper violet).
-        background:
-          'linear-gradient(135deg, var(--sf-signal) 0%, oklch(50% 0.22 268) 100%)',
+        // Prototype source/landing/cta_footer.jsx:5 — dark ink base with a
+        // soft signal-coloured radial glow centred above the headline. The
+        // README's "signal gradient" label refers to this halo, not a full
+        // linear slab. Keeps the alternating rhythm's final dark beat
+        // (ink → paper → ink → paper → ink+glow → ink) while marking the
+        // CTA as the signature moment.
+        background: 'var(--sf-ink)',
         color: 'var(--sf-fg-on-dark-1)',
         padding: '140px 24px',
         position: 'relative',
@@ -47,7 +49,7 @@ export function CTASection({ isAuthenticated }: CTASectionProps) {
           position: 'absolute',
           inset: 0,
           background:
-            'radial-gradient(ellipse 60% 50% at 50% 40%, oklch(82% 0.14 255 / 0.25), transparent 60%)',
+            'radial-gradient(ellipse 60% 50% at 50% 40%, oklch(62% 0.19 255 / 0.20), transparent 60%)',
           pointerEvents: 'none',
         }}
       />
