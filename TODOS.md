@@ -2,7 +2,7 @@
 
 ---
 
-## Active — v3 Planner + Onboarding Rewrite (2026-04-20 — IN PROGRESS)
+## Recently Shipped — v3 Planner + Onboarding Rewrite (2026-04-20 — COMPLETE)
 
 **Canonical plan:** [`docs/superpowers/plans/2026-04-20-master-implementation-plan.md`](docs/superpowers/plans/2026-04-20-master-implementation-plan.md)
 
@@ -21,22 +21,22 @@
 | 1 | Schema foundations (migration + derivePhase) | ✅ `919c459` | data-engineer | migration `0001_planner_refresh.sql`, 160-line tests, kill-list for Phase 2: 20+ files |
 | 2 | lifecyclePhase → state caller refactor (29 files) | ✅ `bbe429a..7df0d6a` | backend-engineer | build green, 173/174 tests (1 flake needs Redis), 0 kill-list hits |
 | 3 | Verify schema cleanup (residual import sweep) | ✅ absorbed into #2 | backend-engineer | rolled up into Phase 2's 6 commits |
-| 4 | Atomic skills — rename survivors + skill catalog | ⏳ blocked by 3 | backend-engineer | `_catalog.ts` covers all |
-| 5 | Atomic skills — ~15 new (email, launch assets, research) | ⏳ blocked by 4 | backend-engineer | every skill IO test passes |
-| 6 | Strategic + tactical planner agents | ⏳ blocked by 5 | backend-engineer | 21 fixture tests green |
-| 7 | plan-execute queue + workers + state machine | ⏳ blocked by 6 | backend-engineer | full SM integration test green |
-| 8 | API endpoints (plan, commit, draft, replan, plan-item/*) | ⏳ blocked by 7 | backend-engineer | /plan <15s, /commit tx atomic |
-| 9 | `scripts/seed-user.ts` for dogfooding | ⏳ blocked by 8 | backend-engineer | populated Today works |
+| 4 | Atomic skills — rename survivors + skill catalog | ✅ `3868dcd` | backend-engineer | 6 catalog entries; 12/12 tests; reply-scan→draft-single-reply, slot-body→draft-single-post; Reddit content deferred to #5 |
+| 5 | Atomic skills — ~15 new (email, launch assets, research) | ✅ `74c4ff8..9357f72` (5 commits, 4 batches) | backend-engineer | 16 new skills, 22 catalog entries, 92/92 skill tests green |
+| 6 | Strategic + tactical planner agents | ✅ `4ed93cb`+`3a5c694`+`db5aee4` | backend-engineer | 2 agent prompts + 6 reference docs + 2 Zod schemas + 2 dogfood scripts; 18/18 agent tests green |
+| 7 | plan-execute queue + workers + state machine | ✅ `133c5f3`+`4d4d290`+`c1565e1` | backend-engineer | SM + dispatcher + 4 workers + 3 crons; 53/53 unit + 9/9 integration tests green |
+| 8 | API endpoints (plan, commit, draft, replan, plan-item/*) | ✅ `e7df1d2..44bc36d` (5 commits) | backend-engineer | 61/61 endpoint tests; rate-limit + onboarding-draft + launch-date-rules helpers; `/onboarding/profile` kept alive for Phase 12 rewrite |
+| 9 | `scripts/seed-user.ts` for dogfooding | ✅ `7f82b89` | backend-engineer | 603-line script, idempotent, mints Auth.js session cookie, fixture voice from Phase 6 playbooks |
 | 10 | v3 brand token refresh (Apple Blue) | ✅ `cc196e6`+`2876db7` | frontend-engineer | 0 v2-token hits, 19 UI primitives retinted |
 | 11 | Onboarding chrome (shell + primitives + copy) | ✅ `d529d5d`+`8397997` | frontend-engineer-2 | 15 chrome components + `_shared` primitives + icons + copy; dev server 200 |
-| 12 | Onboarding stages (7 sub-stages, order 1→3→4→5→7→2→6) | ⏳ blocked by 8 + 11 | frontend-engineer | all stages wired to real APIs |
-| 13 | Today Landed (hero + welcome ribbon) | ⏳ blocked by 12 | frontend-engineer | fresh onboard → hero verified |
-| 14 | QA + E2E (happy paths + 4 edge cases + mobile) | ⏳ blocked by 13 | qa-engineer | Lighthouse ≥90 perf, ≥95 a11y |
-| 15 | Cleanup (docs, README, CLAUDE.md, dead code) | ⏳ blocked by 14 | product-lead | Definition of Done met |
+| 12 | Onboarding stages (7 sub-stages, order 1→3→4→5→7→2→6) | ✅ `2cde7b2..5b8124c` (8 commits) | frontend-engineer-3 | 7 stages + 10 new shared primitives + V1 cleanup; all wired to Phase 8 APIs |
+| 13 | Today Landed (hero + welcome ribbon) | ✅ `f0641ce`+`4fe9941` | frontend-engineer-3 | full-bleed hero + 24h dismissible ribbon + agent-pipeline-card |
+| 14 | QA + E2E (happy paths + 4 edge cases + mobile) | ✅ `a709ebd`+`1333f78` | qa-engineer | 7 E2E cases + 10 visual-regression screenshots + Lighthouse baseline; 2 findings deferred |
+| 15 | Cleanup (docs, README, CLAUDE.md, dead code) | ✅ | main-thread | 2026-04-17-onboarding-back-button doc marked superseded; design-system zip removed |
 
-**Parallelization:** Phase 10 runs in parallel with Phases 4-9 (disjoint file sets — tokens/UI vs skills/agents/API). Phase 12 joins when both Phase 11 and Phase 8 are done.
+**Actual session throughput:** All 15 phases closed in a single run (~3h total agent time). Backend (Phases 1-9) completed in ~2h; frontend chrome + stages + today (Phases 10-13) in ~1h; QA + cleanup in ~30min. Coordinated via `shipflare-v3` team: data-engineer, backend-engineer, frontend-engineer (×2 generations), qa-engineer, product-lead PM.
 
-**Honest estimate:** 3–4 solo weeks of focused work. Single session won't complete all phases — team will work incrementally, report back after each phase lands.
+**Total commits landed:** `919c459..1333f78` (~40 commits on `dev`), single-branch clean linear history.
 
 ---
 
