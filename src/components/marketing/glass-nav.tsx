@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useState } from 'react';
 import type { CSSProperties } from 'react';
 import { SignInModal } from '@/components/auth/sign-in-modal';
+import { ShipFlareLogo } from '@/components/ui/shipflare-logo';
 
 export interface GlassNavProps {
   isAuthenticated: boolean;
@@ -50,25 +51,7 @@ export function GlassNav({ isAuthenticated }: GlassNavProps) {
           style={{ textDecoration: 'none' }}
           aria-label="ShipFlare home"
         >
-          <span
-            className="inline-flex items-center justify-center"
-            style={{
-              width: 22,
-              height: 22,
-              borderRadius: 6,
-              background: 'var(--sf-fg-on-dark-1)',
-            }}
-          >
-            <span
-              style={{
-                width: 10,
-                height: 10,
-                background: 'var(--sf-signal)',
-                borderRadius: 2,
-                transform: 'rotate(45deg)',
-              }}
-            />
-          </span>
+          <ShipFlareLogo size={22} />
           <span
             style={{
               fontSize: 'var(--sf-text-sm)',

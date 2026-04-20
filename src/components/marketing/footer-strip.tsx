@@ -1,4 +1,5 @@
 import type { CSSProperties } from 'react';
+import { ShipFlareLogo } from '@/components/ui/shipflare-logo';
 
 interface FooterLink {
   label: string;
@@ -43,26 +44,7 @@ export function FooterStrip() {
         }}
       >
         <div className="flex items-center" style={{ gap: 10 }}>
-          <span
-            aria-hidden="true"
-            className="inline-flex items-center justify-center"
-            style={{
-              width: 18,
-              height: 18,
-              borderRadius: 4,
-              background: 'var(--sf-fg-on-dark-1)',
-            }}
-          >
-            <span
-              style={{
-                width: 8,
-                height: 8,
-                background: 'var(--sf-signal)',
-                borderRadius: 2,
-                transform: 'rotate(45deg)',
-              }}
-            />
-          </span>
+          <ShipFlareLogo size={18} />
           <span
             style={{
               fontSize: 'var(--sf-text-xs)',
