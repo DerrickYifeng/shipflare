@@ -16,6 +16,7 @@ import {
   tacticalPlanSchema,
 } from '@/agents/schemas';
 import { derivePhase } from '@/lib/launch-phase';
+import { validateLaunchDates } from '@/lib/launch-date-rules';
 import { acquireRateLimit } from '@/lib/rate-limit';
 import { enqueueCalibration } from '@/lib/queue';
 import { isPlatformAvailable } from '@/lib/platform-config';
@@ -28,8 +29,6 @@ const baseLog = createLogger('api:onboarding:commit');
 // 1 commit per minute per user. Prevents accidental double-fire from
 // racing UI buttons; an honest retry waits 60s.
 const RATE_LIMIT_WINDOW_SECONDS = 60;
-
-const MS_PER_DAY = 86_400_000;
 
 const productCategorySchema = z.enum([
   'dev_tool',
@@ -59,86 +58,6 @@ const requestBodySchema = z.object({
 });
 
 type RequestBody = z.infer<typeof requestBodySchema>;
-
-interface DateRuleError {
-  field: string;
-  message: string;
-}
-
-/**
- * Validate per-state date rules. Returns an error array; empty = valid.
- *
- *   state='launching' → launchDate required, in [today+7d, today+90d]
- *   state='launched'  → launchedAt required, in [today-3y, today]
- *   state='mvp'       → launchedAt null, launchDate optional & in [today+1d, today+365d]
- *
- * Past launch date with state='mvp' is rejected so the UI can force the
- * founder to pick 'launching' or 'launched' rather than silently
- * persisting a stale future date.
- */
-function validateStateDates(body: RequestBody): DateRuleError[] {
-  const errors: DateRuleError[] = [];
-  const now = Date.now();
-  const launchDateMs = body.launchDate ? Date.parse(body.launchDate) : null;
-  const launchedAtMs = body.launchedAt ? Date.parse(body.launchedAt) : null;
-
-  if (body.state === 'launching') {
-    if (launchDateMs == null) {
-      errors.push({
-        field: 'launchDate',
-        message: 'state=launching requires launchDate',
-      });
-    } else {
-      const minMs = now + 7 * MS_PER_DAY;
-      const maxMs = now + 90 * MS_PER_DAY;
-      if (launchDateMs < minMs || launchDateMs > maxMs) {
-        errors.push({
-          field: 'launchDate',
-          message:
-            'state=launching requires launchDate in [today+7d, today+90d]',
-        });
-      }
-    }
-  } else if (body.state === 'launched') {
-    if (launchedAtMs == null) {
-      errors.push({
-        field: 'launchedAt',
-        message: 'state=launched requires launchedAt',
-      });
-    } else {
-      const minMs = now - 3 * 365 * MS_PER_DAY;
-      const maxMs = now;
-      if (launchedAtMs < minMs || launchedAtMs > maxMs) {
-        errors.push({
-          field: 'launchedAt',
-          message:
-            'state=launched requires launchedAt in [today-3y, today]',
-        });
-      }
-    }
-  } else {
-    // state === 'mvp'
-    if (launchedAtMs != null) {
-      errors.push({
-        field: 'launchedAt',
-        message: 'state=mvp requires launchedAt=null',
-      });
-    }
-    if (launchDateMs != null) {
-      const minMs = now + 1 * MS_PER_DAY;
-      const maxMs = now + 365 * MS_PER_DAY;
-      if (launchDateMs < minMs || launchDateMs > maxMs) {
-        errors.push({
-          field: 'launchDate',
-          message:
-            'state=mvp requires launchDate null or in [today+1d, today+365d]',
-        });
-      }
-    }
-  }
-
-  return errors;
-}
 
 /**
  * Detect whether the core product identity changed vs an existing row.
@@ -207,7 +126,11 @@ export async function POST(request: NextRequest): Promise<Response> {
     );
   }
 
-  const dateErrors = validateStateDates(body);
+  const dateErrors = validateLaunchDates({
+    state: body.state,
+    launchDate: body.launchDate ?? null,
+    launchedAt: body.launchedAt ?? null,
+  });
   if (dateErrors.length > 0) {
     return NextResponse.json(
       { error: 'invalid_dates', detail: dateErrors },
