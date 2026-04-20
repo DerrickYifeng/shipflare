@@ -9,29 +9,21 @@ interface FirstRunProps {
   hasChannel?: boolean;
 }
 
-// Stages map to the real agent pipeline. Each one advances when the
-// corresponding SSE agent_start / agent_complete event arrives.
-//
-// Backend agent names we observe on the /api/events channel
-// (src/workers/processors/*.ts):
-//   - 'scout'            (discovery.ts)
-//   - 'content-batch'    (content-calendar.ts)
-//   - 'reply-drafter'    (monitor.ts)
-//   - 'x-metrics'        (metrics.ts — not part of first-run)
-// For the Today first-run we care about the scout -> discovery (drafting) ->
-// content -> review arc. We collapse 'content-batch' / 'reply-drafter' into
-// the 'content' bucket, and treat the draft_reviewed event as 'review'.
-const STAGES = ['scout', 'discovery', 'content', 'review'] as const;
+// Stages map to the real v3 agent pipeline. Each advances when the
+// corresponding SSE agent_start / agent_complete / draft_reviewed
+// event arrives. Backend agent names emitted on /api/events:
+//   - 'discovery'      (automation/run route + discovery-scan.ts)
+//   - 'reply-drafter'  (monitor.ts — maps into the content bucket)
+//   - 'x-metrics'      (metrics.ts — not part of first-run)
+// v1's scout + content-batch agents were retired in the Phase 2 cleanup;
+// the first-run arc is now discovery → content → review.
+const STAGES = ['discovery', 'content', 'review'] as const;
 type Stage = (typeof STAGES)[number];
 
 const STAGE_COPY: Record<Stage, { label: string; detail: string }> = {
-  scout: {
-    label: 'Scouting communities',
-    detail: 'Finding where your audience is talking.',
-  },
   discovery: {
-    label: 'Finding discussions',
-    detail: 'Surfacing conversations worth joining.',
+    label: 'Scanning communities',
+    detail: 'Finding where your audience is talking.',
   },
   content: {
     label: 'Drafting replies',
@@ -58,13 +50,11 @@ interface SSEAgentEvent {
 
 function agentToStage(agentName: string | undefined): Stage | null {
   if (!agentName) return null;
-  if (agentName === 'scout') return 'scout';
-  // `discovery` now has a real bracketing pair emitted by discovery-scan.ts —
-  // see the 'discovery_start' / 'discovery_complete' handlers below. Keep
-  // this mapping narrow so stray agentName='discovery' events don't collide.
-  if (agentName === 'content-batch' || agentName === 'reply-drafter') {
-    return 'content';
-  }
+  if (agentName === 'discovery') return 'discovery';
+  if (agentName === 'reply-drafter') return 'content';
+  // Bracketing 'discovery_start' / 'discovery_complete' SSE events (from
+  // discovery-scan.ts) are handled separately in the event reducer; this
+  // mapping is only for the generic agent_start / agent_complete payloads.
   return null;
 }
 
@@ -117,23 +107,16 @@ export function FirstRun({ onItemsReady, hasChannel = true }: FirstRunProps) {
         const stage = agentToStage(event.agentName);
 
         if (event.type === 'discovery_start') {
-          // Backend now emits a synthetic bracket between scout and content.
-          // Park progress at the 'discovery' slot so the bar doesn't stall
-          // while search-source jobs churn.
+          // discovery-scan.ts emits this when its search-source fan-out
+          // begins. Park progress at the 'discovery' slot so the bar
+          // doesn't stall while search-source jobs churn.
           setStageIdx((prev) => Math.max(prev, STAGES.indexOf('discovery')));
         } else if (event.type === 'discovery_complete') {
           setStageIdx((prev) => Math.max(prev, STAGES.indexOf('discovery') + 1));
         } else if (event.type === 'agent_start' && stage) {
           setStageIdx((prev) => Math.max(prev, STAGES.indexOf(stage)));
         } else if (event.type === 'agent_complete' && stage) {
-          // Advance *past* the completed stage. Fallback: if we observe
-          // scout_complete but never get the synthetic discovery pair, jump
-          // forward by 2 so we don't freeze at 25%.
-          if (event.agentName === 'scout') {
-            setStageIdx((prev) => Math.max(prev, STAGES.indexOf('discovery') + 1));
-          } else {
-            setStageIdx((prev) => Math.max(prev, STAGES.indexOf(stage) + 1));
-          }
+          setStageIdx((prev) => Math.max(prev, STAGES.indexOf(stage) + 1));
         } else if (event.type === 'draft_reviewed' && !reviewSeen) {
           reviewSeen = true;
           setStageIdx((prev) => Math.max(prev, STAGES.indexOf('review') + 1));

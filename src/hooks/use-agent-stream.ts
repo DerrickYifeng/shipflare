@@ -6,7 +6,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 // Types
 // ---------------------------------------------------------------------------
 
-type AgentName = 'scout' | 'discovery' | 'content' | 'review' | 'posting';
+// v3 agent identifiers emitted by /api/events. v1's 'scout' was remapped
+// to 'discovery' when the automation/run route started publishing the
+// agent_start event with the new name; v1's 'content-batch' is gone (the
+// draft-single-* skills stream under 'content' via monitor.ts /
+// plan-execute.ts).
+type AgentName = 'discovery' | 'content' | 'review' | 'posting';
 
 export interface AgentState {
   status: 'active' | 'complete' | 'idle' | 'error';

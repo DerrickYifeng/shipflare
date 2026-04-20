@@ -1,19 +1,20 @@
 /**
  * Scene-layout metadata for the five agents in the isometric office.
  *
- * Each agent maps to a BullMQ worker per DATA_CONTRACT.md §2.1:
- *   Nova   → discovery
- *   Ember  → drafting   (content-batch)
- *   Sable  → review
- *   Arlo   → posting
- *   Kit    → scheduler  (no SSE event yet — falls back to "idle")
+ * Each agent maps to a v3 pipeline surface:
+ *   Nova   → discovery   (workers/processors/discovery-scan.ts + search-source.ts)
+ *   Ember  → drafting    (skills: draft-single-post, draft-single-reply)
+ *   Sable  → review      (skills/reply-hardening, executed via plan-execute worker)
+ *   Arlo   → posting     (workers/processors/posting.ts)
+ *   Kit    → scheduler   (tactical-planner; no SSE event yet → falls back to "idle")
  *
- * `streamKey` is the lowercase agent name emitted by the /api/events SSE
- * feed in `agent-stream-provider.tsx`. We intentionally keep these IDs stable
- * (a1…a5) so future features can key handoff history / reordering on them.
+ * `streamKey` is the lowercase agent identifier emitted on /api/events.
+ * The scout/content-batch agents from v1 are gone; discovery + content
+ * are the v3 replacements and IDs (a1…a5) stay stable so handoff history
+ * and reordering features key against them.
  */
 
-export type StreamKey = 'scout' | 'discovery' | 'content' | 'review' | 'posting' | 'scheduler';
+export type StreamKey = 'discovery' | 'content' | 'review' | 'posting' | 'scheduler';
 
 export interface AgentEntry {
   id: 'a1' | 'a2' | 'a3' | 'a4' | 'a5';

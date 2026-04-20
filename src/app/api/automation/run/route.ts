@@ -68,10 +68,13 @@ export async function POST(request: NextRequest) {
   // iteration doesn't immediately unwind.
   await clearStop(userId);
 
-  // Publish launch events so the UI shows agents waking up
+  // Publish launch events so the UI shows agents waking up. v3 remap:
+  // the v1 'scout' agent was retired when discovery moved into
+  // discovery-scan.ts + search-source.ts; the war-room roster's Nova
+  // listens under 'discovery'.
   await publishUserEvent(userId, 'agents', {
     type: 'agent_start',
-    agentName: 'scout',
+    agentName: 'discovery',
     currentTask: 'Scanning communities...',
   });
 
