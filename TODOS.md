@@ -1,5 +1,45 @@
 # TODOS
 
+---
+
+## Active — v3 Planner + Onboarding Rewrite (2026-04-20 — IN PROGRESS)
+
+**Canonical plan:** [`docs/superpowers/plans/2026-04-20-master-implementation-plan.md`](docs/superpowers/plans/2026-04-20-master-implementation-plan.md)
+
+**Spec docs:**
+- [`2026-04-20-planner-and-skills-redesign-design.md`](docs/superpowers/specs/2026-04-20-planner-and-skills-redesign-design.md) — backend canonical (schema, agents, APIs)
+- [`2026-04-20-onboarding-frontend-design.md`](docs/superpowers/specs/2026-04-20-onboarding-frontend-design.md) — frontend canonical (v3 tokens, 7 stages, pixel-perfect target)
+- [`2026-04-19-onboarding-redesign-design.md`](docs/superpowers/specs/2026-04-19-onboarding-redesign-design.md) — original UX flow (still authoritative for copy/UX)
+- [`2026-04-19-onboarding-backend-design.md`](docs/superpowers/specs/2026-04-19-onboarding-backend-design.md) — **partially superseded** (see banner in file)
+
+**Agent team:** `shipflare-v3` (PM + data-engineer + frontend-engineer + backend-engineer + qa-engineer). Config at `~/.claude/teams/shipflare-v3/config.json`. Task list at `~/.claude/tasks/shipflare-v3/`.
+
+### Phase roadmap (15 phases)
+
+| # | Phase | Status | Owner | Gate |
+|---|---|---|---|---|
+| 1 | Schema foundations (migration + derivePhase) | 🔄 active | data-engineer | `drizzle-kit migrate` clean, `launch-phase` tests green |
+| 2 | lifecyclePhase → state caller refactor (29 files) | ⏳ blocked by 1 | backend-engineer | `pnpm build` green, no `lifecyclePhase` greps |
+| 3 | Verify schema cleanup (residual import sweep) | ⏳ blocked by 2 | data-engineer | DB state clean |
+| 4 | Atomic skills — rename survivors + skill catalog | ⏳ blocked by 3 | backend-engineer | `_catalog.ts` covers all |
+| 5 | Atomic skills — ~15 new (email, launch assets, research) | ⏳ blocked by 4 | backend-engineer | every skill IO test passes |
+| 6 | Strategic + tactical planner agents | ⏳ blocked by 5 | backend-engineer | 21 fixture tests green |
+| 7 | plan-execute queue + workers + state machine | ⏳ blocked by 6 | backend-engineer | full SM integration test green |
+| 8 | API endpoints (plan, commit, draft, replan, plan-item/*) | ⏳ blocked by 7 | backend-engineer | /plan <15s, /commit tx atomic |
+| 9 | `scripts/seed-user.ts` for dogfooding | ⏳ blocked by 8 | backend-engineer | populated Today works |
+| 10 | v3 brand token refresh (Apple Blue) | 🔄 active | frontend-engineer | all pages render, 0 v2 token hits |
+| 11 | Onboarding chrome (shell + primitives + copy) | ⏳ blocked by 10 | frontend-engineer | desktop + mobile chrome pixel-perfect |
+| 12 | Onboarding stages (7 sub-stages, order 1→3→4→5→7→2→6) | ⏳ blocked by 8 + 11 | frontend-engineer | all stages wired to real APIs |
+| 13 | Today Landed (hero + welcome ribbon) | ⏳ blocked by 12 | frontend-engineer | fresh onboard → hero verified |
+| 14 | QA + E2E (happy paths + 4 edge cases + mobile) | ⏳ blocked by 13 | qa-engineer | Lighthouse ≥90 perf, ≥95 a11y |
+| 15 | Cleanup (docs, README, CLAUDE.md, dead code) | ⏳ blocked by 14 | product-lead | Definition of Done met |
+
+**Parallelization:** Phase 10 runs in parallel with Phases 4-9 (disjoint file sets — tokens/UI vs skills/agents/API). Phase 12 joins when both Phase 11 and Phase 8 are done.
+
+**Honest estimate:** 3–4 solo weeks of focused work. Single session won't complete all phases — team will work incrementally, report back after each phase lands.
+
+---
+
 ## Recently Shipped — v2 Frontend Migration (2026-04-19)
 
 All 7 phases landed on `dev` (unpushed). Design handoff at `public/ShipFlare Design System.zip`.
