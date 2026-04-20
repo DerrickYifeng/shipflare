@@ -1,194 +1,49 @@
 @import "tailwindcss";
 
 /* =====================================================================
-   ShipFlare v2 — Design Tokens (Phase 1)
-   Signal (cool indigo) + Flare (warm amber). Geist + Geist Mono.
-   OKLCH-based for perceptual consistency.
+   ShipFlare Design System — canonical v2 tokens.
    Source of truth: design_handoff_shipflare_frontend/source/tokens.css
+   ---------------------------------------------------------------------
+   Structure:
+     1. `:root` defines every token with handoff-native names
+        (`--sf-signal`, `--sf-ease-swift`, etc.) so handoff markup that
+        reads `var(--sf-*)` works without translation.
+     2. `@theme inline` aliases those same variables into the Tailwind
+        namespace (`--color-sf-signal`, `--radius-sf-md`, ...) to
+        generate utilities (`bg-sf-signal`, `rounded-sf-md`).
+     3. `.app-dark` remaps a subset of `--sf-*` variables; `@theme
+        inline` means every aliased Tailwind utility retints for free.
    ===================================================================== */
-@theme {
-  /* ─── Colors (light / default) ─── */
+
+:root {
+  /* ─── Colors ─── */
 
   /* Neutrals — cool-tinted, NOT pure black/white */
-  --color-sf-ink: oklch(14% 0.020 265);
-  --color-sf-ink-raised: oklch(20% 0.024 265);
-  --color-sf-paper: oklch(97.5% 0.010 75);
-  --color-sf-paper-raised: oklch(100% 0 0);
-  --color-sf-paper-sunken: oklch(94% 0.012 70);
-
-  /* Foreground on light */
-  --color-sf-fg-1: oklch(18% 0.020 265);
-  --color-sf-fg-2: oklch(35% 0.016 265);
-  --color-sf-fg-3: oklch(52% 0.012 265);
-  --color-sf-fg-4: oklch(65% 0.008 265);
-
-  /* Foreground on dark */
-  --color-sf-fg-on-dark-1: oklch(98% 0.004 85);
-  --color-sf-fg-on-dark-2: oklch(82% 0.008 85);
-  --color-sf-fg-on-dark-3: oklch(65% 0.010 260);
-  --color-sf-fg-on-dark-4: oklch(50% 0.012 260);
-
-  /* Borders */
-  --color-sf-border-v2: oklch(18% 0.025 265 / 0.12);
-  --color-sf-border-v2-subtle: oklch(18% 0.025 265 / 0.06);
-  --color-sf-border-v2-strong: oklch(18% 0.025 265 / 0.18);
-  --color-sf-border-on-dark: oklch(98% 0.004 85 / 0.10);
-
-  /* Primary accent — SIGNAL (electric indigo) */
-  --color-sf-signal: oklch(58% 0.22 258);
-  --color-sf-signal-hover: oklch(63% 0.22 258);
-  --color-sf-signal-ink: oklch(42% 0.22 258);
-  --color-sf-signal-bright: oklch(74% 0.19 258);
-  --color-sf-signal-tint: oklch(94% 0.05 258);
-  --color-sf-signal-glow: oklch(58% 0.22 258 / 0.18);
-
-  /* Secondary accent — FLARE (warm amber) */
-  --color-sf-flare: oklch(74% 0.19 52);
-  --color-sf-flare-hover: oklch(78% 0.19 52);
-  --color-sf-flare-ink: oklch(50% 0.17 48);
-  --color-sf-flare-tint: oklch(94% 0.07 65);
-  --color-sf-flare-glow: oklch(74% 0.19 52 / 0.20);
-
-  /* Semantic */
-  --color-sf-success-v2: oklch(68% 0.17 152);
-  --color-sf-success-ink: oklch(48% 0.14 152);
-  --color-sf-success-tint: oklch(95% 0.04 152);
-  --color-sf-warning-v2: oklch(76% 0.16 82);
-  --color-sf-warning-ink: oklch(52% 0.14 70);
-  --color-sf-warning-tint: oklch(95% 0.04 82);
-  --color-sf-danger: oklch(62% 0.22 25);
-  --color-sf-danger-ink: oklch(48% 0.22 25);
-  --color-sf-danger-tint: oklch(95% 0.04 25);
-
-  /* Categorical palette — 6 swatches, same chroma + lightness, varying hue */
-  --color-sf-cat-1: oklch(62% 0.19 255);
-  --color-sf-cat-2: oklch(62% 0.19 190);
-  --color-sf-cat-3: oklch(62% 0.19 140);
-  --color-sf-cat-4: oklch(62% 0.19 48);
-  --color-sf-cat-5: oklch(62% 0.19 10);
-  --color-sf-cat-6: oklch(62% 0.19 310);
-
-  /* Glass / blur */
-  --color-sf-glass-dark: oklch(13% 0.012 260 / 0.78);
-  --color-sf-glass-light: oklch(97% 0.004 85 / 0.78);
-
-  /* ─── Typography (next/font with graceful fallback) ─── */
-  --font-sf-display: var(--font-geist-sans), "Geist", "Geist Fallback", ui-sans-serif, system-ui, sans-serif;
-  --font-sf-text: var(--font-geist-sans), "Geist", "Geist Fallback", ui-sans-serif, system-ui, sans-serif;
-  --font-sf-mono: var(--font-geist-mono), "Geist Mono", "JetBrains Mono", ui-monospace, "Cascadia Code", Menlo, monospace;
-
-  /* Type scale — as text-* utilities */
-  --text-sf-hero: 64px;
-  --text-sf-h1: 44px;
-  --text-sf-h2: 32px;
-  --text-sf-h3: 22px;
-  --text-sf-lg: 18px;
-  --text-sf-base: 16px;
-  --text-sf-sm: 14px;
-  --text-sf-xs: 12px;
-  --text-sf-2xs: 10px;
-
-  /* Tracking */
-  --tracking-sf-hero: -0.022em;
-  --tracking-sf-tight: -0.016em;
-  --tracking-sf-normal: -0.011em;
-  --tracking-sf-loose: 0em;
-  --tracking-sf-mono: 0.02em;
-
-  /* Line-heights */
-  --leading-sf-tight: 1.05;
-  --leading-sf-snug: 1.18;
-  --leading-sf-normal: 1.45;
-  --leading-sf-relaxed: 1.6;
-
-  /* ─── Spacing ─── */
-  --spacing-sf-2xs: 2px;
-  --spacing-sf-xs: 4px;
-  --spacing-sf-sm: 8px;
-  --spacing-sf-md: 12px;
-  --spacing-sf-base: 16px;
-  --spacing-sf-lg: 20px;
-  --spacing-sf-xl: 24px;
-  --spacing-sf-2xl: 32px;
-  --spacing-sf-3xl: 48px;
-  --spacing-sf-4xl: 72px;
-  --spacing-sf-5xl: 120px;
-
-  /* Layout */
-  --container-sf: 1120px;
-  --container-sf-prose: 680px;
-  --container-sf-narrow: 560px;
-
-  /* ─── Radius ─── */
-  --radius-sf-v2-sm: 6px;
-  --radius-sf-v2-md: 10px;
-  --radius-sf-v2-lg: 16px;
-  --radius-sf-v2-pill: 9999px;
-
-  /* ─── Shadow ─── */
-  --shadow-sf-sm: 0 1px 2px oklch(18% 0.025 265 / 0.05), 0 2px 8px oklch(18% 0.025 265 / 0.06);
-  --shadow-sf-md: 0 2px 4px oklch(18% 0.025 265 / 0.05), 0 10px 28px oklch(18% 0.025 265 / 0.10);
-  --shadow-sf-lg: 0 10px 20px oklch(18% 0.025 265 / 0.08), 0 28px 56px oklch(18% 0.025 265 / 0.16);
-  --shadow-sf-focus: 0 0 0 3px oklch(58% 0.22 258 / 0.24);
-  --shadow-sf-glow-signal: 0 8px 24px oklch(58% 0.22 258 / 0.28);
-  --shadow-sf-glow-flare: 0 8px 24px oklch(74% 0.19 52 / 0.28);
-
-  /* ─── Motion ─── */
-  --ease-sf-swift: cubic-bezier(0.16, 1, 0.3, 1);
-  --ease-sf-smooth: cubic-bezier(0.4, 0, 0.6, 1);
-  --duration-sf-fast: 150ms;
-  --duration-sf-base: 220ms;
-  --duration-sf-slow: 320ms;
-  --duration-sf-entrance: 560ms;
-
-  /* Keyframe-driven animations exposed as Tailwind animate-* utilities */
-  --animate-sf-fade-in-v2: sf-fade-in var(--duration-sf-slow) var(--ease-sf-swift) forwards;
-  --animate-sf-slide-up-v2: sf-slide-up var(--duration-sf-slow) var(--ease-sf-swift) forwards;
-  --animate-sf-pulse-v2: sf-pulse 1.5s var(--ease-sf-smooth) infinite;
-  --animate-sf-shimmer: sf-shimmer 1.2s linear infinite;
-  --animate-sf-walk: sf-walk 0.8s var(--ease-sf-smooth) infinite;
-  --animate-sf-idle-bob: sf-idle-bob 2.2s var(--ease-sf-smooth) infinite;
-  --animate-sf-ticker: sf-ticker 24s linear infinite;
-
-  /* Z-index scale */
-  --z-sf-base: 0;
-  --z-sf-raised: 10;
-  --z-sf-sticky: 50;
-  --z-sf-overlay: 100;
-  --z-sf-modal: 200;
-  --z-sf-toast: 300;
-}
-
-/* -----------------------------------------------------------------
-   v2 CSS custom properties exposed under `--sf-*` names so existing
-   handoff markup (ScanDrawer, ReplyCard, etc.) can consume them via
-   var(--sf-signal), var(--sf-ease-swift), etc.
-   Tailwind @theme tokens above drive utility class generation; these
-   duplicates make the raw variable names available at the root.
-   ----------------------------------------------------------------- */
-:root {
-  /* Colors */
   --sf-ink: oklch(14% 0.020 265);
   --sf-ink-raised: oklch(20% 0.024 265);
   --sf-paper: oklch(97.5% 0.010 75);
   --sf-paper-raised: oklch(100% 0 0);
   --sf-paper-sunken: oklch(94% 0.012 70);
 
+  /* Foreground on light */
   --sf-fg-1: oklch(18% 0.020 265);
   --sf-fg-2: oklch(35% 0.016 265);
   --sf-fg-3: oklch(52% 0.012 265);
   --sf-fg-4: oklch(65% 0.008 265);
 
+  /* Foreground on dark */
   --sf-fg-on-dark-1: oklch(98% 0.004 85);
   --sf-fg-on-dark-2: oklch(82% 0.008 85);
   --sf-fg-on-dark-3: oklch(65% 0.010 260);
   --sf-fg-on-dark-4: oklch(50% 0.012 260);
 
+  /* Borders */
   --sf-border: oklch(18% 0.025 265 / 0.12);
   --sf-border-subtle: oklch(18% 0.025 265 / 0.06);
   --sf-border-strong: oklch(18% 0.025 265 / 0.18);
   --sf-border-on-dark: oklch(98% 0.004 85 / 0.10);
 
+  /* Primary accent — SIGNAL (electric indigo) */
   --sf-signal: oklch(58% 0.22 258);
   --sf-signal-hover: oklch(63% 0.22 258);
   --sf-signal-ink: oklch(42% 0.22 258);
@@ -196,12 +51,14 @@
   --sf-signal-tint: oklch(94% 0.05 258);
   --sf-signal-glow: oklch(58% 0.22 258 / 0.18);
 
+  /* Secondary accent — FLARE (warm amber) */
   --sf-flare: oklch(74% 0.19 52);
   --sf-flare-hover: oklch(78% 0.19 52);
   --sf-flare-ink: oklch(50% 0.17 48);
   --sf-flare-tint: oklch(94% 0.07 65);
   --sf-flare-glow: oklch(74% 0.19 52 / 0.20);
 
+  /* Semantic */
   --sf-success: oklch(68% 0.17 152);
   --sf-success-ink: oklch(48% 0.14 152);
   --sf-success-tint: oklch(95% 0.04 152);
@@ -212,6 +69,7 @@
   --sf-danger-ink: oklch(48% 0.22 25);
   --sf-danger-tint: oklch(95% 0.04 25);
 
+  /* Categorical palette — 6 swatches, same L & C, varying H */
   --sf-cat-1: oklch(62% 0.19 255);
   --sf-cat-2: oklch(62% 0.19 190);
   --sf-cat-3: oklch(62% 0.19 140);
@@ -219,11 +77,17 @@
   --sf-cat-5: oklch(62% 0.19 10);
   --sf-cat-6: oklch(62% 0.19 310);
 
-  /* Typography (next/font vars with graceful fallback) */
+  /* Glass / blur */
+  --sf-glass-dark: oklch(13% 0.012 260 / 0.78);
+  --sf-glass-light: oklch(97% 0.004 85 / 0.78);
+  --sf-glass-blur: saturate(180%) blur(20px);
+
+  /* ─── Typography (next/font with graceful fallback) ─── */
   --sf-font-display: var(--font-geist-sans), "Geist", "Geist Fallback", ui-sans-serif, system-ui, sans-serif;
   --sf-font-text: var(--font-geist-sans), "Geist", "Geist Fallback", ui-sans-serif, system-ui, sans-serif;
   --sf-font-mono: var(--font-geist-mono), "Geist Mono", "JetBrains Mono", ui-monospace, "Cascadia Code", Menlo, monospace;
 
+  /* Type scale */
   --sf-text-hero: 64px;
   --sf-text-h1: 44px;
   --sf-text-h2: 32px;
@@ -234,18 +98,20 @@
   --sf-text-xs: 12px;
   --sf-text-2xs: 10px;
 
+  /* Tracking */
   --sf-track-hero: -0.022em;
   --sf-track-tight: -0.016em;
   --sf-track-normal: -0.011em;
   --sf-track-loose: 0em;
   --sf-track-mono: 0.02em;
 
+  /* Line-heights */
   --sf-lh-tight: 1.05;
   --sf-lh-snug: 1.18;
   --sf-lh-normal: 1.45;
   --sf-lh-relaxed: 1.6;
 
-  /* Spacing */
+  /* ─── Spacing ─── */
   --sf-space-2xs: 2px;
   --sf-space-xs: 4px;
   --sf-space-sm: 8px;
@@ -258,18 +124,18 @@
   --sf-space-4xl: 72px;
   --sf-space-5xl: 120px;
 
-  /* Layout */
+  /* ─── Layout ─── */
   --sf-max-width: 1120px;
   --sf-max-width-prose: 680px;
   --sf-max-width-narrow: 560px;
 
-  /* Radius */
+  /* ─── Radius ─── */
   --sf-radius-sm: 6px;
   --sf-radius-md: 10px;
   --sf-radius-lg: 16px;
   --sf-radius-pill: 9999px;
 
-  /* Shadow */
+  /* ─── Shadow ─── */
   --sf-shadow-sm:
     0 1px 2px oklch(18% 0.025 265 / 0.05),
     0 2px 8px oklch(18% 0.025 265 / 0.06);
@@ -283,12 +149,7 @@
   --sf-shadow-glow-signal: 0 8px 24px oklch(58% 0.22 258 / 0.28);
   --sf-shadow-glow-flare: 0 8px 24px oklch(74% 0.19 52 / 0.28);
 
-  /* Glass / blur */
-  --sf-glass-dark: oklch(13% 0.012 260 / 0.78);
-  --sf-glass-light: oklch(97% 0.004 85 / 0.78);
-  --sf-glass-blur: saturate(180%) blur(20px);
-
-  /* Motion */
+  /* ─── Motion ─── */
   --sf-ease-swift: cubic-bezier(0.16, 1, 0.3, 1);
   --sf-ease-smooth: cubic-bezier(0.4, 0, 0.6, 1);
   --sf-dur-fast: 150ms;
@@ -296,7 +157,7 @@
   --sf-dur-slow: 320ms;
   --sf-dur-entrance: 560ms;
 
-  /* Z-index */
+  /* ─── Z-index scale ─── */
   --sf-z-base: 0;
   --sf-z-raised: 10;
   --sf-z-sticky: 50;
@@ -304,7 +165,7 @@
   --sf-z-modal: 200;
   --sf-z-toast: 300;
 
-  /* Breakpoints (reference) */
+  /* ─── Breakpoints (reference) ─── */
   --sf-bp-sm: 520px;
   --sf-bp-md: 768px;
   --sf-bp-lg: 1024px;
@@ -312,10 +173,154 @@
 }
 
 /* =====================================================================
-   v2 dark-mode remap — applied to any container with `.app-dark`.
+   Tailwind v4 theme aliases — generate utilities from canonical tokens.
+   `inline` keeps the values as `var(--sf-*)` references so the
+   `.app-dark` remap below flows through every Tailwind utility too.
+   ===================================================================== */
+@theme inline {
+  /* Default font stack: Geist everywhere unless a utility overrides */
+  --default-font-family: var(--sf-font-text);
+  --default-mono-font-family: var(--sf-font-mono);
+
+  /* Colors */
+  --color-sf-ink: var(--sf-ink);
+  --color-sf-ink-raised: var(--sf-ink-raised);
+  --color-sf-paper: var(--sf-paper);
+  --color-sf-paper-raised: var(--sf-paper-raised);
+  --color-sf-paper-sunken: var(--sf-paper-sunken);
+
+  --color-sf-fg-1: var(--sf-fg-1);
+  --color-sf-fg-2: var(--sf-fg-2);
+  --color-sf-fg-3: var(--sf-fg-3);
+  --color-sf-fg-4: var(--sf-fg-4);
+
+  --color-sf-fg-on-dark-1: var(--sf-fg-on-dark-1);
+  --color-sf-fg-on-dark-2: var(--sf-fg-on-dark-2);
+  --color-sf-fg-on-dark-3: var(--sf-fg-on-dark-3);
+  --color-sf-fg-on-dark-4: var(--sf-fg-on-dark-4);
+
+  --color-sf-border: var(--sf-border);
+  --color-sf-border-subtle: var(--sf-border-subtle);
+  --color-sf-border-strong: var(--sf-border-strong);
+  --color-sf-border-on-dark: var(--sf-border-on-dark);
+
+  --color-sf-signal: var(--sf-signal);
+  --color-sf-signal-hover: var(--sf-signal-hover);
+  --color-sf-signal-ink: var(--sf-signal-ink);
+  --color-sf-signal-bright: var(--sf-signal-bright);
+  --color-sf-signal-tint: var(--sf-signal-tint);
+  --color-sf-signal-glow: var(--sf-signal-glow);
+
+  --color-sf-flare: var(--sf-flare);
+  --color-sf-flare-hover: var(--sf-flare-hover);
+  --color-sf-flare-ink: var(--sf-flare-ink);
+  --color-sf-flare-tint: var(--sf-flare-tint);
+  --color-sf-flare-glow: var(--sf-flare-glow);
+
+  --color-sf-success: var(--sf-success);
+  --color-sf-success-ink: var(--sf-success-ink);
+  --color-sf-success-tint: var(--sf-success-tint);
+  --color-sf-warning: var(--sf-warning);
+  --color-sf-warning-ink: var(--sf-warning-ink);
+  --color-sf-warning-tint: var(--sf-warning-tint);
+  --color-sf-danger: var(--sf-danger);
+  --color-sf-danger-ink: var(--sf-danger-ink);
+  --color-sf-danger-tint: var(--sf-danger-tint);
+
+  --color-sf-cat-1: var(--sf-cat-1);
+  --color-sf-cat-2: var(--sf-cat-2);
+  --color-sf-cat-3: var(--sf-cat-3);
+  --color-sf-cat-4: var(--sf-cat-4);
+  --color-sf-cat-5: var(--sf-cat-5);
+  --color-sf-cat-6: var(--sf-cat-6);
+
+  --color-sf-glass-dark: var(--sf-glass-dark);
+  --color-sf-glass-light: var(--sf-glass-light);
+
+  /* Fonts */
+  --font-sf-display: var(--sf-font-display);
+  --font-sf-text: var(--sf-font-text);
+  --font-sf-mono: var(--sf-font-mono);
+
+  /* Type scale */
+  --text-sf-hero: var(--sf-text-hero);
+  --text-sf-h1: var(--sf-text-h1);
+  --text-sf-h2: var(--sf-text-h2);
+  --text-sf-h3: var(--sf-text-h3);
+  --text-sf-lg: var(--sf-text-lg);
+  --text-sf-base: var(--sf-text-base);
+  --text-sf-sm: var(--sf-text-sm);
+  --text-sf-xs: var(--sf-text-xs);
+  --text-sf-2xs: var(--sf-text-2xs);
+
+  /* Tracking */
+  --tracking-sf-hero: var(--sf-track-hero);
+  --tracking-sf-tight: var(--sf-track-tight);
+  --tracking-sf-normal: var(--sf-track-normal);
+  --tracking-sf-loose: var(--sf-track-loose);
+  --tracking-sf-mono: var(--sf-track-mono);
+
+  /* Line-heights */
+  --leading-sf-tight: var(--sf-lh-tight);
+  --leading-sf-snug: var(--sf-lh-snug);
+  --leading-sf-normal: var(--sf-lh-normal);
+  --leading-sf-relaxed: var(--sf-lh-relaxed);
+
+  /* Spacing */
+  --spacing-sf-2xs: var(--sf-space-2xs);
+  --spacing-sf-xs: var(--sf-space-xs);
+  --spacing-sf-sm: var(--sf-space-sm);
+  --spacing-sf-md: var(--sf-space-md);
+  --spacing-sf-base: var(--sf-space-base);
+  --spacing-sf-lg: var(--sf-space-lg);
+  --spacing-sf-xl: var(--sf-space-xl);
+  --spacing-sf-2xl: var(--sf-space-2xl);
+  --spacing-sf-3xl: var(--sf-space-3xl);
+  --spacing-sf-4xl: var(--sf-space-4xl);
+  --spacing-sf-5xl: var(--sf-space-5xl);
+
+  /* Layout */
+  --container-sf: var(--sf-max-width);
+  --container-sf-prose: var(--sf-max-width-prose);
+  --container-sf-narrow: var(--sf-max-width-narrow);
+
+  /* Radius */
+  --radius-sf-sm: var(--sf-radius-sm);
+  --radius-sf-md: var(--sf-radius-md);
+  --radius-sf-lg: var(--sf-radius-lg);
+  --radius-sf-pill: var(--sf-radius-pill);
+
+  /* Shadow */
+  --shadow-sf-sm: var(--sf-shadow-sm);
+  --shadow-sf-md: var(--sf-shadow-md);
+  --shadow-sf-lg: var(--sf-shadow-lg);
+  --shadow-sf-focus: var(--sf-shadow-focus);
+  --shadow-sf-glow-signal: var(--sf-shadow-glow-signal);
+  --shadow-sf-glow-flare: var(--sf-shadow-glow-flare);
+
+  /* Motion */
+  --ease-sf-swift: var(--sf-ease-swift);
+  --ease-sf-smooth: var(--sf-ease-smooth);
+  --duration-sf-fast: var(--sf-dur-fast);
+  --duration-sf-base: var(--sf-dur-base);
+  --duration-sf-slow: var(--sf-dur-slow);
+  --duration-sf-entrance: var(--sf-dur-entrance);
+
+  /* Animations */
+  --animate-sf-fade-in: sf-fade-in var(--sf-dur-slow) var(--sf-ease-swift) forwards;
+  --animate-sf-slide-up: sf-slide-up var(--sf-dur-slow) var(--sf-ease-swift) forwards;
+  --animate-sf-pulse: sf-pulse 1.5s var(--sf-ease-smooth) infinite;
+  --animate-sf-shimmer: sf-shimmer 1.2s linear infinite;
+  --animate-sf-walk: sf-walk 0.8s var(--sf-ease-smooth) infinite;
+  --animate-sf-idle-bob: sf-idle-bob 2.2s var(--sf-ease-smooth) infinite;
+  --animate-sf-ticker: sf-ticker 24s linear infinite;
+}
+
+/* =====================================================================
+   Dark-mode remap — applied to any container with `.app-dark`.
    Light + dark themes share components; remapping these CSS vars
-   retints every consumer with no per-component branches.
-   Copied verbatim from design_handoff_shipflare_frontend/source/app/index.html
+   retints every consumer (inline styles AND Tailwind utilities).
+   Values copied verbatim from handoff `source/app/index.html`.
    ===================================================================== */
 .app-dark {
   --sf-paper: oklch(14% 0.020 265);
@@ -348,7 +353,7 @@
   color: var(--sf-fg-1);
 }
 
-/* Light-theme canvas glow — subtle warm/signal gradient */
+/* Canvas glow — subtle warm/signal gradient. Light + dark variants. */
 .app-light .app-canvas {
   background:
     radial-gradient(900px 500px at -10% -20%, oklch(74% 0.19 258 / 0.06), transparent 60%),
@@ -364,7 +369,7 @@
 }
 
 /* =====================================================================
-   v2 signature utility classes
+   Signature utility classes — brand voice and shared primitives.
    ===================================================================== */
 
 /* SIGNATURE — mono uppercase ops label. This is ShipFlare's own voice. */
@@ -393,7 +398,7 @@
   letter-spacing: var(--sf-track-hero);
 }
 
-.sf-h1-v2 {
+.sf-h1 {
   font-family: var(--sf-font-display);
   font-size: var(--sf-text-h1);
   font-weight: 600;
@@ -401,7 +406,7 @@
   letter-spacing: var(--sf-track-tight);
 }
 
-.sf-h2-v2 {
+.sf-h2 {
   font-family: var(--sf-font-display);
   font-size: var(--sf-text-h2);
   font-weight: 600;
@@ -409,7 +414,7 @@
   letter-spacing: var(--sf-track-tight);
 }
 
-.sf-h3-v2 {
+.sf-h3 {
   font-family: var(--sf-font-display);
   font-size: var(--sf-text-h3);
   font-weight: 600;
@@ -440,218 +445,102 @@
 }
 
 /* =====================================================================
-   v2 keyframes (required by sf-* animations and handoff markup)
+   Keyframes — copied verbatim from handoff `tokens.css`.
    ===================================================================== */
+@keyframes sf-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes sf-slide-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes sf-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.45; }
+}
+
 @keyframes sf-shimmer {
-  0% { background-position: -200% 0; }
+  0%   { background-position: -200% 0; }
   100% { background-position: 200% 0; }
 }
 
 @keyframes sf-walk {
   0%, 100% { transform: rotate(-8deg); }
-  50% { transform: rotate(8deg); }
+  50%      { transform: rotate(8deg); }
 }
 
 @keyframes sf-idle-bob {
   0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-1.5px); }
+  50%      { transform: translateY(-1.5px); }
 }
 
 @keyframes sf-ticker {
   from { transform: translateX(0); }
-  to { transform: translateX(-50%); }
+  to   { transform: translateX(-50%); }
 }
 
 /* =====================================================================
-   ShipFlare v1 — Apple-inspired (DESIGN.md) — PRESERVED
-   Existing routes (today, dashboard, etc.) still consume these tokens.
+   Reduced motion — copied verbatim from handoff `tokens.css`.
    ===================================================================== */
-@theme inline {
-  /* Override Tailwind defaults: SF Pro system stack */
-  --default-font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display",
-    "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
-  --default-mono-font-family: "SF Mono", ui-monospace, "Cascadia Code",
-    "Fira Code", Menlo, monospace;
-
-  /* ─── Colors ─── */
-
-  /* Backgrounds */
-  --color-sf-bg-primary: #f5f5f7;
-  --color-sf-bg-secondary: #ffffff;
-  --color-sf-bg-tertiary: #ebebed;
-  --color-sf-bg-dark: #000000;
-  --color-sf-bg-dark-surface: #1d1d1f;
-
-  /* Borders */
-  --color-sf-border: rgba(0, 0, 0, 0.08);
-  --color-sf-border-subtle: rgba(0, 0, 0, 0.04);
-
-  /* Text */
-  --color-sf-text-primary: #1d1d1f;
-  --color-sf-text-secondary: rgba(0, 0, 0, 0.56);
-  --color-sf-text-tertiary: rgba(0, 0, 0, 0.48);
-  --color-sf-text-on-dark: #ffffff;
-
-  /* Accent — Apple Blue */
-  --color-sf-accent: #0071e3;
-  --color-sf-accent-hover: #0077ed;
-  --color-sf-accent-light: #e8f2fc;
-  --color-sf-link: #0066cc;
-  --color-sf-link-dark: #2997ff;
-
-  /* Semantic */
-  --color-sf-success: #34c759;
-  --color-sf-success-light: #eef9f1;
-  --color-sf-warning: #ff9f0a;
-  --color-sf-warning-light: #fff8eb;
-  --color-sf-error: #ff3b30;
-  --color-sf-error-light: #fff0ef;
-
-  /* ─── Fonts ─── */
-  --font-heading: -apple-system, BlinkMacSystemFont, "SF Pro Display",
-    "Helvetica Neue", Helvetica, Arial, sans-serif;
-  --font-body: -apple-system, BlinkMacSystemFont, "SF Pro Text",
-    "Helvetica Neue", Helvetica, Arial, sans-serif;
-  --font-mono: "SF Mono", ui-monospace, "Cascadia Code", "Fira Code", Menlo,
-    monospace;
-
-  /* ─── Spacing (8px base) ─── */
-  --spacing-sf-1: 4px;
-  --spacing-sf-2: 8px;
-  --spacing-sf-3: 12px;
-  --spacing-sf-4: 16px;
-  --spacing-sf-5: 20px;
-  --spacing-sf-6: 24px;
-  --spacing-sf-8: 32px;
-
-  /* ─── Radius (Apple scale) ─── */
-  --radius-sf-sm: 5px;
-  --radius-sf-md: 8px;
-  --radius-sf-lg: 12px;
-  --radius-sf-pill: 980px;
-  --radius-sf-full: 9999px;
-
-  /* ─── Shadows ─── */
-  --shadow-sf-card: 0 3px 5px rgba(0, 0, 0, 0.04),
-    0 6px 20px rgba(0, 0, 0, 0.06);
-  --shadow-sf-elevated: 3px 5px 30px 0px rgba(0, 0, 0, 0.12);
-
-  /* ─── Animations ─── */
-  --animate-sf-score: sf-score-fill 600ms cubic-bezier(0.16, 1, 0.3, 1)
-    forwards;
-  --animate-sf-fade-in: sf-fade-in 300ms cubic-bezier(0.16, 1, 0.3, 1)
-    forwards;
-  --animate-sf-slide-up: sf-slide-up 300ms cubic-bezier(0.16, 1, 0.3, 1)
-    forwards;
-  --animate-sf-pulse: sf-pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-  --animate-thought-line: sf-thought-line 200ms cubic-bezier(0.16, 1, 0.3, 1)
-    forwards;
-}
-
-@keyframes sf-score-fill {
-  from {
-    stroke-dashoffset: var(--sf-score-circumference, 100);
-  }
-  to {
-    stroke-dashoffset: var(--sf-score-offset, 0);
-  }
-}
-
-@keyframes sf-fade-in {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-@keyframes sf-slide-up {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes sf-pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.5;
-  }
-}
-
-@keyframes sf-thought-line {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-/* Respect reduced motion */
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
+  *, *::before, *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
 }
 
-/* Base styles */
+/* =====================================================================
+   Base styles — minimal, v2 canonical.
+   ===================================================================== */
 @layer base {
   html {
     scroll-behavior: smooth;
   }
 
   body {
-    background: var(--color-sf-bg-primary);
-    color: var(--color-sf-text-primary);
-    font-family: var(--font-body);
-    font-size: 17px;
-    line-height: 1.47;
-    letter-spacing: -0.374px;
+    margin: 0;
+    padding: 0;
+    font-family: var(--sf-font-text);
+    font-size: var(--sf-text-base);
+    line-height: var(--sf-lh-normal);
+    letter-spacing: var(--sf-track-normal);
+    color: var(--sf-fg-1);
+    background: var(--sf-paper);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
   }
 
-  /* Focus ring — Apple Blue */
+  *, *::before, *::after { box-sizing: border-box; }
+
+  :focus { outline: none; }
+
   :focus-visible {
-    outline: 2px solid var(--color-sf-accent);
+    outline: 2px solid var(--sf-signal);
     outline-offset: 2px;
+    border-radius: var(--sf-radius-sm);
   }
 
-  /* Remove focus outline on mouse click, keep for keyboard */
-  :focus:not(:focus-visible) {
-    outline: none;
+  input:focus-visible,
+  textarea:focus-visible,
+  select:focus-visible {
+    outline: 2px solid var(--sf-signal);
+    outline-offset: 0;
+    box-shadow: var(--sf-shadow-focus);
   }
 
-  /* Selection */
   ::selection {
-    background: rgba(0, 113, 227, 0.2);
+    background: var(--sf-signal-tint);
   }
 
-  /* Smooth transitions on interactive elements */
-  a,
-  button,
-  input,
-  textarea,
-  select {
-    transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  a, button, input, textarea, select {
+    transition-timing-function: var(--sf-ease-swift);
   }
 
-  /* Scrollbar styling — subtle, Apple-like */
   ::-webkit-scrollbar {
     width: 8px;
     height: 8px;
@@ -662,11 +551,19 @@
   }
 
   ::-webkit-scrollbar-thumb {
-    background: rgba(0, 0, 0, 0.15);
+    background: var(--sf-border);
     border-radius: 4px;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background: rgba(0, 0, 0, 0.25);
+    background: var(--sf-border-strong);
+  }
+
+  .app-dark ::-webkit-scrollbar-thumb {
+    background: oklch(98% 0.004 85 / 0.08);
+  }
+
+  .app-dark ::-webkit-scrollbar-thumb:hover {
+    background: oklch(98% 0.004 85 / 0.14);
   }
 }
