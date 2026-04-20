@@ -3,12 +3,12 @@
 import { useActivity } from '@/hooks/use-activity';
 import { Badge } from '@/components/ui/badge';
 
-const eventLabels: Record<string, { label: string; variant: 'success' | 'error' | 'warning' | 'default' }> = {
+const eventLabels: Record<string, { label: string; variant: 'success' | 'danger' | 'warning' | 'default' }> = {
   discovery_scan: { label: 'Discovery', variant: 'default' },
   draft_created: { label: 'Draft', variant: 'default' },
   post_published: { label: 'Posted', variant: 'success' },
-  post_failed: { label: 'Failed', variant: 'error' },
-  circuit_breaker_trip: { label: 'Breaker', variant: 'error' },
+  post_failed: { label: 'Failed', variant: 'danger' },
+  circuit_breaker_trip: { label: 'Breaker', variant: 'danger' },
 };
 
 export function ActivityTimeline() {

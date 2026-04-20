@@ -7,8 +7,8 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 
-const categoryColors: Record<string, 'default' | 'accent' | 'success' | 'warning'> = {
-  influencer: 'accent',
+const categoryColors: Record<string, 'default' | 'signal' | 'success' | 'warning'> = {
+  influencer: 'signal',
   competitor: 'warning',
   peer: 'success',
   media: 'default',

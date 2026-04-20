@@ -169,7 +169,7 @@ export function CodeSnapshotSection({ snapshot, hasGitHub }: CodeSnapshotSection
             Import from your GitHub repository to extract tech stack and product details.
           </p>
           <Button
-            variant="secondary"
+            variant="ghost"
             className="mt-3 !min-h-[36px] !text-[14px] !tracking-[-0.224px]"
             onClick={() => setShowRepoSelector(true)}
           >
@@ -220,7 +220,7 @@ export function CodeSnapshotSection({ snapshot, hasGitHub }: CodeSnapshotSection
             <div className="flex items-center gap-1.5 flex-wrap">
               <span className="text-[12px] tracking-[-0.12px] text-sf-text-tertiary w-20 shrink-0">Languages</span>
               {snapshot.techStack.languages.map((l) => (
-                <Badge key={l} variant="accent">{l}</Badge>
+                <Badge key={l} variant="signal">{l}</Badge>
               ))}
             </div>
           )}
@@ -251,7 +251,7 @@ export function CodeSnapshotSection({ snapshot, hasGitHub }: CodeSnapshotSection
         {/* Actions */}
         <div className="flex gap-2 mt-4 pt-4 border-t border-[rgba(0,0,0,0.08)]">
           <Button
-            variant="secondary"
+            variant="ghost"
             className="!min-h-[36px] !text-[14px] !tracking-[-0.224px] !px-3"
             onClick={handleRescan}
             disabled={scanState !== 'idle'}

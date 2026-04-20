@@ -428,7 +428,7 @@ export function VoiceSection() {
         <Button onClick={handleSave} disabled={!hasChanges || saving}>
           {saving ? 'Saving…' : 'Save'}
         </Button>
-        <Button variant="secondary" onClick={handleExtract} disabled={extracting}>
+        <Button variant="ghost" onClick={handleExtract} disabled={extracting}>
           {extracting ? 'Queuing…' : 'Re-analyse my voice'}
         </Button>
       </div>

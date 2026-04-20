@@ -207,7 +207,7 @@ export function AutomationSection() {
         <div>
           <div className="flex items-center gap-2 mb-1">
             <h3 className="text-[14px] tracking-[-0.224px] font-medium text-sf-text-primary">Content mix</h3>
-            <Badge variant={mixTotal === 100 ? 'success' : 'error'} mono>
+            <Badge variant={mixTotal === 100 ? 'success' : 'danger'} mono>
               {mixTotal}%
             </Badge>
           </div>

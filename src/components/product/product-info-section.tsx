@@ -211,7 +211,7 @@ export function ProductInfoSection({ product }: ProductInfoSectionProps) {
         <h2 className="text-[21px] font-bold tracking-[-0.12px] text-sf-text-primary">Product Info</h2>
         <div className="flex gap-2">
           <Button
-            variant="secondary"
+            variant="ghost"
             className="!min-h-[32px] !text-[14px] !tracking-[-0.224px] !px-3"
             onClick={() => setEditing(true)}
           >

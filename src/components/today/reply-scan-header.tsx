@@ -120,7 +120,7 @@ export function ReplyScanHeader({
             key={shakeKey}
             onClick={handleScan}
             disabled={scanning || !hasConnectedChannel}
-            variant="secondary"
+            variant="ghost"
             className={shakeKey > 0 ? 'animate-sf-fade-in' : ''}
             title={
               !hasConnectedChannel

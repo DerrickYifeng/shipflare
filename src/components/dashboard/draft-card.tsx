@@ -89,7 +89,7 @@ export const DraftCard = memo(function DraftCard({
           <span className="font-mono text-[12px] tracking-[-0.12px] text-sf-text-tertiary uppercase">
             {draft.platform === 'x' ? '𝕏' : draft.platform}
           </span>
-          <Badge variant="accent">{draft.thread.community}</Badge>
+          <Badge variant="signal">{draft.thread.community}</Badge>
           {/* Source badge */}
           <Badge variant="default">
             {sourceLabel[draft.source] ?? draft.source}

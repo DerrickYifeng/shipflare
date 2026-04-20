@@ -47,7 +47,7 @@ export function ConnectAccountsStep({
           </div>
           {!redditConnected && (
             <Button
-              variant="secondary"
+              variant="ghost"
               className="text-[14px] tracking-[-0.224px]"
               onClick={() => { window.location.href = '/api/reddit/connect'; }}
             >
@@ -75,7 +75,7 @@ export function ConnectAccountsStep({
           </div>
           {!xConnected && (
             <Button
-              variant="secondary"
+              variant="ghost"
               className="text-[14px] tracking-[-0.224px]"
               onClick={() => { window.location.href = '/api/x/connect'; }}
             >

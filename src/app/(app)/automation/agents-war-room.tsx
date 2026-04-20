@@ -112,7 +112,7 @@ export function AgentsWarRoom() {
             <Button
               onClick={handleStop}
               disabled={stopping}
-              variant="secondary"
+              variant="ghost"
               className="gap-2"
             >
               {stopping ? (
@@ -132,7 +132,7 @@ export function AgentsWarRoom() {
           <Button
             onClick={handleTrigger}
             disabled={effectiveState === 'launching' || hasActiveAgent}
-            variant={hasActiveAgent ? 'secondary' : 'primary'}
+            variant={hasActiveAgent ? 'ghost' : 'primary'}
             className="gap-2"
           >
             {effectiveState === 'launching' ? (
@@ -204,7 +204,7 @@ export function AgentsWarRoom() {
         </p>
         <div className="flex flex-col gap-3 mb-6">
           <Button
-            variant="secondary"
+            variant="ghost"
             onClick={() => { window.location.href = '/api/reddit/connect'; }}
             className="gap-2 justify-start"
           >
@@ -212,7 +212,7 @@ export function AgentsWarRoom() {
             Connect Reddit
           </Button>
           <Button
-            variant="secondary"
+            variant="ghost"
             onClick={() => { window.location.href = '/api/x/connect'; }}
             className="gap-2 justify-start"
           >

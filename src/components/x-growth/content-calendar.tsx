@@ -24,18 +24,18 @@ function hasUpcomingWeek(items: CalendarItem[]): boolean {
   });
 }
 
-const typeColors: Record<string, 'accent' | 'success' | 'warning' | 'error' | 'default'> = {
-  metric: 'accent',
+const typeColors: Record<string, 'signal' | 'success' | 'warning' | 'danger' | 'default'> = {
+  metric: 'signal',
   educational: 'success',
   engagement: 'warning',
-  product: 'error',
+  product: 'danger',
   thread: 'default',
 };
 
-const statusVariant: Record<string, 'default' | 'success' | 'warning' | 'accent'> = {
+const statusVariant: Record<string, 'default' | 'success' | 'warning' | 'signal'> = {
   scheduled: 'default',
   draft_created: 'warning',
-  approved: 'accent',
+  approved: 'signal',
   posted: 'success',
   skipped: 'default',
 };

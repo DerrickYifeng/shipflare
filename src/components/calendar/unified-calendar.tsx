@@ -15,18 +15,18 @@ const channels = [
   { id: 'x', label: 'X', icon: XChannelIcon },
 ];
 
-const typeColors: Record<string, 'accent' | 'success' | 'warning' | 'error' | 'default'> = {
-  metric: 'accent',
+const typeColors: Record<string, 'signal' | 'success' | 'warning' | 'danger' | 'default'> = {
+  metric: 'signal',
   educational: 'success',
   engagement: 'warning',
-  product: 'error',
+  product: 'danger',
   thread: 'default',
 };
 
-const statusVariant: Record<string, 'default' | 'success' | 'warning' | 'accent'> = {
+const statusVariant: Record<string, 'default' | 'success' | 'warning' | 'signal'> = {
   scheduled: 'default',
   draft_created: 'warning',
-  approved: 'accent',
+  approved: 'signal',
   posted: 'success',
   skipped: 'default',
 };
@@ -236,7 +236,7 @@ export function UnifiedCalendar() {
           <Button
             onClick={handleGenerate}
             disabled={isGenerating}
-            variant="secondary"
+            variant="ghost"
             title={isGenerating ? 'Planning in progress' : undefined}
           >
             {isGenerating ? 'Planning...' : 'Generate Week'}

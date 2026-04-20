@@ -9,12 +9,12 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { TimeLeft } from '@/components/ui/time-left';
 
-const statusVariant: Record<string, 'default' | 'success' | 'warning' | 'error' | 'accent'> = {
-  pending: 'accent',
+const statusVariant: Record<string, 'default' | 'success' | 'warning' | 'danger' | 'signal'> = {
+  pending: 'signal',
   draft_created: 'warning',
   replied: 'success',
   skipped: 'default',
-  expired: 'error',
+  expired: 'danger',
 };
 
 export function ReplyQueue() {
@@ -67,7 +67,7 @@ export function ReplyQueue() {
             {pendingTweets.length} tweet{pendingTweets.length !== 1 ? 's' : ''} awaiting reply
           </p>
         </div>
-        <Button onClick={handleScan} disabled={scanning} variant="secondary">
+        <Button onClick={handleScan} disabled={scanning} variant="ghost">
           {scanning ? 'Scanning...' : 'Scan Now'}
         </Button>
       </div>

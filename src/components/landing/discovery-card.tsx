@@ -86,7 +86,7 @@ function IntentBadge({ intent }: { intent: IntentClassification }) {
     return <Badge variant="warning" className="text-[10px]">Seeking solution</Badge>;
   }
   if (intent.readerNeed.present && intent.readerNeed.strength > 0.6) {
-    return <Badge variant="accent" className="text-[10px]">Audience fit</Badge>;
+    return <Badge variant="signal" className="text-[10px]">Audience fit</Badge>;
   }
   return null;
 }
