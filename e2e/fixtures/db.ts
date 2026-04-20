@@ -104,12 +104,10 @@ export async function seedChannel(
 }
 
 /**
- * Seed a single `todo_items` row for `userId`. Used by the reply-scan E2E to
- * short-circuit the server-side first-run check
- * (`isFirstRun = !existing` → true when there are no todo rows at all).
- * Defaults to an already-expired row so the /api/today `WHERE status='pending'
- * AND expires_at > now()` filter returns zero items and the Today page still
- * renders the EmptyState + scan surface.
+ * Phase 2 migration: `todo_items` was dropped and the Today page stub always
+ * renders `isFirstRun=true` until plan_items replaces it in Phase 13. This
+ * helper stays in the fixture surface so E2E tests that reference it keep
+ * compiling, but it is now a no-op that returns a placeholder row.
  */
 export async function seedTodoItem(
   userId: string,
@@ -122,20 +120,17 @@ export async function seedTodoItem(
     platform: string;
   }> = {},
 ) {
-  const expiresAt = overrides.expiresAt ?? new Date(Date.now() - 60_000);
-  const row = {
+  return {
     id: crypto.randomUUID(),
     userId,
     todoType: overrides.todoType ?? 'approve_post',
     source: overrides.source ?? 'calendar',
     priority: overrides.priority ?? 'optional',
     status: overrides.status ?? 'expired',
-    title: 'Test seed (for non-first-run state)',
+    title: 'Test seed (no-op during v2 migration)',
     platform: overrides.platform ?? 'reddit',
-    expiresAt,
+    expiresAt: overrides.expiresAt ?? new Date(Date.now() - 60_000),
   };
-  await db.insert(schema.todoItems).values(row);
-  return row;
 }
 
 export async function cleanupUser(userId: string) {

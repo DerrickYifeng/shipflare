@@ -21,7 +21,7 @@ specific **angle** — a role in the week's arc.
   thesis: string;
   thesisSource: 'milestone' | 'top_reply_ratio' | 'fallback' | 'manual';
   pillar?: string;
-  product: { name; description; valueProp; keywords; lifecyclePhase };
+  product: { name; description; valueProp; keywords; currentPhase };
   recentPostHistory: string[];   // last ≤20 posts on this channel
   priorAnglesThisWeek: Array<{ angle: string; topic: string; body: string }>;
   isThread: boolean;

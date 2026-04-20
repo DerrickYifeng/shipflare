@@ -30,7 +30,7 @@ produce the body text for that slot. One LLM call, one slot.
   thesis: string;
   thesisSource: 'milestone' | 'top_reply_ratio' | 'fallback' | 'manual';
   pillar?: string;
-  product: { name; description; valueProp; keywords; lifecyclePhase };
+  product: { name; description; valueProp; keywords; currentPhase };
   recentPostHistory: string[];
   priorAnglesThisWeek: Array<{ angle: string; topic: string; body: string }>;
   isThread: boolean;
