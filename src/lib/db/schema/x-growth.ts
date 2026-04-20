@@ -47,8 +47,12 @@ export const xMonitoredTweetStatusEnum = pgEnum('x_monitored_tweet_status', [
 ]);
 
 /**
- * Still referenced by `threads.state` (see `channels.ts`). Renaming / decoupling
- * is deferred until the Phase 2 caller refactor.
+ * Historical enum name — the x_content_calendar table is gone but the
+ * enum survives as the type backing `threads.state` (channels.ts).
+ * Intentionally NOT re-exported from src/lib/db/schema/index.ts so new
+ * code doesn't accept it as public API. Rename requires ALTER TYPE on
+ * a live column and is deferred until we have a reason to spend the
+ * migration.
  */
 export const xContentCalendarItemStateEnum = pgEnum('x_content_calendar_item_state', [
   'queued',

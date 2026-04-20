@@ -18,12 +18,16 @@ export {
   xFollowerSnapshots,
   xAnalyticsSummary,
   xMonitoredTweetStatusEnum,
-  xContentCalendarItemStateEnum,
   // Platform-generic aliases
   analyticsSummary,
   targetAccounts,
   monitoredContent,
 } from './x-growth';
+// Note: xContentCalendarItemStateEnum is intentionally NOT re-exported.
+// It still exists in x-growth.ts as an internal dependency of
+// threads.state (channels.ts imports it directly). Renaming the enum
+// requires an ALTER TYPE migration with live-data risk — deferred
+// until the audit's "option b" rename is green-lit.
 export { discoveryConfigs } from './discovery-configs';
 export * from './voice-profiles';
 export {

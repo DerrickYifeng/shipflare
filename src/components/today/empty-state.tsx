@@ -1,5 +1,3 @@
-import Link from 'next/link';
-
 export function EmptyState() {
   return (
     <div className="flex flex-col items-center justify-center py-16 px-6 animate-sf-fade-in">
@@ -27,13 +25,6 @@ export function EmptyState() {
       <p className="text-[14px] tracking-[-0.224px] text-sf-text-secondary mb-4 text-center max-w-sm leading-[1.47]">
         Your marketing team is scanning for opportunities. Check back later or create content manually.
       </p>
-
-      <Link
-        href="/calendar"
-        className="text-[14px] tracking-[-0.224px] font-medium text-sf-accent hover:text-sf-accent/80 transition-colors duration-200"
-      >
-        Open Calendar
-      </Link>
     </div>
   );
 }

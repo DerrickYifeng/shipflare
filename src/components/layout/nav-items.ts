@@ -16,7 +16,6 @@ import {
   TodayIcon,
   ProductIcon,
   GrowthIcon,
-  CalendarIcon,
   ZapIcon,
   GearIcon,
 } from './nav-icons';
@@ -33,7 +32,6 @@ export const NAV_ITEMS: ReadonlyArray<NavItem> = [
   { href: '/today', label: 'Today', Icon: TodayIcon },
   { href: '/product', label: 'My Product', Icon: ProductIcon },
   { href: '/growth', label: 'Growth', Icon: GrowthIcon },
-  { href: '/calendar', label: 'Calendar', Icon: CalendarIcon },
   {
     href: '/team',
     label: 'Your AI Team',
