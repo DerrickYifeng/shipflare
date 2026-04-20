@@ -396,6 +396,36 @@ describe('POST /api/onboarding/commit — happy path', () => {
     await POST(makeRequest(bodyFor('mvp')));
     expect(enqueueCalibrationMock).not.toHaveBeenCalled();
   });
+
+  it('accepts launchChannel/usersBucket and records them on the pipeline event', async () => {
+    const { POST } = await import('../route');
+    const body = {
+      ...bodyFor('launching', { launchDate: new Date(Date.now() + 14 * 86_400_000).toISOString() }),
+      launchChannel: 'showhn',
+      usersBucket: '1k-10k',
+    };
+    const res = await POST(makeRequest(body));
+    expect(res.status).toBe(200);
+    expect(recordPipelineEventMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stage: 'launch_plan_completed',
+        metadata: expect.objectContaining({
+          launchChannel: 'showhn',
+          usersBucket: '1k-10k',
+        }),
+      }),
+    );
+  });
+
+  it('rejects an unknown launchChannel value', async () => {
+    const { POST } = await import('../route');
+    const body = {
+      ...bodyFor('launching', { launchDate: new Date(Date.now() + 14 * 86_400_000).toISOString() }),
+      launchChannel: 'tiktok',
+    };
+    const res = await POST(makeRequest(body));
+    expect(res.status).toBe(400);
+  });
 });
 
 describe('POST /api/onboarding/commit — failure paths', () => {

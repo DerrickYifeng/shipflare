@@ -39,6 +39,14 @@ const productCategorySchema = z.enum([
 
 const productStateSchema = z.enum(['mvp', 'launching', 'launched']);
 
+// Stage-5 launch context. `launchChannel` is meaningful only for
+// state='launching' (where is this founder launching?); `usersBucket`
+// only for state='launched' (how big is the audience now?). Allow both
+// on every state because the onboarding flow already clamps nulls at
+// the UI layer — server just needs to accept + forward them.
+const launchChannelSchema = z.enum(['producthunt', 'showhn', 'both', 'other']);
+const usersBucketSchema = z.enum(['<100', '100-1k', '1k-10k', '10k+']);
+
 const requestBodySchema = z.object({
   product: z.object({
     name: z.string().min(1).max(200),
@@ -52,6 +60,8 @@ const requestBodySchema = z.object({
   state: productStateSchema,
   launchDate: z.string().datetime().nullable().optional(),
   launchedAt: z.string().datetime().nullable().optional(),
+  launchChannel: launchChannelSchema.nullable().optional(),
+  usersBucket: usersBucketSchema.nullable().optional(),
   recentMilestones: z
     .array(
       z.object({
@@ -164,6 +174,8 @@ export async function POST(request: NextRequest): Promise<Response> {
       state: body.state,
       currentPhase,
       channels: body.channels,
+      launchChannel: body.launchChannel ?? null,
+      usersBucket: body.usersBucket ?? null,
     },
   });
 
@@ -239,6 +251,21 @@ async function runChain(
   currentPhase: ReturnType<typeof derivePhase>,
   userId: string,
 ): Promise<{ path: StrategicPath; plan: TacticalPlan }> {
+  // Launch context hints from Stage 5. Only forward fields the state
+  // actually uses so the planner prompt stays focused (launchChannel
+  // for 'launching', usersBucket for 'launched'). Omitted entirely when
+  // null — the skill prompt treats missing keys as "unknown".
+  const launchContext: {
+    launchChannel?: z.infer<typeof launchChannelSchema>;
+    usersBucket?: z.infer<typeof usersBucketSchema>;
+  } = {};
+  if (body.state === 'launching' && body.launchChannel) {
+    launchContext.launchChannel = body.launchChannel;
+  }
+  if (body.state === 'launched' && body.usersBucket) {
+    launchContext.usersBucket = body.usersBucket;
+  }
+
   // Strategic pass
   const strategicRes = await runSkill<StrategicPath>({
     skill: strategicSkill,
@@ -251,6 +278,7 @@ async function runChain(
       channels: body.channels,
       voiceProfile: body.voiceProfile ?? null,
       recentMilestones: body.recentMilestones ?? [],
+      launchContext,
     },
     outputSchema: strategicPathSchema,
   });
@@ -286,6 +314,7 @@ async function runChain(
         launchDate: body.launchDate ?? null,
         launchedAt: body.launchedAt ?? null,
       },
+      launchContext,
       channels: body.channels,
       weekStart: weekStart.toISOString(),
       weekEnd: weekEnd.toISOString(),

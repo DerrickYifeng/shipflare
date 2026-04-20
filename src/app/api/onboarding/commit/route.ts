@@ -39,6 +39,13 @@ const productCategorySchema = z.enum([
   'other',
 ]);
 
+// Stage-5 launch context. Accepted so the frontend can send them without
+// Zod stripping; persisted only on the pipeline event for observability
+// until strategic_paths grows a dedicated column. Matches the shape used
+// by POST /api/onboarding/plan.
+const launchChannelSchema = z.enum(['producthunt', 'showhn', 'both', 'other']);
+const usersBucketSchema = z.enum(['<100', '100-1k', '1k-10k', '10k+']);
+
 const requestBodySchema = z.object({
   product: z.object({
     name: z.string().min(1).max(200),
@@ -52,6 +59,8 @@ const requestBodySchema = z.object({
   state: z.enum(['mvp', 'launching', 'launched']),
   launchDate: z.string().datetime().nullable().optional(),
   launchedAt: z.string().datetime().nullable().optional(),
+  launchChannel: launchChannelSchema.nullable().optional(),
+  usersBucket: usersBucketSchema.nullable().optional(),
   path: strategicPathSchema,
   plan: tacticalPlanSchema,
 });
@@ -337,11 +346,18 @@ export async function POST(request: NextRequest): Promise<Response> {
       kind: 'commit',
       items: body.plan.items.length,
       calibrated: enqueued.length > 0,
+      // Launch-context hints from Stage 5. Persisted on the event rather
+      // than the strategic_paths row so we don't ship a migration for
+      // a metric we're not yet consuming server-side. Use these to
+      // retrospect "do Product Hunt launchers get better plans than
+      // Show HN launchers?" once there's enough traffic.
+      launchChannel: body.launchChannel ?? null,
+      usersBucket: body.usersBucket ?? null,
     },
   });
 
   log.info(
-    `commit done user=${userId} product=${productId} items=${body.plan.items.length} enqueued=${enqueued.length}`,
+    `commit done user=${userId} product=${productId} items=${body.plan.items.length} enqueued=${enqueued.length} launchChannel=${body.launchChannel ?? '-'} usersBucket=${body.usersBucket ?? '-'}`,
   );
 
   return NextResponse.json(

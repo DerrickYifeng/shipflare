@@ -236,4 +236,110 @@ describe('POST /api/onboarding/plan', () => {
       expect.objectContaining({ stage: 'launch_plan_failed' }),
     );
   });
+
+  it('accepts launchChannel when state=launching and forwards it to the planner', async () => {
+    runSkillMock
+      .mockResolvedValueOnce({
+        results: [validPath],
+        errors: [],
+        usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0, model: 'sonnet', turns: 1 },
+      })
+      .mockResolvedValueOnce({
+        results: [validPlan],
+        errors: [],
+        usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0, model: 'haiku', turns: 1 },
+      });
+
+    const { POST } = await import('../route');
+    const res = await POST(
+      makeRequest({ ...validBody, launchChannel: 'producthunt' }),
+    );
+    expect(res.status).toBe(200);
+
+    const strategicCall = runSkillMock.mock.calls[0]?.[0] as {
+      input: { launchContext: Record<string, unknown> };
+    };
+    expect(strategicCall.input.launchContext).toEqual({
+      launchChannel: 'producthunt',
+    });
+    // pipeline event carries the hint for observability
+    expect(recordPipelineEventMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stage: 'launch_plan_started',
+        metadata: expect.objectContaining({ launchChannel: 'producthunt' }),
+      }),
+    );
+  });
+
+  it('accepts usersBucket when state=launched and forwards it', async () => {
+    runSkillMock
+      .mockResolvedValueOnce({
+        results: [validPath],
+        errors: [],
+        usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0, model: 'sonnet', turns: 1 },
+      })
+      .mockResolvedValueOnce({
+        results: [validPlan],
+        errors: [],
+        usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0, model: 'haiku', turns: 1 },
+      });
+
+    const { POST } = await import('../route');
+    const res = await POST(
+      makeRequest({
+        ...validBody,
+        state: 'launched',
+        launchDate: null,
+        launchedAt: '2026-04-01T00:00:00.000Z',
+        usersBucket: '100-1k',
+      }),
+    );
+    expect(res.status).toBe(200);
+
+    const strategicCall = runSkillMock.mock.calls[0]?.[0] as {
+      input: { launchContext: Record<string, unknown> };
+    };
+    expect(strategicCall.input.launchContext).toEqual({ usersBucket: '100-1k' });
+  });
+
+  it('drops launchChannel when state is not launching', async () => {
+    // state=mvp + launchChannel should NOT forward the hint — the planner
+    // prompt only uses it for the launching phase.
+    runSkillMock
+      .mockResolvedValueOnce({
+        results: [validPath],
+        errors: [],
+        usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0, model: 'sonnet', turns: 1 },
+      })
+      .mockResolvedValueOnce({
+        results: [validPlan],
+        errors: [],
+        usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0, model: 'haiku', turns: 1 },
+      });
+
+    const { POST } = await import('../route');
+    const res = await POST(
+      makeRequest({
+        ...validBody,
+        state: 'mvp',
+        launchDate: null,
+        launchedAt: null,
+        launchChannel: 'producthunt',
+      }),
+    );
+    expect(res.status).toBe(200);
+
+    const strategicCall = runSkillMock.mock.calls[0]?.[0] as {
+      input: { launchContext: Record<string, unknown> };
+    };
+    expect(strategicCall.input.launchContext).toEqual({});
+  });
+
+  it('rejects an unknown launchChannel value', async () => {
+    const { POST } = await import('../route');
+    const res = await POST(
+      makeRequest({ ...validBody, launchChannel: 'tiktok' }),
+    );
+    expect(res.status).toBe(400);
+  });
 });
