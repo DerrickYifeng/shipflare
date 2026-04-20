@@ -87,21 +87,23 @@ export function DemoWindow() {
   const [stepIdx, setStepIdx] = useState(-1);
   const [threadIdx, setThreadIdx] = useState(-1);
 
-  useEffect(() => {
-    // Schedule all state transitions asynchronously (via setTimeout) so no
-    // setState runs inside the effect body — keeps react-hooks/set-state-in-effect
-    // happy and avoids synchronous cascading renders.
-    const timers: ReturnType<typeof setTimeout>[] = [];
+  // React's "reset state on prop change" pattern:
+  // https://react.dev/reference/react/useState#storing-information-from-previous-renders
+  // Resetting during render (when `cycle` changes) commits the reset in the
+  // SAME paint as the cycle bump — no 1-tick flash of the previous cycle's
+  // final state, and no `setState-in-effect` lint violation. Mirrors the
+  // synchronous reset at source/landing/hero_demo.jsx:86.
+  const [prevCycle, setPrevCycle] = useState(cycle);
+  if (prevCycle !== cycle) {
+    setPrevCycle(cycle);
+    setTyped('');
+    setStepIdx(-1);
+    setThreadIdx(-1);
+    setPhase('typing');
+  }
 
-    // Tick 0 — reset to typing phase.
-    timers.push(
-      setTimeout(() => {
-        setTyped('');
-        setStepIdx(-1);
-        setThreadIdx(-1);
-        setPhase('typing');
-      }, 0),
-    );
+  useEffect(() => {
+    const timers: ReturnType<typeof setTimeout>[] = [];
 
     DEMO_URL.split('').forEach((_, i) => {
       timers.push(

@@ -1,10 +1,10 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('SignInModal (unauthenticated)', () => {
-  test('top-nav Sign in opens the provider modal', async ({ page }) => {
+  test('top-nav Sign up opens the provider modal', async ({ page }) => {
     await page.goto('/');
 
-    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+    await page.getByRole('button', { name: 'Sign up', exact: true }).click();
 
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
@@ -14,7 +14,7 @@ test.describe('SignInModal (unauthenticated)', () => {
 
   test('Esc closes the modal', async ({ page }) => {
     await page.goto('/');
-    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+    await page.getByRole('button', { name: 'Sign up', exact: true }).click();
 
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
@@ -25,7 +25,7 @@ test.describe('SignInModal (unauthenticated)', () => {
 
   test('× button closes the modal', async ({ page }) => {
     await page.goto('/');
-    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+    await page.getByRole('button', { name: 'Sign up', exact: true }).click();
 
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
@@ -36,7 +36,7 @@ test.describe('SignInModal (unauthenticated)', () => {
 
   test('Continue with GitHub navigates to GitHub OAuth', async ({ page }) => {
     await page.goto('/');
-    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+    await page.getByRole('button', { name: 'Sign up', exact: true }).click();
 
     // Intercept the OAuth redirect before the browser follows it
     const requestPromise = page.waitForRequest((request) =>

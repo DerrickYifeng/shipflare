@@ -430,6 +430,17 @@
   color: var(--sf-fg-2);
 }
 
+.sf-body { font-size: var(--sf-text-base); line-height: var(--sf-lh-normal); }
+
+.sf-caption {
+  font-size: var(--sf-text-sm);
+  line-height: var(--sf-lh-normal);
+  color: var(--sf-fg-3);
+}
+
+.sf-section-ink { background: var(--sf-ink); color: var(--sf-fg-on-dark-1); }
+.sf-section-paper { background: var(--sf-paper); color: var(--sf-fg-1); }
+
 .sf-container {
   max-width: var(--sf-max-width);
   margin: 0 auto;

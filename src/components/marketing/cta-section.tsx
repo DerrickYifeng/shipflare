@@ -152,6 +152,46 @@ export function CTASection({ isAuthenticated }: CTASectionProps) {
             <Ops tone="onDark">or continue with</Ops>
             <button
               type="button"
+              disabled
+              aria-disabled="true"
+              title="Coming soon — GitHub sign-in only for now"
+              style={{
+                color: 'var(--sf-fg-on-dark-4)',
+                background: 'transparent',
+                border: 'none',
+                padding: 0,
+                cursor: 'not-allowed',
+                fontSize: 'var(--sf-text-xs)',
+                fontFamily: 'var(--sf-font-mono)',
+                textTransform: 'uppercase',
+                letterSpacing: 'var(--sf-track-mono)',
+                opacity: 0.55,
+              }}
+            >
+              Google ↗
+            </button>
+            <button
+              type="button"
+              disabled
+              aria-disabled="true"
+              title="Coming soon — GitHub sign-in only for now"
+              style={{
+                color: 'var(--sf-fg-on-dark-4)',
+                background: 'transparent',
+                border: 'none',
+                padding: 0,
+                cursor: 'not-allowed',
+                fontSize: 'var(--sf-text-xs)',
+                fontFamily: 'var(--sf-font-mono)',
+                textTransform: 'uppercase',
+                letterSpacing: 'var(--sf-track-mono)',
+                opacity: 0.55,
+              }}
+            >
+              𝕏 ↗
+            </button>
+            <button
+              type="button"
               onClick={() => setSignInOpen(true)}
               style={{
                 color: 'var(--sf-fg-on-dark-2)',

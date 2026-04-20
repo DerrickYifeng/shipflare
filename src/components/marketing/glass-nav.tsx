@@ -126,7 +126,7 @@ export function GlassNav({ isAuthenticated }: GlassNavProps) {
               }}
               className="inline-flex items-center"
             >
-              Sign in
+              Sign up
             </button>
           )}
         </nav>
