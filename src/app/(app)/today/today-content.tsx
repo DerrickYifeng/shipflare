@@ -45,7 +45,7 @@ import { ReplyCard } from './_components/reply-card';
 import { PostCard } from './_components/post-card';
 import { ScanDrawer } from './_components/scan-drawer';
 import { SourceFilterRail } from './_components/source-filter-rail';
-import { useScanFlow } from './_hooks/use-scan-flow';
+import { useScanFlow, type ScanSource } from './_hooks/use-scan-flow';
 
 /* ─────────────────────────────────────────────────────────────────── */
 
@@ -372,6 +372,28 @@ function TodayContentInner({
     return { replies: rs, posts: ps, filteredReplies: filtered };
   }, [items, sourceFilterId]);
 
+  // Derive implicit sources from current replies so the filter rail shows
+  // chips even before the first scan runs (prototype index.html:266 seeds
+  // them from a static list; we derive from live reply data instead).
+  const implicitSources = useMemo<ScanSource[]>(() => {
+    const seen = new Set<string>();
+    const out: ScanSource[] = [];
+    for (const r of replies) {
+      if (r.community === null) continue;
+      const key = `${r.platform}:${r.community}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ platform: r.platform, source: r.community });
+    }
+    return out;
+  }, [replies]);
+
+  // Prefer the live scan's source list when one is running; otherwise fall
+  // back to the derived list so the rail never renders empty with replies
+  // in view.
+  const displaySources =
+    scan.sources.length > 0 ? scan.sources : implicitSources;
+
   const activeItem = items[activeIndex];
   const activeId = activeItem?.id ?? null;
 
@@ -435,7 +457,7 @@ function TodayContentInner({
       />
 
       <SourceFilterRail
-        sources={scan.sources}
+        sources={displaySources}
         chipState={chipState}
         filterId={sourceFilterId}
         onFilterChange={setSourceFilterId}
@@ -446,8 +468,7 @@ function TodayContentInner({
 
       <div
         style={{
-          maxWidth: 820,
-          margin: '0 auto',
+          width: '100%',
           padding: '0 clamp(16px, 3vw, 32px) 48px',
         }}
       >
@@ -667,14 +688,16 @@ function MetaLine({ toReview, shippedToday, lastScan, scanning }: MetaLineProps)
         {toReview} to review
       </span>
       {separator}
+      <span>{shippedToday} shipped today</span>
+      {separator}
       <StatusDot
         state={scanning ? 'active' : 'success'}
         size={6}
         aria-label={scanning ? 'Scanning in progress' : 'Pipeline idle'}
       />
-      <span style={{ marginLeft: 6 }}>{shippedToday} shipped today</span>
+      <span style={{ marginLeft: 6 }}>Auto-scans every 4h</span>
       {separator}
-      <span>last scan {relativeScan(lastScan)}</span>
+      <span>last run {relativeScan(lastScan)}</span>
     </span>
   );
 }
