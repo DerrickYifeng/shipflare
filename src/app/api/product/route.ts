@@ -1,18 +1,19 @@
-import type { Metadata } from 'next';
-import { redirect } from 'next/navigation';
-import { eq } from 'drizzle-orm';
+import { NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { products } from '@/lib/db/schema';
-import { ProductContent, type ProductSnapshot } from './product-content';
+import { eq } from 'drizzle-orm';
 
-export const metadata: Metadata = { title: 'My Product' };
-
-type Phase = ProductSnapshot['lifecyclePhase'];
-
-export default async function ProductPage() {
+/**
+ * GET /api/product
+ * Returns the authenticated user's product snapshot. Used by the v2 My Product
+ * page for SWR revalidation after inline edits.
+ */
+export async function GET() {
   const session = await auth();
-  if (!session?.user?.id) redirect('/');
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
 
   const [row] = await db
     .select({
@@ -28,19 +29,17 @@ export default async function ProductPage() {
     .where(eq(products.userId, session.user.id))
     .limit(1);
 
-  if (!row) redirect('/onboarding');
+  if (!row) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
 
-  const initial: ProductSnapshot = {
+  return NextResponse.json({
     name: row.name,
     description: row.description,
     keywords: row.keywords,
     valueProp: row.valueProp,
     url: row.url,
-    lifecyclePhase: (['pre_launch', 'launched', 'scaling'].includes(row.lifecyclePhase)
-      ? row.lifecyclePhase
-      : 'pre_launch') as Phase,
+    lifecyclePhase: row.lifecyclePhase,
     updatedAt: row.updatedAt.toISOString(),
-  };
-
-  return <ProductContent initial={initial} />;
+  });
 }
