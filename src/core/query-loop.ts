@@ -12,6 +12,13 @@ import { createMessage, UsageTracker, addMessageCacheBreakpoint } from './api-cl
 import { toAnthropicTool } from './tool-system';
 import { executeTools } from './tool-executor';
 import { createLogger } from '@/lib/logger';
+import {
+  STRUCTURED_OUTPUT_TOOL_NAME,
+  STRUCTURED_OUTPUT_CORRECTION,
+  buildStructuredOutputApiTool,
+  getMaxStructuredOutputRetries,
+  validateStructuredOutput,
+} from '@/tools/StructuredOutputTool/StructuredOutputTool';
 
 const log = createLogger('core:agent');
 
@@ -313,6 +320,22 @@ export async function queryLoop<T>(params: QueryParams): Promise<{ output: T; tr
 /**
  * High-level agent runner. Collects events, returns final result.
  * Drop-in replacement for bridge's runAgent().
+ *
+ * StructuredOutput enforcement:
+ *   When `outputSchema` is provided AND the caller is not on the cache-safe
+ *   fan-out path (`prebuilt` unset), we synthesize a `StructuredOutput` API
+ *   tool (see src/tools/StructuredOutputTool/StructuredOutputTool.ts) with
+ *   the caller's Zod schema as its input_schema. The agent MUST call this
+ *   tool once to deliver its final answer; runAgent intercepts the tool_use,
+ *   Zod-validates, and returns the validated value.
+ *
+ *   If the agent ends its turn WITHOUT calling StructuredOutput, we inject a
+ *   correction message and continue. The retry is bounded by
+ *   `MAX_STRUCTURED_OUTPUT_RETRIES` (env var; default 5).
+ *
+ *   Ported from engine/tools/SyntheticOutputTool + hooks/hookHelpers.ts
+ *   registerStructuredOutputEnforcement — the hook system itself is NOT
+ *   ported; the Stop-check is inlined here (spec §5.1 row `hookHelpers.ts`).
  */
 export async function runAgent<T>(
   config: AgentConfig,
@@ -331,7 +354,28 @@ export async function runAgent<T>(
 ): Promise<AgentResult<T>> {
   log.debug(`Agent "${config.name}" starting (model=${config.model}, maxTurns=${config.maxTurns})`);
 
-  const anthropicTools = prebuilt?.cachedTools ?? config.tools.map(toAnthropicTool);
+  const baseAnthropicTools = prebuilt?.cachedTools ?? config.tools.map(toAnthropicTool);
+
+  // StructuredOutput mode: when an outputSchema is provided AND we're not on
+  // the cache-safe fan-out path (which requires byte-identical tool arrays
+  // across children — a schema-specific synthesized tool would bust the
+  // shared prefix), append the synthesized tool to the Anthropic tool list.
+  // The enforcement/validation happens below inside the turn loop.
+  const useStructuredOutput = Boolean(outputSchema) && !prebuilt;
+  const structuredOutputApiTool = useStructuredOutput && outputSchema
+    ? buildStructuredOutputApiTool(outputSchema)
+    : null;
+
+  const anthropicTools = structuredOutputApiTool
+    ? [...baseAnthropicTools, structuredOutputApiTool]
+    : baseAnthropicTools;
+
+  if (structuredOutputApiTool) {
+    log.debug(
+      `Agent "${config.name}" using StructuredOutput tool (name=${STRUCTURED_OUTPUT_TOOL_NAME})`,
+    );
+  }
+
   const messages: Anthropic.Messages.MessageParam[] = [
     ...(prebuilt?.forkContextMessages ?? []),
     { role: 'user', content: userMessage },
@@ -355,6 +399,12 @@ export async function runAgent<T>(
 
   const tracker = new UsageTracker();
   let currentMaxTokens = 16_384;
+
+  // StructuredOutput Stop-check retry counter. Only incremented when the
+  // agent ends its turn without calling the tool; independent of max_tokens
+  // or JSON-fallback retries.
+  const maxStructuredRetries = getMaxStructuredOutputRetries();
+  let structuredOutputRetries = 0;
 
   for (let turn = 1; turn <= config.maxTurns; turn++) {
     if (context.abortSignal.aborted) {
@@ -391,8 +441,56 @@ export async function runAgent<T>(
         (b): b is Anthropic.Messages.ToolUseBlock => b.type === 'tool_use',
       );
 
+      // StructuredOutput intercept: validate the tool's input against the
+      // caller's Zod schema and return it as the agent's final output. On
+      // validation failure, feed an is_error tool_result back so the model
+      // can self-correct on the next turn (same-conversation correction is
+      // cheaper than blowing up and re-running the whole agent).
+      if (structuredOutputApiTool && outputSchema) {
+        const soCall = toolUseBlocks.find(
+          (b) => b.name === STRUCTURED_OUTPUT_TOOL_NAME,
+        );
+        if (soCall) {
+          const result = validateStructuredOutput(outputSchema, soCall.input);
+          if (result.ok) {
+            if (onProgress && turn > 1) onProgress({ type: 'scoring' });
+            return {
+              result: result.value as T,
+              usage: tracker.toSummary(),
+            };
+          }
+          if (turn < config.maxTurns) {
+            log.warn(
+              `Agent "${config.name}" StructuredOutput validation failed on turn ${turn}; asking agent to self-correct`,
+            );
+            messages.push({
+              role: 'user',
+              content: [
+                {
+                  type: 'tool_result',
+                  tool_use_id: soCall.id,
+                  is_error: true,
+                  content: result.message,
+                },
+              ],
+            });
+            continue;
+          }
+          throw new Error(
+            `Agent ${config.name}: StructuredOutput validation failed after ${turn} turns`,
+          );
+        }
+      }
+
+      // Strip any stray StructuredOutput calls from the real tool execution
+      // set — executeTools doesn't know about the synthesized tool and would
+      // report it as an error.
+      const executableBlocks = structuredOutputApiTool
+        ? toolUseBlocks.filter((b) => b.name !== STRUCTURED_OUTPUT_TOOL_NAME)
+        : toolUseBlocks;
+
       // Map StreamEvents to OnProgress for backward compat
-      const toolResults = await executeTools(toolUseBlocks, config.tools, context, (event) => {
+      const toolResults = await executeTools(executableBlocks, config.tools, context, (event) => {
         if (event.type === 'tool_start') {
           const query = (event.input as Record<string, unknown>)?.query as string | undefined;
           if (onProgress && query) {
@@ -459,6 +557,33 @@ export async function runAgent<T>(
       onProgress({ type: 'scoring' });
     }
 
+    // Stop-check enforcement: agent ended turn without calling
+    // StructuredOutput. Inject correction and keep looping until we exhaust
+    // the retry budget. Runs BEFORE text extraction so the legacy
+    // JSON-in-prose path below is skipped for StructuredOutput agents.
+    if (structuredOutputApiTool && outputSchema) {
+      if (
+        structuredOutputRetries < maxStructuredRetries &&
+        turn < config.maxTurns
+      ) {
+        structuredOutputRetries++;
+        log.warn(
+          `Agent "${config.name}" ended turn without ${STRUCTURED_OUTPUT_TOOL_NAME} ` +
+            `(retry ${structuredOutputRetries}/${maxStructuredRetries})`,
+        );
+        messages.push({ role: 'assistant', content: response.content });
+        messages.push({
+          role: 'user',
+          content: STRUCTURED_OUTPUT_CORRECTION,
+        });
+        continue;
+      }
+      throw new Error(
+        `Agent ${config.name}: failed to produce ${STRUCTURED_OUTPUT_TOOL_NAME} ` +
+          `after ${structuredOutputRetries} Stop-check retries`,
+      );
+    }
+
     const textBlock = response.content.find(
       (b): b is Anthropic.Messages.TextBlock => b.type === 'text',
     );
@@ -470,6 +595,10 @@ export async function runAgent<T>(
     const summary = tracker.toSummary();
 
     if (outputSchema) {
+      // Legacy text-JSON path — only reached on the cache-safe fan-out branch
+      // (prebuilt set) where StructuredOutput isn't used (byte-identical tool
+      // arrays are required for cross-agent cache sharing). StructuredOutput
+      // agents exit above via the tool_use intercept or the Stop-check throw.
       try {
         const jsonStr = extractJson(textBlock.text);
         const parsed = JSON.parse(jsonStr);
