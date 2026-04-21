@@ -71,32 +71,59 @@ export async function getDraft(userId: string): Promise<OnboardingDraft | null> 
 }
 
 /**
- * Merge-upsert the draft. Reads the existing draft, shallow-merges
- * the patch, writes back with a refreshed 1h TTL. When no prior
- * draft exists the patch is written as-is.
+ * Merge-upsert the draft. Atomic via Redis WATCH + MULTI/EXEC so two
+ * concurrent `putDraft` calls for the same user can't leapfrog each
+ * other. On optimistic-lock contention, retries up to `MAX_RETRIES`
+ * with a fresh read each time — the last writer wins, but writes
+ * aren't lost.
  *
  * Merge is intentionally shallow — nested objects (e.g. `previewPath`)
  * are replaced wholesale rather than deep-merged. Callers that want
  * to touch nested state send the full nested object.
  */
+const MAX_RETRIES = 5;
+
 export async function putDraft(
   userId: string,
   patch: Partial<OnboardingDraft>,
 ): Promise<void> {
-  try {
-    const kv = getKeyValueClient();
-    const existing = await getDraft(userId);
-    const next: OnboardingDraft = {
-      ...(existing ?? {}),
-      ...patch,
-      updatedAt: new Date().toISOString(),
-    };
-    await kv.set(key(userId), JSON.stringify(next), 'EX', TTL_SECONDS);
-  } catch (err) {
-    log.warn(
-      `putDraft failed user=${userId}: ${err instanceof Error ? err.message : String(err)}`,
-    );
+  const kv = getKeyValueClient();
+  const k = key(userId);
+
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    try {
+      await kv.watch(k);
+      const raw = await kv.get(k);
+      const existing = raw ? (JSON.parse(raw) as OnboardingDraft) : null;
+      const next: OnboardingDraft = {
+        ...(existing ?? {}),
+        ...patch,
+        updatedAt: new Date().toISOString(),
+      };
+      const result = await kv
+        .multi()
+        .set(k, JSON.stringify(next), 'EX', TTL_SECONDS)
+        .exec();
+      // `exec()` returns `null` when WATCH noticed a change between
+      // WATCH and EXEC — retry the whole read-modify-write.
+      if (result !== null) return;
+    } catch (err) {
+      // Abandon the WATCH and surface the failure at warn. A single
+      // lost write is acceptable; the draft is a UX nicety.
+      try {
+        await kv.unwatch();
+      } catch {
+        /* ignore */
+      }
+      log.warn(
+        `putDraft failed user=${userId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return;
+    }
   }
+  log.warn(
+    `putDraft user=${userId} gave up after ${MAX_RETRIES} CAS retries`,
+  );
 }
 
 /** Remove the draft. Idempotent; errors are silent. */

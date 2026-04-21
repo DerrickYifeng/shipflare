@@ -268,14 +268,20 @@ test.describe('Onboarding v3: Redis draft resume', () => {
     ).toBeVisible({ timeout: 25_000 });
 
     // Edit name so the debounced autosave writes to Redis, then wait
-    // for 400ms debounce + a PUT round-trip.
+    // for the SPECIFIC PUT that carries the edited value. Matching any
+    // PUT to /api/onboarding/draft is insufficient — Stage 2's
+    // onExtracted and Stage 3's mount-autosave both fire earlier PUTs
+    // with the pre-edit value, and racing those against the reload is
+    // exactly what caused this test to flake 35% of the time.
     const name = productNameInput(page);
     await name.fill('Resumed ShipFlare');
-    // The autosave debounces 400ms and then PUTs /api/onboarding/draft.
-    // Wait for that request specifically so we don't race the reload.
     await page.waitForResponse(
-      (res) =>
-        res.url().includes('/api/onboarding/draft') && res.request().method() === 'PUT',
+      (res) => {
+        if (!res.url().includes('/api/onboarding/draft')) return false;
+        if (res.request().method() !== 'PUT') return false;
+        const body = res.request().postData() ?? '';
+        return body.includes('"name":"Resumed ShipFlare"');
+      },
       { timeout: 5_000 },
     );
 

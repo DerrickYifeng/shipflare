@@ -127,18 +127,38 @@ interface PersistedDraft {
   previewPlan?: TacticalPlan | null;
 }
 
+// Serialize draft PUTs. The server's read-modify-write is not atomic
+// (see `src/lib/onboarding-draft.ts` putDraft — it reads, merges in
+// memory, writes), so two concurrent PUTs can reorder and the later
+// patch can lose. Chain every call off a single queue ref so the
+// server sees writes in fire order. Fire-and-forget is preserved —
+// callers don't await this, but a later PUT won't leapfrog an earlier
+// one.
+let draftQueue: Promise<unknown> = Promise.resolve();
+
 async function persistDraft(
   patch: Partial<PersistedDraft>,
 ): Promise<void> {
-  try {
-    await fetch('/api/onboarding/draft', {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(patch),
-    });
-  } catch {
-    // Best-effort — the draft is a UX nicety, not correctness-critical.
-  }
+  // Chain this PUT off the tail of the queue so the server processes
+  // concurrent `mirrorToRedis` calls in fire order rather than
+  // racing them through the non-atomic read-modify-write in
+  // `src/lib/onboarding-draft.ts`. The tail promise is settled
+  // (always resolves) so one rejected PUT doesn't poison the queue
+  // for subsequent writes.
+  const next = draftQueue.then(async () => {
+    try {
+      await fetch('/api/onboarding/draft', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+    } catch {
+      // Best-effort — the draft is a UX nicety, not correctness-
+      // critical. Swallow so the queue stays unbroken.
+    }
+  });
+  draftQueue = next;
+  await next;
 }
 
 async function hydrateDraft(): Promise<PersistedDraft | null> {
