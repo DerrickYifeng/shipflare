@@ -6,6 +6,14 @@ left a handful of v2 artifacts alive because their one remaining caller —
 `/api/product/phase` — stays on the legacy skill-runner path until Phase
 D/E. This document is the audit trail so Phase E knows what to clean up.
 
+**Phase E Day 3 update (2026-04-21, commits `5ec0202` + the planner-
+deletion commit + `6573f74`)**: the deferred planner cleanup is DONE.
+`/api/product/phase` migrated to team-run (trigger='phase_transition'),
+all v2 planner SKILL/agent files + `tacticalPlan*` schema exports +
+equivalence-eval test deleted. The remaining Phase E work (Task #23):
+migrate the 9 non-planner `runSkill` callers off and delete
+`src/core/skill-runner.ts` + `src/core/skill-loader.ts`.
+
 ## What Phase C removed
 
 - **Worker + queue**: `src/workers/processors/tactical-generate.ts`,
