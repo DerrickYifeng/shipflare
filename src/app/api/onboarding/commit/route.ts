@@ -17,7 +17,7 @@ import {
 import { derivePhase } from '@/lib/launch-phase';
 import { validateLaunchDates } from '@/lib/launch-date-rules';
 import { acquireRateLimit } from '@/lib/rate-limit';
-import { enqueueCalibration } from '@/lib/queue';
+import { enqueueCalibration, enqueueTacticalGenerate } from '@/lib/queue';
 import { getUserChannels } from '@/lib/user-channels';
 import { deleteDraft } from '@/lib/onboarding-draft';
 import { recordPipelineEvent } from '@/lib/pipeline-events';
@@ -62,7 +62,11 @@ const requestBodySchema = z.object({
   launchChannel: launchChannelSchema.nullable().optional(),
   usersBucket: usersBucketSchema.nullable().optional(),
   path: strategicPathSchema,
-  plan: tacticalPlanSchema,
+  // `plan` is optional in the new flow — when absent, the tactical
+  // planner runs post-commit as a background job (`tactical-generate`).
+  // When present (old flow / back-compat), plan_items are written
+  // inline inside the same transaction.
+  plan: tacticalPlanSchema.optional(),
 });
 
 type RequestBody = z.infer<typeof requestBodySchema>;
@@ -167,8 +171,10 @@ export async function POST(request: NextRequest): Promise<Response> {
 
   // --- transactional writes ---
   let productId: string;
+  let strategicPathId: string;
+  let planId: string;
   try {
-    productId = await db.transaction(async (tx) => {
+    const txResult = await db.transaction(async (tx) => {
       // Upsert product. uniqueIndex products_user_uq(user_id) guarantees
       // one-per-user; we select + insert/update explicitly for clarity.
       let pid: string;
@@ -236,7 +242,7 @@ export async function POST(request: NextRequest): Promise<Response> {
           phaseGoals: body.path.phaseGoals,
         })
         .returning({ id: strategicPaths.id });
-      const strategicPathId = pathRow.id;
+      const spid = pathRow.id;
 
       // plans header for this week
       const now = new Date();
@@ -250,21 +256,25 @@ export async function POST(request: NextRequest): Promise<Response> {
         .values({
           userId,
           productId: pid,
-          strategicPathId,
+          strategicPathId: spid,
           trigger: 'onboarding',
           weekStart,
-          notes: body.plan.plan.notes,
+          // `notes` is null when tactical runs post-commit — the worker
+          // updates this field once the planner emits its plan.notes.
+          notes: body.plan ? body.plan.plan.notes : null,
         })
         .returning({ id: plans.id });
-      const planId = planRow.id;
+      const pid2 = planRow.id;
 
-      // plan_items rows
-      if (body.plan.items.length > 0) {
+      // Inline plan_items write only when the caller provided `plan`
+      // (back-compat flow). New callers omit `plan` and let the
+      // `tactical-generate` worker populate plan_items post-commit.
+      if (body.plan && body.plan.items.length > 0) {
         await tx.insert(planItems).values(
           body.plan.items.map((item) => ({
             userId,
             productId: pid,
-            planId,
+            planId: pid2,
             kind: item.kind,
             userAction: item.userAction,
             phase: item.phase,
@@ -278,8 +288,11 @@ export async function POST(request: NextRequest): Promise<Response> {
         );
       }
 
-      return pid;
+      return { productId: pid, strategicPathId: spid, planId: pid2 };
     });
+    productId = txResult.productId;
+    strategicPathId = txResult.strategicPathId;
+    planId = txResult.planId;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     log.error(`commit tx failed user=${userId}: ${message}`);
@@ -292,6 +305,28 @@ export async function POST(request: NextRequest): Promise<Response> {
   // --- post-transaction side effects (best-effort, never block response) ---
 
   const enqueued: string[] = [];
+  let tacticalJobId: string | undefined;
+
+  // When the caller didn't supply `plan`, run tactical-planner as a
+  // background job so /today can show progress while Stage 6 advances.
+  // Failures here are logged but never propagate — the onboarding
+  // response stays a 200 and the worker retries (see processor).
+  if (!body.plan) {
+    try {
+      tacticalJobId = await enqueueTacticalGenerate({
+        userId,
+        productId,
+        strategicPathId,
+        planId,
+        traceId,
+      });
+      enqueued.push(`tactical-generate:${tacticalJobId}`);
+    } catch (err) {
+      log.warn(
+        `post-commit tactical-generate enqueue failed user=${userId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
 
   if (changed) {
     try {
@@ -337,6 +372,8 @@ export async function POST(request: NextRequest): Promise<Response> {
     );
   }
 
+  const inlineItemCount = body.plan?.items.length ?? 0;
+
   await recordPipelineEvent({
     userId,
     productId,
@@ -344,8 +381,11 @@ export async function POST(request: NextRequest): Promise<Response> {
     metadata: {
       traceId,
       kind: 'commit',
-      items: body.plan.items.length,
-      calibrated: enqueued.length > 0,
+      items: inlineItemCount,
+      tacticalDeferred: !body.plan,
+      planId,
+      strategicPathId,
+      calibrated: changed && enqueued.some((e) => e.startsWith('calibration:')),
       // Launch-context hints from Stage 5. Persisted on the event rather
       // than the strategic_paths row so we don't ship a migration for
       // a metric we're not yet consuming server-side. Use these to
@@ -357,11 +397,16 @@ export async function POST(request: NextRequest): Promise<Response> {
   });
 
   log.info(
-    `commit done user=${userId} product=${productId} items=${body.plan.items.length} enqueued=${enqueued.length} launchChannel=${body.launchChannel ?? '-'} usersBucket=${body.usersBucket ?? '-'}`,
+    `commit done user=${userId} product=${productId} planId=${planId} inlineItems=${inlineItemCount} tacticalDeferred=${!body.plan} enqueued=${enqueued.length} launchChannel=${body.launchChannel ?? '-'} usersBucket=${body.usersBucket ?? '-'}`,
   );
 
   return NextResponse.json(
-    { success: true, productId, enqueued },
+    {
+      success: true,
+      productId,
+      enqueued,
+      ...(tacticalJobId ? { tacticalJobId } : {}),
+    },
     { headers: { 'x-trace-id': traceId } },
   );
 }
