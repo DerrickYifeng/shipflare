@@ -264,20 +264,21 @@ export default async function TeamMemberPage({ params }: TeamMemberPageProps) {
         </div>
       </header>
 
-      <div style={{ marginBottom: 'var(--sf-space-2xl)' }}>
-        <SendMessageForm
-          teamId={member.teamId}
-          memberId={member.id}
-          recipientName={member.displayName}
-        />
-      </div>
-
       <ActivityLog
         teamId={member.teamId}
         memberId={member.id}
         members={rosterRefs}
         initialMessages={initialMessages}
       />
+
+      <div style={{ marginTop: 'var(--sf-space-2xl)' }}>
+        <SendMessageForm
+          teamId={member.teamId}
+          memberId={member.id}
+          recipientName={member.displayName}
+          agentType={member.agentType}
+        />
+      </div>
     </main>
   );
 }

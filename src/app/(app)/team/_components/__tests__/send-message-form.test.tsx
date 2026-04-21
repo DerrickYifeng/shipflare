@@ -69,6 +69,21 @@ describe('<SendMessageForm>', () => {
     expect(onSent).toHaveBeenCalledTimes(1);
   });
 
+  it('uses a role-aware placeholder for known agent_types', () => {
+    renderForm({ agentType: 'growth-strategist' });
+    const textarea = screen.getByTestId('send-message-input') as HTMLTextAreaElement;
+    expect(textarea.placeholder).toContain('growth strategist');
+  });
+
+  it('disables submit once the draft exceeds the 500-char cap', () => {
+    renderForm();
+    const textarea = screen.getByTestId('send-message-input') as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: 'x'.repeat(501) } });
+    expect(
+      (screen.getByTestId('send-message-submit') as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
   it('surfaces an error when the POST fails', async () => {
     fetchMock.mockResolvedValueOnce({
       ok: false,

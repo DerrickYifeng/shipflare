@@ -22,10 +22,35 @@ export interface SendMessageFormProps {
    * placeholder and the submit button's aria-label.
    */
   recipientName?: string;
+  /** `team_members.agent_type`, used to pick a role-aware placeholder. */
+  agentType?: string;
   onSent?: () => void;
 }
 
-const MAX_LEN = 8000;
+// Route zod limit is 8000, but 500 is plenty for a direct-message steer
+// and keeps the form feeling conversational. The counter turns error-
+// inked past this bound; submit is disabled once over.
+const MAX_LEN = 500;
+
+/**
+ * Role-aware placeholder copy. The main page UX is "direct your
+ * specialist toward a specific action"; a generic "Send a message"
+ * prompts blank-page-syndrome for users who've never messaged an AI
+ * teammate before.
+ */
+const PLACEHOLDER_BY_AGENT_TYPE: Record<string, string> = {
+  coordinator: 'Ask Chief of Staff to replan this week…',
+  'growth-strategist': 'Direct the growth strategist to rewrite the thesis…',
+  'content-planner': 'Tell the content planner what to slot in next…',
+};
+
+function placeholderFor(agentType: string | undefined, recipientName: string | undefined): string {
+  if (agentType && PLACEHOLDER_BY_AGENT_TYPE[agentType]) {
+    return PLACEHOLDER_BY_AGENT_TYPE[agentType];
+  }
+  if (recipientName) return `Send a message to ${recipientName}…`;
+  return 'Send a message to your team…';
+}
 
 /**
  * User → team direct-message composer. Phase D Day 3.
@@ -44,6 +69,7 @@ export function SendMessageForm({
   teamId,
   memberId,
   recipientName,
+  agentType,
   onSent,
 }: SendMessageFormProps) {
   const { toast } = useToast();
@@ -161,9 +187,7 @@ export function SendMessageForm({
     color: 'var(--sf-error-ink)',
   };
 
-  const placeholder = recipientName
-    ? `Send a message to ${recipientName}…`
-    : 'Send a message to your team…';
+  const placeholder = placeholderFor(agentType, recipientName);
 
   const ariaLabel = recipientName
     ? `Send a message to ${recipientName}`
