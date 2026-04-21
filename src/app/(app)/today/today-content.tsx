@@ -46,6 +46,7 @@ import {
   TodayWelcomeRibbon,
   WELCOME_HERO_SEEN_KEY,
 } from '@/components/today/today-welcome-ribbon';
+import { TacticalProgressCard } from '@/components/today/tactical-progress-card';
 import { ReplyCard } from './_components/reply-card';
 import { PostCard } from './_components/post-card';
 import { ScanDrawer } from './_components/scan-drawer';
@@ -472,6 +473,7 @@ function TodayContentInner({
         {landedHero}
         <HeaderBar title="Today" />
         {welcomeRibbon}
+        <TacticalProgressCard />
         <FirstRun onItemsReady={handleItemsReady} hasChannel={hasChannel} />
       </>
     );
@@ -520,6 +522,7 @@ function TodayContentInner({
       {landedHero}
       <HeaderBar title="Today" meta={metaLine} action={scanButton} />
       {welcomeRibbon}
+      <TacticalProgressCard />
 
       <ScanDrawer
         open={scan.drawerOpen}
