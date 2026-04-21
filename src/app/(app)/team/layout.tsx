@@ -1,16 +1,10 @@
 import type { ReactNode } from 'react';
-import { AgentStreamProvider } from '@/hooks/agent-stream-provider';
 
 /**
- * `/team` is now the only route that needs the live agent SSE stream.
- * Mounting the provider at the route-layout level (instead of the app-wide
- * layout) keeps the EventSource connection off Today / Growth / Calendar /
- * Settings — those pages don't care about agent events and would otherwise
- * hold an open HTTP stream open for no reason.
- *
- * See audit synthesis Theme 7 and the previous `/automation/layout.tsx`
- * that this file replaces.
+ * `/team` — Phase D scaffold. Day 1 is a read-only server-rendered view;
+ * Day 2 adds the SSE hook (`useTeamEvents`) that subscribes to
+ * `/api/team/events` on the client. No route-level provider needed yet.
  */
 export default function TeamLayout({ children }: { children: ReactNode }) {
-  return <AgentStreamProvider>{children}</AgentStreamProvider>;
+  return <>{children}</>;
 }
