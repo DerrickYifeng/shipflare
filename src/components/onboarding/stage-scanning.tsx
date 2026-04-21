@@ -28,11 +28,16 @@ interface StageScanningProps {
 
 interface RepoScanComplete {
   type: 'complete';
-  productAnalysis: {
-    productName: string;
-    oneLiner: string;
+  // Server publishes the already-shaped ExtractedProfile under `data`.
+  // See src/workers/processors/code-scan.ts `publish({ type: 'complete', data })`.
+  data: {
+    url: string | null;
+    name: string;
+    description: string;
     keywords: string[];
     valueProp: string;
+    ogImage: string | null;
+    seoAudit: Record<string, unknown> | null;
   };
 }
 
@@ -105,14 +110,11 @@ async function extractFromRepo(
         }
         if (parsed.type === 'complete') {
           const c = parsed as RepoScanComplete;
+          // Fall back to the repo URL when the server couldn't extract a
+          // homepage (readme/package.json had no `homepage` field).
           return {
-            url: `https://github.com/${repoFullName}`,
-            name: c.productAnalysis.productName,
-            description: c.productAnalysis.oneLiner,
-            keywords: c.productAnalysis.keywords,
-            valueProp: c.productAnalysis.valueProp,
-            ogImage: null,
-            seoAudit: null,
+            ...c.data,
+            url: c.data.url ?? `https://github.com/${repoFullName}`,
           };
         }
       } catch (err) {
