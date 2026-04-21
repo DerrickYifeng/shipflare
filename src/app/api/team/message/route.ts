@@ -10,7 +10,7 @@ import {
   teamMessages,
 } from '@/lib/db/schema';
 import { getPubSubPublisher } from '@/lib/redis';
-import { teamMessagesChannel } from '@/tools/SendMessageTool';
+import { teamInjectChannel, teamMessagesChannel } from '@/tools/SendMessageTool';
 import { enqueueTeamRun } from '@/lib/queue/team-run';
 import { createLogger } from '@/lib/logger';
 
@@ -38,11 +38,12 @@ const requestSchema = z.object({
  * If no team_run is currently active, we trigger a new run with `message` as
  * the goal (the coordinator reads it on the first turn).
  *
- * TODO(Phase D): Live message injection into a RUNNING coordinator's
- * conversation. Today we only record+publish the message. The coordinator
- * is single-shot per run — a mid-run message won't be picked up until the
- * next run. Live interjection requires a Redis pub/sub feedback loop from
- * this route back into the worker, which is deferred per Phase D scope.
+ * When a run IS active, we (a) record+publish the message to the SSE
+ * channel so the UI echoes it immediately, and (b) publish to the
+ * per-run inject channel so the worker's coordinator picks it up on its
+ * next turn (Phase D Day 3). Messages arriving mid-turn queue server-
+ * side and drain at the next turn boundary — we never abort an in-
+ * flight API call.
  */
 export async function POST(request: NextRequest): Promise<Response> {
   const session = await auth();
@@ -134,6 +135,24 @@ export async function POST(request: NextRequest): Promise<Response> {
     );
   }
 
+  // Live injection: when a run is active, push the message onto the
+  // worker's per-run inject channel. The coordinator's runAgent drains
+  // its FIFO at the next turn boundary and appends the message as a
+  // user-role turn. Best-effort — a Redis failure is logged; the
+  // durable DB insert above remains the source of truth.
+  if (activeRunId) {
+    try {
+      await getPubSubPublisher().publish(
+        teamInjectChannel(body.teamId, activeRunId),
+        JSON.stringify({ messageId, content: body.message }),
+      );
+    } catch (err) {
+      log.warn(
+        `Inject publish failed for run ${activeRunId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
   // No active run? Start one with the message as the goal.
   if (!activeRunId) {
     const coordinators = await db
@@ -175,7 +194,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     {
       messageId,
       runId: activeRunId,
-      note: 'Message recorded on active run; live injection into coordinator is Phase D.',
+      note: 'Message recorded on active run; injected into coordinator on its next turn.',
     },
     { status: 200 },
   );

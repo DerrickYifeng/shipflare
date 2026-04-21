@@ -19,12 +19,13 @@ import {
   teamRuns,
   teamMessages,
 } from '@/lib/db/schema';
-import { getPubSubPublisher } from '@/lib/redis';
+import { createPubSubSubscriber, getPubSubPublisher } from '@/lib/redis';
 import { runAgent } from '@/core/query-loop';
 import { buildAgentConfigFromDefinition } from '@/tools/AgentTool/spawn';
 import { resolveAgent } from '@/tools/AgentTool/registry';
 import { getAgentOutputSchema } from '@/tools/AgentTool/agent-schemas';
-import { teamMessagesChannel } from '@/tools/SendMessageTool';
+import { teamInjectChannel, teamMessagesChannel } from '@/tools/SendMessageTool';
+import type Anthropic from '@anthropic-ai/sdk';
 // Side-effect import: registers Task + SendMessage in the global tool
 // registry so agents that declare them resolve at runAgent time.
 import '@/tools/registry-team';
@@ -51,9 +52,32 @@ export function getTeamRunConcurrency(): number {
 // Persistence helpers (exported for integration testing)
 // ---------------------------------------------------------------------------
 
+/**
+ * Async subscription handle returned by `TeamRunDeps.subscribeInjections`.
+ * Call `unsubscribe()` to tear down the Redis connection on run completion.
+ */
+export interface InjectSubscription {
+  unsubscribe: () => Promise<void>;
+}
+
 export interface TeamRunDeps {
   db: Database;
   publish: (channel: string, payload: Record<string, unknown>) => Promise<void>;
+  /**
+   * Subscribe to user-message injections for a running coordinator.
+   * The callback is invoked once per incoming message with the plain text
+   * string the user sent. Returns a handle with `unsubscribe()` so the
+   * processor can tear the subscriber down when the run ends. Production
+   * deps wire this to Redis pub/sub; tests can pass an in-memory variant.
+   *
+   * When unset (legacy call-sites, pre-Day-3 tests), live injection is a
+   * no-op and the coordinator runs on its original goal only.
+   */
+  subscribeInjections?: (
+    teamId: string,
+    runId: string,
+    onMessage: (content: string) => void,
+  ) => Promise<InjectSubscription>;
 }
 
 /**
@@ -73,6 +97,33 @@ function defaultDeps(): TeamRunDeps {
           `Redis publish to ${channel} failed: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
+    },
+    subscribeInjections: async (teamId, runId, onMessage) => {
+      const channel = teamInjectChannel(teamId, runId);
+      const sub = createPubSubSubscriber();
+      sub.on('message', (_chan, raw) => {
+        try {
+          const parsed = JSON.parse(raw) as { content?: unknown };
+          if (typeof parsed.content === 'string' && parsed.content.length > 0) {
+            onMessage(parsed.content);
+          }
+        } catch (err) {
+          baseLog.warn(
+            `Redis inject payload parse failed for ${channel}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      });
+      await sub.subscribe(channel);
+      return {
+        unsubscribe: async () => {
+          try {
+            await sub.unsubscribe(channel);
+          } catch {
+            // Already torn down — ignore.
+          }
+          sub.disconnect();
+        },
+      };
     },
   };
 }
@@ -312,7 +363,34 @@ export async function processTeamRunInternal(
   // persist tool events synchronously via a scoped wrapper that the runner
   // invokes per tool call.)
 
-  // --- 9) Run! ---
+  // --- 9) Wire live message injection ---
+  // FIFO of user messages pushed in while the coordinator is mid-run. Each
+  // turn, runAgent calls `injectMessages()`, which drains this queue and
+  // returns plain user-role MessageParams — the coordinator reads them on
+  // its next turn and can adapt its plan.
+  const pendingInjections: Anthropic.Messages.MessageParam[] = [];
+  let injectSub: InjectSubscription | null = null;
+  if (deps.subscribeInjections) {
+    try {
+      injectSub = await deps.subscribeInjections(team.id, runId, (content) => {
+        pendingInjections.push({ role: 'user', content });
+      });
+    } catch (err) {
+      // Subscription is best-effort — a Redis failure must not block the
+      // run from starting. Log and carry on; the coordinator will just
+      // miss live messages for this run.
+      baseLog.warn(
+        `subscribeInjections failed for run ${runId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  const injectMessages = (): Anthropic.Messages.MessageParam[] => {
+    if (pendingInjections.length === 0) return [];
+    return pendingInjections.splice(0, pendingInjections.length);
+  };
+
+  // --- 10) Run! ---
   try {
     const result = await runAgent(
       agentConfig,
@@ -323,6 +401,7 @@ export async function processTeamRunInternal(
       undefined, // prebuilt
       undefined, // onIdleReset
       (event) => emitToolEvent(deps, toolCtx, event),
+      injectMessages,
     );
 
     // Persist agent's final text block (if any) as a completion message.
@@ -372,6 +451,16 @@ export async function processTeamRunInternal(
     });
     await markFailed(deps, runId, message);
     throw err;
+  } finally {
+    if (injectSub) {
+      try {
+        await injectSub.unsubscribe();
+      } catch (err) {
+        baseLog.warn(
+          `inject subscriber teardown failed for run ${runId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
   }
 }
 

@@ -358,6 +358,20 @@ export async function runAgent<T>(
    * where tool-level observability isn't needed.
    */
   onEvent?: (event: import('./types').StreamEvent) => void | Promise<void>,
+  /**
+   * Called at the top of every turn to drain any user messages that have
+   * been queued for mid-run injection (Phase D Day 3: `/api/team/message`
+   * pushes into a Redis channel; the team-run worker's subscriber fills a
+   * FIFO; this callback drains it). Returned messages are appended to the
+   * conversation before the next `createMessage` call so the coordinator
+   * reads them on its next turn.
+   *
+   * Only the top-level coordinator receives this — child subagents spawned
+   * via Task don't, so injected messages don't silently leak into
+   * specialists' contexts. Messages arriving mid-turn queue until the
+   * next turn boundary.
+   */
+  injectMessages?: () => Anthropic.Messages.MessageParam[],
 ): Promise<AgentResult<T>> {
   log.debug(`Agent "${config.name}" starting (model=${config.model}, maxTurns=${config.maxTurns})`);
 
@@ -416,6 +430,26 @@ export async function runAgent<T>(
   for (let turn = 1; turn <= config.maxTurns; turn++) {
     if (context.abortSignal.aborted) {
       throw new Error('Agent execution aborted');
+    }
+
+    // Drain any live-injected user messages before we construct the
+    // next API payload. Injected messages arrive via Redis pub/sub from
+    // `/api/team/message` while this coordinator is mid-run (Phase D
+    // Day 3). They're appended as plain user-role messages so Claude
+    // sees them like any other prompt turn. Safe to call on turn 1:
+    // an empty FIFO returns [] and the loop proceeds normally.
+    //
+    // IMPORTANT: injected messages can't land on top of an open
+    // `tool_use` block — Anthropic's API rejects that shape. When the
+    // prior assistant turn ended with tool_use, executeTools (or
+    // StructuredOutput intercept) already pushed a tool_result user
+    // message before reaching this point, so the conversation tail is
+    // always a user or assistant end_turn when we get here.
+    if (injectMessages) {
+      const pending = injectMessages();
+      if (pending.length > 0) {
+        messages.push(...pending);
+      }
     }
 
     // When using pre-built blocks, add cache breakpoint on last message

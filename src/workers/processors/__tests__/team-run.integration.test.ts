@@ -296,6 +296,20 @@ interface ScriptedResponse {
 
 const script: ScriptedResponse[] = [];
 
+/**
+ * Optional per-turn hook for tests that need to observe (and possibly
+ * side-effect into) the exact messages Anthropic sees. Fired with a copy
+ * of the `messages` array PRE-response, along with the 1-based turn idx.
+ * Used by the Task #9 live-injection test to push a user message onto
+ * the FIFO after turn 2, and assert turn 3's input carries it.
+ */
+type ApiHook = (
+  messages: ReadonlyArray<unknown>,
+  turn: number,
+) => void | Promise<void>;
+let apiHook: ApiHook | null = null;
+let apiCallCount = 0;
+
 vi.mock('@/core/api-client', async () => {
   const actual =
     await vi.importActual<typeof import('@/core/api-client')>(
@@ -303,7 +317,11 @@ vi.mock('@/core/api-client', async () => {
     );
   return {
     ...actual,
-    createMessage: vi.fn(async () => {
+    createMessage: vi.fn(async (params: { messages: unknown[] }) => {
+      apiCallCount += 1;
+      if (apiHook) {
+        await apiHook([...params.messages], apiCallCount);
+      }
       const next = script.shift();
       if (!next) {
         throw new Error(
@@ -360,6 +378,8 @@ beforeEach(() => {
   tasksTable.length = 0;
   published.length = 0;
   script.length = 0;
+  apiHook = null;
+  apiCallCount = 0;
   __setAgentsRootForTesting(FIXTURES_ROOT);
 });
 
@@ -674,6 +694,167 @@ describe('Phase A Day 4 — team-run integration', () => {
 
     // --- 4. Pub/sub parity ---
     expect(published.length).toBe(messagesTable.length);
+  });
+
+  it('injects a user message into a running coordinator between turns', async () => {
+    // Phase D Day 3 prerequisite (Task #9): a user message delivered via
+    // the `subscribeInjections` dep while the coordinator is mid-run must
+    // surface in the coordinator's next turn as a user-role
+    // Anthropic message. In-flight API calls are NOT aborted — the
+    // message queues and drains at the next turn boundary.
+
+    teamsTable.push({ id: 'team-inj', userId: 'user-inj', productId: null });
+    membersTable.push({
+      id: 'mem-inj-coord',
+      teamId: 'team-inj',
+      agentType: 'coordinator-test',
+      displayName: 'Sam',
+    });
+    runsTable.push({
+      id: 'run-inj',
+      teamId: 'team-inj',
+      status: 'pending',
+      goal: 'Initial goal',
+      rootAgentId: 'mem-inj-coord',
+      traceId: null,
+    });
+
+    // 3 API turns: text end_turn (Stop-check retry) → text end_turn
+    // (Stop-check retry) → StructuredOutput (terminal success).
+    script.push({
+      content: [{ type: 'text', text: 'thinking...' }],
+      stop_reason: 'end_turn',
+    });
+    script.push({
+      content: [{ type: 'text', text: 'still thinking...' }],
+      stop_reason: 'end_turn',
+    });
+    script.push({
+      content: [
+        {
+          type: 'tool_use',
+          id: 'toolu_so_inj',
+          name: 'StructuredOutput',
+          input: { status: 'completed', summary: 'heard the user' },
+        },
+      ],
+      stop_reason: 'tool_use',
+    });
+
+    // Capture the messages passed into each API call so we can prove
+    // the injected message is visible to turn 3.
+    const capturedTurns: Array<ReadonlyArray<unknown>> = [];
+
+    // In-memory subscribe impl. We invoke the onMessage callback
+    // between turns 2 and 3 — apiHook fires PRE-response on each
+    // createMessage call, so we trigger the push right after turn 2's
+    // assistant message is returned but before turn 3's API call.
+    let inboundOnMessage: ((content: string) => void) | null = null;
+    const deps: TeamRunDeps = {
+      db: makeFakeDb(await import('@/lib/db/schema')),
+      publish: makePublish(),
+      subscribeInjections: async (_teamId, _runId, onMessage) => {
+        inboundOnMessage = onMessage;
+        return { unsubscribe: async () => {} };
+      },
+    };
+
+    apiHook = (messages, turn) => {
+      capturedTurns.push(messages);
+      if (turn === 2 && inboundOnMessage) {
+        // Simulate the user hitting /api/team/message between turns 2
+        // and 3 while the worker is waiting for the model's turn-2
+        // response. The message lands on the FIFO; turn 3's `injectMessages`
+        // callback will drain it into the conversation.
+        inboundOnMessage('wait — pivot to metric X');
+      }
+    };
+
+    const rootSchema = z.object({
+      status: z.string(),
+      summary: z.string(),
+    });
+
+    await processTeamRunInternal('run-inj', deps, () => {}, rootSchema);
+
+    // Exactly 3 API calls were made (turn 1, turn 2, turn 3).
+    expect(capturedTurns).toHaveLength(3);
+
+    // Turn 1 messages: only the initial goal — no injection yet.
+    const turn1Texts = capturedTurns[0]
+      .filter((m): m is { role: string; content: unknown } =>
+        typeof m === 'object' && m !== null && 'role' in m,
+      )
+      .map((m) => JSON.stringify(m.content));
+    expect(turn1Texts.some((t) => t.includes('Initial goal'))).toBe(true);
+    expect(turn1Texts.some((t) => t.includes('pivot to metric X'))).toBe(
+      false,
+    );
+
+    // Turn 3 messages: the injected user message IS present.
+    const turn3Texts = capturedTurns[2]
+      .filter((m): m is { role: string; content: unknown } =>
+        typeof m === 'object' && m !== null && 'role' in m,
+      )
+      .map((m) => JSON.stringify(m.content));
+    expect(turn3Texts.some((t) => t.includes('pivot to metric X'))).toBe(
+      true,
+    );
+
+    // The run completed successfully (no abort, no failure).
+    expect(runsTable.find((r) => r.id === 'run-inj')?.status).toBe(
+      'completed',
+    );
+  });
+
+  it('tolerates a subscribeInjections failure and still runs the coordinator', async () => {
+    teamsTable.push({ id: 'team-sub', userId: 'user-sub', productId: null });
+    membersTable.push({
+      id: 'mem-sub-coord',
+      teamId: 'team-sub',
+      agentType: 'coordinator-test',
+      displayName: 'Sam',
+    });
+    runsTable.push({
+      id: 'run-sub',
+      teamId: 'team-sub',
+      status: 'pending',
+      goal: 'Just run',
+      rootAgentId: 'mem-sub-coord',
+      traceId: null,
+    });
+
+    script.push({
+      content: [
+        {
+          type: 'tool_use',
+          id: 'toolu_so_sub',
+          name: 'StructuredOutput',
+          input: { status: 'completed', summary: 'ok' },
+        },
+      ],
+      stop_reason: 'tool_use',
+    });
+
+    const deps: TeamRunDeps = {
+      db: makeFakeDb(await import('@/lib/db/schema')),
+      publish: makePublish(),
+      subscribeInjections: async () => {
+        throw new Error('redis down');
+      },
+    };
+
+    const rootSchema = z.object({
+      status: z.string(),
+      summary: z.string(),
+    });
+
+    await expect(
+      processTeamRunInternal('run-sub', deps, () => {}, rootSchema),
+    ).resolves.not.toThrow();
+    expect(runsTable.find((r) => r.id === 'run-sub')?.status).toBe(
+      'completed',
+    );
   });
 
   it('skips the run idempotently when the team_runs row is no longer pending', async () => {
