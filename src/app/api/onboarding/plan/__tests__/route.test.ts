@@ -53,6 +53,22 @@ vi.mock('@/skills/_catalog', () => ({
   SKILL_CATALOG: [],
 }));
 
+// Phase B Day 4 — the route now checks for a committed product row to
+// decide whether to route through team-run. Default behaviour in these
+// tests: no product exists, so the route stays on the legacy skill-
+// runner path (exactly what the existing assertions expect).
+vi.mock('@/lib/db', () => ({
+  db: {
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          limit: async () => [],
+        }),
+      }),
+    }),
+  },
+}));
+
 const validBody = {
   product: {
     name: 'ShipFlare',

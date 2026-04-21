@@ -1,5 +1,6 @@
 import { type NextRequest } from 'next/server';
 import { join } from 'node:path';
+import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { auth } from '@/lib/auth';
 import { loadSkill } from '@/core/skill-loader';
@@ -8,10 +9,15 @@ import {
   strategicPathSchema,
   type StrategicPath,
 } from '@/agents/schemas';
+import { db } from '@/lib/db';
+import { products } from '@/lib/db/schema';
 import { derivePhase } from '@/lib/launch-phase';
 import { acquireRateLimit } from '@/lib/rate-limit';
 import { recordPipelineEvent } from '@/lib/pipeline-events';
 import { createLogger, loggerForRequest } from '@/lib/logger';
+import { ensureTeamExists } from '@/lib/team-provisioner';
+import { enqueueTeamRun } from '@/lib/queue/team-run';
+import { subscribeToStrategicPathEvents } from '@/lib/onboarding-team-run';
 
 const baseLog = createLogger('api:onboarding:plan');
 
@@ -203,14 +209,38 @@ export async function POST(request: NextRequest): Promise<Response> {
       };
 
       try {
-        const path = await Promise.race([
-          runStrategic(body, currentPhase),
-          new Promise<never>((_, reject) => {
-            abortController.signal.addEventListener('abort', () =>
-              reject(new PlannerTimeoutError()),
-            );
-          }),
-        ]);
+        // Phase B Day 4 — if the user has a committed product row, route
+        // through the team-run path so the coordinator + growth-strategist
+        // AGENTs drive the strategic-path write. Otherwise fall back to
+        // the legacy skill-runner path (fresh onboarding hasn't committed
+        // a product yet). Phase C removes the legacy branch.
+        const existingProduct = await db
+          .select({ id: products.id })
+          .from(products)
+          .where(eq(products.userId, userId))
+          .limit(1);
+
+        const useTeamRun = existingProduct.length > 0;
+
+        let path: StrategicPath;
+        if (useTeamRun) {
+          path = await runViaTeamRun({
+            userId,
+            productId: existingProduct[0].id,
+            body,
+            abortSignal: abortController.signal,
+            onHeartbeat: () => enqueue({ type: 'heartbeat' }),
+          });
+        } else {
+          path = await Promise.race([
+            runStrategic(body, currentPhase),
+            new Promise<never>((_, reject) => {
+              abortController.signal.addEventListener('abort', () =>
+                reject(new PlannerTimeoutError()),
+              );
+            }),
+          ]);
+        }
 
         await recordPipelineEvent({
           userId,
@@ -220,11 +250,12 @@ export async function POST(request: NextRequest): Promise<Response> {
             pillars: path.contentPillars.length,
             thesisWeeks: path.thesisArc.length,
             scope: 'strategic_only',
+            runner: useTeamRun ? 'team_run' : 'skill_runner',
           },
         });
 
         log.info(
-          `strategic plan done user=${userId} pillars=${path.contentPillars.length}`,
+          `strategic plan done user=${userId} pillars=${path.contentPillars.length} runner=${useTeamRun ? 'team_run' : 'skill_runner'}`,
         );
 
         cleanup({ type: 'strategic_done', path });
@@ -269,6 +300,67 @@ class PlannerTimeoutError extends Error {
     super('planner_timeout');
     this.name = 'PlannerTimeoutError';
   }
+}
+
+interface RunViaTeamRunArgs {
+  userId: string;
+  productId: string;
+  body: RequestBody;
+  abortSignal: AbortSignal;
+  onHeartbeat?: () => void;
+}
+
+async function runViaTeamRun(
+  args: RunViaTeamRunArgs,
+): Promise<StrategicPath> {
+  const { userId, productId, body, abortSignal } = args;
+
+  // 1) Ensure a team + base roster exists for this (userId, productId).
+  const { teamId, memberIds } = await ensureTeamExists(userId, productId);
+
+  // 2) Enqueue the team-run with trigger='onboarding' + derived goal.
+  const goal =
+    `Plan the launch strategy for ${body.product.name}. ` +
+    `State: ${body.state}. Channels: ${body.channels.join(', ')}.`;
+
+  const { runId } = await enqueueTeamRun({
+    teamId,
+    trigger: 'onboarding',
+    goal,
+    rootMemberId: memberIds.coordinator,
+  });
+
+  // 3) Subscribe to the team's Redis channel, translate events to the
+  //    onboarding UI's event shape, and return the first strategic_done.
+  const generator = subscribeToStrategicPathEvents(teamId, runId, {
+    timeoutMs: PLAN_TIMEOUT_MS,
+  });
+
+  try {
+    for await (const event of generator) {
+      if (abortSignal.aborted) {
+        throw new PlannerTimeoutError();
+      }
+      if (event.type === 'heartbeat') {
+        args.onHeartbeat?.();
+        continue;
+      }
+      if (event.type === 'error') {
+        throw new Error(event.error);
+      }
+      if (event.type === 'strategic_done') {
+        return event.path;
+      }
+    }
+  } finally {
+    try {
+      await generator.return();
+    } catch {
+      // Generator already completed.
+    }
+  }
+
+  throw new Error('team-run ended without a strategic path');
 }
 
 async function runStrategic(

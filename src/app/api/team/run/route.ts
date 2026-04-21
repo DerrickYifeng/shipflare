@@ -3,8 +3,8 @@ import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { teams, teamMembers } from '@/lib/db/schema';
-import { enqueueTeamRun } from '@/lib/queue/team-run';
+import { teams, teamMembers, products } from '@/lib/db/schema';
+import { enqueueTeamRun, type TeamRunTrigger } from '@/lib/queue/team-run';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('api:team:run');
@@ -14,9 +14,26 @@ export const dynamic = 'force-dynamic';
 
 const requestSchema = z.object({
   teamId: z.string().min(1),
-  goal: z.string().min(1).max(4000),
+  /**
+   * Human-readable goal. Required for `manual` triggers and
+   * `reply_sweep`; optional for `onboarding` / `weekly` /
+   * `phase_transition` where the route derives a template from product
+   * context (spec §4.2).
+   */
+  goal: z.string().min(1).max(4000).optional(),
   trigger: z
     .enum(['manual', 'onboarding', 'weekly', 'phase_transition', 'reply_sweep'])
+    .optional(),
+  /**
+   * Extra context for triggers whose goal template needs it beyond the
+   * product row alone. Today only `phase_transition` uses the `oldPhase`
+   * field; other triggers ignore the bag.
+   */
+  context: z
+    .object({
+      oldPhase: z.string().optional(),
+      newPhase: z.string().optional(),
+    })
     .optional(),
   /**
    * Optional explicit root-agent member id. When absent, the route resolves
@@ -25,6 +42,40 @@ const requestSchema = z.object({
    */
   rootMemberId: z.string().optional(),
 });
+
+/**
+ * Build the per-trigger goal template enumerated in spec §4.2. Callers
+ * that want to hand-craft the goal can still pass `goal` in the request
+ * body and we use it verbatim.
+ */
+export function deriveGoalFromTrigger(
+  trigger: TeamRunTrigger,
+  product: {
+    name: string;
+    state: string;
+  } | null,
+  channels: string[],
+  extra: { oldPhase?: string; newPhase?: string } | undefined,
+): string {
+  const productName = product?.name ?? 'this product';
+  const state = product?.state ?? 'mvp';
+  const channelList = channels.length > 0 ? channels.join(', ') : 'none';
+  switch (trigger) {
+    case 'onboarding':
+      return `Plan the launch strategy for ${productName}. State: ${state}. Channels: ${channelList}.`;
+    case 'weekly':
+      return `Plan this week for ${productName}. Current state: ${state}. Carry over stalled items.`;
+    case 'phase_transition':
+      return `Phase changed from ${extra?.oldPhase ?? '(unknown)'} to ${extra?.newPhase ?? state}. Review and update the strategic path for ${productName}.`;
+    case 'reply_sweep':
+      return `Check for new high-signal threads on connected channels (${channelList}) for ${productName}.`;
+    case 'manual':
+    default:
+      // Manual with no caller-provided goal falls through to a neutral
+      // prompt so runAgent has something to send.
+      return `Review team state and propose next actions for ${productName}.`;
+  }
+}
 
 /**
  * POST /api/team/run
@@ -51,7 +102,11 @@ export async function POST(request: NextRequest): Promise<Response> {
   }
 
   const teamRow = await db
-    .select({ id: teams.id, userId: teams.userId })
+    .select({
+      id: teams.id,
+      userId: teams.userId,
+      productId: teams.productId,
+    })
     .from(teams)
     .where(eq(teams.id, body.teamId))
     .limit(1);
@@ -62,6 +117,32 @@ export async function POST(request: NextRequest): Promise<Response> {
   if (teamRow[0].userId !== userId) {
     // Don't leak existence — return 404 to the non-owner.
     return NextResponse.json({ error: 'team_not_found' }, { status: 404 });
+  }
+
+  const trigger: TeamRunTrigger = body.trigger ?? 'manual';
+
+  // Derive a goal when the caller didn't supply one. Manual / reply_sweep
+  // still require an explicit goal — the template for them is weak.
+  let goal = body.goal ?? '';
+  if (goal === '') {
+    if (trigger === 'manual') {
+      return NextResponse.json(
+        { error: 'invalid_body', detail: 'goal required for manual trigger' },
+        { status: 400 },
+      );
+    }
+    const productRows = teamRow[0].productId
+      ? await db
+          .select({ name: products.name, state: products.state })
+          .from(products)
+          .where(eq(products.id, teamRow[0].productId))
+          .limit(1)
+      : [];
+    const productRow = productRows[0] ?? null;
+    // Channel list deferred — the scheduler will query from connected
+    // channels in future triggers. For onboarding the caller typically
+    // passes its own goal anyway.
+    goal = deriveGoalFromTrigger(trigger, productRow, [], body.context);
   }
 
   // Resolve the root agent. Explicit rootMemberId wins; otherwise prefer
@@ -115,8 +196,8 @@ export async function POST(request: NextRequest): Promise<Response> {
 
   const { runId, traceId, alreadyRunning } = await enqueueTeamRun({
     teamId: body.teamId,
-    goal: body.goal,
-    trigger: body.trigger ?? 'manual',
+    goal,
+    trigger,
     rootMemberId,
   });
 
