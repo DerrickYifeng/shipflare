@@ -156,12 +156,57 @@ Emit JSON only — no prose, no explanation outside the schema. Your
 output MUST validate against `tacticalPlanSchema` in
 `src/agents/schemas.ts`.
 
-```ts
+**Exact shape** (copy key names verbatim — Zod rejects missing or
+renamed fields):
+
+```json
 {
-  plan: { thesis: string, notes: string },
-  items: TacticalPlanItem[]
+  "plan": {
+    "thesis": "Why indie devs waste 6h/week on PR review",
+    "notes": "This week leans on the Monday data post to seed X. Phase-task slot for 'Run 5 customer interviews' is already in-flight from last week — not re-scheduled."
+  },
+  "items": [
+    {
+      "kind": "content_post",
+      "userAction": "approve",
+      "phase": "audience",
+      "channel": "x",
+      "scheduledAt": "2026-05-05T14:00:00.000Z",
+      "skillName": "draft-single-post",
+      "params": { "angle": "data", "anchor_theme": "Why indie devs waste 6h/week on PR review" },
+      "title": "Data post: the 6-hour PR-review tax on indie teams",
+      "description": "Uses last week's scrape of 14 repos. Anchor theme = this week's thesis. Approve before 12:00 UTC Monday."
+    },
+    {
+      "kind": "interview",
+      "userAction": "manual",
+      "phase": "audience",
+      "channel": null,
+      "scheduledAt": "2026-05-06T17:00:00.000Z",
+      "skillName": null,
+      "params": { "targetCount": 1 },
+      "title": "Run a customer interview",
+      "description": "Follow-up with a beta user from last week's waitlist. 30 min. Record pain points."
+    }
+  ]
 }
 ```
+
+**Every item is an object with ALL of these fields** (no exceptions):
+`kind`, `userAction`, `phase`, `channel`, `scheduledAt`, `skillName`,
+`params`, `title`, `description`.
+
+- `phase` is **required** on every item — one of
+  `foundation|audience|momentum|launch|compound|steady`. Set it to the
+  launch phase the item belongs to (usually the current `phaseMap`
+  phase; milestone-anchored items can use their milestone's phase).
+- `channel` is `null` when the item is channel-agnostic (e.g.
+  `interview`, `setup_task`, `metrics_compute`).
+- `skillName` is `null` for `userAction: 'manual'` items that the
+  user marks done directly.
+- `params` is always an object — `{}` is valid if the skill takes
+  no parameters, but NEVER omit the field.
+- `scheduledAt` is an ISO-8601 timestamp string in UTC.
 
 ## References (auto-injected)
 
