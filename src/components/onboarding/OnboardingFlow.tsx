@@ -603,11 +603,14 @@ function StageRouter({
         <StagePlanBuilding
           draft={draft}
           connectedChannels={connectedChannels}
-          onGenerated={({ path, plan }) => {
+          onGenerated={({ path }) => {
+            // Tactical plan is drafted in the background after /commit — we
+            // advance to Stage 7 with strategic-only and let /today stream
+            // the tactical progress via /api/today/progress.
             const next: DraftState = {
               ...draftRef.current,
               path,
-              plan,
+              plan: null,
             };
             updateDraft(next);
             mirrorToRedis(next);
@@ -619,7 +622,10 @@ function StageRouter({
       );
 
     case 'plan': {
-      if (!draft.path || !draft.plan) {
+      // Tactical plan (`draft.plan`) is drafted in the background post-commit
+      // and is always null at this point. Only the strategic path is required
+      // to render Stage 7.
+      if (!draft.path) {
         return (
           <div style={{ padding: 16 }}>
             <p>Plan not generated yet. Going back to the state picker…</p>
@@ -656,8 +662,8 @@ function StageRouter({
             mirrorToRedis(next);
           }}
           onCommit={async () => {
-            if (!draft.path || !draft.plan || !draft.product) {
-              throw new Error('Missing plan or product data');
+            if (!draft.path || !draft.product) {
+              throw new Error('Missing path or product data');
             }
             const state = draft.productState ?? 'launching';
             const body = {
@@ -687,7 +693,9 @@ function StageRouter({
                 state === 'launching' ? draft.launchChannel : null,
               usersBucket: state === 'launched' ? draft.usersBucket : null,
               path: draft.path,
-              plan: draft.plan,
+              // `plan` is intentionally omitted — commit enqueues the
+              // tactical-generate worker, and /today subscribes to
+              // /api/today/progress for live drafting updates.
             };
             const res = await fetch('/api/onboarding/commit', {
               method: 'POST',
