@@ -450,39 +450,22 @@ function TodayContentInner({
   const activeItem = items[activeIndex];
   const activeId = activeItem?.id ?? null;
 
-  // Landed hero is an overlay — renders above every other Today view until
-  // the user dismisses it (timer / scroll / CTA click). See §7 of the
-  // onboarding frontend spec.
-  const landedHero = showLandedHero ? (
-    <TodayLandedHero onDismiss={dismissLandedHero} />
-  ) : null;
+  // Post-onboarding landing: the former full-bleed "You're set. Scout is
+  // already working." hero + "Your marketing team is getting ready..."
+  // FirstRun warmup are both intentionally off now. Users land directly
+  // in the normal Today shell with the welcome ribbon + TacticalProgressCard
+  // carrying the post-onboarding progress story. Keeps the flow single-
+  // surface and avoids two separate waiting screens.
+  const landedHero = null;
 
-  const welcomeRibbon = !showLandedHero ? (
+  const welcomeRibbon = (
     <TodayWelcomeRibbon onboardingCompletedAt={onboardingCompletedAt} />
-  ) : null;
-
-  // First-run gate — show the signature "your agents are warming up" flow
-  // ONLY when the user genuinely has zero plan_items. A user with items
-  // (all completed / skipped today) falls through to CompletionState
-  // instead of the warmup. `hasAnyPlanItems` is the server-truth flag
-  // introduced by `/api/today` — the initial server-rendered
-  // `isFirstRun` prop handles first paint.
-  if (showFirstRun && items.length === 0 && !hasAnyPlanItems) {
-    return (
-      <>
-        {landedHero}
-        <HeaderBar title="Today" />
-        {welcomeRibbon}
-        <TacticalProgressCard />
-        <FirstRun onItemsReady={handleItemsReady} hasChannel={hasChannel} />
-      </>
-    );
-  }
+  );
 
   if (isLoading) {
     // loading.tsx owns the skeleton surface, but keep a guard so hooks
     // don't render a partial view if SWR hasn't hydrated yet.
-    return landedHero;
+    return null;
   }
 
   // Meta line for HeaderBar: "{n} to review · ● {n} shipped today · last scan {t}"

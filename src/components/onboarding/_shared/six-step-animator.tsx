@@ -40,8 +40,14 @@ interface SixStepAnimatorProps {
   showCost?: boolean;
 }
 
-const STEP_DURATION_MS = 850;
-const STEP_JITTER_MS = 400;
+// Pace each decorative step at ~5s so the 6-step cycle spans ~30s and
+// matches the typical strategic-planner wall-clock. When `realCallComplete`
+// arrives early, we accelerate remaining steps via STEP_DURATION_FAST. When
+// the animation runs ahead of the network we hold on the last step with a
+// pulse instead of silently showing 6/6 done while the real work is mid-flight.
+const STEP_DURATION_MS = 4500;
+const STEP_JITTER_MS = 1000;
+const STEP_DURATION_FAST_MS = 180;
 
 function prefersReducedMotion(): boolean {
   if (typeof window === 'undefined') return false;
@@ -63,20 +69,31 @@ export function SixStepAnimator({
   const [cost, setCost] = useState(0);
   const completedRef = useRef(false);
 
-  // Step advancer — clamps at steps.length (never runs past the last row).
+  // Step advancer — paces with the real backend call:
+  //   - Normal: ~5s per step, so the 6-step cycle spans ~30s and matches
+  //     strategic-planner wall-clock.
+  //   - When the real call completes while the animation is mid-cycle,
+  //     accelerate remaining steps so the UI doesn't drag behind the data.
+  //   - When the animation reaches the LAST step before the real call
+  //     arrives, hold there (the ScanDot pulses) until realCallComplete
+  //     so the user sees "still working" honesty instead of 6/6 done idle.
   useEffect(() => {
     if (realCallError) return;
     if (active >= steps.length) return;
+    const isLast = active === steps.length - 1;
+    if (isLast && !realCallComplete) return; // hold + pulse until network catches up
     const reducedMotion = prefersReducedMotion();
     const duration = reducedMotion
       ? 50
-      : STEP_DURATION_MS + Math.random() * STEP_JITTER_MS;
+      : realCallComplete
+        ? STEP_DURATION_FAST_MS
+        : STEP_DURATION_MS + Math.random() * STEP_JITTER_MS;
     const t = setTimeout(() => {
       setActive((a) => a + 1);
       setCost((c) => c + 0.003 + Math.random() * 0.01);
     }, duration);
     return () => clearTimeout(t);
-  }, [active, steps.length, realCallError]);
+  }, [active, steps.length, realCallError, realCallComplete]);
 
   // Elapsed timer — ticks every 100ms for the header cost/time display.
   useEffect(() => {

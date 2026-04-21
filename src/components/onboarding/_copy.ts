@@ -241,7 +241,6 @@ export const COPY = {
     tabs: [
       { id: 'about', label: 'A · About your product' },
       { id: 'timeline', label: 'B · Timeline' },
-      { id: 'week', label: 'C · First week' },
     ] as const,
     aboutLabels: {
       name: 'Name',
@@ -255,7 +254,6 @@ export const COPY = {
     addKeyword: '+ Add',
     quota: 'Quota',
     pending: 'pending',
-    finishLaterCta: 'Looks good · finish later',
     launchCta: 'Launch the agents',
   },
 } as const;

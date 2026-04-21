@@ -34,7 +34,7 @@ interface StagePlanProps {
   onCommit: () => Promise<void>;
 }
 
-type TabId = 'about' | 'timeline' | 'week';
+type TabId = 'about' | 'timeline';
 
 export function StagePlan({
   draft,
@@ -93,8 +93,6 @@ export function StagePlan({
       {tab === 'timeline' && (
         <TimelinePanel path={path} state={draft.productState ?? 'launching'} />
       )}
-      {tab === 'week' && <FirstWeekPanel plan={plan} />}
-
 
       {commitError && (
         <div
@@ -113,16 +111,6 @@ export function StagePlan({
         back={
           <OnbButton size="lg" variant="ghost" onClick={onBack}>
             Back
-          </OnbButton>
-        }
-        extras={
-          <OnbButton
-            size="lg"
-            variant="secondary"
-            onClick={handleCommit}
-            disabled={committing}
-          >
-            {COPY.stage7.finishLaterCta}
           </OnbButton>
         }
         primary={
