@@ -17,8 +17,12 @@ import type { PlanItemState } from '@/lib/plan-state';
 // (frontend needs this to distinguish "genuinely no plan yet" from
 // "plan exists, all items completed/skipped today").
 
+// Today surfaces items that have a draft body the user can read + approve.
+// Bare `planned` items (tactical-planner just scheduled, draft skill hasn't
+// run yet) belong in TacticalProgressCard's "drafting X of Y" view, not
+// here — otherwise users see topic-only cards with an "Approve topic"
+// button and no body to judge.
 const PENDING_STATES = [
-  'planned',
   'drafted',
   'ready_for_review',
   'approved',

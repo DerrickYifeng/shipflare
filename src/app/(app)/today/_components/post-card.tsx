@@ -300,7 +300,7 @@ export function PostCard({
                   : undefined
               }
             >
-              {item.draftBody ? 'Schedule' : 'Approve topic'}
+              {item.draftBody ? 'Schedule' : 'Approve'}
             </Button>
             {item.draftBody ? (
               <TextAction onClick={() => setLocalEditing(true)}>Edit</TextAction>
