@@ -2,143 +2,178 @@
 // while the post-commit tactical-generate worker drafts this week's items
 // and (optionally) platform calibration is still running.
 //
-// Subscribes to `/api/today/progress` (SSE) and folds discrete events into
-// a single view model. Renders two stacked sections — tactical draft
-// progress and per-platform calibration — which auto-collapse when their
-// respective work finishes.
+// Contract (locked with backend-engineer-sse):
+//   - Mount-time snapshot: GET /api/today/progress (REST, JSON)
+//   - Live updates:        /api/events?channel=agents via useSSEChannel
+//                          (tactical_generate_{started,completed,failed}
+//                           and calibration_{progress,complete})
 //
 // Visibility gate: shows when `?from=onboarding` is in URL (within the same
-// 24h TTL as the welcome ribbon) OR whenever a live snapshot reports
-// in-flight tactical / calibration work.
+// 24h TTL as the welcome ribbon) OR whenever the snapshot reports in-flight
+// tactical / calibration work.
 
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { OnbMono } from '@/components/onboarding/_shared/onb-mono';
 import { PLATFORMS } from '@/lib/platform-config';
 import { WELCOME_HERO_SEEN_KEY } from '@/components/today/today-welcome-ribbon';
+import { useSSEChannel } from '@/hooks/use-sse-channel';
 
-/* ─── Event shape — mirrors /api/today/progress SSE contract ─────────── */
+/* ─── Backend contract ───────────────────────────────────────────────── */
 
-type TacticalStatus = 'pending' | 'running' | 'done' | 'error';
+type TacticalStatus = 'pending' | 'running' | 'completed' | 'failed';
+type CalibrationStatus = 'pending' | 'running' | 'completed' | 'failed';
 
 interface TacticalSnapshot {
   status: TacticalStatus;
-  drafted: number;
-  expected: number;
-  error?: string | null;
+  itemCount: number;
+  expectedCount: number | null;
+  error: string | null;
+  planId: string | null;
 }
 
-type CalibrationStatus = 'pending' | 'running' | 'done' | 'error';
-
-interface CalibrationRow {
+interface PlatformCalibration {
   platform: string;
   status: CalibrationStatus;
-  round: number;
-  maxRounds: number;
   precision: number | null;
+  round: number;
 }
 
-interface ProgressEventSnapshot {
-  type: 'snapshot';
+interface ProgressSnapshot {
   tactical: TacticalSnapshot;
-  calibration: CalibrationRow[];
+  calibration: { platforms: PlatformCalibration[] };
 }
 
-interface ProgressEventTacticalItem {
-  type: 'tactical_item_drafted';
-  count: number;
-  expected: number;
+// Live events published on `shipflare:events:{userId}:agents` (see
+// tactical-generate processor + calibrate-discovery worker on the backend).
+interface TacticalGenerateStarted {
+  type: 'tactical_generate_started';
+  planId: string;
+  traceId: string;
 }
-
-interface ProgressEventTacticalDone {
-  type: 'tactical_done';
+interface TacticalGenerateCompleted {
+  type: 'tactical_generate_completed';
+  planId: string;
+  itemCount: number;
+  traceId: string;
 }
-
-interface ProgressEventTacticalError {
-  type: 'tactical_error';
+interface TacticalGenerateFailed {
+  type: 'tactical_generate_failed';
+  planId: string;
   error: string;
+  traceId: string;
 }
-
-interface ProgressEventCalibrationUpdate {
-  type: 'calibration_update';
+interface CalibrationProgress {
+  type: 'calibration_progress';
   platform: string;
   round: number;
   maxRounds: number;
-  precision: number | null;
+}
+interface CalibrationComplete {
+  type: 'calibration_complete';
+  productId: string;
 }
 
-interface ProgressEventCalibrationDone {
-  type: 'calibration_done';
-  platform: string;
-}
-
-type ProgressEvent =
-  | ProgressEventSnapshot
-  | ProgressEventTacticalItem
-  | ProgressEventTacticalDone
-  | ProgressEventTacticalError
-  | ProgressEventCalibrationUpdate
-  | ProgressEventCalibrationDone
+type LiveEvent =
+  | TacticalGenerateStarted
+  | TacticalGenerateCompleted
+  | TacticalGenerateFailed
+  | CalibrationProgress
+  | CalibrationComplete
   | { type: string; [key: string]: unknown };
 
 /* ─── View state ─────────────────────────────────────────────────────── */
 
+/** Calibration isn't fanned out by platform in the `_complete` event, so the
+ * client can't directly mark a single platform done from a live event. We
+ * use the max known round per platform + final-step detection to collapse.
+ */
+interface CalibrationView {
+  platform: string;
+  status: CalibrationStatus;
+  precision: number | null;
+  round: number;
+  maxRounds: number | null;
+}
+
 interface ViewState {
   tactical: TacticalSnapshot;
-  /** Keyed by platform id so repeat `calibration_update` events merge cleanly. */
-  calibration: Record<string, CalibrationRow>;
+  calibration: Record<string, CalibrationView>;
+  /** True once the mount-time snapshot fetch has resolved (success or failure). */
+  snapshotLoaded: boolean;
 }
 
 const INITIAL_VIEW: ViewState = {
-  tactical: { status: 'pending', drafted: 0, expected: 0 },
+  tactical: {
+    status: 'pending',
+    itemCount: 0,
+    expectedCount: null,
+    error: null,
+    planId: null,
+  },
   calibration: {},
+  snapshotLoaded: false,
 };
 
-function reduce(state: ViewState, event: ProgressEvent): ViewState {
+function seedFromSnapshot(state: ViewState, snap: ProgressSnapshot): ViewState {
+  const calibration: Record<string, CalibrationView> = {};
+  for (const row of snap.calibration.platforms) {
+    calibration[row.platform] = {
+      platform: row.platform,
+      status: row.status,
+      precision: row.precision,
+      round: row.round,
+      maxRounds: null,
+    };
+  }
+  return { tactical: snap.tactical, calibration, snapshotLoaded: true };
+}
+
+function reduceLive(state: ViewState, event: LiveEvent): ViewState {
   switch (event.type) {
-    case 'snapshot': {
-      const ev = event as ProgressEventSnapshot;
-      const calibration: Record<string, CalibrationRow> = {};
-      for (const row of ev.calibration) {
-        calibration[row.platform] = row;
-      }
-      return { tactical: ev.tactical, calibration };
-    }
-    case 'tactical_item_drafted': {
-      const ev = event as ProgressEventTacticalItem;
+    case 'tactical_generate_started': {
+      const ev = event as TacticalGenerateStarted;
       return {
         ...state,
         tactical: {
-          ...state.tactical,
           status: 'running',
-          drafted: ev.count,
-          expected: ev.expected,
+          itemCount: 0,
+          expectedCount: state.tactical.expectedCount,
+          error: null,
+          planId: ev.planId,
         },
       };
     }
-    case 'tactical_done': {
+    case 'tactical_generate_completed': {
+      const ev = event as TacticalGenerateCompleted;
+      return {
+        ...state,
+        tactical: {
+          status: 'completed',
+          itemCount: ev.itemCount,
+          expectedCount: state.tactical.expectedCount,
+          error: null,
+          planId: ev.planId,
+        },
+      };
+    }
+    case 'tactical_generate_failed': {
+      const ev = event as TacticalGenerateFailed;
       return {
         ...state,
         tactical: {
           ...state.tactical,
-          status: 'done',
-          // Collapse to expected once done so the final count reads cleanly
-          // if we missed an intermediate `tactical_item_drafted` event.
-          drafted: Math.max(state.tactical.drafted, state.tactical.expected),
+          status: 'failed',
+          error: ev.error,
+          planId: ev.planId,
         },
       };
     }
-    case 'tactical_error': {
-      const ev = event as ProgressEventTacticalError;
-      return {
-        ...state,
-        tactical: { ...state.tactical, status: 'error', error: ev.error },
-      };
-    }
-    case 'calibration_update': {
-      const ev = event as ProgressEventCalibrationUpdate;
+    case 'calibration_progress': {
+      const ev = event as CalibrationProgress;
+      const prev = state.calibration[ev.platform];
       return {
         ...state,
         calibration: {
@@ -146,24 +181,22 @@ function reduce(state: ViewState, event: ProgressEvent): ViewState {
           [ev.platform]: {
             platform: ev.platform,
             status: 'running',
+            precision: prev?.precision ?? null,
             round: ev.round,
             maxRounds: ev.maxRounds,
-            precision: ev.precision,
           },
         },
       };
     }
-    case 'calibration_done': {
-      const ev = event as ProgressEventCalibrationDone;
-      const existing = state.calibration[ev.platform];
-      if (!existing) return state;
-      return {
-        ...state,
-        calibration: {
-          ...state.calibration,
-          [ev.platform]: { ...existing, status: 'done' },
-        },
-      };
+    case 'calibration_complete': {
+      // Event is keyed by productId, not platform. Mark every running
+      // platform as completed — calibration_complete fires once per
+      // product-level pass.
+      const next: Record<string, CalibrationView> = {};
+      for (const [k, v] of Object.entries(state.calibration)) {
+        next[k] = v.status === 'running' ? { ...v, status: 'completed' } : v;
+      }
+      return { ...state, calibration: next };
     }
     default:
       return state;
@@ -173,49 +206,29 @@ function reduce(state: ViewState, event: ProgressEvent): ViewState {
 /* ─── Visibility gate ────────────────────────────────────────────────── */
 
 const RIBBON_TTL_MS = 24 * 60 * 60 * 1000;
+const SUCCESS_GRACE_MS = 5_000;
 
-/**
- * Show when:
- *  - `?from=onboarding` was in the URL, OR the onboarding hero-seen
- *    timestamp is within the 24h TTL, OR
- *  - there is active tactical / calibration work in the current snapshot.
- */
 function shouldRemainVisible(
   fromOnboarding: boolean,
   state: ViewState,
   tacticalCollapsedAt: number | null,
 ): boolean {
-  if (state.tactical.status === 'running' || state.tactical.status === 'error') {
-    return true;
-  }
-  if (state.tactical.status === 'pending' && fromOnboarding) return true;
-  // After tactical completes we keep the card around for 5s as a success chip,
-  // then hide.
-  if (state.tactical.status === 'done') {
+  const t = state.tactical.status;
+  if (t === 'running' || t === 'failed') return true;
+  if (t === 'pending' && fromOnboarding) return true;
+  if (t === 'completed') {
     if (tacticalCollapsedAt === null) return true;
-    if (Date.now() - tacticalCollapsedAt < 5_000) return true;
+    if (Date.now() - tacticalCollapsedAt < SUCCESS_GRACE_MS) return true;
   }
-  // Show if any platform is still calibrating.
   for (const row of Object.values(state.calibration)) {
-    if (row.status === 'running' || row.status === 'error') return true;
+    if (row.status === 'running' || row.status === 'failed') return true;
   }
   return false;
 }
 
 /* ─── Component ──────────────────────────────────────────────────────── */
 
-interface TacticalProgressCardProps {
-  /**
-   * When null, the component mounts its own SSE subscription. A parent can
-   * inject its own event stream (e.g. for tests) by passing a pre-built
-   * readable here.
-   */
-  endpoint?: string;
-}
-
-export function TacticalProgressCard({
-  endpoint = '/api/today/progress',
-}: TacticalProgressCardProps) {
+export function TacticalProgressCard() {
   const searchParams = useSearchParams();
   const fromOnboardingQuery = searchParams?.get('from') === 'onboarding';
   const [fromOnboardingSession, setFromOnboardingSession] = useState(false);
@@ -224,8 +237,7 @@ export function TacticalProgressCard({
   const tacticalCollapsedAtRef = useRef<number | null>(null);
   const [, forceTick] = useState(0);
 
-  // Hero-seen timestamp piggybacks on the welcome ribbon's 24h window so we
-  // stay in-sync with that existing localStorage key.
+  // Hero-seen timestamp piggybacks on the welcome ribbon's 24h window.
   useEffect(() => {
     if (fromOnboardingQuery) {
       setFromOnboardingSession(true);
@@ -240,55 +252,92 @@ export function TacticalProgressCard({
         setFromOnboardingSession(true);
       }
     } catch {
-      /* localStorage unavailable — fall back to query-string only */
+      /* localStorage unavailable */
     }
   }, [fromOnboardingQuery]);
 
-  // Mark the collapse wall-clock the first time we see `done`, so the 5s
-  // grace window is deterministic.
+  // Mount-time snapshot. Uses an AbortController so the dev Strict-Mode
+  // double-mount doesn't produce a duplicate in-flight request.
   useEffect(() => {
-    if (view.tactical.status === 'done' && tacticalCollapsedAtRef.current === null) {
+    const controller = new AbortController();
+    (async () => {
+      try {
+        const res = await fetch('/api/today/progress', {
+          signal: controller.signal,
+          headers: { accept: 'application/json' },
+        });
+        if (!res.ok) throw new Error(`snapshot ${res.status}`);
+        const snap = (await res.json()) as ProgressSnapshot;
+        setView((prev) => seedFromSnapshot(prev, snap));
+      } catch {
+        // Mark loaded even on failure so the visibility gate can still
+        // decide (fromOnboarding-only case). Live events will populate
+        // the rest.
+        setView((prev) => ({ ...prev, snapshotLoaded: true }));
+      }
+    })();
+    return () => controller.abort();
+  }, []);
+
+  // Live events. `useSSEChannel` already filters heartbeat/connected frames.
+  const handleLiveEvent = useCallback((data: unknown) => {
+    if (
+      !data ||
+      typeof data !== 'object' ||
+      !('type' in data) ||
+      typeof (data as { type: unknown }).type !== 'string'
+    ) {
+      return;
+    }
+    setView((prev) => reduceLive(prev, data as LiveEvent));
+  }, []);
+  useSSEChannel('agents', handleLiveEvent);
+
+  // When tactical flips to completed, stamp the collapse wall-clock once and
+  // schedule a re-render at the end of the grace window so visibility
+  // re-evaluates.
+  useEffect(() => {
+    if (
+      view.tactical.status === 'completed' &&
+      tacticalCollapsedAtRef.current === null
+    ) {
       tacticalCollapsedAtRef.current = Date.now();
-      // Re-render after 5s so the visibility gate re-evaluates.
-      const t = window.setTimeout(() => forceTick((n) => n + 1), 5_100);
+      const t = window.setTimeout(
+        () => forceTick((n) => n + 1),
+        SUCCESS_GRACE_MS + 100,
+      );
       return () => window.clearTimeout(t);
+    }
+    if (view.tactical.status !== 'completed') {
+      tacticalCollapsedAtRef.current = null;
     }
   }, [view.tactical.status]);
 
-  // SSE subscription. `endpoint` is stable but we guard with an AbortController
-  // so dev Strict-Mode double-mount doesn't leak a reader.
-  useEffect(() => {
-    const controller = new AbortController();
-    void consumeStream(endpoint, controller.signal, (event) => {
-      setView((prev) => reduce(prev, event));
-    });
-    return () => controller.abort();
-  }, [endpoint]);
-
+  const fromOnboarding = fromOnboardingSession || fromOnboardingQuery;
   const visible = useMemo(
     () =>
       !dismissed &&
-      (fromOnboardingSession || fromOnboardingQuery
-        ? shouldRemainVisible(true, view, tacticalCollapsedAtRef.current)
-        : shouldRemainVisible(false, view, tacticalCollapsedAtRef.current)),
-    [dismissed, fromOnboardingSession, fromOnboardingQuery, view],
+      view.snapshotLoaded &&
+      shouldRemainVisible(fromOnboarding, view, tacticalCollapsedAtRef.current),
+    [dismissed, fromOnboarding, view],
   );
 
   if (!visible) return null;
 
   const calibrationRows = Object.values(view.calibration).filter(
-    (r) => r.status !== 'done',
+    (r) => r.status === 'running' || r.status === 'failed',
   );
   const showTactical =
     view.tactical.status === 'running' ||
-    view.tactical.status === 'error' ||
-    (view.tactical.status === 'pending' && fromOnboardingSession) ||
-    view.tactical.status === 'done';
+    view.tactical.status === 'failed' ||
+    view.tactical.status === 'completed' ||
+    (view.tactical.status === 'pending' && fromOnboarding);
 
   return (
     <section
       aria-live="polite"
       style={{
+        position: 'relative',
         margin: '0 clamp(16px, 3vw, 32px) 16px',
         background: 'var(--sf-bg-secondary)',
         borderRadius: 'var(--sf-radius-xl, 14px)',
@@ -303,73 +352,45 @@ export function TacticalProgressCard({
           hasTacticalDivider={showTactical}
         />
       )}
-      {view.tactical.status === 'done' && calibrationRows.length === 0 && (
+      {view.tactical.status === 'completed' && calibrationRows.length === 0 && (
         <DismissHandle onDismiss={() => setDismissed(true)} />
       )}
     </section>
   );
 }
 
-/* ─── SSE stream consumer ────────────────────────────────────────────── */
-
-async function consumeStream(
-  endpoint: string,
-  signal: AbortSignal,
-  onEvent: (event: ProgressEvent) => void,
-): Promise<void> {
-  try {
-    const res = await fetch(endpoint, {
-      signal,
-      headers: { accept: 'text/event-stream' },
-    });
-    if (!res.ok || !res.body) return;
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const parts = buffer.split('\n\n');
-      buffer = parts.pop() ?? '';
-      for (const part of parts) {
-        const line = part.split('\n').find((l) => l.startsWith('data: '));
-        if (!line) continue;
-        try {
-          const parsed = JSON.parse(line.slice(6)) as ProgressEvent;
-          onEvent(parsed);
-        } catch {
-          // Malformed frame — skip. SSE servers can flush partial writes
-          // that we'll catch on the next iteration.
-        }
-      }
-    }
-  } catch {
-    // Network hiccups are fine — the user can refresh. We don't want a
-    // failed stream to explode the whole /today view.
-  }
-}
-
 /* ─── Tactical section ───────────────────────────────────────────────── */
 
 function TacticalSection({ tactical }: { tactical: TacticalSnapshot }) {
-  const { status, drafted, expected, error } = tactical;
-  const isError = status === 'error';
-  const isDone = status === 'done';
-  const headline = isError
+  const { status, itemCount, expectedCount, error } = tactical;
+  const isFailed = status === 'failed';
+  const isDone = status === 'completed';
+  const headline = isFailed
     ? 'Drafting stalled'
     : isDone
       ? 'This week is drafted'
       : "Drafting this week's plan…";
-  const subline = isError
+  const subline = isFailed
     ? error || 'Drafting hit an error. Retry when you have a sec.'
     : isDone
       ? 'Items are now in your inbox below.'
       : 'Each item appears below as it lands.';
-  // Clamp pct so `drafted > expected` (edge case with server clock skew)
-  // still renders a sane bar.
-  const pct =
-    expected > 0 ? Math.min(100, Math.round((drafted / expected) * 100)) : 0;
+  // Backend doesn't expose expectedCount today (always null); fall back to
+  // a friendly "—" in the count but still drive the bar to 100% on completed
+  // so the card doesn't finish stuck at 0.
+  const countLabel =
+    expectedCount && expectedCount > 0
+      ? `${itemCount} / ${expectedCount} items`
+      : isDone
+        ? `${itemCount} items`
+        : itemCount > 0
+          ? `${itemCount} items so far`
+          : 'Queued';
+  const pct = isDone
+    ? 100
+    : expectedCount && expectedCount > 0
+      ? Math.min(100, Math.round((itemCount / expectedCount) * 100))
+      : 0;
 
   return (
     <div style={{ padding: '18px 20px' }}>
@@ -381,14 +402,12 @@ function TacticalSection({ tactical }: { tactical: TacticalSnapshot }) {
           marginBottom: 6,
         }}
       >
-        <OnbMono color={isError ? 'var(--sf-error-ink)' : 'var(--sf-accent)'}>
-          {isError ? 'Tactical · Error' : isDone ? 'Tactical · Ready' : 'Tactical'}
+        <OnbMono color={isFailed ? 'var(--sf-error-ink)' : 'var(--sf-accent)'}>
+          {isFailed ? 'Tactical · Error' : isDone ? 'Tactical · Ready' : 'Tactical'}
         </OnbMono>
-        {!isError && !isDone && <PulsingDot />}
+        {!isFailed && !isDone && <PulsingDot />}
         <span style={{ flex: 1 }} />
-        <OnbMono color="var(--sf-fg-4)">
-          {drafted} / {expected || '—'} items
-        </OnbMono>
+        <OnbMono color="var(--sf-fg-4)">{countLabel}</OnbMono>
       </div>
       <div
         style={{
@@ -412,8 +431,12 @@ function TacticalSection({ tactical }: { tactical: TacticalSnapshot }) {
       >
         {subline}
       </div>
-      <ProgressBar pct={pct} intent={isError ? 'error' : isDone ? 'success' : 'running'} />
-      {isError && (
+      <ProgressBar
+        pct={pct}
+        intent={isFailed ? 'error' : isDone ? 'success' : 'running'}
+        indeterminate={!isFailed && !isDone && pct === 0}
+      />
+      {isFailed && (
         <div style={{ marginTop: 12 }}>
           <RetryButton />
         </div>
@@ -425,9 +448,11 @@ function TacticalSection({ tactical }: { tactical: TacticalSnapshot }) {
 function ProgressBar({
   pct,
   intent,
+  indeterminate,
 }: {
   pct: number;
   intent: 'running' | 'success' | 'error';
+  indeterminate: boolean;
 }) {
   const fill =
     intent === 'error'
@@ -435,6 +460,40 @@ function ProgressBar({
       : intent === 'success'
         ? 'var(--sf-success)'
         : 'var(--sf-accent)';
+  if (indeterminate) {
+    // We don't know `expectedCount` up front (backend returns null), so
+    // before any items land we show a seeking shimmer instead of a 0% bar.
+    return (
+      <div
+        style={{
+          height: 4,
+          borderRadius: 999,
+          background: 'rgba(0,0,0,0.06)',
+          overflow: 'hidden',
+          position: 'relative',
+        }}
+      >
+        <div
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            height: '100%',
+            width: '40%',
+            background: fill,
+            borderRadius: 999,
+            animation: 'sfTacticalSeek 1400ms ease-in-out infinite',
+          }}
+        />
+        <style>{`
+          @keyframes sfTacticalSeek {
+            0%   { transform: translateX(-100%); }
+            100% { transform: translateX(250%); }
+          }
+        `}</style>
+      </div>
+    );
+  }
   return (
     <div
       style={{
@@ -486,7 +545,7 @@ function CalibrationSection({
   rows,
   hasTacticalDivider,
 }: {
-  rows: CalibrationRow[];
+  rows: CalibrationView[];
   hasTacticalDivider: boolean;
 }) {
   return (
@@ -514,15 +573,17 @@ function CalibrationSection({
   );
 }
 
-function CalibrationRowView({ row }: { row: CalibrationRow }) {
+function CalibrationRowView({ row }: { row: CalibrationView }) {
   const cfg = PLATFORMS[row.platform];
   const displayName = cfg?.displayName ?? row.platform;
-  const isError = row.status === 'error';
+  const isFailed = row.status === 'failed';
   const precisionText =
     row.precision === null || row.precision === undefined
       ? '—'
       : row.precision.toFixed(2);
-  const roundText = `Round ${row.round}/${row.maxRounds}`;
+  const roundText = row.maxRounds
+    ? `Round ${row.round}/${row.maxRounds}`
+    : `Round ${row.round}`;
 
   return (
     <div
@@ -541,8 +602,8 @@ function CalibrationRowView({ row }: { row: CalibrationRow }) {
           width: 7,
           height: 7,
           borderRadius: '50%',
-          background: isError ? 'var(--sf-error-ink)' : 'var(--sf-accent)',
-          animation: isError
+          background: isFailed ? 'var(--sf-error-ink)' : 'var(--sf-accent)',
+          animation: isFailed
             ? undefined
             : 'sfTacticalPulse 1400ms ease-in-out infinite',
           flexShrink: 0,
@@ -561,7 +622,7 @@ function CalibrationRowView({ row }: { row: CalibrationRow }) {
         {displayName}
       </span>
       <OnbMono color="var(--sf-fg-3)">
-        {isError ? 'Error' : 'Calibrating'}
+        {isFailed ? 'Error' : 'Calibrating'}
       </OnbMono>
       <span style={{ flex: 1 }} />
       <OnbMono color="var(--sf-fg-4)">{roundText}</OnbMono>
@@ -570,19 +631,24 @@ function CalibrationRowView({ row }: { row: CalibrationRow }) {
   );
 }
 
-/* ─── Secondary UI ───────────────────────────────────────────────────── */
+/* ─── Retry + dismiss ────────────────────────────────────────────────── */
 
 function RetryButton() {
   const [submitting, setSubmitting] = useState(false);
   const onClick = async () => {
     setSubmitting(true);
     try {
-      await fetch('/api/plan/replan', { method: 'POST' });
-      // The SSE stream will pick up a fresh `snapshot` from the server,
-      // flipping the card back into running state.
+      // Matches the existing /api/plan/replan endpoint that runs the full
+      // tactical pass (supersede + insert) for the current week.
+      await fetch('/api/plan/replan', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ trigger: 'manual' }),
+      });
+      // The SSE stream will emit tactical_generate_started → running, then
+      // completed or failed when the worker finishes.
     } catch {
-      // Intentional no-op — the error strip stays visible and the user can
-      // try again. Dedicated toasting lives in the page orchestrator.
+      // The error strip stays visible; the user can retry again.
     } finally {
       setSubmitting(false);
     }
