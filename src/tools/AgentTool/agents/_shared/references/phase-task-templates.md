@@ -1,7 +1,6 @@
 <!-- Ported from src/skills/tactical-planner/references/phase-task-templates.md (v2).
      Shared by growth-strategist (when shaping phase-aware milestones) and
-     content-planner (when allocating non-content plan_items). Phase C
-     deletes the v2 source. -->
+     content-planner (when allocating non-content plan_items). -->
 
 # Phase task templates
 
@@ -10,6 +9,26 @@ by phase. Each template carries a
 `{ kind, title, description, channel, userAction, skillName, params }`
 shape — the planner should fill in product-specific strings, not emit
 the template verbatim.
+
+## skillName reality check (Phase E Day 3)
+
+The `skillName: '...'` hints in the templates below reflect the v2
+atomic-skill set. Most of those skills were retired — this file now
+annotates each dead hint with `# Phase E Day 3: skill retired`. For the
+content-planner:
+
+- `content_post` rows MUST set `skillName: null` and route via `channel`
+  (`x` → x-writer, `reddit` → reddit-writer).
+- `content_reply` on X MAY set `skillName: 'draft-single-reply'`; Reddit
+  reply drafting is not wired yet.
+- `setup_task` voice work MAY set `skillName: 'voice-extractor'`.
+- **Every other template's `skillName` is currently retired** — leave
+  `null` and the plan-execute dispatcher will route via the shell-route
+  table (manual / auto completion) until a future phase rewires the
+  kind to a team-run agent.
+
+The kind + userAction + channel + params fields still matter exactly as
+written; only the skillName column changed.
 
 Rules:
 - At most 2 `setup_task` + 1 `interview` per week (hard cap).
@@ -38,7 +57,7 @@ Goal: de-risk positioning + plant audience seeds.
   current phase. Founder uses them across the 5 scheduled interviews."
 - `channel`: null
 - `userAction`: 'approve'
-- `skillName`: 'generate-interview-questions'
+- `skillName`: null  # Phase E Day 3: skill retired; manual-completion
 - `params`: `{ intent: 'discovery' }`
 
 ### 3. setup_task — Extract voice profile
@@ -57,7 +76,7 @@ Goal: de-risk positioning + plant audience seeds.
   landing. Founder hosts on their domain."
 - `channel`: null
 - `userAction`: 'approve'
-- `skillName`: 'draft-waitlist-page'
+- `skillName`: null  # Phase E Day 3: skill retired
 - `params`: `{ includeEmailCapture: true }`
 
 ### 5. setup_task — Nail positioning one-liner
@@ -75,7 +94,7 @@ Goal: de-risk positioning + plant audience seeds.
   month. End on a question inviting replies."
 - `channel`: 'x'
 - `userAction`: 'approve'
-- `skillName`: 'draft-single-post'
+- `skillName`: null  # Phase E Day 3: content_post routes to x-writer / reddit-writer via channel
 - `params`: `{ angle: 'story', pillar: '{contentPillars[0]}' }`
 
 ### 7. email_send — Waitlist welcome drip
@@ -84,7 +103,7 @@ Goal: de-risk positioning + plant audience seeds.
   reply, no CTA."
 - `channel`: 'email'
 - `userAction`: 'approve'
-- `skillName`: 'draft-email'
+- `skillName`: null  # Phase E Day 3: skill retired
 - `params`: `{ emailType: 'welcome' }`
 
 ### 8. analytics_summary — Week 1 baseline
@@ -93,7 +112,7 @@ Goal: de-risk positioning + plant audience seeds.
   rate. Feeds future retros."
 - `channel`: null
 - `userAction`: 'auto'
-- `skillName`: 'analytics-summarize'
+- `skillName`: null  # Phase E Day 3: skill retired
 - `params`: `{}`
 
 ### 9. content_post — Contrarian week-opener
@@ -102,7 +121,7 @@ Goal: de-risk positioning + plant audience seeds.
   category. Defend with a specific reason."
 - `channel`: 'x'
 - `userAction`: 'approve'
-- `skillName`: 'draft-single-post'
+- `skillName`: null  # Phase E Day 3: content_post routes to x-writer / reddit-writer via channel
 - `params`: `{ angle: 'contrarian', pillar: '{contentPillars[1]}' }`
 
 ### 10. setup_task — Seed waitlist with 10 founders
@@ -126,7 +145,7 @@ Goal: build launch-ready audience. Weekly rhythm matters most here.
   unpack why it matters."
 - `channel`: 'x'
 - `userAction`: 'approve'
-- `skillName`: 'draft-single-post'
+- `skillName`: null  # Phase E Day 3: content_post routes to x-writer / reddit-writer via channel
 - `params`: `{ angle: 'data', pillar: '{contentPillars[0]}' }`
 
 ### 2. content_post — Howto playbook post
@@ -135,7 +154,7 @@ Goal: build launch-ready audience. Weekly rhythm matters most here.
   Each step independently verifiable."
 - `channel`: 'x'
 - `userAction`: 'approve'
-- `skillName`: 'draft-single-post'
+- `skillName`: null  # Phase E Day 3: content_post routes to x-writer / reddit-writer via channel
 - `params`: `{ angle: 'howto', pillar: '{contentPillars[1]}' }`
 
 ### 3. content_reply — Reply-guy engine session
@@ -158,11 +177,12 @@ Goal: build launch-ready audience. Weekly rhythm matters most here.
 
 ### 5. launch_asset — Community rules scan (reddit)
 - `title`: "Read rules for target subreddits"
-- `description`: "Run fetch-community-rules across the 2-4 target
-  subreddits to know the self-promotion policy before posting."
+- `description`: "Skim rules for the 2-4 target subreddits manually;
+  know each sub's self-promotion policy before posting. (Automated
+  scan deferred to a future phase.)"
 - `channel`: 'reddit'
 - `userAction`: 'approve'
-- `skillName`: 'fetch-community-rules'
+- `skillName`: null  # Phase E Day 3: skill retired
 - `params`: `{}`
 
 ### 6. email_send — Weekly build-in-public email
@@ -171,13 +191,14 @@ Goal: build launch-ready audience. Weekly rhythm matters most here.
   120-180 words."
 - `channel`: 'email'
 - `userAction`: 'approve'
-- `skillName`: 'draft-email'
+- `skillName`: null  # Phase E Day 3: skill retired
 - `params`: `{ emailType: 'drip_week_1' }`
 
 ### 7. interview — Activation interviews (current signups)
 - `title`: "Run 3 activation interviews with beta users"
 - `description`: "30-min calls with users who signed up but didn't
-  activate. Use `generate-interview-questions` intent='activation'."
+  activate. Prepare an activation-intent question script; the founder
+  runs the calls and follows up."
 - `channel`: null
 - `userAction`: 'manual'
 - `skillName`: null
@@ -189,16 +210,17 @@ Goal: build launch-ready audience. Weekly rhythm matters most here.
   facing generalization in the last sentence."
 - `channel`: 'x'
 - `userAction`: 'approve'
-- `skillName`: 'draft-single-post'
+- `skillName`: null  # Phase E Day 3: content_post routes to x-writer / reddit-writer via channel
 - `params`: `{ angle: 'case', pillar: '{contentPillars[2]}' }`
 
 ### 9. launch_asset — Community hot-posts scan
 - `title`: "Read hot posts in target subreddits"
-- `description`: "Run fetch-community-hot-posts to derive top formats
-  + a weekly insight before posting in each sub."
+- `description`: "Browse hot posts in the target subs to derive top
+  formats + a weekly insight before posting. (Automated scan deferred
+  to a future phase.)"
 - `channel`: 'reddit'
 - `userAction`: 'approve'
-- `skillName`: 'fetch-community-hot-posts'
+- `skillName`: null  # Phase E Day 3: skill retired
 - `params`: `{ limit: 25 }`
 
 ### 10. analytics_summary — Weekly rhythm check
@@ -207,7 +229,7 @@ Goal: build launch-ready audience. Weekly rhythm matters most here.
   plan."
 - `channel`: null
 - `userAction`: 'auto'
-- `skillName`: 'analytics-summarize'
+- `skillName`: null  # Phase E Day 3: skill retired
 - `params`: `{}`
 
 ---
@@ -222,7 +244,7 @@ Goal: maximize launch-day reach. Fewer net-new projects; tighten every asset.
   kinds. Pin within 5min of T-0."
 - `channel`: 'producthunt'
 - `userAction`: 'approve'
-- `skillName`: 'draft-launch-day-comment'
+- `skillName`: null  # Phase E Day 3: skill retired
 - `params`: `{}`
 
 ### 2. launch_asset — Hunter outreach batch (10 DMs)
@@ -231,7 +253,7 @@ Goal: maximize launch-day reach. Fewer net-new projects; tighten every asset.
   list. Deduplicate on (hunter, personalizationHook)."
 - `channel`: 'producthunt'
 - `userAction`: 'approve'
-- `skillName`: 'draft-hunter-outreach'
+- `skillName`: null  # Phase E Day 3: skill retired
 - `params`: `{ batchSize: 10 }`
 
 ### 3. launch_asset — Gallery image + video briefs
@@ -240,7 +262,7 @@ Goal: maximize launch-day reach. Fewer net-new projects; tighten every asset.
   video_30s. Designer has 3-7 days to execute."
 - `channel`: null
 - `userAction`: 'approve'
-- `skillName`: 'generate-launch-asset-brief'
+- `skillName`: null  # Phase E Day 3: skill retired
 - `params`: `{ assetTypes: ['gallery_image', 'video_30s'] }`
 
 ### 4. launch_asset — Build launch-day runsheet
@@ -249,7 +271,7 @@ Goal: maximize launch-day reach. Fewer net-new projects; tighten every asset.
   across channels."
 - `channel`: null
 - `userAction`: 'approve'
-- `skillName`: 'build-launch-runsheet'
+- `skillName`: null  # Phase E Day 3: skill retired
 - `params`: `{}`
 
 ### 5. content_post — Daily thesis post
@@ -258,7 +280,7 @@ Goal: maximize launch-day reach. Fewer net-new projects; tighten every asset.
   week's theme. 5 posts across the week."
 - `channel`: 'x'
 - `userAction`: 'approve'
-- `skillName`: 'draft-single-post'
+- `skillName`: null  # Phase E Day 3: content_post routes to x-writer / reddit-writer via channel
 - `params`: `{ angle: 'claim' }`
 
 ### 6. email_send — Pre-launch reminder to waitlist
@@ -266,7 +288,7 @@ Goal: maximize launch-day reach. Fewer net-new projects; tighten every asset.
 - `description`: "120-140 words. Explicit launch URL + time zone."
 - `channel`: 'email'
 - `userAction`: 'approve'
-- `skillName`: 'draft-email'
+- `skillName`: null  # Phase E Day 3: skill retired
 - `params`: `{ emailType: 'drip_week_2' }`
 
 ### 7. setup_task — Verify launch assets ready
@@ -284,7 +306,7 @@ Goal: maximize launch-day reach. Fewer net-new projects; tighten every asset.
   14 days. Prep the T+2 thank-you list."
 - `channel`: null
 - `userAction`: 'approve'
-- `skillName`: 'identify-top-supporters'
+- `skillName`: null  # Phase E Day 3: skill retired
 - `params`: `{ topN: 10 }`
 
 ### 9. metrics_compute — Launch baseline snapshot
@@ -293,7 +315,7 @@ Goal: maximize launch-day reach. Fewer net-new projects; tighten every asset.
   impressions, engagement rate."
 - `channel`: null
 - `userAction`: 'auto'
-- `skillName`: 'metrics-compute'
+- `skillName`: null  # Phase E Day 3: skill retired
 - `params`: `{}`
 
 ### 10. content_post — Contrarian pre-launch post
@@ -302,7 +324,7 @@ Goal: maximize launch-day reach. Fewer net-new projects; tighten every asset.
   thesis."
 - `channel`: 'x'
 - `userAction`: 'approve'
-- `skillName`: 'draft-single-post'
+- `skillName`: null  # Phase E Day 3: content_post routes to x-writer / reddit-writer via channel
 - `params`: `{ angle: 'contrarian' }`
 
 ---
@@ -326,7 +348,7 @@ Goal: convert launch-day audience into retention + second wave.
   focus. 200-240 words."
 - `channel`: 'x'
 - `userAction`: 'approve'
-- `skillName`: 'draft-single-post'
+- `skillName`: null  # Phase E Day 3: content_post routes to x-writer / reddit-writer via channel
 - `params`: `{ angle: 'data', pillar: 'retro' }`
 
 ### 2. email_send — Thank-you email to top supporters
@@ -335,7 +357,7 @@ Goal: convert launch-day audience into retention + second wave.
   their specific action."
 - `channel`: 'email'
 - `userAction`: 'approve'
-- `skillName`: 'draft-email'
+- `skillName`: null  # Phase E Day 3: skill retired
 - `params`: `{ emailType: 'thank_you', targetCount: 10 }`
 
 ### 3. interview — Retention interviews
@@ -353,7 +375,7 @@ Goal: convert launch-day audience into retention + second wave.
   window. Feeds the thank-you list."
 - `channel`: null
 - `userAction`: 'auto'
-- `skillName`: 'identify-top-supporters'
+- `skillName`: null  # Phase E Day 3: skill retired
 - `params`: `{ windowDays: 7, topN: 30 }`
 
 ### 5. content_post — Case post referencing a new user
@@ -361,7 +383,7 @@ Goal: convert launch-day audience into retention + second wave.
 - `description`: "With consent. Anchored to the week's theme."
 - `channel`: 'x'
 - `userAction`: 'approve'
-- `skillName`: 'draft-single-post'
+- `skillName`: null  # Phase E Day 3: content_post routes to x-writer / reddit-writer via channel
 - `params`: `{ angle: 'case' }`
 
 ---
@@ -376,7 +398,7 @@ Goal: durable rhythm. No panic moves.
   angleMix."
 - `channel`: 'x'
 - `userAction`: 'approve'
-- `skillName`: 'draft-single-post'
+- `skillName`: null  # Phase E Day 3: content_post routes to x-writer / reddit-writer via channel
 - `params`: `{}`
 
 ### 2. content_reply — Reply session
@@ -392,16 +414,17 @@ Goal: durable rhythm. No panic moves.
 - `description`: "One insight per week. 140-220 words."
 - `channel`: 'email'
 - `userAction`: 'approve'
-- `skillName`: 'draft-email'
+- `skillName`: null  # Phase E Day 3: skill retired
 - `params`: `{ emailType: 'drip_retention' }`
 
 ### 4. analytics_summary — Weekly rhythm check
 - `title`: "Weekly analytics summary"
-- `description`: "analytics-summarize; recommended next moves feed
-  next week's planner run."
+- `description`: "Summarize the week's numbers; recommended next moves
+  feed next week's planner run. (Manual for now — automated summary
+  deferred to a future phase.)"
 - `channel`: null
 - `userAction`: 'auto'
-- `skillName`: 'analytics-summarize'
+- `skillName`: null  # Phase E Day 3: skill retired
 - `params`: `{}`
 
 ---

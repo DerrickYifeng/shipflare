@@ -44,8 +44,11 @@ emails across the week, and persist them as plan_items.
 ## Critical reminders (easy to miss — catch yourself)
 
 1. **Don't skip email.** If the user connected email, you MUST emit at
-   least one `draft-email` item per week. Zero emails when email is a
-   connected channel is always wrong.
+   least one `email_send` item (kind='email_send', userAction='approve',
+   skillName=null) per week. Zero emails when email is a connected
+   channel is always wrong. (Phase E Day 3: the draft-email skill was
+   retired; the plan-execute dispatcher advances email_send rows as
+   manual-completion until a future phase rewires to a team-run agent.)
 2. **Foundation phase is setup-heavy.** In `foundation` / `audience`
    phases, `setup_task` items are your primary job. Content posts are
    secondary. You should have 1-2 `setup_task` + 2-4 content items per

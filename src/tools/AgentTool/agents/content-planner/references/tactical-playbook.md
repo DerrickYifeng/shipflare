@@ -109,38 +109,50 @@ Use the `email` cadence from `channelMix.email` if present. Per phase:
 - `launch`: launch-day email (T-0) + retrospective T+3.
 - `compound` / `steady`: weekly digest OR thank-you batches.
 
-For v1, emit the `draft-email` row only (userAction='approve'); Phase 7
-chains `send-email` after approval.
+For v1, emit the `email_send` row with `userAction='approve'` and leave
+`skillName: null`. As of Phase E Day 3 the email drafting/sending skills
+are not wired — the row currently advances through the state machine as
+a manual-completion item so the founder can send the email off-platform.
+A future phase rewires email to a team-run email agent; when that lands
+the dispatch table row will pick up the new skill automatically.
 
 ### Before you move on — email check
 
 If `channelMix.email` is present (user has email connected), STOP and
 verify you've scheduled at least 1 `email_send` item for this week. If
-not, add one now using `add_plan_item` with `kind: 'email_send'`,
-`userAction: 'approve'`, and `skillName: 'draft-email'`. Do this in the
-same response — before moving to Step 5. Dropping email is a common
-failure mode; this check is cheap insurance.
+not, add one now using `add_plan_item` with `kind: 'email_send'` and
+`userAction: 'approve'`. Do this in the same response — before moving to
+Step 5. Dropping email is a common failure mode; this check is cheap
+insurance.
 
 ## Step 5 — Pick the right skill + params per item, and write notes
 
 For every scheduled item:
 
-- Pick `skillName` to match the item's `kind`:
-  - `content_post` → `draft-single-post`
-  - `content_reply` → `draft-single-reply`
-  - `email_send` → `draft-email`
-  - `interview` → `generate-interview-questions` (optional; founder
-    runs the interview manually after)
+- Pick `skillName` to match the item's `kind`. As of Phase E Day 3 the
+  runtime-loaded skills are narrow — only set `skillName` for the
+  entries below; for any other kind, leave `skillName: null` and the
+  dispatcher will route via (kind, channel) or manual-complete the row:
+  - `content_post` → **leave `skillName: null`**. Content posts route
+    through the writer team-run (x-writer for `channel: 'x'`,
+    reddit-writer for `channel: 'reddit'`) rather than a string skill.
+  - `content_reply` → `draft-single-reply` (only for `channel: 'x'` —
+    reddit reply drafting isn't wired yet).
+  - `email_send` → `skillName: null`. Manual-completion until a future
+    phase wires an email agent.
+  - `interview` → `skillName: null` (founder runs the interview manually).
   - `setup_task` → `voice-extractor` ONLY if voice hasn't been extracted
-    yet; most setup_tasks have `skillName: null` (manual labor)
-  - `launch_asset` → one of: `draft-hunter-outreach`,
-    `draft-waitlist-page`, `draft-launch-day-comment`,
-    `generate-launch-asset-brief`, `build-launch-runsheet`
-  - `analytics_summary` → `analytics-summarize`,
-    `identify-top-supporters`, `compile-retrospective`
-- Fill `params` with the minimum the skill needs. For
-  `draft-single-post` that's `{ angle, topic, anchor_theme, pillar }`.
-  For email, `{ emailType, recipient }`.
+    yet; most setup_tasks have `skillName: null` (manual labor).
+  - `launch_asset` → `skillName: null`. The individual launch-asset
+    skills (draft-hunter-outreach, draft-waitlist-page, etc.) were
+    retired; founders handle launch assets off-platform in the current
+    release.
+  - `analytics_summary`, `metrics_compute` → `skillName: null`
+    (manual-completion; analytics pipeline is deferred).
+- Fill `params` with the minimum the downstream consumer needs. For
+  `content_post` that's `{ angle, topic, anchor_theme, pillar }` — the
+  writer agent reads these when it runs. For email, `{ emailType,
+  recipient }` so the founder can draft off-platform.
 - Write a `title` and `description` the founder will see on the Today
   page. The description should explain *why* this item is scheduled now
   — what the founder learns by approving it.

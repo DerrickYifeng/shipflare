@@ -9,7 +9,8 @@ Seven named angles used across the growth-strategist (when shaping
 angles to individual `plan_items`). Each angle has a definition, two
 worked examples, and a "when to use" note.
 
-The downstream `draft-single-post` skill reads the angle when writing
+The downstream writer agent (x-writer or reddit-writer, spawned via
+team-run based on `plan_items.channel`) reads the angle when writing
 the body, so mis-labelling an item's angle changes what eventually
 ships.
 
