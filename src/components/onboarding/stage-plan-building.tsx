@@ -1,6 +1,8 @@
 // Stage 6 — Plan building. Reuses SixStepAnimator while POST /api/onboarding/plan
-// runs in parallel. 180s timeout → error state with "Continue with manual plan"
-// fallback.
+// streams SSE events in parallel. Advances on `strategic_done` with the
+// strategic path only — tactical drafting is deferred to a background worker
+// kicked off by /api/onboarding/commit, with progress shown on /today.
+// 180s timeout → error state with "Continue with manual plan" fallback.
 
 'use client';
 
@@ -9,10 +11,7 @@ import { OnbMono } from './_shared/onb-mono';
 import { SixStepAnimator } from './_shared/six-step-animator';
 import { OnbButton } from './_shared/onb-button';
 import { COPY } from './_copy';
-import type {
-  StrategicPath,
-  TacticalPlan,
-} from '@/agents/schemas';
+import type { StrategicPath } from '@/agents/schemas';
 import type { DraftState, ProductState } from './OnboardingFlow';
 
 const PLAN_TIMEOUT_MS = 180_000;
@@ -42,16 +41,38 @@ interface PlanRequest {
   usersBucket?: '<100' | '100-1k' | '1k-10k' | '10k+' | null;
 }
 
-interface PlanResponse {
+/**
+ * Emitted to OnboardingFlow on strategic completion. Tactical plan is always
+ * null here — the tactical worker drafts it post-commit and Today streams
+ * progress.
+ */
+interface PlanStrategicResult {
   path: StrategicPath;
-  plan: TacticalPlan;
+  plan: null;
 }
+
+interface PlanEventStrategicDone {
+  type: 'strategic_done';
+  path: StrategicPath;
+}
+
+interface PlanEventError {
+  type: 'error';
+  error: string;
+}
+
+// Tolerant shape — backend may emit progress pings, keepalives, or events we
+// don't care about. We switch on `type` and ignore anything else.
+type PlanEvent =
+  | PlanEventStrategicDone
+  | PlanEventError
+  | { type: string; [key: string]: unknown };
 
 interface StagePlanBuildingProps {
   draft: DraftState;
   /** Channels already connected from /api/channels. */
   connectedChannels: Array<'x' | 'reddit' | 'email'>;
-  onGenerated: (response: PlanResponse) => void;
+  onGenerated: (response: PlanStrategicResult) => void;
   onCancel: () => void;
   onFallback: () => void;
 }
@@ -74,7 +95,7 @@ export function StagePlanBuilding({
 }: StagePlanBuildingProps) {
   const [realCallComplete, setRealCallComplete] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const responseRef = useRef<PlanResponse | null>(null);
+  const responseRef = useRef<PlanStrategicResult | null>(null);
   const stateLabel = draft.productState ?? 'launching';
 
   // Read draft + channels via refs so the effect below can be a one-shot
@@ -135,15 +156,59 @@ export function StagePlanBuilding({
           signal: controller.signal,
         });
         if (!res.ok) {
+          // Errors are still JSON (route returns JSON on 4xx before switching
+          // to the SSE stream for 200). Parse defensively.
           const errBody = (await res.json().catch(() => ({}))) as {
             error?: string;
             detail?: string;
           };
           throw new Error(errBody.detail || errBody.error || `${res.status}`);
         }
-        const json = (await res.json()) as PlanResponse;
-        responseRef.current = json;
-        setRealCallComplete(true);
+        const reader = res.body?.getReader();
+        if (!reader) {
+          throw new Error('Plan stream returned no reader');
+        }
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let resolved = false;
+        while (!resolved) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split('\n\n');
+          buffer = parts.pop() ?? '';
+          for (const part of parts) {
+            const line = part
+              .split('\n')
+              .find((l) => l.startsWith('data: '));
+            if (!line) continue;
+            let parsed: PlanEvent;
+            try {
+              parsed = JSON.parse(line.slice(6)) as PlanEvent;
+            } catch {
+              continue;
+            }
+            if (parsed.type === 'error') {
+              const ev = parsed as PlanEventError;
+              throw new Error(ev.error || 'Plan generation failed');
+            }
+            if (parsed.type === 'strategic_done') {
+              const ev = parsed as PlanEventStrategicDone;
+              responseRef.current = { path: ev.path, plan: null };
+              setRealCallComplete(true);
+              resolved = true;
+              // Keep the connection open so the server can finish flushing
+              // other events without erroring, but stop consuming — the
+              // reader will be cancelled in the finally block.
+              break;
+            }
+            // Unknown event types are ignored on purpose (tactical_done,
+            // keepalives, etc. — tactical lives on /today now).
+          }
+        }
+        if (!resolved) {
+          throw new Error('Plan stream ended without strategic_done');
+        }
       } catch (err) {
         if (controller.signal.aborted) {
           setError(COPY.stage6.timeoutMessage);
