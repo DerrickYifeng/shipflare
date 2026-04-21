@@ -20,7 +20,8 @@ import type { DraftState, ProductState } from './OnboardingFlow';
 interface StagePlanProps {
   draft: DraftState;
   path: StrategicPath;
-  plan: TacticalPlan;
+  /** Null when tactical drafting is deferred to the post-commit worker. */
+  plan: TacticalPlan | null;
   connectedChannels: Array<'x' | 'reddit' | 'email'>;
   onBack: () => void;
   onAboutEdit: (patch: {
@@ -59,7 +60,11 @@ export function StagePlan({
     }
   };
 
-  const summary = plan.plan.notes;
+  // Tactical plan is drafted in the background after commit. Fall back to
+  // the strategic narrative so the header still feels specific while the
+  // tactical notes are pending — first line only, to keep it scannable.
+  const summary =
+    plan?.plan.notes ?? path.narrative.split(/(?<=\.)\s+/)[0] ?? path.narrative;
 
   return (
     <div>
@@ -89,6 +94,7 @@ export function StagePlan({
         <TimelinePanel path={path} state={draft.productState ?? 'launching'} />
       )}
       {tab === 'week' && <FirstWeekPanel plan={plan} />}
+
 
       {commitError && (
         <div
@@ -706,7 +712,8 @@ function computeQuotaLabel(
   return `~${total * 5} replies · ${total} posts · ${period}`;
 }
 
-function FirstWeekPanel({ plan }: { plan: TacticalPlan }) {
+function FirstWeekPanel({ plan }: { plan: TacticalPlan | null }) {
+  if (!plan) return <FirstWeekPendingPanel />;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       {plan.items.map((item, i) => (
@@ -768,6 +775,89 @@ function FirstWeekPanel({ plan }: { plan: TacticalPlan }) {
           <OnbMono color="rgba(0,0,0,0.40)">{COPY.stage7.pending}</OnbMono>
         </div>
       ))}
+    </div>
+  );
+}
+
+/**
+ * Placeholder shown while the tactical plan is drafting in the background
+ * (post-commit worker). Intentionally non-interactive — the card lives on
+ * /today once the user launches the agents, so nothing to edit here yet.
+ */
+function FirstWeekPendingPanel() {
+  return (
+    <div
+      style={{
+        background: 'var(--sf-bg-secondary)',
+        borderRadius: 12,
+        padding: '28px 24px',
+        boxShadow: 'var(--sf-shadow-card)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 14,
+      }}
+    >
+      <OnbMono color="var(--sf-accent)">Drafting this week</OnbMono>
+      <h3
+        style={{
+          margin: 0,
+          fontSize: 18,
+          fontWeight: 600,
+          lineHeight: 1.25,
+          letterSpacing: '-0.2px',
+          color: 'var(--sf-fg-1)',
+        }}
+      >
+        Your AI team will draft 7 days of items once you launch.
+      </h3>
+      <p
+        style={{
+          margin: 0,
+          fontSize: 14,
+          lineHeight: 1.5,
+          letterSpacing: '-0.16px',
+          color: 'var(--sf-fg-2)',
+        }}
+      >
+        You&apos;ll see progress on{' '}
+        <span style={{ fontFamily: 'var(--sf-font-mono)', fontSize: 13 }}>
+          /today
+        </span>{' '}
+        as each item comes in — expect the first drafts in about a minute.
+        Nothing posts until you approve.
+      </p>
+      <div
+        style={{
+          marginTop: 6,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8,
+        }}
+      >
+        {[0, 1, 2].map((i) => (
+          <div
+            key={i}
+            style={{
+              height: 42,
+              borderRadius: 10,
+              background:
+                'linear-gradient(90deg, rgba(0,0,0,0.035) 0%, rgba(0,0,0,0.06) 50%, rgba(0,0,0,0.035) 100%)',
+              backgroundSize: '200% 100%',
+              animation: `sfPlanPendingShimmer 1600ms ease-in-out ${i * 160}ms infinite`,
+            }}
+          />
+        ))}
+      </div>
+      <style jsx>{`
+        @keyframes sfPlanPendingShimmer {
+          0% {
+            background-position: 200% 0;
+          }
+          100% {
+            background-position: -200% 0;
+          }
+        }
+      `}</style>
     </div>
   );
 }
