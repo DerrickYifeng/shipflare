@@ -190,3 +190,30 @@ Report the count in your StructuredOutput `stalledCarriedOver`.
 - No active path — STOP. Do not emit `plan_items` without a path. Send
   a SendMessage back to the coordinator explaining the gap and call
   StructuredOutput with `status: 'partial'` and `itemsAdded: 0`.
+
+## Step 6 — Optionally fan out to writers
+
+After every `add_plan_item` call has returned and your `update_plan_item`
+carryovers have landed, you MAY spawn writer subagents in parallel to
+pre-draft `content_post` bodies. Route by channel:
+
+- `content_post` with `channel: 'x'` → `Task(x-writer, ...)`
+- `content_post` with `channel: 'reddit'` → `Task(reddit-writer, ...)`
+- `content_post` with `channel: 'email'` or any other value → do NOT
+  fan out. Those channels don't have a writer subagent yet; the
+  plan-execute worker will draft them after approval.
+- Any other `kind` (`email_send`, `setup_task`, `interview`,
+  `launch_asset`, etc.) — do NOT fan out. This playbook covers posts
+  only.
+
+Emit every Task call in ONE response so they run concurrently. The
+writer's `prompt` should carry the `planItemId` plus any context worth
+preserving (theme, angle, pillar, voice) — the writer reads the
+plan_item row itself, so duplication isn't required, but passing
+context reduces the writer's exploration budget.
+
+Skipping fan-out is always safe — the plan-execute worker catches any
+`planned` content_post at draft time and runs the same draft_post tool
+from a different surface. The main reason to pre-draft is to populate
+the founder's Today page so they can approve on sight instead of
+waiting for a second queue pass.

@@ -72,24 +72,56 @@ see:
 
 ## Optional: pre-draft by spawning writers
 
-After adding all plan_items, you CAN spawn writers in parallel to draft
-bodies:
+After you've added the week's plan_items with `add_plan_item`, you CAN
+spawn writers in parallel to pre-draft the bodies. Pick the writer by
+the plan_item's `channel`:
+
+| plan_item.channel | Writer subagent_type |
+|---|---|
+| `x`               | `x-writer`           |
+| `reddit`          | `reddit-writer`      |
+| `email` / `none`  | skip — no writer yet, plan-execute drafts later |
+
+Emit one `Task` call per eligible plan_item, in ONE response so the
+spawns run concurrently. Each writer has `draft_post` in its tool
+allowlist; it reads the plan_item row, generates the body via
+`sideQuery`, and UPDATEs `plan_items.output.draft_body` + transitions
+the row to `state='drafted'`.
+
+Example (single response, multiple Task calls):
 
 ```
-Task(x-writer, { planItemId: "...", context: { theme, angle, pillar, voice } }) × N
-Task(reddit-writer, { planItemId: "..." }) × M
+Task({
+  subagent_type: "x-writer",
+  description: "draft X post for plan_item abc-123",
+  prompt: "planItemId: abc-123\ncontext: { theme: 'week-1 thesis', angle: 'claim', pillar: 'speed', voice: 'terse' }"
+}) × N
+Task({
+  subagent_type: "reddit-writer",
+  description: "draft reddit post for plan_item def-456",
+  prompt: "planItemId: def-456\ncontext: { theme: '...', angle: 'story', pillar: 'reliability' }"
+}) × M
 ```
 
-Emit them in ONE response. Writers return draft_body; plan_items update
-automatically.
+The `prompt` is free-form text — just include `planItemId` (required)
+and any `context` hints the writer might want (optional). The plan_item
+row is the source of truth for channel + title + description + params.
 
-If this turns out too slow or costly, skip fan-out — draft generation can
-fall back to the plan-execute worker after items are approved.
+### When to skip fan-out
 
-Note: in Phase B only the content-drafting skills (`draft-single-post`,
-`draft-single-reply`) exist as skills, not yet as subagents. Phase E adds
-`x-writer` / `reddit-writer` as AGENT.md files. Until then, skip the Task
-fan-out.
+Fan-out is OPTIONAL. Skip it (let plan-execute draft after approval)
+when:
+
+- The week is heavy (>20 content_post items) — API cost is linear in
+  fan-out count; batching through plan-execute lets stale-sweeping
+  drop items that never get approved.
+- The founder hasn't reviewed last week's drafts yet — they'll have
+  sharper context if you defer.
+- You're replanning mid-week and most items already have a draft_body.
+
+When in doubt, emit the Task calls — writers are cheap (Haiku, 4 turns
+max) and a pre-drafted Today page is the biggest single lever on
+founder follow-through.
 
 ## Delivering
 
