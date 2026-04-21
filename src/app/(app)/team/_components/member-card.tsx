@@ -1,9 +1,13 @@
 'use client';
 
 import Link from 'next/link';
-import type { CSSProperties } from 'react';
+import { useState, type CSSProperties } from 'react';
 import { Card } from '@/components/ui/card';
 import { Badge, type BadgeVariant } from '@/components/ui/badge';
+import {
+  accentForAgentType,
+  avatarGradientForAgentType,
+} from './agent-accent';
 
 export type TeamMemberStatus =
   | 'idle'
@@ -53,20 +57,6 @@ function relativeTime(input: string | Date | null): string {
   return `${Math.floor(hr / 24)}d ago`;
 }
 
-/**
- * Deterministic pastel gradient seeded by agent_type string. Avoids
- * hand-picked colors that drift across platforms.
- */
-function avatarGradient(seed: string): string {
-  let hash = 0;
-  for (let i = 0; i < seed.length; i += 1) {
-    hash = (hash * 31 + seed.charCodeAt(i)) | 0;
-  }
-  const h1 = Math.abs(hash) % 360;
-  const h2 = (h1 + 48) % 360;
-  return `linear-gradient(135deg, hsl(${h1} 68% 72%), hsl(${h2} 62% 58%))`;
-}
-
 function initials(displayName: string): string {
   const trimmed = displayName.trim();
   if (!trimmed) return '?';
@@ -87,12 +77,14 @@ export function MemberCard({
     ? status
     : 'idle';
   const meta = STATUS_META[statusKey];
+  const accent = accentForAgentType(agentType);
+  const [hover, setHover] = useState(false);
 
   const avatar: CSSProperties = {
     width: 56,
     height: 56,
     borderRadius: 'var(--sf-radius-full)',
-    background: avatarGradient(agentType),
+    background: avatarGradientForAgentType(agentType),
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -114,8 +106,13 @@ export function MemberCard({
   };
 
   const cardStyle: CSSProperties = {
-    transition: 'box-shadow 120ms ease, transform 120ms ease',
+    transition:
+      'box-shadow 200ms var(--sf-ease-swift, ease-out), transform 200ms var(--sf-ease-swift, ease-out)',
     cursor: 'pointer',
+    boxShadow: hover
+      ? 'var(--sf-shadow-card-hover, 0 12px 28px rgba(0, 0, 0, 0.10))'
+      : undefined,
+    transform: hover ? 'translateY(-1px)' : undefined,
   };
 
   const headerRow: CSSProperties = {
@@ -178,16 +175,25 @@ export function MemberCard({
 
   const showTask = statusKey === 'active' && currentTask?.trim();
 
+  // Use the agent's semantic accent on the card stripe — it's always
+  // present, just dimmer when the member is idle so we don't paint the
+  // whole grid rainbow-bright. The Card's accent prop takes a token name
+  // like 'accent' | 'success' | 'warning', which the agent-accent map
+  // surfaces via `badgeVariant` (a 1:1 correspondence).
+  const cardAccent = accent?.badgeVariant;
+
   return (
     <Link
       href={`/team/${memberId}`}
       style={linkStyle}
       aria-label={`${displayName} — ${meta.label}`}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      onFocus={() => setHover(true)}
+      onBlur={() => setHover(false)}
+      data-testid={`member-card-${agentType}`}
     >
-      <Card
-        style={cardStyle}
-        accent={statusKey === 'active' ? 'accent' : undefined}
-      >
+      <Card style={cardStyle} accent={cardAccent}>
         <div style={headerRow}>
           <div style={avatar} aria-hidden="true">
             {initials(displayName)}
