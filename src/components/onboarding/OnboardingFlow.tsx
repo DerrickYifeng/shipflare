@@ -219,7 +219,10 @@ function applyPersistedToDraft(
 }
 
 function initialStageFromDraft(d: DraftState): Stage {
-  if (d.plan && d.path) return 'plan';
+  // Cap resume at 'state'. Never auto-skip into 'plan-building' or 'plan'
+  // even when a previous session cached plan+path — the user must see the
+  // state picker at least once so they don't silently ship with stale
+  // launch-date or category decisions from a prior dogfood run.
   if (d.productState) return 'state';
   if (d.product && d.product.name && d.reviewed) return 'connect';
   if (d.product && d.product.name) return 'review';

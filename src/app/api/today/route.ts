@@ -87,20 +87,27 @@ export async function GET() {
   // Stats — single aggregate round-trip. Yesterday completions, today
   // completions+skips, and the raw pending count that the first-run
   // empty state keys off.
+  //
+  // NOTE: The pg driver rejects raw Date objects in sql-template binds
+  // ("Received an instance of Date"). Convert to ISO strings explicitly
+  // — Postgres parses ISO-8601 into timestamptz without ambiguity.
+  const yStartIso = yStart.toISOString();
+  const todayStartIso = todayStart.toISOString();
+  const todayEndIso = todayEnd.toISOString();
   const [stats] = await db
     .select({
       publishedYesterday: sql<number>`
         count(*) filter (
           where ${planItems.state} = 'completed'
-            and ${planItems.completedAt} >= ${yStart}
-            and ${planItems.completedAt} < ${todayStart}
+            and ${planItems.completedAt} >= ${yStartIso}
+            and ${planItems.completedAt} < ${todayStartIso}
         )
       `.mapWith(Number),
       actedToday: sql<number>`
         count(*) filter (
           where ${planItems.state} in ('completed', 'skipped')
-            and ${planItems.completedAt} >= ${todayStart}
-            and ${planItems.completedAt} < ${todayEnd}
+            and ${planItems.completedAt} >= ${todayStartIso}
+            and ${planItems.completedAt} < ${todayEndIso}
         )
       `.mapWith(Number),
       pendingCount: sql<number>`
