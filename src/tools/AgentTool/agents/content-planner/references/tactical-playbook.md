@@ -46,6 +46,12 @@ angles from the 7 (see "7-angles") your content items may use.
 
 For each channel the user has connected (X / Reddit / Email):
 
+- Channel distribution MUST match input `channelMix` **exactly**,
+  item-for-item. `channelMix` is not a hint — it's a binding allocation.
+  If `channelMix` says `{ x: { perWeek: 3 }, reddit: { perWeek: 1 }, email: { perWeek: 1 } }`
+  and email is connected, you emit exactly 3 X posts + 1 reddit post +
+  1 `email_send` item — not 2 reddit + 3 X + 0 email. Over-producing one
+  channel to compensate for skipping another is a rejection condition.
 - Schedule `channelMix[channel].perWeek` content items, spread across
   the week — not all on one day.
 - Use `channelMix[channel].preferredHours` to pick `scheduledAt` UTC

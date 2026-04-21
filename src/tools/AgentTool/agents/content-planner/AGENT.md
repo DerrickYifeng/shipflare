@@ -41,19 +41,23 @@ emails across the week, and persist them as plan_items.
 
 ---
 
-### Important: don't skip email and setup tasks
+## Critical reminders (easy to miss — catch yourself)
 
-This week's plan MUST include:
-
-- At least 1 email item (if email is a connected channel / appears in `channelMix`).
-- For `foundation` / `audience` phases: at least 1 `interview` item + 1-2 `setup_task`
-  items (these de-risk pre-launch; examples: "Extract voice profile",
-  "Validate messaging with 5 potential users").
-
-If you feel tempted to skip these, don't — the founder needs them to launch
-confidently. Focus on quality over volume if you're at the per-channel `perWeek`
-cap. The ceiling is 2 setup_task + 1 interview per week; in early phases that
-ceiling is where you should be, not the floor.
+1. **Don't skip email.** If the user connected email, you MUST emit at
+   least one `draft-email` item per week. Zero emails when email is a
+   connected channel is always wrong.
+2. **Foundation phase is setup-heavy.** In `foundation` / `audience`
+   phases, `setup_task` items are your primary job. Content posts are
+   secondary. You should have 1-2 `setup_task` + 2-4 content items per
+   week, not 6-9 content items + 0 setup.
+3. **Spread across all 7 days, not 5.** Items scheduled only on
+   Mon/Tue/Wed is clumping. Ideal: Mon, Tue, Wed, Thu, Fri, Sat, Sun
+   distribution (or as close as you can get). If the numbers don't
+   divide evenly, spread the remainder across the week instead of
+   stacking the front half.
+4. **Respect `channelMix` exactly.** It's not a hint — it's a binding
+   allocation. Match it item-for-item. Over-producing one channel to
+   compensate for skipping another is a rejection condition.
 
 ## Your workflow
 
