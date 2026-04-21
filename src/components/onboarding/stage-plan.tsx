@@ -14,14 +14,12 @@ import { OnbButton } from './_shared/onb-button';
 import { OnbMono } from './_shared/onb-mono';
 import { ArrowRight, Pencil, XClose } from './icons';
 import { COPY } from './_copy';
-import type { StrategicPath, TacticalPlan } from '@/agents/schemas';
+import type { StrategicPath } from '@/tools/schemas';
 import type { DraftState, ProductState } from './OnboardingFlow';
 
 interface StagePlanProps {
   draft: DraftState;
   path: StrategicPath;
-  /** Null when tactical drafting is deferred to the post-commit worker. */
-  plan: TacticalPlan | null;
   connectedChannels: Array<'x' | 'reddit' | 'email'>;
   onBack: () => void;
   onAboutEdit: (patch: {
@@ -39,7 +37,6 @@ type TabId = 'about' | 'timeline';
 export function StagePlan({
   draft,
   path,
-  plan,
   connectedChannels,
   onBack,
   onAboutEdit,
@@ -60,11 +57,10 @@ export function StagePlan({
     }
   };
 
-  // Tactical plan is drafted in the background after commit. Fall back to
-  // the strategic narrative so the header still feels specific while the
-  // tactical notes are pending — first line only, to keep it scannable.
+  // Tactical plan is drafted asynchronously by the team-run after commit.
+  // Stage 7 summary falls back to the strategic narrative first line.
   const summary =
-    plan?.plan.notes ?? path.narrative.split(/(?<=\.)\s+/)[0] ?? path.narrative;
+    path.narrative.split(/(?<=\.)\s+/)[0] ?? path.narrative;
 
   return (
     <div>
@@ -700,77 +696,11 @@ function computeQuotaLabel(
   return `~${total * 5} replies · ${total} posts · ${period}`;
 }
 
-function FirstWeekPanel({ plan }: { plan: TacticalPlan | null }) {
-  if (!plan) return <FirstWeekPendingPanel />;
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      {plan.items.map((item, i) => (
-        <div
-          key={i}
-          style={{
-            background: 'var(--sf-bg-secondary)',
-            borderRadius: 12,
-            padding: '14px 16px',
-            boxShadow: 'var(--sf-shadow-card)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 14,
-          }}
-        >
-          <div
-            style={{
-              width: 28,
-              height: 28,
-              borderRadius: 8,
-              background: 'rgba(0,113,227,0.08)',
-              color: 'var(--sf-accent)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontFamily: 'var(--sf-font-mono)',
-              fontSize: 12,
-              fontWeight: 500,
-              flexShrink: 0,
-            }}
-          >
-            {String(i + 1).padStart(2, '0')}
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div
-              style={{
-                fontSize: 14,
-                fontWeight: 500,
-                letterSpacing: '-0.16px',
-                color: 'var(--sf-fg-1)',
-              }}
-            >
-              {item.title}
-            </div>
-            {item.description && (
-              <div
-                style={{
-                  marginTop: 2,
-                  fontSize: 12,
-                  lineHeight: 1.4,
-                  letterSpacing: '-0.12px',
-                  color: 'var(--sf-fg-3)',
-                }}
-              >
-                {item.description}
-              </div>
-            )}
-          </div>
-          <OnbMono color="rgba(0,0,0,0.40)">{COPY.stage7.pending}</OnbMono>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 /**
  * Placeholder shown while the tactical plan is drafting in the background
- * (post-commit worker). Intentionally non-interactive — the card lives on
- * /today once the user launches the agents, so nothing to edit here yet.
+ * (the team-run writes plan_items asynchronously). Intentionally non-
+ * interactive — the card lives on /today once the user launches the
+ * agents, so nothing to edit here yet.
  */
 function FirstWeekPendingPanel() {
   return (

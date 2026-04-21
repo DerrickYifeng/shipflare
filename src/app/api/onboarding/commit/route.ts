@@ -7,13 +7,9 @@ import {
   products,
   strategicPaths,
   plans,
-  planItems,
   discoveryConfigs,
 } from '@/lib/db/schema';
-import {
-  strategicPathSchema,
-  tacticalPlanSchema,
-} from '@/agents/schemas';
+import { strategicPathSchema } from '@/tools/schemas';
 import { derivePhase } from '@/lib/launch-phase';
 import { validateLaunchDates } from '@/lib/launch-date-rules';
 import { acquireRateLimit } from '@/lib/rate-limit';
@@ -62,11 +58,11 @@ const requestBodySchema = z.object({
   launchChannel: launchChannelSchema.nullable().optional(),
   usersBucket: usersBucketSchema.nullable().optional(),
   path: strategicPathSchema,
-  // `plan` is optional in the new flow — when absent, the tactical
-  // planner runs post-commit as a background job (`tactical-generate`).
-  // When present (old flow / back-compat), plan_items are written
-  // inline inside the same transaction.
-  plan: tacticalPlanSchema.optional(),
+  // Phase E Day 3: `plan` inline-insert back-compat is gone. plan_items
+  // are populated exclusively by the onboarding team-run already in
+  // flight from POST /api/onboarding/plan (content-planner writes them
+  // via add_plan_item). Clients that still send `plan` get it silently
+  // dropped by the zod strict flag below.
 });
 
 type RequestBody = z.infer<typeof requestBodySchema>;
@@ -259,34 +255,15 @@ export async function POST(request: NextRequest): Promise<Response> {
           strategicPathId: spid,
           trigger: 'onboarding',
           weekStart,
-          // `notes` is null when tactical runs post-commit — the worker
-          // updates this field once the planner emits its plan.notes.
-          notes: body.plan ? body.plan.plan.notes : null,
+          // `notes` starts null — the onboarding team-run's content-
+          // planner fills it in (or leaves it null if nothing to say).
+          notes: null,
         })
         .returning({ id: plans.id });
       const pid2 = planRow.id;
 
-      // Inline plan_items write only when the caller provided `plan`
-      // (back-compat flow). New callers omit `plan` and let the
-      // `tactical-generate` worker populate plan_items post-commit.
-      if (body.plan && body.plan.items.length > 0) {
-        await tx.insert(planItems).values(
-          body.plan.items.map((item) => ({
-            userId,
-            productId: pid,
-            planId: pid2,
-            kind: item.kind,
-            userAction: item.userAction,
-            phase: item.phase,
-            channel: item.channel ?? null,
-            scheduledAt: new Date(item.scheduledAt),
-            skillName: item.skillName ?? null,
-            params: item.params,
-            title: item.title,
-            description: item.description ?? null,
-          })),
-        );
-      }
+      // Phase E Day 3: no inline plan_items insert. The onboarding team-
+      // run writes plan_items asynchronously via add_plan_item.
 
       return { productId: pid, strategicPathId: spid, planId: pid2 };
     });
@@ -356,8 +333,6 @@ export async function POST(request: NextRequest): Promise<Response> {
     );
   }
 
-  const inlineItemCount = body.plan?.items.length ?? 0;
-
   await recordPipelineEvent({
     userId,
     productId,
@@ -365,8 +340,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     metadata: {
       traceId,
       kind: 'commit',
-      items: inlineItemCount,
-      tacticalDeferred: !body.plan,
+      items: 0,
       planId,
       strategicPathId,
       calibrated: changed && enqueued.some((e) => e.startsWith('calibration:')),
@@ -381,7 +355,7 @@ export async function POST(request: NextRequest): Promise<Response> {
   });
 
   log.info(
-    `commit done user=${userId} product=${productId} planId=${planId} inlineItems=${inlineItemCount} tacticalDeferred=${!body.plan} enqueued=${enqueued.length} launchChannel=${body.launchChannel ?? '-'} usersBucket=${body.usersBucket ?? '-'}`,
+    `commit done user=${userId} product=${productId} planId=${planId} enqueued=${enqueued.length} launchChannel=${body.launchChannel ?? '-'} usersBucket=${body.usersBucket ?? '-'}`,
   );
 
   return NextResponse.json(

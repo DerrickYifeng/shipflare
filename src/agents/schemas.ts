@@ -671,65 +671,12 @@ export const strategicPathSchema = z.object({
   }),
 });
 
-/**
- * A single plan_item emitted by the tactical-planner. Mirrors the
- * planner-visible subset of the `plan_items` table — the caller assigns
- * id / timestamps / state columns downstream.
- */
-export const tacticalPlanItemSchema = z.object({
-  kind: z.enum([
-    'content_post',
-    'content_reply',
-    'email_send',
-    'interview',
-    'setup_task',
-    'launch_asset',
-    'runsheet_beat',
-    'metrics_compute',
-    'analytics_summary',
-  ]),
-  userAction: z.enum(['auto', 'approve', 'manual']),
-  phase: z.enum([
-    'foundation',
-    'audience',
-    'momentum',
-    'launch',
-    'compound',
-    'steady',
-  ]),
-  channel: z.string().nullable(),
-  scheduledAt: z.string().min(1), // ISO
-  skillName: z.string().nullable(),
-  params: z.record(z.string(), z.unknown()),
-  title: z.string().min(1).max(200),
-  description: z.string().max(600).nullable(),
-});
-
-/**
- * Output schema for the tactical-planner agent. `plan` carries the
- * week-level framing (thesis + founder-facing notes); `items` is the
- * concrete 7-day schedule the plan-execute dispatcher drives.
- *
- * Hard floor of 3 items — a week with <3 scheduled items means the
- * planner failed to allocate cadence and the caller should retry or
- * escalate.
- */
-export const tacticalPlanSchema = z.object({
-  plan: z.object({
-    thesis: z.string().min(1).max(240),
-    notes: z.string().min(1).max(1200),
-  }),
-  items: z.array(tacticalPlanItemSchema).min(3).max(40),
-});
-
 export type StrategicMilestone = z.infer<typeof strategicMilestoneSchema>;
 export type StrategicThesisWeek = z.infer<typeof strategicThesisWeekSchema>;
 export type StrategicChannelCadence = z.infer<
   typeof strategicChannelCadenceSchema
 >;
 export type StrategicPath = z.infer<typeof strategicPathSchema>;
-export type TacticalPlanItem = z.infer<typeof tacticalPlanItemSchema>;
-export type TacticalPlan = z.infer<typeof tacticalPlanSchema>;
 
 export type DraftEmailOutput = z.infer<typeof draftEmailOutputSchema>;
 export type SendEmailOutput = z.infer<typeof sendEmailOutputSchema>;

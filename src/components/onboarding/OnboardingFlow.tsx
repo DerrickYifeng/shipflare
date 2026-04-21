@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ExtractedProfile } from '@/types/onboarding';
-import type { StrategicPath, TacticalPlan } from '@/agents/schemas';
+import type { StrategicPath } from '@/tools/schemas';
 import { ProgressRail } from './progress-rail';
 import { MobileHeader } from './mobile-header';
 import { TopChevron } from './top-chevron';
@@ -55,7 +55,6 @@ export interface DraftState {
   launchChannel: LaunchChannel | null;
   usersBucket: UsersBucket | null;
   path: StrategicPath | null;
-  plan: TacticalPlan | null;
   /** Last known source kind. Drives chip in Stage 3 + scanning variant. */
   sourceKind: 'github' | 'url' | 'manual' | 'url-only' | null;
   /** URL typed in Stage 1. Preserved across back-navigation. */
@@ -75,7 +74,6 @@ const INITIAL_DRAFT: DraftState = {
   launchChannel: null,
   usersBucket: null,
   path: null,
-  plan: null,
   sourceKind: null,
   sourceUrl: '',
   sourceRepoFullName: null,
@@ -124,7 +122,6 @@ interface PersistedDraft {
   launchChannel?: LaunchChannel | null;
   usersBucket?: UsersBucket | null;
   previewPath?: StrategicPath | null;
-  previewPlan?: TacticalPlan | null;
 }
 
 // Serialize draft PUTs. The server's read-modify-write is not atomic
@@ -210,7 +207,6 @@ function applyPersistedToDraft(
     launchChannel: persisted.launchChannel ?? existing.launchChannel,
     usersBucket: persisted.usersBucket ?? existing.usersBucket,
     path: persisted.previewPath ?? existing.path,
-    plan: persisted.previewPlan ?? existing.plan,
     sourceKind,
     sourceUrl: persisted.url ?? existing.sourceUrl,
     sourceRepoFullName:
@@ -318,7 +314,6 @@ export function OnboardingFlow({ initialStage }: OnboardingFlowProps = {}) {
         launchChannel: d.launchChannel,
         usersBucket: d.usersBucket,
         previewPath: d.path,
-        previewPlan: d.plan,
       };
       void persistDraft(persisted);
     },
@@ -610,7 +605,6 @@ function StageRouter({
             const next: DraftState = {
               ...draftRef.current,
               path,
-              plan: null,
             };
             updateDraft(next);
             mirrorToRedis(next);
@@ -622,9 +616,8 @@ function StageRouter({
       );
 
     case 'plan': {
-      // Tactical plan (`draft.plan`) is drafted in the background post-commit
-      // and is always null at this point. Only the strategic path is required
-      // to render Stage 7.
+      // Tactical plan items are drafted asynchronously by the team-run
+      // after commit. Stage 7 only needs the strategic path to render.
       if (!draft.path) {
         return (
           <div style={{ padding: 16 }}>
@@ -636,7 +629,6 @@ function StageRouter({
         <StagePlan
           draft={draft}
           path={draft.path}
-          plan={draft.plan}
           connectedChannels={connectedChannels}
           onBack={() => setStage('state')}
           onAboutEdit={(patch) => {
