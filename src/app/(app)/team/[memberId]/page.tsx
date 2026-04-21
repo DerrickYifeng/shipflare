@@ -11,6 +11,8 @@ import {
   ActivityLog,
   type ActivityLogMemberRef,
 } from '../_components/activity-log';
+import { SendMessageForm } from '../_components/send-message-form';
+import { avatarGradientForAgentType } from '../_components/agent-accent';
 import type {
   TeamActivityMessage,
   TeamMessageType,
@@ -48,16 +50,6 @@ const AGENT_ROLE_BLURB: Record<string, string> = {
   'content-planner':
     'Head of Content. Turns the strategic path into a weekly plan of posts and tasks.',
 };
-
-function avatarGradient(seed: string): string {
-  let hash = 0;
-  for (let i = 0; i < seed.length; i += 1) {
-    hash = (hash * 31 + seed.charCodeAt(i)) | 0;
-  }
-  const h1 = Math.abs(hash) % 360;
-  const h2 = (h1 + 48) % 360;
-  return `linear-gradient(135deg, hsl(${h1} 68% 72%), hsl(${h2} 62% 58%))`;
-}
 
 function initials(displayName: string): string {
   const trimmed = displayName.trim();
@@ -195,7 +187,7 @@ export default async function TeamMemberPage({ params }: TeamMemberPageProps) {
     width: 72,
     height: 72,
     borderRadius: 'var(--sf-radius-full)',
-    background: avatarGradient(member.agentType),
+    background: avatarGradientForAgentType(member.agentType),
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -271,6 +263,14 @@ export default async function TeamMemberPage({ params }: TeamMemberPageProps) {
           <p style={blurbStyle}>{blurb}</p>
         </div>
       </header>
+
+      <div style={{ marginBottom: 'var(--sf-space-2xl)' }}>
+        <SendMessageForm
+          teamId={member.teamId}
+          memberId={member.id}
+          recipientName={member.displayName}
+        />
+      </div>
 
       <ActivityLog
         teamId={member.teamId}
