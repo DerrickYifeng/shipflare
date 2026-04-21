@@ -1,0 +1,743 @@
+'use client';
+
+/**
+ * /calendar week-grid against `plan_items`. Reads `/api/calendar?weekStart=`
+ * and renders 7 day columns with item cards. Mobile collapses to a stacked
+ * list of days.
+ *
+ * Today column: accent-bordered header. Today's date is derived locally so
+ * the highlight adapts to the user's browser TZ without a second server
+ * round-trip.
+ */
+
+import { useCallback, useMemo, type CSSProperties } from 'react';
+import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
+import useSWR from 'swr';
+import { HeaderBar } from '@/components/layout/header-bar';
+import { Button } from '@/components/ui/button';
+import { EmptyState } from '@/components/ui/empty-state';
+
+type PlanItemKind =
+  | 'content_post'
+  | 'content_reply'
+  | 'email_send'
+  | 'interview'
+  | 'setup_task'
+  | 'launch_asset'
+  | 'runsheet_beat'
+  | 'metrics_compute'
+  | 'analytics_summary';
+
+type PlanItemState =
+  | 'planned'
+  | 'drafted'
+  | 'ready_for_review'
+  | 'approved'
+  | 'executing'
+  | 'completed'
+  | 'skipped'
+  | 'failed'
+  | 'superseded'
+  | 'stale';
+
+interface CalendarItem {
+  id: string;
+  kind: PlanItemKind;
+  state: PlanItemState;
+  channel: string | null;
+  scheduledAt: string;
+  title: string;
+  description: string | null;
+  phase: string;
+}
+
+interface CalendarDay {
+  date: string;
+  items: CalendarItem[];
+}
+
+interface CalendarResponse {
+  weekStart: string;
+  weekEnd: string;
+  prev: string;
+  next: string;
+  days: CalendarDay[];
+  totals: {
+    scheduled: number;
+    completed: number;
+    skipped: number;
+  };
+}
+
+const fetcher = (url: string): Promise<CalendarResponse> =>
+  fetch(url).then((r) => {
+    if (!r.ok) throw new Error(`Calendar fetch failed (${r.status})`);
+    return r.json() as Promise<CalendarResponse>;
+  });
+
+export function CalendarContent() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const weekStartParam = searchParams?.get('weekStart') ?? '';
+
+  const swrKey = weekStartParam
+    ? `/api/calendar?weekStart=${encodeURIComponent(weekStartParam)}`
+    : '/api/calendar';
+  const { data, error, isLoading } = useSWR<CalendarResponse>(swrKey, fetcher, {
+    refreshInterval: 60_000,
+  });
+
+  const navTo = useCallback(
+    (iso: string) => {
+      const ymd = iso.slice(0, 10);
+      router.push(`/calendar?weekStart=${ymd}`);
+    },
+    [router],
+  );
+
+  const goThisWeek = useCallback(() => {
+    router.push('/calendar');
+  }, [router]);
+
+  // Format label for the header nav. "Apr 14" / "This week" / "Apr 28".
+  const navLabels = useMemo(() => {
+    if (!data) return { prev: '', next: '', current: 'This week' };
+    return {
+      prev: shortMonthDay(data.prev),
+      next: shortMonthDay(data.next),
+      current: weekRangeLabel(data.weekStart, data.weekEnd),
+    };
+  }, [data]);
+
+  const meta = data ? (
+    <MetaLine
+      scheduled={data.totals.scheduled}
+      completed={data.totals.completed}
+      skipped={data.totals.skipped}
+    />
+  ) : null;
+
+  const nav = (
+    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => data && navTo(data.prev)}
+        disabled={!data}
+        aria-label="Previous week"
+      >
+        ← {data ? navLabels.prev : ''}
+      </Button>
+      <Button variant="ghost" size="sm" onClick={goThisWeek}>
+        This week
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => data && navTo(data.next)}
+        disabled={!data}
+        aria-label="Next week"
+      >
+        {data ? navLabels.next : ''} →
+      </Button>
+    </div>
+  );
+
+  if (error) {
+    return (
+      <>
+        <HeaderBar title="Calendar" />
+        <div style={{ padding: '16px clamp(16px, 3vw, 32px)' }}>
+          <EmptyState
+            title="We couldn't load the calendar."
+            hint="Try refreshing — if the problem sticks, ping support."
+          />
+        </div>
+      </>
+    );
+  }
+
+  if (isLoading || !data) {
+    return (
+      <>
+        <HeaderBar title="Calendar" meta={meta} action={nav} />
+        <div
+          style={{
+            padding: '16px clamp(16px, 3vw, 32px) 48px',
+            textAlign: 'center',
+            color: 'var(--sf-fg-4)',
+            fontSize: 13,
+          }}
+        >
+          Loading…
+        </div>
+      </>
+    );
+  }
+
+  const totalItems = data.days.reduce((n, d) => n + d.items.length, 0);
+
+  return (
+    <>
+      <HeaderBar title="Calendar" meta={meta} action={nav} />
+      {totalItems === 0 ? (
+        <EmptyWeek />
+      ) : (
+        <>
+          <DesktopGrid days={data.days} />
+          <MobileStack days={data.days} />
+        </>
+      )}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Desktop 7-column grid
+// ---------------------------------------------------------------------------
+
+function DesktopGrid({ days }: { days: CalendarDay[] }) {
+  return (
+    <div
+      className="calendar-desktop-grid"
+      style={{
+        padding: '0 clamp(16px, 3vw, 32px) 48px',
+        display: 'grid',
+        gridTemplateColumns: 'repeat(7, minmax(0, 1fr))',
+        gap: 12,
+      }}
+    >
+      {days.map((d) => (
+        <DayColumn key={d.date} day={d} />
+      ))}
+      <style>{`
+        @media (max-width: 880px) {
+          .calendar-desktop-grid { display: none !important; }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+function DayColumn({ day }: { day: CalendarDay }) {
+  const today = todayYmdLocal();
+  const isToday = day.date === today;
+  const label = dayColumnLabel(day.date);
+  return (
+    <section
+      style={{
+        background: 'var(--sf-bg-secondary)',
+        borderRadius: 10,
+        padding: 12,
+        border: '1px solid rgba(0,0,0,0.04)',
+        borderLeftWidth: isToday ? 2 : 1,
+        borderLeftColor: isToday ? 'var(--sf-accent)' : 'rgba(0,0,0,0.04)',
+        boxShadow: 'var(--sf-shadow-card)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+        minHeight: 220,
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'baseline',
+          justifyContent: 'space-between',
+          gap: 6,
+          paddingBottom: 8,
+          borderBottom: '1px solid rgba(0,0,0,0.04)',
+        }}
+      >
+        <span
+          style={{
+            fontSize: 11,
+            fontFamily: 'var(--sf-font-mono)',
+            letterSpacing: '-0.08px',
+            textTransform: 'uppercase',
+            color: isToday ? 'var(--sf-accent)' : 'var(--sf-fg-4)',
+            fontWeight: 500,
+          }}
+        >
+          {label.weekday}
+        </span>
+        <span
+          style={{
+            fontSize: 13,
+            fontWeight: 500,
+            color: 'var(--sf-fg-1)',
+            letterSpacing: '-0.12px',
+          }}
+        >
+          {label.day}
+        </span>
+      </div>
+      {day.items.length === 0 ? (
+        <div
+          style={{
+            fontSize: 12,
+            color: 'var(--sf-fg-4)',
+            letterSpacing: '-0.12px',
+            fontStyle: 'italic',
+            padding: '6px 2px',
+          }}
+        >
+          Nothing scheduled · relax
+        </div>
+      ) : (
+        day.items.map((i) => <ItemCard key={i.id} item={i} />)
+      )}
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Mobile stacked list
+// ---------------------------------------------------------------------------
+
+function MobileStack({ days }: { days: CalendarDay[] }) {
+  const today = todayYmdLocal();
+  return (
+    <div
+      className="calendar-mobile-stack"
+      style={{
+        padding: '0 clamp(16px, 3vw, 24px) 48px',
+        display: 'none',
+        flexDirection: 'column',
+        gap: 16,
+      }}
+    >
+      {days.map((d) => {
+        const isToday = d.date === today;
+        const label = dayColumnLabel(d.date);
+        return (
+          <section key={d.date}>
+            <header
+              style={{
+                display: 'flex',
+                alignItems: 'baseline',
+                gap: 8,
+                padding: '0 0 8px 12px',
+                borderLeft: `2px solid ${
+                  isToday ? 'var(--sf-accent)' : 'rgba(0,0,0,0.08)'
+                }`,
+                marginBottom: 4,
+              }}
+            >
+              <span
+                style={{
+                  fontFamily: 'var(--sf-font-mono)',
+                  fontSize: 11,
+                  letterSpacing: '-0.08px',
+                  textTransform: 'uppercase',
+                  color: isToday ? 'var(--sf-accent)' : 'var(--sf-fg-4)',
+                  fontWeight: 500,
+                }}
+              >
+                {label.weekday}
+              </span>
+              <span
+                style={{
+                  fontSize: 15,
+                  fontWeight: 500,
+                  color: 'var(--sf-fg-1)',
+                  letterSpacing: '-0.16px',
+                }}
+              >
+                {label.day}
+              </span>
+            </header>
+            {d.items.length === 0 ? (
+              <div
+                style={{
+                  fontSize: 13,
+                  color: 'var(--sf-fg-4)',
+                  letterSpacing: '-0.12px',
+                  fontStyle: 'italic',
+                  padding: '4px 0 4px 14px',
+                }}
+              >
+                Nothing scheduled · relax
+              </div>
+            ) : (
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 8,
+                }}
+              >
+                {d.items.map((i) => (
+                  <ItemCard key={i.id} item={i} />
+                ))}
+              </div>
+            )}
+          </section>
+        );
+      })}
+      <style>{`
+        @media (max-width: 880px) {
+          .calendar-mobile-stack { display: flex !important; }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Item card
+// ---------------------------------------------------------------------------
+
+function ItemCard({ item }: { item: CalendarItem }) {
+  const kindStyle = kindStyles(item.kind);
+  const stateDot = stateDotStyles(item.state);
+  const dimmed = item.state === 'skipped' || item.state === 'completed';
+  const cardStyle: CSSProperties = {
+    display: 'block',
+    textDecoration: 'none',
+    color: 'inherit',
+    background: 'var(--sf-bg-primary)',
+    borderRadius: 8,
+    padding: '10px 10px 10px 12px',
+    borderLeft: `3px solid ${kindStyle.accent}`,
+    opacity: dimmed ? 0.55 : 1,
+    transition:
+      'transform 150ms cubic-bezier(0.16,1,0.3,1), box-shadow 150ms',
+  };
+  return (
+    <Link
+      href={`/today?highlight=${item.id}`}
+      style={cardStyle}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.transform = 'translateY(-1px)';
+        e.currentTarget.style.boxShadow = 'var(--sf-shadow-card-hover)';
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.transform = 'none';
+        e.currentTarget.style.boxShadow = 'none';
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          fontSize: 10,
+          fontFamily: 'var(--sf-font-mono)',
+          letterSpacing: '-0.08px',
+          textTransform: 'uppercase',
+          color: kindStyle.inkColor,
+          fontWeight: 500,
+        }}
+      >
+        <span>{formatClock(item.scheduledAt)}</span>
+        <span style={{ color: 'rgba(0,0,0,0.2)' }}>·</span>
+        <span>{kindStyle.label}</span>
+        <span style={{ flex: 1 }} />
+        <StateDot spec={stateDot} />
+      </div>
+      <div
+        style={{
+          marginTop: 4,
+          fontSize: 13,
+          fontWeight: 500,
+          color: 'var(--sf-fg-1)',
+          letterSpacing: '-0.12px',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {item.title}
+      </div>
+      {item.channel && !isManualKind(item.kind) && (
+        <span
+          style={{
+            display: 'inline-block',
+            marginTop: 6,
+            padding: '1px 6px',
+            borderRadius: 4,
+            background: 'rgba(0,0,0,0.05)',
+            color: 'var(--sf-fg-3)',
+            fontSize: 10,
+            fontFamily: 'var(--sf-font-mono)',
+            letterSpacing: '-0.08px',
+            textTransform: 'uppercase',
+            fontWeight: 500,
+          }}
+        >
+          {channelLabel(item.channel)}
+        </span>
+      )}
+    </Link>
+  );
+}
+
+function StateDot({
+  spec,
+}: {
+  spec: { color: string; fill: 'solid' | 'ring' | 'pulse' };
+}) {
+  if (spec.fill === 'ring') {
+    return (
+      <span
+        aria-hidden
+        style={{
+          width: 8,
+          height: 8,
+          borderRadius: '50%',
+          border: `1.5px solid ${spec.color}`,
+          display: 'inline-block',
+          flexShrink: 0,
+        }}
+      />
+    );
+  }
+  if (spec.fill === 'pulse') {
+    return (
+      <span
+        aria-hidden
+        style={{
+          width: 8,
+          height: 8,
+          borderRadius: '50%',
+          background: spec.color,
+          boxShadow: `0 0 0 3px ${spec.color}22`,
+          animation: 'sf-pulse 1.5s cubic-bezier(0.4,0,0.6,1) infinite',
+          flexShrink: 0,
+        }}
+      />
+    );
+  }
+  return (
+    <span
+      aria-hidden
+      style={{
+        width: 8,
+        height: 8,
+        borderRadius: '50%',
+        background: spec.color,
+        flexShrink: 0,
+      }}
+    />
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Empty week
+// ---------------------------------------------------------------------------
+
+function EmptyWeek() {
+  return (
+    <div
+      style={{
+        padding: '24px clamp(16px, 3vw, 32px) 48px',
+      }}
+    >
+      <EmptyState
+        title="No items this week."
+        hint="Re-plan from /settings to regenerate your week."
+        action={
+          <Link
+            href="/settings"
+            style={{
+              fontSize: 13,
+              color: 'var(--sf-accent)',
+              letterSpacing: '-0.12px',
+              textDecoration: 'underline',
+            }}
+          >
+            Go to Settings
+          </Link>
+        }
+      />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Small helpers
+// ---------------------------------------------------------------------------
+
+interface KindStyle {
+  label: string;
+  accent: string;
+  inkColor: string;
+}
+
+function kindStyles(k: PlanItemKind): KindStyle {
+  switch (k) {
+    case 'content_post':
+      return {
+        label: 'Post',
+        accent: 'var(--sf-accent)',
+        inkColor: 'var(--sf-link)',
+      };
+    case 'content_reply':
+      return {
+        label: 'Reply',
+        accent: 'var(--sf-accent-light)',
+        inkColor: 'var(--sf-link)',
+      };
+    case 'email_send':
+      return {
+        label: 'Email',
+        accent: 'var(--sf-success)',
+        inkColor: 'var(--sf-success-ink)',
+      };
+    case 'interview':
+      return {
+        label: 'Interview',
+        accent: 'var(--sf-fg-3)',
+        inkColor: 'var(--sf-fg-3)',
+      };
+    case 'setup_task':
+      return {
+        label: 'Setup',
+        accent: 'var(--sf-fg-3)',
+        inkColor: 'var(--sf-fg-3)',
+      };
+    case 'launch_asset':
+      return {
+        label: 'Launch',
+        accent: 'var(--sf-warning-ink)',
+        inkColor: 'var(--sf-warning-ink)',
+      };
+    case 'runsheet_beat':
+      return {
+        label: 'Runsheet',
+        accent: 'var(--sf-warning-ink)',
+        inkColor: 'var(--sf-warning-ink)',
+      };
+    case 'metrics_compute':
+      return {
+        label: 'Metrics',
+        accent: 'var(--sf-fg-4)',
+        inkColor: 'var(--sf-fg-4)',
+      };
+    case 'analytics_summary':
+      return {
+        label: 'Summary',
+        accent: 'var(--sf-fg-4)',
+        inkColor: 'var(--sf-fg-4)',
+      };
+  }
+}
+
+function stateDotStyles(s: PlanItemState): {
+  color: string;
+  fill: 'solid' | 'ring' | 'pulse';
+} {
+  switch (s) {
+    case 'ready_for_review':
+      return { color: 'var(--sf-accent)', fill: 'pulse' };
+    case 'approved':
+    case 'executing':
+      return { color: 'var(--sf-accent)', fill: 'solid' };
+    case 'drafted':
+      return { color: 'var(--sf-accent)', fill: 'ring' };
+    case 'completed':
+      return { color: 'var(--sf-success)', fill: 'solid' };
+    case 'skipped':
+      return { color: 'rgba(0,0,0,0.32)', fill: 'ring' };
+    case 'failed':
+      return { color: 'var(--sf-error)', fill: 'solid' };
+    case 'planned':
+    case 'superseded':
+    case 'stale':
+      return { color: 'rgba(0,0,0,0.24)', fill: 'ring' };
+  }
+}
+
+function isManualKind(k: PlanItemKind): boolean {
+  return k === 'interview' || k === 'setup_task' || k === 'runsheet_beat';
+}
+
+function channelLabel(channel: string): string {
+  if (channel === 'x') return 'X';
+  if (channel === 'reddit') return 'Reddit';
+  if (channel === 'email') return 'Email';
+  return channel;
+}
+
+function formatClock(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleTimeString(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+}
+
+function shortMonthDay(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+function weekRangeLabel(start: string, end: string): string {
+  const s = new Date(start);
+  const e = new Date(new Date(end).getTime() - 1);
+  const fmt: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' };
+  return `${s.toLocaleDateString(undefined, fmt)} – ${e.toLocaleDateString(undefined, fmt)}`;
+}
+
+function dayColumnLabel(ymd: string): { weekday: string; day: string } {
+  // Parse as UTC so the TZ offset doesn't shift the column by a day for
+  // users right around midnight.
+  const d = new Date(`${ymd}T00:00:00Z`);
+  const weekday = d.toLocaleDateString(undefined, {
+    weekday: 'short',
+    timeZone: 'UTC',
+  });
+  const day = d.toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+  });
+  return { weekday, day };
+}
+
+function todayYmdLocal(): string {
+  const n = new Date();
+  const y = n.getUTCFullYear();
+  const m = String(n.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(n.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function MetaLine({
+  scheduled,
+  completed,
+  skipped,
+}: {
+  scheduled: number;
+  completed: number;
+  skipped: number;
+}) {
+  const sep = (
+    <span
+      aria-hidden
+      style={{ margin: '0 6px', color: 'var(--sf-fg-4)' }}
+    >
+      ·
+    </span>
+  );
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        flexWrap: 'wrap',
+      }}
+    >
+      <span style={{ color: 'var(--sf-fg-2)', fontWeight: 500 }}>
+        {scheduled} scheduled
+      </span>
+      {sep}
+      <span>{completed} completed</span>
+      {sep}
+      <span>{skipped} skipped</span>
+    </span>
+  );
+}
