@@ -21,6 +21,7 @@ import {
 } from '@/lib/db/schema';
 import { createPubSubSubscriber, getPubSubPublisher } from '@/lib/redis';
 import { runAgent } from '@/core/query-loop';
+import { maybeEmitBudgetWarning } from '@/lib/team-budget';
 import { buildAgentConfigFromDefinition } from '@/tools/AgentTool/spawn';
 import { resolveAgent } from '@/tools/AgentTool/registry';
 import { getAgentOutputSchema } from '@/tools/AgentTool/agent-schemas';
@@ -33,6 +34,18 @@ import type { ToolContext, StreamEvent } from '@/core/types';
 import type { TeamRunJobData } from '@/lib/queue/team-run';
 
 const baseLog = createLogger('worker:team-run');
+
+// ---------------------------------------------------------------------------
+// Observability thresholds (Phase G Day 1)
+// ---------------------------------------------------------------------------
+
+/**
+ * Runs exceeding this duration emit a `team-run-slow` observability alert
+ * at completion. Sentry integration is stubbed via structured logs for
+ * now; switching to @sentry/nextjs is a one-line replacement in
+ * `emitSlowRunAlert`.
+ */
+export const SLOW_RUN_THRESHOLD_MS = 5 * 60 * 1000;
 
 // ---------------------------------------------------------------------------
 // Concurrency (read by src/workers/index.ts when wiring the Worker instance)
@@ -241,9 +254,10 @@ export async function processTeamRunInternal(
   // The partial unique index on (team_id) WHERE status='running' will reject a
   // parallel run for the same team — in that case we surface the failure so
   // BullMQ can mark the job failed (no retry, attempts=1).
+  const runStartedAt = new Date();
   await deps.db
     .update(teamRuns)
-    .set({ status: 'running', startedAt: new Date() })
+    .set({ status: 'running', startedAt: runStartedAt })
     .where(eq(teamRuns.id, runId));
 
   // --- 4) Load team + members ---
@@ -425,19 +439,57 @@ export async function processTeamRunInternal(
       },
     });
 
+    const completedAt = new Date();
+    const startedAtMs = runStartedAt.getTime();
+    const durationMs = completedAt.getTime() - startedAtMs;
+
     await deps.db
       .update(teamRuns)
       .set({
         status: 'completed',
-        completedAt: new Date(),
+        completedAt,
         totalCostUsd: String(result.usage.costUsd),
         totalTurns: result.usage.turns,
       })
       .where(eq(teamRuns.id, runId));
 
     logLine(
-      `team-run ${runId}: completed (cost=$${result.usage.costUsd.toFixed(4)}, turns=${result.usage.turns})`,
+      `team-run ${runId}: completed (cost=$${result.usage.costUsd.toFixed(4)}, turns=${result.usage.turns}, duration=${durationMs}ms)`,
     );
+
+    // Phase G Day 1: slow-run alert. Run durations over the threshold emit
+    // a structured observability log that a Sentry integration can tail on.
+    if (durationMs >= SLOW_RUN_THRESHOLD_MS) {
+      baseLog.warn(
+        `observability:slow-run team=${team.id} run=${runId} ` +
+          `durationMs=${durationMs} thresholdMs=${SLOW_RUN_THRESHOLD_MS} ` +
+          `cost=$${result.usage.costUsd.toFixed(4)} turns=${result.usage.turns}`,
+      );
+    }
+
+    // Structured-output retry alert (spec §11 Phase G Day 1). The
+    // query-loop reports per-turn retry counts on usage; surface as
+    // observability signal when a run accumulated 3+ retries — a prompt-
+    // tuning smell.
+    const retryCount = (result.usage as unknown as { structuredOutputRetries?: number })
+      .structuredOutputRetries;
+    if (typeof retryCount === 'number' && retryCount >= 3) {
+      baseLog.warn(
+        `observability:structured-output-retries team=${team.id} run=${runId} retries=${retryCount}`,
+      );
+    }
+
+    // Phase G Day 2: after every completed run, check whether the team
+    // has crossed the 90% weekly budget threshold. Emits at most once per
+    // (team, week) via Redis dedupe; the sink defaults to a structured
+    // observability log until email infra ships.
+    try {
+      await maybeEmitBudgetWarning(team.id, deps.db);
+    } catch (err) {
+      baseLog.warn(
+        `budget warning check failed for team=${team.id}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await recordMessage(deps, {

@@ -22,6 +22,7 @@ import {
   spawnSubagent,
   type SpawnCallbacks,
 } from './spawn';
+import { teamHasBudgetRemaining } from '@/lib/team-budget';
 
 const log = createLogger('tools:Task');
 
@@ -282,6 +283,22 @@ export const taskTool: ToolDefinition<TaskInput, TaskResult> = buildTool({
           `Restructure the work so the specialist returns results to an earlier link in the chain ` +
           `instead of spawning deeper.`,
       );
+    }
+
+    // Phase G Day 2: refuse to spawn once the team's weekly budget is
+    // exhausted. Checked before resolve/record so budget-capped runs don't
+    // leave partial team_tasks rows behind. Allow query_* / add_plan_item /
+    // SendMessage to continue so the coordinator can still summarize.
+    const { db: budgetDb, teamId: budgetTeamId } = readTeamDeps(ctx);
+    if (budgetDb && budgetTeamId) {
+      const hasBudget = await teamHasBudgetRemaining(budgetTeamId, budgetDb);
+      if (!hasBudget) {
+        throw new Error(
+          `Task: team weekly budget reached. Budget resets Monday 00:00 UTC. ` +
+            `Refusing to spawn "${input.subagent_type}". ` +
+            `Summarize remaining work via text or SendMessage instead.`,
+        );
+      }
     }
 
     const agent = await resolveAgent(input.subagent_type);
