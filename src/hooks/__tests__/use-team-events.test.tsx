@@ -43,7 +43,6 @@ describe('useTeamEvents', () => {
   });
 
   afterEach(() => {
-    // @ts-expect-error — restore
     globalThis.EventSource = OriginalEventSource;
   });
 

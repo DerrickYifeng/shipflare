@@ -306,8 +306,13 @@ export function useTeamEvents({
     function scheduleReconnect(): void {
       if (!mountedRef.current) return;
       setReconnecting(true);
-      const delay = backoffRef.current;
-      backoffRef.current = Math.min(delay * 2, MAX_BACKOFF_MS);
+      const base = backoffRef.current;
+      backoffRef.current = Math.min(base * 2, MAX_BACKOFF_MS);
+      // Add ±25% jitter so many simultaneously-disconnected clients (e.g.
+      // after a deploy that bounces the SSE process) don't retry in a
+      // synchronized thundering herd.
+      const jitter = base * (Math.random() * 0.5 - 0.25);
+      const delay = Math.max(250, Math.floor(base + jitter));
       if (reconnectTimerRef.current !== null) {
         clearTimeout(reconnectTimerRef.current);
       }
