@@ -1,13 +1,10 @@
-import { join } from 'node:path';
 import { and, eq, gte, lt, inArray, ne, sql } from 'drizzle-orm';
 import { db } from '@/lib/db';
-import { planItems, products, strategicPaths, plans } from '@/lib/db/schema';
-import { loadSkill } from '@/core/skill-loader';
-import { runSkill } from '@/core/skill-runner';
-import { SKILL_CATALOG } from '@/skills/_catalog';
-import { tacticalPlanSchema, type TacticalPlan } from '@/agents/schemas';
+import { planItems, products, strategicPaths } from '@/lib/db/schema';
 import { derivePhase, type ProductState } from '@/lib/launch-phase';
 import { getUserChannels } from '@/lib/user-channels';
+import { ensureTeamExists } from '@/lib/team-provisioner';
+import { enqueueTeamRun } from '@/lib/queue/team-run';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('lib:re-plan');
@@ -24,8 +21,8 @@ const log = createLogger('lib:re-plan');
  * superseded — the founder is committed to them, so the planner
  * doesn't get to reshuffle them mid-week.
  *
- * The caller runs this BEFORE inserting the new plan's items so the
- * 7-day window is cleaned out in one pass. Returns the count of rows
+ * The caller runs this BEFORE enqueuing the team-run so the 7-day
+ * window is cleaned out in one pass. Returns the count of rows
  * marked.
  *
  * Idempotent: calling twice with the same args has no additional
@@ -90,8 +87,8 @@ export async function supersedePlanItems(
  * Different from tactical: it deactivates ALL active strategic paths
  * for the user (there should only be one, but the uniqueness
  * constraint is partial so we defensively scan) and supersedes every
- * pre-approval plan_item regardless of window. The caller then runs
- * strategic-planner + tactical-planner to rebuild.
+ * pre-approval plan_item regardless of window. The caller then
+ * enqueues a team-run with trigger='phase_transition' to rebuild.
  *
  * This is the "phase change" / "launch date change" path. Accept the
  * cost of resetting the whole pipeline; it's infrequent.
@@ -121,27 +118,41 @@ export async function supersedeForStrategicReplan(
 // ---------------------------------------------------------------------------
 // Tactical replan — shared between POST /api/plan/replan and the Monday
 // weekly-replan cron processor. Callers choose the `trigger` value
-// (`manual` vs `cron`) for the plans row.
+// (`manual` vs `weekly`) for the team_runs row.
+//
+// Phase C: the legacy skill-runner path (runSkill(tactical-planner) inside a
+// supersede+insert transaction) is gone. The tactical replan now:
+//   1. Reads the active strategic path (still required — we surface
+//      `no_active_path` if the user hasn't committed one yet).
+//   2. Intersects channelMix with currently-connected channels.
+//   3. Supersedes the week's pre-approval items (still synchronous — we want
+//      the /today UI to clear stale items the moment the replan button fires).
+//   4. Enqueues a team_run; the coordinator delegates to content-planner which
+//      writes new plan_items via add_plan_item.
+//
+// The call returns AFTER the enqueue, NOT after the team-run completes.
+// Callers (both the API route and the cron) rely on the existing team-run
+// SSE / observability path for progress. Drops the `plan` field and the
+// `planner_timeout` soft-fail code from the legacy shape — the team-run is
+// async and cannot synthesize a terminal TacticalPlan object.
 // ---------------------------------------------------------------------------
 
-const PLAN_TIMEOUT_MS = 45_000;
+export type ReplanTrigger = 'manual' | 'weekly';
 
-const tacticalSkillLazy = (() => {
-  let cached: ReturnType<typeof loadSkill> | null = null;
-  return () => {
-    if (!cached) {
-      cached = loadSkill(join(process.cwd(), 'src/skills/tactical-planner'));
+export type ReplanResult =
+  | {
+      ok: true;
+      runId: string;
+      itemsSuperseded: number;
     }
-    return cached;
-  };
-})();
-
-const catalogProjection = SKILL_CATALOG.map((s) => ({
-  name: s.name,
-  description: s.description,
-  supportedKinds: [...s.supportedKinds],
-  ...(s.channels ? { channels: [...s.channels] } : {}),
-}));
+  | {
+      ok: false;
+      code:
+        | 'no_active_path'
+        | 'no_channels_in_path'
+        | 'team_run_enqueue_failed';
+      detail?: string;
+    };
 
 function weekBounds(now: Date): { weekStart: Date; weekEnd: Date } {
   const d = new Date(now);
@@ -154,24 +165,13 @@ function weekBounds(now: Date): { weekStart: Date; weekEnd: Date } {
   return { weekStart, weekEnd };
 }
 
-export type ReplanTrigger = 'manual' | 'weekly';
-
-export type ReplanResult =
-  | {
-      ok: true;
-      plan: TacticalPlan;
-      itemsInserted: number;
-      itemsSuperseded: number;
-    }
-  | { ok: false; code: 'no_active_path' | 'no_channels_in_path' | 'planner_timeout' | 'planner_failed'; detail?: string };
-
 /**
- * Load the user's product + active strategic path, run the tactical
- * planner, and atomically supersede + insert the week's items.
+ * Load the user's product + active strategic path, supersede the week's
+ * pre-approval items, and enqueue a team-run to produce the new items.
  *
  * Shared between:
  *   - POST /api/plan/replan (trigger='manual', user-initiated)
- *   - workers/processors/weekly-replan.ts (trigger='cron', Monday 00:00 UTC)
+ *   - workers/processors/weekly-replan.ts (trigger='weekly', Monday 00:00 UTC)
  *
  * Does NOT acquire a lock — callers handle deduplication: the API route
  * via the request rate limit, the cron via the per-(user, week) Redis lock.
@@ -184,17 +184,10 @@ export async function runTacticalReplan(
     .select({
       productId: products.id,
       productName: products.name,
-      productValueProp: products.valueProp,
       state: products.state,
       launchDate: products.launchDate,
       launchedAt: products.launchedAt,
-      pathId: strategicPaths.id,
-      pathNarrative: strategicPaths.narrative,
-      pathMilestones: strategicPaths.milestones,
-      pathThesisArc: strategicPaths.thesisArc,
-      pathContentPillars: strategicPaths.contentPillars,
       pathChannelMix: strategicPaths.channelMix,
-      pathPhaseGoals: strategicPaths.phaseGoals,
     })
     .from(products)
     .innerJoin(
@@ -217,38 +210,12 @@ export async function runTacticalReplan(
   });
   const { weekStart, weekEnd } = weekBounds(new Date());
 
-  const weekRows = await db
-    .select({
-      kind: planItems.kind,
-      state: planItems.state,
-      userAction: planItems.userAction,
-      title: planItems.title,
-    })
-    .from(planItems)
-    .where(
-      and(
-        eq(planItems.userId, userId),
-        gte(planItems.scheduledAt, weekStart),
-        lt(planItems.scheduledAt, weekEnd),
-      ),
-    );
-
-  const completedLastWeek = weekRows
-    .filter((r) => r.state === 'completed')
-    .map((r) => ({ title: r.title, kind: r.kind }));
-  const stalledItems = weekRows
-    .filter((r) => r.state === 'stale' || r.state === 'failed')
-    .map((r) => ({ title: r.title, kind: r.kind }));
-  const currentLaunchTasks = weekRows
-    .filter((r) => r.userAction === 'manual' && r.state !== 'completed')
-    .map((r) => ({ title: r.title, kind: r.kind }));
-
-  // Intersect the strategic path's channelMix (the plan's intended channels)
-  // with the user's currently-connected channels. If the user disconnected
-  // a channel in Settings after the plan was written, it's no longer
-  // executable — the planner shouldn't produce plan_items for it on replan.
-  // Email is an exception: it doesn't live in the `channels` table (no
-  // OAuth), so we keep it whenever the path's channelMix lists it.
+  // Intersect the strategic path's channelMix (the plan's intended
+  // channels) with the user's currently-connected channels. If the user
+  // disconnected a channel in Settings after the plan was written, it's
+  // no longer executable — the planner shouldn't produce plan_items for
+  // it. Email is an exception: it doesn't live in the `channels` table
+  // (no OAuth), so we keep it whenever the path's channelMix lists it.
   const channelMix = row.pathChannelMix as Record<string, unknown> | null;
   const connected = new Set(await getUserChannels(userId));
   const channels: Array<'x' | 'reddit' | 'email'> = [];
@@ -264,134 +231,44 @@ export async function runTacticalReplan(
     `replan start user=${userId} trigger=${trigger} phase=${currentPhase} channels=[${channels.join(',')}] weekStart=${weekStart.toISOString()}`,
   );
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), PLAN_TIMEOUT_MS);
+  // Supersede the week's pre-approval items up front so the Today UI clears
+  // stale entries the moment the replan button fires. The team-run writes
+  // new items on its own timeline.
+  const itemsSuperseded = await supersedePlanItems({
+    userId,
+    windowStart: weekStart,
+    windowEnd: weekEnd,
+  });
 
-  let plan: TacticalPlan;
+  // Ensure the team exists (idempotent) and enqueue a team-run. The
+  // coordinator's goal prompt seeds the delegation to content-planner.
+  let runId: string;
   try {
-    const res = await Promise.race([
-      runSkill<TacticalPlan>({
-        skill: tacticalSkillLazy(),
-        input: {
-          strategicPath: {
-            narrative: row.pathNarrative,
-            thesisArc: row.pathThesisArc,
-            contentPillars: row.pathContentPillars,
-            channelMix: row.pathChannelMix,
-            phaseGoals: row.pathPhaseGoals,
-            milestones: row.pathMilestones,
-          },
-          product: {
-            name: row.productName,
-            valueProp: row.productValueProp,
-            currentPhase,
-            state,
-            launchDate: row.launchDate ? row.launchDate.toISOString() : null,
-            launchedAt: row.launchedAt ? row.launchedAt.toISOString() : null,
-          },
-          channels,
-          weekStart: weekStart.toISOString(),
-          weekEnd: weekEnd.toISOString(),
-          signals: {
-            recentMilestones: [],
-            recentMetrics: [],
-            stalledItems,
-            completedLastWeek,
-            currentLaunchTasks,
-          },
-          skillCatalog: catalogProjection,
-          voiceBlock: null,
-        },
-        outputSchema: tacticalPlanSchema,
-      }),
-      new Promise<never>((_, reject) => {
-        controller.signal.addEventListener('abort', () =>
-          reject(new Error('planner_timeout')),
-        );
-      }),
-    ]);
-    clearTimeout(timeoutId);
-    if (res.errors.length > 0) {
-      return {
-        ok: false,
-        code: 'planner_failed',
-        detail: `tactical-planner error: ${res.errors.map((e) => e.error).join('; ')}`,
-      };
-    }
-    const maybePlan = res.results[0];
-    if (!maybePlan) {
-      return { ok: false, code: 'planner_failed', detail: 'no plan result' };
-    }
-    plan = maybePlan;
-  } catch (err) {
-    clearTimeout(timeoutId);
-    const message = err instanceof Error ? err.message : String(err);
-    if (message === 'planner_timeout') {
-      return { ok: false, code: 'planner_timeout' };
-    }
-    return { ok: false, code: 'planner_failed', detail: message };
-  }
+    const { teamId, memberIds } = await ensureTeamExists(userId, row.productId);
+    const goal =
+      `Re-plan week ${weekStart.toISOString().slice(0, 10)} for ${row.productName}. ` +
+      `State: ${state}. Phase: ${currentPhase}. ` +
+      `Channels: ${channels.join(', ')}. ` +
+      (trigger === 'weekly'
+        ? 'Monday cron replan — produce fresh plan_items for the coming 7 days.'
+        : 'Manual replan — previous week items have been superseded; produce fresh plan_items for the coming 7 days.');
 
-  let itemsInserted = 0;
-  let itemsSuperseded = 0;
-  try {
-    await db.transaction(async (tx) => {
-      const superseded = await tx
-        .update(planItems)
-        .set({ state: 'superseded' })
-        .where(
-          and(
-            eq(planItems.userId, userId),
-            gte(planItems.scheduledAt, weekStart),
-            lt(planItems.scheduledAt, weekEnd),
-            inArray(planItems.state, ['planned', 'drafted', 'ready_for_review']),
-            ne(planItems.userAction, 'manual'),
-          ),
-        )
-        .returning({ id: planItems.id });
-      itemsSuperseded = superseded.length;
-
-      const [planRow] = await tx
-        .insert(plans)
-        .values({
-          userId,
-          productId: row.productId,
-          strategicPathId: row.pathId,
-          trigger,
-          weekStart,
-          notes: plan.plan.notes,
-        })
-        .returning({ id: plans.id });
-      const planId = planRow.id;
-
-      if (plan.items.length > 0) {
-        await tx.insert(planItems).values(
-          plan.items.map((item) => ({
-            userId,
-            productId: row.productId,
-            planId,
-            kind: item.kind,
-            userAction: item.userAction,
-            phase: item.phase,
-            channel: item.channel ?? null,
-            scheduledAt: new Date(item.scheduledAt),
-            skillName: item.skillName ?? null,
-            params: item.params,
-            title: item.title,
-            description: item.description ?? null,
-          })),
-        );
-        itemsInserted = plan.items.length;
-      }
+    const enqueued = await enqueueTeamRun({
+      teamId,
+      trigger: trigger === 'weekly' ? 'weekly' : 'manual',
+      goal,
+      rootMemberId: memberIds.coordinator,
     });
+    runId = enqueued.runId;
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return { ok: false, code: 'planner_failed', detail: `tx_failed: ${message}` };
+    const detail = err instanceof Error ? err.message : String(err);
+    log.error(`replan enqueue failed user=${userId}: ${detail}`);
+    return { ok: false, code: 'team_run_enqueue_failed', detail };
   }
 
   log.info(
-    `replan done user=${userId} trigger=${trigger} inserted=${itemsInserted} superseded=${itemsSuperseded}`,
+    `replan enqueued user=${userId} trigger=${trigger} runId=${runId} superseded=${itemsSuperseded}`,
   );
 
-  return { ok: true, plan, itemsInserted, itemsSuperseded };
+  return { ok: true, runId, itemsSuperseded };
 }

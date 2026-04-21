@@ -71,10 +71,9 @@ export async function processWeeklyReplan(
     `weekly replan: ${activePaths.length} users with active strategic paths (week=${wkKey})`,
   );
 
-  let ran = 0;
+  let enqueued = 0;
   let lockSkipped = 0;
   let failed = 0;
-  let totalInserted = 0;
   let totalSuperseded = 0;
 
   for (const p of activePaths) {
@@ -88,6 +87,10 @@ export async function processWeeklyReplan(
     }
 
     try {
+      // Phase C: runTacticalReplan now enqueues a team-run and returns
+      // immediately. Items land asynchronously via the coordinator's
+      // add_plan_item tool_calls. The cron's success metric is "the
+      // replan was enqueued", not "the new plan_items are written".
       const result = await runTacticalReplan(p.userId, 'weekly');
       if (!result.ok) {
         failed++;
@@ -96,11 +99,10 @@ export async function processWeeklyReplan(
         );
         continue;
       }
-      ran++;
-      totalInserted += result.itemsInserted;
+      enqueued++;
       totalSuperseded += result.itemsSuperseded;
       jlog.info(
-        `weekly replan user=${p.userId} inserted=${result.itemsInserted} superseded=${result.itemsSuperseded}`,
+        `weekly replan user=${p.userId} runId=${result.runId} superseded=${result.itemsSuperseded}`,
       );
     } catch (err) {
       // Don't let one user's bad data abort the cron. Log and move on.
@@ -111,7 +113,7 @@ export async function processWeeklyReplan(
   }
 
   jlog.info(
-    `weekly replan complete: ran=${ran} failed=${failed} lockSkipped=${lockSkipped} inserted=${totalInserted} superseded=${totalSuperseded}`,
+    `weekly replan complete: enqueued=${enqueued} failed=${failed} lockSkipped=${lockSkipped} superseded=${totalSuperseded}`,
   );
 }
 

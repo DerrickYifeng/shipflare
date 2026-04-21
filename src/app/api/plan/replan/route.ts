@@ -83,12 +83,6 @@ export async function POST(request: NextRequest): Promise<Response> {
         { status: 400, headers: { 'x-trace-id': traceId } },
       );
     }
-    if (result.code === 'planner_timeout') {
-      return NextResponse.json(
-        { error: 'planner_timeout' },
-        { status: 504, headers: { 'x-trace-id': traceId } },
-      );
-    }
     log.error(`replan failed user=${userId}: ${result.detail ?? 'unknown'}`);
     return NextResponse.json(
       { error: 'replan_failed', detail: result.detail },
@@ -96,10 +90,14 @@ export async function POST(request: NextRequest): Promise<Response> {
     );
   }
 
+  // Phase C: the team-run is async. We return the runId so the client
+  // can subscribe to /api/team/events for progress; plan_items land via
+  // add_plan_item tool_calls as the coordinator runs. Drop the legacy
+  // `plan` field (terminal TacticalPlan object) — it doesn't exist in
+  // the team-run shape.
   return NextResponse.json(
     {
-      plan: result.plan,
-      itemsInserted: result.itemsInserted,
+      runId: result.runId,
       itemsSuperseded: result.itemsSuperseded,
     },
     { headers: { 'x-trace-id': traceId } },
