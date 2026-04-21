@@ -128,6 +128,52 @@ Your output MUST validate against `strategicPathSchema` in
 `src/agents/schemas.ts`. Emit JSON only — no prose, no explanations
 outside the schema.
 
+**Exact shape** (copy these key names verbatim — the caller parses
+with Zod and rejects any deviation):
+
+```json
+{
+  "narrative": "Two or three paragraphs, 200-2400 chars...",
+  "milestones": [
+    { "atDayOffset": -28, "title": "200 waitlist signups",
+      "successMetric": "waitlist count >= 200", "phase": "audience" },
+    { "atDayOffset": 0, "title": "Ship Hacker News Show HN",
+      "successMetric": "Show HN post goes live on launch day",
+      "phase": "launch" }
+  ],
+  "thesisArc": [
+    { "weekStart": "2026-05-04T00:00:00.000Z",
+      "theme": "Why indie devs waste 6h/week on PR review",
+      "angleMix": ["data", "contrarian", "howto"] }
+  ],
+  "contentPillars": ["build-in-public", "tooling-counterfactuals",
+                     "solo-dev-ops"],
+  "channelMix": {
+    "x":      { "perWeek": 4, "preferredHours": [14, 17, 21] },
+    "reddit": { "perWeek": 2, "preferredHours": [15, 19],
+                "preferredCommunities": ["r/SideProject",
+                                         "r/indiehackers"] }
+  },
+  "phaseGoals": {
+    "audience": "Grow from 50 → 500 waitlist by end of window",
+    "launch":   "Top 5 on Product Hunt for the day"
+  }
+}
+```
+
+Three shape-critical rules the LLM often gets wrong:
+
+1. **`milestones` entries are objects with `atDayOffset` (signed int)
+   and `phase` (enum) — NOT `day` / `stage` / any other name.** All four
+   fields (`atDayOffset`, `title`, `successMetric`, `phase`) are
+   required.
+2. **`channelMix` is an OBJECT keyed by channel name, not an array.**
+   `{ "x": {...}, "reddit": {...} }`, never
+   `[{ "channel": "x", ... }]`. Omit channels that aren't in the input
+   `channels` array.
+3. **`phaseGoals` is an OBJECT keyed by phase name.** Same pattern as
+   channelMix.
+
 ## Hard rules
 
 - NEVER output fewer than 3 content pillars.
