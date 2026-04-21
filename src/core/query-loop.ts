@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { z } from 'zod';
+import { zodToJsonSchema } from 'zod-to-json-schema';
 import type {
   AgentConfig,
   AgentResult,
@@ -65,6 +66,34 @@ export async function queryLoop<T>(params: QueryParams): Promise<{ output: T; tr
     log.debug(`Turn ${turn}/${maxTurns} starting`);
     onEvent?.({ type: 'turn_start', turn });
 
+    // Hand the API a grammar-compilable JSON schema when we have an
+    // expected output shape. Claude's structured-outputs feature forces
+    // the generator to emit tokens that validate against this schema —
+    // no more JSON-parse errors, missing enum values, or drifted field
+    // names. Zod validation below is kept as a belt-and-suspenders check
+    // (free; the object is already compliant when this feature is on).
+    //
+    // zodToJsonSchema can emit constructs Anthropic doesn't support
+    // (minLength/maxLength/minItems>1/regex/additionalProperties:true).
+    // See docs — the TS SDK doesn't strip these on raw messages.stream()
+    // calls, so we rely on Anthropic returning a 400 at schema-compile
+    // time if we drift, and fall back to prompt-level JSON parsing.
+    let jsonSchemaForOutput: Record<string, unknown> | undefined;
+    if (outputSchema && tools.length === 0) {
+      // Structured outputs is currently applied only when tools are
+      // absent — our agents either run tools (chain-of-thought tool
+      // use) or emit terminal JSON. The planner agents are the latter.
+      try {
+        jsonSchemaForOutput = zodToJsonSchema(outputSchema, {
+          target: 'jsonSchema2019-09',
+          $refStrategy: 'none',
+        }) as Record<string, unknown>;
+      } catch (err) {
+        log.warn(
+          `zodToJsonSchema failed — falling back to prompt-level validation: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
     const { response, usage } = await createMessage({
       model,
       system: systemPrompt,
@@ -72,6 +101,7 @@ export async function queryLoop<T>(params: QueryParams): Promise<{ output: T; tr
       tools: anthropicTools.length > 0 ? anthropicTools : undefined,
       maxTokens: currentMaxTokens,
       promptCaching,
+      outputSchema: jsonSchemaForOutput,
       signal: abortSignal,
     });
 
@@ -187,6 +217,25 @@ export async function runAgent<T>(
     { role: 'user', content: userMessage },
   ];
 
+  // Structured outputs: only applied when the agent has no tools. Agents
+  // that call tools produce tool_use blocks, not terminal JSON, so the
+  // grammar constraint doesn't apply. Agents that emit terminal JSON
+  // (planners, classifiers) get their Zod schema compiled to a JSON
+  // schema the API grammar-constrains output to.
+  let jsonSchemaForOutput: Record<string, unknown> | undefined;
+  if (outputSchema && anthropicTools.length === 0) {
+    try {
+      jsonSchemaForOutput = zodToJsonSchema(outputSchema, {
+        target: 'jsonSchema2019-09',
+        $refStrategy: 'none',
+      }) as Record<string, unknown>;
+    } catch (err) {
+      log.warn(
+        `zodToJsonSchema failed for agent "${config.name}" — prompt-level fallback: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
   const tracker = new UsageTracker();
   let currentMaxTokens = 16_384;
 
@@ -206,6 +255,7 @@ export async function runAgent<T>(
       tools: anthropicTools.length > 0 ? anthropicTools : undefined,
       maxTokens: currentMaxTokens,
       promptCaching: true,
+      outputSchema: jsonSchemaForOutput,
       signal: context.abortSignal,
       systemBlocks: prebuilt?.systemBlocks,
     });
