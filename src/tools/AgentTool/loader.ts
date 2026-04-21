@@ -290,23 +290,51 @@ function readBlockValue(lines: string[], startIndex: number): BlockResult {
 // ---------------------------------------------------------------------------
 
 /**
- * Shared-references resolver. The real runtime path is
- * `src/tools/AgentTool/agents/_shared/references/`; tests override this so
- * fixtures stay self-contained.
+ * Shared-references resolver. The canonical runtime path is
+ * `src/tools/AgentTool/agents/_shared/references/`; tests override via
+ * `opts.sharedReferencesDir` so fixtures stay self-contained.
+ *
+ * A file may also live at the tool-description-scoped path
+ * `src/tools/AgentTool/references/` (today: `delegation-teaching.md`).
+ * That file is auto-injected into the Task tool description by
+ * `prompt.ts`, AND also ends up in an agent's system prompt whenever
+ * the AGENT.md's `shared-references:` list names it — so an agent
+ * (like the coordinator) that wants both the Task-tool-description
+ * surface AND an inlined copy in its own system prompt can reference
+ * it without duplicating the file.
  */
 async function resolveSharedReference(
   entry: string,
   opts: LoadOptions,
 ): Promise<string> {
   const normalized = entry.endsWith('.md') ? entry : `${entry}.md`;
-  const baseDir =
+  const primaryDir =
     opts.sharedReferencesDir ??
     path.resolve(
       process.cwd(),
       'src/tools/AgentTool/agents/_shared/references',
     );
-  const full = path.join(baseDir, normalized);
-  return fs.readFile(full, 'utf8');
+  const primaryPath = path.join(primaryDir, normalized);
+  try {
+    return await fs.readFile(primaryPath, 'utf8');
+  } catch (primaryErr) {
+    // Fallback: tool-description-scoped references. Only applied for the
+    // production root (tests still see the strict single-dir behavior so
+    // fixture isolation is preserved).
+    if (opts.sharedReferencesDir === undefined) {
+      const fallbackDir = path.resolve(
+        process.cwd(),
+        'src/tools/AgentTool/references',
+      );
+      const fallbackPath = path.join(fallbackDir, normalized);
+      try {
+        return await fs.readFile(fallbackPath, 'utf8');
+      } catch {
+        // Fall through to the primary error.
+      }
+    }
+    throw primaryErr;
+  }
 }
 
 async function resolveAgentReference(
