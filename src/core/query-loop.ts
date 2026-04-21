@@ -61,6 +61,17 @@ const STRIPPED_KEYS = new Set<string>([
   '$schema',
 ]);
 
+/**
+ * Thrown when a Zod schema contains constructs that can't be expressed
+ * in Anthropic's structured-outputs grammar (e.g. dynamic-key records,
+ * z.unknown at the root). Caller falls back to prompt-level validation.
+ */
+class UnexpressibleSchemaError extends Error {
+  constructor(reason: string) {
+    super(`Schema unexpressible for Anthropic structured outputs: ${reason}`);
+  }
+}
+
 function sanitizeJsonSchemaForAnthropic(node: unknown): unknown {
   if (Array.isArray(node)) {
     return node.map(sanitizeJsonSchemaForAnthropic);
@@ -74,23 +85,34 @@ function sanitizeJsonSchemaForAnthropic(node: unknown): unknown {
   // to `{ type: 'object', additionalProperties: <schema> }` with NO
   // `properties` key. Anthropic's grammar has no way to express "any
   // keys, values of shape X" — only `additionalProperties: false` is
-  // allowed. Rather than force empty objects, convert the subtree to
-  // an unconstrained pass-through `{}` so the model can emit any JSON
-  // there. Outer Zod post-validation still enforces the real shape.
+  // allowed, and an empty `{}` pass-through is also rejected ("Empty
+  // schema that accepts any JSON value is not supported"). Bail out of
+  // structured outputs entirely for this agent; the caller catches and
+  // falls back to prompt-level validation.
   if (
     src.type === 'object' &&
     src.properties === undefined &&
     src.additionalProperties !== undefined &&
     src.additionalProperties !== false
   ) {
-    return {};
+    throw new UnexpressibleSchemaError(
+      'dynamic-key object (z.record / z.map) — Anthropic grammar has no construct for it',
+    );
+  }
+
+  // Root-level z.unknown() / z.any() compiles to `{}` which Anthropic
+  // also rejects. Bail.
+  if (Object.keys(src).length === 0) {
+    throw new UnexpressibleSchemaError(
+      'empty schema (z.unknown / z.any) at non-root position',
+    );
   }
 
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(src)) {
     if (STRIPPED_KEYS.has(key)) continue;
     // additionalProperties: only `false` is allowed. Strip `true` and
-    // object/schema forms (latter handled as pass-through above when
+    // object/schema forms (latter handled as bailout above when
     // it's the only thing on the node).
     if (key === 'additionalProperties' && value !== false) continue;
     out[key] = sanitizeJsonSchemaForAnthropic(value);
