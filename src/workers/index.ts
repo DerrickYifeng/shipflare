@@ -19,7 +19,13 @@ import { processPlanExecuteSweeper } from './processors/plan-execute-sweeper';
 import { processStaleSweeper } from './processors/stale-sweeper';
 import { processWeeklyReplan } from './processors/weekly-replan';
 import { processTeamRun, getTeamRunConcurrency } from './processors/team-run';
+import { processReplySweepCron } from './processors/reply-sweep-cron';
 import { TEAM_RUN_QUEUE_NAME, type TeamRunJobData } from '@/lib/queue/team-run';
+import {
+  REPLY_SWEEP_CRON_QUEUE_NAME,
+  scheduleReplySweepCron,
+  type ReplySweepCronJobData,
+} from '@/lib/queue/reply-sweep-cron';
 import { dreamQueue, discoveryQueue, discoveryScanQueue, monitorQueue, metricsQueue, analyticsQueue, codeScanQueue } from '@/lib/queue';
 import type { PlanExecuteJobData } from '@/lib/queue';
 import { createLogger, loggerForJob } from '@/lib/logger';
@@ -213,6 +219,17 @@ const teamRunWorker = new Worker<TeamRunJobData>(
   { ...BASE_OPTS, concurrency: getTeamRunConcurrency(), lockDuration: 15 * 60_000 },
 );
 
+// Phase E Day 2 — reply-sweep fan-out. The processor walks teams every
+// 6h (cadence defined in src/lib/queue/reply-sweep-cron.ts) and calls
+// `maybeEnqueueReplySweep(userId)` for each owner. The helper is
+// idempotent and throttles against recent reply_sweep runs, so safe to
+// re-fire. See scheduleReplySweepCron() below.
+const replySweepCronWorker = new Worker<ReplySweepCronJobData>(
+  REPLY_SWEEP_CRON_QUEUE_NAME,
+  async (job) => processReplySweepCron(job),
+  { ...BASE_OPTS, concurrency: 1 },
+);
+
 const workers = [
   discoveryWorker, reviewWorker, postingWorker,
   healthScoreWorker, dreamWorker, codeScanWorker,
@@ -226,6 +243,7 @@ const workers = [
   staleSweeperWorker, weeklyReplanWorker,
   // AI Team Platform
   teamRunWorker,
+  replySweepCronWorker,
 ];
 
 // Log events — bind traceId / jobId / queue into the child logger so lifecycle
@@ -391,6 +409,7 @@ Promise.all([
   schedulePlanExecuteSweeper(),
   scheduleStaleSweeper(),
   scheduleWeeklyReplan(),
+  scheduleReplySweepCron(),
 ]).catch((err) => {
   log.error('Failed to schedule cron jobs:', err.message);
 });
