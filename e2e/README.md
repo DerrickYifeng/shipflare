@@ -89,3 +89,47 @@ runs diff against it.
 - Assert on `level: 2` for stage headings — the ProgressRail renders
   an `<h1>` with the same text, so unqualified `getByRole('heading')`
   is ambiguous.
+
+## Real-API full run: `team-full-run.spec.ts`
+
+Gated E2E that drives a real onboarding → team_run →
+coordinator-response pipeline against Anthropic's API. Skipped by
+default — opt in with `RUN_FULL_E2E=1`.
+
+```bash
+RUN_FULL_E2E=1 \
+ANTHROPIC_API_KEY=sk-ant-... \
+  pnpm test:e2e e2e/tests/team-full-run.spec.ts
+```
+
+Requires the dev server (`bun run dev`) to be running so the BullMQ
+worker process can pick up the team-run job. Playwright's `webServer`
+config reuses an existing server when present.
+
+### Cost and wall time
+
+- **Cost**: ~$0.50 per run (one coordinator main loop + two subagent
+  delegations through Claude Sonnet).
+- **Wall time**: 5–10 minutes. Per-test timeout is pinned at 10 min.
+
+### CI strategy
+
+Run this spec on a **nightly cron** or the **release-candidate**
+pipeline — not on every PR. Matches the Phase C equivalence eval
+(`RUN_EQUIVALENCE_EVAL=1`, ~$2/run) gating pattern so the heavy
+credit-burning tests share one opt-in discipline.
+
+### Expected flakes (not bugs)
+
+Failures caused by these modes are external and should NOT trigger a
+code investigation — re-run once before looking at the diff:
+
+- Anthropic 429 rate limits during high-load windows
+- Anthropic 529 overloaded responses
+- Transient network blips between the dev server and
+  `api.anthropic.com`
+
+If the failure reproduces twice OR the assertion that failed is about
+a schema / DB shape (e.g. `strategic_paths.length < 1`,
+`plan_items.length < 5`), treat it as a real regression in the
+coordinator or subagent contracts.
