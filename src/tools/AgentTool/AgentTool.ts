@@ -11,6 +11,7 @@ import { createLogger } from '@/lib/logger';
 import type { Database } from '@/lib/db';
 import { teamTasks } from '@/lib/db/schema';
 import { getAvailableAgents, resolveAgent } from './registry';
+import { getAgentOutputSchema } from './agent-schemas';
 import {
   getContextDepth,
   spawnSubagent,
@@ -250,11 +251,31 @@ export const taskTool: ToolDefinition<TaskInput, TaskResult> = buildTool({
 
     const startedAt = Date.now();
 
-    // Callbacks: Day 3 has no consumer for onMessage / onToolCall / onError
-    // on the Task surface — the /team UI event stream is a Day 4 concern. We
-    // intentionally leave them undefined so runAgent doesn't emit work it
-    // doesn't need to.
-    const callbacks: SpawnCallbacks | undefined = undefined;
+    // Forward the parent's onEvent (if provided via ToolContext) to the
+    // child runAgent so the subagent's tool_start / tool_done events land
+    // on the same team_messages channel as the parent's. The team-run
+    // worker stashes its onEvent under ctx.get('onEvent'); callers that
+    // aren't team-scoped won't have it, in which case we pass undefined
+    // and the child runs quietly.
+    let onEventFn: SpawnCallbacks['onEvent'] | undefined;
+    try {
+      const fromCtx = ctx.get<SpawnCallbacks['onEvent'] | null>('onEvent');
+      if (typeof fromCtx === 'function') onEventFn = fromCtx;
+    } catch {
+      onEventFn = undefined;
+    }
+    const callbacks: SpawnCallbacks | undefined = onEventFn
+      ? { onEvent: onEventFn }
+      : undefined;
+
+    // Resolve the subagent's terminal-output Zod schema. Agents whose
+    // AGENT.md frontmatter includes `StructuredOutput` in the tool list
+    // (coordinator, growth-strategist, content-planner, …) each have a
+    // schema registered under `src/tools/AgentTool/agent-schemas.ts` —
+    // that schema is handed to runAgent so it synthesizes a validated
+    // `StructuredOutput` tool on the subagent's Anthropic tool list. Agents
+    // without a registered schema run in plain-text terminal mode.
+    const subagentOutputSchema = getAgentOutputSchema(agent.name);
 
     try {
       const agentResult = await spawnSubagent(
@@ -262,9 +283,7 @@ export const taskTool: ToolDefinition<TaskInput, TaskResult> = buildTool({
         input.prompt,
         ctx,
         callbacks,
-        undefined, // outputSchema: Task callers don't pre-declare one — subagents
-        //            use their own StructuredOutput when they need structured
-        //            returns (inferred from their tool list at runtime).
+        subagentOutputSchema ?? undefined,
         parentTaskId,
       );
 

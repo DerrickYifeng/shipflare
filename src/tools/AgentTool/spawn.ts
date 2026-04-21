@@ -7,11 +7,13 @@
 import type { z } from 'zod';
 import { runAgent } from '@/core/query-loop';
 import { registry } from '@/tools/registry';
+import { STRUCTURED_OUTPUT_TOOL_NAME } from '@/tools/StructuredOutputTool/StructuredOutputTool';
 import type {
   AgentConfig,
   AgentResult,
   AnyToolDefinition,
   OnProgress,
+  StreamEvent,
   ToolContext,
 } from '@/core/types';
 import type { AgentDefinition } from './loader';
@@ -60,6 +62,13 @@ export interface SpawnCallbacks {
   onToolCall?: (call: unknown) => void;
   onError?: (err: unknown) => void;
   onProgress?: OnProgress;
+  /**
+   * Tool-lifecycle event callback forwarded into the child runAgent so
+   * nested subagents' tool_start / tool_done events share the parent's
+   * team_messages channel. The team-run worker sets this per run; ad-hoc
+   * callers leave it undefined and the child runs quietly.
+   */
+  onEvent?: (event: StreamEvent) => void | Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -71,11 +80,19 @@ export interface SpawnCallbacks {
  * any declared tool is unknown — fail-closed keeps misconfigured agents from
  * silently launching with a stripped tool list and then hitting
  * "Unknown tool" runtime errors further down the stack.
+ *
+ * `StructuredOutput` is a synthesized/virtual tool: runAgent appends it to
+ * the Anthropic tool list at runtime when the caller provides an
+ * `outputSchema`. AGENT.md files that declare it in `tools: [...]` are
+ * telling downstream readers ("this agent emits structured output") — the
+ * entry isn't resolved here. See src/tools/registry.ts for why it's
+ * intentionally not registered.
  */
 export function resolveAgentTools(def: AgentDefinition): AnyToolDefinition[] {
   const resolved: AnyToolDefinition[] = [];
   const missing: string[] = [];
   for (const toolName of def.tools) {
+    if (toolName === STRUCTURED_OUTPUT_TOOL_NAME) continue;
     const tool = registry.get(toolName);
     if (!tool) {
       missing.push(toolName);
@@ -176,5 +193,8 @@ export async function spawnSubagent<T = unknown>(
     childCtx,
     outputSchema,
     callbacks?.onProgress,
+    undefined, // prebuilt
+    undefined, // onIdleReset
+    callbacks?.onEvent,
   );
 }

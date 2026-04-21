@@ -23,6 +23,7 @@ import { getPubSubPublisher } from '@/lib/redis';
 import { runAgent } from '@/core/query-loop';
 import { buildAgentConfigFromDefinition } from '@/tools/AgentTool/spawn';
 import { resolveAgent } from '@/tools/AgentTool/registry';
+import { getAgentOutputSchema } from '@/tools/AgentTool/agent-schemas';
 import { teamMessagesChannel } from '@/tools/SendMessageTool';
 // Side-effect import: registers Task + SendMessage in the global tool
 // registry so agents that declare them resolve at runAgent time.
@@ -243,6 +244,13 @@ export async function processTeamRunInternal(
 
   const agentConfig = buildAgentConfigFromDefinition(agentDef);
 
+  // Resolve the per-agent StructuredOutput schema. Tests pass
+  // `rootOutputSchema` directly to override this lookup with a fixture-
+  // specific shape; production callers let it fall through to the
+  // registered schema (coordinator, growth-strategist, content-planner).
+  const resolvedSchema: import('zod').ZodType<unknown> | undefined =
+    rootOutputSchema ?? getAgentOutputSchema(rootMember.agentType) ?? undefined;
+
   // --- 6) Record the user_prompt seed message ---
   await recordMessage(deps, {
     runId,
@@ -256,6 +264,14 @@ export async function processTeamRunInternal(
 
   // --- 7) Build ToolContext with deps ---
   const controller = new AbortController();
+  // `onEvent` is plumbed through the ToolContext so nested subagents
+  // (spawned via Task) can forward their tool_start / tool_done events
+  // to the same team_messages channel without re-plumbing the deps. The
+  // Task tool reads this off the ctx and passes it to spawnSubagent's
+  // nested runAgent call. Declared as a container upfront so it can be
+  // closed over by the getter below, then filled after toolCtx exists.
+  const onEventHolder: { fn: ((event: StreamEvent) => Promise<void>) | null } =
+    { fn: null };
   const toolCtx: ToolContext = {
     abortSignal: controller.signal,
     get<V>(key: string): V {
@@ -272,11 +288,15 @@ export async function processTeamRunInternal(
           return runId as unknown as V;
         case 'currentMemberId':
           return rootMember.id as unknown as V;
+        case 'onEvent':
+          return onEventHolder.fn as unknown as V;
         default:
           throw new Error(`Missing dependency: ${key}`);
       }
     },
   };
+  onEventHolder.fn = (event: StreamEvent) =>
+    emitToolEvent(deps, toolCtx, event);
 
   // --- 8) Attach stream-event → team_messages bridge ---
   // runAgent exposes `onProgress` for coarse-grained signals; the
@@ -298,7 +318,7 @@ export async function processTeamRunInternal(
       agentConfig,
       run.goal,
       toolCtx,
-      rootOutputSchema,
+      resolvedSchema,
       undefined, // onProgress
       undefined, // prebuilt
       undefined, // onIdleReset
