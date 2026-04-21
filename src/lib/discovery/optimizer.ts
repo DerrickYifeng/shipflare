@@ -192,43 +192,6 @@ export async function runOptimizer(
     ],
     maxTokens: 4096,
     promptCaching: false,
-    outputSchema: {
-      type: 'object',
-      properties: {
-        analysis: { type: 'string' },
-        numericChanges: {
-          type: 'object',
-          properties: {
-            weightRelevance: { type: 'number' },
-            weightIntent: { type: 'number' },
-            weightExposure: { type: 'number' },
-            weightFreshness: { type: 'number' },
-            weightEngagement: { type: 'number' },
-            intentGate: { type: 'number' },
-            relevanceGate: { type: 'number' },
-            gateCap: { type: 'number' },
-          },
-          additionalProperties: false,
-        },
-        strategyRules: { type: 'string' },
-        customLowRelevancePatterns: { type: 'string' },
-        customPainPhrases: {
-          type: 'array',
-          items: { type: 'string' },
-        },
-        customQueryTemplates: {
-          type: 'array',
-          items: { type: 'string' },
-        },
-        platformStrategyOverride: { type: 'string' },
-        undoFromPreviousRound: {
-          type: 'array',
-          items: { type: 'string' },
-        },
-      },
-      required: ['analysis'],
-      additionalProperties: false,
-    },
   });
 
   const text = response.content

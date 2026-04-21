@@ -217,9 +217,10 @@ describe('runAgent — StructuredOutput tool intercept', () => {
   });
 
   it('accepts an end-to-end call with a schema containing minItems>1', async () => {
-    // minItems>1 is one of the constructs output_config.format.schema rejects
-    // at compile time but tool input_schema accepts. This confirms the
-    // intercept path round-trips it without invoking the sanitizer.
+    // Tool input_schema accepts minItems>1 as-is. Confirms the
+    // StructuredOutput intercept path round-trips the constraint without
+    // issue. (Phase C Day 3 removed the legacy output_config.format
+    // sanitizer that would have needed to strip this.)
     const schema = z.object({
       bugs: z.array(z.string()).min(3),
     });
@@ -255,9 +256,9 @@ describe('runAgent — StructuredOutput tool intercept', () => {
   });
 
   it('accepts an end-to-end call with a z.record (dynamic-key) schema', async () => {
-    // z.record is another construct the old sanitizer bails on. Tool
-    // input_schema accepts it; the intercept + Zod validation round-trip it
-    // cleanly.
+    // Dynamic-key objects (z.record / z.map) pass through StructuredOutput
+    // tool_use + Zod validation without issue. (Phase C Day 3 removed the
+    // legacy sanitizer that bailed on these for the output_config path.)
     const schema = z.object({
       metrics: z.record(z.number()),
     });

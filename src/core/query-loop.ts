@@ -1,6 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
 import type {
   AgentConfig,
   AgentResult,
@@ -22,128 +21,14 @@ import {
 
 const log = createLogger('core:agent');
 
-// ---------------------------------------------------------------------------
-// Structured-outputs JSON-schema sanitizer
-// ---------------------------------------------------------------------------
-//
-// Anthropic's structured-outputs grammar rejects several JSON-schema
-// constructs that zod-to-json-schema happily emits from idiomatic Zod:
-//
-//   - minItems: N  (N > 1)         ← z.array(...).min(2+)
-//   - maxItems                     ← z.array(...).max(N)
-//   - minLength / maxLength        ← z.string().min/max
-//   - minimum / maximum            ← z.number().min/max
-//   - exclusiveMinimum / exclusiveMaximum
-//   - multipleOf
-//   - pattern (regex)              ← z.string().regex(...)
-//   - format: 'uri' | 'email' | etc. ← z.string().url/email
-//   - additionalProperties: true   ← objects without z.strictObject
-//   - const                        ← z.literal(x) at schema root
-//   - enum with > N members (practical limit exists, not documented)
-//
-// Anthropic DOES support:
-//   - type, enum (reasonable cardinality), properties, required, items,
-//     oneOf/anyOf/allOf (bounded), $ref (non-recursive), description.
-//   - minItems: 0 or 1 only.
-//
-// Stripping these constraints doesn't loosen our contract — the outer
-// Zod schema still post-validates every response, so string length and
-// array cardinality rules still fire. We're just giving the API a
-// grammar it can actually compile.
-const STRIPPED_KEYS = new Set<string>([
-  'minItems',
-  'maxItems',
-  'minLength',
-  'maxLength',
-  'minimum',
-  'maximum',
-  'exclusiveMinimum',
-  'exclusiveMaximum',
-  'multipleOf',
-  'pattern',
-  'format',
-  'const',
-  'default',
-  'examples',
-  '$schema',
-]);
-
-/**
- * Thrown when a Zod schema contains constructs that can't be expressed
- * in Anthropic's structured-outputs grammar (e.g. dynamic-key records,
- * z.unknown at the root). Caller falls back to prompt-level validation.
- */
-class UnexpressibleSchemaError extends Error {
-  constructor(reason: string) {
-    super(`Schema unexpressible for Anthropic structured outputs: ${reason}`);
-  }
-}
-
-function sanitizeJsonSchemaForAnthropic(node: unknown): unknown {
-  if (Array.isArray(node)) {
-    return node.map(sanitizeJsonSchemaForAnthropic);
-  }
-  if (node === null || typeof node !== 'object') {
-    return node;
-  }
-  const src = node as Record<string, unknown>;
-
-  // Dynamic-key object (z.record / z.map / z.object({}).catchall) compiles
-  // to `{ type: 'object', additionalProperties: <schema> }` with NO
-  // `properties` key. Anthropic's grammar has no way to express "any
-  // keys, values of shape X" — only `additionalProperties: false` is
-  // allowed, and an empty `{}` pass-through is also rejected ("Empty
-  // schema that accepts any JSON value is not supported"). Bail out of
-  // structured outputs entirely for this agent; the caller catches and
-  // falls back to prompt-level validation.
-  if (
-    src.type === 'object' &&
-    src.properties === undefined &&
-    src.additionalProperties !== undefined &&
-    src.additionalProperties !== false
-  ) {
-    throw new UnexpressibleSchemaError(
-      'dynamic-key object (z.record / z.map) — Anthropic grammar has no construct for it',
-    );
-  }
-
-  // Root-level z.unknown() / z.any() compiles to `{}` which Anthropic
-  // also rejects. Bail.
-  if (Object.keys(src).length === 0) {
-    throw new UnexpressibleSchemaError(
-      'empty schema (z.unknown / z.any) at non-root position',
-    );
-  }
-
-  const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(src)) {
-    if (STRIPPED_KEYS.has(key)) continue;
-    // additionalProperties: only `false` is allowed. Strip `true` and
-    // object/schema forms (latter handled as bailout above when
-    // it's the only thing on the node).
-    if (key === 'additionalProperties' && value !== false) continue;
-    out[key] = sanitizeJsonSchemaForAnthropic(value);
-  }
-
-  // Anthropic requires every `type: 'object'` node to carry
-  // `additionalProperties: false` EXPLICITLY. Silent absence is rejected
-  // at schema-compile time.
-  if (out.type === 'object' && out.additionalProperties === undefined) {
-    out.additionalProperties = false;
-  }
-
-  return out;
-}
-
-function zodToSanitizedJsonSchema(
-  schema: z.ZodType<unknown>,
-): Record<string, unknown> {
-  const raw = zodToJsonSchema(schema, {
-    target: 'jsonSchema2019-09',
-    $refStrategy: 'none',
-  }) as Record<string, unknown>;
-  return sanitizeJsonSchemaForAnthropic(raw) as Record<string, unknown>;
-}
+// Phase C Day 3 — the JSON-schema sanitizer that converted Zod schemas
+// into Anthropic's structured-outputs grammar was retired. StructuredOutput
+// enforcement now runs via the synthesized `StructuredOutput` tool (see
+// src/tools/StructuredOutputTool/StructuredOutputTool.ts), which is
+// already wired through runAgent below. The sanitizer path was exercised
+// only when the agent had NO other tools — a condition the v2 planner
+// skills used and the v3 AgentTool.md files never hit. See
+// docs/phase-c-audit.md §Day 3.
 
 // ---------------------------------------------------------------------------
 // Query loop (ported from engine/query.ts:248-1409, stripped of CLI concerns)
@@ -196,31 +81,6 @@ export async function queryLoop<T>(params: QueryParams): Promise<{ output: T; tr
     log.debug(`Turn ${turn}/${maxTurns} starting`);
     onEvent?.({ type: 'turn_start', turn });
 
-    // Hand the API a grammar-compilable JSON schema when we have an
-    // expected output shape. Claude's structured-outputs feature forces
-    // the generator to emit tokens that validate against this schema —
-    // no more JSON-parse errors, missing enum values, or drifted field
-    // names. Zod validation below is kept as a belt-and-suspenders check
-    // (free; the object is already compliant when this feature is on).
-    //
-    // zodToJsonSchema can emit constructs Anthropic doesn't support
-    // (minLength/maxLength/minItems>1/regex/additionalProperties:true).
-    // See docs — the TS SDK doesn't strip these on raw messages.stream()
-    // calls, so we rely on Anthropic returning a 400 at schema-compile
-    // time if we drift, and fall back to prompt-level JSON parsing.
-    let jsonSchemaForOutput: Record<string, unknown> | undefined;
-    if (outputSchema && tools.length === 0) {
-      // Structured outputs is currently applied only when tools are
-      // absent — our agents either run tools (chain-of-thought tool
-      // use) or emit terminal JSON. The planner agents are the latter.
-      try {
-        jsonSchemaForOutput = zodToSanitizedJsonSchema(outputSchema);
-      } catch (err) {
-        log.warn(
-          `zodToJsonSchema failed — falling back to prompt-level validation: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-    }
     const { response, usage } = await createMessage({
       model,
       system: systemPrompt,
@@ -228,7 +88,6 @@ export async function queryLoop<T>(params: QueryParams): Promise<{ output: T; tr
       tools: anthropicTools.length > 0 ? anthropicTools : undefined,
       maxTokens: currentMaxTokens,
       promptCaching,
-      outputSchema: jsonSchemaForOutput,
       signal: abortSignal,
     });
 
@@ -402,22 +261,6 @@ export async function runAgent<T>(
     { role: 'user', content: userMessage },
   ];
 
-  // Structured outputs: only applied when the agent has no tools. Agents
-  // that call tools produce tool_use blocks, not terminal JSON, so the
-  // grammar constraint doesn't apply. Agents that emit terminal JSON
-  // (planners, classifiers) get their Zod schema compiled to a JSON
-  // schema the API grammar-constrains output to.
-  let jsonSchemaForOutput: Record<string, unknown> | undefined;
-  if (outputSchema && anthropicTools.length === 0) {
-    try {
-      jsonSchemaForOutput = zodToSanitizedJsonSchema(outputSchema);
-    } catch (err) {
-      log.warn(
-        `zodToJsonSchema failed for agent "${config.name}" — prompt-level fallback: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-  }
-
   const tracker = new UsageTracker();
   let currentMaxTokens = 16_384;
 
@@ -463,7 +306,6 @@ export async function runAgent<T>(
       tools: anthropicTools.length > 0 ? anthropicTools : undefined,
       maxTokens: currentMaxTokens,
       promptCaching: true,
-      outputSchema: jsonSchemaForOutput,
       signal: context.abortSignal,
       systemBlocks: prebuilt?.systemBlocks,
     });

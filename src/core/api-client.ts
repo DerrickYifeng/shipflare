@@ -109,8 +109,6 @@ export interface CreateMessageOptions {
   maxTokens?: number;
   /** Enable prompt caching on system prompt + tools. Default: true. */
   promptCaching?: boolean;
-  /** Structured output schema for guaranteed JSON. */
-  outputSchema?: Record<string, unknown>;
   signal?: AbortSignal;
   /**
    * Pre-built system prompt blocks. When provided, overrides `system` string.
@@ -144,7 +142,6 @@ export async function createMessage(opts: CreateMessageOptions): Promise<CreateM
     tools,
     maxTokens = 8192,
     promptCaching = true,
-    outputSchema,
     signal,
   } = opts;
 
@@ -186,7 +183,6 @@ export async function createMessage(opts: CreateMessageOptions): Promise<CreateM
           system: systemBlocks,
           messages,
           ...(cachedTools ? { tools: cachedTools } : {}),
-          ...(outputSchema ? { output_config: { format: { type: 'json_schema' as const, schema: outputSchema } } } : {}),
         },
         { signal },
       );
@@ -319,7 +315,6 @@ export interface SideQueryOptions {
   system: string;
   messages: Anthropic.Messages.MessageParam[];
   tools?: Anthropic.Messages.Tool[];
-  outputSchema?: Record<string, unknown>;
   maxTokens?: number;
   signal?: AbortSignal;
 }
@@ -336,7 +331,6 @@ export async function sideQuery(opts: SideQueryOptions): Promise<Anthropic.Messa
     messages: opts.messages,
     tools: opts.tools,
     maxTokens: opts.maxTokens ?? 1024,
-    outputSchema: opts.outputSchema,
     signal: opts.signal,
     promptCaching: false, // Side queries are short-lived, caching not beneficial
   });

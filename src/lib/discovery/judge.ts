@@ -128,7 +128,6 @@ export async function judgeThreadsBatch(
     ],
     maxTokens: 4096,
     promptCaching: false,
-    outputSchema: zodToJsonSchema(judgeOutputSchema),
   });
 
   const text = response.content
@@ -175,32 +174,3 @@ export async function judgeThreadsBatch(
   };
 }
 
-// ---------------------------------------------------------------------------
-// Helper: convert Zod schema to JSON Schema for outputSchema
-// ---------------------------------------------------------------------------
-
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function zodToJsonSchema(_schema: z.ZodType): Record<string, unknown> {
-  // Minimal conversion for the specific judge schema.
-  // Anthropic output_config.format.schema expects raw JSON Schema (no wrapper).
-  return {
-    type: 'object',
-    properties: {
-      judgments: {
-        type: 'array',
-        items: {
-          type: 'object',
-          properties: {
-            id: { type: 'string' },
-            isPotentialUser: { type: 'boolean' },
-            reason: { type: 'string' },
-          },
-          required: ['id', 'isPotentialUser', 'reason'],
-          additionalProperties: false,
-        },
-      },
-    },
-    required: ['judgments'],
-    additionalProperties: false,
-  };
-}

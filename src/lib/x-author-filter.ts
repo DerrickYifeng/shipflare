@@ -123,27 +123,6 @@ You will be given the product's context (name, description, value prop) and a ba
 
 Output a short reason (<= 10 words) explaining the verdict, naming the product-specific signal — e.g. "direct competitor — same category", "sells courses but not in product's vertical", "builder with real portfolio", "target ICP — audience matches product", "hybrid creator, passes".`;
 
-const judgeOutputSchema = {
-  type: 'object',
-  properties: {
-    verdicts: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          username: { type: 'string' },
-          isCompetitor: { type: 'boolean' },
-          reason: { type: 'string' },
-        },
-        required: ['username', 'isCompetitor', 'reason'],
-        additionalProperties: false,
-      },
-    },
-  },
-  required: ['verdicts'],
-  additionalProperties: false,
-} as const;
-
 const parsedVerdictsSchema = z.object({
   verdicts: z.array(
     z.object({
@@ -206,7 +185,6 @@ export const judgeAuthorsWithLLM = async (
     ],
     maxTokens: 1024,
     promptCaching: false,
-    outputSchema: judgeOutputSchema,
   });
 
   const text = response.content
