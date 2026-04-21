@@ -14,32 +14,58 @@ import {
   type PlanItemState,
   type PlanItemUserAction,
 } from '@/lib/plan-state';
+import { ensureTeamExists } from '@/lib/team-provisioner';
+import { enqueueTeamRun } from '@/lib/queue/team-run';
 
 const baseLog = createLogger('worker:plan-execute');
 
 /**
+ * (kind, channel) combinations that route draft-phase jobs to a writer
+ * team-run instead of the legacy dispatch table. Phase E Day 3.
+ */
+const WRITER_AGENT_BY_CHANNEL: Record<string, string> = {
+  x: 'x-writer',
+  reddit: 'reddit-writer',
+};
+
+function writerAgentFor(
+  kind: PlanItemKind,
+  channel: string | null,
+): string | null {
+  if (kind !== 'content_post') return null;
+  if (!channel) return null;
+  return WRITER_AGENT_BY_CHANNEL[channel] ?? null;
+}
+
+/**
  * Plan-execute dispatcher.
  *
- * Consumes a plan-execute job, resolves the skill via the dispatch
- * table, and — for Phase 7 — advances the plan_item's state without
- * running the actual LLM / post / send call. Phase 8's API endpoints
- * and Phase 12's frontend will wire the real invocations on top of
- * this scaffolding.
+ * Two paths:
  *
- * State transitions performed here:
+ * 1) **Writer team-run (Phase E Day 3)** — for `phase='draft'` +
+ *    `kind='content_post'` + `channel IN ('x','reddit')`. The processor
+ *    enqueues a team-run with the matching writer AGENT.md; the writer's
+ *    `draft_post` tool UPDATEs `plan_items.output.draft_body` and flips
+ *    `state` to `'drafted'`. Fire-and-forget from the processor's POV:
+ *    it returns as soon as the enqueue succeeds.
  *
- *  - phase='draft' + state='planned' + userAction='approve'
- *      → moves planned → drafted (skill call stubbed)
- *  - phase='execute' + state IN ('approved','planned'+auto)
- *      → moves planned/approved → executing → completed (stubbed)
+ * 2) **Legacy state-machine stub** — for every other (kind, phase)
+ *    combination. Runs the state transitions from the existing dispatch
+ *    table without invoking a skill. The 11 keep-until-Phase-E skills
+ *    (posting, voice-extract, draft-review, etc.) still arrive here; a
+ *    future Phase E/F migration will route them through writer/reply
+ *    team-runs too.
  *
- * Any other combination is treated as a stale job (e.g. the item was
- * superseded between enqueue and pickup) and no-ops loudly via a
- * logger warning — the job succeeds so it doesn't retry into a dead
- * end.
+ * State transitions for the legacy path:
+ *  - phase='draft' + state='planned' → moves planned → drafted
+ *  - phase='execute' + state IN ('approved','planned'+auto) → moves
+ *    planned/approved → executing → completed
  *
- * All state changes route through `transition()` so invalid moves
- * throw InvalidTransitionError and surface in the DLQ.
+ * Any other combination is treated as a stale job and no-ops loudly. The
+ * job succeeds so BullMQ doesn't retry into a dead end.
+ *
+ * All state changes route through `transition()` so invalid moves throw
+ * InvalidTransitionError and surface in the DLQ.
  */
 export async function processPlanExecute(
   job: Job<PlanExecuteJobData>,
@@ -51,6 +77,7 @@ export async function processPlanExecute(
     .select({
       id: planItems.id,
       userId: planItems.userId,
+      productId: planItems.productId,
       kind: planItems.kind,
       state: planItems.state,
       userAction: planItems.userAction,
@@ -66,12 +93,60 @@ export async function processPlanExecute(
     return;
   }
 
-  const current = {
+  const current: RowLike = {
     id: row.id,
     state: row.state as PlanItemState,
     userAction: row.userAction as PlanItemUserAction,
   };
 
+  // ------------------------------------------------------------------
+  // Writer team-run path (content_post + x/reddit, draft phase only)
+  // ------------------------------------------------------------------
+  const writerAgent =
+    phase === 'draft'
+      ? writerAgentFor(row.kind as PlanItemKind, row.channel)
+      : null;
+
+  if (writerAgent) {
+    if (!canTransition(current.state, 'drafted')) {
+      log.warn(
+        `plan_item ${planItemId}: draft phase fired but state is ${current.state} (expected planned) — skipping`,
+      );
+      return;
+    }
+
+    try {
+      const { teamId, memberIds } = await ensureTeamExists(
+        row.userId,
+        row.productId,
+      );
+      const goal =
+        `Spawn ${writerAgent} via Task to draft plan_item ${planItemId} (channel=${row.channel}). ` +
+        `The writer reads the plan_item, calls draft_post to generate + persist the body, ` +
+        `and flips the plan_item state to 'drafted'. Don't call draft_post yourself — ` +
+        `delegate to the writer and return its summary.`;
+      await enqueueTeamRun({
+        teamId,
+        trigger: 'draft_post',
+        goal,
+        rootMemberId: memberIds.coordinator,
+      });
+      log.info(
+        `plan_item ${planItemId}: draft phase → enqueued team-run agent=${writerAgent} channel=${row.channel}`,
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.error(
+        `plan_item ${planItemId}: draft phase writer enqueue failed: ${message}`,
+      );
+      await writeState(current, 'failed');
+    }
+    return;
+  }
+
+  // ------------------------------------------------------------------
+  // Legacy dispatch-table path
+  // ------------------------------------------------------------------
   const route = dispatchPlanItem({
     kind: row.kind as PlanItemKind,
     channel: row.channel,
@@ -86,9 +161,6 @@ export async function processPlanExecute(
     return;
   }
 
-  // ------------------------------------------------------------------
-  // Draft phase
-  // ------------------------------------------------------------------
   if (phase === 'draft') {
     if (!canTransition(current.state, 'drafted')) {
       log.warn(
@@ -107,21 +179,13 @@ export async function processPlanExecute(
     }
 
     log.info(
-      `plan_item ${planItemId}: draft phase → skill=${skillName} (Phase 7 stub: not invoking)`,
+      `plan_item ${planItemId}: draft phase → skill=${skillName} (legacy stub: state transition only)`,
     );
-
-    // Phase 7: state transition only. Phase 8 wires runSkill() here.
     await writeState(current, 'drafted');
     return;
   }
 
-  // ------------------------------------------------------------------
-  // Execute phase
-  // ------------------------------------------------------------------
   if (phase === 'execute') {
-    // Execute is valid from approved (normal flow) or planned+auto
-    // (auto-action items skip review). Both must transition → executing
-    // first.
     if (!canTransition(current.state, 'executing')) {
       log.warn(
         `plan_item ${planItemId}: execute phase fired but state is ${current.state} — skipping`,
@@ -140,12 +204,8 @@ export async function processPlanExecute(
     }
 
     log.info(
-      `plan_item ${planItemId}: execute phase → skill=${skillName} (Phase 7 stub: not invoking)`,
+      `plan_item ${planItemId}: execute phase → skill=${skillName} (legacy stub: state transition only)`,
     );
-
-    // Phase 7: flow through executing → completed without actually
-    // running the side-effect. Phase 8 wires the real post/send
-    // under the 'executing' window so failures can flip to 'failed'.
     const afterExecuting = await writeState(current, 'executing');
     await writeState(afterExecuting, 'completed');
     return;

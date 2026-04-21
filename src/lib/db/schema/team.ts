@@ -98,7 +98,7 @@ export const teamRuns = pgTable(
     teamId: text('team_id')
       .notNull()
       .references(() => teams.id, { onDelete: 'cascade' }),
-    // 'onboarding' | 'weekly' | 'manual' | 'phase_transition' | 'reply_sweep'
+    // 'onboarding' | 'weekly' | 'manual' | 'phase_transition' | 'reply_sweep' | 'draft_post'
     trigger: text('trigger').notNull(),
     goal: text('goal').notNull(),
     rootAgentId: text('root_agent_id')

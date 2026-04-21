@@ -13,6 +13,7 @@ import type { PlanItemState, PlanItemUserAction } from '@/lib/plan-state';
 interface Row {
   id: string;
   userId: string;
+  productId: string;
   kind: string;
   state: PlanItemState;
   userAction: PlanItemUserAction;
@@ -25,6 +26,7 @@ const rows = new Map<string, Row>();
 function seedItem(init: Partial<Row> & { id: string; kind: string }): Row {
   const row: Row = {
     userId: 'u-1',
+    productId: 'p-1',
     state: 'planned',
     userAction: 'approve',
     channel: null,
@@ -83,6 +85,35 @@ vi.mock('drizzle-orm', async () => {
   };
 });
 
+// Phase E Day 3: writer-agent enqueue path mocks. content_post + x/reddit
+// enqueues a team-run via ensureTeamExists + enqueueTeamRun. The writer's
+// draft_post tool owns the state flip; the processor returns without
+// touching state after a successful enqueue.
+const ensureTeamExistsMock = vi.fn(
+  async (_userId: string, _productId: string | null) => ({
+    teamId: 'team-1',
+    memberIds: {
+      coordinator: 'mem-coord',
+      'growth-strategist': 'mem-gs',
+      'content-planner': 'mem-cp',
+    },
+    created: false,
+  }),
+);
+vi.mock('@/lib/team-provisioner', () => ({
+  ensureTeamExists: (userId: string, productId: string | null) =>
+    ensureTeamExistsMock(userId, productId),
+}));
+
+const enqueueTeamRunMock = vi.fn(async (_input: Record<string, unknown>) => ({
+  runId: 'run-pe-1',
+  traceId: 'trace-pe-1',
+  alreadyRunning: false,
+}));
+vi.mock('@/lib/queue/team-run', () => ({
+  enqueueTeamRun: (input: Record<string, unknown>) => enqueueTeamRunMock(input),
+}));
+
 // Avoid the logger touching real stdout noise in test output.
 vi.mock('@/lib/logger', () => ({
   createLogger: () => ({
@@ -109,10 +140,12 @@ function makeJob(data: PlanExecuteJobData): Job<PlanExecuteJobData> {
 
 beforeEach(() => {
   rows.clear();
+  ensureTeamExistsMock.mockClear();
+  enqueueTeamRunMock.mockClear();
 });
 
 describe('processPlanExecute — draft phase', () => {
-  it('advances planned → drafted for content_post + approve', async () => {
+  it('enqueues a writer team-run for content_post + x, leaves state planned', async () => {
     const { processPlanExecute } = await import('../plan-execute');
     seedItem({
       id: 'item-1',
@@ -126,7 +159,44 @@ describe('processPlanExecute — draft phase', () => {
       makeJob({ schemaVersion: 1, planItemId: 'item-1', userId: 'u-1', phase: 'draft' }),
     );
 
-    expect(rows.get('item-1')!.state).toBe('drafted');
+    // Phase E Day 3: the processor enqueues a team-run; the writer's
+    // draft_post tool owns the state flip (planned → drafted) after
+    // the team-run completes. The processor itself does not touch
+    // state here.
+    expect(rows.get('item-1')!.state).toBe('planned');
+    expect(ensureTeamExistsMock).toHaveBeenCalledWith('u-1', 'p-1');
+    expect(enqueueTeamRunMock).toHaveBeenCalledTimes(1);
+    const call = enqueueTeamRunMock.mock.calls[0]?.[0] as {
+      teamId: string;
+      trigger: string;
+      rootMemberId: string;
+      goal: string;
+    };
+    expect(call.teamId).toBe('team-1');
+    expect(call.trigger).toBe('draft_post');
+    expect(call.rootMemberId).toBe('mem-coord');
+    expect(call.goal).toContain('x-writer');
+    expect(call.goal).toContain('item-1');
+  });
+
+  it('enqueues a writer team-run for content_post + reddit', async () => {
+    const { processPlanExecute } = await import('../plan-execute');
+    seedItem({
+      id: 'item-r',
+      kind: 'content_post',
+      channel: 'reddit',
+      userAction: 'approve',
+      state: 'planned',
+    });
+
+    await processPlanExecute(
+      makeJob({ schemaVersion: 1, planItemId: 'item-r', userId: 'u-1', phase: 'draft' }),
+    );
+
+    expect(rows.get('item-r')!.state).toBe('planned');
+    expect(enqueueTeamRunMock).toHaveBeenCalledTimes(1);
+    const call = enqueueTeamRunMock.mock.calls[0]?.[0] as { goal: string };
+    expect(call.goal).toContain('reddit-writer');
   });
 
   it('no-ops when row is no longer in planned state', async () => {
@@ -146,12 +216,16 @@ describe('processPlanExecute — draft phase', () => {
     expect(rows.get('item-2')!.state).toBe('superseded');
   });
 
-  it('marks row as failed when kind has no dispatch route', async () => {
+  it('marks row as failed when the dispatch route is missing (content_reply + reddit has no wired route)', async () => {
     const { processPlanExecute } = await import('../plan-execute');
+    // The writer-agent branch only activates on phase='draft' +
+    // content_post. content_reply + reddit has neither writer route
+    // nor a legacy dispatch entry (only content_reply + x is wired),
+    // so the processor falls through to the "no route" failure path.
     seedItem({
       id: 'item-3',
-      kind: 'content_post',
-      channel: 'reddit', // reddit is intentionally unwired in Phase 7
+      kind: 'content_reply',
+      channel: 'reddit',
       userAction: 'approve',
       state: 'planned',
     });
@@ -233,11 +307,17 @@ describe('processPlanExecute — integration: full SM walk', () => {
       state: 'planned',
     });
 
-    // Step 2: draft phase — simulates plan-execute-sweeper picking it up
+    // Step 2: draft phase — processor enqueues the writer team-run;
+    // the writer's draft_post tool UPDATEs state → 'drafted' when it
+    // finishes. Here we simulate that DB update directly.
     await processPlanExecute(
       makeJob({ schemaVersion: 1, planItemId: 'item-sm', userId: 'u-1', phase: 'draft' }),
     );
-    expect(rows.get('item-sm')!.state).toBe('drafted');
+    expect(enqueueTeamRunMock).toHaveBeenCalled();
+    expect(rows.get('item-sm')!.state).toBe('planned');
+    // Simulate the writer's draft_post tool completing and flipping state.
+    const afterEnqueue = rows.get('item-sm')!;
+    rows.set('item-sm', { ...afterEnqueue, state: 'drafted' });
 
     // Step 3: draft-review passes — Phase 8's API or a chained
     // processor moves drafted → ready_for_review

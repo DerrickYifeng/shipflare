@@ -46,7 +46,8 @@ export type TeamRunTrigger =
   | 'weekly'
   | 'manual'
   | 'phase_transition'
-  | 'reply_sweep';
+  | 'reply_sweep'
+  | 'draft_post';
 
 export interface EnqueueTeamRunInput {
   teamId: string;
