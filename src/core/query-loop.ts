@@ -69,13 +69,40 @@ function sanitizeJsonSchemaForAnthropic(node: unknown): unknown {
     return node;
   }
   const src = node as Record<string, unknown>;
+
+  // Dynamic-key object (z.record / z.map / z.object({}).catchall) compiles
+  // to `{ type: 'object', additionalProperties: <schema> }` with NO
+  // `properties` key. Anthropic's grammar has no way to express "any
+  // keys, values of shape X" — only `additionalProperties: false` is
+  // allowed. Rather than force empty objects, convert the subtree to
+  // an unconstrained pass-through `{}` so the model can emit any JSON
+  // there. Outer Zod post-validation still enforces the real shape.
+  if (
+    src.type === 'object' &&
+    src.properties === undefined &&
+    src.additionalProperties !== undefined &&
+    src.additionalProperties !== false
+  ) {
+    return {};
+  }
+
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(src)) {
     if (STRIPPED_KEYS.has(key)) continue;
-    // additionalProperties: allow only `false`. Strip `true` + object forms.
+    // additionalProperties: only `false` is allowed. Strip `true` and
+    // object/schema forms (latter handled as pass-through above when
+    // it's the only thing on the node).
     if (key === 'additionalProperties' && value !== false) continue;
     out[key] = sanitizeJsonSchemaForAnthropic(value);
   }
+
+  // Anthropic requires every `type: 'object'` node to carry
+  // `additionalProperties: false` EXPLICITLY. Silent absence is rejected
+  // at schema-compile time.
+  if (out.type === 'object' && out.additionalProperties === undefined) {
+    out.additionalProperties = false;
+  }
+
   return out;
 }
 
