@@ -37,6 +37,7 @@ import {
 import { queryRecentMilestonesTool } from './MilestoneTools';
 import { queryMetricsTool } from './MetricsTools';
 import { queryTeamStatusTool } from './TeamTools';
+import { draftPostTool } from './DraftingTools';
 
 /**
  * Central tool registry for ShipFlare agents.
@@ -91,6 +92,15 @@ registry.register(queryLastWeekCompletionsTool);
 registry.register(queryRecentMilestonesTool);
 registry.register(queryMetricsTool);
 registry.register(queryTeamStatusTool);
+
+// ---------------------------------------------------------------------------
+// Phase E Day 1 drafting tools (spec §9.1 + §11 Phase E). Flat snake_case
+// identifiers (`draft_post`); agents opt in via AGENT.md `tools: [...]`.
+// Writers (x-writer, reddit-writer) call these to generate + persist body
+// text on an existing plan_item — the plan_item row is the source of
+// truth for channel + context, the tool is the side-effect gate.
+// ---------------------------------------------------------------------------
+registry.register(draftPostTool);
 
 export { registry };
 
