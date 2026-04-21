@@ -652,6 +652,21 @@ describe('Phase A Day 4 — team-run integration', () => {
     expect(taskA!.parentTaskId).toBeNull();
     expect(taskB!.parentTaskId).toBe(taskA!.id);
 
+    // Phase G Day 1 cost-attribution: every completed spawn records a
+    // per-task cost, and the team_runs.total_cost_usd aggregates them +
+    // the root run's own cost. The fake API returns tokens>0 so the
+    // usage-cost model produces a positive dollar value for each spawn.
+    expect(taskA!.status).toBe('completed');
+    expect(taskB!.status).toBe('completed');
+    const taskACost = Number(taskA!.costUsd ?? 0);
+    const taskBCost = Number(taskB!.costUsd ?? 0);
+    expect(taskACost).toBeGreaterThan(0);
+    expect(taskBCost).toBeGreaterThan(0);
+    const runTotalCost = Number(run?.totalCostUsd ?? 0);
+    // Coordinator's own usage contributes too, so the aggregate is ≥
+    // (taskA + taskB).
+    expect(runTotalCost).toBeGreaterThanOrEqual(taskACost + taskBCost);
+
     // --- 3. team_messages attribution ---
     //
     // Every tool_call / tool_result emitted INSIDE echo-agent-a's run must

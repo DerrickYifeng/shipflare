@@ -18,6 +18,7 @@ import {
   teamMembers,
   teamRuns,
   teamMessages,
+  teamTasks,
 } from '@/lib/db/schema';
 import { createPubSubSubscriber, getPubSubPublisher } from '@/lib/redis';
 import { runAgent } from '@/core/query-loop';
@@ -443,18 +444,35 @@ export async function processTeamRunInternal(
     const startedAtMs = runStartedAt.getTime();
     const durationMs = completedAt.getTime() - startedAtMs;
 
+    // Phase G Day 1: team_runs.total_cost_usd aggregates the root agent's
+    // cost (result.usage.costUsd) + every nested spawn's cost recorded
+    // in team_tasks.cost_usd. runAgent's usage only tracks the call it
+    // made directly; costs inside Task-spawned subagents live on their
+    // respective team_tasks rows, so we SUM them back in here.
+    const childTasks = await deps.db
+      .select({ costUsd: teamTasks.costUsd })
+      .from(teamTasks)
+      .where(eq(teamTasks.runId, runId));
+    const childCostUsd = childTasks.reduce(
+      (acc, row) => acc + Number(row.costUsd ?? 0),
+      0,
+    );
+    const aggregateCostUsd = result.usage.costUsd + childCostUsd;
+
     await deps.db
       .update(teamRuns)
       .set({
         status: 'completed',
         completedAt,
-        totalCostUsd: String(result.usage.costUsd),
+        totalCostUsd: String(aggregateCostUsd),
         totalTurns: result.usage.turns,
       })
       .where(eq(teamRuns.id, runId));
 
     logLine(
-      `team-run ${runId}: completed (cost=$${result.usage.costUsd.toFixed(4)}, turns=${result.usage.turns}, duration=${durationMs}ms)`,
+      `team-run ${runId}: completed (cost=$${aggregateCostUsd.toFixed(4)} ` +
+        `[root=$${result.usage.costUsd.toFixed(4)}, spawns=$${childCostUsd.toFixed(4)}], ` +
+        `turns=${result.usage.turns}, duration=${durationMs}ms)`,
     );
 
     // Phase G Day 1: slow-run alert. Run durations over the threshold emit
@@ -463,7 +481,7 @@ export async function processTeamRunInternal(
       baseLog.warn(
         `observability:slow-run team=${team.id} run=${runId} ` +
           `durationMs=${durationMs} thresholdMs=${SLOW_RUN_THRESHOLD_MS} ` +
-          `cost=$${result.usage.costUsd.toFixed(4)} turns=${result.usage.turns}`,
+          `cost=$${aggregateCostUsd.toFixed(4)} turns=${result.usage.turns}`,
       );
     }
 
