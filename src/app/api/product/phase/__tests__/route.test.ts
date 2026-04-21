@@ -14,17 +14,6 @@ vi.mock('@/lib/auth', () => ({
   auth: async () => (authUserId ? { user: { id: authUserId } } : null),
 }));
 
-vi.mock('@/core/skill-loader', () => ({
-  loadSkill: (path: string) => ({
-    name: path.includes('strategic') ? 'strategic-planner' : 'tactical-planner',
-  }),
-}));
-
-const runSkillMock = vi.fn();
-vi.mock('@/core/skill-runner', () => ({
-  runSkill: runSkillMock,
-}));
-
 vi.mock('@/lib/logger', () => ({
   createLogger: () => ({ debug: () => {}, info: () => {}, warn: () => {}, error: () => {} }),
   loggerForRequest: () => ({
@@ -33,41 +22,67 @@ vi.mock('@/lib/logger', () => ({
   }),
 }));
 
-vi.mock('@/skills/_catalog', () => ({
-  SKILL_CATALOG: [],
+// Phase E Day 3: the route enqueues a team-run via ensureTeamExists +
+// enqueueTeamRun. getUserChannels still drives the channels list.
+const getUserChannelsMock = vi.fn(async (_userId: string) => ['x']);
+vi.mock('@/lib/user-channels', () => ({
+  getUserChannels: (userId: string) => getUserChannelsMock(userId),
 }));
 
-vi.mock('@/lib/platform-config', () => ({
-  isPlatformAvailable: (p: string) => ['x', 'reddit'].includes(p),
+const ensureTeamExistsMock = vi.fn(
+  async (_userId: string, _productId: string | null) => ({
+    teamId: 'team-1',
+    memberIds: {
+      coordinator: 'mem-coord',
+      'growth-strategist': 'mem-gs',
+      'content-planner': 'mem-cp',
+    },
+    created: false,
+  }),
+);
+vi.mock('@/lib/team-provisioner', () => ({
+  ensureTeamExists: (userId: string, productId: string | null) =>
+    ensureTeamExistsMock(userId, productId),
 }));
 
+const enqueueTeamRunMock = vi.fn(async (_input: Record<string, unknown>) => ({
+  runId: 'run-phase-1',
+  traceId: 'trace-phase-1',
+  alreadyRunning: false,
+}));
+vi.mock('@/lib/queue/team-run', () => ({
+  enqueueTeamRun: (input: Record<string, unknown>) => enqueueTeamRunMock(input),
+}));
+
+// Minimal validateLaunchDates stub — the real implementation enforces
+// per-state date rules which we exercise indirectly by passing valid dates.
+// Tests that want to assert 400-on-invalid-dates set customDateErrors.
+let customDateErrors: string[] = [];
+vi.mock('@/lib/launch-date-rules', () => ({
+  validateLaunchDates: () => customDateErrors,
+}));
+
+// DB mock — productRow drives the product lookup; transaction runs the
+// callback with a tx that records supersede returning().length.
 let productRow: Record<string, unknown> | null = null;
-let userChannelRows: Array<{ platform: string }> = [];
+let supersededIds: Array<{ id: string }> = [];
 let txShouldThrow = false;
 
 vi.mock('@/lib/db', () => ({
   db: {
-    select: (projection?: unknown) => {
-      const sel = projection as Record<string, unknown> | undefined;
-      const fields = sel ? Object.keys(sel) : [];
-      return {
-        from: () => ({
-          where: () => {
-            if (fields.length === 1 && fields[0] === 'platform') {
-              return userChannelRows;
-            }
-            return { limit: () => (productRow ? [productRow] : []) };
-          },
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          limit: () => (productRow ? [productRow] : []),
         }),
-      };
-    },
+      }),
+    }),
     transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
       if (txShouldThrow) throw new Error('tx-fail');
       const tx = {
-        update: () => ({ set: () => ({ where: async () => undefined }) }),
-        insert: () => ({
-          values: () => ({
-            returning: () => [{ id: 'new-id-1' }],
+        update: () => ({
+          set: () => ({
+            where: () => ({ returning: () => supersededIds }),
           }),
         }),
       };
@@ -77,9 +92,8 @@ vi.mock('@/lib/db', () => ({
 }));
 
 vi.mock('drizzle-orm', async () => {
-  const actual = await vi.importActual<typeof import('drizzle-orm')>(
-    'drizzle-orm',
-  );
+  const actual =
+    await vi.importActual<typeof import('drizzle-orm')>('drizzle-orm');
   return {
     ...actual,
     eq: () => ({}),
@@ -92,42 +106,7 @@ vi.mock('drizzle-orm', async () => {
   };
 });
 
-const productFixture = {
-  id: 'prod-1',
-  name: 'ShipFlare',
-  description: 'Marketing autopilot',
-  valueProp: null,
-  keywords: ['indiedev'],
-  category: 'dev_tool',
-  targetAudience: 'solo founders',
-};
-
-const validPath = {
-  narrative:
-    'This is a deliberately long narrative that exceeds the 200-char floor. ' +
-    'It names the thesis in paragraph one and sketches the arc in paragraph two so the downstream fixtures have realistic data. ' +
-    'We hedge by calling out one risk and the mitigation approach.',
-  milestones: [
-    { atDayOffset: -28, title: 'x', successMetric: 'x', phase: 'foundation' },
-    { atDayOffset: -14, title: 'y', successMetric: 'y', phase: 'audience' },
-    { atDayOffset: -7, title: 'z', successMetric: 'z', phase: 'momentum' },
-  ],
-  thesisArc: [
-    { weekStart: '2026-04-20T00:00:00Z', theme: 't', angleMix: ['claim'] },
-  ],
-  contentPillars: ['a', 'b', 'c'],
-  channelMix: { x: { perWeek: 4, preferredHours: [14, 17, 21] } },
-  phaseGoals: { audience: 'grow' },
-};
-
-const validPlan = {
-  plan: { thesis: 't', notes: 'week notes' },
-  items: [
-    { kind: 'content_post' as const, userAction: 'approve' as const, phase: 'audience' as const, channel: 'x', scheduledAt: '2026-04-22T17:00:00Z', skillName: 'draft-single-post', params: { anchor_theme: 't' }, title: 'A', description: null },
-    { kind: 'content_post' as const, userAction: 'approve' as const, phase: 'audience' as const, channel: 'x', scheduledAt: '2026-04-23T17:00:00Z', skillName: 'draft-single-post', params: { anchor_theme: 't' }, title: 'B', description: null },
-    { kind: 'content_post' as const, userAction: 'approve' as const, phase: 'audience' as const, channel: 'x', scheduledAt: '2026-04-24T17:00:00Z', skillName: 'draft-single-post', params: { anchor_theme: 't' }, title: 'C', description: null },
-  ],
-};
+const productFixture = { id: 'prod-1', name: 'ShipFlare' };
 
 function makeReq(body: unknown): NextRequest {
   return new NextRequest('http://localhost/api/product/phase', {
@@ -137,15 +116,17 @@ function makeReq(body: unknown): NextRequest {
   });
 }
 
-const DAY = 86_400_000;
-
 beforeEach(() => {
   allowedRL = true;
   authUserId = 'user-1';
-  productRow = null;
-  userChannelRows = [];
+  productRow = productFixture;
+  supersededIds = [];
   txShouldThrow = false;
-  runSkillMock.mockReset();
+  customDateErrors = [];
+  getUserChannelsMock.mockClear();
+  getUserChannelsMock.mockImplementation(async () => ['x']);
+  ensureTeamExistsMock.mockClear();
+  enqueueTeamRunMock.mockClear();
 });
 
 describe('POST /api/product/phase', () => {
@@ -161,136 +142,113 @@ describe('POST /api/product/phase', () => {
     const { POST } = await import('../route');
     const res = await POST(makeReq({ state: 'mvp' }));
     expect(res.status).toBe(429);
+    expect(res.headers.get('Retry-After')).toBe('7');
   });
 
-  it('returns 404 when user has no product', async () => {
+  it('returns 400 on invalid request body', async () => {
+    const { POST } = await import('../route');
+    const res = await POST(makeReq({ state: 'bogus' }));
+    expect(res.status).toBe(400);
+    const payload = (await res.json()) as { error: string };
+    expect(payload.error).toBe('invalid_request');
+  });
+
+  it('returns 400 when validateLaunchDates reports errors', async () => {
+    customDateErrors = ['launchDate required when state=launching'];
+    const { POST } = await import('../route');
+    const res = await POST(
+      makeReq({ state: 'launching', launchDate: null }),
+    );
+    expect(res.status).toBe(400);
+    const payload = (await res.json()) as { error: string; detail: unknown };
+    expect(payload.error).toBe('invalid_dates');
+    expect(payload.detail).toEqual(customDateErrors);
+  });
+
+  it('returns 404 when the user has no product', async () => {
     productRow = null;
     const { POST } = await import('../route');
     const res = await POST(makeReq({ state: 'mvp' }));
     expect(res.status).toBe(404);
-  });
-
-  it('returns 400 on invalid_dates (state=launching without launchDate)', async () => {
-    productRow = productFixture;
-    const { POST } = await import('../route');
-    const res = await POST(makeReq({ state: 'launching' }));
-    expect(res.status).toBe(400);
     const payload = (await res.json()) as { error: string };
-    expect(payload.error).toBe('invalid_dates');
+    expect(payload.error).toBe('no_product');
   });
 
-  it('returns 200 success on valid phase change', async () => {
-    productRow = productFixture;
-    runSkillMock
-      .mockResolvedValueOnce({
-        results: [validPath],
-        errors: [],
-        usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0, model: 'sonnet', turns: 1 },
-      })
-      .mockResolvedValueOnce({
-        results: [validPlan],
-        errors: [],
-        usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0, model: 'haiku', turns: 1 },
-      });
-
+  it('enqueues a team-run on success and returns { runId, phase, itemsSuperseded }', async () => {
+    supersededIds = [{ id: 's1' }, { id: 's2' }, { id: 's3' }];
     const { POST } = await import('../route');
     const res = await POST(
       makeReq({
         state: 'launching',
-        launchDate: new Date(Date.now() + 30 * DAY).toISOString(),
+        launchDate: '2026-05-14T00:00:00.000Z',
+        launchedAt: null,
       }),
     );
     expect(res.status).toBe(200);
     const payload = (await res.json()) as {
       success: boolean;
-      strategicPathId: string;
-      planId: string;
-      items: number;
+      runId: string;
+      phase: string;
+      itemsSuperseded: number;
     };
     expect(payload.success).toBe(true);
-    expect(payload.items).toBe(3);
+    expect(payload.runId).toBe('run-phase-1');
+    expect(payload.itemsSuperseded).toBe(3);
+    // derivePhase('launching', launchDate ~3 weeks out) = 'audience'
+    expect(payload.phase).toBe('audience');
+
+    expect(ensureTeamExistsMock).toHaveBeenCalledWith('user-1', 'prod-1');
+    expect(enqueueTeamRunMock).toHaveBeenCalledTimes(1);
+    expect(enqueueTeamRunMock.mock.calls[0]?.[0]).toMatchObject({
+      teamId: 'team-1',
+      trigger: 'phase_transition',
+      rootMemberId: 'mem-coord',
+    });
   });
 
-  it('returns 500 when strategic-planner errors', async () => {
-    productRow = productFixture;
-    runSkillMock.mockResolvedValueOnce({
-      results: [],
-      errors: [{ label: 's', error: 'LLM refused' }],
-      usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0, model: 'sonnet', turns: 0 },
-    });
+  it('passes the product name + phase + channels into the coordinator goal', async () => {
+    const { POST } = await import('../route');
+    await POST(
+      makeReq({
+        state: 'launched',
+        launchDate: null,
+        launchedAt: '2026-04-07T00:00:00.000Z',
+      }),
+    );
+    const goal = enqueueTeamRunMock.mock.calls[0]?.[0]?.goal as string;
+    expect(goal).toContain('ShipFlare');
+    expect(goal).toContain('launched');
+    // derivePhase('launched', 14d ago) = 'compound'
+    expect(goal).toContain('compound');
+    expect(goal).toContain('x');
+  });
+
+  it('returns 500 when the DB transaction fails', async () => {
+    txShouldThrow = true;
     const { POST } = await import('../route');
     const res = await POST(makeReq({ state: 'mvp' }));
     expect(res.status).toBe(500);
     const payload = (await res.json()) as { error: string };
-    expect(payload.error).toBe('replan_failed');
+    expect(payload.error).toBe('phase_change_failed');
   });
 
-  it('returns 500 when transaction throws', async () => {
-    productRow = productFixture;
-    txShouldThrow = true;
-    runSkillMock
-      .mockResolvedValueOnce({
-        results: [validPath],
-        errors: [],
-        usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0, model: 'sonnet', turns: 1 },
-      })
-      .mockResolvedValueOnce({
-        results: [validPlan],
-        errors: [],
-        usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0, model: 'haiku', turns: 1 },
-      });
+  it('returns 500 when the team-run enqueue fails', async () => {
+    enqueueTeamRunMock.mockImplementationOnce(async () => {
+      throw new Error('redis-down');
+    });
     const { POST } = await import('../route');
     const res = await POST(makeReq({ state: 'mvp' }));
     expect(res.status).toBe(500);
+    const payload = (await res.json()) as { error: string; detail: string };
+    expect(payload.error).toBe('phase_change_failed');
+    expect(payload.detail).toBe('redis-down');
   });
 
-  it("feeds the planner the user's connected channels", async () => {
-    productRow = productFixture;
-    userChannelRows = [{ platform: 'x' }, { platform: 'reddit' }];
-    runSkillMock
-      .mockResolvedValueOnce({
-        results: [validPath],
-        errors: [],
-        usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0, model: 'sonnet', turns: 1 },
-      })
-      .mockResolvedValueOnce({
-        results: [validPlan],
-        errors: [],
-        usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0, model: 'haiku', turns: 1 },
-      });
+  it('falls back to [x] when the user has no connected channels', async () => {
+    getUserChannelsMock.mockImplementationOnce(async () => []);
     const { POST } = await import('../route');
     await POST(makeReq({ state: 'mvp' }));
-
-    const strategicCall = runSkillMock.mock.calls[0]?.[0] as {
-      input: { channels: string[] };
-    };
-    const tacticalCall = runSkillMock.mock.calls[1]?.[0] as {
-      input: { channels: string[] };
-    };
-    expect(strategicCall.input.channels).toEqual(['x', 'reddit']);
-    expect(tacticalCall.input.channels).toEqual(['x', 'reddit']);
-  });
-
-  it("falls back to ['x'] when the user has no connected channels", async () => {
-    productRow = productFixture;
-    userChannelRows = [];
-    runSkillMock
-      .mockResolvedValueOnce({
-        results: [validPath],
-        errors: [],
-        usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0, model: 'sonnet', turns: 1 },
-      })
-      .mockResolvedValueOnce({
-        results: [validPlan],
-        errors: [],
-        usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0, model: 'haiku', turns: 1 },
-      });
-    const { POST } = await import('../route');
-    await POST(makeReq({ state: 'mvp' }));
-
-    const strategicCall = runSkillMock.mock.calls[0]?.[0] as {
-      input: { channels: string[] };
-    };
-    expect(strategicCall.input.channels).toEqual(['x']);
+    const goal = enqueueTeamRunMock.mock.calls[0]?.[0]?.goal as string;
+    expect(goal).toContain('x');
   });
 });

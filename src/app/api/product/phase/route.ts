@@ -1,48 +1,20 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { join } from 'node:path';
 import { z } from 'zod';
 import { and, eq, gte, inArray, lt, ne, sql } from 'drizzle-orm';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import {
-  products,
-  strategicPaths,
-  plans,
-  planItems,
-} from '@/lib/db/schema';
-import { loadSkill } from '@/core/skill-loader';
-import { runSkill } from '@/core/skill-runner';
-import { SKILL_CATALOG } from '@/skills/_catalog';
-import {
-  strategicPathSchema,
-  tacticalPlanSchema,
-  type StrategicPath,
-  type TacticalPlan,
-} from '@/agents/schemas';
+import { products, strategicPaths, planItems } from '@/lib/db/schema';
 import { derivePhase, type ProductState } from '@/lib/launch-phase';
 import { validateLaunchDates } from '@/lib/launch-date-rules';
 import { acquireRateLimit } from '@/lib/rate-limit';
 import { getUserChannels } from '@/lib/user-channels';
+import { ensureTeamExists } from '@/lib/team-provisioner';
+import { enqueueTeamRun } from '@/lib/queue/team-run';
 import { createLogger, loggerForRequest } from '@/lib/logger';
 
 const baseLog = createLogger('api:product:phase');
 
-const CHAIN_TIMEOUT_MS = 60_000;
 const RATE_LIMIT_WINDOW_SECONDS = 60;
-
-const strategicSkill = loadSkill(
-  join(process.cwd(), 'src/skills/strategic-planner'),
-);
-const tacticalSkill = loadSkill(
-  join(process.cwd(), 'src/skills/tactical-planner'),
-);
-
-const catalogProjection = SKILL_CATALOG.map((s) => ({
-  name: s.name,
-  description: s.description,
-  supportedKinds: [...s.supportedKinds],
-  ...(s.channels ? { channels: [...s.channels] } : {}),
-}));
 
 const requestBodySchema = z.object({
   state: z.enum(['mvp', 'launching', 'launched']),
@@ -64,35 +36,37 @@ function weekBounds(now: Date): { weekStart: Date; weekEnd: Date } {
 /**
  * POST /api/product/phase
  *
- * Strategic replan: "phase change, new path". The user has changed
- * their launch situation in Settings (mvp ↔ launching ↔ launched,
- * and/or the launch date shifted). Validates per-state date rules,
- * updates the products row, deactivates the current strategic_path,
- * runs strategic-planner + tactical-planner back-to-back, then
- * replaces this week's pre-approval plan_items inside one transaction.
+ * Strategic replan: "phase change, new path". The user has changed their
+ * launch situation in Settings (mvp ↔ launching ↔ launched, and/or the
+ * launch date shifted). We:
+ *
+ *   1. Validate per-state date rules.
+ *   2. Update the `products` row (state + dates) and deactivate the active
+ *      `strategic_paths` row atomically.
+ *   3. Supersede this week's pre-approval `plan_items` so the Today UI
+ *      clears stale entries immediately.
+ *   4. Enqueue a team-run with `trigger='phase_transition'`. The
+ *      coordinator delegates to growth-strategist (to write the new
+ *      strategic path) then content-planner (to write the new week's
+ *      plan_items). Both land via their domain tools; this route returns
+ *      immediately with a runId.
+ *
+ * Phase E Day 3: replaces the legacy runSkill(strategic) + runSkill(tactical)
+ * chain. The team-run is async — the client should subscribe to
+ * `/api/team/events?runId=...` for progress. Drops the legacy `{ path,
+ * plan, items }` response envelope.
  *
  * Sibling endpoint:
- *   POST /api/plan/replan — tactical replan. Use when phase and
- *   launch date are UNchanged and you just want fresh plan_items for
- *   the coming week. That route skips strategic-planner entirely
- *   (reuses the active path) and only runs tactical-planner.
+ *   POST /api/plan/replan — tactical replan (same-phase new-week). Use
+ *   when the phase or launch date is unchanged. That route reuses the
+ *   active strategic_path and only enqueues a weekly replan.
  *
- * These routes are NOT duplicates — they operate on different scopes:
- * `phase` writes a new strategic_paths row, `replan` reuses the
- * active one. Both eventually reach the same supersede+insert
- * transaction shape on plan_items, but the inputs to that transaction
- * are sourced differently.
- *
- * Replaces the old v1 PUT /api/product/phase route that just toggled
- * lifecyclePhase without re-planning.
- *
- *   200 { success: true, strategicPathId, planId, items }
+ *   200 { success: true, runId, phase, itemsSuperseded }
  *   400 invalid_request / invalid_dates
  *   401 unauthorized
  *   404 no_product (user hasn't completed onboarding)
  *   429 rate_limited
- *   500 replan_failed
- *   504 planner_timeout
+ *   500 phase_change_failed
  */
 export async function POST(request: NextRequest): Promise<Response> {
   const { log, traceId } = loggerForRequest(baseLog, request);
@@ -141,17 +115,8 @@ export async function POST(request: NextRequest): Promise<Response> {
     );
   }
 
-  // Load the existing product. 404 when user hasn't completed onboarding.
   const [product] = await db
-    .select({
-      id: products.id,
-      name: products.name,
-      description: products.description,
-      valueProp: products.valueProp,
-      keywords: products.keywords,
-      category: products.category,
-      targetAudience: products.targetAudience,
-    })
+    .select({ id: products.id, name: products.name })
     .from(products)
     .where(eq(products.userId, userId))
     .limit(1);
@@ -169,134 +134,20 @@ export async function POST(request: NextRequest): Promise<Response> {
   const currentPhase = derivePhase({ state, launchDate, launchedAt });
 
   const userChannels = await getUserChannels(userId);
-  // Fall back to ['x'] so a user with zero connected channels still gets a
-  // plan (they can only execute X-shaped skills, which is fine — the strategic
-  // planner needs at least one channel to write channelMix against).
-  const plannerChannels = userChannels.length > 0 ? userChannels : ['x'];
+  const activeChannels = userChannels.length > 0 ? userChannels : ['x'];
 
   log.info(
-    `phase change start user=${userId} state=${state} phase=${currentPhase} channels=${plannerChannels.join(',')}`,
+    `phase change start user=${userId} state=${state} phase=${currentPhase} channels=${activeChannels.join(',')}`,
   );
 
-  // Run strategic + tactical chain. Same pattern as /api/onboarding/plan
-  // but persisted rather than previewed.
+  // Commit the pre-team-run state atomically: update product, supersede
+  // this week's pre-approval items, deactivate the active strategic_path.
+  // The team-run writes the NEW strategic_path + plan_items on its own
+  // timeline via growth-strategist + content-planner tool calls.
   const { weekStart, weekEnd } = weekBounds(new Date());
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), CHAIN_TIMEOUT_MS);
-
-  const timeoutPromise = new Promise<never>((_resolve, reject) => {
-    controller.signal.addEventListener('abort', () =>
-      reject(new Error('planner_timeout')),
-    );
-  });
-
-  let path: StrategicPath;
-  let plan: TacticalPlan;
+  let itemsSuperseded = 0;
   try {
-    const strategicRes = await Promise.race([
-      runSkill<StrategicPath>({
-        skill: strategicSkill,
-        input: {
-          product: {
-            name: product.name,
-            description: product.description,
-            valueProp: product.valueProp,
-            keywords: product.keywords,
-            category: product.category ?? 'other',
-            targetAudience: product.targetAudience,
-          },
-          state,
-          currentPhase,
-          launchDate: launchDate ? launchDate.toISOString() : null,
-          launchedAt: launchedAt ? launchedAt.toISOString() : null,
-          channels: plannerChannels,
-          voiceProfile: null,
-          recentMilestones: [],
-        },
-        outputSchema: strategicPathSchema,
-      }),
-      timeoutPromise,
-    ]);
-
-    if (strategicRes.errors.length > 0) {
-      throw new Error(
-        `strategic-planner: ${strategicRes.errors.map((e) => e.error).join('; ')}`,
-      );
-    }
-    const maybePath = strategicRes.results[0];
-    if (!maybePath) throw new Error('strategic-planner returned no result');
-    path = maybePath;
-
-    const tacticalRes = await Promise.race([
-      runSkill<TacticalPlan>({
-        skill: tacticalSkill,
-        input: {
-          strategicPath: {
-            narrative: path.narrative,
-            thesisArc: path.thesisArc,
-            contentPillars: path.contentPillars,
-            channelMix: path.channelMix,
-            phaseGoals: path.phaseGoals,
-            milestones: path.milestones,
-          },
-          product: {
-            name: product.name,
-            valueProp: product.valueProp,
-            currentPhase,
-            state,
-            launchDate: launchDate ? launchDate.toISOString() : null,
-            launchedAt: launchedAt ? launchedAt.toISOString() : null,
-          },
-          channels: plannerChannels,
-          weekStart: weekStart.toISOString(),
-          weekEnd: weekEnd.toISOString(),
-          signals: {
-            recentMilestones: [],
-            recentMetrics: [],
-            stalledItems: [],
-            completedLastWeek: [],
-            currentLaunchTasks: [],
-          },
-          skillCatalog: catalogProjection,
-          voiceBlock: null,
-        },
-        outputSchema: tacticalPlanSchema,
-      }),
-      timeoutPromise,
-    ]);
-
-    clearTimeout(timeoutId);
-
-    if (tacticalRes.errors.length > 0) {
-      throw new Error(
-        `tactical-planner: ${tacticalRes.errors.map((e) => e.error).join('; ')}`,
-      );
-    }
-    const maybePlan = tacticalRes.results[0];
-    if (!maybePlan) throw new Error('tactical-planner returned no result');
-    plan = maybePlan;
-  } catch (err) {
-    clearTimeout(timeoutId);
-    const message = err instanceof Error ? err.message : String(err);
-    if (message === 'planner_timeout') {
-      return NextResponse.json(
-        { error: 'planner_timeout' },
-        { status: 504, headers: { 'x-trace-id': traceId } },
-      );
-    }
-    log.error(`phase chain failed user=${userId}: ${message}`);
-    return NextResponse.json(
-      { error: 'replan_failed', detail: message },
-      { status: 500, headers: { 'x-trace-id': traceId } },
-    );
-  }
-
-  // Commit: update product, supersede current week's pre-approval items,
-  // deactivate old path, insert new path + plan + items.
-  let strategicPathId: string;
-  let planId: string;
-  try {
-    ({ strategicPathId, planId } = await db.transaction(async (tx) => {
+    await db.transaction(async (tx) => {
       await tx
         .update(products)
         .set({
@@ -307,7 +158,7 @@ export async function POST(request: NextRequest): Promise<Response> {
         })
         .where(eq(products.id, product.id));
 
-      await tx
+      const superseded = await tx
         .update(planItems)
         .set({ state: 'superseded', updatedAt: sql`now()` })
         .where(
@@ -318,83 +169,64 @@ export async function POST(request: NextRequest): Promise<Response> {
             inArray(planItems.state, ['planned', 'drafted', 'ready_for_review']),
             ne(planItems.userAction, 'manual'),
           ),
-        );
+        )
+        .returning({ id: planItems.id });
+      itemsSuperseded = superseded.length;
 
       await tx
         .update(strategicPaths)
         .set({ isActive: false })
         .where(eq(strategicPaths.userId, userId));
-
-      const [pathRow] = await tx
-        .insert(strategicPaths)
-        .values({
-          userId,
-          productId: product.id,
-          isActive: true,
-          phase: currentPhase,
-          launchDate,
-          launchedAt,
-          narrative: path.narrative,
-          milestones: path.milestones,
-          thesisArc: path.thesisArc,
-          contentPillars: path.contentPillars,
-          channelMix: path.channelMix,
-          phaseGoals: path.phaseGoals,
-        })
-        .returning({ id: strategicPaths.id });
-
-      const [planRow] = await tx
-        .insert(plans)
-        .values({
-          userId,
-          productId: product.id,
-          strategicPathId: pathRow.id,
-          trigger: 'manual',
-          weekStart,
-          notes: plan.plan.notes,
-        })
-        .returning({ id: plans.id });
-
-      if (plan.items.length > 0) {
-        await tx.insert(planItems).values(
-          plan.items.map((item) => ({
-            userId,
-            productId: product.id,
-            planId: planRow.id,
-            kind: item.kind,
-            userAction: item.userAction,
-            phase: item.phase,
-            channel: item.channel ?? null,
-            scheduledAt: new Date(item.scheduledAt),
-            skillName: item.skillName ?? null,
-            params: item.params,
-            title: item.title,
-            description: item.description ?? null,
-          })),
-        );
-      }
-
-      return { strategicPathId: pathRow.id, planId: planRow.id };
-    }));
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     log.error(`phase tx failed user=${userId}: ${message}`);
     return NextResponse.json(
-      { error: 'replan_failed', detail: message },
+      { error: 'phase_change_failed', detail: message },
+      { status: 500, headers: { 'x-trace-id': traceId } },
+    );
+  }
+
+  // Enqueue the team-run. Growth-strategist writes the new strategic_path
+  // via write_strategic_path (which activates it on insert); content-planner
+  // writes the week's plan_items via add_plan_item.
+  let runId: string;
+  try {
+    const { teamId, memberIds } = await ensureTeamExists(userId, product.id);
+    const goal =
+      `Phase change for ${product.name}: the user updated their launch situation. ` +
+      `New state: ${state}. New phase: ${currentPhase}. ` +
+      (launchDate ? `Launch date: ${launchDate.toISOString().slice(0, 10)}. ` : '') +
+      (launchedAt ? `Launched: ${launchedAt.toISOString().slice(0, 10)}. ` : '') +
+      `Active channels: ${activeChannels.join(', ')}. ` +
+      `Write a new strategic path reflecting the new phase, then plan the coming week.`;
+
+    const enqueued = await enqueueTeamRun({
+      teamId,
+      trigger: 'phase_transition',
+      goal,
+      rootMemberId: memberIds.coordinator,
+    });
+    runId = enqueued.runId;
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    log.error(`phase enqueue failed user=${userId}: ${detail}`);
+    return NextResponse.json(
+      { error: 'phase_change_failed', detail },
       { status: 500, headers: { 'x-trace-id': traceId } },
     );
   }
 
   log.info(
-    `phase change done user=${userId} path=${strategicPathId} plan=${planId} items=${plan.items.length}`,
+    `phase change enqueued user=${userId} runId=${runId} superseded=${itemsSuperseded}`,
   );
 
   return NextResponse.json(
     {
       success: true,
-      strategicPathId,
-      planId,
-      items: plan.items.length,
+      runId,
+      phase: currentPhase,
+      itemsSuperseded,
     },
     { headers: { 'x-trace-id': traceId } },
   );
