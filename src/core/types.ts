@@ -61,9 +61,41 @@ export interface ToolResult {
 // Stream event types (ported from engine/query.ts)
 // ---------------------------------------------------------------------------
 
+/**
+ * Provenance tag attached to `tool_start` / `tool_done` events when the
+ * emitting agent is a subagent spawned via the Task tool. The Task tool
+ * augments its child's events with this field so the top-level event
+ * handler (the team-run worker) can attribute each nested tool call to
+ * the specialist that ran it AND link it to the `team_tasks.id` row that
+ * started the spawn — giving the activity-log UI a complete delegation
+ * tree. Only the innermost spawn tags the event; outer spawns preserve
+ * the existing tag so leaf events carry their immediate parent.
+ */
+export interface StreamEventSpawnMeta {
+  /** `team_tasks.id` of the spawn that produced this event. */
+  parentTaskId: string;
+  /** `team_members.id` of the subagent that emitted the event, if resolvable. */
+  fromMemberId: string | null;
+  /** AGENT.md `name` of the subagent — always present, cheap fallback. */
+  agentName: string;
+}
+
 export type StreamEvent =
-  | { type: 'tool_start'; toolName: string; toolUseId: string; input: unknown }
-  | { type: 'tool_done'; toolName: string; toolUseId: string; result: ToolResult; durationMs: number }
+  | {
+      type: 'tool_start';
+      toolName: string;
+      toolUseId: string;
+      input: unknown;
+      spawnMeta?: StreamEventSpawnMeta;
+    }
+  | {
+      type: 'tool_done';
+      toolName: string;
+      toolUseId: string;
+      result: ToolResult;
+      durationMs: number;
+      spawnMeta?: StreamEventSpawnMeta;
+    }
   | { type: 'text_delta'; text: string }
   | { type: 'turn_start'; turn: number }
   | { type: 'turn_complete'; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }

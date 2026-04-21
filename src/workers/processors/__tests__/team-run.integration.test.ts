@@ -501,6 +501,181 @@ describe('Phase A Day 4 — team-run integration', () => {
     expect(completionEvent.type).toBe('completion');
   });
 
+  it('propagates onEvent through 2-level Task spawns with parentTaskId tagging', async () => {
+    // Phase D prerequisite (Task #10): when the coordinator spawns
+    // echo-agent-a, and echo-agent-a spawns echo-agent-b, every tool_call
+    // emitted inside the specialist subagents must land in team_messages
+    // with metadata.parentTaskId pointing at the nearest enclosing
+    // team_tasks.id — so the activity-log UI can render a complete tree.
+
+    // Point the agent registry at the nested-fixture directory for the
+    // rest of this test. `afterEach` resets it.
+    __setAgentsRootForTesting(
+      path.resolve(__dirname, 'team-run-nested-fixtures'),
+    );
+    __resetAgentRegistry();
+
+    // --- Seed state ---
+    teamsTable.push({ id: 'team-n', userId: 'user-n', productId: null });
+    membersTable.push({
+      id: 'mem-coord-n',
+      teamId: 'team-n',
+      agentType: 'coordinator-nested',
+      displayName: 'Sam (coordinator)',
+    });
+    membersTable.push({
+      id: 'mem-echo-a',
+      teamId: 'team-n',
+      agentType: 'echo-agent-a',
+      displayName: 'Echo A',
+    });
+    membersTable.push({
+      id: 'mem-echo-b',
+      teamId: 'team-n',
+      agentType: 'echo-agent-b',
+      displayName: 'Echo B',
+    });
+    runsTable.push({
+      id: 'run-nested',
+      teamId: 'team-n',
+      status: 'pending',
+      goal: 'Nested echo',
+      rootAgentId: 'mem-coord-n',
+      traceId: null,
+    });
+
+    // --- Script ---
+    //   Turn 1 (coordinator-nested): Task(echo-agent-a, ...)
+    //   Turn 2 (echo-agent-a):       Task(echo-agent-b, ...)
+    //   Turn 3 (echo-agent-b):       text end_turn
+    //   Turn 4 (echo-agent-a):       text end_turn (after tool_result)
+    //   Turn 5 (coordinator-nested): StructuredOutput terminal
+
+    script.push({
+      content: [
+        {
+          type: 'tool_use',
+          id: 'toolu_a',
+          name: 'Task',
+          input: {
+            subagent_type: 'echo-agent-a',
+            prompt: 'level 1',
+            description: 'spawn A',
+          },
+        },
+      ],
+      stop_reason: 'tool_use',
+    });
+    script.push({
+      content: [
+        {
+          type: 'tool_use',
+          id: 'toolu_b',
+          name: 'Task',
+          input: {
+            subagent_type: 'echo-agent-b',
+            prompt: 'level 2',
+            description: 'spawn B',
+          },
+        },
+      ],
+      stop_reason: 'tool_use',
+    });
+    script.push({
+      content: [{ type: 'text', text: 'leaf' }],
+      stop_reason: 'end_turn',
+    });
+    script.push({
+      content: [{ type: 'text', text: 'A done' }],
+      stop_reason: 'end_turn',
+    });
+    script.push({
+      content: [
+        {
+          type: 'tool_use',
+          id: 'toolu_so_nested',
+          name: 'StructuredOutput',
+          input: { status: 'completed', summary: 'nested echo done' },
+        },
+      ],
+      stop_reason: 'tool_use',
+    });
+
+    const schema = await import('@/lib/db/schema');
+    const deps: TeamRunDeps = {
+      db: makeFakeDb(schema),
+      publish: makePublish(),
+    };
+    const rootSchema = z.object({
+      status: z.string(),
+      summary: z.string(),
+    });
+
+    await processTeamRunInternal('run-nested', deps, () => {}, rootSchema);
+
+    // --- 1. team_runs completed ---
+    const run = runsTable.find((r) => r.id === 'run-nested');
+    expect(run?.status).toBe('completed');
+
+    // --- 2. team_tasks: expect TWO task rows (A + B) chained ---
+    const tasks = tasksTable.filter((t) => t.runId === 'run-nested');
+    expect(tasks).toHaveLength(2);
+    const taskA = tasks.find(
+      (t) => (t.input as Record<string, unknown>).subagent_type === 'echo-agent-a',
+    );
+    const taskB = tasks.find(
+      (t) => (t.input as Record<string, unknown>).subagent_type === 'echo-agent-b',
+    );
+    expect(taskA).toBeDefined();
+    expect(taskB).toBeDefined();
+    // taskA's parent is the coordinator (null); taskB's parent is taskA.
+    expect(taskA!.parentTaskId).toBeNull();
+    expect(taskB!.parentTaskId).toBe(taskA!.id);
+
+    // --- 3. team_messages attribution ---
+    //
+    // Every tool_call / tool_result emitted INSIDE echo-agent-a's run must
+    // carry metadata.parentTaskId === taskA.id and fromMemberId === 'mem-echo-a'.
+    // (That includes the Task(echo-agent-b) call and its tool_result, but
+    // NOT the outer Task(echo-agent-a) call — that one is attributed to
+    // the coordinator.)
+    const toolMessages = messagesTable.filter(
+      (m) => m.type === 'tool_call' || m.type === 'tool_result',
+    );
+
+    const coordinatorTaskCalls = toolMessages.filter(
+      (m) =>
+        (m.metadata as Record<string, unknown>).toolName === 'Task' &&
+        m.fromMemberId === 'mem-coord-n',
+    );
+    expect(coordinatorTaskCalls.length).toBeGreaterThan(0);
+    for (const msg of coordinatorTaskCalls) {
+      // The outermost Task call has no spawnMeta — it runs at the
+      // coordinator scope, not inside a spawn.
+      expect(
+        (msg.metadata as Record<string, unknown>).parentTaskId,
+      ).toBeUndefined();
+    }
+
+    const aScopedTaskCalls = toolMessages.filter(
+      (m) =>
+        (m.metadata as Record<string, unknown>).toolName === 'Task' &&
+        m.fromMemberId === 'mem-echo-a',
+    );
+    expect(aScopedTaskCalls.length).toBeGreaterThan(0);
+    for (const msg of aScopedTaskCalls) {
+      expect((msg.metadata as Record<string, unknown>).parentTaskId).toBe(
+        taskA!.id,
+      );
+      expect((msg.metadata as Record<string, unknown>).agentName).toBe(
+        'echo-agent-a',
+      );
+    }
+
+    // --- 4. Pub/sub parity ---
+    expect(published.length).toBe(messagesTable.length);
+  });
+
   it('skips the run idempotently when the team_runs row is no longer pending', async () => {
     runsTable.push({
       id: 'run-already-done',

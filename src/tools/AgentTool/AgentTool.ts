@@ -4,12 +4,17 @@
 // teammate spawn. Spawn depth limit (3) enforced here per spec §16.
 
 import { z } from 'zod';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { buildTool } from '@/core/tool-system';
-import type { ToolContext, ToolDefinition } from '@/core/types';
+import type {
+  StreamEvent,
+  StreamEventSpawnMeta,
+  ToolContext,
+  ToolDefinition,
+} from '@/core/types';
 import { createLogger } from '@/lib/logger';
 import type { Database } from '@/lib/db';
-import { teamTasks } from '@/lib/db/schema';
+import { teamMembers, teamTasks } from '@/lib/db/schema';
 import { getAvailableAgents, resolveAgent } from './registry';
 import { getAgentOutputSchema } from './agent-schemas';
 import {
@@ -188,6 +193,55 @@ async function recordTaskFailure(
     .where(eq(teamTasks.id, taskId));
 }
 
+/**
+ * Best-effort resolve the spawned specialist's `team_members.id` so events
+ * emitted inside its runAgent can be attributed to it in the activity log.
+ * Returns `null` when ctx isn't team-scoped (tests / CLI) or when the
+ * team_provisioner hasn't seeded a row for this agent_type yet — callers
+ * fall back to the caller's memberId for legacy-compatible attribution.
+ */
+async function resolveSpecialistMemberId(
+  ctx: ToolContext,
+  agentType: string,
+): Promise<string | null> {
+  const { db, teamId } = readTeamDeps(ctx);
+  if (!db || !teamId) return null;
+  try {
+    const rows = await db
+      .select({ id: teamMembers.id })
+      .from(teamMembers)
+      .where(
+        and(eq(teamMembers.teamId, teamId), eq(teamMembers.agentType, agentType)),
+      )
+      .limit(1);
+    return rows[0]?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Wrap a parent's onEvent so that `tool_start` / `tool_done` events emitted
+ * inside the child's runAgent carry a `spawnMeta` tag pointing at the
+ * `team_tasks.id` row the child is running under. The innermost spawn tags
+ * the event; deeper spawns preserve an existing tag so leaf events always
+ * carry their immediate parent. Non-tool events pass through untouched.
+ */
+function wrapOnEventWithSpawnMeta(
+  parentOnEvent: (event: StreamEvent) => void | Promise<void>,
+  spawnMeta: StreamEventSpawnMeta,
+): (event: StreamEvent) => void | Promise<void> {
+  return (event) => {
+    if (event.type === 'tool_start' || event.type === 'tool_done') {
+      if (event.spawnMeta !== undefined) {
+        return parentOnEvent(event);
+      }
+      return parentOnEvent({ ...event, spawnMeta });
+    }
+    return parentOnEvent(event);
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Tool definition
 // ---------------------------------------------------------------------------
@@ -257,6 +311,13 @@ export const taskTool: ToolDefinition<TaskInput, TaskResult> = buildTool({
     // worker stashes its onEvent under ctx.get('onEvent'); callers that
     // aren't team-scoped won't have it, in which case we pass undefined
     // and the child runs quietly.
+    //
+    // When we have a parentTaskId (team-scoped run), wrap the parent's
+    // onEvent so the child's tool events carry a `spawnMeta` tag — the
+    // team-run worker's event bridge reads this and writes each nested
+    // tool_call / tool_result into team_messages with the correct
+    // `from_member_id` + `metadata.parentTaskId`, so the activity-log UI
+    // can render the full delegation tree.
     let onEventFn: SpawnCallbacks['onEvent'] | undefined;
     try {
       const fromCtx = ctx.get<SpawnCallbacks['onEvent'] | null>('onEvent');
@@ -264,8 +325,23 @@ export const taskTool: ToolDefinition<TaskInput, TaskResult> = buildTool({
     } catch {
       onEventFn = undefined;
     }
-    const callbacks: SpawnCallbacks | undefined = onEventFn
-      ? { onEvent: onEventFn }
+
+    let wrappedOnEvent: SpawnCallbacks['onEvent'] | undefined = onEventFn;
+    if (onEventFn && parentTaskId) {
+      const specialistMemberId = await resolveSpecialistMemberId(
+        ctx,
+        agent.name,
+      );
+      const spawnMeta: StreamEventSpawnMeta = {
+        parentTaskId,
+        fromMemberId: specialistMemberId,
+        agentName: agent.name,
+      };
+      wrappedOnEvent = wrapOnEventWithSpawnMeta(onEventFn, spawnMeta);
+    }
+
+    const callbacks: SpawnCallbacks | undefined = wrappedOnEvent
+      ? { onEvent: wrappedOnEvent }
       : undefined;
 
     // Resolve the subagent's terminal-output Zod schema. Agents whose

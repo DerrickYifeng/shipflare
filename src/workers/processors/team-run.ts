@@ -412,19 +412,29 @@ export async function emitToolEvent(
 ): Promise<void> {
   let teamId: string;
   let runId: string;
-  let fromMemberId: string | null = null;
+  let callerMemberId: string | null = null;
   try {
     teamId = ctx.get<string>('teamId');
     runId = ctx.get<string>('runId');
     try {
-      fromMemberId = ctx.get<string>('currentMemberId');
+      callerMemberId = ctx.get<string>('currentMemberId');
     } catch {
-      fromMemberId = null;
+      callerMemberId = null;
     }
   } catch {
     // Not a team-run context — nothing to record.
     return;
   }
+
+  // When the event was emitted inside a subagent spawned via Task, the
+  // Task tool has augmented it with a `spawnMeta` tag pointing at the
+  // spawning team_tasks row + the specialist's team_members row (when
+  // resolvable). We use that to attribute the message to the specialist
+  // and record `parentTaskId` on metadata so the UI can render a tree.
+  if (event.type !== 'tool_start' && event.type !== 'tool_done') return;
+
+  const spawnMeta = event.spawnMeta;
+  const fromMemberId = spawnMeta?.fromMemberId ?? callerMemberId;
 
   if (event.type === 'tool_start') {
     await recordMessage(deps, {
@@ -438,6 +448,12 @@ export async function emitToolEvent(
         toolName: event.toolName,
         toolUseId: event.toolUseId,
         input: event.input,
+        ...(spawnMeta
+          ? {
+              parentTaskId: spawnMeta.parentTaskId,
+              agentName: spawnMeta.agentName,
+            }
+          : {}),
       },
     });
     return;
@@ -455,6 +471,12 @@ export async function emitToolEvent(
         toolUseId: event.toolUseId,
         isError: event.result.is_error ?? false,
         durationMs: event.durationMs,
+        ...(spawnMeta
+          ? {
+              parentTaskId: spawnMeta.parentTaskId,
+              agentName: spawnMeta.agentName,
+            }
+          : {}),
       },
     });
   }
