@@ -90,28 +90,41 @@ export interface ToleranceResult {
   detail: string;
 }
 
-/** Within ±tolerance (default 15%) of `expected`. 0-vs-0 counts as pass. */
+/**
+ * Pass when |actual − expected| ≤ max(|expected| × tolerance, absoluteFloor).
+ *
+ * The `absoluteFloor` (default 1) prevents small-N metrics from failing on
+ * 1-unit LLM variance — a ±1 difference on a channel counting N=3 items is
+ * statistical noise, not a quality regression, and would always blow the
+ * 15% relative bar.
+ *
+ * 0-vs-0 always passes; expected=0 with actual≠0 passes only if
+ * |actual| ≤ absoluteFloor.
+ */
 export function withinTolerance(
   actual: number,
   expected: number,
   tolerance = 0.15,
   label = 'value',
+  absoluteFloor = 1,
 ): ToleranceResult {
-  if (expected === 0 && actual === 0) {
-    return { pass: true, detail: `${label}: 0 == 0` };
-  }
+  const absDelta = Math.abs(actual - expected);
   if (expected === 0) {
-    // Expected zero but actual non-zero — fail unless actual is also zero.
+    const pass = absDelta <= absoluteFloor;
     return {
-      pass: actual === 0,
-      detail: `${label}: expected 0 but got ${actual}`,
+      pass,
+      detail:
+        actual === 0
+          ? `${label}: 0 == 0`
+          : `${label}: expected 0 but got ${actual} (floor=${absoluteFloor})`,
     };
   }
-  const delta = Math.abs(actual - expected) / Math.abs(expected);
-  const pass = delta <= tolerance;
+  const relDelta = absDelta / Math.abs(expected);
+  const allowedAbs = Math.max(Math.abs(expected) * tolerance, absoluteFloor);
+  const pass = absDelta <= allowedAbs;
   return {
     pass,
-    detail: `${label}: actual=${actual} expected=${expected} delta=${(delta * 100).toFixed(1)}%`,
+    detail: `${label}: actual=${actual} expected=${expected} delta=${(relDelta * 100).toFixed(1)}% (allow ±${allowedAbs.toFixed(2)})`,
   };
 }
 
