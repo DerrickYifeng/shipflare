@@ -118,7 +118,7 @@ function seedHappyPath(store: InMemoryStore): { planItemId: string } {
       phase: 'foundation',
       channel: 'x',
       scheduledAt: new Date('2026-04-22T09:00:00Z'),
-      skillName: 'draft-single-post',
+      skillName: null,
       params: { angle: 'claim', topic: 'first plan' },
       output: null,
       title: 'Announce the new planner',

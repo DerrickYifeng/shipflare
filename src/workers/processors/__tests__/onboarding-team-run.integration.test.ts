@@ -434,7 +434,7 @@ describe('Phase B Day 4 — onboarding team-run end-to-end', () => {
             phase: 'audience',
             channel: 'x',
             scheduledAt: `${baseWeek}0T14:00:00.000Z`,
-            skillName: 'draft-single-post',
+            skillName: null,
             params: {
               angle: 'data',
               anchor_theme: 'Indie devs waste hours on PR review',
@@ -453,7 +453,7 @@ describe('Phase B Day 4 — onboarding team-run end-to-end', () => {
             phase: 'audience',
             channel: 'x',
             scheduledAt: `${baseWeek}1T17:00:00.000Z`,
-            skillName: 'draft-single-post',
+            skillName: null,
             params: {
               angle: 'contrarian',
               anchor_theme: 'Indie devs waste hours on PR review',
@@ -472,7 +472,7 @@ describe('Phase B Day 4 — onboarding team-run end-to-end', () => {
             phase: 'audience',
             channel: 'x',
             scheduledAt: `${baseWeek}2T14:00:00.000Z`,
-            skillName: 'draft-single-post',
+            skillName: null,
             params: {
               angle: 'howto',
               anchor_theme: 'Indie devs waste hours on PR review',
@@ -491,7 +491,7 @@ describe('Phase B Day 4 — onboarding team-run end-to-end', () => {
             phase: 'audience',
             channel: 'x',
             scheduledAt: `${baseWeek}4T17:00:00.000Z`,
-            skillName: 'draft-single-post',
+            skillName: null,
             params: {
               angle: 'data',
               anchor_theme: 'Indie devs waste hours on PR review',

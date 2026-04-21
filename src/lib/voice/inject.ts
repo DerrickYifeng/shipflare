@@ -1,7 +1,7 @@
 /**
- * Build the <voice_profile> XML block injected into draft-single-post /
- * draft-single-reply prompts. Pure function — takes a profile row, returns
- * a string (or null when profile is absent).
+ * Build the <voice_profile> XML block injected into writer agent prompts
+ * (x-writer, reddit-writer) and the draft-single-reply skill. Pure function —
+ * takes a profile row, returns a string (or null when profile is absent).
  */
 
 import { db } from '@/lib/db';

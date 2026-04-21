@@ -9,18 +9,18 @@ import {
 } from '../_catalog';
 
 /**
- * The catalog is the contract between the tactical-planner (Phase 6) and the
- * plan-execute dispatcher (Phase 7). These tests pin the invariants every
- * downstream consumer assumes: entries are unique, schemas are valid Zod, and
- * each entry corresponds to a real SKILL.md frontmatter name on disk.
+ * Phase E Day 3 trimmed the catalog from 22 to 5 entries — the remaining
+ * entries are the skills still loaded at runtime by their workers. The v2
+ * atomic-skill set that the tactical-planner used to select via skillName
+ * is gone; plan_items now flow through team-run coordinators + Task-spawned
+ * writer agents, so the planner no longer drives a catalog lookup.
  */
 describe('SKILL_CATALOG', () => {
   const SKILLS_DIR = join(process.cwd(), 'src/skills');
 
-  it('exports at least the six skills required by the Phase 4 exit gate', () => {
+  it('exports the 5 runtime-loaded skills that survived Phase E', () => {
     const names = SKILL_CATALOG.map((s) => s.name);
     for (const required of [
-      'draft-single-post',
       'draft-single-reply',
       'discovery',
       'draft-review',
@@ -39,9 +39,6 @@ describe('SKILL_CATALOG', () => {
 
   it('every entry carries a parseable Zod input schema', () => {
     for (const entry of SKILL_CATALOG) {
-      // `ZodType.parse(undefined)` either succeeds (empty object with all
-      // optional fields) or throws — both are valid Zod signals. What we're
-      // guarding against is a non-Zod value slipped into `inputSchema`.
       expect(typeof entry.inputSchema).toBe('object');
       expect(entry.inputSchema).toBeInstanceOf(z.ZodType);
     }
@@ -75,36 +72,13 @@ describe('SKILL_CATALOG', () => {
       expect(entry.channels.length).toBeGreaterThan(0);
     }
   });
-
-  it('draft-single-post rejects non-X platforms at the Zod layer', () => {
-    // Defense-in-depth: even if a caller bypasses the catalog channel filter,
-    // the input schema must refuse Reddit until Phase 5 lands the Reddit
-    // content guide + agent-prompt branch. This pins that contract so the
-    // TODO cannot silently get widened without a test failure.
-    const entry = findSkill('draft-single-post');
-    expect(entry).toBeDefined();
-    const parse = entry!.inputSchema.safeParse({
-      platform: 'reddit',
-      contentType: 'educational',
-      angle: 'claim',
-      topic: 't',
-      thesis: 'th',
-      thesisSource: 'manual',
-      product: { name: 'N', description: 'D', keywords: [] },
-      recentPostHistory: [],
-      priorAnglesThisWeek: [],
-      isThread: false,
-      voiceBlock: null,
-    });
-    expect(parse.success).toBe(false);
-  });
 });
 
 describe('findSkill', () => {
   it('returns the catalog entry by exact name', () => {
-    const entry = findSkill('draft-single-post');
+    const entry = findSkill('draft-single-reply');
     expect(entry).toBeDefined();
-    expect(entry?.name).toBe('draft-single-post');
+    expect(entry?.name).toBe('draft-single-reply');
   });
 
   it('returns undefined for an unknown skill name', () => {
@@ -113,16 +87,15 @@ describe('findSkill', () => {
 });
 
 describe('skillsForKind', () => {
-  it('returns draft-single-post for content_post on x', () => {
-    const matches = skillsForKind('content_post', 'x');
-    expect(matches.map((s) => s.name)).toContain('draft-single-post');
+  it('returns draft-single-reply for content_reply on x', () => {
+    const matches = skillsForKind('content_reply', 'x');
+    expect(matches.map((s) => s.name)).toContain('draft-single-reply');
   });
 
   it('excludes channel-scoped skills for other channels', () => {
-    const matches = skillsForKind('content_post', 'reddit');
-    // draft-single-post advertises channels: ['x'] only until Phase 5
-    // lands Reddit; it should not match here.
-    expect(matches.map((s) => s.name)).not.toContain('draft-single-post');
+    const matches = skillsForKind('content_reply', 'reddit');
+    // draft-single-reply advertises channels: ['x'] only; it should not match.
+    expect(matches.map((s) => s.name)).not.toContain('draft-single-reply');
   });
 
   it('includes channel-agnostic skills for any channel', () => {
@@ -131,9 +104,11 @@ describe('skillsForKind', () => {
     expect(matches.map((s) => s.name)).toContain('voice-extractor');
   });
 
-  it('returns an empty array when no skill supports the requested kind', () => {
-    // metrics_compute has no catalog entry today — it lands in Phase 5.
-    const matches = skillsForKind('metrics_compute');
+  it('returns an empty array when no catalog skill supports the requested kind', () => {
+    // content_post flows through team-run writers (x-writer / reddit-writer),
+    // not a catalog-registered skill — so catalog lookup for this kind is
+    // deliberately empty.
+    const matches = skillsForKind('content_post');
     expect(matches).toEqual([]);
   });
 });

@@ -11,7 +11,7 @@ import { OnbMono } from './_shared/onb-mono';
 import { SixStepAnimator } from './_shared/six-step-animator';
 import { OnbButton } from './_shared/onb-button';
 import { COPY } from './_copy';
-import type { StrategicPath } from '@/agents/schemas';
+import type { StrategicPath } from '@/tools/schemas';
 import type { DraftState, ProductState } from './OnboardingFlow';
 
 const PLAN_TIMEOUT_MS = 180_000;

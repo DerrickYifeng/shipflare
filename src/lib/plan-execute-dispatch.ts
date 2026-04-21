@@ -61,15 +61,16 @@ const ROUTES: ReadonlyArray<
   }
 > = [
   // --- content_post ---
+  // Phase E Day 3: plan-execute's writer branch owns the DRAFT phase for
+  // content_post + x/reddit (x-writer / reddit-writer spawned via team-run).
+  // The EXECUTE phase still flows through dispatch → posting, since posting
+  // is an actual runtime-loaded skill (src/skills/posting) that the execute
+  // branch uses as a string label to advance the state machine.
   {
     kind: 'content_post',
     channel: 'x',
     route: {
-      draftSkill: 'draft-single-post',
-      // Execute phase posts to X. Routed through the existing `posting`
-      // queue in the processor, which wraps x-post.ts. The dispatch
-      // table exposes `posting` as the skill name; the processor maps
-      // skill name → queue.
+      draftSkill: null, // writer branch handles draft — dispatcher not consulted for draft phase
       executeSkill: 'posting',
       defaultUserAction: 'approve',
     },
@@ -85,13 +86,17 @@ const ROUTES: ReadonlyArray<
     },
   },
   // --- email_send ---
+  // Phase E Day 3: deleted draft-email + send-email skills. Email rows still
+  // flow through the dispatcher as a manual-completion path so the
+  // content-planner's prose playbook doesn't emit dead-on-arrival jobs.
+  // A future phase can wire a team-run email agent here.
   {
     kind: 'email_send',
     channel: null,
     route: {
-      draftSkill: 'draft-email',
-      executeSkill: 'send-email',
-      defaultUserAction: 'approve',
+      draftSkill: null,
+      executeSkill: null,
+      defaultUserAction: 'manual',
     },
   },
   // --- setup_task: skill-backed ---
@@ -124,7 +129,10 @@ const ROUTES: ReadonlyArray<
     route: {
       // Launch-asset rows carry their draft skill in `plan_items.skillName`
       // explicitly (set by tactical-planner). No default execute skill —
-      // the founder takes the asset off-platform.
+      // the founder takes the asset off-platform. The individual launch-
+      // asset skills (draft-hunter-outreach, draft-waitlist-page, etc.)
+      // were deleted in Phase E Day 3 — the per-row skillName is now just
+      // a label until Phase F wires replacements.
       draftSkill: null,
       executeSkill: null,
       defaultUserAction: 'approve',
@@ -144,12 +152,15 @@ const ROUTES: ReadonlyArray<
     },
   },
   // --- metrics_compute ---
+  // Phase E Day 3: analytics-summarize skill deleted. Manual-completion
+  // shell keeps the row advancing through the state machine until a future
+  // phase re-introduces analytics via team-run or a dedicated worker.
   {
     kind: 'metrics_compute',
     channel: null,
     route: {
       draftSkill: null,
-      executeSkill: 'analytics-summarize',
+      executeSkill: null,
       defaultUserAction: 'auto',
     },
   },
@@ -158,7 +169,7 @@ const ROUTES: ReadonlyArray<
     kind: 'analytics_summary',
     channel: null,
     route: {
-      draftSkill: 'analytics-summarize',
+      draftSkill: null,
       executeSkill: null,
       defaultUserAction: 'auto',
     },

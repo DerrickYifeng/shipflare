@@ -111,6 +111,111 @@ When Phase E Day 3 migrates `/api/product/phase` off the legacy path:
 After all of the above, grep `runSkill\|loadSkill\|SKILL_CATALOG\|TacticalPlan`
 should return 0 hits in `src/`.
 
+## Phase E Day 3 — Task #23 final sweep (2026-04-21)
+
+Scope narrowed vs. the original checklist above. `skill-runner.ts` +
+`skill-loader.ts` STAY — 9 production workers + full-scan + 2 CLI scripts
+still load skills via `loadSkill()`. Migration of those callers to
+AgentTool / Task is deferred to Phase F+.
+
+### What Task #23 deleted
+
+**18 skill directories (14 truly dead + 4 stub-only):**
+
+| Dir | Status |
+|---|---|
+| ab-test-subject | truly dead |
+| build-launch-runsheet | truly dead |
+| classify-thread-sentiment | truly dead |
+| compile-retrospective | truly dead |
+| deep-analysis | truly dead (no catalog entry) |
+| draft-hunter-outreach | truly dead |
+| draft-launch-day-comment | truly dead |
+| draft-waitlist-page | truly dead |
+| extract-milestone-from-commits | truly dead |
+| fetch-community-hot-posts | truly dead |
+| fetch-community-rules | truly dead |
+| generate-interview-questions | truly dead |
+| generate-launch-asset-brief | truly dead |
+| identify-top-supporters | truly dead |
+| draft-single-post | stub-only (replaced by x-writer in Task #22) |
+| draft-email | stub-only (dispatch string, no runtime load) |
+| send-email | stub-only (local send.ts never actually loaded) |
+| analytics-summarize | stub-only (dispatch string, no runtime load) |
+
+**15 agent `.md` files** (`src/agents/{name}.md`) for the deleted skills
+(draft-single-reply / posting / voice-extractor / discovery / draft-review /
+product-opportunity-judge / community-discovery keep theirs).
+
+**All 18 catalog entries** in `src/skills/_catalog.ts` — catalog shrunk
+from 22 entries to 5 (draft-single-reply, discovery, draft-review, posting,
+voice-extractor).
+
+**Schemas in `src/agents/schemas.ts`** — kept only the schemas + types the
+7 live skills and surrounding workers still import. Dropped the
+`slotBodyOutputSchema`, `calendarPlanOutputSchema`, `contentOutputSchema`,
+`contentCreatorOutputSchema`, `analystOutputSchema`, and every
+`Phase-5-atomic-skill` output schema + their inferred type aliases. The
+strategic-planner schemas (now in `src/tools/schemas.ts`) also dropped from
+here. File shrunk from 712 → 233 lines.
+
+**Test files** — `src/agents/__tests__/calendar-plan-schema.test.ts` and
+`src/agents/__tests__/schemas-shell.test.ts` deleted (tested deleted
+schemas).
+
+### Dispatch table updates
+
+- `content_post + x` — DRAFT phase now handled by plan-execute's writer
+  branch (spawns x-writer / reddit-writer via team-run). Dispatch table
+  keeps the entry with `draftSkill: null`, `executeSkill: 'posting'` so the
+  EXECUTE phase still runs through posting.
+- `email_send`, `metrics_compute`, `analytics_summary` — kept as
+  manual/auto-completion SHELL routes (`draftSkill: null, executeSkill:
+  null`). The skill strings are gone; shell routes let content-planner
+  continue emitting these kinds without blowing up dispatch. A future
+  phase wires replacements (team-run email agent / analytics worker).
+- `launch_asset` — skillName strings the tactical-planner emits still
+  pass through the dispatch table untouched; the per-row skill refs are
+  now labels since the target skills were deleted.
+
+### Full-scan pipeline
+
+- `src/core/pipelines/full-scan.ts` — Step 3 (community intelligence)
+  removed. The `community-intel` skill dir was deleted in commit `bbe429a`
+  (Oct) but the loader call was wrapped in try/catch — in production it
+  always threw and fell back to an empty intel array. Now explicit: we
+  always emit an empty `communityIntel` list. Replacement path is team-run
+  (community-manager).
+- Added `src/agents/community-discovery.md` (restored from pre-`bbe429a`
+  git history) so `community-discovery/SKILL.md` can default to the
+  skill-name-matches-agent-name resolution rule. Dropped the `agent: scout`
+  override from the SKILL.md frontmatter.
+
+### Known follow-up — prose docs still reference deleted skills
+
+`src/tools/AgentTool/agents/content-planner/references/tactical-playbook.md`
+and `src/tools/AgentTool/agents/_shared/references/phase-task-templates.md`
+still instruct the content-planner to emit plan_items with skillNames from
+the 18 deleted skills (e.g. `skillName: 'draft-email'`). With the new shell
+dispatch routes those rows no longer crash — they advance through the
+state machine as manual-completion items, the per-row skillName is a
+label — but a user inspecting the plan will see intent for features that
+don't actually run.
+
+Updating those prose docs is a separate follow-up (team-lead owns
+deciding when: could be Phase F when we reintroduce the replacements,
+could be now if drift risk outweighs rewrite cost).
+
+### Updated grep sweep (2026-04-21, post-Task-#23)
+
+| Pattern | Expected | Found | Verdict |
+|---|---|---|---|
+| All 18 dead skill names (`ab-test-subject\|...`) in `src/**/*.{ts,tsx}` | 0 runtime / small number of comment refs | 1 (audit comment in `agents/schemas.ts`) | ✓ |
+| `from.*@/core/skill-runner` (in `src/`) | 9 (6 processors + 2 scripts + full-scan) | 9 | ✓ |
+| `from.*@/core/skill-loader` (in `src/`) | 9 | 9 | ✓ |
+| `community-intel` in `src/` outside a `.md` doc | 0 | 0 | ✓ |
+| `loadSkill(...)` call sites in `src/` (excluding skill-loader.ts internals) | 11 | 11 | ✓ — all 7 live skills covered (posting / voice-extractor / discovery / draft-review / product-opportunity-judge / draft-single-reply / community-discovery) |
+
 ## Rollback
 
 Phase C deletions are protected by git tag `pre-team-platform-cutover`

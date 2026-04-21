@@ -113,7 +113,7 @@ function seed(init: Partial<Row> & { id?: string } = {}): Row {
     userAction: 'approve',
     kind: 'content_post',
     channel: 'x',
-    skillName: 'draft-single-post',
+    skillName: null,
     ...init,
   };
   rows.set(row.id, row);

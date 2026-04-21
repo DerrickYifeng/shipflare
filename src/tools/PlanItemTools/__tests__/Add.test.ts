@@ -68,7 +68,7 @@ function validInput() {
     phase: 'foundation' as const,
     channel: 'x',
     scheduledAt: '2026-04-22T09:00:00.000Z',
-    skillName: 'draft-single-post',
+    skillName: null,
     params: { angle: 'claim' },
     title: 'Ship the write_strategic_path tool',
     description: 'First plan item written by Phase B',

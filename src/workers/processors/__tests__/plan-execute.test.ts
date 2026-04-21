@@ -258,6 +258,9 @@ describe('processPlanExecute — execute phase', () => {
 
   it('drives planned+auto → executing → completed for metrics_compute', async () => {
     const { processPlanExecute } = await import('../plan-execute');
+    // Phase E Day 3 deleted the analytics-summarize skill, but the dispatch
+    // table still carries a shell route for metrics_compute so the state
+    // machine can advance the row to completed until a replacement lands.
     seedItem({
       id: 'item-5',
       kind: 'metrics_compute',
@@ -283,7 +286,7 @@ describe('processPlanExecute — execute phase', () => {
       channel: null,
       userAction: 'approve',
       state: 'approved',
-      skillName: 'draft-waitlist-page',
+      skillName: 'custom-launch-skill',
     });
 
     await processPlanExecute(

@@ -6,7 +6,6 @@ import { runSkill } from '@/core/skill-runner';
 import {
   discoveryOutputSchema,
   communityDiscoveryOutputSchema,
-  communityIntelOutputSchema,
 } from '@/agents/schemas';
 import type {
   DiscoveryOutput,
@@ -147,31 +146,13 @@ export async function runFullScan(input: {
     send('community_discovery_done', { communities: [], fallback: true, error: message });
   }
 
-  // Step 3: Community intelligence (rules + hot posts)
-  let communityIntel: CommunityIntelOutput[] = [];
-
-  try {
-    send('community_intel_start', { subreddits });
-
-    const intelSkill = loadSkill(join(SKILLS_DIR, 'community-intel'));
-    const intelResult = await runSkill<CommunityIntelOutput>({
-      skill: intelSkill,
-      input: {
-        ...productContext,
-        subreddits,
-      },
-      deps: { redditClient },
-      outputSchema: communityIntelOutputSchema,
-    });
-
-    communityIntel = intelResult.results;
-    log.info(`Community intel gathered for ${communityIntel.length} subreddits`);
-    send('community_intel_done', { intel: communityIntel });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    log.warn(`Community intel failed (non-fatal): ${message}`);
-    send('community_intel_done', { intel: [], error: message });
-  }
+  // Step 3: Community intelligence previously ran the `community-intel` skill
+  // (rules + hot posts). That skill was deleted pre-Phase-E; the intel list is
+  // now always empty and downstream filters fall through to the default
+  // draftType='reply'. Removing this step entirely awaits a replacement in a
+  // future phase — team-run (community-manager) is the intended path.
+  const communityIntel: CommunityIntelOutput[] = [];
+  send('community_intel_done', { intel: communityIntel });
 
   // Step 4: Thread discovery (parallel across supported platforms via unified skill)
   const discoverySkill = loadSkill(join(SKILLS_DIR, 'discovery'));

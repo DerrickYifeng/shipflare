@@ -2,7 +2,6 @@
 name: community-discovery
 description: Discover communities where target users congregate
 context: fork
-agent: scout
 model: claude-haiku-4-5-20251001
 allowed-tools:
   - reddit_discover_subs

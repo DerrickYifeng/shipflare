@@ -80,7 +80,7 @@ describe('PATCH /api/today/[id]/approve', () => {
       userAction: 'approve',
       kind: 'content_post',
       channel: 'x',
-      skillName: 'draft-single-post',
+      skillName: null,
     });
     writeMock.mockResolvedValueOnce(null);
     const { PATCH } = await import('../route');
