@@ -52,6 +52,12 @@ For each channel the user has connected (X / Reddit / Email):
   times. Spread across the list — don't stack two items in the same hour.
 - Rotate through `contentPillars` — don't emit three posts on the same
   pillar back-to-back.
+- Spread items across **all 7 days** of the week, not just 3-5. Aim for
+  roughly 1 item per day on average (0-2 per day is fine). If you have
+  9 items, spreading them across 7 days is better than clumping into 5 —
+  this prevents approval overload on any single day and lets the founder
+  ship steadily. When your schedule feels dense on some days, push an
+  item to the emptier days instead.
 - Distribute angles from `angleMix` (the week's recommended angles)
   across the items.
 
@@ -71,6 +77,22 @@ Draw from the "phase-task-templates" reference. Rules:
 - `setup_task` / `interview` items ALWAYS take `userAction: 'manual'`
   unless the template explicitly overrides.
 
+### Foundation & audience phases: mandatory tasks
+
+If the product state is `mvp` or the launch phase is `foundation` /
+`audience`, you MUST include:
+
+- At least 1 `interview` item (e.g. "Run 3 customer interviews").
+- At least 1-2 `setup_task` items (e.g. "Extract voice profile",
+  "Validate messaging with 10 potential users").
+
+These de-risk the launch. The maximum-2-setup-task + 1-interview rule is
+a ceiling, not a floor — in these phases aim FOR 1-2 setup_tasks and 1
+interview, not fewer. Exception: only skip if
+`signals.currentLaunchTasks` already covers the same topic (case-
+insensitive title overlap), or if `query_stalled_items` / `query_last_week_completions`
+already contains a matching title.
+
 ## Step 4 — Schedule emails per phase
 
 Use the `email` cadence from `channelMix.email` if present. Per phase:
@@ -83,6 +105,15 @@ Use the `email` cadence from `channelMix.email` if present. Per phase:
 
 For v1, emit the `draft-email` row only (userAction='approve'); Phase 7
 chains `send-email` after approval.
+
+### Before you move on — email check
+
+If `channelMix.email` is present (user has email connected), STOP and
+verify you've scheduled at least 1 `email_send` item for this week. If
+not, add one now using `add_plan_item` with `kind: 'email_send'`,
+`userAction: 'approve'`, and `skillName: 'draft-email'`. Do this in the
+same response — before moving to Step 5. Dropping email is a common
+failure mode; this check is cheap insurance.
 
 ## Step 5 — Pick the right skill + params per item, and write notes
 
