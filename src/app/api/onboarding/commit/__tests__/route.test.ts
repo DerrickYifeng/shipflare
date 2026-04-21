@@ -20,13 +20,8 @@ vi.mock('@/lib/auth', () => ({
 }));
 
 const enqueueCalibrationMock = vi.fn(async () => undefined);
-const enqueueTacticalGenerateMock =
-  vi.fn<(data: Record<string, unknown>) => Promise<string>>(
-    async () => 'tg-plan-new-1',
-  );
 vi.mock('@/lib/queue', () => ({
   enqueueCalibration: enqueueCalibrationMock,
-  enqueueTacticalGenerate: enqueueTacticalGenerateMock,
 }));
 
 const deleteDraftMock = vi.fn(async () => undefined);
@@ -232,7 +227,6 @@ beforeEach(() => {
   postTxChannels = [];
   txShouldThrow = false;
   enqueueCalibrationMock.mockClear();
-  enqueueTacticalGenerateMock.mockClear();
   deleteDraftMock.mockClear();
   recordPipelineEventMock.mockClear();
 });
@@ -434,8 +428,11 @@ describe('POST /api/onboarding/commit — happy path', () => {
   });
 });
 
-describe('POST /api/onboarding/commit — path-only (tactical deferred)', () => {
-  it('accepts a body without `plan` and enqueues tactical-generate', async () => {
+describe('POST /api/onboarding/commit — path-only (plan deferred to team-run)', () => {
+  it('accepts a body without `plan` and returns 200 without enqueueing a planner job', async () => {
+    // Phase C: tactical-generate is gone. plan_items are written by the
+    // team-run already in flight from POST /api/onboarding/plan, so commit
+    // only persists the strategic path + plans header row.
     const { POST } = await import('../route');
     const body = bodyFor('mvp') as Record<string, unknown>;
     delete body.plan;
@@ -444,31 +441,20 @@ describe('POST /api/onboarding/commit — path-only (tactical deferred)', () => 
     const payload = (await res.json()) as {
       success: boolean;
       productId: string;
-      tacticalJobId?: string;
       enqueued: string[];
+      tacticalJobId?: string;
     };
     expect(payload.success).toBe(true);
-    expect(payload.tacticalJobId).toBe('tg-plan-new-1');
-    expect(payload.enqueued).toContain('tactical-generate:tg-plan-new-1');
-
-    expect(enqueueTacticalGenerateMock).toHaveBeenCalledTimes(1);
-    const call = enqueueTacticalGenerateMock.mock.calls[0]?.[0] as {
-      userId: string;
-      productId: string;
-      strategicPathId: string;
-      planId: string;
-    };
-    expect(call.userId).toBe('user-1');
-    expect(call.productId).toBe('prod-new-1');
-    expect(call.strategicPathId).toBe('prod-new-1');
-    expect(call.planId).toBe('prod-new-1');
+    expect(payload.tacticalJobId).toBeUndefined();
+    expect(payload.enqueued.some((e) => e.startsWith('tactical-generate:'))).toBe(
+      false,
+    );
   });
 
-  it('does NOT enqueue tactical-generate when `plan` is present (back-compat)', async () => {
+  it('accepts `plan` inline when present (back-compat)', async () => {
     const { POST } = await import('../route');
     const res = await POST(makeRequest(bodyFor('mvp')));
     expect(res.status).toBe(200);
-    expect(enqueueTacticalGenerateMock).not.toHaveBeenCalled();
     const payload = (await res.json()) as { tacticalJobId?: string };
     expect(payload.tacticalJobId).toBeUndefined();
   });

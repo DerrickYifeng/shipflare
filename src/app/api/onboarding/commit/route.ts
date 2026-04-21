@@ -17,7 +17,7 @@ import {
 import { derivePhase } from '@/lib/launch-phase';
 import { validateLaunchDates } from '@/lib/launch-date-rules';
 import { acquireRateLimit } from '@/lib/rate-limit';
-import { enqueueCalibration, enqueueTacticalGenerate } from '@/lib/queue';
+import { enqueueCalibration } from '@/lib/queue';
 import { getUserChannels } from '@/lib/user-channels';
 import { deleteDraft } from '@/lib/onboarding-draft';
 import { recordPipelineEvent } from '@/lib/pipeline-events';
@@ -305,28 +305,12 @@ export async function POST(request: NextRequest): Promise<Response> {
   // --- post-transaction side effects (best-effort, never block response) ---
 
   const enqueued: string[] = [];
-  let tacticalJobId: string | undefined;
 
-  // When the caller didn't supply `plan`, run tactical-planner as a
-  // background job so /today can show progress while Stage 6 advances.
-  // Failures here are logged but never propagate — the onboarding
-  // response stays a 200 and the worker retries (see processor).
-  if (!body.plan) {
-    try {
-      tacticalJobId = await enqueueTacticalGenerate({
-        userId,
-        productId,
-        strategicPathId,
-        planId,
-        traceId,
-      });
-      enqueued.push(`tactical-generate:${tacticalJobId}`);
-    } catch (err) {
-      log.warn(
-        `post-commit tactical-generate enqueue failed user=${userId}: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-  }
+  // Phase C: tactical-generate enqueue removed. plan_items are populated by
+  // the team-run already in flight from POST /api/onboarding/plan (the
+  // coordinator delegates to content-planner which calls add_plan_item
+  // directly). Commit records the strategic_path; plan_items arrive
+  // asynchronously via the same team-run.
 
   if (changed) {
     try {
@@ -405,7 +389,6 @@ export async function POST(request: NextRequest): Promise<Response> {
       success: true,
       productId,
       enqueued,
-      ...(tacticalJobId ? { tacticalJobId } : {}),
     },
     { headers: { 'x-trace-id': traceId } },
   );
