@@ -3,7 +3,7 @@ name: strategic-planner
 description: Produces the durable narrative path for a product's launch arc.
 model: claude-sonnet-4-6
 tools: []
-maxTurns: 3
+maxTurns: 2
 maxOutputTokens: 32000
 ---
 

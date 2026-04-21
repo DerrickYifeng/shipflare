@@ -1,5 +1,5 @@
 // Stage 6 — Plan building. Reuses SixStepAnimator while POST /api/onboarding/plan
-// runs in parallel. 45s timeout → error state with "Continue with manual plan"
+// runs in parallel. 180s timeout → error state with "Continue with manual plan"
 // fallback.
 
 'use client';
@@ -15,7 +15,7 @@ import type {
 } from '@/agents/schemas';
 import type { DraftState, ProductState } from './OnboardingFlow';
 
-const PLAN_TIMEOUT_MS = 45_000;
+const PLAN_TIMEOUT_MS = 180_000;
 
 interface PlanRequest {
   product: {

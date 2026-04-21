@@ -18,10 +18,12 @@ import { createLogger, loggerForRequest } from '@/lib/logger';
 
 const baseLog = createLogger('api:onboarding:plan');
 
-// 45 second budget for the full strategic → tactical chain. Sonnet 4.6
-// + Haiku 4.5 together typically finishes in 8-15s; 45s leaves headroom
-// for the Anthropic API adding a long-tail spike.
-const PLAN_TIMEOUT_MS = 45_000;
+// 180 second budget for the full strategic → tactical chain. Observed
+// in dogfood: Sonnet 4.6 strategic-planner turn 1 alone runs ~30-35s
+// (end_turn with 32k tokens). A 2-turn strategic + 1-turn tactical run
+// lands around 60-90s; 180s is a generous ceiling so we don't clip a
+// slow Anthropic API day.
+const PLAN_TIMEOUT_MS = 180_000;
 
 // One plan generation per 10 seconds per user. Prevents the founder
 // mashing "Generate plan" from burning 3x the cost in 30s.
