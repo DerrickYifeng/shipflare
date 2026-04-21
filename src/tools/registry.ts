@@ -60,6 +60,27 @@ registry.register(webSearchTool);
 export { registry };
 
 /**
+ * Register Team runtime tools (Task, SendMessage). These are split out of
+ * the top-level registration to avoid a module cycle: `AgentTool/spawn.ts`
+ * imports `registry` so its tool resolution can look up by name. Eagerly
+ * registering `taskTool` in that same module would make the tool exist
+ * before its dependencies finished loading.
+ *
+ * Callers that need these tools available (the team-run worker + the
+ * integration tests) must import `./registry-team` for its side effect.
+ * StructuredOutput is intentionally NOT registered — it's synthesized
+ * per-agent from the caller's Zod outputSchema inside runAgent
+ * (see src/tools/StructuredOutputTool/StructuredOutputTool.ts).
+ */
+export function registerTeamRuntimeTools(tools: {
+  taskTool: typeof import('./AgentTool/AgentTool').taskTool;
+  sendMessageTool: typeof import('./SendMessageTool').sendMessageTool;
+}): void {
+  registry.register(tools.taskTool);
+  registry.register(tools.sendMessageTool);
+}
+
+/**
  * Load MCP tools into the registry from an MCPManager.
  * Call this after MCPManager.connectAll() to make MCP tools
  * available to agents.

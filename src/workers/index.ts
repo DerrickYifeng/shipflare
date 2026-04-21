@@ -19,6 +19,8 @@ import { processPlanExecuteSweeper } from './processors/plan-execute-sweeper';
 import { processStaleSweeper } from './processors/stale-sweeper';
 import { processWeeklyReplan } from './processors/weekly-replan';
 import { processTacticalGenerate } from './processors/tactical-generate';
+import { processTeamRun, getTeamRunConcurrency } from './processors/team-run';
+import { TEAM_RUN_QUEUE_NAME, type TeamRunJobData } from '@/lib/queue/team-run';
 import { dreamQueue, discoveryQueue, discoveryScanQueue, monitorQueue, metricsQueue, analyticsQueue, codeScanQueue } from '@/lib/queue';
 import type { PlanExecuteJobData, TacticalGenerateJobData } from '@/lib/queue';
 import { createLogger, loggerForJob } from '@/lib/logger';
@@ -211,6 +213,16 @@ const tacticalGenerateWorker = new Worker<TacticalGenerateJobData>(
   { ...BASE_OPTS, concurrency: 2, lockDuration: 180_000 },
 );
 
+// AI Team Platform — coordinator main-loop runner.
+// Lock duration accommodates a multi-turn coordinator run with delegated
+// subagents; each subagent is synchronous from the worker's POV and the full
+// chain ceiling is ~10 minutes (spec §15.3 alert threshold).
+const teamRunWorker = new Worker<TeamRunJobData>(
+  TEAM_RUN_QUEUE_NAME,
+  async (job) => processTeamRun(job),
+  { ...BASE_OPTS, concurrency: getTeamRunConcurrency(), lockDuration: 15 * 60_000 },
+);
+
 const workers = [
   discoveryWorker, reviewWorker, postingWorker,
   healthScoreWorker, dreamWorker, codeScanWorker,
@@ -224,6 +236,8 @@ const workers = [
   staleSweeperWorker, weeklyReplanWorker,
   // Post-commit tactical planner
   tacticalGenerateWorker,
+  // AI Team Platform
+  teamRunWorker,
 ];
 
 // Log events — bind traceId / jobId / queue into the child logger so lifecycle

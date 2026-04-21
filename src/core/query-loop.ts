@@ -351,6 +351,13 @@ export async function runAgent<T>(
   },
   /** Called on every progress signal to reset the idle timeout in the swarm. */
   onIdleReset?: () => void,
+  /**
+   * Fine-grained stream events from the agent's tool execution (tool_start /
+   * tool_done). Used by the team-run worker to mirror tool calls into
+   * `team_messages` for SSE consumers. Undefined in the CLI / test paths
+   * where tool-level observability isn't needed.
+   */
+  onEvent?: (event: import('./types').StreamEvent) => void | Promise<void>,
 ): Promise<AgentResult<T>> {
   log.debug(`Agent "${config.name}" starting (model=${config.model}, maxTurns=${config.maxTurns})`);
 
@@ -451,7 +458,38 @@ export async function runAgent<T>(
           (b) => b.name === STRUCTURED_OUTPUT_TOOL_NAME,
         );
         if (soCall) {
+          // Observability: surface the synthesized StructuredOutput call on
+          // the same event stream regular tools use. Not routed through
+          // executeTools (the tool is synthetic), so we emit manually here.
+          const structuredOutputStartMs = onEvent ? Date.now() : 0;
+          if (onEvent) {
+            void Promise.resolve(
+              onEvent({
+                type: 'tool_start',
+                toolName: STRUCTURED_OUTPUT_TOOL_NAME,
+                toolUseId: soCall.id,
+                input: soCall.input,
+              }),
+            ).catch(() => {});
+          }
           const result = validateStructuredOutput(outputSchema, soCall.input);
+          if (onEvent) {
+            void Promise.resolve(
+              onEvent({
+                type: 'tool_done',
+                toolName: STRUCTURED_OUTPUT_TOOL_NAME,
+                toolUseId: soCall.id,
+                result: {
+                  tool_use_id: soCall.id,
+                  content: result.ok
+                    ? JSON.stringify(result.value)
+                    : result.message,
+                  ...(result.ok ? {} : { is_error: true }),
+                },
+                durationMs: Date.now() - structuredOutputStartMs,
+              }),
+            ).catch(() => {});
+          }
           if (result.ok) {
             if (onProgress && turn > 1) onProgress({ type: 'scoring' });
             return {
@@ -491,6 +529,12 @@ export async function runAgent<T>(
 
       // Map StreamEvents to OnProgress for backward compat
       const toolResults = await executeTools(executableBlocks, config.tools, context, (event) => {
+        // Team-run observability: forward raw stream events to callers
+        // (Phase A Day 4 — worker mirrors these into team_messages).
+        if (onEvent) {
+          // Fire-and-forget — never let observer latency block the loop.
+          void Promise.resolve(onEvent(event)).catch(() => {});
+        }
         if (event.type === 'tool_start') {
           const query = (event.input as Record<string, unknown>)?.query as string | undefined;
           if (onProgress && query) {
