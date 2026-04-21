@@ -176,6 +176,13 @@ Three shape-critical rules the LLM often gets wrong:
 
 ## Hard rules
 
+- **`angleMix` values are STRICTLY one of these 7 enum strings:
+  `claim`, `story`, `contrarian`, `howto`, `data`, `case`, `synthesis`.**
+  Do NOT put content pillar names (`under-the-hood`, `build-in-public`,
+  `solo-dev-ops`, etc.) in `angleMix` — those belong in `contentPillars`.
+  Angles describe the *shape* of a post (is it a claim? a story? a
+  how-to?); pillars describe the *topic* (what the post is about).
+  If unsure, default an angleMix entry to `story` or `howto`.
 - NEVER output fewer than 3 content pillars.
 - NEVER output fewer than 3 milestones.
 - NEVER recommend `channelMix` entries for channels not in the input
