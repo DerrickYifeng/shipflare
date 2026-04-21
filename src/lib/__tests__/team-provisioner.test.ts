@@ -74,6 +74,7 @@ vi.mock('drizzle-orm', async () => {
     ...actual,
     eq: (col: unknown, value: unknown) => ({ __eq: { col, value } }),
     and: (...parts: unknown[]) => ({ __and: parts }),
+    isNull: (col: unknown) => ({ __isNull: col }),
   };
 });
 
@@ -85,51 +86,47 @@ vi.mock('@/lib/db/schema', () => ({
 }));
 
 vi.mock('@/lib/db', () => {
-  interface EqSentinel {
-    __eq: { col: unknown; value: unknown };
-  }
-  interface AndSentinel {
-    __and: EqSentinel[];
-  }
-  function flattenFilters(cond: unknown): Array<[unknown, unknown]> {
+  interface EqSentinel { __eq: { col: unknown; value: unknown } }
+  interface AndSentinel { __and: unknown[] }
+  interface IsNullSentinel { __isNull: unknown }
+  type Filter =
+    | { kind: 'eq'; value: unknown }
+    | { kind: 'isNull' };
+
+  function flattenFilters(cond: unknown): Filter[] {
     if (!cond) return [];
-    const c = cond as EqSentinel | AndSentinel;
-    if ('__and' in c) {
-      return c.__and.flatMap((x) => flattenFilters(x));
+    if ((cond as AndSentinel).__and) {
+      return (cond as AndSentinel).__and.flatMap((x) => flattenFilters(x));
     }
-    if ('__eq' in c) return [[c.__eq.col, c.__eq.value]];
+    if ((cond as EqSentinel).__eq) {
+      return [{ kind: 'eq', value: (cond as EqSentinel).__eq.value }];
+    }
+    if ((cond as IsNullSentinel).__isNull !== undefined) {
+      return [{ kind: 'isNull' }];
+    }
     return [];
   }
 
-  function matches(row: Record<string, unknown>, filters: Array<[unknown, unknown]>): boolean {
-    return filters.every(([col, value]) => {
-      // `col` here is whatever drizzle column ref the test receives. For this
-      // mock we treat the source.column as the symbol + name pair, but
-      // dranzle's column refs include a table reference. We decode col name
-      // from symbol-assigned debug. To keep this simple, we assume filters
-      // are always against the primary join key for each table and just
-      // fall through to comparing by-key.
-      void col;
-      void value;
-      return true;
+  // Heuristic row-matcher: eq filter matches when the value appears as any
+  // field in the row; isNull filter matches when the row has at least one
+  // null or undefined field. Not a real query planner, but sufficient for
+  // the provisioner's shape (all filters target (user_id, product_id) or
+  // (id, agent_type)).
+  function rowMatches(
+    row: Record<string, unknown>,
+    filters: Filter[],
+  ): boolean {
+    return filters.every((f) => {
+      if (f.kind === 'eq') {
+        return Object.values(row).some((v) => v === f.value);
+      }
+      return Object.values(row).some((v) => v === null || v === undefined);
     });
   }
-
-  // A lightweight row-matcher that introspects the columns selected by
-  // checking if `value` equals any of the row's fields.
-  function rowMatches(row: Record<string, unknown>, filters: Array<[unknown, unknown]>): boolean {
-    // Every filter value must appear as a field in the row.
-    return filters.every(([_col, value]) => {
-      return Object.values(row).some((v) => v === value);
-    });
-  }
-  void matches;
 
   function selectBuilder() {
     return {
       from: (table: TableKey) => ({
-        // .where() must be both awaitable (for callers that don't chain
-        // .limit) AND carry a .limit() method. Return a thenable-ish object.
         where: (cond: unknown) => {
           const filters = flattenFilters(cond);
           const result = rows[table].filter((r) =>
@@ -156,6 +153,20 @@ vi.mock('@/lib/db', () => {
           rows[table].push(v as never);
           return Promise.resolve([]);
         },
+      }),
+      update: (table: TableKey) => ({
+        set: (patch: Record<string, unknown>) => ({
+          where: (cond: unknown) => {
+            const filters = flattenFilters(cond);
+            const list = rows[table] as Record<string, unknown>[];
+            for (let i = 0; i < list.length; i += 1) {
+              if (rowMatches(list[i], filters)) {
+                list[i] = { ...list[i], ...patch };
+              }
+            }
+            return Promise.resolve([]);
+          },
+        }),
       }),
     },
   };
@@ -440,5 +451,31 @@ describe('provisionTeamForProduct', () => {
     expect(res.preset).toBe('default-squad');
     expect(getTeams()).toHaveLength(1);
     expect(getTeams()[0].productId).toBeNull();
+  });
+
+  it('relinks an orphan product_id=null team when productId is later known', async () => {
+    const { provisionTeamForProduct } = await import('@/lib/team-provisioner');
+
+    // Step 1: seed a null-product team (simulates /api/onboarding/plan
+    // provisioning before the product row existed).
+    await provisionTeamForProduct('u-1', null);
+    expect(getTeams()).toHaveLength(1);
+    expect(getTeams()[0].productId).toBeNull();
+    const orphanTeamId = getTeams()[0].id;
+
+    // Step 2: the product is committed — /api/onboarding/commit re-runs
+    // provisionTeamForProduct with the concrete productId. The existing
+    // null-product team should be relinked; no second team created.
+    rows[productsTable].push({
+      id: 'p-1',
+      userId: 'u-1',
+      category: 'dev_tool',
+    });
+    const res = await provisionTeamForProduct('u-1', 'p-1');
+
+    expect(getTeams()).toHaveLength(1);
+    expect(getTeams()[0].id).toBe(orphanTeamId);
+    expect(getTeams()[0].productId).toBe('p-1');
+    expect(res.teamId).toBe(orphanTeamId);
   });
 });

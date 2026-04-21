@@ -13,7 +13,7 @@
 // channel connects RECONCILES — it inserts any missing members but never
 // removes existing ones.
 
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import { teams, teamMembers, products, channels } from '@/lib/db/schema';
 import { createLogger } from '@/lib/logger';
@@ -288,6 +288,38 @@ export async function provisionTeamForProduct(
   userId: string,
   productId: string | null,
 ): Promise<ProvisionResult> {
+  // Phase G cleanup: if an orphan team with product_id=null exists for
+  // this user (seeded by /api/onboarding/plan BEFORE the product row
+  // existed), relink it to the new productId instead of inserting a
+  // second team. Idempotent: if the relink target already has a
+  // product_id team, we leave the null-product team alone and the
+  // caller gets the product-scoped team below.
+  if (productId) {
+    const orphanRows = await db
+      .select({ id: teams.id })
+      .from(teams)
+      .where(and(eq(teams.userId, userId), isNull(teams.productId)))
+      .limit(2);
+    if (orphanRows.length === 1) {
+      // Single null-product team — safe to relink unless a product-scoped
+      // team for this product already exists.
+      const already = await db
+        .select({ id: teams.id })
+        .from(teams)
+        .where(and(eq(teams.userId, userId), eq(teams.productId, productId)))
+        .limit(1);
+      if (already.length === 0) {
+        await db
+          .update(teams)
+          .set({ productId, updatedAt: new Date() })
+          .where(eq(teams.id, orphanRows[0].id));
+        log.info(
+          `provisionTeamForProduct: relinked orphan team ${orphanRows[0].id} user=${userId} product=${productId}`,
+        );
+      }
+    }
+  }
+
   // Read category from products (may be null/undefined for freshly-created
   // products that haven't picked a category yet).
   let category: ProductCategory | null = null;
