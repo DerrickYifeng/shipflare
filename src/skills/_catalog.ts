@@ -677,7 +677,7 @@ const tacticalPlannerInput = z.object({
       z.object({
         perWeek: z.number().int().nonnegative(),
         preferredHours: z.array(z.number().int().min(0).max(23)),
-        preferredCommunities: z.array(z.string()).optional(),
+        preferredCommunities: z.array(z.string()).nullish(),
       }),
     ),
     phaseGoals: z.record(z.string(), z.string()),

@@ -639,7 +639,7 @@ export const strategicThesisWeekSchema = z.object({
 export const strategicChannelCadenceSchema = z.object({
   perWeek: z.number().int().min(0).max(21),
   preferredHours: z.array(z.number().int().min(0).max(23)).min(1).max(6),
-  preferredCommunities: z.array(z.string().min(1)).optional(),
+  preferredCommunities: z.array(z.string().min(1)).nullish(),
 });
 
 /**
@@ -654,20 +654,20 @@ export const strategicPathSchema = z.object({
   contentPillars: z.array(z.string().min(1).max(60)).min(3).max(4),
   channelMix: z
     .object({
-      x: strategicChannelCadenceSchema.optional(),
-      reddit: strategicChannelCadenceSchema.optional(),
-      email: strategicChannelCadenceSchema.optional(),
+      x: strategicChannelCadenceSchema.nullish(),
+      reddit: strategicChannelCadenceSchema.nullish(),
+      email: strategicChannelCadenceSchema.nullish(),
     })
-    .refine((c) => Object.values(c).some((v) => v !== undefined), {
+    .refine((c) => Object.values(c).some((v) => v != null), {
       message: 'channelMix must include at least one active channel',
     }),
   phaseGoals: z.object({
-    foundation: z.string().min(1).max(240).optional(),
-    audience: z.string().min(1).max(240).optional(),
-    momentum: z.string().min(1).max(240).optional(),
-    launch: z.string().min(1).max(240).optional(),
-    compound: z.string().min(1).max(240).optional(),
-    steady: z.string().min(1).max(240).optional(),
+    foundation: z.string().min(1).max(240).nullish(),
+    audience: z.string().min(1).max(240).nullish(),
+    momentum: z.string().min(1).max(240).nullish(),
+    launch: z.string().min(1).max(240).nullish(),
+    compound: z.string().min(1).max(240).nullish(),
+    steady: z.string().min(1).max(240).nullish(),
   }),
 });
 
