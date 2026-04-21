@@ -37,7 +37,11 @@ import {
 import { queryRecentMilestonesTool } from './MilestoneTools';
 import { queryMetricsTool } from './MetricsTools';
 import { queryTeamStatusTool } from './TeamTools';
-import { draftPostTool } from './DraftingTools';
+import {
+  draftPostTool,
+  findThreadsTool,
+  draftReplyTool,
+} from './DraftingTools';
 
 /**
  * Central tool registry for ShipFlare agents.
@@ -94,13 +98,21 @@ registry.register(queryMetricsTool);
 registry.register(queryTeamStatusTool);
 
 // ---------------------------------------------------------------------------
-// Phase E Day 1 drafting tools (spec §9.1 + §11 Phase E). Flat snake_case
-// identifiers (`draft_post`); agents opt in via AGENT.md `tools: [...]`.
-// Writers (x-writer, reddit-writer) call these to generate + persist body
-// text on an existing plan_item — the plan_item row is the source of
+// Phase E drafting tools (spec §9.1 + §11 Phase E). Flat snake_case
+// identifiers; agents opt in via AGENT.md `tools: [...]`.
+//
+// Day 1: x-writer / reddit-writer call `draft_post` to generate + persist
+// body text on an existing plan_item — the plan_item row is the source of
 // truth for channel + context, the tool is the side-effect gate.
+//
+// Day 2: community-manager calls `find_threads` (read-only inbox scan) +
+// `draft_reply` (INSERT drafts with status='pending') for the reply-guy
+// workflow. find_threads is concurrency-safe read-only; draft_reply is
+// concurrency-safe writes (each draft is its own row).
 // ---------------------------------------------------------------------------
 registry.register(draftPostTool);
+registry.register(findThreadsTool);
+registry.register(draftReplyTool);
 
 export { registry };
 
