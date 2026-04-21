@@ -20,6 +20,23 @@ import { xGetTweetTool } from './x-get-tweet';
 import { xGetMentionsTool } from './x-get-mentions';
 import { xGetMetricsTool } from './x-get-metrics';
 import { xThreadPostTool } from './x-thread-post';
+// Phase B domain tools — one file per entity. Each barrel re-exports
+// the tool variables; registering them here makes them discoverable by
+// AGENT.md `tools: [...]` allowlists via the central registry.
+import {
+  writeStrategicPathTool,
+  queryStrategicPathTool,
+} from './StrategicPathTools';
+import {
+  addPlanItemTool,
+  updatePlanItemTool,
+  queryPlanItemsTool,
+  queryStalledItemsTool,
+  queryLastWeekCompletionsTool,
+} from './PlanItemTools';
+import { queryRecentMilestonesTool } from './MilestoneTools';
+import { queryMetricsTool } from './MetricsTools';
+import { queryTeamStatusTool } from './TeamTools';
 
 /**
  * Central tool registry for ShipFlare agents.
@@ -56,6 +73,24 @@ registry.register(generateQueriesTool);
 registry.register(scoreThreadsTool);
 registry.register(classifyIntentTool);
 registry.register(webSearchTool);
+
+// ---------------------------------------------------------------------------
+// Phase B domain tools (spec §9 + §11 Phase B Day 1-2). Flat snake_case
+// identifiers match Claude Code's tool-naming convention. Unlike the
+// Task / SendMessage team-runtime tools (which ship from `registry-team.ts`
+// to avoid module cycles), the domain tools have no circular imports — they
+// read + write scoped DB state only — so they register inline here.
+// ---------------------------------------------------------------------------
+registry.register(writeStrategicPathTool);
+registry.register(queryStrategicPathTool);
+registry.register(addPlanItemTool);
+registry.register(updatePlanItemTool);
+registry.register(queryPlanItemsTool);
+registry.register(queryStalledItemsTool);
+registry.register(queryLastWeekCompletionsTool);
+registry.register(queryRecentMilestonesTool);
+registry.register(queryMetricsTool);
+registry.register(queryTeamStatusTool);
 
 export { registry };
 
