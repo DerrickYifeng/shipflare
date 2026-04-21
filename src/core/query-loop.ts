@@ -16,6 +16,80 @@ import { createLogger } from '@/lib/logger';
 const log = createLogger('core:agent');
 
 // ---------------------------------------------------------------------------
+// Structured-outputs JSON-schema sanitizer
+// ---------------------------------------------------------------------------
+//
+// Anthropic's structured-outputs grammar rejects several JSON-schema
+// constructs that zod-to-json-schema happily emits from idiomatic Zod:
+//
+//   - minItems: N  (N > 1)         ← z.array(...).min(2+)
+//   - maxItems                     ← z.array(...).max(N)
+//   - minLength / maxLength        ← z.string().min/max
+//   - minimum / maximum            ← z.number().min/max
+//   - exclusiveMinimum / exclusiveMaximum
+//   - multipleOf
+//   - pattern (regex)              ← z.string().regex(...)
+//   - format: 'uri' | 'email' | etc. ← z.string().url/email
+//   - additionalProperties: true   ← objects without z.strictObject
+//   - const                        ← z.literal(x) at schema root
+//   - enum with > N members (practical limit exists, not documented)
+//
+// Anthropic DOES support:
+//   - type, enum (reasonable cardinality), properties, required, items,
+//     oneOf/anyOf/allOf (bounded), $ref (non-recursive), description.
+//   - minItems: 0 or 1 only.
+//
+// Stripping these constraints doesn't loosen our contract — the outer
+// Zod schema still post-validates every response, so string length and
+// array cardinality rules still fire. We're just giving the API a
+// grammar it can actually compile.
+const STRIPPED_KEYS = new Set<string>([
+  'minItems',
+  'maxItems',
+  'minLength',
+  'maxLength',
+  'minimum',
+  'maximum',
+  'exclusiveMinimum',
+  'exclusiveMaximum',
+  'multipleOf',
+  'pattern',
+  'format',
+  'const',
+  'default',
+  'examples',
+  '$schema',
+]);
+
+function sanitizeJsonSchemaForAnthropic(node: unknown): unknown {
+  if (Array.isArray(node)) {
+    return node.map(sanitizeJsonSchemaForAnthropic);
+  }
+  if (node === null || typeof node !== 'object') {
+    return node;
+  }
+  const src = node as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(src)) {
+    if (STRIPPED_KEYS.has(key)) continue;
+    // additionalProperties: allow only `false`. Strip `true` + object forms.
+    if (key === 'additionalProperties' && value !== false) continue;
+    out[key] = sanitizeJsonSchemaForAnthropic(value);
+  }
+  return out;
+}
+
+function zodToSanitizedJsonSchema(
+  schema: z.ZodType<unknown>,
+): Record<string, unknown> {
+  const raw = zodToJsonSchema(schema, {
+    target: 'jsonSchema2019-09',
+    $refStrategy: 'none',
+  }) as Record<string, unknown>;
+  return sanitizeJsonSchemaForAnthropic(raw) as Record<string, unknown>;
+}
+
+// ---------------------------------------------------------------------------
 // Query loop (ported from engine/query.ts:248-1409, stripped of CLI concerns)
 // ---------------------------------------------------------------------------
 
@@ -84,10 +158,7 @@ export async function queryLoop<T>(params: QueryParams): Promise<{ output: T; tr
       // absent — our agents either run tools (chain-of-thought tool
       // use) or emit terminal JSON. The planner agents are the latter.
       try {
-        jsonSchemaForOutput = zodToJsonSchema(outputSchema, {
-          target: 'jsonSchema2019-09',
-          $refStrategy: 'none',
-        }) as Record<string, unknown>;
+        jsonSchemaForOutput = zodToSanitizedJsonSchema(outputSchema);
       } catch (err) {
         log.warn(
           `zodToJsonSchema failed — falling back to prompt-level validation: ${err instanceof Error ? err.message : String(err)}`,
@@ -225,10 +296,7 @@ export async function runAgent<T>(
   let jsonSchemaForOutput: Record<string, unknown> | undefined;
   if (outputSchema && anthropicTools.length === 0) {
     try {
-      jsonSchemaForOutput = zodToJsonSchema(outputSchema, {
-        target: 'jsonSchema2019-09',
-        $refStrategy: 'none',
-      }) as Record<string, unknown>;
+      jsonSchemaForOutput = zodToSanitizedJsonSchema(outputSchema);
     } catch (err) {
       log.warn(
         `zodToJsonSchema failed for agent "${config.name}" — prompt-level fallback: ${err instanceof Error ? err.message : String(err)}`,
