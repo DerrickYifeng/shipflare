@@ -16,6 +16,7 @@ import { growthStrategistOutputSchema } from './agents/growth-strategist/schema'
 import { contentPlannerOutputSchema } from './agents/content-planner/schema';
 import { xWriterOutputSchema } from './agents/x-writer/schema';
 import { redditWriterOutputSchema } from './agents/reddit-writer/schema';
+import { communityManagerOutputSchema } from './agents/community-manager/schema';
 
 const registry: Record<string, ZodType<unknown>> = {
   coordinator: coordinatorOutputSchema as ZodType<unknown>,
@@ -23,6 +24,7 @@ const registry: Record<string, ZodType<unknown>> = {
   'content-planner': contentPlannerOutputSchema as ZodType<unknown>,
   'x-writer': xWriterOutputSchema as ZodType<unknown>,
   'reddit-writer': redditWriterOutputSchema as ZodType<unknown>,
+  'community-manager': communityManagerOutputSchema as ZodType<unknown>,
 };
 
 /**
@@ -41,4 +43,5 @@ export {
   contentPlannerOutputSchema,
   xWriterOutputSchema,
   redditWriterOutputSchema,
+  communityManagerOutputSchema,
 };
