@@ -30,6 +30,12 @@ export interface ActivityLogProps {
   /** All known members on the team, used to label from/to of messages. */
   members: ActivityLogMemberRef[];
   initialMessages: TeamActivityMessage[];
+  /**
+   * Test-only — skip the SSE subscription and render straight from
+   * `initialMessages`. Lets vitest drive `activity-log` in jsdom without
+   * needing an EventSource polyfill or test server.
+   */
+  __disableLiveUpdates?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -98,12 +104,20 @@ export function ActivityLog({
   memberId,
   members,
   initialMessages,
+  __disableLiveUpdates,
 }: ActivityLogProps) {
-  const { messages, isConnected, reconnecting } = useTeamEvents({
+  // Hook must always be called (rules of hooks), but we ignore its output when
+  // live updates are disabled (tests) and render from `initialMessages`
+  // directly. The hook internally guards on `teamId` so passing a dummy id
+  // is cheap; we pass the real one so the test still exercises the import.
+  const live = useTeamEvents({
     teamId,
     initialMessages,
     filter: (msg) => msg.from === memberId || msg.to === memberId,
   });
+  const messages = __disableLiveUpdates ? initialMessages : live.messages;
+  const isConnected = __disableLiveUpdates ? false : live.isConnected;
+  const reconnecting = __disableLiveUpdates ? false : live.reconnecting;
 
   const [typeFilter, setTypeFilter] = useState<'all' | TeamMessageType>('all');
   const [runFilter, setRunFilter] = useState<string>('all');
@@ -250,7 +264,7 @@ export function ActivityLog({
 
       {filtered.length === 0 ? (
         <EmptyState
-          title="No activity yet."
+          title="No activity for this member yet."
           hint={
             messages.length === 0
               ? 'Messages will appear here when this member starts working.'
@@ -259,6 +273,9 @@ export function ActivityLog({
         />
       ) : (
         <ol
+          role="log"
+          aria-live="polite"
+          aria-relevant="additions"
           style={{
             listStyle: 'none',
             padding: 0,
@@ -267,6 +284,7 @@ export function ActivityLog({
             flexDirection: 'column',
             gap: 'var(--sf-space-md)',
           }}
+          data-testid="activity-log-list"
         >
           {filtered.map((msg) => (
             <MessageRow
@@ -274,12 +292,27 @@ export function ActivityLog({
               message={msg}
               members={members}
               currentMemberId={memberId}
+              depth={messageDepth(msg)}
             />
           ))}
         </ol>
       )}
     </section>
   );
+}
+
+/**
+ * Threading depth. Phase D Day 2 supports a single level of indent —
+ * messages whose `metadata.parentTaskId` is populated were emitted from
+ * inside a specialist's subagent run (spawned by the coordinator's Task
+ * tool). We render those indented so the coordinator→specialist
+ * delegation is visible at a glance. Deeper nesting is possible but
+ * rare in the Phase B 3-agent roster; when it matters we can walk the
+ * parentTaskId chain to compute true depth.
+ */
+function messageDepth(msg: TeamActivityMessage): number {
+  const parentTaskId = msg.metadata?.['parentTaskId'];
+  return typeof parentTaskId === 'string' && parentTaskId.length > 0 ? 1 : 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -290,12 +323,35 @@ interface MessageRowProps {
   message: TeamActivityMessage;
   members: ActivityLogMemberRef[];
   currentMemberId: string;
+  depth: number;
 }
 
-function MessageRow({ message, members, currentMemberId }: MessageRowProps) {
+const INDENT_PER_DEPTH_PX = 24;
+
+function MessageRow({
+  message,
+  members,
+  currentMemberId,
+  depth,
+}: MessageRowProps) {
   const { type, content, metadata, createdAt, from, to, runId } = message;
   const isError = type === 'error';
   const fromOther = from !== currentMemberId;
+  const indent = depth * INDENT_PER_DEPTH_PX;
+
+  const wrap: CSSProperties = {
+    position: 'relative',
+    marginLeft: indent,
+    // A vertical connector line for indented messages makes the
+    // parent→child relationship visually explicit without a separate DOM
+    // element per child.
+    ...(depth > 0
+      ? {
+          borderLeft: '2px solid var(--sf-border)',
+          paddingLeft: 'var(--sf-space-md)',
+        }
+      : {}),
+  };
 
   const row: CSSProperties = {
     position: 'relative',
@@ -346,42 +402,54 @@ function MessageRow({ message, members, currentMemberId }: MessageRowProps) {
     fontVariantNumeric: 'tabular-nums',
   };
 
-  return (
-    <li style={row}>
-      <div style={headerRow}>
-        <div style={speakerRow}>
-          <span style={speakerName}>{labelMember(from, members)}</span>
-          {to && to !== from ? (
-            <>
-              <span style={toLabel}>→</span>
-              <span style={toLabel}>{labelMember(to, members)}</span>
-            </>
-          ) : null}
-          <TypeBadge type={type} />
-          {runId ? (
-            <span
-              style={{
-                ...toLabel,
-                fontFamily: 'var(--sf-font-mono)',
-                color: 'var(--sf-fg-4)',
-              }}
-              aria-label="Run id"
-            >
-              run:{shortId(runId)}
-            </span>
-          ) : null}
-        </div>
-        <time style={timeStyle} dateTime={createdAt}>
-          {formatTimestamp(createdAt)}
-        </time>
-      </div>
+  const agentName =
+    typeof metadata?.['agentName'] === 'string'
+      ? (metadata['agentName'] as string)
+      : null;
 
-      <MessageBody
-        type={type}
-        content={content}
-        metadata={metadata}
-        fromOther={fromOther}
-      />
+  return (
+    <li style={wrap} data-depth={depth} data-testid={`activity-row-${type}`}>
+      <div style={row}>
+        <div style={headerRow}>
+          <div style={speakerRow}>
+            <span style={speakerName}>{labelMember(from, members)}</span>
+            {to && to !== from ? (
+              <>
+                <span style={toLabel}>→</span>
+                <span style={toLabel}>{labelMember(to, members)}</span>
+              </>
+            ) : null}
+            <TypeBadge type={type} />
+            {agentName && depth > 0 ? (
+              <span style={{ ...toLabel, color: 'var(--sf-fg-4)' }}>
+                · via {agentName}
+              </span>
+            ) : null}
+            {runId ? (
+              <span
+                style={{
+                  ...toLabel,
+                  fontFamily: 'var(--sf-font-mono)',
+                  color: 'var(--sf-fg-4)',
+                }}
+                aria-label="Run id"
+              >
+                run:{shortId(runId)}
+              </span>
+            ) : null}
+          </div>
+          <time style={timeStyle} dateTime={createdAt}>
+            {formatTimestamp(createdAt)}
+          </time>
+        </div>
+
+        <MessageBody
+          type={type}
+          content={content}
+          metadata={metadata}
+          fromOther={fromOther}
+        />
+      </div>
     </li>
   );
 }
