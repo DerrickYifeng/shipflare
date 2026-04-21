@@ -193,6 +193,7 @@ function applyPersistedToDraft(
           description: persisted.description ?? '',
           keywords: persisted.keywords ?? [],
           valueProp: persisted.valueProp ?? '',
+          targetAudience: persisted.targetAudience ?? '',
           ogImage: null,
           seoAudit: null,
         }
@@ -497,12 +498,18 @@ function StageRouter({
               description: draft.product?.description ?? '',
               name: draft.product?.name ?? '',
             });
+      // Seed the audience field from the extract's AI-inferred value when
+      // the user hasn't typed anything yet. Empty-string draft.audience
+      // means no user edit — prefer the extracted value; once the user
+      // starts typing we respect that (even clearing back to '').
+      const initialAudience =
+        draft.audience || draft.product?.targetAudience || '';
       return (
         <StageReview
           initialValue={{
             name: draft.product?.name ?? '',
             description: draft.product?.description ?? '',
-            audience: draft.audience,
+            audience: initialAudience,
             voice: draft.voice || 'Technical, calm, spec-like',
             keywords: draft.product?.keywords ?? [],
             category: initialCategory,
@@ -526,6 +533,7 @@ function StageRouter({
                     description: v.description,
                     keywords: v.keywords,
                     valueProp: '',
+                    targetAudience: '',
                     ogImage: null,
                     seoAudit: null,
                   },
@@ -541,6 +549,7 @@ function StageRouter({
               product: {
                 url: draftRef.current.sourceUrl,
                 valueProp: '',
+                targetAudience: '',
                 ogImage: null,
                 seoAudit: null,
                 ...draftRef.current.product,

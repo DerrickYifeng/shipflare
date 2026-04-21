@@ -36,6 +36,7 @@ interface RepoScanComplete {
     description: string;
     keywords: string[];
     valueProp: string;
+    targetAudience: string;
     ogImage: string | null;
     seoAudit: Record<string, unknown> | null;
   };

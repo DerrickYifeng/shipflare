@@ -307,6 +307,7 @@ export async function processCodeScan(job: Job<CodeScanJobData>): Promise<void> 
       description: scanResult.productAnalysis.oneLiner,
       keywords: scanResult.productAnalysis.keywords,
       valueProp: scanResult.productAnalysis.valueProp,
+      targetAudience: scanResult.productAnalysis.targetAudience,
       ogImage: null,
       seoAudit: null,
     };

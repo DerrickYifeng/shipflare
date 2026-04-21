@@ -18,7 +18,8 @@ const CUES: readonly CategoryCue[] = [
   [
     'dev_tool',
     [
-      /\bdev(?:eloper)? tool(?:s)?\b/i,
+      /\bdev(?:eloper)?s?\b/i,        // "developer", "developers", "dev"
+      /\bindie hackers?\b/i,
       /\bSDK\b/,
       /\bCLI\b/,
       /\bAPI\b/,
@@ -26,6 +27,17 @@ const CUES: readonly CategoryCue[] = [
       /\blinter\b/i,
       /\bframework\b/i,
       /\bIDE\b/,
+      /\bgithub\b/i,
+      /\btypescript\b/i,
+      /\bpython\b/i,
+      /\brust\b/i,
+      /\bgolang?\b/i,
+      /\bbackend\b/i,
+      /\bfrontend\b/i,
+      /\bdatabase\b/i,
+      /\bkubernetes\b/i,
+      /\bdocker\b/i,
+      /\bterraform\b/i,
     ],
   ],
   [
@@ -53,12 +65,19 @@ const CUES: readonly CategoryCue[] = [
   [
     'creator_tool',
     [
-      /\bcreator\b/i,
+      // Require explicit creator-economy signals. Bare "content" was too
+      // broad — any marketing/docs tool mentions "content" and was
+      // grabbing this branch (e.g. a dev-marketing product matched here
+      // instead of dev_tool).
+      /\bcreator(?:s| economy)?\b/i,
       /\bnewsletter\b/i,
+      /\bsubstack\b/i,
       /\bpodcast\b/i,
-      /\bvideo edit\b/i,
+      /\bvideo edit(?:ing|or)?\b/i,
       /\bstream(?:ing|er)\b/i,
-      /\bcontent\b/i,
+      /\btiktok\b/i,
+      /\byoutube\b/i,
+      /\binfluencer\b/i,
     ],
   ],
   [

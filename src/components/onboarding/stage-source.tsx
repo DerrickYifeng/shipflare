@@ -193,6 +193,7 @@ export function StageSource({
                   description: '',
                   keywords: [],
                   valueProp: '',
+                  targetAudience: '',
                   ogImage: null,
                   seoAudit: null,
                 })
@@ -333,6 +334,7 @@ export function StageSource({
                     description: '',
                     keywords: [],
                     valueProp: '',
+                    targetAudience: '',
                     ogImage: null,
                     seoAudit: null,
                   })
