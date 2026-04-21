@@ -25,17 +25,6 @@ vi.mock('@/lib/auth', () => ({
     authUserId ? { user: { id: authUserId } } : null,
 }));
 
-vi.mock('@/core/skill-loader', () => ({
-  loadSkill: (path: string) => ({
-    name: path.includes('strategic') ? 'strategic-planner' : 'tactical-planner',
-  }),
-}));
-
-const runSkillMock = vi.fn();
-vi.mock('@/core/skill-runner', () => ({
-  runSkill: runSkillMock,
-}));
-
 vi.mock('@/lib/logger', () => ({
   createLogger: () => ({
     debug: () => {},
@@ -49,25 +38,72 @@ vi.mock('@/lib/logger', () => ({
   }),
 }));
 
-vi.mock('@/skills/_catalog', () => ({
-  SKILL_CATALOG: [],
-}));
-
-// Phase B Day 4 — the route now checks for a committed product row to
-// decide whether to route through team-run. Default behaviour in these
-// tests: no product exists, so the route stays on the legacy skill-
-// runner path (exactly what the existing assertions expect).
+// Phase C: the route always routes through team-run. The DB mock returns
+// one product row so the route passes productId to ensureTeamExists; the
+// productId=null path is exercised by changing `productRows` to [].
+let productRows: Array<{ id: string }> = [{ id: 'prod-1' }];
 vi.mock('@/lib/db', () => ({
   db: {
     select: () => ({
       from: () => ({
         where: () => ({
-          limit: async () => [],
+          limit: async () => productRows,
         }),
       }),
     }),
   },
 }));
+
+vi.mock('drizzle-orm', async () => {
+  const actual =
+    await vi.importActual<typeof import('drizzle-orm')>('drizzle-orm');
+  return { ...actual, eq: () => ({}) };
+});
+
+const ensureTeamExistsMock = vi.fn(
+  async (_userId: string, _productId: string | null) => ({
+    teamId: 'team-1',
+    memberIds: {
+      coordinator: 'mem-coord',
+      'growth-strategist': 'mem-gs',
+      'content-planner': 'mem-cp',
+    },
+    created: false,
+  }),
+);
+vi.mock('@/lib/team-provisioner', () => ({
+  ensureTeamExists: (userId: string, productId: string | null) =>
+    ensureTeamExistsMock(userId, productId),
+}));
+
+const enqueueTeamRunMock = vi.fn(async (_input: Record<string, unknown>) => ({
+  runId: 'run-1',
+  traceId: 'trace-1',
+  alreadyRunning: false,
+}));
+vi.mock('@/lib/queue/team-run', () => ({
+  enqueueTeamRun: (input: Record<string, unknown>) => enqueueTeamRunMock(input),
+}));
+
+// subscribeToStrategicPathEvents yields whatever events we push. Tests
+// seed the event queue via `pushEvent`.
+type OnboardingEvent =
+  | { type: 'heartbeat' }
+  | { type: 'error'; error: string }
+  | { type: 'strategic_done'; path: Record<string, unknown> };
+let pendingEvents: OnboardingEvent[] = [];
+vi.mock('@/lib/onboarding-team-run', () => ({
+  subscribeToStrategicPathEvents: async function* (
+    _teamId: string,
+    _runId: string,
+  ): AsyncGenerator<OnboardingEvent, void, void> {
+    for (const e of pendingEvents) yield e;
+  },
+}));
+
+// ---------------------------------------------------------------------------
+// Fixtures
+// ---------------------------------------------------------------------------
 
 const validBody = {
   product: {
@@ -123,7 +159,6 @@ async function readSSEEvents(res: Response): Promise<Array<Record<string, unknow
     const { value, done } = await reader.read();
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
-    // SSE messages are separated by \n\n
     const parts = buffer.split('\n\n');
     buffer = parts.pop() ?? '';
     for (const part of parts) {
@@ -142,11 +177,14 @@ async function readSSEEvents(res: Response): Promise<Array<Record<string, unknow
 beforeEach(() => {
   allowedRL = true;
   authUserId = 'user-1';
-  runSkillMock.mockReset();
+  productRows = [{ id: 'prod-1' }];
+  pendingEvents = [];
   recordPipelineEventMock.mockClear();
+  ensureTeamExistsMock.mockClear();
+  enqueueTeamRunMock.mockClear();
 });
 
-describe('POST /api/onboarding/plan (SSE, strategic-only)', () => {
+describe('POST /api/onboarding/plan (SSE, team-run only)', () => {
   it('returns 401 when unauthenticated (not SSE)', async () => {
     authUserId = null;
     const { POST } = await import('../route');
@@ -169,15 +207,8 @@ describe('POST /api/onboarding/plan (SSE, strategic-only)', () => {
     expect(res.status).toBe(400);
   });
 
-  it('streams strategic_done on success (no tactical run)', async () => {
-    runSkillMock.mockResolvedValueOnce({
-      results: [validPath],
-      errors: [],
-      usage: {
-        inputTokens: 1000, outputTokens: 500, cacheReadTokens: 0, cacheWriteTokens: 0,
-        costUsd: 0.05, model: 'sonnet', turns: 1,
-      },
-    });
+  it('streams strategic_done on success', async () => {
+    pendingEvents = [{ type: 'strategic_done', path: validPath }];
 
     const { POST } = await import('../route');
     const res = await POST(makeRequest(validBody));
@@ -189,8 +220,13 @@ describe('POST /api/onboarding/plan (SSE, strategic-only)', () => {
     expect(terminal).toBeTruthy();
     expect(terminal?.path).toEqual(validPath);
 
-    // runSkill called exactly once — tactical no longer runs here.
-    expect(runSkillMock).toHaveBeenCalledTimes(1);
+    expect(ensureTeamExistsMock).toHaveBeenCalledWith('user-1', 'prod-1');
+    expect(enqueueTeamRunMock).toHaveBeenCalledTimes(1);
+    expect(enqueueTeamRunMock.mock.calls[0]?.[0]).toMatchObject({
+      teamId: 'team-1',
+      trigger: 'onboarding',
+      rootMemberId: 'mem-coord',
+    });
 
     expect(recordPipelineEventMock).toHaveBeenCalledWith(
       expect.objectContaining({ stage: 'launch_plan_started' }),
@@ -200,12 +236,20 @@ describe('POST /api/onboarding/plan (SSE, strategic-only)', () => {
     );
   });
 
-  it('streams error event when strategic-planner errors', async () => {
-    runSkillMock.mockResolvedValueOnce({
-      results: [],
-      errors: [{ label: 'strategic', error: 'LLM refused' }],
-      usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0, model: 'sonnet', turns: 0 },
-    });
+  it('passes productId=null when no product row exists (fresh onboarding)', async () => {
+    productRows = [];
+    pendingEvents = [{ type: 'strategic_done', path: validPath }];
+
+    const { POST } = await import('../route');
+    const res = await POST(makeRequest(validBody));
+    expect(res.status).toBe(200);
+    await readSSEEvents(res);
+
+    expect(ensureTeamExistsMock).toHaveBeenCalledWith('user-1', null);
+  });
+
+  it('streams error event when the team-run reports an error', async () => {
+    pendingEvents = [{ type: 'error', error: 'coordinator crashed' }];
     const { POST } = await import('../route');
     const res = await POST(makeRequest(validBody));
     expect(res.status).toBe(200);
@@ -213,87 +257,23 @@ describe('POST /api/onboarding/plan (SSE, strategic-only)', () => {
     const events = await readSSEEvents(res);
     const terminal = events.find((e) => e.type === 'error');
     expect(terminal).toBeTruthy();
-    expect(String(terminal?.error)).toContain('strategic-planner error');
+    expect(String(terminal?.error)).toContain('coordinator crashed');
 
     expect(recordPipelineEventMock).toHaveBeenCalledWith(
       expect.objectContaining({ stage: 'launch_plan_failed' }),
     );
   });
 
-  it('forwards launchChannel when state=launching', async () => {
-    runSkillMock.mockResolvedValueOnce({
-      results: [validPath],
-      errors: [],
-      usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0, model: 'sonnet', turns: 1 },
-    });
-
+  it('streams error when the team-run ends without a strategic path', async () => {
+    pendingEvents = [];
     const { POST } = await import('../route');
-    const res = await POST(
-      makeRequest({ ...validBody, launchChannel: 'producthunt' }),
-    );
+    const res = await POST(makeRequest(validBody));
     expect(res.status).toBe(200);
 
-    // Drain the stream so the runSkill call completes.
-    await readSSEEvents(res);
-
-    const strategicCall = runSkillMock.mock.calls[0]?.[0] as {
-      input: { launchContext: Record<string, unknown> };
-    };
-    expect(strategicCall.input.launchContext).toEqual({
-      launchChannel: 'producthunt',
-    });
-  });
-
-  it('forwards usersBucket when state=launched', async () => {
-    runSkillMock.mockResolvedValueOnce({
-      results: [validPath],
-      errors: [],
-      usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0, model: 'sonnet', turns: 1 },
-    });
-
-    const { POST } = await import('../route');
-    const res = await POST(
-      makeRequest({
-        ...validBody,
-        state: 'launched',
-        launchDate: null,
-        launchedAt: '2026-04-01T00:00:00.000Z',
-        usersBucket: '100-1k',
-      }),
-    );
-    expect(res.status).toBe(200);
-    await readSSEEvents(res);
-
-    const strategicCall = runSkillMock.mock.calls[0]?.[0] as {
-      input: { launchContext: Record<string, unknown> };
-    };
-    expect(strategicCall.input.launchContext).toEqual({ usersBucket: '100-1k' });
-  });
-
-  it('drops launchChannel when state is not launching', async () => {
-    runSkillMock.mockResolvedValueOnce({
-      results: [validPath],
-      errors: [],
-      usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0, model: 'sonnet', turns: 1 },
-    });
-
-    const { POST } = await import('../route');
-    const res = await POST(
-      makeRequest({
-        ...validBody,
-        state: 'mvp',
-        launchDate: null,
-        launchedAt: null,
-        launchChannel: 'producthunt',
-      }),
-    );
-    expect(res.status).toBe(200);
-    await readSSEEvents(res);
-
-    const strategicCall = runSkillMock.mock.calls[0]?.[0] as {
-      input: { launchContext: Record<string, unknown> };
-    };
-    expect(strategicCall.input.launchContext).toEqual({});
+    const events = await readSSEEvents(res);
+    const terminal = events.find((e) => e.type === 'error');
+    expect(terminal).toBeTruthy();
+    expect(String(terminal?.error)).toContain('team-run ended without a strategic path');
   });
 
   it('rejects an unknown launchChannel value', async () => {
@@ -302,5 +282,31 @@ describe('POST /api/onboarding/plan (SSE, strategic-only)', () => {
       makeRequest({ ...validBody, launchChannel: 'tiktok' }),
     );
     expect(res.status).toBe(400);
+  });
+
+  it('includes product category + phase + milestones in the coordinator goal', async () => {
+    pendingEvents = [{ type: 'strategic_done', path: validPath }];
+    const body = {
+      ...validBody,
+      recentMilestones: [
+        {
+          title: 'reply engine shipped',
+          summary: 'reply window tightened to 15 minutes',
+          source: 'pr',
+          atISO: '2026-04-19T21:30:00Z',
+        },
+      ],
+    };
+    const { POST } = await import('../route');
+    const res = await POST(makeRequest(body));
+    expect(res.status).toBe(200);
+    await readSSEEvents(res);
+
+    const goal = enqueueTeamRunMock.mock.calls[0]?.[0]?.goal as string;
+    expect(goal).toContain('ShipFlare');
+    expect(goal).toContain('dev_tool');
+    expect(goal).toContain('launching');
+    expect(goal).toContain('audience'); // phase derived from launchDate
+    expect(goal).toContain('reply engine shipped');
   });
 });

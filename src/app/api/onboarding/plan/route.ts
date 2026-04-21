@@ -1,14 +1,8 @@
 import { type NextRequest } from 'next/server';
-import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { auth } from '@/lib/auth';
-import { loadSkill } from '@/core/skill-loader';
-import { runSkill } from '@/core/skill-runner';
-import {
-  strategicPathSchema,
-  type StrategicPath,
-} from '@/agents/schemas';
+import type { StrategicPath } from '@/tools/schemas';
 import { db } from '@/lib/db';
 import { products } from '@/lib/db/schema';
 import { derivePhase } from '@/lib/launch-phase';
@@ -78,10 +72,6 @@ const requestBodySchema = z.object({
 });
 
 type RequestBody = z.infer<typeof requestBodySchema>;
-
-const strategicSkill = loadSkill(
-  join(process.cwd(), 'src/skills/strategic-planner'),
-);
 
 function jsonError(status: number, body: Record<string, unknown>, traceId: string): Response {
   return new Response(JSON.stringify(body), {
@@ -209,38 +199,25 @@ export async function POST(request: NextRequest): Promise<Response> {
       };
 
       try {
-        // Phase B Day 4 — if the user has a committed product row, route
-        // through the team-run path so the coordinator + growth-strategist
-        // AGENTs drive the strategic-path write. Otherwise fall back to
-        // the legacy skill-runner path (fresh onboarding hasn't committed
-        // a product yet). Phase C removes the legacy branch.
+        // Phase C: team-run is the only path. When the user hasn't
+        // committed a product row yet (fresh onboarding), pass
+        // productId=null — ensureTeamExists accepts that and creates a
+        // product-less team. The commit route later binds the team
+        // to the real productId via its own upsert.
         const existingProduct = await db
           .select({ id: products.id })
           .from(products)
           .where(eq(products.userId, userId))
           .limit(1);
 
-        const useTeamRun = existingProduct.length > 0;
-
-        let path: StrategicPath;
-        if (useTeamRun) {
-          path = await runViaTeamRun({
-            userId,
-            productId: existingProduct[0].id,
-            body,
-            abortSignal: abortController.signal,
-            onHeartbeat: () => enqueue({ type: 'heartbeat' }),
-          });
-        } else {
-          path = await Promise.race([
-            runStrategic(body, currentPhase),
-            new Promise<never>((_, reject) => {
-              abortController.signal.addEventListener('abort', () =>
-                reject(new PlannerTimeoutError()),
-              );
-            }),
-          ]);
-        }
+        const path: StrategicPath = await runViaTeamRun({
+          userId,
+          productId: existingProduct[0]?.id ?? null,
+          body,
+          currentPhase,
+          abortSignal: abortController.signal,
+          onHeartbeat: () => enqueue({ type: 'heartbeat' }),
+        });
 
         await recordPipelineEvent({
           userId,
@@ -250,12 +227,12 @@ export async function POST(request: NextRequest): Promise<Response> {
             pillars: path.contentPillars.length,
             thesisWeeks: path.thesisArc.length,
             scope: 'strategic_only',
-            runner: useTeamRun ? 'team_run' : 'skill_runner',
+            runner: 'team_run',
           },
         });
 
         log.info(
-          `strategic plan done user=${userId} pillars=${path.contentPillars.length} runner=${useTeamRun ? 'team_run' : 'skill_runner'}`,
+          `strategic plan done user=${userId} pillars=${path.contentPillars.length} runner=team_run`,
         );
 
         cleanup({ type: 'strategic_done', path });
@@ -304,8 +281,14 @@ class PlannerTimeoutError extends Error {
 
 interface RunViaTeamRunArgs {
   userId: string;
-  productId: string;
+  /**
+   * Null on fresh onboarding (user hasn't called /api/onboarding/commit
+   * yet). ensureTeamExists accepts null and creates a product-less team;
+   * the commit route later binds it to the real productId via upsert.
+   */
+  productId: string | null;
   body: RequestBody;
+  currentPhase: ReturnType<typeof derivePhase>;
   abortSignal: AbortSignal;
   onHeartbeat?: () => void;
 }
@@ -313,15 +296,31 @@ interface RunViaTeamRunArgs {
 async function runViaTeamRun(
   args: RunViaTeamRunArgs,
 ): Promise<StrategicPath> {
-  const { userId, productId, body, abortSignal } = args;
+  const { userId, productId, body, currentPhase, abortSignal } = args;
 
   // 1) Ensure a team + base roster exists for this (userId, productId).
   const { teamId, memberIds } = await ensureTeamExists(userId, productId);
 
   // 2) Enqueue the team-run with trigger='onboarding' + derived goal.
+  //    The goal carries the full product + phase context so the
+  //    coordinator can delegate with enough input for growth-strategist
+  //    to produce a high-signal path on the first turn.
+  const milestoneNote =
+    body.recentMilestones && body.recentMilestones.length > 0
+      ? ` Recent shipping: ${body.recentMilestones.map((m) => m.title).join('; ')}.`
+      : '';
+  const launchDateNote = body.launchDate
+    ? ` Launch date: ${body.launchDate.slice(0, 10)}.`
+    : body.launchedAt
+      ? ` Launched: ${body.launchedAt.slice(0, 10)}.`
+      : '';
   const goal =
     `Plan the launch strategy for ${body.product.name}. ` +
-    `State: ${body.state}. Channels: ${body.channels.join(', ')}.`;
+    `Category: ${body.product.category}. ` +
+    `State: ${body.state}. Phase: ${currentPhase}. ` +
+    `Channels: ${body.channels.join(', ')}.` +
+    launchDateNote +
+    milestoneNote;
 
   const { runId } = await enqueueTeamRun({
     teamId,
@@ -361,47 +360,4 @@ async function runViaTeamRun(
   }
 
   throw new Error('team-run ended without a strategic path');
-}
-
-async function runStrategic(
-  body: RequestBody,
-  currentPhase: ReturnType<typeof derivePhase>,
-): Promise<StrategicPath> {
-  const launchContext: {
-    launchChannel?: z.infer<typeof launchChannelSchema>;
-    usersBucket?: z.infer<typeof usersBucketSchema>;
-  } = {};
-  if (body.state === 'launching' && body.launchChannel) {
-    launchContext.launchChannel = body.launchChannel;
-  }
-  if (body.state === 'launched' && body.usersBucket) {
-    launchContext.usersBucket = body.usersBucket;
-  }
-
-  const strategicRes = await runSkill<StrategicPath>({
-    skill: strategicSkill,
-    input: {
-      product: body.product,
-      state: body.state,
-      currentPhase,
-      launchDate: body.launchDate ?? null,
-      launchedAt: body.launchedAt ?? null,
-      channels: body.channels,
-      voiceProfile: body.voiceProfile ?? null,
-      recentMilestones: body.recentMilestones ?? [],
-      launchContext,
-    },
-    outputSchema: strategicPathSchema,
-  });
-
-  if (strategicRes.errors.length > 0) {
-    throw new Error(
-      `strategic-planner error: ${strategicRes.errors.map((e) => e.error).join('; ')}`,
-    );
-  }
-  const path = strategicRes.results[0];
-  if (!path) {
-    throw new Error('strategic-planner returned no result');
-  }
-  return path;
 }
