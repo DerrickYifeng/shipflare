@@ -18,6 +18,7 @@ import { getUserChannels } from '@/lib/user-channels';
 import { deleteDraft } from '@/lib/onboarding-draft';
 import { recordPipelineEvent } from '@/lib/pipeline-events';
 import { createLogger, loggerForRequest } from '@/lib/logger';
+import { provisionTeamForProduct } from '@/lib/team-provisioner';
 
 const baseLog = createLogger('api:onboarding:commit');
 
@@ -282,6 +283,21 @@ export async function POST(request: NextRequest): Promise<Response> {
   // --- post-transaction side effects (best-effort, never block response) ---
 
   const enqueued: string[] = [];
+
+  // Phase F: reconcile the team roster now that the product is committed
+  // (we have the final category + connected channels). Idempotent — if a
+  // baseline team was seeded by POST /api/onboarding/plan earlier in the
+  // flow, this adds the preset's writer/community members on top.
+  try {
+    const provision = await provisionTeamForProduct(userId, productId);
+    log.info(
+      `provisionTeamForProduct: team=${provision.teamId} preset=${provision.preset} roster=[${provision.roster.join(',')}] created=${provision.created}`,
+    );
+  } catch (err) {
+    log.warn(
+      `provisionTeamForProduct failed (non-fatal) user=${userId}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
 
   // Phase C: tactical-generate enqueue removed. plan_items are populated by
   // the team-run already in flight from POST /api/onboarding/plan (the

@@ -1,11 +1,12 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { channels } from '@/lib/db/schema';
+import { channels, products } from '@/lib/db/schema';
 import { channelPosts } from '@/lib/db/schema/channels';
 import { encrypt } from '@/lib/encryption';
 import { eq, and } from 'drizzle-orm';
 import { createLogger } from '@/lib/logger';
+import { provisionTeamForProduct } from '@/lib/team-provisioner';
 
 const log = createLogger('api:x');
 
@@ -140,6 +141,30 @@ export async function GET(request: NextRequest) {
   }
 
   log.info(`X account connected: @${username}`);
+
+  // Phase F: silently reconcile the team roster — a newly-connected X
+  // channel may add x-writer to a default-squad team. Best-effort; channel
+  // connection succeeds either way.
+  try {
+    const [productRow] = await db
+      .select({ id: products.id })
+      .from(products)
+      .where(eq(products.userId, session.user.id))
+      .limit(1);
+    if (productRow?.id) {
+      const provision = await provisionTeamForProduct(
+        session.user.id,
+        productRow.id,
+      );
+      log.info(
+        `provisionTeamForProduct post-x-connect: team=${provision.teamId} preset=${provision.preset}`,
+      );
+    }
+  } catch (err) {
+    log.warn(
+      `provisionTeamForProduct post-x-connect failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
 
   // Fetch recent post history for content deduplication (best-effort)
   try {

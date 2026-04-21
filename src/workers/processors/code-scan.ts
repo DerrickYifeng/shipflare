@@ -262,6 +262,23 @@ export async function processCodeScan(job: Job<CodeScanJobData>): Promise<void> 
         await enqueueCalibration({ userId, productId });
         log.info(`Enqueued calibration for code-scanned product ${productId}`);
       }
+
+      // Phase F: seed the team roster for the newly-scanned product. Best-
+      // effort — if it fails the scan job still succeeds and the team will
+      // be provisioned lazily by the next plan-execute or /api/onboarding/plan.
+      try {
+        const { provisionTeamForProduct } = await import(
+          '@/lib/team-provisioner'
+        );
+        const provision = await provisionTeamForProduct(userId, productId);
+        log.info(
+          `provisionTeamForProduct post-code-scan: team=${provision.teamId} preset=${provision.preset}`,
+        );
+      } catch (err) {
+        log.warn(
+          `provisionTeamForProduct post-code-scan failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     }
 
     // Upsert code snapshot
