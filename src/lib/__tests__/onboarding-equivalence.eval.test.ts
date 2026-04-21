@@ -293,6 +293,14 @@ interface V3Outcome {
   path: StrategicPath;
   /** plan_items captured from add_plan_item tool_calls. */
   planItems: EquivalencePlanItem[];
+  /** Total team_messages published (all types). Debug signal for retries. */
+  messageCount: number;
+  /**
+   * Count of StructuredOutput correction tool_results (indicator of agent
+   * retry loops). Hitting MAX_STRUCTURED_OUTPUT_RETRIES = 5 suggests the
+   * agent prompt or schema has an issue.
+   */
+  structuredOutputRetries: number;
 }
 
 async function runV3(fixture: EquivalenceFixture): Promise<V3Outcome> {
@@ -449,7 +457,24 @@ async function runV3(fixture: EquivalenceFixture): Promise<V3Outcome> {
     };
   });
 
-  return { path, planItems: items };
+  // Count StructuredOutput-correction tool_results — a retry indicator.
+  // The `StructuredOutputTool` emits a tool_result with isError=true when
+  // the agent's payload fails Zod validation; we count those to spot
+  // tight retry loops.
+  const structuredOutputRetries = captured.filter(
+    (m) =>
+      m.type === 'tool_result' &&
+      (m.metadata as Record<string, unknown> | null)?.toolName ===
+        'StructuredOutput' &&
+      (m.metadata as Record<string, unknown>).isError === true,
+  ).length;
+
+  return {
+    path,
+    planItems: items,
+    messageCount: captured.length,
+    structuredOutputRetries,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -488,14 +513,41 @@ MAYBE_DESCRIBE('Phase C equivalence gate: onboarding v2 vs v3 parity', () => {
   for (const fixture of EQUIVALENCE_FIXTURES) {
     it(
       `${fixture.fixtureId} — v2 and v3 agree within ±15%`,
-      // 3 min per fixture — one Sonnet planner call + one Haiku tactical
-      // call + team-run with 3 agents is ~60-90s end-to-end.
-      { timeout: 180_000 },
+      // 5 min per fixture — v3 team-run with 3 AGENT.md's + Task fan-out
+      // hits 2-3 Sonnet calls + several Haiku calls; 180s was too tight
+      // (observed 180010ms timeout on dev_tool-foundation on 2026-04-21).
+      { timeout: 300_000 },
       async () => {
-        const [v2, v3] = await Promise.all([
-          runV2(fixture),
-          runV3(fixture),
-        ]);
+        const t0 = Date.now();
+        const v2Promise = (async () => {
+          const start = Date.now();
+          const result = await runV2(fixture);
+          const durMs = Date.now() - start;
+          // eslint-disable-next-line no-console
+          console.log(
+            `[equivalence-eval] ${fixture.fixtureId} v2 done in ${(durMs / 1000).toFixed(1)}s ` +
+              `pillars=${result.path.contentPillars.length} items=${result.plan.items.length}`,
+          );
+          return result;
+        })();
+        const v3Promise = (async () => {
+          const start = Date.now();
+          const result = await runV3(fixture);
+          const durMs = Date.now() - start;
+          // eslint-disable-next-line no-console
+          console.log(
+            `[equivalence-eval] ${fixture.fixtureId} v3 done in ${(durMs / 1000).toFixed(1)}s ` +
+              `pillars=${result.path.contentPillars.length} items=${result.planItems.length} ` +
+              `msgs=${result.messageCount} strOutRetries=${result.structuredOutputRetries}`,
+          );
+          return result;
+        })();
+        const [v2, v3] = await Promise.all([v2Promise, v3Promise]);
+        const totalMs = Date.now() - t0;
+        // eslint-disable-next-line no-console
+        console.log(
+          `[equivalence-eval] ${fixture.fixtureId} fixture wall-clock ${(totalMs / 1000).toFixed(1)}s`,
+        );
 
         const v2Items: EquivalencePlanItem[] = v2.plan.items.map((i) => ({
           kind: i.kind,
