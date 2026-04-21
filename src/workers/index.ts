@@ -18,8 +18,9 @@ import { processPlanExecute } from './processors/plan-execute';
 import { processPlanExecuteSweeper } from './processors/plan-execute-sweeper';
 import { processStaleSweeper } from './processors/stale-sweeper';
 import { processWeeklyReplan } from './processors/weekly-replan';
+import { processTacticalGenerate } from './processors/tactical-generate';
 import { dreamQueue, discoveryQueue, discoveryScanQueue, monitorQueue, metricsQueue, analyticsQueue, codeScanQueue } from '@/lib/queue';
-import type { PlanExecuteJobData } from '@/lib/queue';
+import type { PlanExecuteJobData, TacticalGenerateJobData } from '@/lib/queue';
 import { createLogger, loggerForJob } from '@/lib/logger';
 import type { DiscoveryJobData, ReviewJobData, PostingJobData, HealthScoreJobData, DreamJobData, CodeScanJobData, MonitorJobData, SearchSourceJobData, DiscoveryScanJobData, EngagementJobData, MetricsJobData, AnalyticsJobData, CalibrationJobData } from '@/lib/queue/types';
 import type { VoiceExtractJobData } from '@/lib/queue/voice-extract';
@@ -201,6 +202,15 @@ const weeklyReplanWorker = new Worker<Record<string, never>>(
   { ...BASE_OPTS, concurrency: 1 },
 );
 
+// Background tactical-planner runner enqueued from /api/onboarding/commit.
+// Lock duration accommodates the 60s planner timeout plus Anthropic API
+// slow-day slack — a tactical run should never hit the lock ceiling.
+const tacticalGenerateWorker = new Worker<TacticalGenerateJobData>(
+  'tactical-generate',
+  async (job) => processTacticalGenerate(job),
+  { ...BASE_OPTS, concurrency: 2, lockDuration: 180_000 },
+);
+
 const workers = [
   discoveryWorker, reviewWorker, postingWorker,
   healthScoreWorker, dreamWorker, codeScanWorker,
@@ -212,6 +222,8 @@ const workers = [
   // Phase 7
   planExecuteWorker, planExecuteSweeperWorker,
   staleSweeperWorker, weeklyReplanWorker,
+  // Post-commit tactical planner
+  tacticalGenerateWorker,
 ];
 
 // Log events — bind traceId / jobId / queue into the child logger so lifecycle
@@ -381,7 +393,7 @@ Promise.all([
   log.error('Failed to schedule cron jobs:', err.message);
 });
 
-log.info('All workers started: discovery, review, posting, health-score, dream, code-scan, monitor, search-source, discovery-scan, engagement, metrics, analytics, calibration, voice-extract, plan-execute, plan-execute-sweeper, stale-sweeper, weekly-replan. Discovery 3x/day, discovery-scan every 4h, plan-execute-sweeper every 1m, stale-sweeper every 1h, weekly-replan Monday 00:00 UTC, all others daily.');
+log.info('All workers started: discovery, review, posting, health-score, dream, code-scan, monitor, search-source, discovery-scan, engagement, metrics, analytics, calibration, voice-extract, plan-execute, plan-execute-sweeper, stale-sweeper, weekly-replan, tactical-generate. Discovery 3x/day, discovery-scan every 4h, plan-execute-sweeper every 1m, stale-sweeper every 1h, weekly-replan Monday 00:00 UTC, all others daily.');
 
 // Graceful shutdown
 async function shutdown() {

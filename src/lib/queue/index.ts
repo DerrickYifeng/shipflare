@@ -389,6 +389,17 @@ export {
 export type { PlanExecuteJobData } from './plan-execute';
 
 // ----------------------------------------------------------------
+//  Tactical-generate queue (post-commit background tactical-planner)
+// ----------------------------------------------------------------
+
+export {
+  tacticalGenerateQueue,
+  enqueueTacticalGenerate,
+  tacticalGenerateJobSchema,
+} from './tactical-generate';
+export type { TacticalGenerateJobData } from './tactical-generate';
+
+// ----------------------------------------------------------------
 //  Calibration queue
 // ----------------------------------------------------------------
 
