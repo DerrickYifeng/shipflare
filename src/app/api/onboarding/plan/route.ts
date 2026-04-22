@@ -312,10 +312,20 @@ async function runViaTeamRun(
   // 1) Ensure a team + base roster exists for this (userId, productId).
   const { teamId, memberIds } = await ensureTeamExists(userId, productId);
 
-  // 2) Enqueue the team-run with trigger='onboarding' + derived goal.
-  //    The goal carries the full product + phase context so the
-  //    coordinator can delegate with enough input for growth-strategist
-  //    to produce a high-signal path on the first turn.
+  // 2) Enqueue the team-run rooted at growth-strategist.
+  //
+  //    Pre-Phase-F we rooted onboarding at the coordinator so it could
+  //    delegate, but the coordinator kept making bad parallel-spawn
+  //    decisions (spawning content-planner + x-writer before the
+  //    strategic_path existed → x-writer hallucinated plan_item IDs →
+  //    wasted 15s + retries). Since onboarding is a single-responsibility
+  //    flow ("write the strategic path"), we skip the delegation turn
+  //    and root the run directly at growth-strategist. Content-planner
+  //    runs as a separate team_run from /api/onboarding/commit after
+  //    the founder reviews the path.
+  //
+  //    Net effect: ~30-50s faster per onboarding, no coordinator Sonnet
+  //    turn, no parallel-spawn foot-guns.
   const milestoneNote =
     body.recentMilestones && body.recentMilestones.length > 0
       ? ` Recent shipping: ${body.recentMilestones.map((m) => m.title).join('; ')}.`
@@ -325,19 +335,26 @@ async function runViaTeamRun(
     : body.launchedAt
       ? ` Launched: ${body.launchedAt.slice(0, 10)}.`
       : '';
+  // Growth-strategist-specific goal: tell it directly to call
+  // write_strategic_path, not the generic "plan the launch" goal which
+  // the model can misread as "return a description".
   const goal =
-    `Plan the launch strategy for ${body.product.name}. ` +
+    `Write the 30-day strategic path for ${body.product.name} by calling ` +
+    `write_strategic_path. ` +
     `Category: ${body.product.category}. ` +
     `State: ${body.state}. Phase: ${currentPhase}. ` +
     `Channels: ${body.channels.join(', ')}.` +
     launchDateNote +
-    milestoneNote;
+    milestoneNote +
+    ` Follow your strategic-path-playbook (six ordered steps) and persist ` +
+    `via the write_strategic_path tool. Do not emit the terminal ` +
+    `StructuredOutput until write_strategic_path has succeeded.`;
 
   const { runId } = await enqueueTeamRun({
     teamId,
     trigger: 'onboarding',
     goal,
-    rootMemberId: memberIds.coordinator,
+    rootMemberId: memberIds['growth-strategist'],
   });
 
   // 3) Subscribe to the team's Redis channel, translate events to the
