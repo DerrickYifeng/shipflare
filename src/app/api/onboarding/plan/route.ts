@@ -238,10 +238,21 @@ export async function POST(request: NextRequest): Promise<Response> {
         cleanup({ type: 'strategic_done', path });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
+        // Surface the underlying pg/driver cause — Drizzle wraps driver
+        // errors so `.message` is just "Failed query: <SQL>" and the real
+        // detail lives on `.cause` (e.g. 'relation "teams" does not exist
+        // [42P01]' when a migration hasn't been applied).
+        const cause =
+          err instanceof Error && err.cause
+            ? err.cause instanceof Error
+              ? `${err.cause.message}${(err.cause as { code?: string }).code ? ` [${(err.cause as { code?: string }).code}]` : ''}`
+              : String(err.cause)
+            : undefined;
+        const fullMessage = cause ? `${message} — cause: ${cause}` : message;
         await recordPipelineEvent({
           userId,
           stage: 'launch_plan_failed',
-          metadata: { traceId, error: message },
+          metadata: { traceId, error: fullMessage },
         });
 
         if (err instanceof PlannerTimeoutError) {
@@ -252,7 +263,7 @@ export async function POST(request: NextRequest): Promise<Response> {
           return;
         }
 
-        log.error(`strategic plan failed user=${userId}: ${message}`);
+        log.error(`strategic plan failed user=${userId}: ${fullMessage}`);
         cleanup({ type: 'error', error: message });
       }
     },
