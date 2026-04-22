@@ -90,9 +90,11 @@ export function computeCollapsedBands(days: CalendarDay[]): {
       const start = new Date(item.scheduledAt);
       const startHour = start.getUTCHours();
       const minutes = durationForKind(item.kind);
-      // Expand across the duration. e.g. 60m starting 09:00 lights 9 and
-      // 10 (since the block ends at 10:00 exclusive we only need hour 9,
-      // but lighting hour 10 keeps a 1h buffer around meetings).
+      // Expand across the event's duration. e.g.:
+      //   30m at 08:45 -> endMinutes=555, ceil(555/60)=10, loop h=8,9.
+      //   60m at 09:00 -> endMinutes=600, ceil(600/60)=10, loop h=9 only.
+      // Events assumed to fall within a single UTC day; cross-midnight
+      // items are out of scope.
       const endMinutes = startHour * 60 + start.getUTCMinutes() + minutes;
       const endHourExclusive = Math.ceil(endMinutes / 60);
       for (let h = startHour; h < endHourExclusive && h < 24; h += 1) {

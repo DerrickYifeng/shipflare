@@ -71,7 +71,7 @@ describe('computeCollapsedBands', () => {
     ]);
   });
 
-  test('packed 09-17 yields no bands', () => {
+  test('packed 09-17 yields no bands within the working day (only edges collapse)', () => {
     const days: CalendarDay[] = [
       day('2026-04-22', [
         { kind: 'interview', hour: 9 },
