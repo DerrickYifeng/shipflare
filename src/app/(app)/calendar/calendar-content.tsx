@@ -10,7 +10,24 @@
  * round-trip.
  */
 
-import { useCallback, useMemo, type CSSProperties } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type RefObject,
+} from 'react';
+import {
+  computeCollapsedBands,
+  hourToTopPx,
+  layoutDayEvents,
+  type CalendarDay as LayoutDay,
+  type CalendarItem as LayoutItem,
+  type PositionedEvent,
+} from '@/lib/calendar-layout';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import useSWR from 'swr';
@@ -185,110 +202,11 @@ export function CalendarContent() {
         <EmptyWeek />
       ) : (
         <>
-          <DesktopGrid days={data.days} />
+          <TimeGrid days={data.days} weekStart={data.weekStart} />
           <MobileStack days={data.days} />
         </>
       )}
     </>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Desktop 7-column grid
-// ---------------------------------------------------------------------------
-
-function DesktopGrid({ days }: { days: CalendarDay[] }) {
-  return (
-    <div
-      className="calendar-desktop-grid"
-      style={{
-        padding: '0 clamp(16px, 3vw, 32px) 48px',
-        display: 'grid',
-        gridTemplateColumns: 'repeat(7, minmax(0, 1fr))',
-        gap: 12,
-      }}
-    >
-      {days.map((d) => (
-        <DayColumn key={d.date} day={d} />
-      ))}
-      <style>{`
-        @media (max-width: 880px) {
-          .calendar-desktop-grid { display: none !important; }
-        }
-      `}</style>
-    </div>
-  );
-}
-
-function DayColumn({ day }: { day: CalendarDay }) {
-  const today = todayYmdLocal();
-  const isToday = day.date === today;
-  const label = dayColumnLabel(day.date);
-  return (
-    <section
-      style={{
-        background: 'var(--sf-bg-secondary)',
-        borderRadius: 10,
-        padding: 12,
-        border: '1px solid rgba(0,0,0,0.04)',
-        borderLeftWidth: isToday ? 2 : 1,
-        borderLeftColor: isToday ? 'var(--sf-accent)' : 'rgba(0,0,0,0.04)',
-        boxShadow: 'var(--sf-shadow-card)',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 8,
-        minHeight: 220,
-      }}
-    >
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'baseline',
-          justifyContent: 'space-between',
-          gap: 6,
-          paddingBottom: 8,
-          borderBottom: '1px solid rgba(0,0,0,0.04)',
-        }}
-      >
-        <span
-          style={{
-            fontSize: 11,
-            fontFamily: 'var(--sf-font-mono)',
-            letterSpacing: '-0.08px',
-            textTransform: 'uppercase',
-            color: isToday ? 'var(--sf-accent)' : 'var(--sf-fg-4)',
-            fontWeight: 500,
-          }}
-        >
-          {label.weekday}
-        </span>
-        <span
-          style={{
-            fontSize: 13,
-            fontWeight: 500,
-            color: 'var(--sf-fg-1)',
-            letterSpacing: '-0.12px',
-          }}
-        >
-          {label.day}
-        </span>
-      </div>
-      {day.items.length === 0 ? (
-        <div
-          style={{
-            fontSize: 12,
-            color: 'var(--sf-fg-4)',
-            letterSpacing: '-0.12px',
-            fontStyle: 'italic',
-            padding: '6px 2px',
-          }}
-        >
-          Nothing scheduled · relax
-        </div>
-      ) : (
-        day.items.map((i) => <ItemCard key={i.id} item={i} />)
-      )}
-    </section>
   );
 }
 
@@ -382,6 +300,489 @@ function MobileStack({ days }: { days: CalendarDay[] }) {
         }
       `}</style>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Time grid (desktop, ≥880 px)
+// ---------------------------------------------------------------------------
+
+const HOUR_HEIGHT_PX = 48;
+const BAND_HEIGHT_PX = 28;
+const LEFT_RAIL_PX = 56;
+
+interface TimeGridProps {
+  days: LayoutDay[];
+  weekStart: string;
+  gridRef?: RefObject<HTMLDivElement | null>;
+}
+
+function TimeGrid({ days, weekStart: _weekStart, gridRef }: TimeGridProps) {
+  const { bands } = useMemo(() => computeCollapsedBands(days), [days]);
+
+  const internalRef = useRef<HTMLDivElement | null>(null);
+  const ref = gridRef ?? internalRef;
+  const [columnWidthPx, setColumnWidthPx] = useState(140);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => {
+      const width = el.getBoundingClientRect().width;
+      const cols = (width - LEFT_RAIL_PX) / 7;
+      setColumnWidthPx(Math.max(cols, 80));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [ref]);
+
+  // Build the vertical track: either a 48px hour row or a 28px band row.
+  const tracks = useMemo(() => {
+    const out: Array<
+      | { kind: 'hour'; hour: number }
+      | { kind: 'band'; startHour: number; endHour: number }
+    > = [];
+    let h = 0;
+    while (h < 24) {
+      const band = bands.find((b) => b.startHour === h);
+      if (band) {
+        out.push({ kind: 'band', startHour: band.startHour, endHour: band.endHour });
+        h = band.endHour;
+      } else {
+        out.push({ kind: 'hour', hour: h });
+        h += 1;
+      }
+    }
+    return out;
+  }, [bands]);
+
+  const today = todayYmdLocal();
+  const totalHeight = tracks.reduce(
+    (sum, t) => sum + (t.kind === 'hour' ? HOUR_HEIGHT_PX : BAND_HEIGHT_PX),
+    0,
+  );
+
+  // Precompute each band's top-px offset (for the full-width label overlay).
+  const bandPositions = useMemo(() => {
+    return bands.map((b) => ({
+      band: b,
+      topPx: hourToTopPx(b.startHour * 60, bands, HOUR_HEIGHT_PX, BAND_HEIGHT_PX),
+    }));
+  }, [bands]);
+
+  return (
+    <div
+      ref={ref}
+      className="calendar-time-grid"
+      style={{
+        padding: '0 clamp(16px, 3vw, 32px) 48px',
+        maxHeight: 'calc(100vh - 220px)',
+        overflowY: 'auto',
+      }}
+    >
+      <DayHeaderRow days={days} today={today} />
+      <div
+        style={{
+          position: 'relative',
+          display: 'grid',
+          gridTemplateColumns: `${LEFT_RAIL_PX}px repeat(7, minmax(0, 1fr))`,
+          borderTop: '1px solid rgba(0,0,0,0.06)',
+        }}
+      >
+        <HourRail tracks={tracks} />
+        {days.map((d, dayIndex) => (
+          <DayColumn
+            key={d.date}
+            day={d}
+            dayIndex={dayIndex}
+            tracks={tracks}
+            bands={bands}
+            columnWidthPx={columnWidthPx}
+            isToday={d.date === today}
+            totalHeight={totalHeight}
+          />
+        ))}
+        {/* Full-width band labels painted on top of the columns. */}
+        {bandPositions.map(({ band, topPx }) => (
+          <div
+            key={`band-label-${band.startHour}`}
+            aria-hidden
+            style={{
+              position: 'absolute',
+              left: LEFT_RAIL_PX,
+              right: 0,
+              top: topPx,
+              height: BAND_HEIGHT_PX,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: 10,
+              fontFamily: 'var(--sf-font-mono)',
+              color: 'var(--sf-fg-4)',
+              letterSpacing: '-0.08px',
+              textTransform: 'uppercase',
+              pointerEvents: 'none',
+            }}
+          >
+            — no events · {String(band.startHour).padStart(2, '0')}:00–
+            {String(band.endHour).padStart(2, '0')}:00 —
+          </div>
+        ))}
+      </div>
+      <style>{`
+        @media (max-width: 880px) {
+          .calendar-time-grid { display: none !important; }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+function DayHeaderRow({ days, today }: { days: LayoutDay[]; today: string }) {
+  return (
+    <div
+      style={{
+        position: 'sticky',
+        top: 0,
+        background: 'var(--sf-bg-primary)',
+        zIndex: 2,
+        display: 'grid',
+        gridTemplateColumns: `${LEFT_RAIL_PX}px repeat(7, minmax(0, 1fr))`,
+        borderBottom: '1px solid rgba(0,0,0,0.06)',
+      }}
+    >
+      <div />
+      {days.map((d) => {
+        const isToday = d.date === today;
+        const label = dayColumnLabel(d.date);
+        return (
+          <div
+            key={d.date}
+            style={{
+              padding: '10px 12px',
+              borderLeft: `${isToday ? 2 : 1}px solid ${
+                isToday ? 'var(--sf-accent)' : 'rgba(0,0,0,0.06)'
+              }`,
+              display: 'flex',
+              alignItems: 'baseline',
+              justifyContent: 'space-between',
+              gap: 6,
+            }}
+          >
+            <span
+              style={{
+                fontSize: 11,
+                fontFamily: 'var(--sf-font-mono)',
+                letterSpacing: '-0.08px',
+                textTransform: 'uppercase',
+                color: isToday ? 'var(--sf-accent)' : 'var(--sf-fg-4)',
+                fontWeight: 500,
+              }}
+            >
+              {label.weekday}
+            </span>
+            <span
+              style={{
+                fontSize: 13,
+                fontWeight: 500,
+                color: 'var(--sf-fg-1)',
+                letterSpacing: '-0.12px',
+              }}
+            >
+              {label.day}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function HourRail({
+  tracks,
+}: {
+  tracks: Array<
+    | { kind: 'hour'; hour: number }
+    | { kind: 'band'; startHour: number; endHour: number }
+  >;
+}) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        borderRight: '1px solid rgba(0,0,0,0.06)',
+      }}
+    >
+      {tracks.map((t, i) => {
+        if (t.kind === 'band') {
+          // Empty spacer — the full-width band label is painted by the
+          // overlay in TimeGrid so we only need to reserve vertical space
+          // here to keep the rail aligned with the day columns.
+          return (
+            <div
+              key={`band-${t.startHour}`}
+              style={{ height: BAND_HEIGHT_PX }}
+            />
+          );
+        }
+        return (
+          <div
+            key={`hour-${t.hour}`}
+            style={{
+              height: HOUR_HEIGHT_PX,
+              paddingRight: 8,
+              fontSize: 10,
+              fontFamily: 'var(--sf-font-mono)',
+              color: 'var(--sf-fg-4)',
+              letterSpacing: '-0.08px',
+              textAlign: 'right',
+              transform: 'translateY(-6px)',
+              // Hide the "00:00" label; the 0 row anchors visually without it.
+              visibility: i === 0 && t.hour === 0 ? 'hidden' : 'visible',
+            }}
+          >
+            {String(t.hour).padStart(2, '0')}:00
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function DayColumn({
+  day,
+  dayIndex: _dayIndex,
+  tracks,
+  bands,
+  columnWidthPx,
+  isToday,
+  totalHeight,
+}: {
+  day: LayoutDay;
+  dayIndex: number;
+  tracks: Array<
+    | { kind: 'hour'; hour: number }
+    | { kind: 'band'; startHour: number; endHour: number }
+  >;
+  bands: { startHour: number; endHour: number }[];
+  columnWidthPx: number;
+  isToday: boolean;
+  totalHeight: number;
+}) {
+  const positioned = useMemo(
+    () =>
+      layoutDayEvents(
+        day.items as LayoutItem[],
+        bands,
+        HOUR_HEIGHT_PX,
+        BAND_HEIGHT_PX,
+        columnWidthPx,
+      ),
+    [day.items, bands, columnWidthPx],
+  );
+
+  return (
+    <div
+      style={{
+        position: 'relative',
+        borderLeft: `${isToday ? 2 : 1}px solid ${
+          isToday ? 'var(--sf-accent)' : 'rgba(0,0,0,0.06)'
+        }`,
+        background: isToday ? 'rgba(0, 122, 255, 0.025)' : 'transparent',
+        minHeight: totalHeight,
+      }}
+    >
+      <TrackGuides tracks={tracks} />
+      {isToday && <NowLine bands={bands} />}
+      {positioned.map((p) =>
+        p.isOverflowPill ? (
+          <OverflowPill key={`pill-${p.item.id}`} p={p} />
+        ) : (
+          <EventCard key={p.item.id} p={p} />
+        ),
+      )}
+    </div>
+  );
+}
+
+function TrackGuides({
+  tracks,
+}: {
+  tracks: Array<
+    | { kind: 'hour'; hour: number }
+    | { kind: 'band'; startHour: number; endHour: number }
+  >;
+}) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column' }}>
+      {tracks.map((t) => (
+        <div
+          key={t.kind === 'hour' ? `hg-${t.hour}` : `bg-${t.startHour}`}
+          style={{
+            height: t.kind === 'hour' ? HOUR_HEIGHT_PX : BAND_HEIGHT_PX,
+            borderTop: '1px solid rgba(0,0,0,0.04)',
+            background:
+              t.kind === 'band' ? 'rgba(0,0,0,0.015)' : 'transparent',
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function NowLine({ bands }: { bands: { startHour: number; endHour: number }[] }) {
+  const [topPx, setTopPx] = useState<number | null>(null);
+  useEffect(() => {
+    const compute = () => {
+      const now = new Date();
+      const minutes = now.getHours() * 60 + now.getMinutes();
+      setTopPx(hourToTopPx(minutes, bands, HOUR_HEIGHT_PX, BAND_HEIGHT_PX));
+    };
+    compute();
+    const t = window.setInterval(compute, 60_000);
+    return () => window.clearInterval(t);
+  }, [bands]);
+  if (topPx === null) return null;
+  return (
+    <div
+      aria-hidden
+      style={{
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        top: topPx,
+        height: 1,
+        background: 'var(--sf-accent)',
+        boxShadow: '0 0 0 1px rgba(0, 122, 255, 0.15)',
+        zIndex: 1,
+        pointerEvents: 'none',
+      }}
+    />
+  );
+}
+
+function EventCard({ p }: { p: PositionedEvent }) {
+  const kindStyle = kindStyles(p.item.kind);
+  const stateDot = stateDotStyles(p.item.state);
+  const dimmed = p.item.state === 'skipped' || p.item.state === 'completed';
+  const compact = p.heightPx < 40;
+  return (
+    <Link
+      href={`/today?highlight=${p.item.id}`}
+      style={{
+        position: 'absolute',
+        top: p.topPx,
+        left: `calc(${p.leftPct}% + 2px)`,
+        width: `calc(${p.widthPct}% - 4px)`,
+        height: Math.max(p.heightPx - 2, 18),
+        background: 'var(--sf-bg-primary)',
+        borderRadius: 6,
+        borderLeft: `3px solid ${kindStyle.accent}`,
+        boxShadow: 'var(--sf-shadow-card)',
+        textDecoration: 'none',
+        color: 'inherit',
+        padding: compact ? '3px 6px' : '6px 8px',
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: compact ? 0 : 2,
+        opacity: dimmed ? 0.6 : 1,
+        zIndex: 2,
+        transition: 'box-shadow 150ms, transform 150ms cubic-bezier(0.16,1,0.3,1)',
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.transform = 'translateY(-1px)';
+        e.currentTarget.style.boxShadow = 'var(--sf-shadow-card-hover)';
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.transform = 'none';
+        e.currentTarget.style.boxShadow = 'var(--sf-shadow-card)';
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 4,
+          fontSize: 10,
+          fontFamily: 'var(--sf-font-mono)',
+          letterSpacing: '-0.08px',
+          textTransform: 'uppercase',
+          color: kindStyle.inkColor,
+          fontWeight: 500,
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+        }}
+      >
+        <span>{formatClock(p.item.scheduledAt)}</span>
+        <span style={{ color: 'rgba(0,0,0,0.2)' }}>·</span>
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {kindStyle.label}
+        </span>
+        <span style={{ flex: 1 }} />
+        <StateDot spec={stateDot} />
+      </div>
+      {!compact && (
+        <div
+          style={{
+            fontSize: 12,
+            fontWeight: 500,
+            color: 'var(--sf-fg-1)',
+            letterSpacing: '-0.12px',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {p.item.title}
+        </div>
+      )}
+      {compact && (
+        <span
+          style={{
+            fontSize: 11,
+            fontWeight: 500,
+            color: 'var(--sf-fg-1)',
+            letterSpacing: '-0.12px',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {p.item.title}
+        </span>
+      )}
+    </Link>
+  );
+}
+
+function OverflowPill({ p }: { p: PositionedEvent }) {
+  return (
+    <Link
+      href={`/today?highlight=${p.item.id}`}
+      style={{
+        position: 'absolute',
+        top: p.topPx + Math.max(p.heightPx - 22, 4),
+        right: 4,
+        padding: '2px 8px',
+        fontSize: 10,
+        fontFamily: 'var(--sf-font-mono)',
+        textTransform: 'uppercase',
+        background: 'var(--sf-fg-1)',
+        color: 'var(--sf-bg-primary)',
+        borderRadius: 10,
+        textDecoration: 'none',
+        zIndex: 3,
+        letterSpacing: '-0.08px',
+      }}
+      title={`${(p.overflowIds ?? []).length} more overlapping`}
+    >
+      +{(p.overflowIds ?? []).length} more
+    </Link>
   );
 }
 
