@@ -24,8 +24,10 @@ import {
   computeCollapsedBands,
   hourToTopPx,
   layoutDayEvents,
-  type CalendarDay as LayoutDay,
-  type CalendarItem as LayoutItem,
+  type CalendarDay,
+  type CalendarItem,
+  type PlanItemKind,
+  type PlanItemState,
   type PositionedEvent,
 } from '@/lib/calendar-layout';
 import Link from 'next/link';
@@ -34,45 +36,6 @@ import useSWR from 'swr';
 import { HeaderBar } from '@/components/layout/header-bar';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
-
-type PlanItemKind =
-  | 'content_post'
-  | 'content_reply'
-  | 'email_send'
-  | 'interview'
-  | 'setup_task'
-  | 'launch_asset'
-  | 'runsheet_beat'
-  | 'metrics_compute'
-  | 'analytics_summary';
-
-type PlanItemState =
-  | 'planned'
-  | 'drafted'
-  | 'ready_for_review'
-  | 'approved'
-  | 'executing'
-  | 'completed'
-  | 'skipped'
-  | 'failed'
-  | 'superseded'
-  | 'stale';
-
-interface CalendarItem {
-  id: string;
-  kind: PlanItemKind;
-  state: PlanItemState;
-  channel: string | null;
-  scheduledAt: string;
-  title: string;
-  description: string | null;
-  phase: string;
-}
-
-interface CalendarDay {
-  date: string;
-  items: CalendarItem[];
-}
 
 interface CalendarResponse {
   weekStart: string;
@@ -202,7 +165,7 @@ export function CalendarContent() {
         <EmptyWeek />
       ) : (
         <>
-          <TimeGrid days={data.days} weekStart={data.weekStart} />
+          <TimeGrid days={data.days} />
           <MobileStack days={data.days} />
         </>
       )}
@@ -312,12 +275,11 @@ const BAND_HEIGHT_PX = 28;
 const LEFT_RAIL_PX = 56;
 
 interface TimeGridProps {
-  days: LayoutDay[];
-  weekStart: string;
+  days: CalendarDay[];
   gridRef?: RefObject<HTMLDivElement | null>;
 }
 
-function TimeGrid({ days, weekStart: _weekStart, gridRef }: TimeGridProps) {
+function TimeGrid({ days, gridRef }: TimeGridProps) {
   const { bands } = useMemo(() => computeCollapsedBands(days), [days]);
 
   const internalRef = useRef<HTMLDivElement | null>(null);
@@ -440,7 +402,7 @@ function TimeGrid({ days, weekStart: _weekStart, gridRef }: TimeGridProps) {
   );
 }
 
-function DayHeaderRow({ days, today }: { days: LayoutDay[]; today: string }) {
+function DayHeaderRow({ days, today }: { days: CalendarDay[]; today: string }) {
   return (
     <div
       style={{
@@ -561,7 +523,7 @@ function DayColumn({
   isToday,
   totalHeight,
 }: {
-  day: LayoutDay;
+  day: CalendarDay;
   dayIndex: number;
   tracks: Array<
     | { kind: 'hour'; hour: number }
@@ -575,7 +537,7 @@ function DayColumn({
   const positioned = useMemo(
     () =>
       layoutDayEvents(
-        day.items as LayoutItem[],
+        day.items,
         bands,
         HOUR_HEIGHT_PX,
         BAND_HEIGHT_PX,
@@ -638,7 +600,8 @@ function NowLine({ bands }: { bands: { startHour: number; endHour: number }[] })
   useEffect(() => {
     const compute = () => {
       const now = new Date();
-      const minutes = now.getHours() * 60 + now.getMinutes();
+      // UTC to match layoutDayEvents / computeCollapsedBands positioning.
+      const minutes = now.getUTCHours() * 60 + now.getUTCMinutes();
       setTopPx(hourToTopPx(minutes, bands, HOUR_HEIGHT_PX, BAND_HEIGHT_PX));
     };
     compute();
