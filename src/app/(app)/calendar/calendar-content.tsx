@@ -80,6 +80,25 @@ export function CalendarContent() {
     router.push('/calendar');
   }, [router]);
 
+  const gridRef = useRef<HTMLDivElement | null>(null);
+
+  const scrollToNow = useCallback(() => {
+    const el = gridRef.current;
+    if (!data || !el) return;
+    const now = new Date();
+    // UTC to match layoutDayEvents / computeCollapsedBands / NowLine positioning.
+    const minutes = now.getUTCHours() * 60 + now.getUTCMinutes();
+    const { bands } = computeCollapsedBands(data.days);
+    const topPx = hourToTopPx(minutes, bands, HOUR_HEIGHT_PX, BAND_HEIGHT_PX);
+    el.scrollTo({ top: Math.max(topPx - 120, 0), behavior: 'smooth' });
+  }, [data]);
+
+  const showNowButton = useMemo(() => {
+    if (!data) return false;
+    const todayYmd = todayYmdLocal();
+    return data.days.some((d) => d.date === todayYmd);
+  }, [data]);
+
   // Format label for the header nav. "Apr 14" / "This week" / "Apr 28".
   const navLabels = useMemo(() => {
     if (!data) return { prev: '', next: '', current: 'This week' };
@@ -121,6 +140,11 @@ export function CalendarContent() {
       >
         {data ? navLabels.next : ''} →
       </Button>
+      {showNowButton && (
+        <Button variant="ghost" size="sm" onClick={scrollToNow}>
+          Now
+        </Button>
+      )}
     </div>
   );
 
@@ -165,7 +189,7 @@ export function CalendarContent() {
         <EmptyWeek />
       ) : (
         <>
-          <TimeGrid days={data.days} />
+          <TimeGrid days={data.days} gridRef={gridRef} />
           <MobileStack days={data.days} />
         </>
       )}
