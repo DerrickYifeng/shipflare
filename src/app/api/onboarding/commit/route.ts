@@ -18,7 +18,11 @@ import { getUserChannels } from '@/lib/user-channels';
 import { deleteDraft } from '@/lib/onboarding-draft';
 import { recordPipelineEvent } from '@/lib/pipeline-events';
 import { createLogger, loggerForRequest } from '@/lib/logger';
-import { provisionTeamForProduct } from '@/lib/team-provisioner';
+import {
+  ensureTeamExists,
+  provisionTeamForProduct,
+} from '@/lib/team-provisioner';
+import { enqueueTeamRun } from '@/lib/queue/team-run';
 
 const baseLog = createLogger('api:onboarding:commit');
 
@@ -299,11 +303,42 @@ export async function POST(request: NextRequest): Promise<Response> {
     );
   }
 
-  // Phase C: tactical-generate enqueue removed. plan_items are populated by
-  // the team-run already in flight from POST /api/onboarding/plan (the
-  // coordinator delegates to content-planner which calls add_plan_item
-  // directly). Commit records the strategic_path; plan_items arrive
-  // asynchronously via the same team-run.
+  // Phase B1 (post-coordinator cutover): POST /api/onboarding/plan is
+  // rooted at growth-strategist — it writes the strategic_path and
+  // stops there, no plan_items. This commit endpoint fires a separate
+  // content-planner team-run so plan_items land asynchronously after
+  // the founder approves. /today's tactical-progress-card filters on
+  // trigger IN ('onboarding','weekly','manual','phase_transition')
+  // and counts add_plan_item tool_calls — it picks up this 'weekly'
+  // run naturally.
+  try {
+    const { teamId, memberIds } = await ensureTeamExists(userId, productId);
+    const channels = await getUserChannels(userId);
+    const itemsGoal =
+      `Plan week 1 plan_items for ${body.product.name}. ` +
+      `Strategic path pathId=${strategicPathId}. ` +
+      `Connected channels: ${channels.join(', ') || 'none'}. ` +
+      `Category: ${body.product.category}. ` +
+      `Follow your tactical-playbook steps 1-5 and call add_plan_item ` +
+      `for every row. Skip writer fan-out (Step 6) on this onboarding ` +
+      `run — the founder reviews items before we pre-draft bodies.`;
+    const { runId: itemsRunId } = await enqueueTeamRun({
+      teamId,
+      trigger: 'weekly',
+      goal: itemsGoal,
+      rootMemberId: memberIds['content-planner'],
+    });
+    enqueued.push(`team-run:weekly:${itemsRunId}`);
+    log.info(
+      `enqueued content-planner team-run user=${userId} run=${itemsRunId}`,
+    );
+  } catch (err) {
+    // Non-fatal — user already has strategic_path; plan_items can be
+    // generated later via /api/plan/replan. Log and move on.
+    log.warn(
+      `failed to enqueue content-planner team-run (non-fatal) user=${userId}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
 
   if (changed) {
     try {
