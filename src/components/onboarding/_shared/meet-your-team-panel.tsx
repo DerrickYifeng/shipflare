@@ -17,7 +17,7 @@ import { COPY } from '../_copy';
 import type {
   AgentType,
   DisplayNameMap,
-} from '@/lib/team-provisioner';
+} from '@/lib/team-presets';
 
 export interface MeetYourTeamMember {
   agentType: AgentType | string;

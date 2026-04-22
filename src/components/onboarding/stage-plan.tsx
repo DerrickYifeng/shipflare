@@ -18,7 +18,7 @@ import { MeetYourTeamPanel } from './_shared/meet-your-team-panel';
 import {
   pickPresetByCategory,
   getTeamCompositionForPreset,
-} from '@/lib/team-provisioner';
+} from '@/lib/team-presets';
 import type { StrategicPath } from '@/tools/schemas';
 import type { DraftState, ProductState } from './OnboardingFlow';
 
