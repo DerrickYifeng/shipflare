@@ -225,7 +225,9 @@ describe('POST /api/onboarding/plan (SSE, team-run only)', () => {
     expect(enqueueTeamRunMock.mock.calls[0]?.[0]).toMatchObject({
       teamId: 'team-1',
       trigger: 'onboarding',
-      rootMemberId: 'mem-coord',
+      // onboarding is rooted at growth-strategist (not coordinator) so the
+      // run writes strategic_path directly without a delegation turn.
+      rootMemberId: 'mem-gs',
     });
 
     expect(recordPipelineEventMock).toHaveBeenCalledWith(
