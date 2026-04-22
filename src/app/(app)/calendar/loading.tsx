@@ -1,60 +1,98 @@
 import { HeaderBar } from '@/components/layout/header-bar';
 
 /**
- * Calendar skeleton — 7 day columns with greyed placeholder cards. Matches
- * the desktop grid so the paint doesn't jump when data arrives.
+ * Calendar skeleton — approximates the time-grid layout so the
+ * skeleton→real-view transition does not produce a layout shift.
+ *
+ * Shape:
+ *   - HeaderBar (matches the real view)
+ *   - Sticky day-column header row (7 pills)
+ *   - Time-grid body: 56px left rail + 7 day columns divided by hairlines
  */
+
+const LEFT_RAIL_PX = 56;
+
 export default function CalendarLoading() {
   return (
     <>
       <HeaderBar title="Calendar" />
       <div
         style={{
-          padding: '16px clamp(16px, 3vw, 32px) 48px',
-          display: 'grid',
-          gridTemplateColumns: 'repeat(7, minmax(0, 1fr))',
-          gap: 12,
+          padding: '0 clamp(16px, 3vw, 32px) 48px',
         }}
       >
-        {Array.from({ length: 7 }).map((_, i) => (
+        {/* Day-column header row */}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: `${LEFT_RAIL_PX}px repeat(7, minmax(0, 1fr))`,
+            borderBottom: '1px solid rgba(0,0,0,0.06)',
+            marginBottom: 0,
+          }}
+        >
+          {/* Rail spacer */}
+          <div style={{ height: 44 }} />
+          {Array.from({ length: 7 }).map((_, i) => (
+            <div
+              key={i}
+              style={{
+                padding: '10px 12px',
+                borderLeft: '1px solid rgba(0,0,0,0.06)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+              }}
+            >
+              {/* Weekday pill */}
+              <div
+                style={{
+                  width: 26,
+                  height: 10,
+                  background: 'rgba(0,0,0,0.06)',
+                  borderRadius: 3,
+                }}
+              />
+              {/* Day number pill */}
+              <div
+                style={{
+                  width: 40,
+                  height: 12,
+                  background: 'rgba(0,0,0,0.04)',
+                  borderRadius: 3,
+                }}
+              />
+            </div>
+          ))}
+        </div>
+
+        {/* Time-grid body */}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: `${LEFT_RAIL_PX}px repeat(7, minmax(0, 1fr))`,
+            minHeight: 560,
+            border: '1px solid rgba(0,0,0,0.06)',
+            borderTop: 'none',
+          }}
+        >
+          {/* Left rail */}
           <div
-            key={i}
             style={{
-              background: 'var(--sf-bg-secondary)',
-              borderRadius: 8,
-              padding: 12,
-              height: 220,
-              border: '1px solid rgba(0,0,0,0.04)',
+              borderRight: '1px solid rgba(0,0,0,0.06)',
+              background: 'transparent',
             }}
-          >
+          />
+          {/* 7 day columns */}
+          {Array.from({ length: 7 }).map((_, i) => (
             <div
+              key={i}
               style={{
-                width: 80,
-                height: 14,
-                background: 'rgba(0,0,0,0.06)',
-                borderRadius: 4,
-                marginBottom: 14,
+                borderLeft: '1px solid rgba(0,0,0,0.06)',
+                minHeight: 560,
               }}
             />
-            <div
-              style={{
-                width: '100%',
-                height: 48,
-                background: 'rgba(0,0,0,0.04)',
-                borderRadius: 6,
-                marginBottom: 10,
-              }}
-            />
-            <div
-              style={{
-                width: '80%',
-                height: 48,
-                background: 'rgba(0,0,0,0.04)',
-                borderRadius: 6,
-              }}
-            />
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
     </>
   );
