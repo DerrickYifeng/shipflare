@@ -275,8 +275,18 @@ export async function processCodeScan(job: Job<CodeScanJobData>): Promise<void> 
           `provisionTeamForProduct post-code-scan: team=${provision.teamId} preset=${provision.preset}`,
         );
       } catch (err) {
+        // Surface the real Postgres cause, not just "Failed query: <SQL>".
+        // Drizzle wraps the driver error; the useful details live on
+        // `.cause` (pg error with .code / .message) or in the stack.
+        const message = err instanceof Error ? err.message : String(err);
+        const cause =
+          err instanceof Error && err.cause
+            ? err.cause instanceof Error
+              ? `${err.cause.message}${(err.cause as { code?: string }).code ? ` [${(err.cause as { code?: string }).code}]` : ''}`
+              : String(err.cause)
+            : undefined;
         log.warn(
-          `provisionTeamForProduct post-code-scan failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
+          `provisionTeamForProduct post-code-scan failed (non-fatal): ${message}${cause ? ` — cause: ${cause}` : ''}`,
         );
       }
     }
