@@ -1,12 +1,19 @@
+// Snapshot shape choice: `tactical` keeps the pre-team-run fields the UI
+// already binds (status, itemCount, expectedCount, error, planId). A sibling
+// `teamRun: { teamId, runId } | null` carries the SSE-subscription target so
+// the client doesn't need a second round-trip to /api/team/status. `planId`
+// is now populated with the team-run id (reused field — UI labels remain
+// neutral), so TacticalSnapshot's ergonomics stay intact.
+
 import type { NextRequest } from 'next/server';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, count, desc, eq, gte, inArray, sql } from 'drizzle-orm';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import {
-  plans,
-  planItems,
   discoveryConfigs,
-  products,
+  teamMessages,
+  teamRuns,
+  teams,
 } from '@/lib/db/schema';
 import { createLogger, loggerForRequest } from '@/lib/logger';
 
@@ -24,6 +31,11 @@ interface PlatformCalibration {
   round: number;
 }
 
+interface TeamRunRef {
+  teamId: string;
+  runId: string;
+}
+
 interface ProgressSnapshot {
   tactical: {
     status: TacticalStatus;
@@ -32,10 +44,21 @@ interface ProgressSnapshot {
     error: string | null;
     planId: string | null;
   };
+  teamRun: TeamRunRef | null;
   calibration: {
     platforms: PlatformCalibration[];
   };
 }
+
+const TACTICAL_TRIGGERS = [
+  'onboarding',
+  'weekly',
+  'manual',
+  'phase_transition',
+] as const;
+
+const STALE_WINDOW_MS = 24 * 60 * 60 * 1000;
+const SUCCESS_FRESH_MS = 5 * 60 * 1000;
 
 /**
  * GET /api/today/progress
@@ -43,24 +66,21 @@ interface ProgressSnapshot {
  * Initial snapshot for the /today progress widget. Returns the current
  * state of the two async onboarding tails:
  *
- *   1. `tactical-generate` worker — writes plan_items into the pre-existing
- *      plans row created by /api/onboarding/commit. Status is derived:
- *        - items > 0         → 'completed'
- *        - notes contains "failed" → 'failed'
- *        - otherwise         → 'running' (worker is mid-flight or queued)
+ *   1. Team-run tactical pass — the coordinator drives `content-planner`,
+ *      which calls `add_plan_item` N times. Each tool_call lands as a row
+ *      in `team_messages`. Status derives from `team_runs.status` plus
+ *      freshness; item count is a live COUNT on `team_messages` filtered
+ *      by `metadata.toolName = 'add_plan_item'`.
  *
  *   2. `calibrate-discovery` worker — per-platform calibration status lives
- *      in discovery_configs.calibration_status. We return every row for the
- *      user so the widget can render one chip per platform.
+ *      in `discovery_configs.calibration_status`. Unchanged.
  *
  * Clients should:
  *   - call this once on mount to seed the UI
- *   - subscribe to `/api/events?channel=agents` for live updates
- *     (`tactical_generate_*` and `calibration_*` pub/sub events).
- *
- * This is NOT an SSE endpoint — the live stream already exists on
- * `/api/events`. Building a parallel SSE relay here would duplicate the
- * Redis subscriber logic for no benefit.
+ *   - for tactical: subscribe to /api/team/events with the returned
+ *     teamRun.teamId + runId
+ *   - for calibration: subscribe to /api/events?channel=agents (still
+ *     publishes calibration_progress / calibration_complete)
  */
 export async function GET(request: NextRequest): Promise<Response> {
   const { traceId } = loggerForRequest(baseLog, request);
@@ -90,7 +110,7 @@ export async function GET(request: NextRequest): Promise<Response> {
 }
 
 async function buildSnapshot(userId: string): Promise<ProgressSnapshot> {
-  const tactical = await loadTacticalStatus(userId);
+  const { tactical, teamRun } = await loadTacticalStatus(userId);
   const calibrationRows = await db
     .select({
       platform: discoveryConfigs.platform,
@@ -103,6 +123,7 @@ async function buildSnapshot(userId: string): Promise<ProgressSnapshot> {
 
   return {
     tactical,
+    teamRun,
     calibration: {
       platforms: calibrationRows.map((r) => ({
         platform: r.platform,
@@ -114,98 +135,136 @@ async function buildSnapshot(userId: string): Promise<ProgressSnapshot> {
   };
 }
 
-/**
- * Derive tactical status from the newest plans row + its plan_items
- * count. The tactical-generate worker writes plan_items against this
- * row; the commit route creates the header with no items so the UI's
- * pending window is `items.length === 0 && notes === null`.
- */
-async function loadTacticalStatus(
-  userId: string,
-): Promise<ProgressSnapshot['tactical']> {
-  const [productRow] = await db
-    .select({ id: products.id })
-    .from(products)
-    .where(eq(products.userId, userId))
+async function loadTacticalStatus(userId: string): Promise<{
+  tactical: ProgressSnapshot['tactical'];
+  teamRun: TeamRunRef | null;
+}> {
+  // Prefer the product-linked team; fall back to any team the user owns.
+  // Sorting by productId-nullslast keeps deterministic selection when a
+  // user (somehow) has both a product-linked and un-linked team.
+  const teamRows = await db
+    .select({ id: teams.id })
+    .from(teams)
+    .where(eq(teams.userId, userId))
+    .orderBy(sql`${teams.productId} IS NULL`, desc(teams.createdAt))
     .limit(1);
 
-  if (!productRow) {
+  if (teamRows.length === 0) {
     return {
-      status: 'pending',
-      itemCount: 0,
-      expectedCount: null,
-      error: null,
-      planId: null,
+      tactical: {
+        status: 'pending',
+        itemCount: 0,
+        expectedCount: null,
+        error: null,
+        planId: null,
+      },
+      teamRun: null,
     };
   }
+  const teamId = teamRows[0].id;
 
-  const [planRow] = await db
+  const staleCutoff = new Date(Date.now() - STALE_WINDOW_MS);
+  const [runRow] = await db
     .select({
-      id: plans.id,
-      trigger: plans.trigger,
-      notes: plans.notes,
+      id: teamRuns.id,
+      status: teamRuns.status,
+      completedAt: teamRuns.completedAt,
+      errorMessage: teamRuns.errorMessage,
     })
-    .from(plans)
+    .from(teamRuns)
     .where(
-      and(eq(plans.userId, userId), eq(plans.productId, productRow.id)),
+      and(
+        eq(teamRuns.teamId, teamId),
+        inArray(teamRuns.trigger, TACTICAL_TRIGGERS as unknown as string[]),
+        gte(teamRuns.startedAt, staleCutoff),
+      ),
     )
-    .orderBy(desc(plans.generatedAt))
+    .orderBy(desc(teamRuns.startedAt))
     .limit(1);
 
-  if (!planRow) {
+  if (!runRow) {
     return {
+      tactical: {
+        status: 'pending',
+        itemCount: 0,
+        expectedCount: null,
+        error: null,
+        planId: null,
+      },
+      teamRun: null,
+    };
+  }
+
+  const itemCount = await countAddPlanItemCalls(runRow.id);
+
+  if (runRow.status === 'running') {
+    return {
+      tactical: {
+        status: 'running',
+        itemCount,
+        expectedCount: null,
+        error: null,
+        planId: runRow.id,
+      },
+      teamRun: { teamId, runId: runRow.id },
+    };
+  }
+
+  if (runRow.status === 'failed') {
+    return {
+      tactical: {
+        status: 'failed',
+        itemCount,
+        expectedCount: null,
+        error: runRow.errorMessage ?? 'Team run failed.',
+        planId: runRow.id,
+      },
+      teamRun: { teamId, runId: runRow.id },
+    };
+  }
+
+  if (runRow.status === 'completed') {
+    const completedAt = runRow.completedAt?.getTime() ?? 0;
+    const fresh = completedAt > 0 && Date.now() - completedAt < SUCCESS_FRESH_MS;
+    return {
+      tactical: {
+        status: fresh ? 'completed' : 'pending',
+        itemCount,
+        expectedCount: null,
+        error: null,
+        planId: fresh ? runRow.id : null,
+      },
+      teamRun: fresh ? { teamId, runId: runRow.id } : null,
+    };
+  }
+
+  // cancelled / pending / unknown — treat as pending (UI hides).
+  return {
+    tactical: {
       status: 'pending',
-      itemCount: 0,
+      itemCount,
       expectedCount: null,
       error: null,
       planId: null,
-    };
-  }
-
-  const itemRows = await db
-    .select({ id: planItems.id })
-    .from(planItems)
-    .where(eq(planItems.planId, planRow.id));
-  const itemCount = itemRows.length;
-
-  // The tactical-generate processor stamps `notes` with a
-  // `tactical-generate failed` message on final attempt failure. That
-  // string is the /today error surface — frontend renders it verbatim.
-  const isFailureNote =
-    typeof planRow.notes === 'string' &&
-    planRow.notes.startsWith('tactical-generate failed');
-
-  if (isFailureNote) {
-    return {
-      status: 'failed',
-      itemCount,
-      expectedCount: null,
-      error: planRow.notes,
-      planId: planRow.id,
-    };
-  }
-
-  if (itemCount > 0) {
-    return {
-      status: 'completed',
-      itemCount,
-      expectedCount: null,
-      error: null,
-      planId: planRow.id,
-    };
-  }
-
-  // Header exists, zero items, no failure note — the worker is mid-flight
-  // or still queued. The distinction between 'pending' and 'running'
-  // isn't observable from DB state alone (we'd need to peek the BullMQ
-  // job), so report 'running' uniformly. The live SSE stream flips
-  // the UI to 'completed' the moment the worker publishes its event,
-  // which is faster than polling this endpoint anyway.
-  return {
-    status: 'running',
-    itemCount,
-    expectedCount: null,
-    error: null,
-    planId: planRow.id,
+    },
+    teamRun: null,
   };
+}
+
+/**
+ * Count `add_plan_item` tool_calls for a specific team_run. Counting in SQL
+ * avoids shipping every message row to Node just to length-check the list.
+ */
+async function countAddPlanItemCalls(runId: string): Promise<number> {
+  const rows = await db
+    .select({ n: count() })
+    .from(teamMessages)
+    .where(
+      and(
+        eq(teamMessages.runId, runId),
+        eq(teamMessages.type, 'tool_call'),
+        sql`${teamMessages.metadata} ->> 'toolName' = 'add_plan_item'`,
+      ),
+    );
+  return rows[0]?.n ?? 0;
 }
