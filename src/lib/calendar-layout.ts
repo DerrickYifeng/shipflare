@@ -37,3 +37,85 @@ export function durationForKind(kind: PlanItemKind): number {
       return 60;
   }
 }
+
+export type PlanItemState =
+  | 'planned'
+  | 'drafted'
+  | 'ready_for_review'
+  | 'approved'
+  | 'executing'
+  | 'completed'
+  | 'skipped'
+  | 'failed'
+  | 'superseded'
+  | 'stale';
+
+export interface CalendarItem {
+  id: string;
+  kind: PlanItemKind;
+  state: PlanItemState;
+  channel: string | null;
+  scheduledAt: string;
+  title: string;
+  description: string | null;
+  phase: string;
+}
+
+export interface CalendarDay {
+  date: string;
+  items: CalendarItem[];
+}
+
+export interface CollapsedBand {
+  startHour: number; // inclusive, 0-23
+  endHour: number; // exclusive, 1-24
+}
+
+export const BAND_COLLAPSE_MIN_HOURS = 3;
+
+/**
+ * Compute which hours of the day are "used" across the visible week and
+ * which contiguous ≥3h runs of unused hours should render as a single
+ * band. Used hours are computed as `max over 7 days` so hour labels on
+ * the left rail stay aligned across columns.
+ */
+export function computeCollapsedBands(days: CalendarDay[]): {
+  usedHours: Set<number>;
+  bands: CollapsedBand[];
+} {
+  const usedHours = new Set<number>();
+
+  for (const d of days) {
+    for (const item of d.items) {
+      const start = new Date(item.scheduledAt);
+      const startHour = start.getUTCHours();
+      const minutes = durationForKind(item.kind);
+      // Expand across the duration. e.g. 60m starting 09:00 lights 9 and
+      // 10 (since the block ends at 10:00 exclusive we only need hour 9,
+      // but lighting hour 10 keeps a 1h buffer around meetings).
+      const endMinutes = startHour * 60 + start.getUTCMinutes() + minutes;
+      const endHourExclusive = Math.ceil(endMinutes / 60);
+      for (let h = startHour; h < endHourExclusive && h < 24; h += 1) {
+        usedHours.add(h);
+      }
+    }
+  }
+
+  const bands: CollapsedBand[] = [];
+  let runStart: number | null = null;
+  for (let h = 0; h <= 24; h += 1) {
+    const isUsed = h < 24 && usedHours.has(h);
+    if (!isUsed && runStart === null) {
+      runStart = h;
+    }
+    if ((isUsed || h === 24) && runStart !== null) {
+      const runLength = h - runStart;
+      if (runLength >= BAND_COLLAPSE_MIN_HOURS) {
+        bands.push({ startHour: runStart, endHour: h });
+      }
+      runStart = null;
+    }
+  }
+
+  return { usedHours, bands };
+}
