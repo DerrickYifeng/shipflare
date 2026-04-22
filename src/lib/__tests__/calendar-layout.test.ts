@@ -242,3 +242,54 @@ describe('layoutDayEvents — overlapping', () => {
     }
   });
 });
+
+describe('layoutDayEvents — overflow pill', () => {
+  test('three overlaps in a narrow column emit first event + overflow pill', () => {
+    const events = layoutDayEvents(
+      [
+        item('content_post', 8, 0, 'a'),
+        item('content_post', 8, 0, 'b'),
+        item('content_post', 8, 0, 'c'),
+      ],
+      [],
+      HOUR_H,
+      BAND_H,
+      200, // 200 / 3 ≈ 66.7 < 80 -> overflow
+    );
+    expect(events).toHaveLength(2);
+    const [first, pill] = events as [PositionedEvent, PositionedEvent];
+    expect(first.item.id).toBe('a');
+    expect(first.widthPct).toBe(100);
+    expect(first.isOverflowPill).toBeFalsy();
+    expect(pill.isOverflowPill).toBe(true);
+    expect(pill.overflowIds).toEqual(['b', 'c']);
+    expect(pill.item.id).toBe('a'); // link target points at first event
+  });
+
+  test('two overlaps in a narrow column also overflow', () => {
+    // 2 events in 120px column -> 60px each < 80 -> overflow.
+    const events = layoutDayEvents(
+      [item('content_post', 8, 0, 'a'), item('content_post', 8, 0, 'b')],
+      [],
+      HOUR_H,
+      BAND_H,
+      120,
+    );
+    expect(events).toHaveLength(2);
+    expect(events[0].widthPct).toBe(100);
+    expect(events[1].isOverflowPill).toBe(true);
+    expect(events[1].overflowIds).toEqual(['b']);
+  });
+
+  test('two overlaps in a wide column stay side-by-side', () => {
+    const events = layoutDayEvents(
+      [item('content_post', 8, 0, 'a'), item('content_post', 8, 0, 'b')],
+      [],
+      HOUR_H,
+      BAND_H,
+      200, // 100px each, above 80 -> OK
+    );
+    expect(events).toHaveLength(2);
+    expect(events.every((e) => !e.isOverflowPill)).toBe(true);
+  });
+});

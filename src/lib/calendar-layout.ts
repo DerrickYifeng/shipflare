@@ -73,6 +73,11 @@ export interface CollapsedBand {
 
 export const BAND_COLLAPSE_MIN_HOURS = 3;
 
+/** Minimum rendered width (px) per card before the overlap layout falls
+ * back to a single card + overflow pill. 80px fits the mono-font time
+ * label comfortably; below this the card becomes unreadable. */
+export const MIN_CARD_WIDTH_PX = 80;
+
 /**
  * Compute which hours of the day are "used" across the visible week and
  * which contiguous ≥3h runs of unused hours should render as a single
@@ -192,18 +197,16 @@ function toSpan(item: CalendarItem): EventWithSpan {
 
 /**
  * Layout all events for a single day into absolutely-positioned boxes.
- * Non-overlapping events occupy the full column width; overlap grouping
- * and overflow-pill logic are added in later tasks.
- *
- * `columnWidthPx` is unused at this stage — Task 5 adds grouping and
- * Task 6 reads it to decide when to emit an overflow pill.
+ * Non-overlapping events occupy the full column width. Overlapping events
+ * are grouped and rendered side-by-side unless the column is too narrow
+ * (less than MIN_CARD_WIDTH_PX per event), in which case only the first
+ * event is shown with an overflow pill listing the other ids.
  */
 export function layoutDayEvents(
   items: CalendarItem[],
   bands: CollapsedBand[],
   hourHeightPx: number,
   bandHeightPx: number,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   columnWidthPx: number,
 ): PositionedEvent[] {
   const spans = items
@@ -232,6 +235,32 @@ export function layoutDayEvents(
   for (const group of groups) {
     const n = group.length;
     const widthPct = 100 / n;
+    const perWidthPx = columnWidthPx / n;
+
+    if (n > 1 && perWidthPx < MIN_CARD_WIDTH_PX) {
+      const first = group[0];
+      const topPx = hourToTopPx(first.startMinutes, bands, hourHeightPx, bandHeightPx);
+      const bottomPx = hourToTopPx(first.endMinutes, bands, hourHeightPx, bandHeightPx);
+      const heightPx = Math.max(bottomPx - topPx, 20);
+      out.push({
+        item: first.item,
+        topPx,
+        heightPx,
+        leftPct: 0,
+        widthPct: 100,
+      });
+      out.push({
+        item: first.item, // link target = first event
+        topPx,
+        heightPx,
+        leftPct: 0,
+        widthPct: 100,
+        isOverflowPill: true,
+        overflowIds: group.slice(1).map((s) => s.item.id),
+      });
+      continue;
+    }
+
     group.forEach((s, i) => {
       const topPx = hourToTopPx(s.startMinutes, bands, hourHeightPx, bandHeightPx);
       const bottomPx = hourToTopPx(s.endMinutes, bands, hourHeightPx, bandHeightPx);
