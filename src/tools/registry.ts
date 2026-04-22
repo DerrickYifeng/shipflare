@@ -20,28 +20,22 @@ import { xGetTweetTool } from './x-get-tweet';
 import { xGetMentionsTool } from './x-get-mentions';
 import { xGetMetricsTool } from './x-get-metrics';
 import { xThreadPostTool } from './x-thread-post';
-// Phase B domain tools — one file per entity. Each barrel re-exports
-// the tool variables; registering them here makes them discoverable by
-// AGENT.md `tools: [...]` allowlists via the central registry.
-import {
-  writeStrategicPathTool,
-  queryStrategicPathTool,
-} from './StrategicPathTools';
-import {
-  addPlanItemTool,
-  updatePlanItemTool,
-  queryPlanItemsTool,
-  queryStalledItemsTool,
-  queryLastWeekCompletionsTool,
-} from './PlanItemTools';
-import { queryRecentMilestonesTool } from './MilestoneTools';
-import { queryMetricsTool } from './MetricsTools';
-import { queryTeamStatusTool } from './TeamTools';
-import {
-  draftPostTool,
-  findThreadsTool,
-  draftReplyTool,
-} from './DraftingTools';
+// Phase B domain tools — one folder per tool (Claude Code convention).
+// Registering them here makes them discoverable by AGENT.md `tools: [...]`
+// allowlists via the central registry.
+import { writeStrategicPathTool } from './WriteStrategicPathTool/WriteStrategicPathTool';
+import { queryStrategicPathTool } from './QueryStrategicPathTool/QueryStrategicPathTool';
+import { addPlanItemTool } from './AddPlanItemTool/AddPlanItemTool';
+import { updatePlanItemTool } from './UpdatePlanItemTool/UpdatePlanItemTool';
+import { queryPlanItemsTool } from './QueryPlanItemsTool/QueryPlanItemsTool';
+import { queryStalledItemsTool } from './QueryStalledItemsTool/QueryStalledItemsTool';
+import { queryLastWeekCompletionsTool } from './QueryLastWeekCompletionsTool/QueryLastWeekCompletionsTool';
+import { queryRecentMilestonesTool } from './QueryRecentMilestonesTool/QueryRecentMilestonesTool';
+import { queryMetricsTool } from './QueryMetricsTool/QueryMetricsTool';
+import { queryTeamStatusTool } from './QueryTeamStatusTool/QueryTeamStatusTool';
+import { draftPostTool } from './DraftPostTool/DraftPostTool';
+import { findThreadsTool } from './FindThreadsTool/FindThreadsTool';
+import { draftReplyTool } from './DraftReplyTool/DraftReplyTool';
 
 /**
  * Central tool registry for ShipFlare agents.
