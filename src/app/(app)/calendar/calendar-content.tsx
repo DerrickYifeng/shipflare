@@ -412,8 +412,7 @@ function TimeGrid({ days, gridRef }: TimeGridProps) {
               pointerEvents: 'none',
             }}
           >
-            — no events · {String(band.startHour).padStart(2, '0')}:00–
-            {String(band.endHour).padStart(2, '0')}:00 —
+            {`— no events · ${String(band.startHour).padStart(2, '0')}:00–${String(band.endHour).padStart(2, '0')}:00 —`}
           </div>
         ))}
       </div>
