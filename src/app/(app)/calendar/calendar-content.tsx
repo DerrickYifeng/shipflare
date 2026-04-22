@@ -742,6 +742,30 @@ function EventCard({ p }: { p: PositionedEvent }) {
           {p.item.title}
         </span>
       )}
+      {!compact && p.item.channel && !isManualKind(p.item.kind) && (
+        <span
+          style={{
+            display: 'inline-block',
+            marginTop: 2,
+            padding: '1px 6px',
+            borderRadius: 4,
+            background: 'rgba(0,0,0,0.05)',
+            color: 'var(--sf-fg-3)',
+            fontSize: 10,
+            fontFamily: 'var(--sf-font-mono)',
+            letterSpacing: '-0.08px',
+            textTransform: 'uppercase',
+            fontWeight: 500,
+            alignSelf: 'flex-start',
+            maxWidth: '100%',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+          }}
+        >
+          {channelLabel(p.item.channel)}
+        </span>
+      )}
     </Link>
   );
 }
