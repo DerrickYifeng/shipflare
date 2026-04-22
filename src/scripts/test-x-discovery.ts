@@ -13,7 +13,7 @@
 
 import 'dotenv/config';
 import { XAIClient } from '@/lib/xai-client';
-import { xSearchTool } from '@/tools/x-search';
+import { xSearchTool } from '@/tools/XSearchTool/XSearchTool';
 import { createToolContext } from '@/core/query-loop';
 import { loadSkill } from '@/core/skill-loader';
 import { runSkill } from '@/core/skill-runner';

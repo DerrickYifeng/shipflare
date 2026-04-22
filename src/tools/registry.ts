@@ -13,13 +13,13 @@ import { classifyIntentTool } from './classify-intent';
 import { hnSearchTool } from './hn-search';
 import { hnGetThreadTool } from './hn-get-thread';
 import { webSearchTool } from './web-search';
-import { xSearchTool } from './x-search';
-import { xPostTool } from './x-post';
-import { xGetUserTweetsTool } from './x-get-user-tweets';
-import { xGetTweetTool } from './x-get-tweet';
-import { xGetMentionsTool } from './x-get-mentions';
-import { xGetMetricsTool } from './x-get-metrics';
-import { xThreadPostTool } from './x-thread-post';
+import { xSearchTool } from './XSearchTool/XSearchTool';
+import { xPostTool } from './XPostTool/XPostTool';
+import { xGetUserTweetsTool } from './XGetUserTweetsTool/XGetUserTweetsTool';
+import { xGetTweetTool } from './XGetTweetTool/XGetTweetTool';
+import { xGetMentionsTool } from './XGetMentionsTool/XGetMentionsTool';
+import { xGetMetricsTool } from './XGetMetricsTool/XGetMetricsTool';
+import { xThreadPostTool } from './XThreadPostTool/XThreadPostTool';
 // Phase B domain tools — one folder per tool (Claude Code convention).
 // Registering them here makes them discoverable by AGENT.md `tools: [...]`
 // allowlists via the central registry.
