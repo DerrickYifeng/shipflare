@@ -3,8 +3,11 @@ import {
   computeCollapsedBands,
   durationForKind,
   hourToTopPx,
+  layoutDayEvents,
   type CalendarDay,
+  type CalendarItem,
   type PlanItemKind,
+  type PositionedEvent,
 } from '../calendar-layout';
 
 const HOUR_H = 48;
@@ -141,5 +144,54 @@ describe('hourToTopPx', () => {
   test('30-minute offset adds half an hour', () => {
     // 09:30 with band 00-09 collapsed: band_h + 0.5 * 48 = 28 + 24 = 52.
     expect(hourToTopPx(9 * 60 + 30, [{ startHour: 0, endHour: 9 }], HOUR_H, BAND_H)).toBe(52);
+  });
+});
+
+function item(kind: PlanItemKind, hour: number, minute = 0, id = `${hour}-${minute}`): CalendarItem {
+  return {
+    id,
+    kind,
+    state: 'planned',
+    channel: null,
+    scheduledAt: `2026-04-22T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00Z`,
+    title: `item ${id}`,
+    description: null,
+    phase: 'foundation',
+  };
+}
+
+describe('layoutDayEvents — non-overlapping', () => {
+  test('single 09:00 post -> full width, 24px tall', () => {
+    const events = layoutDayEvents(
+      [item('content_post', 9)],
+      [{ startHour: 0, endHour: 9 }],
+      HOUR_H,
+      BAND_H,
+      200,
+    );
+    expect(events).toHaveLength(1);
+    const e = events[0] as PositionedEvent;
+    expect(e.topPx).toBe(28); // band_h
+    expect(e.heightPx).toBe(24); // 30m -> half of 48
+    expect(e.leftPct).toBe(0);
+    expect(e.widthPct).toBe(100);
+    expect(e.isOverflowPill).toBeFalsy();
+  });
+
+  test('three non-overlapping events each get full width', () => {
+    const events = layoutDayEvents(
+      [item('content_post', 9), item('interview', 11), item('content_post', 15)],
+      [],
+      HOUR_H,
+      BAND_H,
+      200,
+    );
+    expect(events).toHaveLength(3);
+    for (const e of events) {
+      expect(e.leftPct).toBe(0);
+      expect(e.widthPct).toBe(100);
+    }
+    // heights: 30, 60, 30 -> 24, 48, 24 px
+    expect(events.map((e) => e.heightPx)).toEqual([24, 48, 24]);
   });
 });

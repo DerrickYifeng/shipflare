@@ -165,3 +165,60 @@ export function hourToTopPx(
 
   return px;
 }
+
+export interface PositionedEvent {
+  item: CalendarItem;
+  topPx: number;
+  heightPx: number;
+  leftPct: number;
+  widthPct: number;
+  isOverflowPill?: boolean;
+  /** Ids of the extra events collapsed into the pill. */
+  overflowIds?: string[];
+}
+
+interface EventWithSpan {
+  item: CalendarItem;
+  startMinutes: number;
+  endMinutes: number;
+}
+
+function toSpan(item: CalendarItem): EventWithSpan {
+  const d = new Date(item.scheduledAt);
+  const startMinutes = d.getUTCHours() * 60 + d.getUTCMinutes();
+  const endMinutes = startMinutes + durationForKind(item.kind);
+  return { item, startMinutes, endMinutes };
+}
+
+/**
+ * Layout all events for a single day into absolutely-positioned boxes.
+ * Non-overlapping events occupy the full column width; overlap grouping
+ * and overflow-pill logic are added in later tasks.
+ *
+ * `columnWidthPx` is unused at this stage — Task 5 adds grouping and
+ * Task 6 reads it to decide when to emit an overflow pill.
+ */
+export function layoutDayEvents(
+  items: CalendarItem[],
+  bands: CollapsedBand[],
+  hourHeightPx: number,
+  bandHeightPx: number,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  columnWidthPx: number,
+): PositionedEvent[] {
+  const spans = items
+    .map(toSpan)
+    .sort((a, b) => a.startMinutes - b.startMinutes);
+
+  return spans.map((s) => {
+    const topPx = hourToTopPx(s.startMinutes, bands, hourHeightPx, bandHeightPx);
+    const bottomPx = hourToTopPx(s.endMinutes, bands, hourHeightPx, bandHeightPx);
+    return {
+      item: s.item,
+      topPx,
+      heightPx: Math.max(bottomPx - topPx, 20),
+      leftPct: 0,
+      widthPct: 100,
+    };
+  });
+}
