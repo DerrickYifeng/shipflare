@@ -1,12 +1,18 @@
 // TacticalProgressCard — live progress widget pinned above the Today feed
-// while the post-commit tactical-generate worker drafts this week's items
-// and (optionally) platform calibration is still running.
+// while the post-commit team-run drafts this week's plan_items and
+// (optionally) platform calibration is still running.
 //
-// Contract (locked with backend-engineer-sse):
+// Contract:
 //   - Mount-time snapshot: GET /api/today/progress (REST, JSON)
-//   - Live updates:        /api/events?channel=agents via useSSEChannel
-//                          (tactical_generate_{started,completed,failed}
-//                           and calibration_{progress,complete})
+//   - Tactical live feed:  /api/team/events?teamId=…&runId=… via
+//                          useTeamEvents. We count `add_plan_item` tool_calls
+//                          for itemCount, watch for a coordinator `completion`
+//                          message, and surface `error` messages.
+//   - Calibration live feed: /api/events?channel=agents via useSSEChannel.
+//                          Still receives `calibration_progress` and
+//                          `calibration_complete` from the calibrate-discovery
+//                          worker. `tactical_generate_*` events do not fire
+//                          anymore — the processor was deleted in Phase C.
 //
 // Visibility gate: shows when `?from=onboarding` is in URL (within the same
 // 24h TTL as the welcome ribbon) OR whenever the snapshot reports in-flight
@@ -20,6 +26,7 @@ import { OnbMono } from '@/components/onboarding/_shared/onb-mono';
 import { PLATFORMS } from '@/lib/platform-config';
 import { WELCOME_HERO_SEEN_KEY } from '@/components/today/today-welcome-ribbon';
 import { useSSEChannel } from '@/hooks/use-sse-channel';
+import { useTeamEvents, type TeamActivityMessage } from '@/hooks/use-team-events';
 
 /* ─── Backend contract ───────────────────────────────────────────────── */
 
@@ -41,30 +48,21 @@ interface PlatformCalibration {
   round: number;
 }
 
+interface TeamRunRef {
+  teamId: string;
+  runId: string;
+}
+
 interface ProgressSnapshot {
   tactical: TacticalSnapshot;
+  teamRun: TeamRunRef | null;
   calibration: { platforms: PlatformCalibration[] };
 }
 
-// Live events published on `shipflare:events:{userId}:agents` (see
-// tactical-generate processor + calibrate-discovery worker on the backend).
-interface TacticalGenerateStarted {
-  type: 'tactical_generate_started';
-  planId: string;
-  traceId: string;
-}
-interface TacticalGenerateCompleted {
-  type: 'tactical_generate_completed';
-  planId: string;
-  itemCount: number;
-  traceId: string;
-}
-interface TacticalGenerateFailed {
-  type: 'tactical_generate_failed';
-  planId: string;
-  error: string;
-  traceId: string;
-}
+// Live calibration events still fire on `shipflare:events:{userId}:agents`
+// from calibrate-discovery. Tactical events now arrive through useTeamEvents
+// (see Phase D `/api/team/events`), so there is no `tactical_generate_*`
+// branch here anymore.
 interface CalibrationProgress {
   type: 'calibration_progress';
   platform: string;
@@ -76,10 +74,7 @@ interface CalibrationComplete {
   productId: string;
 }
 
-type LiveEvent =
-  | TacticalGenerateStarted
-  | TacticalGenerateCompleted
-  | TacticalGenerateFailed
+type CalibrationLiveEvent =
   | CalibrationProgress
   | CalibrationComplete
   | { type: string; [key: string]: unknown };
@@ -100,6 +95,7 @@ interface CalibrationView {
 
 interface ViewState {
   tactical: TacticalSnapshot;
+  teamRun: TeamRunRef | null;
   calibration: Record<string, CalibrationView>;
   /** True once the mount-time snapshot fetch has resolved (success or failure). */
   snapshotLoaded: boolean;
@@ -113,6 +109,7 @@ const INITIAL_VIEW: ViewState = {
     error: null,
     planId: null,
   },
+  teamRun: null,
   calibration: {},
   snapshotLoaded: false,
 };
@@ -128,49 +125,19 @@ function seedFromSnapshot(state: ViewState, snap: ProgressSnapshot): ViewState {
       maxRounds: null,
     };
   }
-  return { tactical: snap.tactical, calibration, snapshotLoaded: true };
+  return {
+    tactical: snap.tactical,
+    teamRun: snap.teamRun,
+    calibration,
+    snapshotLoaded: true,
+  };
 }
 
-function reduceLive(state: ViewState, event: LiveEvent): ViewState {
+function reduceCalibrationLive(
+  state: ViewState,
+  event: CalibrationLiveEvent,
+): ViewState {
   switch (event.type) {
-    case 'tactical_generate_started': {
-      const ev = event as TacticalGenerateStarted;
-      return {
-        ...state,
-        tactical: {
-          status: 'running',
-          itemCount: 0,
-          expectedCount: state.tactical.expectedCount,
-          error: null,
-          planId: ev.planId,
-        },
-      };
-    }
-    case 'tactical_generate_completed': {
-      const ev = event as TacticalGenerateCompleted;
-      return {
-        ...state,
-        tactical: {
-          status: 'completed',
-          itemCount: ev.itemCount,
-          expectedCount: state.tactical.expectedCount,
-          error: null,
-          planId: ev.planId,
-        },
-      };
-    }
-    case 'tactical_generate_failed': {
-      const ev = event as TacticalGenerateFailed;
-      return {
-        ...state,
-        tactical: {
-          ...state.tactical,
-          status: 'failed',
-          error: ev.error,
-          planId: ev.planId,
-        },
-      };
-    }
     case 'calibration_progress': {
       const ev = event as CalibrationProgress;
       const prev = state.calibration[ev.platform];
@@ -201,6 +168,77 @@ function reduceLive(state: ViewState, event: LiveEvent): ViewState {
     default:
       return state;
   }
+}
+
+/**
+ * Fold the team_messages stream into a tactical snapshot. Each
+ * `add_plan_item` tool_call counts toward itemCount; a `completion` message
+ * marks the run done; an `error` message marks failure. Pure — the caller
+ * wires it into React state.
+ */
+export function deriveTacticalFromMessages(
+  messages: readonly TeamActivityMessage[],
+  base: TacticalSnapshot,
+): TacticalSnapshot {
+  let itemCount = 0;
+  let completed = false;
+  let failed = false;
+  let errorText: string | null = null;
+  for (const msg of messages) {
+    if (
+      msg.type === 'tool_call' &&
+      typeof msg.metadata?.toolName === 'string' &&
+      msg.metadata.toolName === 'add_plan_item'
+    ) {
+      itemCount += 1;
+      continue;
+    }
+    if (msg.type === 'completion') {
+      completed = true;
+      continue;
+    }
+    if (msg.type === 'error') {
+      failed = true;
+      if (!errorText && typeof msg.content === 'string' && msg.content.length) {
+        errorText = msg.content;
+      }
+    }
+  }
+
+  // Prefer the snapshot's starting itemCount if it exceeds what we've
+  // counted from the live stream (the snapshot already counted pre-mount
+  // messages that the SSE snapshot may or may not replay, depending on
+  // how many landed before the 200-row cap).
+  const effectiveItems = Math.max(base.itemCount, itemCount);
+
+  if (failed) {
+    return {
+      ...base,
+      status: 'failed',
+      itemCount: effectiveItems,
+      error: errorText ?? base.error,
+    };
+  }
+  if (completed) {
+    return {
+      ...base,
+      status: 'completed',
+      itemCount: effectiveItems,
+      error: null,
+    };
+  }
+  if (effectiveItems > base.itemCount || base.status === 'pending') {
+    // Upgrade pending → running when any add_plan_item lands, or keep
+    // running with a fresher count.
+    return {
+      ...base,
+      status: base.status === 'pending' && effectiveItems === 0
+        ? 'pending'
+        : 'running',
+      itemCount: effectiveItems,
+    };
+  }
+  return { ...base, itemCount: effectiveItems };
 }
 
 /* ─── Visibility gate ────────────────────────────────────────────────── */
@@ -279,8 +317,9 @@ export function TacticalProgressCard() {
     return () => controller.abort();
   }, []);
 
-  // Live events. `useSSEChannel` already filters heartbeat/connected frames.
-  const handleLiveEvent = useCallback((data: unknown) => {
+  // Calibration live feed — this channel only carries `calibration_*`
+  // events now (the `tactical_generate_*` producer was deleted in Phase C).
+  const handleCalibrationEvent = useCallback((data: unknown) => {
     if (
       !data ||
       typeof data !== 'object' ||
@@ -289,9 +328,63 @@ export function TacticalProgressCard() {
     ) {
       return;
     }
-    setView((prev) => reduceLive(prev, data as LiveEvent));
+    const type = (data as { type: string }).type;
+    if (type !== 'calibration_progress' && type !== 'calibration_complete') {
+      return;
+    }
+    setView((prev) => reduceCalibrationLive(prev, data as CalibrationLiveEvent));
   }, []);
-  useSSEChannel('agents', handleLiveEvent);
+  useSSEChannel('agents', handleCalibrationEvent);
+
+  // Tactical live feed — subscribe to the team's /api/team/events stream
+  // when we know the teamId + runId. `useTeamEvents` no-ops when teamId is
+  // falsy, so this is safe pre-snapshot.
+  const teamId = view.teamRun?.teamId ?? '';
+  const runId = view.teamRun?.runId ?? null;
+  const tacticalFilter = useCallback((msg: TeamActivityMessage) => {
+    return (
+      msg.type === 'tool_call' ||
+      msg.type === 'completion' ||
+      msg.type === 'error'
+    );
+  }, []);
+  const { messages: teamMessages } = useTeamEvents({
+    teamId,
+    runId,
+    filter: tacticalFilter,
+  });
+
+  // Fold live team_messages into the tactical snapshot. We re-derive from
+  // the snapshot baseline each time — the hook already dedupes by id and
+  // keeps messages sorted, so this is O(n) per render, cheap at n ≤ 200.
+  const snapshotTacticalRef = useRef<TacticalSnapshot>(view.tactical);
+  useEffect(() => {
+    if (view.snapshotLoaded) {
+      snapshotTacticalRef.current = {
+        // Snapshot values are the floor; live messages can only progress.
+        ...view.tactical,
+      };
+    }
+    // We intentionally do NOT depend on `view.tactical` here — we only
+    // want to capture the snapshot baseline once per snapshotLoaded flip.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view.snapshotLoaded]);
+
+  useEffect(() => {
+    if (!view.snapshotLoaded) return;
+    if (!view.teamRun) return;
+    const derived = deriveTacticalFromMessages(
+      teamMessages,
+      snapshotTacticalRef.current,
+    );
+    setView((prev) =>
+      prev.tactical.status === derived.status &&
+      prev.tactical.itemCount === derived.itemCount &&
+      prev.tactical.error === derived.error
+        ? prev
+        : { ...prev, tactical: derived },
+    );
+  }, [teamMessages, view.snapshotLoaded, view.teamRun]);
 
   // When tactical flips to completed, stamp the collapse wall-clock once and
   // schedule a re-render at the end of the grace window so visibility
