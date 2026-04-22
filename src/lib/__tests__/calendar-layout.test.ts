@@ -2,9 +2,13 @@ import { describe, expect, test } from 'vitest';
 import {
   computeCollapsedBands,
   durationForKind,
+  hourToTopPx,
   type CalendarDay,
   type PlanItemKind,
 } from '../calendar-layout';
+
+const HOUR_H = 48;
+const BAND_H = 28;
 
 describe('durationForKind', () => {
   test.each<[PlanItemKind, number]>([
@@ -114,5 +118,28 @@ describe('computeCollapsedBands', () => {
     const { usedHours } = computeCollapsedBands(days);
     expect(usedHours.has(8)).toBe(true);
     expect(usedHours.has(9)).toBe(true);
+  });
+});
+
+describe('hourToTopPx', () => {
+  test('no bands: 0h -> 0px, 9h -> 9 * 48', () => {
+    expect(hourToTopPx(0, [], HOUR_H, BAND_H)).toBe(0);
+    expect(hourToTopPx(9 * 60, [], HOUR_H, BAND_H)).toBe(9 * 48);
+  });
+
+  test('band entirely before the minute offset collapses hours to one band height', () => {
+    // 00-09 collapsed (9h). Minute offset = 9h, 0min.
+    // Expected top = 0 expanded hours before band * 48 + band_h = 28.
+    expect(hourToTopPx(9 * 60, [{ startHour: 0, endHour: 9 }], HOUR_H, BAND_H)).toBe(28);
+  });
+
+  test('band entirely after the offset has no effect', () => {
+    // minute offset = 5h. Band 10-13 is after. Top = 5 * 48.
+    expect(hourToTopPx(5 * 60, [{ startHour: 10, endHour: 13 }], HOUR_H, BAND_H)).toBe(5 * 48);
+  });
+
+  test('30-minute offset adds half an hour', () => {
+    // 09:30 with band 00-09 collapsed: band_h + 0.5 * 48 = 28 + 24 = 52.
+    expect(hourToTopPx(9 * 60 + 30, [{ startHour: 0, endHour: 9 }], HOUR_H, BAND_H)).toBe(52);
   });
 });

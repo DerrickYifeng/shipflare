@@ -121,3 +121,47 @@ export function computeCollapsedBands(days: CalendarDay[]): {
 
   return { usedHours, bands };
 }
+
+/**
+ * Convert a clock offset (minutes from midnight) to a pixel offset in the
+ * rendered time grid, skipping past any collapsed bands that fall strictly
+ * before the offset. Bands that straddle the offset shouldn't happen in
+ * practice (bands only cover unused hours and an event's hour is always
+ * used); defensively we treat them as if the offset landed at the band's
+ * start.
+ */
+export function hourToTopPx(
+  minutesFromMidnight: number,
+  bands: CollapsedBand[],
+  hourHeightPx: number,
+  bandHeightPx: number,
+): number {
+  let px = 0;
+  let minutesConsumed = 0;
+
+  for (let h = 0; h < 24; h += 1) {
+    if (minutesConsumed >= minutesFromMidnight) break;
+
+    const band = bands.find((b) => b.startHour === h);
+    if (band) {
+      const bandEndMinutes = band.endHour * 60;
+      if (minutesFromMidnight >= bandEndMinutes) {
+        // Offset is past the band — consume the whole band as one row.
+        px += bandHeightPx;
+        minutesConsumed = bandEndMinutes;
+        h = band.endHour - 1; // loop will re-increment
+        continue;
+      }
+      // Defensive: offset inside the band — stop at the band's top edge.
+      break;
+    }
+
+    const hourEndMinutes = (h + 1) * 60;
+    const chunkMinutes =
+      Math.min(hourEndMinutes, minutesFromMidnight) - h * 60;
+    px += (chunkMinutes / 60) * hourHeightPx;
+    minutesConsumed = Math.min(hourEndMinutes, minutesFromMidnight);
+  }
+
+  return px;
+}
