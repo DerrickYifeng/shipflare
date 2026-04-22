@@ -195,3 +195,50 @@ describe('layoutDayEvents — non-overlapping', () => {
     expect(events.map((e) => e.heightPx)).toEqual([24, 48, 24]);
   });
 });
+
+describe('layoutDayEvents — overlapping', () => {
+  test('two posts at 08:00 split 50/50', () => {
+    const events = layoutDayEvents(
+      [item('content_post', 8, 0, 'a'), item('content_post', 8, 0, 'b')],
+      [],
+      HOUR_H,
+      BAND_H,
+      200,
+    );
+    expect(events.map((e) => e.widthPct)).toEqual([50, 50]);
+    expect(events.map((e) => e.leftPct)).toEqual([0, 50]);
+  });
+
+  test('transitive overlap: A=08:00-08:30, B=08:15-08:45, C=08:40-09:10 -> all three share', () => {
+    const events = layoutDayEvents(
+      [
+        item('content_post', 8, 0, 'a'),
+        item('content_post', 8, 15, 'b'),
+        item('content_post', 8, 40, 'c'),
+      ],
+      [],
+      HOUR_H,
+      BAND_H,
+      300, // wide enough to avoid overflow pill
+    );
+    expect(events).toHaveLength(3);
+    expect(events.every((e) => !e.isOverflowPill)).toBe(true);
+    const widths = events.map((e) => Math.round(e.widthPct));
+    expect(widths).toEqual([33, 33, 33]);
+    expect(events.map((e) => Math.round(e.leftPct))).toEqual([0, 33, 67]);
+  });
+
+  test('disjoint events stay full width', () => {
+    const events = layoutDayEvents(
+      [item('content_post', 9), item('content_post', 14)],
+      [],
+      HOUR_H,
+      BAND_H,
+      200,
+    );
+    for (const e of events) {
+      expect(e.widthPct).toBe(100);
+      expect(e.leftPct).toBe(0);
+    }
+  });
+});

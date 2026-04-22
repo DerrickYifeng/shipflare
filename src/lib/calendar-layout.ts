@@ -210,15 +210,39 @@ export function layoutDayEvents(
     .map(toSpan)
     .sort((a, b) => a.startMinutes - b.startMinutes);
 
-  return spans.map((s) => {
-    const topPx = hourToTopPx(s.startMinutes, bands, hourHeightPx, bandHeightPx);
-    const bottomPx = hourToTopPx(s.endMinutes, bands, hourHeightPx, bandHeightPx);
-    return {
-      item: s.item,
-      topPx,
-      heightPx: Math.max(bottomPx - topPx, 20),
-      leftPct: 0,
-      widthPct: 100,
-    };
-  });
+  // Group transitively overlapping events. Sweep left→right; extend the
+  // current group whenever the next event starts before the running max
+  // end of the group.
+  const groups: EventWithSpan[][] = [];
+  let current: EventWithSpan[] = [];
+  let currentMaxEnd = -Infinity;
+  for (const s of spans) {
+    if (current.length === 0 || s.startMinutes < currentMaxEnd) {
+      current.push(s);
+      currentMaxEnd = Math.max(currentMaxEnd, s.endMinutes);
+    } else {
+      groups.push(current);
+      current = [s];
+      currentMaxEnd = s.endMinutes;
+    }
+  }
+  if (current.length > 0) groups.push(current);
+
+  const out: PositionedEvent[] = [];
+  for (const group of groups) {
+    const n = group.length;
+    const widthPct = 100 / n;
+    group.forEach((s, i) => {
+      const topPx = hourToTopPx(s.startMinutes, bands, hourHeightPx, bandHeightPx);
+      const bottomPx = hourToTopPx(s.endMinutes, bands, hourHeightPx, bandHeightPx);
+      out.push({
+        item: s.item,
+        topPx,
+        heightPx: Math.max(bottomPx - topPx, 20),
+        leftPct: i * widthPct,
+        widthPct,
+      });
+    });
+  }
+  return out;
 }
