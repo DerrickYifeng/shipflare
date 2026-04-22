@@ -17,9 +17,12 @@
 // owned by the route handler that wires us up — keeping the two layers
 // separate means the adapter can be tested without an HTTP round-trip.
 
+import { and, eq } from 'drizzle-orm';
 import { createPubSubSubscriber } from '@/lib/redis';
 import { teamMessagesChannel } from '@/tools/SendMessageTool/SendMessageTool';
 import { createLogger } from '@/lib/logger';
+import { db } from '@/lib/db';
+import { strategicPaths } from '@/lib/db/schema';
 import type { StrategicPath } from '@/tools/schemas';
 import { strategicPathSchema } from '@/tools/schemas';
 
@@ -43,6 +46,74 @@ export type OnboardingTeamRunEvent =
   | TeamRunStrategicEvent
   | TeamRunErrorEvent
   | TeamRunHeartbeatEvent;
+
+/**
+ * Extract `pathId` from the tool_result content. The write_strategic_path
+ * tool returns `{ pathId, persisted }`; the Redis payload stores the
+ * content as a JSON string.
+ */
+function parsePathIdFromToolResult(content: unknown): string | null {
+  if (typeof content !== 'string') return null;
+  try {
+    const obj = JSON.parse(content) as { pathId?: unknown };
+    return typeof obj.pathId === 'string' && obj.pathId.length > 0
+      ? obj.pathId
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Load a persisted strategic_paths row by id, validate its snapshot
+ * against strategicPathSchema, and push the terminal events. Used by
+ * the tool_result fallback when the tool_call input was too loose for
+ * the SSE client's strict schema but the tool itself coerced + wrote
+ * a valid row.
+ */
+async function loadPathAndPush(
+  pathId: string,
+  push: (item:
+    | { type: 'strategic_done'; path: StrategicPath }
+    | { type: 'error'; error: string }
+    | { type: '__done' }) => void,
+): Promise<void> {
+  const [row] = await db
+    .select()
+    .from(strategicPaths)
+    .where(eq(strategicPaths.id, pathId))
+    .limit(1);
+  if (!row) {
+    push({
+      type: 'error',
+      error: `strategic_paths row not found for pathId=${pathId}`,
+    });
+    push({ type: '__done' });
+    return;
+  }
+  // The persisted row mirrors strategicPathSchema's shape across the
+  // jsonb columns. Re-validate so the SSE consumer gets a typed
+  // StrategicPath.
+  const candidate = {
+    narrative: row.narrative,
+    milestones: row.milestones,
+    thesisArc: row.thesisArc,
+    contentPillars: row.contentPillars,
+    channelMix: row.channelMix,
+    phaseGoals: row.phaseGoals,
+  };
+  const v = strategicPathSchema.safeParse(candidate);
+  if (v.success) {
+    push({ type: 'strategic_done', path: v.data });
+    push({ type: '__done' });
+    return;
+  }
+  push({
+    type: 'error',
+    error: `strategic_paths row failed schema validation: ${v.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`,
+  });
+  push({ type: '__done' });
+}
 
 /**
  * Subscribe to a team's Redis pub/sub channel and yield UI-shaped events
@@ -84,7 +155,9 @@ export async function* subscribeToStrategicPathEvents(
       if (type === 'tool_call') {
         const toolName = metadata?.toolName as string | undefined;
         if (toolName === 'write_strategic_path') {
-          // The tool's input IS the StrategicPath.
+          // Fast path: the tool's input IS the StrategicPath. If the
+          // agent emitted a strictly-schema-valid payload we can yield
+          // without a DB round-trip.
           const input = metadata?.input;
           const v = strategicPathSchema.safeParse(input);
           if (v.success) {
@@ -92,9 +165,39 @@ export async function* subscribeToStrategicPathEvents(
             push({ type: '__done' });
             return;
           }
+          // Validation failed — log the specific issues, but don't bail.
+          // The tool_result below is the source of truth: if the tool
+          // itself persisted the row (even with a looser coerce path),
+          // we'll pick it up via the DB fallback on tool_result success.
           log.warn(
-            `write_strategic_path input failed schema validation: ${v.error.message}`,
+            `write_strategic_path tool_call input failed schema validation (will fall back to DB on tool_result): ${v.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`,
           );
+        }
+      }
+      if (type === 'tool_result') {
+        const toolName = metadata?.toolName as string | undefined;
+        const isError = metadata?.isError === true;
+        if (toolName === 'write_strategic_path' && !isError) {
+          // Tool succeeded (INSERT or UPDATE landed). Pull the path
+          // back out of the DB by pathId so the UI gets a
+          // canonical-from-storage payload rather than the agent's
+          // possibly-looser tool_call input. Covers the case where
+          // tool_call input was rejected by our strict schema but the
+          // tool coerced + persisted a valid-enough row.
+          const pathId = parsePathIdFromToolResult(parsed.content);
+          if (pathId) {
+            loadPathAndPush(pathId, push).catch((err) => {
+              log.warn(
+                `strategic_paths lookup for pathId=${pathId} failed: ${err instanceof Error ? err.message : String(err)}`,
+              );
+              push({
+                type: 'error',
+                error: 'write_strategic_path succeeded but DB lookup failed',
+              });
+              push({ type: '__done' });
+            });
+            return;
+          }
         }
       }
       if (type === 'error') {
