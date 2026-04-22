@@ -7,12 +7,12 @@ import { redditGetThreadTool } from './RedditGetThreadTool/RedditGetThreadTool';
 import { redditGetRulesTool } from './RedditGetRulesTool/RedditGetRulesTool';
 import { redditHotPostsTool } from './RedditHotPostsTool/RedditHotPostsTool';
 import { redditSubmitPostTool } from './RedditSubmitPostTool/RedditSubmitPostTool';
-import { generateQueriesTool } from './generate-queries';
-import { scoreThreadsTool } from './score-threads';
-import { classifyIntentTool } from './classify-intent';
-import { hnSearchTool } from './hn-search';
-import { hnGetThreadTool } from './hn-get-thread';
-import { webSearchTool } from './web-search';
+import { generateQueriesTool } from './GenerateQueriesTool/GenerateQueriesTool';
+import { scoreThreadsTool } from './ScoreThreadsTool/ScoreThreadsTool';
+import { classifyIntentTool } from './ClassifyIntentTool/ClassifyIntentTool';
+import { hnSearchTool } from './HnSearchTool/HnSearchTool';
+import { hnGetThreadTool } from './HnGetThreadTool/HnGetThreadTool';
+import { webSearchTool } from './WebSearchTool/WebSearchTool';
 import { xSearchTool } from './XSearchTool/XSearchTool';
 import { xPostTool } from './XPostTool/XPostTool';
 import { xGetUserTweetsTool } from './XGetUserTweetsTool/XGetUserTweetsTool';
@@ -125,7 +125,7 @@ export { registry };
  */
 export function registerTeamRuntimeTools(tools: {
   taskTool: typeof import('./AgentTool/AgentTool').taskTool;
-  sendMessageTool: typeof import('./SendMessageTool').sendMessageTool;
+  sendMessageTool: typeof import('./SendMessageTool/SendMessageTool').sendMessageTool;
 }): void {
   registry.register(tools.taskTool);
   registry.register(tools.sendMessageTool);

@@ -10,7 +10,7 @@ import {
   teamMessages,
 } from '@/lib/db/schema';
 import { getPubSubPublisher } from '@/lib/redis';
-import { teamInjectChannel, teamMessagesChannel } from '@/tools/SendMessageTool';
+import { teamInjectChannel, teamMessagesChannel } from '@/tools/SendMessageTool/SendMessageTool';
 import { enqueueTeamRun } from '@/lib/queue/team-run';
 import { createLogger } from '@/lib/logger';
 

@@ -163,7 +163,7 @@ vi.mock('@/lib/queue/team-run', () => ({
 // ---------------------------------------------------------------------------
 
 import { POST } from '../route';
-import { teamInjectChannel, teamMessagesChannel } from '@/tools/SendMessageTool';
+import { teamInjectChannel, teamMessagesChannel } from '@/tools/SendMessageTool/SendMessageTool';
 
 beforeEach(() => {
   teamsTable.length = 0;

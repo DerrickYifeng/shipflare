@@ -18,7 +18,7 @@
 // separate means the adapter can be tested without an HTTP round-trip.
 
 import { createPubSubSubscriber } from '@/lib/redis';
-import { teamMessagesChannel } from '@/tools/SendMessageTool';
+import { teamMessagesChannel } from '@/tools/SendMessageTool/SendMessageTool';
 import { createLogger } from '@/lib/logger';
 import type { StrategicPath } from '@/tools/schemas';
 import { strategicPathSchema } from '@/tools/schemas';

@@ -15,7 +15,7 @@ import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { teams, teamMessages } from '@/lib/db/schema';
 import { createPubSubSubscriber } from '@/lib/redis';
-import { teamMessagesChannel } from '@/tools/SendMessageTool';
+import { teamMessagesChannel } from '@/tools/SendMessageTool/SendMessageTool';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('api:team:events');

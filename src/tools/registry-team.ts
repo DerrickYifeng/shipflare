@@ -15,6 +15,6 @@
 
 import { registerTeamRuntimeTools } from './registry';
 import { taskTool } from './AgentTool/AgentTool';
-import { sendMessageTool } from './SendMessageTool';
+import { sendMessageTool } from './SendMessageTool/SendMessageTool';
 
 registerTeamRuntimeTools({ taskTool, sendMessageTool });

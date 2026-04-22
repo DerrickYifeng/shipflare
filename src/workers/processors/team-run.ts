@@ -26,7 +26,7 @@ import { maybeEmitBudgetWarning } from '@/lib/team-budget';
 import { buildAgentConfigFromDefinition } from '@/tools/AgentTool/spawn';
 import { resolveAgent } from '@/tools/AgentTool/registry';
 import { getAgentOutputSchema } from '@/tools/AgentTool/agent-schemas';
-import { teamInjectChannel, teamMessagesChannel } from '@/tools/SendMessageTool';
+import { teamInjectChannel, teamMessagesChannel } from '@/tools/SendMessageTool/SendMessageTool';
 import type Anthropic from '@anthropic-ai/sdk';
 // Side-effect import: registers Task + SendMessage in the global tool
 // registry so agents that declare them resolve at runAgent time.
