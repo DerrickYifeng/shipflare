@@ -162,6 +162,115 @@ describe('useTeamEvents', () => {
     expect(result.current.messages.map((m) => m.id)).toEqual(['m-keep']);
   });
 
+  it('accumulates agent_text deltas into a partial, then swaps in the final agent_text', () => {
+    // Locks in the Phase 5 streaming contract: deltas accumulate into a
+    // partial keyed by messageId, and the matching final `agent_text`
+    // swaps it into the durable `messages` list. Phase A switched the
+    // hook back to eager setState (React 18's concurrent scheduler
+    // handles backpressure via the caller's `useDeferredValue`), so
+    // the mid-stream partial content is observable synchronously
+    // inside `act` — that's what this test locks in.
+    const { result } = renderHook(() => useTeamEvents({ teamId: 'team-1' }));
+    const es = MockEventSource.instances[0];
+
+    act(() => {
+      es.emit({ type: 'connected', teamId: 'team-1', runId: null });
+      es.emit({ type: 'snapshot_end' });
+      es.emit({
+        type: 'event',
+        messageType: 'agent_text_start',
+        messageId: 'blk-1',
+        runId: 'run-1',
+        teamId: 'team-1',
+        from: 'mem-coord',
+        to: null,
+        content: null,
+        createdAt: '2026-04-22T22:00:00.000Z',
+      });
+      es.emit({
+        type: 'event',
+        messageType: 'agent_text_delta',
+        messageId: 'blk-1',
+        runId: 'run-1',
+        teamId: 'team-1',
+        from: 'mem-coord',
+        to: null,
+        content: 'hello',
+        createdAt: '2026-04-22T22:00:00.050Z',
+      });
+      es.emit({
+        type: 'event',
+        messageType: 'agent_text_delta',
+        messageId: 'blk-1',
+        runId: 'run-1',
+        teamId: 'team-1',
+        from: 'mem-coord',
+        to: null,
+        content: ' there',
+        createdAt: '2026-04-22T22:00:00.100Z',
+      });
+    });
+
+    // Mid-stream: partial has the accumulated text, messages list empty.
+    expect(result.current.messages).toHaveLength(0);
+    expect(result.current.partials.size).toBe(1);
+    expect(result.current.partials.get('blk-1')?.content).toBe('hello there');
+
+    act(() => {
+      es.emit({
+        type: 'event',
+        messageType: 'agent_text',
+        messageId: 'blk-1',
+        runId: 'run-1',
+        teamId: 'team-1',
+        from: 'mem-coord',
+        to: null,
+        content: 'hello there',
+        createdAt: '2026-04-22T22:00:00.150Z',
+      });
+    });
+
+    // Final: partial dropped, durable agent_text appears exactly once.
+    expect(result.current.partials.size).toBe(0);
+    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages[0].id).toBe('blk-1');
+    expect(result.current.messages[0].type).toBe('agent_text');
+    expect(result.current.messages[0].content).toBe('hello there');
+  });
+
+  it('appends a live user_prompt event with the correct message type', () => {
+    // Regression: the SSE endpoint used to emit `{ type: 'event', ...parsed }`
+    // which let the publish payload's own `type` key (e.g. 'user_prompt')
+    // overwrite the wrapper. The switch in useTeamEvents only has a `case
+    // 'event'` branch, so every live team message was silently dropped.
+    // The endpoint now renames the inner type to `messageType` so the wrapper
+    // survives — this test locks in both sides of the contract.
+    const { result } = renderHook(() => useTeamEvents({ teamId: 'team-1' }));
+    const es = MockEventSource.instances[0];
+    act(() => {
+      es.emit({ type: 'connected', teamId: 'team-1', runId: null });
+      es.emit({ type: 'snapshot_end' });
+      es.emit({
+        type: 'event',
+        messageType: 'user_prompt',
+        messageId: 'user-msg-1',
+        runId: 'run-1',
+        teamId: 'team-1',
+        from: null,
+        to: null,
+        content: 'hi team',
+        metadata: null,
+        createdAt: '2026-04-22T18:20:00Z',
+      });
+    });
+    expect(result.current.messages).toHaveLength(1);
+    const msg = result.current.messages[0];
+    expect(msg.id).toBe('user-msg-1');
+    expect(msg.type).toBe('user_prompt');
+    expect(msg.content).toBe('hi team');
+    expect(msg.runId).toBe('run-1');
+  });
+
   it('inserts a live event with an earlier timestamp in chronological order', () => {
     const { result } = renderHook(() =>
       useTeamEvents({

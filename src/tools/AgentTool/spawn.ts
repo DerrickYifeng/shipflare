@@ -17,6 +17,7 @@ import type {
   ToolContext,
 } from '@/core/types';
 import type { AgentDefinition } from './loader';
+import { renderRuntimePreamble } from './runtime-preamble';
 
 /**
  * Default model for subagents that don't declare one in AGENT.md frontmatter.
@@ -111,10 +112,11 @@ export function resolveAgentTools(def: AgentDefinition): AnyToolDefinition[] {
 
 export function buildAgentConfigFromDefinition(
   def: AgentDefinition,
+  now: Date = new Date(),
 ): AgentConfig {
   return {
     name: def.name,
-    systemPrompt: def.systemPrompt,
+    systemPrompt: `${renderRuntimePreamble(now)}${def.systemPrompt}`,
     model: def.model ?? DEFAULT_SUBAGENT_MODEL,
     tools: resolveAgentTools(def),
     maxTurns: def.maxTurns ?? DEFAULT_SUBAGENT_MAX_TURNS,

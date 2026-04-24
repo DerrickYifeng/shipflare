@@ -10,6 +10,7 @@ tools:
   - query_plan_items
   - query_strategic_path
   - add_plan_item
+  - update_plan_item
   - StructuredOutput
 shared-references:
   - base-guidelines

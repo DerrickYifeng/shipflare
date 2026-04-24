@@ -70,6 +70,24 @@ beforeEach(() => {
       description: null,
       scheduledAt: new Date('2026-04-22T09:00:00.000Z'),
     },
+    {
+      id: 'pi-completed',
+      userId: 'user-1',
+      productId: 'prod-1',
+      state: 'completed',
+      title: 'Completed row',
+      description: null,
+      scheduledAt: new Date('2026-04-20T09:00:00.000Z'),
+    },
+    {
+      id: 'pi-executing',
+      userId: 'user-1',
+      productId: 'prod-1',
+      state: 'executing',
+      title: 'In flight',
+      description: null,
+      scheduledAt: new Date('2026-04-23T09:00:00.000Z'),
+    },
   ]);
 });
 
@@ -124,6 +142,80 @@ describe('updatePlanItemTool', () => {
     const parse = updatePlanItemTool.inputSchema.safeParse({
       id: 'pi-1',
       patch: { foo: 'bar' },
+    });
+    expect(parse.success).toBe(false);
+  });
+
+  it('refuses to modify `completed` rows (terminal_state)', async () => {
+    const ctx = makeCtx(store, { userId: 'user-1', productId: 'prod-1' });
+    const result = await updatePlanItemTool.execute(
+      { id: 'pi-completed', patch: { title: 'rewrite history' } },
+      ctx,
+    );
+    expect(result).toEqual({ updated: false, reason: 'terminal_state' });
+    const row = store
+      .get<PlanItemRow>(planItems)
+      .find((r) => r.id === 'pi-completed')!;
+    expect(row.title).toBe('Completed row');
+  });
+
+  it('refuses to modify `executing` rows (terminal_state)', async () => {
+    const ctx = makeCtx(store, { userId: 'user-1', productId: 'prod-1' });
+    const result = await updatePlanItemTool.execute(
+      { id: 'pi-executing', patch: { state: 'superseded' } },
+      ctx,
+    );
+    expect(result).toEqual({ updated: false, reason: 'terminal_state' });
+  });
+
+  it('flips `planned` to `superseded` (the replanning case)', async () => {
+    const ctx = makeCtx(store, { userId: 'user-1', productId: 'prod-1' });
+    const result = await updatePlanItemTool.execute(
+      { id: 'pi-1', patch: { state: 'superseded' } },
+      ctx,
+    );
+    expect(result).toEqual({ updated: true });
+    const row = store
+      .get<PlanItemRow>(planItems)
+      .find((r) => r.id === 'pi-1')!;
+    expect(row.state).toBe('superseded');
+  });
+
+  it('accepts null for omitted optional fields (LLM-friendly)', async () => {
+    const ctx = makeCtx(store, { userId: 'user-1', productId: 'prod-1' });
+    const result = await updatePlanItemTool.execute(
+      {
+        id: 'pi-1',
+        patch: {
+          title: 'Renamed',
+          state: null,
+          scheduledAt: null,
+          userAction: null,
+        },
+      } as never,
+      ctx,
+    );
+    expect(result).toEqual({ updated: true });
+    const row = store
+      .get<PlanItemRow>(planItems)
+      .find((r) => r.id === 'pi-1')!;
+    expect(row.title).toBe('Renamed');
+    expect(row.state).toBe('planned');
+  });
+
+  it('treats an all-null patch as empty_patch', async () => {
+    const ctx = makeCtx(store, { userId: 'user-1', productId: 'prod-1' });
+    const result = await updatePlanItemTool.execute(
+      { id: 'pi-1', patch: { title: null, state: null } } as never,
+      ctx,
+    );
+    expect(result).toEqual({ updated: false, reason: 'empty_patch' });
+  });
+
+  it('rejects invalid state enum values at the schema layer', () => {
+    const parse = updatePlanItemTool.inputSchema.safeParse({
+      id: 'pi-1',
+      patch: { state: 'pending' },
     });
     expect(parse.success).toBe(false);
   });

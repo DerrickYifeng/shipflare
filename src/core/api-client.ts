@@ -116,6 +116,16 @@ export interface CreateMessageOptions {
    * across parallel agents.
    */
   systemBlocks?: Anthropic.Messages.TextBlockParam[];
+  /**
+   * Raw Anthropic stream event hook. When provided, the underlying
+   * `messages.stream()` forwards every `content_block_start` /
+   * `content_block_delta` / `content_block_stop` event to this callback so
+   * the caller can push live deltas to a UI without re-implementing the
+   * retry + caching plumbing. Omit it to keep the current non-streaming
+   * behavior (we still consume the stream internally and await the final
+   * message, but nothing is forwarded).
+   */
+  onStreamEvent?: (event: Anthropic.Messages.RawMessageStreamEvent) => void;
 }
 
 export interface CreateMessageResult {
@@ -186,6 +196,20 @@ export async function createMessage(opts: CreateMessageOptions): Promise<CreateM
         },
         { signal },
       );
+      if (opts.onStreamEvent) {
+        const handler = opts.onStreamEvent;
+        stream.on('streamEvent', (event) => {
+          try {
+            handler(event);
+          } catch (err) {
+            // A buggy forwarder must NOT poison the retry loop — the
+            // final message is still coming over the same connection.
+            log.warn(
+              `onStreamEvent handler threw: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+        });
+      }
       const response = await stream.finalMessage();
 
       const rawUsage = response.usage as unknown as Record<string, number>;

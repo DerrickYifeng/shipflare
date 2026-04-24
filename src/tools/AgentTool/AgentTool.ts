@@ -128,6 +128,21 @@ async function recordTaskStart(
     // Not a team run — skip the insert.
     return undefined;
   }
+  // Read the tool_use_id for *this* Task invocation (tool-executor
+  // plumbs it in via a per-call ctx proxy). Stashing it in
+  // `input.toolUseId` lets the UI's `taskLookup` join tool_call rows to
+  // team_tasks without a schema migration — the reducer extracts
+  // `toolUseId` from the coordinator's tool_call metadata, and
+  // page.tsx builds a dual-key map so either side hits.
+  let toolUseId: string | null = null;
+  try {
+    const fromCtx = ctx.get<string | null | undefined>('toolUseId');
+    if (typeof fromCtx === 'string' && fromCtx.length > 0) toolUseId = fromCtx;
+  } catch {
+    // ctx.get throws on unknown keys in some ctx implementations —
+    // treat as "not a team run context with toolUseId" and move on.
+    toolUseId = null;
+  }
   const taskId = crypto.randomUUID();
   await db.insert(teamTasks).values({
     id: taskId,
@@ -148,6 +163,7 @@ async function recordTaskStart(
       prompt: input.prompt,
       ...(input.name !== undefined ? { name: input.name } : {}),
       agentName,
+      ...(toolUseId !== null ? { toolUseId } : {}),
     },
     status: 'running',
     startedAt: new Date(),
@@ -239,6 +255,23 @@ function wrapOnEventWithSpawnMeta(
       }
       return parentOnEvent({ ...event, spawnMeta });
     }
+    // Assistant-text streaming events also need the spawnMeta tag so
+    // the worker can stamp `parentToolUseId` on the published agent_text
+    // row — without it, subagent text would render attributed to the
+    // coordinator's thread instead of nested inside the subtask card.
+    if (
+      event.type === 'assistant_text_start' ||
+      event.type === 'assistant_text_delta' ||
+      event.type === 'assistant_text_stop'
+    ) {
+      if (event.spawnMeta !== undefined) {
+        return parentOnEvent(event);
+      }
+      return parentOnEvent({ ...event, spawnMeta });
+    }
+    // Tool-input streaming (per-JSON-delta) stays untagged for now —
+    // the partial JSON lands client-side by tool_use_id alone, which
+    // is already scoped to the subagent that's writing it.
     return parentOnEvent(event);
   };
 }
@@ -349,8 +382,21 @@ export const taskTool: ToolDefinition<TaskInput, TaskResult> = buildTool({
         ctx,
         agent.name,
       );
+      // tool-executor plumbs the coord's `tool_use_id` through the
+      // per-call ctx proxy. It's the Anthropic-issued anchor the UI
+      // uses to nest subagent events under this exact Task card.
+      let parentToolUseId = '';
+      try {
+        const fromCtx = ctx.get<string | null | undefined>('toolUseId');
+        if (typeof fromCtx === 'string' && fromCtx.length > 0) {
+          parentToolUseId = fromCtx;
+        }
+      } catch {
+        parentToolUseId = '';
+      }
       const spawnMeta: StreamEventSpawnMeta = {
         parentTaskId,
+        parentToolUseId,
         fromMemberId: specialistMemberId,
         agentName: agent.name,
       };

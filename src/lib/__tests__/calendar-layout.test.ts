@@ -15,8 +15,8 @@ const BAND_H = 28;
 
 describe('durationForKind', () => {
   test.each<[PlanItemKind, number]>([
-    ['content_post', 30],
-    ['content_reply', 30],
+    ['content_post', 60],
+    ['content_reply', 60],
     ['email_send', 30],
     ['analytics_summary', 30],
     ['metrics_compute', 30],
@@ -161,7 +161,7 @@ function item(kind: PlanItemKind, hour: number, minute = 0, id = `${hour}-${minu
 }
 
 describe('layoutDayEvents — non-overlapping', () => {
-  test('single 09:00 post -> full width, 24px tall', () => {
+  test('single 09:00 post -> full width, 48px tall', () => {
     const events = layoutDayEvents(
       [item('content_post', 9)],
       [{ startHour: 0, endHour: 9 }],
@@ -172,7 +172,7 @@ describe('layoutDayEvents — non-overlapping', () => {
     expect(events).toHaveLength(1);
     const e = events[0] as PositionedEvent;
     expect(e.topPx).toBe(28); // band_h
-    expect(e.heightPx).toBe(24); // 30m -> half of 48
+    expect(e.heightPx).toBe(48); // 60m -> full HOUR_H
     expect(e.leftPct).toBe(0);
     expect(e.widthPct).toBe(100);
     expect(e.isOverflowPill).toBeFalsy();
@@ -180,7 +180,7 @@ describe('layoutDayEvents — non-overlapping', () => {
 
   test('three non-overlapping events each get full width', () => {
     const events = layoutDayEvents(
-      [item('content_post', 9), item('interview', 11), item('content_post', 15)],
+      [item('content_post', 9), item('interview', 11), item('email_send', 15)],
       [],
       HOUR_H,
       BAND_H,
@@ -191,8 +191,8 @@ describe('layoutDayEvents — non-overlapping', () => {
       expect(e.leftPct).toBe(0);
       expect(e.widthPct).toBe(100);
     }
-    // heights: 30, 60, 30 -> 24, 48, 24 px
-    expect(events.map((e) => e.heightPx)).toEqual([24, 48, 24]);
+    // heights: 60, 60, 30 min -> 48, 48, 24 px
+    expect(events.map((e) => e.heightPx)).toEqual([48, 48, 24]);
   });
 });
 

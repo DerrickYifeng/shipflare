@@ -15,12 +15,13 @@ export const dynamic = 'force-dynamic';
 const requestSchema = z.object({
   teamId: z.string().min(1),
   /**
-   * Human-readable goal. Required for `manual` triggers and
-   * `reply_sweep`; optional for `onboarding` / `weekly` /
-   * `phase_transition` where the route derives a template from product
-   * context (spec §4.2).
+   * Human-readable goal. The UI's "+ New session" button POSTs `goal: ''`
+   * so the route can derive a neutral template via `deriveGoalFromTrigger`
+   * (see logic below); only `reply_sweep` truly requires a non-empty goal,
+   * and that case is enforced below with a tailored 400. We accept empty
+   * and absent here and let the fallback do the work.
    */
-  goal: z.string().min(1).max(4000).optional(),
+  goal: z.string().max(4000).optional(),
   trigger: z
     .enum(['manual', 'onboarding', 'weekly', 'phase_transition', 'reply_sweep'])
     .optional(),
@@ -121,13 +122,15 @@ export async function POST(request: NextRequest): Promise<Response> {
 
   const trigger: TeamRunTrigger = body.trigger ?? 'manual';
 
-  // Derive a goal when the caller didn't supply one. Manual / reply_sweep
-  // still require an explicit goal — the template for them is weak.
+  // Derive a goal when the caller didn't supply one. `reply_sweep` still
+  // requires an explicit goal; for `manual` we fall through to the neutral
+  // default template in `deriveGoalFromTrigger` so the UI's "+ New session"
+  // button can POST `{trigger:'manual', goal:''}` without 400-ing.
   let goal = body.goal ?? '';
   if (goal === '') {
-    if (trigger === 'manual') {
+    if (trigger === 'reply_sweep') {
       return NextResponse.json(
-        { error: 'invalid_body', detail: 'goal required for manual trigger' },
+        { error: 'invalid_body', detail: 'goal required for reply_sweep trigger' },
         { status: 400 },
       );
     }

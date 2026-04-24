@@ -39,6 +39,9 @@ export interface InArraySentinel {
 export interface AndSentinel {
   __and: Array<WhereSentinel>;
 }
+export interface NotSentinel {
+  __not: WhereSentinel;
+}
 export interface DescSentinel {
   __desc: unknown;
 }
@@ -47,7 +50,8 @@ export type WhereSentinel =
   | GteSentinel
   | LtSentinel
   | InArraySentinel
-  | AndSentinel;
+  | AndSentinel
+  | NotSentinel;
 
 export interface FilterValue {
   op: 'eq' | 'gte' | 'lt' | 'inArray';
@@ -76,6 +80,14 @@ export function flattenFilters(
         value: cond.__inArray.values,
       },
     ];
+  }
+  if ('__not' in cond) {
+    // Negation isn't used by any primary key lookup path the fake DB
+    // actually runs through; the cancel-race guards inside team-run
+    // use it as a safety net that never narrows any integration-test
+    // row (no fixture starts in a terminal state). Returning [] treats
+    // the clause as a trivially-satisfied no-op.
+    return [];
   }
   return cond.__and.flatMap((c) => flattenFilters(c));
 }
@@ -316,6 +328,11 @@ export function drizzleMockFactory(
       __inArray: { column: col, values },
     }),
     and: (...clauses: WhereSentinel[]): AndSentinel => ({ __and: clauses }),
+    // Negation is only used by the worker's cancel-race guards — it
+    // never narrows a row-by-id path in integration tests, so the fake
+    // treats it as a passthrough of the inner node (flattenFilters
+    // then returns [] for it, a trivially-satisfied no-op).
+    not: (inner: WhereSentinel): NotSentinel => ({ __not: inner }),
     desc: (col: unknown): DescSentinel => ({ __desc: col }),
     sql: (..._args: unknown[]) => 'sql-stub',
   };

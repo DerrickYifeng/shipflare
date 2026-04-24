@@ -31,17 +31,17 @@ export interface NavItem {
 
 export const NAV_ITEMS: ReadonlyArray<NavItem> = [
   { href: '/today', label: 'Today', Icon: TodayIcon },
-  { href: '/product', label: 'My Product', Icon: ProductIcon },
-  { href: '/calendar', label: 'Calendar', Icon: CalendarIcon },
-  { href: '/growth', label: 'Growth', Icon: GrowthIcon },
   {
     href: '/team',
-    label: 'Your AI Team',
+    label: 'My AI Team',
     Icon: ZapIcon,
     // `/automation` is a server-redirect to `/team`; keep the label in sync
     // so brief flashes during redirect still read correctly.
     aliases: [/^\/automation/],
   },
+  { href: '/product', label: 'My Product', Icon: ProductIcon },
+  { href: '/calendar', label: 'Calendar', Icon: CalendarIcon },
+  { href: '/growth', label: 'Growth', Icon: GrowthIcon },
   { href: '/settings', label: 'Settings', Icon: GearIcon },
 ];
 

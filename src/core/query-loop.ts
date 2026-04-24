@@ -81,6 +81,14 @@ export async function queryLoop<T>(params: QueryParams): Promise<{ output: T; tr
     log.debug(`Turn ${turn}/${maxTurns} starting`);
     onEvent?.({ type: 'turn_start', turn });
 
+    // Per-turn state for the assistant-text streaming forwarder. One
+    // assistant message may contain many content blocks (text +
+    // tool_use); each TEXT block gets its own messageId so the UI can
+    // key partial state independently and a mid-turn narration doesn't
+    // get stitched into the end_turn text.
+    const textMessageIds = new Map<number, string>();
+    const textBuffers = new Map<number, string>();
+
     const { response, usage } = await createMessage({
       model,
       system: systemPrompt,
@@ -89,6 +97,53 @@ export async function queryLoop<T>(params: QueryParams): Promise<{ output: T; tr
       maxTokens: currentMaxTokens,
       promptCaching,
       signal: abortSignal,
+      onStreamEvent: onEvent
+        ? (event) => {
+            if (event.type === 'content_block_start') {
+              if (event.content_block.type !== 'text') return;
+              const messageId = crypto.randomUUID();
+              textMessageIds.set(event.index, messageId);
+              textBuffers.set(event.index, '');
+              onEvent({
+                type: 'assistant_text_start',
+                messageId,
+                turn,
+                blockIndex: event.index,
+              });
+              return;
+            }
+            if (event.type === 'content_block_delta') {
+              if (event.delta.type !== 'text_delta') return;
+              const messageId = textMessageIds.get(event.index);
+              if (!messageId) return;
+              const prev = textBuffers.get(event.index) ?? '';
+              textBuffers.set(event.index, prev + event.delta.text);
+              onEvent({
+                type: 'assistant_text_delta',
+                messageId,
+                turn,
+                blockIndex: event.index,
+                delta: event.delta.text,
+              });
+              return;
+            }
+            if (event.type === 'content_block_stop') {
+              const messageId = textMessageIds.get(event.index);
+              if (!messageId) return;
+              const text = textBuffers.get(event.index) ?? '';
+              onEvent({
+                type: 'assistant_text_stop',
+                messageId,
+                turn,
+                blockIndex: event.index,
+                text,
+              });
+              textMessageIds.delete(event.index);
+              textBuffers.delete(event.index);
+              return;
+            }
+          }
+        : undefined,
     });
 
     tracker.add(usage, model);
@@ -299,6 +354,99 @@ export async function runAgent<T>(
     // so the growing conversation prefix is cached between turns.
     const cachedMessages = prebuilt ? addMessageCacheBreakpoint(messages) : messages;
 
+    // TTFB observability — borrowed from Claude Code's
+    // `queryCheckpoint('query_first_chunk_received')` pattern
+    // (engine/services/api/claude.ts:1973). Capture wall-clock time at
+    // the turn boundary and again at first stream event; the delta is
+    // how long the user stares at a blank bubble before characters
+    // start appearing. Logged per turn so a slow TTFB shows up in the
+    // worker log tagged `observability:llm-ttfb`.
+    const turnStartedAt = Date.now();
+    let firstChunkLogged = false;
+    const logFirstChunk = () => {
+      if (firstChunkLogged) return;
+      firstChunkLogged = true;
+      const ttfbMs = Date.now() - turnStartedAt;
+      log.info(
+        `observability:llm-ttfb agent="${config.name}" turn=${turn} ttfbMs=${ttfbMs}`,
+      );
+    };
+
+    // Per-turn state for assistant-text streaming. One assistant response
+    // may contain multiple text content blocks (interleaved with
+    // tool_use); we key a stable messageId per block so the UI's
+    // partials map can track them independently.
+    //
+    // Deltas are coalesced into at most ~30fps bursts (`DELTA_FLUSH_MS`)
+    // so the Redis pub/sub lane doesn't churn one publish per token on
+    // long responses. The human eye can't tell the difference between
+    // 30fps and 60fps text appearance; the server, the SSE stream, and
+    // the client's state machinery all breathe easier. Per-block state:
+    //   - textMessageIds:  contentBlock index → stable UUID
+    //   - textBuffers:     total accumulated text for the stop payload
+    //   - pendingDelta:    buffered chunk that hasn't been emitted yet
+    //   - flushTimer:      Node timer handle for the scheduled flush
+    const textMessageIds = new Map<number, string>();
+    const textBuffers = new Map<number, string>();
+    const pendingDelta = new Map<number, string>();
+    const flushTimers = new Map<number, ReturnType<typeof setTimeout>>();
+    const DELTA_FLUSH_MS = 33;
+
+    // Parallel state for tool_use content blocks. Keyed by contentBlock
+    // index so interleaved text + tool_use blocks within one turn stay
+    // attributed correctly. `toolUseIds` is set at block start; the
+    // pending buffer is flushed every DELTA_FLUSH_MS (same rhythm as
+    // text). Ephemeral — we never persist input_json_delta rows.
+    const toolUseIds = new Map<number, string>();
+    const toolPendingDelta = new Map<number, string>();
+    const toolFlushTimers = new Map<number, ReturnType<typeof setTimeout>>();
+
+    const flushDeltaFor = (blockIndex: number): void => {
+      const existing = flushTimers.get(blockIndex);
+      if (existing) {
+        clearTimeout(existing);
+        flushTimers.delete(blockIndex);
+      }
+      const buffered = pendingDelta.get(blockIndex);
+      if (!buffered) return;
+      const messageId = textMessageIds.get(blockIndex);
+      if (!messageId) return;
+      pendingDelta.delete(blockIndex);
+      if (!onEvent) return;
+      void Promise.resolve(
+        onEvent({
+          type: 'assistant_text_delta',
+          messageId,
+          turn,
+          blockIndex,
+          delta: buffered,
+        }),
+      ).catch(() => {});
+    };
+
+    const flushToolDeltaFor = (blockIndex: number): void => {
+      const existing = toolFlushTimers.get(blockIndex);
+      if (existing) {
+        clearTimeout(existing);
+        toolFlushTimers.delete(blockIndex);
+      }
+      const buffered = toolPendingDelta.get(blockIndex);
+      if (!buffered) return;
+      const toolUseId = toolUseIds.get(blockIndex);
+      if (!toolUseId) return;
+      toolPendingDelta.delete(blockIndex);
+      if (!onEvent) return;
+      void Promise.resolve(
+        onEvent({
+          type: 'tool_input_delta',
+          toolUseId,
+          turn,
+          blockIndex,
+          jsonDelta: buffered,
+        }),
+      ).catch(() => {});
+    };
+
     const { response, usage } = await createMessage({
       model: config.model,
       system: config.systemPrompt,
@@ -308,7 +456,117 @@ export async function runAgent<T>(
       promptCaching: true,
       signal: context.abortSignal,
       systemBlocks: prebuilt?.systemBlocks,
+      onStreamEvent: onEvent
+        ? (event) => {
+            // The earliest signal the API has sent anything back — used
+            // to punch the TTFB checkpoint before we dispatch per-type.
+            logFirstChunk();
+            if (event.type === 'content_block_start') {
+              if (event.content_block.type === 'text') {
+                const messageId = crypto.randomUUID();
+                textMessageIds.set(event.index, messageId);
+                textBuffers.set(event.index, '');
+                void Promise.resolve(
+                  onEvent({
+                    type: 'assistant_text_start',
+                    messageId,
+                    turn,
+                    blockIndex: event.index,
+                  }),
+                ).catch(() => {});
+                return;
+              }
+              if (event.content_block.type === 'tool_use') {
+                // Track the Anthropic-issued tool_use_id so downstream
+                // `tool_input_delta` events can be matched with the
+                // eventual tool_call row (emitted by tool_executor via
+                // the `tool_start` StreamEvent once the stream ends).
+                toolUseIds.set(event.index, event.content_block.id);
+                toolPendingDelta.set(event.index, '');
+                return;
+              }
+              return;
+            }
+            if (event.type === 'content_block_delta') {
+              if (event.delta.type === 'text_delta') {
+                const messageId = textMessageIds.get(event.index);
+                if (!messageId) return;
+                const prev = textBuffers.get(event.index) ?? '';
+                textBuffers.set(event.index, prev + event.delta.text);
+                const buffered = pendingDelta.get(event.index) ?? '';
+                pendingDelta.set(event.index, buffered + event.delta.text);
+                if (!flushTimers.has(event.index)) {
+                  const idx = event.index;
+                  const timer = setTimeout(
+                    () => flushDeltaFor(idx),
+                    DELTA_FLUSH_MS,
+                  );
+                  flushTimers.set(idx, timer);
+                }
+                return;
+              }
+              if (event.delta.type === 'input_json_delta') {
+                const toolUseId = toolUseIds.get(event.index);
+                if (!toolUseId) return;
+                const buffered = toolPendingDelta.get(event.index) ?? '';
+                toolPendingDelta.set(
+                  event.index,
+                  buffered + event.delta.partial_json,
+                );
+                if (!toolFlushTimers.has(event.index)) {
+                  const idx = event.index;
+                  const timer = setTimeout(
+                    () => flushToolDeltaFor(idx),
+                    DELTA_FLUSH_MS,
+                  );
+                  toolFlushTimers.set(idx, timer);
+                }
+                return;
+              }
+              return;
+            }
+            if (event.type === 'content_block_stop') {
+              // Text block stop → emit stop + flush.
+              const messageId = textMessageIds.get(event.index);
+              if (messageId) {
+                // Drain the last buffered chunk synchronously so the stop
+                // event never arrives with tokens still pending — otherwise
+                // the client would receive the final `text` but miss the
+                // tail deltas, leaving the partial one frame stale.
+                flushDeltaFor(event.index);
+                const text = textBuffers.get(event.index) ?? '';
+                void Promise.resolve(
+                  onEvent({
+                    type: 'assistant_text_stop',
+                    messageId,
+                    turn,
+                    blockIndex: event.index,
+                    text,
+                  }),
+                ).catch(() => {});
+                textMessageIds.delete(event.index);
+                textBuffers.delete(event.index);
+                return;
+              }
+              // Tool_use block stop → drain any tail input_json_delta so
+              // the client's partial JSON is complete before the final
+              // tool_call row lands and replaces it.
+              if (toolUseIds.has(event.index)) {
+                flushToolDeltaFor(event.index);
+                toolUseIds.delete(event.index);
+                toolPendingDelta.delete(event.index);
+                return;
+              }
+              return;
+            }
+          }
+        : undefined,
     });
+
+    // Turn teardown: any stragglers (e.g., retry at max_tokens) — drain
+    // remaining pending deltas so they reach the client for both lanes.
+    for (const idx of Array.from(flushTimers.keys())) flushDeltaFor(idx);
+    for (const idx of Array.from(toolFlushTimers.keys())) flushToolDeltaFor(idx);
 
     // API responded — reset idle timer (agent is making progress)
     onIdleReset?.();

@@ -31,6 +31,7 @@ import {
   type PositionedEvent,
 } from '@/lib/calendar-layout';
 import Link from 'next/link';
+import { createPortal } from 'react-dom';
 import { useRouter, useSearchParams } from 'next/navigation';
 import useSWR from 'swr';
 import { HeaderBar } from '@/components/layout/header-bar';
@@ -655,9 +656,57 @@ function EventCard({ p }: { p: PositionedEvent }) {
   const stateDot = stateDotStyles(p.item.state);
   const dimmed = p.item.state === 'skipped' || p.item.state === 'completed';
   const compact = p.heightPx < 40;
+
+  // Hover-to-preview: show a portal-based detail card near the event
+  // after a short delay (avoids flashes when the user sweeps across
+  // the week). The grace period on mouse-leave lets the user travel
+  // onto the preview itself without it snapping shut mid-traverse.
+  const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
+  const showTimerRef = useRef<number | null>(null);
+  const hideTimerRef = useRef<number | null>(null);
+
+  const cancelTimers = useCallback((): void => {
+    if (showTimerRef.current !== null) {
+      window.clearTimeout(showTimerRef.current);
+      showTimerRef.current = null;
+    }
+    if (hideTimerRef.current !== null) {
+      window.clearTimeout(hideTimerRef.current);
+      hideTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleShow = useCallback((el: HTMLElement): void => {
+    if (hideTimerRef.current !== null) {
+      window.clearTimeout(hideTimerRef.current);
+      hideTimerRef.current = null;
+    }
+    if (showTimerRef.current !== null) return;
+    showTimerRef.current = window.setTimeout(() => {
+      showTimerRef.current = null;
+      setAnchorRect(el.getBoundingClientRect());
+    }, 120);
+  }, []);
+
+  const scheduleHide = useCallback((): void => {
+    if (showTimerRef.current !== null) {
+      window.clearTimeout(showTimerRef.current);
+      showTimerRef.current = null;
+    }
+    if (hideTimerRef.current !== null) return;
+    hideTimerRef.current = window.setTimeout(() => {
+      hideTimerRef.current = null;
+      setAnchorRect(null);
+    }, 120);
+  }, []);
+
+  useEffect(() => cancelTimers, [cancelTimers]);
+
   return (
+    <>
     <Link
       href={`/today?highlight=${p.item.id}`}
+      aria-describedby={anchorRect ? `calevt-${p.item.id}-details` : undefined}
       style={{
         position: 'absolute',
         top: p.topPx,
@@ -682,11 +731,15 @@ function EventCard({ p }: { p: PositionedEvent }) {
       onMouseEnter={(e) => {
         e.currentTarget.style.transform = 'translateY(-1px)';
         e.currentTarget.style.boxShadow = 'var(--sf-shadow-card-hover)';
+        scheduleShow(e.currentTarget);
       }}
       onMouseLeave={(e) => {
         e.currentTarget.style.transform = 'none';
         e.currentTarget.style.boxShadow = 'var(--sf-shadow-card)';
+        scheduleHide();
       }}
+      onFocus={(e) => scheduleShow(e.currentTarget)}
+      onBlur={() => scheduleHide()}
     >
       <div
         style={{
@@ -709,6 +762,20 @@ function EventCard({ p }: { p: PositionedEvent }) {
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {kindStyle.label}
         </span>
+        {p.item.channel && !isManualKind(p.item.kind) ? (
+          <>
+            <span style={{ color: 'rgba(0,0,0,0.2)' }}>·</span>
+            <span
+              style={{
+                color: 'var(--sf-fg-3)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+              }}
+            >
+              {channelLabel(p.item.channel)}
+            </span>
+          </>
+        ) : null}
         <span style={{ flex: 1 }} />
         <StateDot spec={stateDot} />
       </div>
@@ -742,32 +809,179 @@ function EventCard({ p }: { p: PositionedEvent }) {
           {p.item.title}
         </span>
       )}
-      {!compact && p.item.channel && !isManualKind(p.item.kind) && (
-        <span
-          style={{
-            display: 'inline-block',
-            marginTop: 2,
-            padding: '1px 6px',
-            borderRadius: 4,
-            background: 'rgba(0,0,0,0.05)',
-            color: 'var(--sf-fg-3)',
-            fontSize: 10,
-            fontFamily: 'var(--sf-font-mono)',
-            letterSpacing: '-0.08px',
-            textTransform: 'uppercase',
-            fontWeight: 500,
-            alignSelf: 'flex-start',
-            maxWidth: '100%',
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-          }}
-        >
-          {channelLabel(p.item.channel)}
-        </span>
-      )}
     </Link>
+    {anchorRect ? (
+      <EventHoverCard
+        id={`calevt-${p.item.id}-details`}
+        item={p.item}
+        anchorRect={anchorRect}
+        onEnter={cancelTimers}
+        onLeave={scheduleHide}
+      />
+    ) : null}
+    </>
   );
+}
+
+function EventHoverCard({
+  id,
+  item,
+  anchorRect,
+  onEnter,
+  onLeave,
+}: {
+  id: string;
+  item: CalendarItem;
+  anchorRect: DOMRect;
+  onEnter: () => void;
+  onLeave: () => void;
+}) {
+  const kindStyle = kindStyles(item.kind);
+  const stateDot = stateDotStyles(item.state);
+  const WIDTH = 320;
+  const GAP = 10;
+  const viewportW = typeof window !== 'undefined' ? window.innerWidth : 1280;
+  const viewportH = typeof window !== 'undefined' ? window.innerHeight : 800;
+
+  // Prefer right of the anchor. Flip left when that would clip the
+  // viewport. Clamp vertically so tall cards don't overflow off
+  // screen on stacked events near the bottom of the day column.
+  const spaceRight = viewportW - anchorRect.right - GAP;
+  const placeLeft = spaceRight < WIDTH && anchorRect.left > WIDTH + GAP;
+  const left = placeLeft
+    ? Math.max(8, anchorRect.left - GAP - WIDTH)
+    : Math.min(viewportW - WIDTH - 8, anchorRect.right + GAP);
+  const rawTop = anchorRect.top;
+  const top = Math.max(8, Math.min(rawTop, viewportH - 40));
+
+  const scheduled = new Date(item.scheduledAt);
+  const dateLine = scheduled.toLocaleDateString(undefined, {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  });
+  const timeLine = formatClock(item.scheduledAt);
+
+  const wrap: CSSProperties = {
+    position: 'fixed',
+    top,
+    left,
+    width: WIDTH,
+    maxHeight: `calc(100vh - ${top + 16}px)`,
+    overflowY: 'auto',
+    background: 'var(--sf-bg-primary)',
+    borderRadius: 10,
+    borderLeft: `3px solid ${kindStyle.accent}`,
+    boxShadow:
+      '0 6px 14px rgba(0, 0, 0, 0.06), 0 24px 48px rgba(0, 0, 0, 0.14)',
+    padding: '12px 14px',
+    zIndex: 200,
+    pointerEvents: 'auto',
+    animation: 'sf-calevt-hover-in 140ms cubic-bezier(0.16, 1, 0.3, 1)',
+  };
+
+  const metaRow: CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    fontFamily: 'var(--sf-font-mono)',
+    fontSize: 10,
+    fontWeight: 600,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+    color: kindStyle.inkColor,
+    whiteSpace: 'nowrap',
+  };
+
+  const title: CSSProperties = {
+    marginTop: 8,
+    fontSize: 14.5,
+    fontWeight: 600,
+    color: 'var(--sf-fg-1)',
+    letterSpacing: '-0.01em',
+    lineHeight: 1.35,
+    wordBreak: 'break-word',
+  };
+
+  const subLine: CSSProperties = {
+    marginTop: 4,
+    fontSize: 12,
+    color: 'var(--sf-fg-3)',
+    fontFamily: 'var(--sf-font-mono)',
+    letterSpacing: 0.2,
+  };
+
+  const description: CSSProperties = {
+    marginTop: 10,
+    fontSize: 12.5,
+    lineHeight: 1.5,
+    color: 'var(--sf-fg-2)',
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
+  };
+
+  const chipRow: CSSProperties = {
+    marginTop: 10,
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 6,
+  };
+
+  const chip: CSSProperties = {
+    padding: '2px 8px',
+    borderRadius: 4,
+    background: 'rgba(0, 0, 0, 0.05)',
+    color: 'var(--sf-fg-3)',
+    fontFamily: 'var(--sf-font-mono)',
+    fontSize: 10,
+    fontWeight: 600,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  };
+
+  const panel = (
+    <div
+      id={id}
+      role="tooltip"
+      onMouseEnter={onEnter}
+      onMouseLeave={onLeave}
+      style={wrap}
+    >
+      <div style={metaRow}>
+        <span>{kindStyle.label}</span>
+        <span aria-hidden="true" style={{ color: 'rgba(0,0,0,0.2)' }}>·</span>
+        <StateDot spec={stateDot} />
+        <span style={{ color: 'var(--sf-fg-3)' }}>
+          {String(item.state).replace(/_/g, ' ')}
+        </span>
+      </div>
+      <div style={title}>{item.title}</div>
+      <div style={subLine}>
+        {dateLine} · {timeLine}
+      </div>
+      {item.description ? (
+        <p style={description}>{item.description}</p>
+      ) : null}
+      <div style={chipRow}>
+        {item.channel && !isManualKind(item.kind) ? (
+          <span style={chip}>{channelLabel(item.channel)}</span>
+        ) : null}
+        {item.phase ? <span style={chip}>{item.phase}</span> : null}
+      </div>
+      <style>{`
+        @keyframes sf-calevt-hover-in {
+          from { opacity: 0; transform: translateY(-4px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
+    </div>
+  );
+
+  // Only portal on the client — `createPortal` needs `document`, and
+  // the calendar page is a client component so `window` is defined by
+  // the time we render an event card.
+  if (typeof document === 'undefined') return null;
+  return createPortal(panel, document.body);
 }
 
 function OverflowPill({ p }: { p: PositionedEvent }) {

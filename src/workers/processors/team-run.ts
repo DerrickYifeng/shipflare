@@ -10,7 +10,7 @@
 // subscribers.
 
 import type { Job } from 'bullmq';
-import { eq } from 'drizzle-orm';
+import { and, eq, inArray, not } from 'drizzle-orm';
 import { createLogger, loggerForJob } from '@/lib/logger';
 import { db, type Database } from '@/lib/db';
 import {
@@ -26,12 +26,16 @@ import { maybeEmitBudgetWarning } from '@/lib/team-budget';
 import { buildAgentConfigFromDefinition } from '@/tools/AgentTool/spawn';
 import { resolveAgent } from '@/tools/AgentTool/registry';
 import { getAgentOutputSchema } from '@/tools/AgentTool/agent-schemas';
-import { teamInjectChannel, teamMessagesChannel } from '@/tools/SendMessageTool/SendMessageTool';
+import {
+  teamCancelChannel,
+  teamInjectChannel,
+  teamMessagesChannel,
+} from '@/tools/SendMessageTool/SendMessageTool';
 import type Anthropic from '@anthropic-ai/sdk';
 // Side-effect import: registers Task + SendMessage in the global tool
 // registry so agents that declare them resolve at runAgent time.
 import '@/tools/registry-team';
-import type { ToolContext, StreamEvent } from '@/core/types';
+import type { ToolContext, StreamEvent, StreamEventSpawnMeta } from '@/core/types';
 import type { TeamRunJobData } from '@/lib/queue/team-run';
 
 const baseLog = createLogger('worker:team-run');
@@ -92,6 +96,18 @@ export interface TeamRunDeps {
     runId: string,
     onMessage: (content: string) => void,
   ) => Promise<InjectSubscription>;
+  /**
+   * Subscribe to user-initiated cancellation for a running coordinator.
+   * The worker aborts its AbortController when the callback fires,
+   * propagating through runAgent into the Anthropic SDK. Returns a
+   * handle so the subscriber gets torn down when the run ends. Tests
+   * can stub this with a no-op.
+   */
+  subscribeCancel?: (
+    teamId: string,
+    runId: string,
+    onCancel: () => void,
+  ) => Promise<InjectSubscription>;
 }
 
 /**
@@ -124,6 +140,32 @@ function defaultDeps(): TeamRunDeps {
         } catch (err) {
           baseLog.warn(
             `Redis inject payload parse failed for ${channel}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      });
+      await sub.subscribe(channel);
+      return {
+        unsubscribe: async () => {
+          try {
+            await sub.unsubscribe(channel);
+          } catch {
+            // Already torn down — ignore.
+          }
+          sub.disconnect();
+        },
+      };
+    },
+    subscribeCancel: async (teamId, runId, onCancel) => {
+      const channel = teamCancelChannel(teamId, runId);
+      const sub = createPubSubSubscriber();
+      // The payload is ignored — the cancel channel is a signal, not a
+      // message. Any publish on it means "stop this run".
+      sub.on('message', () => {
+        try {
+          onCancel();
+        } catch (err) {
+          baseLog.warn(
+            `cancel handler threw for ${channel}: ${err instanceof Error ? err.message : String(err)}`,
           );
         }
       });
@@ -318,15 +360,30 @@ export async function processTeamRunInternal(
     rootOutputSchema ?? getAgentOutputSchema(rootMember.agentType) ?? undefined;
 
   // --- 6) Record the user_prompt seed message ---
-  await recordMessage(deps, {
-    runId,
-    teamId: team.id,
-    fromMemberId: null, // user
-    toMemberId: rootMember.id,
-    type: 'user_prompt',
-    content: run.goal,
-    metadata: { trigger: 'team_run_start', traceId: run.traceId ?? null },
-  });
+  // Skip when the run already has a user_prompt row — that happens when
+  // /api/team/message enqueued this run: it persists the user's brief up
+  // front (for immediate bubble + SSE echo) and the run inherits
+  // `goal = body.message`. Re-inserting the seed here would render two
+  // identical user bubbles back-to-back.
+  const existingPromptRows = await deps.db
+    .select({ id: teamMessages.id })
+    .from(teamMessages)
+    .where(
+      and(eq(teamMessages.runId, runId), eq(teamMessages.type, 'user_prompt')),
+    )
+    .limit(1);
+
+  if (existingPromptRows.length === 0) {
+    await recordMessage(deps, {
+      runId,
+      teamId: team.id,
+      fromMemberId: null, // user
+      toMemberId: rootMember.id,
+      type: 'user_prompt',
+      content: run.goal,
+      metadata: { trigger: 'team_run_start', traceId: run.traceId ?? null },
+    });
+  }
 
   // --- 7) Build ToolContext with deps ---
   const controller = new AbortController();
@@ -400,6 +457,32 @@ export async function processTeamRunInternal(
     }
   }
 
+  // --- 9b) Wire cancellation signal ---
+  // `/api/team/run/[runId]/cancel` publishes on this channel when the
+  // user hits the Stop button in the composer. Aborting the controller
+  // flows through runAgent → Anthropic SDK, which raises
+  // `APIUserAbortError` from the stream reader — we catch it below and
+  // settle the run as `cancelled`.
+  let cancelRequested = false;
+  let cancelSub: InjectSubscription | null = null;
+  if (deps.subscribeCancel) {
+    try {
+      cancelSub = await deps.subscribeCancel(team.id, runId, () => {
+        cancelRequested = true;
+        logLine(`team-run ${runId}: cancellation requested, aborting`);
+        try {
+          controller.abort();
+        } catch {
+          // Already aborted — safe to ignore.
+        }
+      });
+    } catch (err) {
+      baseLog.warn(
+        `subscribeCancel failed for run ${runId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
   const injectMessages = (): Anthropic.Messages.MessageParam[] => {
     if (pendingInjections.length === 0) return [];
     return pendingInjections.splice(0, pendingInjections.length);
@@ -459,6 +542,11 @@ export async function processTeamRunInternal(
     );
     const aggregateCostUsd = result.usage.costUsd + childCostUsd;
 
+    // Guard against racing with a user-initiated cancel: the cancel
+    // route may have flipped the row to `cancelled` milliseconds before
+    // the worker's last turn finished. Only promote to `completed` if
+    // the row is still `running` — otherwise the user's Stop click
+    // would be silently overwritten.
     await deps.db
       .update(teamRuns)
       .set({
@@ -467,7 +555,12 @@ export async function processTeamRunInternal(
         totalCostUsd: String(aggregateCostUsd),
         totalTurns: result.usage.turns,
       })
-      .where(eq(teamRuns.id, runId));
+      .where(
+        and(
+          eq(teamRuns.id, runId),
+          not(inArray(teamRuns.status, ['cancelled', 'completed', 'failed'])),
+        ),
+      );
 
     logLine(
       `team-run ${runId}: completed (cost=$${aggregateCostUsd.toFixed(4)} ` +
@@ -510,6 +603,34 @@ export async function processTeamRunInternal(
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    // User-initiated cancel: the Anthropic SDK raises APIUserAbortError
+    // when our controller fires, plus a plain `Aborted` from our
+    // createMessage retry helper. Both land here; detect via the
+    // `cancelRequested` flag we set inside the cancel subscriber, and
+    // settle the run as `cancelled` instead of `failed` so the UI
+    // colors it muted instead of red.
+    if (cancelRequested) {
+      logLine(`team-run ${runId}: cancelled by user`);
+      await markCancelled(deps, runId);
+      // Publish a terminal event so the client can flip the session
+      // status without waiting for the next snapshot refresh.
+      try {
+        await deps.publish(teamMessagesChannel(team.id), {
+          messageId: crypto.randomUUID(),
+          runId,
+          teamId: team.id,
+          from: rootMember.id,
+          to: null,
+          type: 'error',
+          content: 'Run cancelled by user.',
+          metadata: { cancelled: true },
+          createdAt: new Date().toISOString(),
+        });
+      } catch {
+        // Best-effort — DB status is the source of truth.
+      }
+      return;
+    }
     await recordMessage(deps, {
       runId,
       teamId: team.id,
@@ -531,7 +652,29 @@ export async function processTeamRunInternal(
         );
       }
     }
+    if (cancelSub) {
+      try {
+        await cancelSub.unsubscribe();
+      } catch (err) {
+        baseLog.warn(
+          `cancel subscriber teardown failed for run ${runId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
   }
+}
+
+async function markCancelled(
+  deps: TeamRunDeps,
+  runId: string,
+): Promise<void> {
+  await deps.db
+    .update(teamRuns)
+    .set({
+      status: 'cancelled',
+      completedAt: new Date(),
+    })
+    .where(eq(teamRuns.id, runId));
 }
 
 async function markFailed(
@@ -539,6 +682,8 @@ async function markFailed(
   runId: string,
   message: string,
 ): Promise<void> {
+  // Same cancel-race guard as the completion branch — a user's Stop
+  // click wins over a late `failed` write from the worker's own catch.
   await deps.db
     .update(teamRuns)
     .set({
@@ -546,7 +691,12 @@ async function markFailed(
       completedAt: new Date(),
       errorMessage: message,
     })
-    .where(eq(teamRuns.id, runId));
+    .where(
+      and(
+        eq(teamRuns.id, runId),
+        not(inArray(teamRuns.status, ['cancelled', 'completed', 'failed'])),
+      ),
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -590,6 +740,53 @@ export async function emitToolEvent(
   // spawning team_tasks row + the specialist's team_members row (when
   // resolvable). We use that to attribute the message to the specialist
   // and record `parentTaskId` on metadata so the UI can render a tree.
+  if (
+    event.type === 'assistant_text_start' ||
+    event.type === 'assistant_text_delta' ||
+    event.type === 'assistant_text_stop'
+  ) {
+    // When the event came from a subagent spawn, the Task tool wraps
+    // onEvent with `wrapOnEventWithSpawnMeta` which stamps spawnMeta
+    // on every tag-aware event — including these text-streaming ones.
+    // Attribute the row to the specialist member (if resolvable) and
+    // carry `parentToolUseId` in metadata so the UI can nest.
+    const assistantSpawn = event.spawnMeta;
+    const textFromMemberId = assistantSpawn?.fromMemberId ?? callerMemberId;
+    await emitAssistantTextEvent(deps, {
+      teamId,
+      runId,
+      fromMemberId: textFromMemberId,
+      spawnMeta: assistantSpawn ?? null,
+      event,
+    });
+    return;
+  }
+
+  if (event.type === 'tool_input_delta') {
+    // Ephemeral streaming of the LLM's tool-input JSON as it arrives.
+    // No DB write — the durable `tool_call` row lands later via
+    // emitToolEvent's `tool_start` path. Publish only; the client
+    // accumulates partials keyed by toolUseId and clears on tool_call.
+    try {
+      await deps.publish(teamMessagesChannel(teamId), {
+        messageId: event.toolUseId,
+        runId,
+        teamId,
+        from: callerMemberId,
+        to: null,
+        type: 'tool_input_delta',
+        content: event.jsonDelta,
+        metadata: { turn: event.turn, blockIndex: event.blockIndex },
+        createdAt: new Date().toISOString(),
+      });
+    } catch (err) {
+      baseLog.warn(
+        `tool_input_delta publish failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    return;
+  }
+
   if (event.type !== 'tool_start' && event.type !== 'tool_done') return;
 
   const spawnMeta = event.spawnMeta;
@@ -610,6 +807,7 @@ export async function emitToolEvent(
         ...(spawnMeta
           ? {
               parentTaskId: spawnMeta.parentTaskId,
+              parentToolUseId: spawnMeta.parentToolUseId,
               agentName: spawnMeta.agentName,
             }
           : {}),
@@ -633,11 +831,179 @@ export async function emitToolEvent(
         ...(spawnMeta
           ? {
               parentTaskId: spawnMeta.parentTaskId,
+              parentToolUseId: spawnMeta.parentToolUseId,
               agentName: spawnMeta.agentName,
             }
           : {}),
       },
     });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Assistant-text streaming forwarder
+// ---------------------------------------------------------------------------
+
+interface AssistantTextContext {
+  teamId: string;
+  runId: string;
+  fromMemberId: string | null;
+  spawnMeta: StreamEventSpawnMeta | null;
+  event:
+    | { type: 'assistant_text_start'; messageId: string; turn: number; blockIndex: number }
+    | {
+        type: 'assistant_text_delta';
+        messageId: string;
+        turn: number;
+        blockIndex: number;
+        delta: string;
+      }
+    | {
+        type: 'assistant_text_stop';
+        messageId: string;
+        turn: number;
+        blockIndex: number;
+        text: string;
+      };
+}
+
+/**
+ * Fan out streaming assistant text into two lanes:
+ *
+ *   1. `assistant_text_start` / `_delta`  → published live to Redis so
+ *      the client's `useTeamEvents` can paint the partial bubble with a
+ *      breathing indicator. No DB write — deltas are ephemeral.
+ *
+ *   2. `assistant_text_stop`              → insert one `agent_text` row
+ *      in `team_messages` using the **same** messageId the partial ran
+ *      under, then publish the final. The client sees the id match and
+ *      swaps the partial bubble for the durable one without flicker.
+ *
+ * If Redis publish fails mid-stream we log and move on — the stop event
+ * still lands in the DB, so the conversation is never silently lost; the
+ * worst case is the user misses the typing animation.
+ */
+async function emitAssistantTextEvent(
+  deps: TeamRunDeps,
+  ctx: AssistantTextContext,
+): Promise<void> {
+  const { teamId, runId, fromMemberId, spawnMeta, event } = ctx;
+
+  // Every publish carries the nesting anchors when present, so the
+  // client's reducer can route the row to the right dispatch card.
+  const nestingMetadata = spawnMeta
+    ? {
+        parentTaskId: spawnMeta.parentTaskId,
+        parentToolUseId: spawnMeta.parentToolUseId,
+        agentName: spawnMeta.agentName,
+      }
+    : {};
+
+  if (event.type === 'assistant_text_start') {
+    await safePublish(deps, teamId, {
+      messageId: event.messageId,
+      runId,
+      teamId,
+      from: fromMemberId,
+      to: null,
+      type: 'agent_text_start',
+      content: null,
+      metadata: {
+        turn: event.turn,
+        blockIndex: event.blockIndex,
+        ...nestingMetadata,
+      },
+      createdAt: new Date().toISOString(),
+    });
+    return;
+  }
+
+  if (event.type === 'assistant_text_delta') {
+    await safePublish(deps, teamId, {
+      messageId: event.messageId,
+      runId,
+      teamId,
+      from: fromMemberId,
+      to: null,
+      type: 'agent_text_delta',
+      content: event.delta,
+      metadata: {
+        turn: event.turn,
+        blockIndex: event.blockIndex,
+        ...nestingMetadata,
+      },
+      createdAt: new Date().toISOString(),
+    });
+    return;
+  }
+
+  // stop: record the full text to the DB, then broadcast. Re-uses the
+  // same messageId the partial carried so the client swaps in place.
+  if (event.text.length === 0) {
+    // Empty block — skip the DB write but still notify so the client
+    // can clear its partial state.
+    await safePublish(deps, teamId, {
+      messageId: event.messageId,
+      runId,
+      teamId,
+      from: fromMemberId,
+      to: null,
+      type: 'agent_text_stop',
+      content: null,
+      metadata: {
+        turn: event.turn,
+        blockIndex: event.blockIndex,
+        ...nestingMetadata,
+      },
+      createdAt: new Date().toISOString(),
+    });
+    return;
+  }
+
+  const createdAt = new Date();
+  await deps.db.insert(teamMessages).values({
+    id: event.messageId,
+    runId,
+    teamId,
+    fromMemberId,
+    toMemberId: null,
+    type: 'agent_text',
+    content: event.text,
+    metadata: {
+      turn: event.turn,
+      blockIndex: event.blockIndex,
+      ...nestingMetadata,
+    },
+    createdAt,
+  });
+  await safePublish(deps, teamId, {
+    messageId: event.messageId,
+    runId,
+    teamId,
+    from: fromMemberId,
+    to: null,
+    type: 'agent_text',
+    content: event.text,
+    metadata: {
+      turn: event.turn,
+      blockIndex: event.blockIndex,
+      ...nestingMetadata,
+    },
+    createdAt: createdAt.toISOString(),
+  });
+}
+
+async function safePublish(
+  deps: TeamRunDeps,
+  teamId: string,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  try {
+    await deps.publish(teamMessagesChannel(teamId), payload);
+  } catch (err) {
+    baseLog.warn(
+      `safePublish failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 }
 

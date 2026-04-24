@@ -89,11 +89,23 @@ interface EqSentinel {
   __eq: { column: unknown; value: unknown };
 }
 interface AndSentinel {
-  __and: Array<EqSentinel | AndSentinel>;
+  __and: Array<WhereClause>;
 }
 interface DescSentinel {
   __desc: unknown;
 }
+interface NotSentinel {
+  __not: WhereClause;
+}
+interface InArraySentinel {
+  __inArray: { column: unknown; values: unknown[] };
+}
+type WhereClause =
+  | EqSentinel
+  | AndSentinel
+  | NotSentinel
+  | InArraySentinel
+  | undefined;
 
 vi.mock('drizzle-orm', async () => {
   const actual =
@@ -103,17 +115,28 @@ vi.mock('drizzle-orm', async () => {
     eq: (col: unknown, value: unknown): EqSentinel => ({
       __eq: { column: col, value },
     }),
-    and: (...clauses: Array<EqSentinel | AndSentinel>): AndSentinel => ({
+    and: (...clauses: Array<WhereClause>): AndSentinel => ({
       __and: clauses,
     }),
     desc: (col: unknown): DescSentinel => ({ __desc: col }),
+    // The worker adds `NOT IN (...)` cancel-race guards on terminal
+    // status writes. Integration fixtures never start a run in a
+    // terminal state, so the guard is a no-op here; the fake just
+    // skips these clauses when flattening.
+    not: (inner: WhereClause): NotSentinel => ({ __not: inner }),
+    inArray: (col: unknown, values: unknown[]): InArraySentinel => ({
+      __inArray: { column: col, values },
+    }),
   };
 });
 
-function flatten(cond: EqSentinel | AndSentinel | undefined): unknown[] {
+function flatten(cond: WhereClause): unknown[] {
   if (!cond) return [];
   if ('__eq' in cond) return [cond.__eq.value];
-  return cond.__and.flatMap((c) => flatten(c));
+  if ('__and' in cond) return cond.__and.flatMap((c) => flatten(c));
+  // `not(...)` / `inArray(...)` clauses don't narrow the row-by-id
+  // target the fake resolves through — skip them.
+  return [];
 }
 
 // ---------------------------------------------------------------------------

@@ -103,7 +103,7 @@ export const teamRuns = pgTable(
     goal: text('goal').notNull(),
     rootAgentId: text('root_agent_id')
       .notNull()
-      .references(() => teamMembers.id),
+      .references(() => teamMembers.id, { onDelete: 'cascade' }),
     // 'running' | 'completed' | 'failed' | 'cancelled' | 'pending'
     status: text('status').notNull().default('running'),
     startedAt: timestamp('started_at', { mode: 'date' }).defaultNow().notNull(),
@@ -142,9 +142,13 @@ export const teamMessages = pgTable(
       .notNull()
       .references(() => teams.id, { onDelete: 'cascade' }),
     // NULL = user
-    fromMemberId: text('from_member_id').references(() => teamMembers.id),
+    fromMemberId: text('from_member_id').references(() => teamMembers.id, {
+      onDelete: 'set null',
+    }),
     // NULL = user, or broadcast
-    toMemberId: text('to_member_id').references(() => teamMembers.id),
+    toMemberId: text('to_member_id').references(() => teamMembers.id, {
+      onDelete: 'set null',
+    }),
     // 'user_prompt' | 'agent_text' | 'tool_call' | 'tool_result' | 'completion' | 'error' | 'thinking'
     type: text('type').notNull(),
     content: text('content'),
@@ -178,7 +182,7 @@ export const teamTasks = pgTable(
     parentTaskId: text('parent_task_id'),
     memberId: text('member_id')
       .notNull()
-      .references(() => teamMembers.id),
+      .references(() => teamMembers.id, { onDelete: 'cascade' }),
     // Task tool's `description` param (3-5 words).
     description: text('description').notNull(),
     // Task tool's `prompt` param.

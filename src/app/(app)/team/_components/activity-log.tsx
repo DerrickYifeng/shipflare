@@ -68,8 +68,12 @@ function formatTimestamp(iso: string): string {
 
 function extractToolName(metadata: Record<string, unknown> | null): string | null {
   if (!metadata) return null;
-  const t = metadata['tool_name'];
-  return typeof t === 'string' ? t : null;
+  // Worker writes `toolName` (see emitToolEvent). Keep `tool_name` as a
+  // historical fallback for rows persisted before the key was normalized.
+  const camel = metadata['toolName'];
+  if (typeof camel === 'string' && camel.length > 0) return camel;
+  const snake = metadata['tool_name'];
+  return typeof snake === 'string' && snake.length > 0 ? snake : null;
 }
 
 function shortId(id: string): string {

@@ -41,6 +41,18 @@ export function teamInjectChannel(teamId: string, runId: string): string {
   return `team:${teamId}:inject:${runId}`;
 }
 
+/**
+ * Redis channel for user-initiated run cancellation. `/api/team/run/
+ * [runId]/cancel` publishes any payload here (content ignored); the
+ * worker subscribes for the duration of the run and, on receive, aborts
+ * its top-level `AbortController` — that signal flows through runAgent
+ * into the Anthropic SDK, which raises `APIUserAbortError` from the
+ * stream reader and unwinds the turn loop cleanly.
+ */
+export function teamCancelChannel(teamId: string, runId: string): string {
+  return `team:${teamId}:cancel:${runId}`;
+}
+
 // ---------------------------------------------------------------------------
 // Input schema
 // ---------------------------------------------------------------------------

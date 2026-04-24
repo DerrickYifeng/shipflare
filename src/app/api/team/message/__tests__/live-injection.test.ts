@@ -234,17 +234,31 @@ describe('POST /api/team/message — live injection', () => {
       postRequest({ teamId: 'team-y', message: 'start something' }),
     );
     expect(res.status).toBe(202);
+    const json = (await res.json()) as { runId: string };
+    expect(json.runId).toBe('newrun-123');
 
     const injectChannels = published.filter((p) =>
       p.channel.startsWith('team:team-y:inject:'),
     );
     expect(injectChannels).toHaveLength(0);
 
-    // New run is started (via enqueueTeamRun mock). The durable record
-    // on team_messages carries a null runId because it was inserted
-    // BEFORE the run was enqueued.
+    // New run is started (via enqueueTeamRun mock) BEFORE the user_prompt
+    // is persisted, so the durable record attaches to the new runId. This
+    // is what lets the UI switch to the new session on send — otherwise
+    // the user_prompt lands as an orphan (runId=null) and the new run's
+    // responses arrive under a different runId, both filtered out by the
+    // conversation's selectedRunId filter.
     expect(messagesTable).toHaveLength(1);
-    expect(messagesTable[0].runId).toBeNull();
+    expect(messagesTable[0].runId).toBe('newrun-123');
+
+    // The SSE broadcast of the user_prompt also carries the new runId so
+    // the client sees it under the new session divider.
+    const broadcast = published.find(
+      (p) => p.channel === teamMessagesChannel('team-y'),
+    );
+    expect(broadcast).toBeDefined();
+    const parsed = JSON.parse(broadcast!.payload) as { runId: string | null };
+    expect(parsed.runId).toBe('newrun-123');
   });
 
   it('returns 401 when unauthenticated', async () => {

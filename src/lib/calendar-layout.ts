@@ -26,6 +26,10 @@ export function durationForKind(kind: PlanItemKind): number {
   switch (kind) {
     case 'content_post':
     case 'content_reply':
+      // Match interviews / setup tasks so content work renders as a
+      // meaningful block on the week grid instead of a 30-min sliver
+      // that's easy to skim past.
+      return 60;
     case 'email_send':
     case 'analytics_summary':
     case 'metrics_compute':

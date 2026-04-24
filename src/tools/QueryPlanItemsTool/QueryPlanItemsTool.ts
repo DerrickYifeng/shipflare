@@ -11,17 +11,22 @@ import { z } from 'zod';
 import { and, eq, gte, inArray, lt } from 'drizzle-orm';
 import { buildTool } from '@/core/tool-system';
 import type { ToolDefinition } from '@/core/types';
-import { planItems } from '@/lib/db/schema';
+import { planItems, planItemStateEnum } from '@/lib/db/schema';
 import { readDomainDeps } from '@/tools/context-helpers';
 
 export const QUERY_PLAN_ITEMS_TOOL_NAME = 'query_plan_items';
 
+const planItemStateValues = planItemStateEnum.enumValues as unknown as [
+  string,
+  ...string[],
+];
+
 export const queryPlanItemsInputSchema = z
   .object({
-    weekOffset: z.number().int().min(-52).max(52).optional(),
-    status: z.array(z.string().min(1)).max(10).optional(),
-    id: z.string().min(1).optional(),
-    limit: z.number().int().min(1).max(200).optional(),
+    weekOffset: z.number().int().min(-52).max(52).nullish(),
+    status: z.array(z.enum(planItemStateValues)).max(10).nullish(),
+    id: z.string().min(1).nullish(),
+    limit: z.number().int().min(1).max(200).nullish(),
   })
   .strict();
 
@@ -67,8 +72,9 @@ export const queryPlanItemsTool: ToolDefinition<
   name: QUERY_PLAN_ITEMS_TOOL_NAME,
   description:
     'List plan_items for the current product. Filter by weekOffset ' +
-    '(0=this week, 1=next, -1=last), by status (array of state values), ' +
-    'or by a specific id. Scoped to the current user + product.',
+    '(0=this week, 1=next, -1=last), by status (array of state values: ' +
+    `${planItemStateValues.join(', ')}), or by a specific id. Omit ` +
+    'filters to skip them. Scoped to the current user + product.',
   inputSchema: queryPlanItemsInputSchema,
   isConcurrencySafe: true,
   isReadOnly: true,
@@ -82,17 +88,17 @@ export const queryPlanItemsTool: ToolDefinition<
       eq(planItems.productId, productId),
     ];
 
-    if (input.id !== undefined) {
+    if (input.id != null) {
       conditions.push(eq(planItems.id, input.id));
     }
 
-    if (input.weekOffset !== undefined) {
+    if (input.weekOffset != null) {
       const { start, end } = weekBoundsForOffset(new Date(), input.weekOffset);
       conditions.push(gte(planItems.scheduledAt, start));
       conditions.push(lt(planItems.scheduledAt, end));
     }
 
-    if (input.status !== undefined && input.status.length > 0) {
+    if (input.status != null && input.status.length > 0) {
       conditions.push(
         // Drizzle's inArray expects the same type; the enum column accepts
         // the string values at the SQL layer.

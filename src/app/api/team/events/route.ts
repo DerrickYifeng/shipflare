@@ -130,7 +130,13 @@ export async function GET(request: NextRequest): Promise<Response> {
             // Respect run scoping on the live feed when the client asked for it.
             return;
           }
-          send({ type: 'event', ...parsed });
+          // Rename the publish payload's `type` (e.g. 'user_prompt') to
+          // `messageType` before forwarding so the wire wrapper `type: 'event'`
+          // survives spread — otherwise parsed.type overwrites it and the
+          // client's switch falls through to its default branch, silently
+          // dropping every live message.
+          const { type: messageType, ...rest } = parsed;
+          send({ ...rest, type: 'event', messageType });
         } catch {
           // Ignore malformed payloads — never trust external data.
         }

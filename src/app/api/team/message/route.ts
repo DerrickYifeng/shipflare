@@ -92,20 +92,57 @@ export async function POST(request: NextRequest): Promise<Response> {
   }
 
   // Is there an active run? If so, attach the message to it; if not,
-  // trigger a new run (the message becomes the goal).
+  // enqueue a new run FIRST so the user_prompt can be inserted with the
+  // new runId (instead of landing as an orphan with runId=null and then
+  // being rejoined by the worker's responses under a different run).
   const activeRows = await db
     .select({ id: teamRuns.id })
     .from(teamRuns)
     .where(and(eq(teamRuns.teamId, body.teamId), eq(teamRuns.status, 'running')))
     .limit(1);
 
-  const activeRunId = activeRows[0]?.id ?? null;
+  const preExistingActiveRunId = activeRows[0]?.id ?? null;
+
+  let runIdForMessage: string | null = preExistingActiveRunId;
+  let enqueuedRun: {
+    runId: string;
+    traceId: string;
+    alreadyRunning: boolean;
+  } | null = null;
+
+  if (!preExistingActiveRunId) {
+    const coordinators = await db
+      .select({ id: teamMembers.id })
+      .from(teamMembers)
+      .where(
+        and(
+          eq(teamMembers.teamId, body.teamId),
+          eq(teamMembers.agentType, 'coordinator'),
+        ),
+      )
+      .limit(1);
+
+    const rootMemberId = coordinators[0]?.id ?? toMemberId;
+    if (rootMemberId) {
+      enqueuedRun = await enqueueTeamRun({
+        teamId: body.teamId,
+        trigger: 'manual',
+        goal: body.message,
+        rootMemberId,
+      });
+      runIdForMessage = enqueuedRun.runId;
+    }
+    // If no coordinator and no explicit member, `runIdForMessage` stays
+    // null — we still record the message below so it's not lost, but no
+    // run will process it.
+  }
+
   const messageId = crypto.randomUUID();
   const createdAt = new Date();
 
   await db.insert(teamMessages).values({
     id: messageId,
-    runId: activeRunId,
+    runId: runIdForMessage,
     teamId: body.teamId,
     fromMemberId: null, // user
     toMemberId,
@@ -120,7 +157,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       teamMessagesChannel(body.teamId),
       JSON.stringify({
         messageId,
-        runId: activeRunId,
+        runId: runIdForMessage,
         teamId: body.teamId,
         from: null,
         to: toMemberId,
@@ -135,65 +172,50 @@ export async function POST(request: NextRequest): Promise<Response> {
     );
   }
 
-  // Live injection: when a run is active, push the message onto the
-  // worker's per-run inject channel. The coordinator's runAgent drains
-  // its FIFO at the next turn boundary and appends the message as a
-  // user-role turn. Best-effort — a Redis failure is logged; the
-  // durable DB insert above remains the source of truth.
-  if (activeRunId) {
+  // Live injection: only for runs that were ALREADY running when we
+  // checked above. A freshly-enqueued run hasn't spun up its worker loop
+  // yet, so the coordinator reads the goal from team_runs.goal on its
+  // first turn — nothing to inject.
+  if (preExistingActiveRunId) {
     try {
       await getPubSubPublisher().publish(
-        teamInjectChannel(body.teamId, activeRunId),
+        teamInjectChannel(body.teamId, preExistingActiveRunId),
         JSON.stringify({ messageId, content: body.message }),
       );
     } catch (err) {
       log.warn(
-        `Inject publish failed for run ${activeRunId}: ${err instanceof Error ? err.message : String(err)}`,
+        `Inject publish failed for run ${preExistingActiveRunId}: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }
 
-  // No active run? Start one with the message as the goal.
-  if (!activeRunId) {
-    const coordinators = await db
-      .select({ id: teamMembers.id })
-      .from(teamMembers)
-      .where(
-        and(
-          eq(teamMembers.teamId, body.teamId),
-          eq(teamMembers.agentType, 'coordinator'),
-        ),
-      )
-      .limit(1);
-
-    const rootMemberId = coordinators[0]?.id ?? toMemberId;
-    if (!rootMemberId) {
-      return NextResponse.json(
-        {
-          messageId,
-          runId: null,
-          note: 'Message recorded but no coordinator and no explicit member — no run triggered.',
-        },
-        { status: 200 },
-      );
-    }
-
-    const { runId, traceId, alreadyRunning } = await enqueueTeamRun({
-      teamId: body.teamId,
-      trigger: 'manual',
-      goal: body.message,
-      rootMemberId,
-    });
+  if (enqueuedRun) {
     return NextResponse.json(
-      { messageId, runId, traceId, alreadyRunning },
+      {
+        messageId,
+        runId: enqueuedRun.runId,
+        traceId: enqueuedRun.traceId,
+        alreadyRunning: enqueuedRun.alreadyRunning,
+      },
       { status: 202 },
+    );
+  }
+
+  if (!runIdForMessage) {
+    return NextResponse.json(
+      {
+        messageId,
+        runId: null,
+        note: 'Message recorded but no coordinator and no explicit member — no run triggered.',
+      },
+      { status: 200 },
     );
   }
 
   return NextResponse.json(
     {
       messageId,
-      runId: activeRunId,
+      runId: runIdForMessage,
       note: 'Message recorded on active run; injected into coordinator on its next turn.',
     },
     { status: 200 },

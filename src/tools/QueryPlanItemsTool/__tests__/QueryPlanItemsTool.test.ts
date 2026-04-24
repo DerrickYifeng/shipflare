@@ -129,4 +129,35 @@ describe('queryPlanItemsTool', () => {
     const parse = queryPlanItemsTool.inputSchema.safeParse({ limit: 1000 });
     expect(parse.success).toBe(false);
   });
+
+  it('accepts null for optional fields (LLM often emits null for absent fields)', () => {
+    const parse = queryPlanItemsTool.inputSchema.safeParse({
+      id: null,
+      status: null,
+      weekOffset: null,
+      limit: null,
+    });
+    expect(parse.success).toBe(true);
+  });
+
+  it('rejects invalid state enum values at the schema layer', () => {
+    const parse = queryPlanItemsTool.inputSchema.safeParse({
+      status: ['planned', 'pending', 'done'],
+    });
+    expect(parse.success).toBe(false);
+  });
+
+  it('treats null filter fields as "not filtering" at runtime', async () => {
+    store.register<PlanItemRow>(planItems, [
+      seed({ id: 'a', state: 'planned' }),
+      seed({ id: 'b', state: 'drafted' }),
+    ]);
+    const ctx = makeCtx(store, { userId: 'user-1', productId: 'prod-1' });
+    const rows = await queryPlanItemsTool.execute(
+      // Simulate the LLM first-turn behavior: all fields explicitly null.
+      { id: null, status: null, weekOffset: null, limit: null } as never,
+      ctx,
+    );
+    expect(rows.map((r) => r.id).sort()).toEqual(['a', 'b']);
+  });
 });
