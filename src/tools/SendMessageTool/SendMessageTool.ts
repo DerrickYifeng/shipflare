@@ -32,10 +32,11 @@ export function teamMessagesChannel(teamId: string): string {
 
 /**
  * Redis channel for live-injecting user messages into a running
- * coordinator (Phase D Day 3). `/api/team/message` publishes a JSON
- * payload `{ content: string }` here when the user sends a message to
- * an active run; the team-run worker's subscriber accumulates them in
- * a FIFO and drains into the conversation at the next turn boundary.
+ * coordinator. `POST /api/team/conversations/:id/messages` publishes a
+ * JSON payload `{ content: string }` here when the user sends a
+ * message to an active run; the team-run worker's subscriber
+ * accumulates them in a FIFO and drains into the conversation at the
+ * next turn boundary.
  */
 export function teamInjectChannel(teamId: string, runId: string): string {
   return `team:${teamId}:inject:${runId}`;

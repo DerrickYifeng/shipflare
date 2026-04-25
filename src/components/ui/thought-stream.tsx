@@ -30,7 +30,8 @@ const LIST_STYLE: CSSProperties = {
 
 /**
  * Signature progress list — Gathering → Searching → Scoring → Drafting.
- * Rendered inside ScanDrawer and anywhere a live agent narrates its thinking.
+ * Used wherever a live agent narrates its thinking (token gallery,
+ * marketing demo, etc.).
  */
 export function ThoughtStream({
   steps,

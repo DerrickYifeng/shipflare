@@ -509,10 +509,10 @@ export async function processTeamRunInternal(
 
   // --- 6) Record the user_prompt seed message ---
   // Skip when the run already has a user_prompt row — that happens when
-  // /api/team/message enqueued this run: it persists the user's brief up
-  // front (for immediate bubble + SSE echo) and the run inherits
-  // `goal = body.message`. Re-inserting the seed here would render two
-  // identical user bubbles back-to-back.
+  // POST /api/team/conversations/:id/messages enqueued this run: it
+  // persists the user's brief up front (for immediate bubble + SSE
+  // echo) and the run inherits `goal = body.message`. Re-inserting the
+  // seed here would render two identical user bubbles back-to-back.
   const existingPromptRows = await deps.db
     .select({ id: teamMessages.id })
     .from(teamMessages)

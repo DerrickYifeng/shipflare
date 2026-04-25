@@ -274,9 +274,9 @@ export async function runAgent<T>(
   onEvent?: (event: import('./types').StreamEvent) => void | Promise<void>,
   /**
    * Called at the top of every turn to drain any user messages that have
-   * been queued for mid-run injection (Phase D Day 3: `/api/team/message`
+   * been queued for mid-run injection. `POST /api/team/conversations/:id/messages`
    * pushes into a Redis channel; the team-run worker's subscriber fills a
-   * FIFO; this callback drains it). Returned messages are appended to the
+   * FIFO; this callback drains it. Returned messages are appended to the
    * conversation before the next `createMessage` call so the coordinator
    * reads them on its next turn.
    *
@@ -363,9 +363,10 @@ export async function runAgent<T>(
 
     // Drain any live-injected user messages before we construct the
     // next API payload. Injected messages arrive via Redis pub/sub from
-    // `/api/team/message` while this coordinator is mid-run (Phase D
-    // Day 3). They're appended as plain user-role messages so Claude
-    // sees them like any other prompt turn. Safe to call on turn 1:
+    // `POST /api/team/conversations/:id/messages` while this
+    // coordinator is mid-run. They're appended as plain user-role
+    // messages so Claude sees them like any other prompt turn. Safe to
+    // call on turn 1:
     // an empty FIFO returns [] and the loop proceeds normally.
     //
     // IMPORTANT: injected messages can't land on top of an open

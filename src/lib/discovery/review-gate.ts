@@ -18,7 +18,8 @@
  * signal).
  *
  * Ground-truth source: `thread_feedback` table, which is written by
- * `/api/discovery/approve` on every user approve / skip / post action.
+ * the today action handlers (`/api/today/:id/approve`, `…/skip`) on
+ * every user approve / skip / post action.
  * Product-scoped counts aren't currently available — that table
  * stores (userId, threadId) without a productId, and `threads` rows
  * also lack a productId column. For now the count is per-user, which

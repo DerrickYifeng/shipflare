@@ -67,31 +67,26 @@ export interface StickyComposerProps {
   /** Called with the runId when the user clicks Stop. */
   onCancel?: (runId: string) => void | Promise<void>;
   /**
-   * Phase 2 — the conversation this composer is currently writing to.
-   *
-   * When non-null, sent verbatim on the `/api/team/message` body so
-   * the server routes the message into this exact conversation,
-   * bypassing any pending resume-write race with the fire-and-forget
-   * `POST /api/team/conversation/resume` call. Null means "server
-   * picks" (appropriate for the `+ New session` draft state, where
-   * the UI hasn't committed to a conversation yet).
+   * The conversation this composer is currently writing to. When null
+   * (e.g. `+ New session` draft state), the composer mints a fresh
+   * conversation before posting the first message.
    */
   conversationId?: string | null;
 }
 
 // Route zod limit is 8000 — the product convention is ~500 for steering
-// messages. We match `send-message-form`'s ceiling so the UX is
-// consistent across surfaces.
+// messages so the UX stays conversational.
 const MAX_LEN = 500;
 const MIN_HEIGHT = 28;
 const MAX_HEIGHT = 200;
 
 /**
  * Claude-style composer pinned to the bottom of the AI-team page. POSTs
- * to `/api/team/message` without a memberId so the backend routes to the
- * coordinator (creates a new run or injects into the running one).
- * The user's own message lands in the conversation via SSE — the
- * composer does not optimistically insert a bubble.
+ * the message into the active team conversation via
+ * `/api/team/conversations/:id/messages`; the backend creates a new
+ * coordinator-rooted team_run or injects into the running one. The
+ * user's own bubble lands via SSE — the composer does not insert
+ * optimistically.
  */
 export const StickyComposer = forwardRef<
   StickyComposerHandle,
