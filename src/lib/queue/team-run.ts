@@ -43,11 +43,13 @@ export const teamRunQueue = new Queue<TeamRunJobData>(TEAM_RUN_QUEUE_NAME, {
 
 export type TeamRunTrigger =
   | 'onboarding'
+  | 'kickoff'
   | 'weekly'
   | 'manual'
   | 'phase_transition'
   | 'reply_sweep'
-  | 'draft_post';
+  | 'draft_post'
+  | 'discovery_cron';
 
 export interface EnqueueTeamRunInput {
   teamId: string;
@@ -59,6 +61,13 @@ export interface EnqueueTeamRunInput {
    * `currentMemberId = rootMemberId`.
    */
   rootMemberId: string;
+  /**
+   * The conversation this run lives inside. REQUIRED as of the chat
+   * refactor — there's no longer any "infer which conversation"
+   * fallback path. Callers must create or look up the conversation
+   * before enqueueing a run for it.
+   */
+  conversationId: string;
 }
 
 export interface EnqueueTeamRunResult {
@@ -113,6 +122,7 @@ export async function enqueueTeamRun(
   await db.insert(teamRuns).values({
     id: runId,
     teamId: input.teamId,
+    conversationId: input.conversationId,
     trigger: input.trigger,
     goal: input.goal,
     rootAgentId: input.rootMemberId,
