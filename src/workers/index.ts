@@ -1,6 +1,5 @@
 import { Queue, Worker } from 'bullmq';
 import { getBullMQConnection } from '@/lib/redis';
-import { processDiscovery } from './processors/discovery';
 import { processReview } from './processors/review';
 import { processPosting } from './processors/posting';
 import { processHealthScore } from './processors/health-score';
@@ -10,9 +9,7 @@ import { processXMonitor } from './processors/monitor';
 import { processXEngagement } from './processors/engagement';
 import { processXMetrics } from './processors/metrics';
 import { processXAnalytics } from './processors/analytics';
-import { processCalibration } from './processors/calibrate-discovery';
-import { processSearchSource } from './processors/search-source';
-import { processDiscoveryScan } from './processors/discovery-scan';
+import { processDiscoveryCronFanout } from './processors/discovery-cron-fanout';
 import { processVoiceExtract } from './processors/voice-extract';
 import { processPlanExecute } from './processors/plan-execute';
 import { processPlanExecuteSweeper } from './processors/plan-execute-sweeper';
@@ -26,10 +23,10 @@ import {
   scheduleReplySweepCron,
   type ReplySweepCronJobData,
 } from '@/lib/queue/reply-sweep-cron';
-import { dreamQueue, discoveryQueue, discoveryScanQueue, monitorQueue, metricsQueue, analyticsQueue, codeScanQueue } from '@/lib/queue';
+import { dreamQueue, discoveryScanQueue, monitorQueue, metricsQueue, analyticsQueue, codeScanQueue } from '@/lib/queue';
 import type { PlanExecuteJobData } from '@/lib/queue';
 import { createLogger, loggerForJob } from '@/lib/logger';
-import type { DiscoveryJobData, ReviewJobData, PostingJobData, HealthScoreJobData, DreamJobData, CodeScanJobData, MonitorJobData, SearchSourceJobData, DiscoveryScanJobData, EngagementJobData, MetricsJobData, AnalyticsJobData, CalibrationJobData } from '@/lib/queue/types';
+import type { ReviewJobData, PostingJobData, HealthScoreJobData, DreamJobData, CodeScanJobData, MonitorJobData, DiscoveryScanJobData, EngagementJobData, MetricsJobData, AnalyticsJobData } from '@/lib/queue/types';
 import type { VoiceExtractJobData } from '@/lib/queue/voice-extract';
 
 // ----------------------------------------------------------------
@@ -94,12 +91,6 @@ const BASE_OPTS = {
   lockRenewTime: 30_000,
 };
 
-const discoveryWorker = new Worker<DiscoveryJobData>(
-  'discovery',
-  async (job) => processDiscovery(job),
-  { ...BASE_OPTS, concurrency: 2 },
-);
-
 const reviewWorker = new Worker<ReviewJobData>(
   'review',
   async (job) => processReview(job),
@@ -155,26 +146,10 @@ const analyticsWorker = new Worker<AnalyticsJobData>(
   { ...BASE_OPTS, concurrency: 1 },
 );
 
-const searchSourceWorker = new Worker<SearchSourceJobData>(
-  'search-source',
-  async (job) => processSearchSource(job),
-  { ...BASE_OPTS, concurrency: 6, lockDuration: 45_000 },
-);
-
 const discoveryScanWorker = new Worker<DiscoveryScanJobData>(
   'discovery-scan',
-  async (job) => processDiscoveryScan(job),
+  async (job) => processDiscoveryCronFanout(job),
   { ...BASE_OPTS, concurrency: 2, lockDuration: 15_000 },
-);
-
-const calibrationWorker = new Worker<CalibrationJobData>(
-  'calibration',
-  async (job) => processCalibration(job),
-  {
-    ...BASE_OPTS,
-    concurrency: 1,
-    lockDuration: 30 * 60_000, // 30 min — calibration can run up to 25 min
-  },
 );
 
 const voiceExtractWorker = new Worker<VoiceExtractJobData>(
@@ -231,12 +206,12 @@ const replySweepCronWorker = new Worker<ReplySweepCronJobData>(
 );
 
 const workers = [
-  discoveryWorker, reviewWorker, postingWorker,
+  reviewWorker, postingWorker,
   healthScoreWorker, dreamWorker, codeScanWorker,
   monitorWorker,
-  searchSourceWorker, discoveryScanWorker,
+  discoveryScanWorker,
   engagementWorker,
-  metricsWorker, analyticsWorker, calibrationWorker,
+  metricsWorker, analyticsWorker,
   voiceExtractWorker,
   // Phase 7
   planExecuteWorker, planExecuteSweeperWorker,
@@ -326,30 +301,18 @@ async function scheduleCodeDiff() {
   );
 }
 
-// Schedule discovery: 3x daily (8am, 2pm, 8pm UTC)
-async function scheduleDiscovery() {
-  await discoveryQueue.add(
-    'scheduled-scan',
-    { kind: 'fanout', schemaVersion: 1 },
-    {
-      repeat: { pattern: '0 8,14,20 * * *' },
-      jobId: 'discovery-cron',
-    },
-  );
-}
-
-// Schedule discovery-scan cron baseline: every 4h. Fan-out entry — the
-// processor iterates all users with a channel + product and enqueues a
-// per-user scan with trigger='cron'. This guarantees fresh threads land
-// even for users who haven't opened the app today, without depending on
-// the existing 8/14/20 UTC `discovery` cron (which is the legacy path the
-// slim `discovery.ts` shim still covers for back-compat).
+// Schedule discovery cron baseline: daily at 13:00 UTC. Fan-out entry —
+// the processor iterates all users with a channel + product and enqueues
+// one coordinator-rooted team-run per user (trigger='discovery_cron'),
+// rooted in a per-team rolling 'Discovery' conversation. Replaces the
+// pre-team-run scout-only worker that used to fan out per-platform scan
+// jobs every 4h.
 async function scheduleDiscoveryScan() {
   await discoveryScanQueue.add(
     'fanout',
     { kind: 'fanout', schemaVersion: 1, traceId: 'cron-discovery-scan-fanout' },
     {
-      repeat: { every: 4 * 60 * 60 * 1000 },
+      repeat: { pattern: '0 13 * * *', tz: 'UTC' },
       jobId: 'discovery-scan-fanout-repeat',
     },
   );
@@ -401,7 +364,6 @@ async function scheduleWeeklyReplan() {
 Promise.all([
   scheduleNightlyDream(),
   scheduleCodeDiff(),
-  scheduleDiscovery(),
   scheduleDiscoveryScan(),
   scheduleMonitor(),
   scheduleMetrics(),
@@ -414,7 +376,7 @@ Promise.all([
   log.error('Failed to schedule cron jobs:', err.message);
 });
 
-log.info('All workers started: discovery, review, posting, health-score, dream, code-scan, monitor, search-source, discovery-scan, engagement, metrics, analytics, calibration, voice-extract, plan-execute, plan-execute-sweeper, stale-sweeper, weekly-replan, team-run. Discovery 3x/day, discovery-scan every 4h, plan-execute-sweeper every 1m, stale-sweeper every 1h, weekly-replan Monday 00:00 UTC, all others daily.');
+log.info('All workers started: review, posting, health-score, dream, code-scan, monitor, discovery-scan, engagement, metrics, analytics, voice-extract, plan-execute, plan-execute-sweeper, stale-sweeper, weekly-replan, team-run. discovery-scan daily 13:00 UTC, plan-execute-sweeper every 1m, stale-sweeper every 1h, weekly-replan Monday 00:00 UTC, all others daily.');
 
 // Graceful shutdown
 async function shutdown() {
