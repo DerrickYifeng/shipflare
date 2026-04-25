@@ -71,24 +71,6 @@ export const runSummaryOutputSchema = z.object({
 });
 
 /**
- * Output schema for the community-discovery agent (formerly scout).
- * Returns a list of communities ranked by audience fit.
- */
-export const communityDiscoveryOutputSchema = z.object({
-  communities: z.array(
-    z.object({
-      platform: z.string(),
-      name: z.string(),
-      subscribers: z.number().nullable().optional(),
-      audienceFit: z.number(),
-      activityLevel: z.number(),
-      engageability: z.number(),
-      reason: z.string(),
-    }),
-  ),
-});
-
-/**
  * Output schema for the (retired) community-intel skill. Retained here as
  * a type only — `runFullScan` keeps the pipeline's `communityIntel` field
  * shape for downstream consumers even though no skill produces it today.
@@ -187,7 +169,6 @@ export const voiceExtractorOutputSchema = z.object({
   confidence: z.number().min(0).max(1),
 });
 
-export type CommunityDiscoveryOutput = z.infer<typeof communityDiscoveryOutputSchema>;
 export type CommunityIntelOutput = z.infer<typeof communityIntelOutputSchema>;
 export type PostingOutput = z.infer<typeof postingOutputSchema>;
 export type RunSummaryOutput = z.infer<typeof runSummaryOutputSchema>;
