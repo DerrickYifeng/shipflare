@@ -19,10 +19,9 @@ vi.mock('@/lib/auth', () => ({
   auth: async () => (authUserId ? { user: { id: authUserId } } : null),
 }));
 
-const enqueueCalibrationMock = vi.fn(async () => undefined);
-vi.mock('@/lib/queue', () => ({
-  enqueueCalibration: enqueueCalibrationMock,
-}));
+// `@/lib/queue` no longer needs mocking here — the onboarding commit
+// route does not enqueue any discovery-specific jobs in v3. The rubric
+// is generated lazily by the first discovery-scan.
 
 const deleteDraftMock = vi.fn(async () => undefined);
 vi.mock('@/lib/onboarding-draft', () => ({
@@ -51,6 +50,44 @@ vi.mock('@/lib/platform-config', () => ({
   isPlatformAvailable: (p: string) => ['x', 'reddit'].includes(p),
 }));
 
+// Kickoff team-run mocks. The route now spawns a coordinator-rooted
+// team-run after the transaction commits — these mocks let the happy
+// path actually exercise that code instead of relying on the catch.
+const ensureTeamExistsMock = vi.fn(async () => ({
+  teamId: 'team-1',
+  memberIds: {
+    coordinator: 'member-coord',
+    'growth-strategist': 'member-growth',
+    'content-planner': 'member-planner',
+  },
+  created: false,
+}));
+const provisionTeamForProductMock = vi.fn(async () => ({
+  teamId: 'team-1',
+  preset: 'baseline',
+  roster: ['coordinator'],
+  created: false,
+}));
+vi.mock('@/lib/team-provisioner', () => ({
+  ensureTeamExists: ensureTeamExistsMock,
+  provisionTeamForProduct: provisionTeamForProductMock,
+}));
+
+const enqueueTeamRunMock = vi.fn(async () => ({ runId: 'run-1' }));
+vi.mock('@/lib/queue/team-run', () => ({
+  enqueueTeamRun: enqueueTeamRunMock,
+}));
+
+const createAutomationConversationMock = vi.fn(async () => 'conv-1');
+vi.mock('@/lib/team-conversation-helpers', () => ({
+  createAutomationConversation: createAutomationConversationMock,
+}));
+
+const getUserChannelsMock = vi.fn(async () => [] as string[]);
+vi.mock('@/lib/user-channels', () => ({
+  getUserChannels: getUserChannelsMock,
+}));
+
 // db mock — transaction flow returns a stable productId; post-tx
 // queries return an empty channels list so calibration path is
 // quiet by default.
@@ -71,6 +108,13 @@ vi.mock('@/lib/db', () => ({
       return {
         from: () => ({
           where: (_cond: unknown) => {
+            if (fields.includes('agentType')) {
+              // teamMembers lookup for kickoff team-run dispatch.
+              return [
+                { id: 'member-coord', agentType: 'coordinator' },
+                { id: 'member-planner', agentType: 'content-planner' },
+              ];
+            }
             if (fields.includes('platform')) {
               return selectChannelsWhere();
             }
@@ -226,9 +270,13 @@ beforeEach(() => {
   prevProduct = null;
   postTxChannels = [];
   txShouldThrow = false;
-  enqueueCalibrationMock.mockClear();
   deleteDraftMock.mockClear();
   recordPipelineEventMock.mockClear();
+  ensureTeamExistsMock.mockClear();
+  provisionTeamForProductMock.mockClear();
+  enqueueTeamRunMock.mockClear();
+  createAutomationConversationMock.mockClear();
+  getUserChannelsMock.mockClear();
 });
 
 describe('POST /api/onboarding/commit — auth + rate limit', () => {
@@ -363,6 +411,33 @@ describe('POST /api/onboarding/commit — happy path', () => {
     expect(payload.productId).toBe('prod-new-1');
   });
 
+  it('enqueues a kickoff team-run rooted at coordinator and returns conversationId', async () => {
+    const { POST } = await import('../route');
+    const res = await POST(makeRequest(bodyFor('mvp')));
+    expect(res.status).toBe(200);
+    const payload = (await res.json()) as {
+      conversationId: string | null;
+      enqueued: string[];
+    };
+    expect(typeof payload.conversationId).toBe('string');
+    expect(payload.conversationId).toBe('conv-1');
+    expect(payload.enqueued.some((e) => e.startsWith('team-run:kickoff:'))).toBe(
+      true,
+    );
+    expect(createAutomationConversationMock).toHaveBeenCalledWith(
+      'team-1',
+      'kickoff',
+    );
+    expect(enqueueTeamRunMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        teamId: 'team-1',
+        trigger: 'kickoff',
+        rootMemberId: 'member-coord',
+        conversationId: 'conv-1',
+      }),
+    );
+  });
+
   it('clears the Redis draft after a successful commit', async () => {
     const { POST } = await import('../route');
     await POST(makeRequest(bodyFor('mvp')));
@@ -380,22 +455,9 @@ describe('POST /api/onboarding/commit — happy path', () => {
     );
   });
 
-  it('enqueues calibration when the user has an active channel', async () => {
-    postTxChannels = [{ platform: 'x' }];
-    const { POST } = await import('../route');
-    await POST(makeRequest(bodyFor('mvp')));
-    expect(enqueueCalibrationMock).toHaveBeenCalledWith({
-      userId: 'user-1',
-      productId: 'prod-new-1',
-    });
-  });
-
-  it('skips calibration when no channels are connected', async () => {
-    postTxChannels = [];
-    const { POST } = await import('../route');
-    await POST(makeRequest(bodyFor('mvp')));
-    expect(enqueueCalibrationMock).not.toHaveBeenCalled();
-  });
+  // Discovery v3: legacy calibration-enqueue tests removed. The rubric
+  // is generated lazily on the first discovery-scan, so onboarding no
+  // longer fires a calibration job.
 
   it('accepts launchChannel/usersBucket and records them on the pipeline event', async () => {
     const { POST } = await import('../route');

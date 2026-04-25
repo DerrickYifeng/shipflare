@@ -7,13 +7,12 @@ import {
   products,
   strategicPaths,
   plans,
-  discoveryConfigs,
+  teamMembers,
 } from '@/lib/db/schema';
 import { strategicPathSchema } from '@/tools/schemas';
 import { derivePhase } from '@/lib/launch-phase';
 import { validateLaunchDates } from '@/lib/launch-date-rules';
 import { acquireRateLimit } from '@/lib/rate-limit';
-import { enqueueCalibration } from '@/lib/queue';
 import { getUserChannels } from '@/lib/user-channels';
 import { deleteDraft } from '@/lib/onboarding-draft';
 import { recordPipelineEvent } from '@/lib/pipeline-events';
@@ -23,6 +22,7 @@ import {
   provisionTeamForProduct,
 } from '@/lib/team-provisioner';
 import { enqueueTeamRun } from '@/lib/queue/team-run';
+import { createAutomationConversation } from '@/lib/team-conversation-helpers';
 
 const baseLog = createLogger('api:onboarding:commit');
 
@@ -303,74 +303,67 @@ export async function POST(request: NextRequest): Promise<Response> {
     );
   }
 
-  // Phase B1 (post-coordinator cutover): POST /api/onboarding/plan is
-  // rooted at growth-strategist — it writes the strategic_path and
-  // stops there, no plan_items. This commit endpoint fires a separate
-  // content-planner team-run so plan_items land asynchronously after
-  // the founder approves. /today's tactical-progress-card filters on
-  // trigger IN ('onboarding','weekly','manual','phase_transition')
-  // and counts add_plan_item tool_calls — it picks up this 'weekly'
-  // run naturally.
+  // Post-onboarding kickoff: ONE team-run rooted at coordinator that
+  // dispatches content-planner (week-1 plan_items), community-scout
+  // (live conversations on connected platforms), and reply-drafter
+  // (top-3 replies for queued threads). Visible in /team chat.
+  let kickoffConvId: string | null = null;
   try {
-    const { teamId, memberIds } = await ensureTeamExists(userId, productId);
+    const { teamId } = await ensureTeamExists(userId, productId);
     const channels = await getUserChannels(userId);
-    const itemsGoal =
-      `Plan week 1 plan_items for ${body.product.name}. ` +
+    const memberRows = await db
+      .select({ id: teamMembers.id, agentType: teamMembers.agentType })
+      .from(teamMembers)
+      .where(eq(teamMembers.teamId, teamId));
+    const coordinator = memberRows.find((m) => m.agentType === 'coordinator');
+    if (!coordinator) {
+      throw new Error('coordinator member missing after ensureTeamExists');
+    }
+
+    const goal =
+      `Onboarding kickoff for ${body.product.name}. ` +
       `Strategic path pathId=${strategicPathId}. ` +
       `Connected channels: ${channels.join(', ') || 'none'}. ` +
       `Category: ${body.product.category}. ` +
-      `Follow your tactical-playbook steps 1-5 and call add_plan_item ` +
-      `for every row. Skip writer fan-out (Step 6) on this onboarding ` +
-      `run — the founder reviews items before we pre-draft bodies.`;
-    const { runId: itemsRunId } = await enqueueTeamRun({
+      `Trigger: kickoff. ` +
+      `Follow your kickoff playbook: dispatch content-planner (week-1), ` +
+      `community-scout (scan ${channels.includes('x') ? 'x' : 'connected platforms'}), ` +
+      `then reply-drafter (top-3 replies). Skip drafter if no channels.`;
+    kickoffConvId = await createAutomationConversation(teamId, 'kickoff');
+    const { runId: kickoffRunId } = await enqueueTeamRun({
       teamId,
-      trigger: 'weekly',
-      goal: itemsGoal,
-      rootMemberId: memberIds['content-planner'],
+      trigger: 'kickoff',
+      goal,
+      rootMemberId: coordinator.id,
+      conversationId: kickoffConvId,
     });
-    enqueued.push(`team-run:weekly:${itemsRunId}`);
+    enqueued.push(`team-run:kickoff:${kickoffRunId}`);
     log.info(
-      `enqueued content-planner team-run user=${userId} run=${itemsRunId}`,
+      `enqueued kickoff team-run user=${userId} run=${kickoffRunId} conv=${kickoffConvId}`,
     );
   } catch (err) {
-    // Non-fatal — user already has strategic_path; plan_items can be
-    // generated later via /api/plan/replan. Log and move on.
+    // Non-fatal — user already has strategic_path persisted; they can
+    // manually trigger a scan from /team if this enqueue failed.
     log.warn(
-      `failed to enqueue content-planner team-run (non-fatal) user=${userId}: ${err instanceof Error ? err.message : String(err)}`,
+      `failed to enqueue kickoff team-run (non-fatal) user=${userId}: ${err instanceof Error ? err.message : String(err)}`,
     );
   }
 
+  // Discovery v3: no calibration. The first discovery-scan for this
+  // product generates the onboarding rubric lazily. If the product
+  // context changed, clear the cached rubric so the next scan rebuilds
+  // it against the latest fields.
   if (changed) {
     try {
-      const platforms = await getUserChannels(userId);
-
-      for (const platform of platforms) {
-        await db
-          .insert(discoveryConfigs)
-          .values({
-            userId,
-            platform,
-            calibrationStatus: 'pending',
-          })
-          .onConflictDoUpdate({
-            target: [discoveryConfigs.userId, discoveryConfigs.platform],
-            set: {
-              calibrationStatus: 'pending',
-              calibrationRound: 0,
-              calibrationPrecision: null,
-              calibrationLog: null,
-              updatedAt: new Date(),
-            },
-          });
-      }
-
-      if (platforms.length > 0) {
-        await enqueueCalibration({ userId, productId });
-        for (const p of platforms) enqueued.push(`calibration:${p}`);
-      }
+      const { MemoryStore } = await import('@/memory/store');
+      const { ONBOARDING_RUBRIC_MEMORY_NAME } = await import(
+        '@/lib/discovery/onboarding-rubric'
+      );
+      const store = new MemoryStore(userId, productId);
+      await store.removeEntry(ONBOARDING_RUBRIC_MEMORY_NAME);
     } catch (err) {
       log.warn(
-        `post-commit calibration enqueue failed user=${userId}: ${err instanceof Error ? err.message : String(err)}`,
+        `post-commit rubric clear failed user=${userId}: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }
@@ -413,6 +406,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     {
       success: true,
       productId,
+      conversationId: kickoffConvId,
       enqueued,
     },
     { headers: { 'x-trace-id': traceId } },
