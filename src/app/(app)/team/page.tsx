@@ -11,6 +11,7 @@ import {
   teamRuns,
   teamMessages,
   teamTasks,
+  teamConversations,
 } from '@/lib/db/schema';
 import { EmptyState } from '@/components/ui/empty-state';
 import { getTeamBudgetSnapshot } from '@/lib/team-budget';
@@ -26,7 +27,7 @@ import type {
   TeamRunLookup,
   TeamRunMeta,
 } from './_components/conversation-reducer';
-import type { SessionMeta } from './_components/session-meta';
+import type { ConversationMeta } from './_components/conversation-meta';
 
 export const metadata: Metadata = {
   title: 'My AI Team',
@@ -78,7 +79,12 @@ function extractOutputSummary(output: unknown): string | null {
   return null;
 }
 
-export default async function TeamPage() {
+export default async function TeamPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ conv?: string; from?: string }>;
+}) {
+  const sp = await searchParams;
   const session = await auth();
   if (!session?.user?.id) redirect('/');
   const userId = session.user.id;
@@ -107,7 +113,7 @@ export default async function TeamPage() {
     rawMessages,
     memberCostRows,
     taskRows,
-    sessionRows,
+    conversationRows,
   ] = await Promise.all([
     db
       .select({
@@ -144,6 +150,7 @@ export default async function TeamPage() {
       .select({
         id: teamMessages.id,
         runId: teamMessages.runId,
+        conversationId: teamMessages.conversationId,
         teamId: teamMessages.teamId,
         fromMemberId: teamMessages.fromMemberId,
         toMemberId: teamMessages.toMemberId,
@@ -202,23 +209,15 @@ export default async function TeamPage() {
       .limit(200),
     db
       .select({
-        id: teamRuns.id,
-        trigger: teamRuns.trigger,
-        goal: teamRuns.goal,
-        status: teamRuns.status,
-        startedAt: teamRuns.startedAt,
-        completedAt: teamRuns.completedAt,
-        totalTurns: teamRuns.totalTurns,
+        id: teamConversations.id,
+        title: teamConversations.title,
+        createdAt: teamConversations.createdAt,
+        updatedAt: teamConversations.updatedAt,
       })
-      .from(teamRuns)
-      .where(
-        and(
-          eq(teamRuns.teamId, team.id),
-          ne(teamRuns.trigger, 'onboarding'),
-        ),
-      )
-      .orderBy(desc(teamRuns.startedAt))
-      .limit(20),
+      .from(teamConversations)
+      .where(eq(teamConversations.teamId, team.id))
+      .orderBy(desc(teamConversations.updatedAt))
+      .limit(100),
   ]);
 
   if (members.length === 0) {
@@ -295,6 +294,7 @@ export default async function TeamPage() {
     .map((m) => ({
       id: m.id,
       runId: m.runId,
+      conversationId: m.conversationId ?? null,
       teamId: m.teamId,
       from: m.fromMemberId,
       to: m.toMemberId,
@@ -359,6 +359,7 @@ export default async function TeamPage() {
           status: teamRuns.status,
           startedAt: teamRuns.startedAt,
           completedAt: teamRuns.completedAt,
+          conversationId: teamRuns.conversationId,
         })
         .from(teamRuns)
         .where(
@@ -379,42 +380,34 @@ export default async function TeamPage() {
             ? r.startedAt.toISOString()
             : String(r.startedAt),
         completedAt: isoOrNull(r.completedAt),
+        conversationId: r.conversationId ?? null,
       });
     }
     return map;
   })();
 
-  // Derive a per-run first-prompt title from the initial message window.
-  // `rawMessages` is desc order — iterate in reverse (asc) so the oldest
-  // user_prompt per runId wins. Older sessions outside the 100-msg window
-  // fall back to the trigger label client-side.
-  const titleByRunId = new Map<string, string>();
-  for (let i = rawMessages.length - 1; i >= 0; i -= 1) {
-    const m = rawMessages[i];
-    if (m.type !== 'user_prompt') continue;
-    if (!m.runId) continue;
-    if (titleByRunId.has(m.runId)) continue;
-    const raw = (m.content ?? '').trim().replace(/\s+/g, ' ');
-    if (!raw) continue;
-    titleByRunId.set(
-      m.runId,
-      raw.length > 60 ? `${raw.slice(0, 60).trimEnd()}…` : raw,
-    );
-  }
-
-  const sessions: SessionMeta[] = sessionRows.map((r) => ({
-    id: r.id,
-    trigger: r.trigger,
-    goal: r.goal ?? null,
-    status: r.status as SessionMeta['status'],
-    startedAt:
-      r.startedAt instanceof Date
-        ? r.startedAt.toISOString()
-        : String(r.startedAt),
-    completedAt: isoOrNull(r.completedAt),
-    totalTurns: r.totalTurns ?? 0,
-    title: titleByRunId.get(r.id) ?? null,
+  // ChatGPT-style sidebar: just the conversation list sorted by
+  // updatedAt desc. No per-row status — every thread is always
+  // clickable and continuable.
+  const conversations: ConversationMeta[] = conversationRows.map((c) => ({
+    id: c.id,
+    title: c.title,
+    createdAt:
+      c.createdAt instanceof Date
+        ? c.createdAt.toISOString()
+        : String(c.createdAt),
+    updatedAt:
+      c.updatedAt instanceof Date
+        ? c.updatedAt.toISOString()
+        : String(c.updatedAt),
   }));
+
+  const requestedConv = typeof sp.conv === 'string' ? sp.conv : null;
+  const initialConversationId =
+    (requestedConv && conversations.find((c) => c.id === requestedConv)?.id) ??
+    conversations[0]?.id ??
+    null;
+  const fromOnboarding = sp.from === 'onboarding';
 
   const activeRun = activeRunRows[0] ?? null;
   const lastRun = !activeRun && lastRunRows[0] ? lastRunRows[0] : null;
@@ -463,7 +456,9 @@ export default async function TeamPage() {
       turns={turns}
       taskLookup={taskLookup}
       runLookup={runLookup}
-      sessions={sessions}
+      conversations={conversations}
+      initialConversationId={initialConversationId}
+      fromOnboarding={fromOnboarding}
     />
   );
 }

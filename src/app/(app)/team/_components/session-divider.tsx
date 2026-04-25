@@ -5,7 +5,7 @@ import {
   statusTone,
   toneColor,
   triggerLabel,
-} from './session-meta';
+} from './conversation-meta';
 
 export interface SessionDividerProps {
   runId: string | null;

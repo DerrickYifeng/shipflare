@@ -166,6 +166,7 @@ export interface TeamRunMeta {
   status: string;
   startedAt: string;
   completedAt: string | null;
+  conversationId?: string | null;
 }
 
 export type TeamRunLookup = ReadonlyMap<string, TeamRunMeta>;

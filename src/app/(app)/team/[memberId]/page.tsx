@@ -11,7 +11,6 @@ import {
   ActivityLog,
   type ActivityLogMemberRef,
 } from '../_components/activity-log';
-import { SendMessageForm } from '../_components/send-message-form';
 import { avatarGradientForAgentType } from '../_components/agent-accent';
 import type {
   TeamActivityMessage,
@@ -114,6 +113,7 @@ export default async function TeamMemberPage({ params }: TeamMemberPageProps) {
       .select({
         id: teamMessages.id,
         runId: teamMessages.runId,
+        conversationId: teamMessages.conversationId,
         teamId: teamMessages.teamId,
         fromMemberId: teamMessages.fromMemberId,
         toMemberId: teamMessages.toMemberId,
@@ -145,6 +145,7 @@ export default async function TeamMemberPage({ params }: TeamMemberPageProps) {
   const initialMessages: TeamActivityMessage[] = initialMessageRows.map((m) => ({
     id: m.id,
     runId: m.runId,
+    conversationId: m.conversationId ?? null,
     teamId: m.teamId,
     from: m.fromMemberId,
     to: m.toMemberId,
@@ -270,15 +271,14 @@ export default async function TeamMemberPage({ params }: TeamMemberPageProps) {
         members={rosterRefs}
         initialMessages={initialMessages}
       />
-
-      <div style={{ marginTop: 'var(--sf-space-2xl)' }}>
-        <SendMessageForm
-          teamId={member.teamId}
-          memberId={member.id}
-          recipientName={member.displayName}
-          agentType={member.agentType}
-        />
-      </div>
+      {/*
+        Direct-to-member send form removed with the chat refactor —
+        all composer writes now flow through the per-conversation
+        route. If/when product wants a "ping a specialist" affordance
+        it should be built on top of `POST /api/team/conversations/:id/messages`
+        with `memberId` in the body so it appears inline in the
+        conversation rather than as an orphan member-scoped write.
+      */}
     </main>
   );
 }

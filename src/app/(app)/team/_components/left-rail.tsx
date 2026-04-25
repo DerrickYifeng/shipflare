@@ -4,7 +4,7 @@ import type { CSSProperties } from 'react';
 import { AgentRow, type AgentRowStatus } from './agent-row';
 import { TokenBudget, type BudgetSegment } from './token-budget';
 import { SessionList } from './session-list';
-import type { SessionMeta } from './session-meta';
+import type { ConversationMeta } from './conversation-meta';
 
 export interface LeftRailMember {
   id: string;
@@ -23,12 +23,12 @@ export interface LeftRailProps {
   spentUsd: number;
   weeklyBudgetUsd: number;
   budgetSegments: readonly BudgetSegment[];
-  sessions: readonly SessionMeta[];
-  selectedRunId: string | null;
-  onSelectSession: (runId: string | null) => void;
-  onNewSession: () => void;
-  canCreateSession: boolean;
-  creatingSession: boolean;
+  conversations: readonly ConversationMeta[];
+  selectedConversationId: string | null;
+  onSelectConversation: (conversationId: string) => void;
+  onNewConversation: () => void;
+  canCreate: boolean;
+  creating: boolean;
 }
 
 export function LeftRail({
@@ -39,12 +39,12 @@ export function LeftRail({
   spentUsd,
   weeklyBudgetUsd,
   budgetSegments,
-  sessions,
-  selectedRunId,
-  onSelectSession,
-  onNewSession,
-  canCreateSession,
-  creatingSession,
+  conversations,
+  selectedConversationId,
+  onSelectConversation,
+  onNewConversation,
+  canCreate,
+  creating,
 }: LeftRailProps) {
   const parallelCount = specialists.reduce(
     (n, s) => (typeof s.taskCount === 'number' ? n + s.taskCount : n),
@@ -140,12 +140,12 @@ export function LeftRail({
         <div style={divider} aria-hidden="true" />
 
         <SessionList
-          sessions={sessions}
-          selectedRunId={selectedRunId}
-          onSelect={onSelectSession}
-          onNewSession={onNewSession}
-          canCreateSession={canCreateSession}
-          creatingSession={creatingSession}
+          conversations={conversations}
+          selectedConversationId={selectedConversationId}
+          onSelect={onSelectConversation}
+          onNewConversation={onNewConversation}
+          canCreate={canCreate}
+          creating={creating}
         />
       </div>
 

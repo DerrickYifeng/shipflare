@@ -31,6 +31,7 @@ function msg(
   return {
     id: overrides.id,
     runId: overrides.runId ?? 'run-1',
+    conversationId: overrides.conversationId ?? null,
     teamId: 'team-1',
     from: overrides.from ?? 'coord',
     to: overrides.to ?? null,

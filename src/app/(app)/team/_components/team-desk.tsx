@@ -23,6 +23,7 @@ import {
   type StickyComposerSendResult,
 } from './sticky-composer';
 import { StatusBanner } from './status-banner';
+import { OnboardingBanner } from './onboarding-banner';
 import type { BudgetSegment } from './token-budget';
 import {
   stitchLeadMessages,
@@ -31,8 +32,8 @@ import {
   type TeamRunLookup,
   type TeamRunMeta,
 } from './conversation-reducer';
-import type { SessionMeta } from './session-meta';
-import { useNewSession, type NewSessionResult } from './use-new-session';
+import type { ConversationMeta } from './conversation-meta';
+import { useNewConversation } from './use-new-conversation';
 
 export interface TeamDeskMember {
   id: string;
@@ -47,6 +48,7 @@ export interface TeamDeskMember {
 export interface TeamDeskProps {
   teamId: string;
   coordinatorId: string | null;
+  fromOnboarding?: boolean;
   teamLead: TeamDeskMember | null;
   specialists: readonly TeamDeskMember[];
   initialMessages: TeamActivityMessage[];
@@ -63,7 +65,10 @@ export interface TeamDeskProps {
   turns: number;
   taskLookup?: TaskLookup;
   runLookup?: TeamRunLookup;
-  sessions?: readonly SessionMeta[];
+  /** ChatGPT-style conversation list for the sidebar. */
+  conversations?: readonly ConversationMeta[];
+  /** The conversation id to focus on mount. */
+  initialConversationId?: string | null;
 }
 
 const LEFT_WIDTH = 280;
@@ -71,9 +76,23 @@ const RIGHT_WIDTH = 380;
 const GRID_GAP = 20;
 const H_PAD = 24;
 
+/**
+ * Team desk — ChatGPT-style chat surface. State model:
+ *
+ *   selectedConversationId      ← the ONLY focus state
+ *   conversationList            ← sidebar rows (sort by updatedAt desc)
+ *   allMessages                 ← live SSE stream ∪ per-conversation fetches
+ *   threadMessages              ← allMessages.filter(m.conversationId === selected)
+ *
+ * No runId-keyed UI state, no `runByConv` mapping, no optimistic run
+ * bookkeeping. Runs are a server-side implementation detail; the UI
+ * only ever sees messages, grouped by the conversation they belong to.
+ * Per-run dividers inside the thread are purely cosmetic.
+ */
 export function TeamDesk({
   teamId,
   coordinatorId,
+  fromOnboarding = false,
   teamLead,
   specialists,
   initialMessages,
@@ -89,28 +108,28 @@ export function TeamDesk({
   approvedReady,
   taskLookup,
   runLookup,
-  sessions,
+  conversations,
+  initialConversationId,
 }: TeamDeskProps) {
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(
-    activeRunId ?? null,
-  );
-  // Set by the right-rail Task panel when the user clicks a row whose
-  // run isn't currently selected. Drives (a) Conversation's choice
-  // between jump-to-tail and unstick, and (b) a post-commit effect
-  // below that scrolls + pulse-highlights the target card.
+  // ---------- Focus + sidebar state ----------
+  const [selectedConversationId, setSelectedConversationId] = useState<
+    string | null
+  >(initialConversationId ?? null);
+  const [conversationList, setConversationList] = useState<
+    readonly ConversationMeta[]
+  >(() => conversations ?? []);
   const [pendingFocusMessageId, setPendingFocusMessageId] = useState<
     string | null
   >(null);
-  const [sessionList, setSessionList] = useState<readonly SessionMeta[]>(
-    () => sessions ?? [],
-  );
-  const [runLookupState, setRunLookupState] = useState<TeamRunLookup>(
-    () => runLookup ?? new Map<string, TeamRunMeta>(),
-  );
-  // Client-side draft session id (one at a time). Set when `+ New session`
-  // is clicked, cleared on composer send (draft gets promoted to a real
-  // run) or when the user navigates away from the draft.
-  const [draftSessionId, setDraftSessionId] = useState<string | null>(null);
+
+  // Per-conversation message fetches. When the user clicks an older
+  // conversation whose rows fell off the initial snapshot window, we
+  // load them here; SSE messages are merged on top via `allMessages`.
+  const [fetchedMessages, setFetchedMessages] = useState<
+    TeamActivityMessage[]
+  >([]);
+  const loadedConversationIdsRef = useRef<Set<string>>(new Set());
+
   const composerRef = useRef<StickyComposerHandle | null>(null);
 
   const focusComposer = useCallback(() => {
@@ -128,34 +147,172 @@ export function TeamDesk({
       'error',
     );
   }, [toast]);
-  const { messages, partials, toolInputPartials } = useTeamEvents({
+
+  const { messages: liveMessages, partials, toolInputPartials } = useTeamEvents({
     teamId,
     initialMessages,
     onStall: handleStall,
   });
 
-  // Render backpressure — borrowed from Claude Code's REPL (engine/
-  // screens/REPL.tsx:1318). The stream consumer keeps setting state on
-  // every SSE delta, but the conversation renders against a deferred
-  // snapshot so React's concurrent scheduler can yield the main thread
-  // back to the EventSource callback when deltas arrive faster than the
-  // component can re-render. No hand-written RAF batching required —
-  // React catches the deferred values up automatically when the flood
-  // slows down. Keeps the partials map and messages list in sync for
-  // the renderer while letting the stream breathe.
-  const deferredMessages = useDeferredValue(messages);
+  // Union of SSE stream + on-demand conversation fetches.
+  // De-duped by id; keeps the SSE version (newer) when collision.
+  const allMessages = useMemo<TeamActivityMessage[]>(() => {
+    const byId = new Map<string, TeamActivityMessage>();
+    for (const m of fetchedMessages) byId.set(m.id, m);
+    for (const m of liveMessages) byId.set(m.id, m);
+    return Array.from(byId.values()).sort((a, b) =>
+      a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0,
+    );
+  }, [fetchedMessages, liveMessages]);
+
+  // The ONE thing the conversation component renders.
+  const threadMessages = useMemo<TeamActivityMessage[]>(() => {
+    if (!selectedConversationId) return [];
+    return allMessages.filter(
+      (m) => m.conversationId === selectedConversationId,
+    );
+  }, [allMessages, selectedConversationId]);
+
+  // Render backpressure for the thread view (Claude Code REPL pattern).
+  const deferredThreadMessages = useDeferredValue(threadMessages);
   const deferredPartials = useDeferredValue(partials);
   const deferredToolInputPartials = useDeferredValue(toolInputPartials);
 
-  // Flattened DelegationTask list for the right-rail TaskPanel. We run
-  // stitchLeadMessages here on the live (non-deferred) messages so the
-  // sidebar updates as close to real-time as possible — unlike the
-  // conversation thread, the task panel isn't render-heavy enough to
-  // need backpressure. Pulled across ALL session groups (not just the
-  // one currently selected), so the panel stays useful while the user
-  // is viewing older history.
+  // ---------- Fetch historical messages when a conversation is focused ----------
+  useEffect(() => {
+    if (!selectedConversationId) return;
+    if (loadedConversationIdsRef.current.has(selectedConversationId)) return;
+
+    const cid = selectedConversationId;
+    loadedConversationIdsRef.current.add(cid);
+    let cancelled = false;
+
+    fetch(`/api/team/conversations/${encodeURIComponent(cid)}/messages`, {
+      credentials: 'same-origin',
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((body: {
+        messages?: Array<{
+          id: string;
+          runId: string | null;
+          fromMemberId: string | null;
+          toMemberId: string | null;
+          type: string;
+          content: string | null;
+          metadata: Record<string, unknown> | null;
+          createdAt: string;
+        }>;
+      }) => {
+        if (cancelled || !Array.isArray(body.messages)) return;
+        const mapped: TeamActivityMessage[] = body.messages.map((m) => ({
+          id: m.id,
+          runId: m.runId,
+          conversationId: cid,
+          teamId,
+          from: m.fromMemberId,
+          to: m.toMemberId,
+          type: m.type,
+          content: m.content,
+          metadata: m.metadata,
+          createdAt: m.createdAt,
+        }));
+        setFetchedMessages((prev) => {
+          // Replace any prior fetch for this conversation so reloads
+          // don't accumulate stale rows.
+          const keep = prev.filter((m) => m.conversationId !== cid);
+          return [...keep, ...mapped];
+        });
+      })
+      .catch((err) => {
+        // Allow retry on next click by removing from the loaded set.
+        loadedConversationIdsRef.current.delete(cid);
+        toast(
+          err instanceof Error
+            ? `Couldn't load conversation history: ${err.message}`
+            : 'Network error loading conversation history.',
+          'error',
+        );
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedConversationId, teamId, toast]);
+
+  // ---------- Sidebar reconciliation ----------
+  // Hydrate from server props.
+  useEffect(() => {
+    if (!conversations) return;
+    setConversationList((prev) => {
+      const next = new Map<string, ConversationMeta>();
+      for (const c of prev) next.set(c.id, c);
+      for (const c of conversations) next.set(c.id, c);
+      return Array.from(next.values()).sort((a, b) =>
+        a.updatedAt > b.updatedAt ? -1 : 1,
+      );
+    });
+  }, [conversations]);
+
+  // Bump sidebar `updatedAt` from SSE deltas so the most recently
+  // active conversation floats to the top. No status flags — every
+  // conversation is always clickable and continuable.
+  useEffect(() => {
+    if (liveMessages.length === 0) return;
+    const latestByConv = new Map<string, string>();
+    for (const m of liveMessages) {
+      if (!m.conversationId) continue;
+      const existing = latestByConv.get(m.conversationId);
+      if (!existing || m.createdAt > existing) {
+        latestByConv.set(m.conversationId, m.createdAt);
+      }
+    }
+    if (latestByConv.size === 0) return;
+
+    setConversationList((prev) => {
+      let changed = false;
+      const next = prev.map((c) => {
+        const latest = latestByConv.get(c.id);
+        if (!latest) return c;
+        if (latest <= c.updatedAt) return c;
+        changed = true;
+        return { ...c, updatedAt: latest };
+      });
+      if (!changed) return prev;
+      return [...next].sort((a, b) => (a.updatedAt > b.updatedAt ? -1 : 1));
+    });
+  }, [liveMessages]);
+
+  // Derive title from the first user_prompt in each conversation when
+  // the server hasn't backfilled one yet.
+  const titleByConv = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const m of allMessages) {
+      if (m.type !== 'user_prompt' || !m.conversationId) continue;
+      if (map.has(m.conversationId)) continue;
+      const raw = (m.content ?? '').trim().replace(/\s+/g, ' ');
+      if (!raw) continue;
+      map.set(
+        m.conversationId,
+        raw.length > 60 ? `${raw.slice(0, 60).trimEnd()}…` : raw,
+      );
+    }
+    return map;
+  }, [allMessages]);
+
+  const conversationListWithTitles = useMemo<readonly ConversationMeta[]>(
+    () =>
+      conversationList.map((c) =>
+        c.title ? c : { ...c, title: titleByConv.get(c.id) ?? null },
+      ),
+    [conversationList, titleByConv],
+  );
+
+  // ---------- Delegation tasks (task panel, global view) ----------
   const allDelegationTasks = useMemo<DelegationTask[]>(() => {
-    const nodes = stitchLeadMessages(messages, taskLookup, partials);
+    const nodes = stitchLeadMessages(liveMessages, taskLookup, partials);
     const out: DelegationTask[] = [];
     for (const n of nodes) {
       if (n.kind === 'lead') {
@@ -163,23 +320,87 @@ export function TeamDesk({
       }
     }
     return out;
-  }, [messages, taskLookup, partials]);
+  }, [liveMessages, taskLookup, partials]);
 
-  // Jump-to-task: single-click from the right-rail Task panel must
-  // (a) switch the active run if the target lives elsewhere,
-  // (b) scroll the matching SubtaskCard into view,
-  // (c) fire `sf:task-focus` so the card force-expands.
-  //
-  // Cross-session path: set `pendingFocusMessageId` + `selectedRunId`.
-  // Conversation reads `focusPendingMessageId` in its layout effect
-  // and calls `unstick()` instead of `jumpToBottom()` so the
-  // ResizeObserver doesn't pin back to the tail once the new
-  // session's content measures. The `pendingFocusMessageId` effect
-  // below then performs the scroll + pulse once the new cards are in
-  // the DOM and clears the flag.
-  //
-  // Same-session path: the target card is already rendered, so we
-  // can scroll + dispatch directly without a render round-trip.
+  // ---------- Handlers ----------
+  const handleSelectConversation = useCallback((conversationId: string) => {
+    setSelectedConversationId(conversationId);
+  }, []);
+
+  const handleNewConversationCreated = useCallback(
+    (conv: ConversationMeta) => {
+      setConversationList((prev) => {
+        if (prev.some((c) => c.id === conv.id)) return prev;
+        return [conv, ...prev];
+      });
+      setSelectedConversationId(conv.id);
+      requestAnimationFrame(() => composerRef.current?.focus());
+    },
+    [],
+  );
+
+  const { start: startNewConversation, creating: creatingConversation } =
+    useNewConversation({
+      teamId,
+      onCreated: handleNewConversationCreated,
+      onError: (err) =>
+        toast(
+          err instanceof Error
+            ? `Couldn't start new conversation: ${err.message}`
+            : 'Network error starting new conversation',
+          'error',
+        ),
+    });
+
+  const handleComposerSent = useCallback(
+    (result: StickyComposerSendResult) => {
+      if (!result.conversationId) return;
+      const nowIso = new Date().toISOString();
+      setConversationList((prev) =>
+        prev
+          .map((c) =>
+            c.id === result.conversationId ? { ...c, updatedAt: nowIso } : c,
+          )
+          .sort((a, b) => (a.updatedAt > b.updatedAt ? -1 : 1)),
+      );
+    },
+    [],
+  );
+
+  // Cancellable run — latest user_prompt in the focused thread whose
+  // run hasn't emitted a completion/error yet.
+  const cancellableRunId = useMemo<string | null>(() => {
+    if (threadMessages.length === 0) return null;
+    for (let i = threadMessages.length - 1; i >= 0; i -= 1) {
+      const m = threadMessages[i];
+      if (m.type !== 'user_prompt' || !m.runId) continue;
+      const runId = m.runId;
+      const hasTerminal = threadMessages.some(
+        (x) =>
+          x.runId === runId && (x.type === 'completion' || x.type === 'error'),
+      );
+      return hasTerminal ? null : runId;
+    }
+    return null;
+  }, [threadMessages]);
+
+  // Typing indicator for the focused thread: true when the latest
+  // user_prompt in the thread hasn't yet been answered by a
+  // completion/error event for the same run.
+  const threadIsLive = useMemo(() => {
+    for (let i = threadMessages.length - 1; i >= 0; i -= 1) {
+      const m = threadMessages[i];
+      if (m.type !== 'user_prompt' || !m.runId) continue;
+      const runId = m.runId;
+      const hasTerminal = threadMessages.some(
+        (x) =>
+          x.runId === runId && (x.type === 'completion' || x.type === 'error'),
+      );
+      return !hasTerminal;
+    }
+    return false;
+  }, [threadMessages]);
+
   const focusCardNow = useCallback((messageId: string): void => {
     const el = document.querySelector<HTMLElement>(
       `[data-testid="subtask-card-${messageId}"]`,
@@ -200,22 +421,35 @@ export function TeamDesk({
 
   const handleJumpToTask = useCallback(
     (messageId: string, runId: string | null) => {
-      if (runId && runId !== selectedRunId) {
+      // Find which conversation the target run belongs to by scanning
+      // messages. Falls back to the runLookup prop (initial SSR) when
+      // the run's rows aren't yet in the SSE window.
+      if (!runId) {
+        focusCardNow(messageId);
+        return;
+      }
+      let targetConvId: string | null = null;
+      for (const m of allMessages) {
+        if (m.runId === runId && m.conversationId) {
+          targetConvId = m.conversationId;
+          break;
+        }
+      }
+      if (!targetConvId) {
+        targetConvId = runLookup?.get(runId)?.conversationId ?? null;
+      }
+      if (targetConvId && targetConvId !== selectedConversationId) {
         setPendingFocusMessageId(messageId);
-        setSelectedRunId(runId);
+        setSelectedConversationId(targetConvId);
         return;
       }
       focusCardNow(messageId);
     },
-    [selectedRunId, focusCardNow],
+    [allMessages, runLookup, selectedConversationId, focusCardNow],
   );
 
-  // After a cross-session jump the new SubtaskCards aren't in the DOM
-  // until React commits + the layout effect in Conversation runs
-  // (which un-sticks the scroll). Use a double rAF so this effect
-  // fires after both commit + first paint, then scroll + dispatch
-  // the expand event. The flag is cleared last so Conversation can
-  // resume normal jump-to-tail behaviour on the next session switch.
+  // After a cross-conversation jump, wait for the new cards to hit the
+  // DOM then scroll + pulse the target.
   useEffect(() => {
     if (!pendingFocusMessageId) return;
     let frame1 = 0;
@@ -231,268 +465,6 @@ export function TeamDesk({
       cancelAnimationFrame(frame2);
     };
   }, [pendingFocusMessageId, focusCardNow]);
-
-  // Derive a per-run title from the first `user_prompt` message attributed
-  // to that run. Truncated to 60 chars so it fits the session row. Upgrades
-  // live via SSE: when a freshly-created session's first prompt lands, the
-  // title pops in without a refetch.
-  const titleByRunId = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const m of messages) {
-      if (m.type !== 'user_prompt') continue;
-      if (!m.runId) continue;
-      if (map.has(m.runId)) continue;
-      const raw = (m.content ?? '').trim().replace(/\s+/g, ' ');
-      if (!raw) continue;
-      map.set(m.runId, raw.length > 60 ? `${raw.slice(0, 60).trimEnd()}…` : raw);
-    }
-    return map;
-  }, [messages]);
-
-  const sessionListWithTitles = useMemo<readonly SessionMeta[]>(
-    () =>
-      sessionList.map((s) => ({
-        ...s,
-        title: titleByRunId.get(s.id) ?? s.title ?? null,
-      })),
-    [sessionList, titleByRunId],
-  );
-
-  // SSE-driven run status reconciliation. When a `completion` / `error`
-  // message arrives for a known runId, flip that run (and matching session)
-  // to the terminal status locally so the typing indicator clears without
-  // waiting for a page refresh or refetch. First matching terminal message
-  // wins — subsequent completions for the same runId are no-ops.
-  useEffect(() => {
-    const terminal = new Map<
-      string,
-      { status: 'completed' | 'failed' | 'cancelled'; at: string }
-    >();
-    for (const m of messages) {
-      if (!m.runId) continue;
-      if (terminal.has(m.runId)) continue;
-      if (m.type === 'completion') {
-        terminal.set(m.runId, { status: 'completed', at: m.createdAt });
-      } else if (m.type === 'error') {
-        // Worker stamps `metadata.cancelled = true` on the terminal
-        // error it publishes when a user-initiated cancel unwinds the
-        // run — distinguish so the session rail renders muted instead
-        // of red.
-        const meta = m.metadata;
-        const isCancelled =
-          !!meta && (meta as Record<string, unknown>)['cancelled'] === true;
-        terminal.set(m.runId, {
-          status: isCancelled ? 'cancelled' : 'failed',
-          at: m.createdAt,
-        });
-      }
-    }
-    if (terminal.size === 0) return;
-
-    setRunLookupState((prev) => {
-      let changed = false;
-      const next = new Map(prev);
-      for (const [runId, t] of terminal) {
-        const existing = next.get(runId);
-        if (!existing) continue;
-        if (existing.status === t.status) continue;
-        if (
-          existing.status === 'completed' ||
-          existing.status === 'failed' ||
-          existing.status === 'cancelled'
-        ) {
-          continue;
-        }
-        next.set(runId, {
-          ...existing,
-          status: t.status,
-          completedAt: existing.completedAt ?? t.at,
-        });
-        changed = true;
-      }
-      return changed ? next : prev;
-    });
-
-    setSessionList((prev) => {
-      let changed = false;
-      const next = prev.map((s) => {
-        const t = terminal.get(s.id);
-        if (!t) return s;
-        if (s.status === t.status) return s;
-        if (
-          s.status === 'completed' ||
-          s.status === 'failed' ||
-          s.status === 'cancelled'
-        ) {
-          return s;
-        }
-        changed = true;
-        return {
-          ...s,
-          status: t.status,
-          completedAt: s.completedAt ?? t.at,
-        };
-      });
-      return changed ? next : prev;
-    });
-  }, [messages]);
-
-  // If the parent ever re-renders with a fresh `sessions` prop (e.g. post-SSR
-  // hydration or a navigation refetch), reconcile by merging — server rows
-  // win on `id`, but any locally-optimistic row not yet reflected upstream
-  // stays visible.
-  useEffect(() => {
-    if (!sessions) return;
-    setSessionList((prev) => {
-      const next = new Map<string, SessionMeta>();
-      for (const s of prev) next.set(s.id, s);
-      for (const s of sessions) next.set(s.id, s);
-      return Array.from(next.values());
-    });
-  }, [sessions]);
-
-  useEffect(() => {
-    if (!runLookup) return;
-    setRunLookupState((prev) => {
-      const next = new Map<string, TeamRunMeta>(prev);
-      for (const [id, run] of runLookup) next.set(id, run);
-      return next;
-    });
-  }, [runLookup]);
-
-  const handleSelectSession = useCallback(
-    (runId: string | null) => {
-      setSelectedRunId(runId);
-      // Navigating away from an unbriefed draft tosses it — the rail would
-      // otherwise accumulate phantom placeholders every time the user
-      // changes their mind.
-      if (draftSessionId && runId !== draftSessionId) {
-        setSessionList((prev) => prev.filter((s) => s.id !== draftSessionId));
-        setDraftSessionId(null);
-      }
-    },
-    [draftSessionId],
-  );
-
-  const handleDraftCreated = useCallback(({ draftId }: NewSessionResult) => {
-    const startedAt = new Date().toISOString();
-    const draftRow: SessionMeta = {
-      id: draftId,
-      trigger: 'manual',
-      goal: null,
-      status: 'draft',
-      startedAt,
-      completedAt: null,
-      totalTurns: 0,
-      title: null,
-    };
-    setSessionList((prev) => {
-      // Only one draft at a time — previous draft gets replaced.
-      const withoutPrevDraft = prev.filter((s) => s.status !== 'draft');
-      return [draftRow, ...withoutPrevDraft];
-    });
-    setDraftSessionId(draftId);
-    setSelectedRunId(draftId);
-    requestAnimationFrame(() => composerRef.current?.focus());
-  }, []);
-
-  const insertOptimisticRun = useCallback((result: {
-    runId: string;
-    alreadyRunning: boolean;
-  }) => {
-    setSelectedRunId(result.runId);
-    requestAnimationFrame(() => composerRef.current?.focus());
-    if (result.alreadyRunning) return;
-
-    const nowIso = new Date().toISOString();
-    const optimistic: SessionMeta = {
-      id: result.runId,
-      trigger: 'manual',
-      goal: null,
-      status: 'running',
-      startedAt: nowIso,
-      completedAt: null,
-      totalTurns: 0,
-      title: null,
-    };
-    setSessionList((prev) => {
-      if (prev.some((s) => s.id === result.runId)) return prev;
-      return [optimistic, ...prev];
-    });
-    const optimisticRun: TeamRunMeta = {
-      id: result.runId,
-      trigger: 'manual',
-      goal: null,
-      status: 'running',
-      startedAt: nowIso,
-      completedAt: null,
-    };
-    setRunLookupState((prev) => {
-      if (prev.has(result.runId)) return prev;
-      const next = new Map<string, TeamRunMeta>(prev);
-      next.set(result.runId, optimisticRun);
-      return next;
-    });
-  }, []);
-
-  const { start: startNewSession, creating: creatingSession } = useNewSession({
-    onCreated: handleDraftCreated,
-  });
-
-  const handleComposerSent = useCallback(
-    (result: StickyComposerSendResult) => {
-      if (!result.runId) return;
-      // If the user was writing in a draft session, the composer's send
-      // promotes it: drop the placeholder row and install the real run in
-      // its place. The rail momentarily ordering stays stable because the
-      // new optimistic row is also prepended.
-      if (draftSessionId) {
-        setSessionList((prev) => prev.filter((s) => s.id !== draftSessionId));
-        setDraftSessionId(null);
-      }
-      insertOptimisticRun({
-        runId: result.runId,
-        alreadyRunning: result.alreadyRunning,
-      });
-    },
-    [draftSessionId, insertOptimisticRun],
-  );
-
-  // Defensive: if the selected run vanished from the list (deletion, stale
-  // client state), fall back to the ALL view instead of rendering a dead
-  // selection that no session row can highlight.
-  useEffect(() => {
-    if (selectedRunId === null) return;
-    const stillThere = sessionList.some((s) => s.id === selectedRunId);
-    if (!stillThere) setSelectedRunId(null);
-  }, [selectedRunId, sessionList]);
-
-  // `isLive` from SSR is frozen at page render — when a run finishes
-  // client-side (via SSE terminal reconciliation) it never flips back
-  // false, so the + New session button would be disabled forever. Derive
-  // a live version from the current session list instead. Pending/running
-  // session rows count; drafts don't (they're client-only placeholders).
-  const anySessionRunning = useMemo(
-    () =>
-      sessionList.some(
-        (s) => s.status === 'running' || s.status === 'pending',
-      ),
-    [sessionList],
-  );
-  const canCreateSession = !anySessionRunning && !creatingSession;
-
-  // The composer's Stop button shows only when the selected session is
-  // the one currently running — otherwise the button would target a
-  // session the user can't see, which is confusing. Draft sessions are
-  // excluded by the status check (they're client-only placeholders).
-  const cancellableRunId = useMemo<string | null>(() => {
-    if (!selectedRunId) return null;
-    const selected = sessionList.find((s) => s.id === selectedRunId);
-    if (!selected) return null;
-    return selected.status === 'running' || selected.status === 'pending'
-      ? selected.id
-      : null;
-  }, [selectedRunId, sessionList]);
 
   const handleCancelRun = useCallback(
     async (runId: string) => {
@@ -527,10 +499,6 @@ export function TeamDesk({
     [toast],
   );
 
-  // Per-subtask cancel — fires against the task-scoped endpoint. The
-  // worker publishes a synthetic tool_result with metadata.cancelled so
-  // the SubtaskCard flips to CANCELLED on the next SSE tick without
-  // waiting for a refetch.
   const handleCancelTask = useCallback(
     async (taskId: string) => {
       try {
@@ -547,9 +515,7 @@ export function TeamDesk({
           toast(
             detail.error === 'task_not_found'
               ? "Couldn't find that subtask to cancel."
-              : `Couldn't cancel subtask: ${
-                  detail.error ?? `HTTP ${res.status}`
-                }`,
+              : `Couldn't cancel subtask: ${detail.error ?? `HTTP ${res.status}`}`,
             'error',
           );
         }
@@ -565,9 +531,6 @@ export function TeamDesk({
     [toast],
   );
 
-  // Per-subtask retry — spawns a fresh independent run with the same
-  // subagent + prompt. We jump the session rail to the new run so the
-  // user lands where the action actually shipped.
   const handleRetryTask = useCallback(
     async (taskId: string) => {
       try {
@@ -584,23 +547,27 @@ export function TeamDesk({
           toast(
             detail.error === 'task_not_found'
               ? "Couldn't find that subtask to retry."
-              : `Couldn't retry subtask: ${
-                  detail.error ?? `HTTP ${res.status}`
-                }`,
+              : `Couldn't retry subtask: ${detail.error ?? `HTTP ${res.status}`}`,
             'error',
           );
           return;
         }
         const body = (await res.json().catch(() => ({}))) as {
           runId?: string;
-          alreadyRunning?: boolean;
+          conversationId?: string | null;
         };
-        if (body.runId) {
-          insertOptimisticRun({
-            runId: body.runId,
-            alreadyRunning: !!body.alreadyRunning,
-          });
-          toast('Retrying subtask in a new session.', 'success');
+        if (typeof body.conversationId === 'string') {
+          const convId = body.conversationId;
+          const nowIso = new Date().toISOString();
+          setConversationList((prev) =>
+            prev
+              .map((c) =>
+                c.id === convId ? { ...c, updatedAt: nowIso } : c,
+              )
+              .sort((a, b) => (a.updatedAt > b.updatedAt ? -1 : 1)),
+          );
+          setSelectedConversationId(convId);
+          toast('Retrying subtask.', 'success');
         }
       } catch (err) {
         toast(
@@ -611,19 +578,13 @@ export function TeamDesk({
         );
       }
     },
-    [toast, insertOptimisticRun],
+    [toast],
   );
 
   const allMembers = useMemo<TeamDeskMember[]>(
     () => (teamLead ? [teamLead, ...specialists] : [...specialists]),
     [teamLead, specialists],
   );
-
-  const memberLookup = useMemo(() => {
-    const map = new Map<string, TeamDeskMember>();
-    for (const m of allMembers) map.set(m.id, m);
-    return map;
-  }, [allMembers]);
 
   const conversationMembers = useMemo<ConversationMember[]>(
     () =>
@@ -660,11 +621,58 @@ export function TeamDesk({
     [specialists],
   );
 
-  // Viewport-bounded shell. The team desk fits the app canvas (below the
-  // 56px TopNav) and scroll happens per-column inside the grid instead of
-  // the whole page rolling up. That's what lets the chat column have its
-  // own thin scrollbar on the right — Claude-style — while the rails and
-  // composer stay put.
+  // Build a fresh runLookup for the thread view: every run seen in
+  // the filtered thread. Starts from the server-supplied lookup so
+  // historical dividers keep their `trigger` / `goal` metadata.
+  const threadRunLookup = useMemo<TeamRunLookup>(() => {
+    const map = new Map<string, TeamRunMeta>();
+    if (runLookup) {
+      for (const [id, run] of runLookup) {
+        if (run.conversationId === selectedConversationId) map.set(id, run);
+      }
+    }
+    for (const m of threadMessages) {
+      if (!m.runId || map.has(m.runId)) continue;
+      map.set(m.runId, {
+        id: m.runId,
+        trigger: 'manual',
+        goal: null,
+        status: 'running',
+        startedAt: m.createdAt,
+        completedAt: null,
+        conversationId: selectedConversationId,
+      });
+    }
+    // Update status from terminal events within the thread.
+    for (const m of threadMessages) {
+      if (!m.runId) continue;
+      const run = map.get(m.runId);
+      if (!run) continue;
+      if (m.type === 'completion') {
+        map.set(m.runId, {
+          ...run,
+          status: 'completed',
+          completedAt: run.completedAt ?? m.createdAt,
+        });
+      } else if (m.type === 'error') {
+        const meta = m.metadata;
+        const cancelled =
+          meta && (meta as Record<string, unknown>)['cancelled'] === true;
+        map.set(m.runId, {
+          ...run,
+          status: cancelled ? 'cancelled' : 'failed',
+          completedAt: run.completedAt ?? m.createdAt,
+        });
+      }
+    }
+    return map;
+  }, [runLookup, threadMessages, selectedConversationId]);
+
+  const noopSelectMember = useCallback((_: string) => {
+    /* workspace deleted — members are no longer selectable here */
+  }, []);
+
+  // ---------- Layout ----------
   const rootStyle: CSSProperties = {
     height: 'calc(100vh - 56px)',
     padding: `24px ${H_PAD}px 0`,
@@ -683,18 +691,6 @@ export function TeamDesk({
     minHeight: 0,
   };
 
-  // Left-rail / conversation still accept `activeMemberId` + `onSelect`
-  // props from an older workspace-panel flow. Nothing selects agents
-  // anymore (Phase 5 deleted the panel), but the prop signature lives
-  // on — Phase 6's TaskPanel / future use could put it back. Stub with
-  // a no-op so callers needn't know which state world they're in.
-  const noopSelectMember = useCallback((_: string) => {
-    /* workspace deleted — members are no longer selectable here */
-  }, []);
-
-  // Each column owns its own overflow so content never breaks out into the
-  // page scroll. The center column carries the primary scrollbar; the
-  // rails only scroll internally when their content runs long.
   const columnBase: CSSProperties = {
     minHeight: 0,
     minWidth: 0,
@@ -712,6 +708,8 @@ export function TeamDesk({
     overflowY: 'auto',
   };
 
+  const canCreate = !creatingConversation;
+
   return (
     <div className="ai-team-root" style={rootStyle}>
       <StatusBanner
@@ -723,6 +721,7 @@ export function TeamDesk({
         isLive={isLive}
         leadMessage={leadMessage}
       />
+      {fromOnboarding && <OnboardingBanner />}
 
       <div className="ai-team-grid" style={gridStyle}>
         <div className="ai-team-left" style={columnBase}>
@@ -734,12 +733,12 @@ export function TeamDesk({
             spentUsd={spentUsd}
             weeklyBudgetUsd={weeklyBudgetUsd}
             budgetSegments={budgetSegments}
-            sessions={sessionListWithTitles}
-            selectedRunId={selectedRunId}
-            onSelectSession={handleSelectSession}
-            onNewSession={startNewSession}
-            canCreateSession={canCreateSession}
-            creatingSession={creatingSession}
+            conversations={conversationListWithTitles}
+            selectedConversationId={selectedConversationId}
+            onSelectConversation={handleSelectConversation}
+            onNewConversation={startNewConversation}
+            canCreate={canCreate}
+            creating={creatingConversation}
           />
         </div>
 
@@ -747,15 +746,14 @@ export function TeamDesk({
           <Conversation
             members={conversationMembers}
             coordinatorId={coordinatorId}
-            messages={deferredMessages}
+            messages={deferredThreadMessages}
             partials={deferredPartials}
             toolInputPartials={deferredToolInputPartials}
             taskLookup={taskLookup}
-            runLookup={runLookupState}
+            runLookup={threadRunLookup}
             activeMemberId={null}
             onSelectMember={noopSelectMember}
-            selectedRunId={selectedRunId}
-            isLive={anySessionRunning}
+            isLive={threadIsLive}
             onPrefillComposer={prefillComposer}
             onFocusComposer={focusComposer}
             focusPendingMessageId={pendingFocusMessageId}
@@ -787,16 +785,10 @@ export function TeamDesk({
         onSent={handleComposerSent}
         cancellableRunId={cancellableRunId}
         onCancel={handleCancelRun}
+        conversationId={selectedConversationId}
       />
 
       <style jsx global>{`
-        /*
-         * Fixed-viewport layout: the team desk holds everything in one
-         * screen and each column (left rail / conversation / right rail)
-         * owns its own scroll region. The left rail's sticky / max-height
-         * from the old page-scroll world is overridden here so it fills
-         * its grid cell cleanly.
-         */
         .ai-team-left > aside {
           position: relative !important;
           top: auto !important;
@@ -804,13 +796,6 @@ export function TeamDesk({
           height: 100%;
         }
 
-        /*
-         * Claude-style thin scrollbar applied to every scroll region on
-         * the team desk — the conversation column, the rail interiors,
-         * and the right-column overflow. Subtle by default (12% alpha),
-         * fades in on hover. Using specific selectors keeps this from
-         * leaking into other app surfaces that want the native bar.
-         */
         .ai-team-root,
         .ai-team-root *,
         .ai-team-root *::before,
@@ -842,12 +827,6 @@ export function TeamDesk({
         .ai-team-root *::-webkit-scrollbar-thumb:active {
           background-color: rgba(0, 0, 0, 0.48);
         }
-        /*
-         * Below 1024px the right rail wraps to a new row, so a single
-         * fixed-viewport shell can't contain it anymore. Fall back to
-         * page-scroll: root loses its height cap, columns stop
-         * scrolling internally, and the browser handles overflow.
-         */
         @media (max-width: 1024px) {
           .ai-team-root {
             height: auto !important;

@@ -55,7 +55,6 @@ export interface ConversationProps {
   runLookup?: TeamRunLookup;
   activeMemberId: string | null;
   onSelectMember: (memberId: string) => void;
-  selectedRunId?: string | null;
   /** True when any run is running — drives the typing indicator. */
   isLive?: boolean;
   /**
@@ -100,7 +99,6 @@ export function Conversation({
   runLookup,
   activeMemberId,
   onSelectMember,
-  selectedRunId = null,
   isLive = false,
   onPrefillComposer,
   onFocusComposer,
@@ -124,17 +122,10 @@ export function Conversation({
     [nodes, runLookup],
   );
 
-  // `selectedRunId === null` is the landing / no-selection state — render
-  // an empty thread with the welcome copy instead of dumping every past
-  // session's messages on top of each other. Aggregating across sessions
-  // was misleading as a default and made a fresh visit feel noisy.
-  const visibleGroups: SessionGroup[] = useMemo(
-    () =>
-      selectedRunId === null
-        ? []
-        : groups.filter((g) => g.runId === selectedRunId),
-    [groups, selectedRunId],
-  );
+  // The caller (TeamDesk) pre-filters `messages` to the selected
+  // conversation. This component just renders every group it receives
+  // — no visibility decisions here. Empty thread → welcome screen.
+  const visibleGroups: SessionGroup[] = groups;
 
   // Decide whether to show the typing indicator. Shown when:
   // - a run is live, AND
@@ -177,13 +168,19 @@ export function Conversation({
   // specific SubtaskCard, skip the tail-jump AND un-stick the
   // ResizeObserver so the target card stays in view once TeamDesk's
   // focus effect calls scrollIntoView.
+  // Jump to the tail whenever the thread identity changes (first user
+  // message's runId is a stable-enough proxy for "this is a new thread").
+  // Exception: when the right-rail Task panel requested a jump to a
+  // specific SubtaskCard, skip the tail-jump AND un-stick the
+  // ResizeObserver so the target card stays in view.
+  const firstRunId = visibleGroups[0]?.runId ?? null;
   useLayoutEffect(() => {
     if (focusPendingMessageId) {
       unstick();
       return;
     }
     jumpToBottom();
-  }, [selectedRunId, jumpToBottom, unstick, focusPendingMessageId]);
+  }, [firstRunId, jumpToBottom, unstick, focusPendingMessageId]);
 
   // Scroll container for the thread. The team desk grid gives each
   // column a bounded height; the conversation's own overflow-y keeps
@@ -330,17 +327,10 @@ export function Conversation({
       <div style={threadWrap}>
         <div style={thread} ref={contentRef} data-testid="conversation-thread-content">
           {visibleGroups.length === 0 ? (
-            selectedRunId !== null ? (
-              <EmptySession
-                onPrefillComposer={onPrefillComposer}
-                onFocusComposer={onFocusComposer}
-              />
-            ) : (
-              <EmptyConversation
-                onPrefillComposer={onPrefillComposer}
-                onFocusComposer={onFocusComposer}
-              />
-            )
+            <EmptyConversation
+              onPrefillComposer={onPrefillComposer}
+              onFocusComposer={onFocusComposer}
+            />
           ) : (
             <>
               {visibleGroups.map((group) => (
@@ -450,28 +440,6 @@ function EmptyConversation({
   return (
     <div style={wrap}>
       <span>Brief your Team Lead below to kick off the first run.</span>
-      <SuggestionChips
-        onPrefillComposer={onPrefillComposer}
-        onFocusComposer={onFocusComposer}
-      />
-    </div>
-  );
-}
-
-function EmptySession({ onPrefillComposer, onFocusComposer }: EmptyStateProps) {
-  const wrap: CSSProperties = {
-    padding: '40px 20px',
-    textAlign: 'center',
-    color: 'var(--sf-fg-3)',
-    fontSize: 13,
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: 14,
-  };
-  return (
-    <div style={wrap} data-testid="empty-session-placeholder">
-      <span>This session is waiting for your first brief.</span>
       <SuggestionChips
         onPrefillComposer={onPrefillComposer}
         onFocusComposer={onFocusComposer}

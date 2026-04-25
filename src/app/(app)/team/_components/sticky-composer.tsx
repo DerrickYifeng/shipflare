@@ -29,6 +29,16 @@ export interface StickyComposerSendResult {
   runId: string | null;
   /** True when the server returned an existing run instead of creating one. */
   alreadyRunning: boolean;
+  /**
+   * Phase 2: the conversation this message was attached to. Callers
+   * stamp this onto the optimistic `SessionMeta` they insert into the
+   * rail so `groupRunsByConversation` correctly collapses the new
+   * run with sibling runs in the same conversation — without it, the
+   * optimistic row has `conversationId: null` and renders as its own
+   * standalone session entry, producing the "new session jumped in"
+   * illusion after the user replies to an old thread.
+   */
+  conversationId: string | null;
 }
 
 export interface StickyComposerProps {
@@ -56,6 +66,17 @@ export interface StickyComposerProps {
   cancellableRunId?: string | null;
   /** Called with the runId when the user clicks Stop. */
   onCancel?: (runId: string) => void | Promise<void>;
+  /**
+   * Phase 2 — the conversation this composer is currently writing to.
+   *
+   * When non-null, sent verbatim on the `/api/team/message` body so
+   * the server routes the message into this exact conversation,
+   * bypassing any pending resume-write race with the fire-and-forget
+   * `POST /api/team/conversation/resume` call. Null means "server
+   * picks" (appropriate for the `+ New session` draft state, where
+   * the UI hasn't committed to a conversation yet).
+   */
+  conversationId?: string | null;
 }
 
 // Route zod limit is 8000 — the product convention is ~500 for steering
@@ -86,6 +107,7 @@ export const StickyComposer = forwardRef<
     onSent,
     cancellableRunId,
     onCancel,
+    conversationId,
   },
   ref,
 ) {
@@ -158,14 +180,52 @@ export const StickyComposer = forwardRef<
     setSubmitting(true);
     setValue('');
     try {
-      const res = await fetch('/api/team/message', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ teamId, message: payload }),
-      });
+      // Chat refactor: messages flow through
+      // `/api/team/conversations/:id/messages`. If the user has no
+      // focused conversation (landing state, no rows yet), mint one
+      // first, then POST the message into it. The server never has to
+      // guess which thread a message belongs to.
+      let targetConversationId = conversationId;
+      if (!targetConversationId) {
+        const createRes = await fetch('/api/team/conversations', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ teamId }),
+        });
+        if (!createRes.ok) {
+          const detail = (await createRes.json().catch(() => ({}))) as {
+            error?: string;
+          };
+          toast(
+            typeof detail?.error === 'string'
+              ? detail.error
+              : `Couldn't start conversation: HTTP ${createRes.status}`,
+            'error',
+          );
+          setValue((current) => (current.length === 0 ? payload : current));
+          return;
+        }
+        const created = (await createRes.json()) as { id?: string };
+        if (typeof created.id !== 'string') {
+          toast("Couldn't start conversation: malformed response.", 'error');
+          setValue((current) => (current.length === 0 ? payload : current));
+          return;
+        }
+        targetConversationId = created.id;
+      }
+
+      const res = await fetch(
+        `/api/team/conversations/${encodeURIComponent(targetConversationId)}/messages`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ teamId, message: payload }),
+        },
+      );
       const body = (await res.json().catch(() => ({}))) as {
         runId?: string | null;
         alreadyRunning?: boolean;
+        conversationId?: string | null;
         error?: string;
       };
       if (!res.ok) {
@@ -181,6 +241,10 @@ export const StickyComposer = forwardRef<
       onSent?.({
         runId: typeof body.runId === 'string' ? body.runId : null,
         alreadyRunning: body.alreadyRunning === true,
+        conversationId:
+          typeof body.conversationId === 'string'
+            ? body.conversationId
+            : targetConversationId,
       });
     } catch (err) {
       const msg =
@@ -192,7 +256,7 @@ export const StickyComposer = forwardRef<
     } finally {
       setSubmitting(false);
     }
-  }, [disabled, teamId, toast, trimmed, onSent]);
+  }, [disabled, teamId, toast, trimmed, onSent, conversationId]);
 
   const handleSubmit = useCallback(
     (evt: FormEvent<HTMLFormElement>) => {
