@@ -7,13 +7,12 @@ import { redditGetThreadTool } from './RedditGetThreadTool/RedditGetThreadTool';
 import { redditGetRulesTool } from './RedditGetRulesTool/RedditGetRulesTool';
 import { redditHotPostsTool } from './RedditHotPostsTool/RedditHotPostsTool';
 import { redditSubmitPostTool } from './RedditSubmitPostTool/RedditSubmitPostTool';
-import { generateQueriesTool } from './GenerateQueriesTool/GenerateQueriesTool';
-import { scoreThreadsTool } from './ScoreThreadsTool/ScoreThreadsTool';
 import { classifyIntentTool } from './ClassifyIntentTool/ClassifyIntentTool';
 import { hnSearchTool } from './HnSearchTool/HnSearchTool';
 import { hnGetThreadTool } from './HnGetThreadTool/HnGetThreadTool';
 import { webSearchTool } from './WebSearchTool/WebSearchTool';
 import { xSearchTool } from './XSearchTool/XSearchTool';
+import { xSearchBatchTool } from './XSearchTool/XSearchBatchTool';
 import { xPostTool } from './XPostTool/XPostTool';
 import { xGetUserTweetsTool } from './XGetUserTweetsTool/XGetUserTweetsTool';
 import { xGetTweetTool } from './XGetTweetTool/XGetTweetTool';
@@ -36,6 +35,8 @@ import { queryTeamStatusTool } from './QueryTeamStatusTool/QueryTeamStatusTool';
 import { draftPostTool } from './DraftPostTool/DraftPostTool';
 import { findThreadsTool } from './FindThreadsTool/FindThreadsTool';
 import { draftReplyTool } from './DraftReplyTool/DraftReplyTool';
+import { runDiscoveryScanTool } from './RunDiscoveryScanTool/RunDiscoveryScanTool';
+import { draftSingleReplyTool } from './DraftReplyTool/DraftSingleReplyTool';
 
 /**
  * Central tool registry for ShipFlare agents.
@@ -60,6 +61,7 @@ registry.register(hnGetThreadTool);
 
 // X tools
 registry.register(xSearchTool);
+registry.register(xSearchBatchTool);
 registry.register(xPostTool);
 registry.register(xGetUserTweetsTool);
 registry.register(xGetTweetTool);
@@ -68,8 +70,6 @@ registry.register(xGetMetricsTool);
 registry.register(xThreadPostTool);
 
 // Generic tools
-registry.register(generateQueriesTool);
-registry.register(scoreThreadsTool);
 registry.register(classifyIntentTool);
 registry.register(webSearchTool);
 
@@ -107,6 +107,17 @@ registry.register(queryTeamStatusTool);
 registry.register(draftPostTool);
 registry.register(findThreadsTool);
 registry.register(draftReplyTool);
+
+// ---------------------------------------------------------------------------
+// Unified discovery pipeline tools (team-run wrappers). `run_discovery_scan`
+// wraps `runDiscoveryV3` so a community-scout agent can drive discovery
+// inline from a team-run loop. `draft_single_reply` wraps the
+// draft-single-reply skill (full opportunity-judge + drafter + ai-slop
+// validation pipeline) — distinct from the persist-only `draft_reply`
+// above, which the caller uses when it has already drafted the body.
+// ---------------------------------------------------------------------------
+registry.register(runDiscoveryScanTool);
+registry.register(draftSingleReplyTool);
 
 export { registry };
 
