@@ -279,6 +279,7 @@ describe('useTeamEvents', () => {
           {
             id: 'seed',
             runId: null,
+            conversationId: null,
             teamId: 'team-1',
             from: 'coord',
             to: null,

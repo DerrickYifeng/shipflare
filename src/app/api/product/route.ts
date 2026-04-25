@@ -3,11 +3,9 @@ import { z } from 'zod';
 import { desc, eq } from 'drizzle-orm';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { products, voiceProfiles, discoveryConfigs } from '@/lib/db/schema';
+import { products, voiceProfiles } from '@/lib/db/schema';
 import { derivePhase, type ProductState } from '@/lib/launch-phase';
 import { auditSeo } from '@/tools/seo-audit';
-import { enqueueCalibration } from '@/lib/queue';
-import { getUserChannels } from '@/lib/user-channels';
 import { acquireRateLimit } from '@/lib/rate-limit';
 import { createLogger, loggerForRequest } from '@/lib/logger';
 
@@ -110,8 +108,9 @@ export async function GET() {
  *     overwrites the provided fields.
  *   - `url` triggers an SEO audit, which is stored on the row.
  *   - If the product's "core identity" (name, description, valueProp,
- *     keywords) changes, all of the user's connected platforms get a
- *     calibration reset + one enqueueCalibration call.
+ *     keywords) changes, the cached discovery onboarding rubric is
+ *     evicted so the next discovery-scan regenerates it against the
+ *     new product context.
  *   - Phase/state changes do NOT go through here — those hit
  *     POST /api/product/phase which owns the planner replan.
  *
@@ -224,6 +223,9 @@ export async function PATCH(request: NextRequest): Promise<Response> {
     })
     .where(eq(products.userId, userId));
 
+  // Discovery v3: if product core changed, delete the cached onboarding
+  // rubric so the next discovery-scan regenerates it against the new
+  // product context. No calibration / discovery_configs anymore.
   const coreChanged =
     prev.name !== finalName ||
     prev.description !== finalDesc ||
@@ -232,31 +234,21 @@ export async function PATCH(request: NextRequest): Promise<Response> {
       JSON.stringify([...finalKeywords].sort());
 
   if (coreChanged) {
-    const platforms = await getUserChannels(userId);
-    for (const platform of platforms) {
-      await db
-        .insert(discoveryConfigs)
-        .values({
-          userId,
-          platform,
-          calibrationStatus: 'pending',
-        })
-        .onConflictDoUpdate({
-          target: [discoveryConfigs.userId, discoveryConfigs.platform],
-          set: {
-            calibrationStatus: 'pending',
-            calibrationRound: 0,
-            calibrationPrecision: null,
-            calibrationLog: null,
-            updatedAt: new Date(),
-          },
-        });
-    }
-
-    if (platforms.length > 0) {
-      await enqueueCalibration({ userId, productId: prev.id });
+    try {
+      const { MemoryStore } = await import('@/memory/store');
+      const { ONBOARDING_RUBRIC_MEMORY_NAME } = await import(
+        '@/lib/discovery/onboarding-rubric'
+      );
+      const store = new MemoryStore(userId, prev.id);
+      await store.removeEntry(ONBOARDING_RUBRIC_MEMORY_NAME);
       log.info(
-        `Enqueued calibration product=${prev.id} platforms=${platforms.join(',')}`,
+        `cleared discovery rubric for product ${prev.id} (core fields changed — will regenerate on next scan)`,
+      );
+    } catch (err) {
+      log.warn(
+        `failed to clear discovery rubric for product ${prev.id}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
       );
     }
   }

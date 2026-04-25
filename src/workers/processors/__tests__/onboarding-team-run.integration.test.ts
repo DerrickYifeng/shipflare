@@ -95,6 +95,18 @@ vi.mock('@/lib/redis', () => ({
   getBullMQConnection: () => ({ on: () => {} }),
 }));
 
+vi.mock('@/lib/platform-deps', () => ({
+  createTeamPlatformDeps: async () => ({}),
+}));
+
+vi.mock('@/lib/team-conversation', () => ({
+  loadConversationHistory: async () => [],
+}));
+
+vi.mock('@/lib/team-conversation-registry', () => ({
+  ensureActiveConversation: async () => 'conv-stub',
+}));
+
 // Scripted Anthropic API for deterministic turns.
 interface ScriptedResponse {
   content: Array<
@@ -285,6 +297,7 @@ describe('Phase B Day 4 — onboarding team-run end-to-end', () => {
     getStore().get(teamRuns).push({
       id: runId,
       teamId,
+      conversationId: 'conv-onboarding-test',
       trigger: 'onboarding',
       goal: 'Plan the launch strategy for TestProduct. State: mvp. Channels: x.',
       rootAgentId: coordId,

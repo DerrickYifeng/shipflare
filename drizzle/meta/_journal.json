@@ -29,6 +29,41 @@
       "when": 1776841200000,
       "tag": "0003_team_member_cascade",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1777526400000,
+      "tag": "0004_discovery_v3_scout_columns",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1777612800000,
+      "tag": "0005_discovery_v3_cleanup",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1777699200000,
+      "tag": "0006_team_conversations",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1777785600000,
+      "tag": "0007_team_messages_content_blocks",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1777872000000,
+      "tag": "0008_chat_refactor",
+      "breakpoints": true
     }
   ]
 }

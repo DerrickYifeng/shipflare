@@ -10,7 +10,6 @@ import { and, count, desc, eq, gte, inArray, sql } from 'drizzle-orm';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import {
-  discoveryConfigs,
   teamMessages,
   teamRuns,
   teams,
@@ -111,27 +110,13 @@ export async function GET(request: NextRequest): Promise<Response> {
 
 async function buildSnapshot(userId: string): Promise<ProgressSnapshot> {
   const { tactical, teamRun } = await loadTacticalStatus(userId);
-  const calibrationRows = await db
-    .select({
-      platform: discoveryConfigs.platform,
-      calibrationStatus: discoveryConfigs.calibrationStatus,
-      calibrationRound: discoveryConfigs.calibrationRound,
-      calibrationPrecision: discoveryConfigs.calibrationPrecision,
-    })
-    .from(discoveryConfigs)
-    .where(eq(discoveryConfigs.userId, userId));
 
+  // Discovery v3: no calibration state. Shape retained for client
+  // back-compat — always returns an empty platforms list.
   return {
     tactical,
     teamRun,
-    calibration: {
-      platforms: calibrationRows.map((r) => ({
-        platform: r.platform,
-        status: r.calibrationStatus,
-        precision: r.calibrationPrecision ?? null,
-        round: r.calibrationRound ?? 0,
-      })),
-    },
+    calibration: { platforms: [] },
   };
 }
 

@@ -13,6 +13,7 @@ function makeMessage(
 ): TeamActivityMessage {
   return {
     runId: 'run-1',
+    conversationId: null,
     teamId: 'team-1',
     from: null,
     to: null,

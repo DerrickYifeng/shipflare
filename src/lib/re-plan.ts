@@ -5,6 +5,7 @@ import { derivePhase, type ProductState } from '@/lib/launch-phase';
 import { getUserChannels } from '@/lib/user-channels';
 import { ensureTeamExists } from '@/lib/team-provisioner';
 import { enqueueTeamRun } from '@/lib/queue/team-run';
+import { createAutomationConversation } from '@/lib/team-conversation-helpers';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('lib:re-plan');
@@ -253,11 +254,13 @@ export async function runTacticalReplan(
         ? 'Monday cron replan — produce fresh plan_items for the coming 7 days.'
         : 'Manual replan — previous week items have been superseded; produce fresh plan_items for the coming 7 days.');
 
+    const replanConvId = await createAutomationConversation(teamId, 'weekly');
     const enqueued = await enqueueTeamRun({
       teamId,
       trigger: trigger === 'weekly' ? 'weekly' : 'manual',
       goal,
       rootMemberId: memberIds.coordinator,
+      conversationId: replanConvId,
     });
     runId = enqueued.runId;
   } catch (err) {

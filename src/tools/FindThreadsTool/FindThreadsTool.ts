@@ -51,7 +51,8 @@ export interface ThreadRow {
   url: string;
   upvotes: number | null;
   commentCount: number | null;
-  relevanceScore: number;
+  /** 0..1 — scout agent's confidence in this thread. Null for legacy rows. */
+  scoutConfidence: number | null;
   postedAt: string | null;
   discoveredAt: string;
 }
@@ -97,17 +98,17 @@ export const findThreadsTool: ToolDefinition<FindThreadsInput, { threads: Thread
           url: threads.url,
           upvotes: threads.upvotes,
           commentCount: threads.commentCount,
-          relevanceScore: threads.relevanceScore,
+          scoutConfidence: threads.scoutConfidence,
           postedAt: threads.postedAt,
           discoveredAt: threads.discoveredAt,
         })
         .from(threads)
         .where(and(...filters))
-        .orderBy(desc(threads.relevanceScore), desc(threads.discoveredAt))
-        .limit(limit * 2); // over-fetch so we can filter by relevance client-side
+        .orderBy(desc(threads.scoutConfidence), desc(threads.discoveredAt))
+        .limit(limit * 2); // over-fetch so we can filter client-side
 
       const kept = rows
-        .filter((r) => r.relevanceScore >= minRelevance)
+        .filter((r) => (r.scoutConfidence ?? 0) >= minRelevance)
         .slice(0, limit);
 
       const out: ThreadRow[] = kept.map((r) => ({
@@ -120,7 +121,7 @@ export const findThreadsTool: ToolDefinition<FindThreadsInput, { threads: Thread
         url: r.url,
         upvotes: r.upvotes,
         commentCount: r.commentCount,
-        relevanceScore: r.relevanceScore,
+        scoutConfidence: r.scoutConfidence,
         postedAt: r.postedAt ? r.postedAt.toISOString() : null,
         discoveredAt: r.discoveredAt.toISOString(),
       }));

@@ -2,7 +2,13 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { and, eq } from 'drizzle-orm';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { teams, teamRuns, teamTasks, teamMembers } from '@/lib/db/schema';
+import {
+  teams,
+  teamRuns,
+  teamTasks,
+  teamMembers,
+  teamConversations,
+} from '@/lib/db/schema';
 import { enqueueTeamRun } from '@/lib/queue/team-run';
 import { createLogger } from '@/lib/logger';
 
@@ -46,6 +52,7 @@ export async function POST(
       description: teamTasks.description,
       input: teamTasks.input,
       taskStatus: teamTasks.status,
+      parentConversationId: teamRuns.conversationId,
     })
     .from(teamTasks)
     .innerJoin(teamRuns, eq(teamRuns.id, teamTasks.runId))
@@ -110,11 +117,25 @@ export async function POST(
     task.description ||
     `Retry subtask ${task.taskId.slice(0, 8)}`;
 
+  // Chat refactor: the retry attaches to the same conversation the
+  // parent run belonged to. If for some reason the parent has no
+  // conversation (shouldn't happen post-migration), mint a fresh one
+  // so the retry still has a valid home.
+  let conversationId: string | null = task.parentConversationId ?? null;
+  if (!conversationId) {
+    const [created] = await db
+      .insert(teamConversations)
+      .values({ teamId: task.teamId, title: `Retry of ${task.taskId.slice(0, 8)}` })
+      .returning({ id: teamConversations.id });
+    conversationId = created!.id;
+  }
+
   const { runId, traceId, alreadyRunning } = await enqueueTeamRun({
     teamId: task.teamId,
     trigger: 'manual',
     goal,
     rootMemberId,
+    conversationId,
   });
 
   log.info(
@@ -122,7 +143,7 @@ export async function POST(
   );
 
   return NextResponse.json(
-    { taskId: task.taskId, runId, traceId, alreadyRunning },
+    { taskId: task.taskId, runId, traceId, alreadyRunning, conversationId },
     { status: alreadyRunning ? 200 : 202 },
   );
 }

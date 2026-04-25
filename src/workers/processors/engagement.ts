@@ -175,7 +175,13 @@ export async function processXEngagement(job: Job<EngagementJobData>) {
           community: `@${mention.authorUsername}`,
           title: mention.text.slice(0, 200),
           url: buildContentUrl('x', mention.authorUsername, mention.mentionId),
-          relevanceScore: mention.priority === 'high' ? 0.9 : mention.priority === 'medium' ? 0.7 : 0.5,
+          scoutConfidence:
+            mention.priority === 'high'
+              ? 0.9
+              : mention.priority === 'medium'
+                ? 0.7
+                : 0.5,
+          scoutReason: `engagement-mention (${mention.priority})`,
         })
         .onConflictDoNothing()
         .returning();

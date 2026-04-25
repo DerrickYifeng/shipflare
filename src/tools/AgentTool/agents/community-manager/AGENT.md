@@ -1,6 +1,6 @@
 ---
 name: community-manager
-description: Runs the reply-guy workflow — scans connected platforms for relevant conversations the founder could meaningfully engage with, judges which ones earn a reply, drafts the reply, and persists it as a drafts row for founder approval. USE when a reply-sweep team_run fires (triggered on a schedule by the reply-guy discovery worker) or when the coordinator asks for "engagement on a specific thread". DO NOT USE for drafting original posts — x-writer and reddit-writer handle those. DO NOT USE for scheduled content on the weekly plan — content-planner handles that.
+description: Drafts replies from the already-discovered threads inbox. Reads the `threads` table via `find_threads` (does NOT hit X/Twitter or Reddit APIs — that's `discovery-scout`), judges which rows clear the reply-quality bar, and writes reply drafts. USE when a reply-sweep team_run fires on schedule, when the coordinator passes a specific `threadId` already in the inbox, or AFTER `discovery-scout` has populated fresh rows. DO NOT USE to find brand-new posts live on X/Twitter — call `discovery-scout` first, then chain this agent. DO NOT USE for drafting original posts — x-writer / reddit-writer handle those.
 model: claude-haiku-4-5-20251001
 maxTurns: 12
 tools:

@@ -1,9 +1,6 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
-import {
-  searchSourceQueue,
-  discoveryScanQueue,
-} from '@/lib/queue';
+import { discoveryScanQueue } from '@/lib/queue';
 import type { Queue } from 'bullmq';
 
 /**
@@ -35,7 +32,6 @@ export async function GET() {
   };
 
   return NextResponse.json({
-    searchSource: await counts(searchSourceQueue),
     discoveryScan: await counts(discoveryScanQueue),
   });
 }

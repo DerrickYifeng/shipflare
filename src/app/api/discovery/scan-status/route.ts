@@ -1,13 +1,22 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
-import { searchSourceQueue } from '@/lib/queue';
 
+/**
+ * GET /api/discovery/scan-status?scanRunId=...
+ *
+ * Legacy REST fallback for per-source scan status. Discovery v3 runs the
+ * scout agent inline — there's no per-source BullMQ job to inspect — so
+ * this endpoint returns an empty `sources` list. The UI should rely on
+ * the SSE pipeline events stream for real-time status instead.
+ *
+ * Kept for back-compat with any UI that still polls this route; can be
+ * deleted once callers are removed.
+ */
 export async function GET(request: Request) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
-  const userId = session.user.id;
 
   const { searchParams } = new URL(request.url);
   const scanRunId = searchParams.get('scanRunId');
@@ -15,36 +24,5 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'scanRunId required' }, { status: 400 });
   }
 
-  // Inspect BullMQ to report per-source state.
-  const jobs = await searchSourceQueue.getJobs([
-    'waiting',
-    'active',
-    'delayed',
-    'completed',
-    'failed',
-  ]);
-  const forRun = jobs.filter(
-    (j) => j && j.data.scanRunId === scanRunId && j.data.userId === userId,
-  );
-
-  const sources = await Promise.all(
-    forRun.map(async (j) => {
-      const state = await j.getState();
-      return {
-        id: `${j.data.platform}:${j.data.source}`,
-        platform: j.data.platform,
-        source: j.data.source,
-        state:
-          state === 'completed'
-            ? 'searched'
-            : state === 'failed'
-              ? 'failed'
-              : state === 'active'
-                ? 'searching'
-                : 'queued',
-      };
-    }),
-  );
-
-  return NextResponse.json({ scanRunId, sources });
+  return NextResponse.json({ scanRunId, sources: [] });
 }

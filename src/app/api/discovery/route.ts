@@ -19,7 +19,7 @@ export async function GET() {
     .select()
     .from(threads)
     .where(eq(threads.userId, session.user.id))
-    .orderBy(desc(threads.relevanceScore))
+    .orderBy(desc(threads.scoutConfidence), desc(threads.discoveredAt))
     .limit(50);
 
   return NextResponse.json({
@@ -29,7 +29,8 @@ export async function GET() {
       community: t.community,
       title: t.title,
       url: t.url,
-      relevanceScore: t.relevanceScore,
+      scoutConfidence: t.scoutConfidence,
+      scoutReason: t.scoutReason,
       createdAt: t.discoveredAt,
     })),
   });

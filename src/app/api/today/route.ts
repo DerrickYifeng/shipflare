@@ -216,16 +216,30 @@ export async function GET() {
     .from(planItems)
     .where(eq(planItems.userId, userId));
 
-  // Map plan_items → TodoItem rows.
-  const planRows: TodoItemRow[] = pendingPlan.map((row) => {
-    const draftBody = readDraftBody(row.output);
-    return {
+  // Map plan_items → TodoItem rows. Drop `content_reply` plan_items
+  // that have no draft body — those are placeholder slots the planner
+  // scheduled for a reply that nobody has drafted yet. They render as
+  // empty cards in the UI (no thread context, no draft text), and the
+  // user can't approve / edit / skip them in any useful way until a
+  // body lands. Exposing them is pure noise; the actual reply drafts
+  // (community-manager output) come through the `pendingDrafts` path
+  // below with full thread context.
+  const planRows: TodoItemRow[] = pendingPlan
+    .map((row) => {
+      const draftBody = readDraftBody(row.output);
+      return { row, draftBody };
+    })
+    .filter(({ row, draftBody }) => {
+      if (row.kind === 'content_reply' && !draftBody) return false;
+      return true;
+    })
+    .map(({ row, draftBody }) => ({
       id: row.id,
       draftId: null,
-      todoType: 'approve_post',
-      source: 'calendar',
+      todoType: 'approve_post' as const,
+      source: 'calendar' as const,
       priority: derivePriority(row.scheduledAt, now),
-      status: 'pending',
+      status: 'pending' as const,
       title: row.title,
       platform: row.channel ?? 'x',
       community: null,
@@ -239,7 +253,7 @@ export async function GET() {
       draftBody,
       draftConfidence: null,
       draftWhyItWorks: null,
-      draftType: draftBody ? 'original_post' : null,
+      draftType: draftBody ? ('original_post' as const) : null,
       draftPostTitle: null,
       draftMedia: null,
       threadTitle: null,
@@ -253,11 +267,22 @@ export async function GET() {
       calendarContentType: row.kind,
       calendarScheduledAt: row.scheduledAt.toISOString(),
       _sortKey: row.scheduledAt.getTime(),
-    };
-  });
+    }));
 
-  // Map drafts+threads → TodoItem rows.
-  const replyRows: TodoItemRow[] = pendingDrafts.map((row) => {
+  // Map drafts+threads → TodoItem rows. Drop rows where the draft has
+  // no body OR the joined thread has no body — both produce an
+  // unactionable empty card in the UI. The schema requires both
+  // fields, but legacy / cancelled / bug-induced rows can slip
+  // through; surface them in logs rather than the inbox.
+  const replyRows: TodoItemRow[] = pendingDrafts
+    .filter((row) => {
+      const hasBody = typeof row.replyBody === 'string' && row.replyBody.trim().length > 0;
+      const hasThread =
+        (typeof row.threadBody === 'string' && row.threadBody.trim().length > 0) ||
+        (typeof row.threadTitle === 'string' && row.threadTitle.trim().length > 0);
+      return hasBody && hasThread;
+    })
+    .map((row) => {
     const draftType: 'reply' | 'original_post' =
       row.draftType === 'original_post' ? 'original_post' : 'reply';
     const isReply = draftType === 'reply';

@@ -105,6 +105,7 @@ export async function GET(request: NextRequest): Promise<Response> {
           type: 'snapshot',
           messageId: msg.id,
           runId: msg.runId,
+          conversationId: msg.conversationId,
           teamId: msg.teamId,
           from: msg.fromMemberId,
           to: msg.toMemberId,

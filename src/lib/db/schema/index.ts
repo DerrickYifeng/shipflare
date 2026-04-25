@@ -28,7 +28,6 @@ export {
 // threads.state (channels.ts imports it directly). Renaming the enum
 // requires an ALTER TYPE migration with live-data risk — deferred
 // until the audit's "option b" rename is green-lit.
-export { discoveryConfigs } from './discovery-configs';
 export * from './voice-profiles';
 export {
   pipelineEvents,
@@ -55,6 +54,7 @@ export {
 export {
   teams,
   teamMembers,
+  teamConversations,
   teamRuns,
   teamMessages,
   teamTasks,
@@ -62,6 +62,8 @@ export {
   type NewTeam,
   type TeamMember,
   type NewTeamMember,
+  type TeamConversation,
+  type NewTeamConversation,
   type TeamRun,
   type NewTeamRun,
   type TeamMessage,

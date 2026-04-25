@@ -77,6 +77,16 @@ vi.mock('@/lib/db', () => ({
         }),
       }),
     }),
+    // Chat refactor: phase route now calls
+    // createAutomationConversation(teamId, 'phase_transition') which
+    // does a db.insert(teamConversations).values(...).returning(). The
+    // mock just returns a fixed conversation id so the enqueue arg
+    // assertion still has a valid shape.
+    insert: () => ({
+      values: () => ({
+        returning: () => [{ id: 'conv-phase-test' }],
+      }),
+    }),
     transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
       if (txShouldThrow) throw new Error('tx-fail');
       const tx = {

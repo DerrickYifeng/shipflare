@@ -40,10 +40,8 @@ vi.mock('@/tools/seo-audit', () => ({
   auditSeo: auditSeoMock,
 }));
 
-const enqueueCalibrationMock = vi.fn(async () => undefined);
-vi.mock('@/lib/queue', () => ({
-  enqueueCalibration: enqueueCalibrationMock,
-}));
+// `@/lib/queue` no longer has to be mocked — the PATCH route does not
+// enqueue anything in discovery v3.
 
 let prevProduct: Record<string, unknown> | null = null;
 let userChannelRows: Array<{ platform: string }> = [];
@@ -110,7 +108,6 @@ beforeEach(() => {
   userChannelRows = [];
   updateSet.mockClear();
   insertOnConflict.mockClear();
-  enqueueCalibrationMock.mockClear();
   auditSeoMock.mockClear();
 });
 
@@ -164,32 +161,8 @@ describe('PATCH /api/product', () => {
     expect('keywords' in patch).toBe(false);
   });
 
-  it('enqueues calibration when core identity changes and user has channels', async () => {
-    prevProduct = productFixture;
-    userChannelRows = [{ platform: 'x' }, { platform: 'reddit' }];
-    const { PATCH } = await import('../route');
-    const res = await PATCH(
-      makeReq({ name: 'NewName', description: 'New desc', keywords: [], valueProp: null }),
-    );
-    expect(res.status).toBe(200);
-    expect(insertOnConflict).toHaveBeenCalledTimes(2); // one per channel
-    expect(enqueueCalibrationMock).toHaveBeenCalledWith({
-      userId: 'user-1',
-      productId: 'prod-1',
-    });
-  });
-
-  it('skips calibration when the user has no channels', async () => {
-    prevProduct = productFixture;
-    userChannelRows = [];
-    const { PATCH } = await import('../route');
-    const res = await PATCH(
-      makeReq({ name: 'NewName', description: 'New desc', keywords: [], valueProp: null }),
-    );
-    expect(res.status).toBe(200);
-    expect(insertOnConflict).not.toHaveBeenCalled();
-    expect(enqueueCalibrationMock).not.toHaveBeenCalled();
-  });
+  // Discovery v3: legacy calibration tests removed. Clearing the memory
+  // entry on core-field change is covered by the MemoryStore unit tests.
 
   it('merge=true preserves non-placeholder existing values and unions keywords', async () => {
     prevProduct = productFixture;

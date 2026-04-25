@@ -34,6 +34,10 @@ export type TeamMessageType =
 export interface TeamActivityMessage {
   id: string;
   runId: string | null;
+  /** The conversation this message belongs to. Required for the
+   *  ChatGPT-style thread filter — the UI only renders messages whose
+   *  conversationId matches the focused conversation. */
+  conversationId: string | null;
   teamId: string | null;
   from: string | null;
   to: string | null;
@@ -141,6 +145,7 @@ interface SnapshotPayload {
   type: 'snapshot';
   messageId: string;
   runId: string | null;
+  conversationId?: string | null;
   teamId: string | null;
   from: string | null;
   to: string | null;
@@ -162,6 +167,7 @@ interface EventPayload {
   messageType?: string;
   messageId?: string;
   runId?: string | null;
+  conversationId?: string | null;
   teamId?: string | null;
   from?: string | null;
   to?: string | null;
@@ -188,6 +194,7 @@ function normalizeSnapshot(p: SnapshotPayload): TeamActivityMessage {
   return {
     id: p.messageId,
     runId: p.runId ?? null,
+    conversationId: p.conversationId ?? null,
     teamId: p.teamId ?? null,
     from: p.from ?? null,
     to: p.to ?? null,
@@ -208,6 +215,8 @@ function normalizeEvent(p: EventPayload): TeamActivityMessage | null {
   return {
     id,
     runId: typeof p.runId === 'string' ? p.runId : null,
+    conversationId:
+      typeof p.conversationId === 'string' ? p.conversationId : null,
     teamId: typeof p.teamId === 'string' ? p.teamId : null,
     from: typeof p.from === 'string' ? p.from : null,
     to: typeof p.to === 'string' ? p.to : null,

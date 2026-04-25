@@ -20,7 +20,6 @@
 
 import { z, type ZodTypeAny } from 'zod';
 import {
-  discoveryOutputSchema,
   draftReviewOutputSchema,
   postingOutputSchema,
   replyDrafterOutputSchema,
@@ -99,12 +98,6 @@ const draftSingleReplyInput = z.object({
     .min(1),
 });
 
-const discoveryInput = z.object({
-  platform: z.string().min(1),
-  source: z.string().min(1),
-  product: productContextSchema,
-});
-
 const draftReviewInput = z.object({
   platform: z.string().min(1),
   kind: z.enum(['reply', 'original_post']),
@@ -144,16 +137,6 @@ export const SKILL_CATALOG: readonly SkillMeta[] = [
     outputSchema: replyDrafterOutputSchema,
     supportedKinds: ['content_reply'],
     channels: ['x'],
-  },
-  {
-    name: 'discovery',
-    description:
-      'Search a single platform source (subreddit or X query) for on-topic threads and score them.',
-    inputSchema: discoveryInput,
-    outputSchema: discoveryOutputSchema,
-    // Discovery is not planner-scheduled — it runs from the search-source
-    // fan-out. Listed for dispatcher name resolution if ever re-wired.
-    supportedKinds: [],
   },
   {
     name: 'draft-review',

@@ -55,6 +55,53 @@ export type Team = typeof teams.$inferSelect;
 export type NewTeam = typeof teams.$inferInsert;
 
 // ---------------------------------------------------------------------------
+// team_conversations  (Chat refactor — ChatGPT-style first-class threads)
+// ---------------------------------------------------------------------------
+//
+// A conversation is a persistent thread between the user and the team's
+// coordinator. This is the PRIMARY UI unit — what the user sees in the
+// sidebar, clicks to focus, and sends messages into. Runs are internal
+// bookkeeping (one coordinator execution per user message), scoped to a
+// conversation.
+//
+// No `status` / `last_turn_at` / partial-active-unique-index: the
+// earlier Phase 2 model tried to infer "which conversation is the user
+// in right now" server-side; that was the root of every race we hit.
+// Now the CLIENT tracks focus and passes `conversationId` explicitly
+// on every send — the server never guesses.
+//
+// `updatedAt` advances on every new user message, so the sidebar can
+// sort "most recently active conversation first" without tracking a
+// separate `lastTurnAt`.
+
+export const teamConversations = pgTable(
+  'team_conversations',
+  {
+    id: text('id')
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    teamId: text('team_id')
+      .notNull()
+      .references(() => teams.id, { onDelete: 'cascade' }),
+    /** Human-readable title — defaults to null and backfilled from the
+     *  first user message's first ~60 chars once we have one. */
+    title: text('title'),
+    createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
+    /** Bumped on every new message; drives sidebar sort order. */
+    updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('idx_team_conversations_team_recent').on(
+      t.teamId,
+      t.updatedAt.desc(),
+    ),
+  ],
+);
+
+export type TeamConversation = typeof teamConversations.$inferSelect;
+export type NewTeamConversation = typeof teamConversations.$inferInsert;
+
+// ---------------------------------------------------------------------------
 // team_members
 // ---------------------------------------------------------------------------
 
@@ -98,6 +145,12 @@ export const teamRuns = pgTable(
     teamId: text('team_id')
       .notNull()
       .references(() => teams.id, { onDelete: 'cascade' }),
+    /** Phase 2: the conversation this run belongs to. Nullable for
+     *  legacy rows that predate the team_conversations table. */
+    conversationId: text('conversation_id').references(
+      () => teamConversations.id,
+      { onDelete: 'set null' },
+    ),
     // 'onboarding' | 'weekly' | 'manual' | 'phase_transition' | 'reply_sweep' | 'draft_post'
     trigger: text('trigger').notNull(),
     goal: text('goal').notNull(),
@@ -141,6 +194,13 @@ export const teamMessages = pgTable(
     teamId: text('team_id')
       .notNull()
       .references(() => teams.id, { onDelete: 'cascade' }),
+    /** Phase 2: conversation this message belongs to. Nullable during
+     *  the migration window — legacy rows written before Phase 2 have
+     *  no conversation; see migration 0006 for the one-shot backfill. */
+    conversationId: text('conversation_id').references(
+      () => teamConversations.id,
+      { onDelete: 'set null' },
+    ),
     // NULL = user
     fromMemberId: text('from_member_id').references(() => teamMembers.id, {
       onDelete: 'set null',
@@ -154,11 +214,30 @@ export const teamMessages = pgTable(
     content: text('content'),
     // { tool_use_id?, tool_name?, tool_input?, tool_output?, cost?, tokens?, ... }
     metadata: jsonb('metadata'),
+    /**
+     * Phase 2b — Anthropic-native content blocks for this row.
+     *
+     * When populated, this is the exact `ContentBlockParam[]` the
+     * Claude API expects for this turn's content. The loader concats
+     * these across rows by role, without re-deriving blocks from
+     * `content` / `metadata`. Nullable for legacy rows (pre-migration)
+     * and for types the write path doesn't yet standardize (`thinking`,
+     * `error`). See `src/lib/team-conversation.ts`. Inspired by Claude
+     * Code's session JSONL: each record carries self-describing,
+     * ready-to-replay content.
+     */
+    contentBlocks: jsonb('content_blocks'),
     createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
   },
   (t) => [
     index('idx_team_messages_run').on(t.runId, t.createdAt),
     index('idx_team_messages_team_recent').on(t.teamId, t.createdAt.desc()),
+    /** Phase 2: primary read path — loadConversationHistory scans by
+     *  conversation_id in chronological order. */
+    index('idx_team_messages_conversation').on(
+      t.conversationId,
+      t.createdAt,
+    ),
   ],
 );
 

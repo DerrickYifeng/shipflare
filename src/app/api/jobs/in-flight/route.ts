@@ -4,7 +4,6 @@ import { auth } from '@/lib/auth';
 import {
   discoveryScanQueue,
   codeScanQueue,
-  calibrationQueue,
 } from '@/lib/queue';
 import { createLogger } from '@/lib/logger';
 
@@ -22,7 +21,6 @@ const log = createLogger('api:jobs:in-flight');
 const KIND_TO_QUEUE: Record<string, Queue<unknown>> = {
   'discovery-scan': discoveryScanQueue as unknown as Queue<unknown>,
   'code-scan': codeScanQueue as unknown as Queue<unknown>,
-  calibration: calibrationQueue as unknown as Queue<unknown>,
 };
 
 /** BullMQ job states we consider "in flight" for UI lockout purposes. */

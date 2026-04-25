@@ -14,45 +14,6 @@ import { z } from 'zod';
  */
 
 /**
- * Output schema for the discovery agent.
- * Each thread includes AI-scored relevance and intent dimensions.
- */
-export const discoveryOutputSchema = z.object({
-  threads: z.array(
-    z.object({
-      id: z.string(),
-      community: z.string(),
-      title: z.string(),
-      url: z.string(),
-      relevanceScore: z.number().optional(),
-      scores: z.object({
-        relevance: z.number(),
-        intent: z.number(),
-        // Computed by score_threads — optional when LLM returns JSON directly
-        exposure: z.number().optional(),
-        freshness: z.number().optional(),
-        engagement: z.number().optional(),
-      }).optional(),
-      // Also accept flat relevance/intent from agents that don't use score_threads
-      relevance: z.number().optional(),
-      intent: z.number().optional(),
-      score: z.number().optional(),
-      commentCount: z.number().optional(),
-      createdUtc: z.number().optional(),
-      reason: z.string().optional(),
-      // Original post body — Reddit selftext (already truncated to 500 chars by
-      // the search tool) or tweet text. Pass-through so the UI can show the
-      // full context without a second fetch. Optional because some sources
-      // (HN, certain X search fallbacks) don't return a body field.
-      body: z.string().optional(),
-      author: z.string().optional(),
-      upvotes: z.number().optional(),
-      postedAt: z.string().optional(),
-    }),
-  ),
-});
-
-/**
  * Output schema for the draft-review agent.
  * Adversarial quality check with per-dimension pass/fail.
  */
@@ -226,7 +187,6 @@ export const voiceExtractorOutputSchema = z.object({
   confidence: z.number().min(0).max(1),
 });
 
-export type DiscoveryOutput = z.infer<typeof discoveryOutputSchema>;
 export type CommunityDiscoveryOutput = z.infer<typeof communityDiscoveryOutputSchema>;
 export type CommunityIntelOutput = z.infer<typeof communityIntelOutputSchema>;
 export type PostingOutput = z.infer<typeof postingOutputSchema>;

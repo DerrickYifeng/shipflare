@@ -23,6 +23,11 @@ import {
   type SpawnCallbacks,
 } from './spawn';
 import { teamHasBudgetRemaining } from '@/lib/team-budget';
+import { persistScoutVerdicts } from '@/lib/discovery/persist-scout-verdicts';
+import {
+  discoveryScoutOutputSchema,
+  type DiscoveryScoutOutput,
+} from './agents/discovery-scout/schema';
 
 const log = createLogger('tools:Task');
 
@@ -89,6 +94,15 @@ export interface TaskResult {
  * of a team run, all four keys are present; when it's invoked from an
  * ad-hoc caller (tests, CLI), some are absent and we degrade gracefully.
  */
+function readUserIdFromCtx(ctx: ToolContext): string | null {
+  try {
+    const v = ctx.get<string | null>('userId');
+    return typeof v === 'string' && v.length > 0 ? v : null;
+  } catch {
+    return null;
+  }
+}
+
 function readTeamDeps(ctx: ToolContext): {
   db: Database | null;
   runId: string | null;
@@ -427,6 +441,45 @@ export const taskTool: ToolDefinition<TaskInput, TaskResult> = buildTool({
       );
 
       const duration = Date.now() - startedAt;
+
+      // Post-processor: `discovery-scout`'s `queue` verdicts must hit
+      // the `threads` table so the follow-up `community-manager` turn
+      // can see them via `find_threads`. Without this, the coordinator
+      // could surface fresh candidates to the user but the inbox stayed
+      // empty, and any "draft the reply" follow-up failed on missing
+      // thread rows. The scheduled cron path (discovery-scan worker)
+      // has always persisted; this closes the gap on the
+      // coordinator-invoked path.
+      if (agent.name === 'discovery-scout') {
+        try {
+          const parsed = discoveryScoutOutputSchema.safeParse(
+            agentResult.result,
+          );
+          if (parsed.success) {
+            const userId = readUserIdFromCtx(ctx);
+            if (userId) {
+              const out = await persistScoutVerdicts({
+                userId,
+                verdicts: (parsed.data as DiscoveryScoutOutput).verdicts,
+              });
+              log.info(
+                `discovery-scout post-persist: queued=${out.queued} user=${userId}`,
+              );
+            } else {
+              log.warn(
+                'discovery-scout returned verdicts but ctx has no userId — skipping persist',
+              );
+            }
+          }
+        } catch (err) {
+          // Persistence is best-effort — don't fail the parent run if
+          // the DB write hiccups. The coordinator already has the
+          // in-memory verdicts to surface; the user can re-run scout.
+          log.warn(
+            `discovery-scout post-persist failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
 
       if (parentTaskId) {
         await recordTaskComplete(

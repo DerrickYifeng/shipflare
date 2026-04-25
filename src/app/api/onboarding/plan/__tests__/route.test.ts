@@ -51,6 +51,14 @@ vi.mock('@/lib/db', () => ({
         }),
       }),
     }),
+    // Chat refactor: onboarding route mints a fresh conversation via
+    // createAutomationConversation so the team-run has somewhere to
+    // hang messages. Mock just returns a fixed id.
+    insert: () => ({
+      values: () => ({
+        returning: () => [{ id: 'conv-onboarding-test' }],
+      }),
+    }),
   },
 }));
 

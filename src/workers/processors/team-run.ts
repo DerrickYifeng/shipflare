@@ -22,10 +22,18 @@ import {
 } from '@/lib/db/schema';
 import { createPubSubSubscriber, getPubSubPublisher } from '@/lib/redis';
 import { runAgent } from '@/core/query-loop';
-import { maybeEmitBudgetWarning } from '@/lib/team-budget';
+import {
+  maybeEmitBudgetWarning,
+  teamHasBudgetRemaining,
+  getTeamBudgetSnapshot,
+} from '@/lib/team-budget';
+import { createTeamPlatformDeps } from '@/lib/platform-deps';
+import { loadConversationHistory } from '@/lib/team-conversation';
 import { buildAgentConfigFromDefinition } from '@/tools/AgentTool/spawn';
-import { resolveAgent } from '@/tools/AgentTool/registry';
+import { resolveAgent, getAvailableAgents } from '@/tools/AgentTool/registry';
 import { getAgentOutputSchema } from '@/tools/AgentTool/agent-schemas';
+import { buildTaskDescription } from '@/tools/AgentTool/prompt';
+import { TASK_TOOL_NAME } from '@/tools/AgentTool/AgentTool';
 import {
   teamCancelChannel,
   teamInjectChannel,
@@ -191,6 +199,13 @@ function defaultDeps(): TeamRunDeps {
 interface RecordMessageInput {
   runId: string;
   teamId: string;
+  /**
+   * Phase 2: conversation this message belongs to. Stamped on every
+   * insert so `loadConversationHistory(conversationId=...)` can pick
+   * up recent turns on the coordinator's next spawn. Nullable only
+   * for legacy call sites that predate the migration.
+   */
+  conversationId: string | null;
   fromMemberId: string | null;
   toMemberId: string | null;
   type:
@@ -205,27 +220,88 @@ interface RecordMessageInput {
   metadata: Record<string, unknown> | null;
 }
 
+/**
+ * Derive the Anthropic-native content blocks for a row at write time.
+ *
+ * Keeps each row self-describing so the history loader doesn't have to
+ * re-derive blocks from `content` + `metadata` / guess ordering —
+ * directly borrowed from Claude Code's session JSONL design, where
+ * every transcript line carries its ready-to-replay API shape.
+ *
+ * Returns `null` for types we don't yet standardize (thinking, error,
+ * agent_text) — the loader falls back to legacy synthesis for those.
+ */
+function deriveContentBlocks(
+  input: Pick<RecordMessageInput, 'type' | 'content' | 'metadata'>,
+): unknown {
+  const meta = (input.metadata ?? {}) as Record<string, unknown>;
+  switch (input.type) {
+    case 'user_prompt': {
+      const text = input.content ?? '';
+      if (text.length === 0) return null;
+      return [{ type: 'text', text }];
+    }
+    case 'completion': {
+      const text = input.content ?? '';
+      if (text.length === 0) return null;
+      return [{ type: 'text', text }];
+    }
+    case 'tool_call': {
+      const id = typeof meta.toolUseId === 'string' ? meta.toolUseId : null;
+      const name = typeof meta.toolName === 'string' ? meta.toolName : null;
+      if (!id || !name) return null;
+      return [
+        {
+          type: 'tool_use',
+          id,
+          name,
+          input: (meta.input ?? {}) as Record<string, unknown>,
+        },
+      ];
+    }
+    case 'tool_result': {
+      const id = typeof meta.toolUseId === 'string' ? meta.toolUseId : null;
+      if (!id) return null;
+      const block: Record<string, unknown> = {
+        type: 'tool_result',
+        tool_use_id: id,
+        content: input.content ?? '',
+      };
+      if (meta.isError) block.is_error = true;
+      return [block];
+    }
+    default:
+      // agent_text, thinking, error — let the loader decide how to
+      // handle these (they're currently skipped in reconstruction).
+      return null;
+  }
+}
+
 async function recordMessage(
   deps: TeamRunDeps,
   input: RecordMessageInput,
 ): Promise<string> {
   const id = crypto.randomUUID();
   const createdAt = new Date();
+  const contentBlocks = deriveContentBlocks(input);
   await deps.db.insert(teamMessages).values({
     id,
     runId: input.runId,
     teamId: input.teamId,
+    conversationId: input.conversationId,
     fromMemberId: input.fromMemberId,
     toMemberId: input.toMemberId,
     type: input.type,
     content: input.content,
     metadata: input.metadata,
+    contentBlocks,
     createdAt,
   });
   await deps.publish(teamMessagesChannel(input.teamId), {
     messageId: id,
     runId: input.runId,
     teamId: input.teamId,
+    conversationId: input.conversationId,
     from: input.fromMemberId,
     to: input.toMemberId,
     type: input.type,
@@ -268,6 +344,7 @@ export async function processTeamRunInternal(
     .select({
       id: teamRuns.id,
       teamId: teamRuns.teamId,
+      conversationId: teamRuns.conversationId,
       status: teamRuns.status,
       goal: teamRuns.goal,
       rootAgentId: teamRuns.rootAgentId,
@@ -320,6 +397,58 @@ export async function processTeamRunInternal(
     return;
   }
 
+  // --- 4.5) Conversation id (chat refactor) ---
+  // Every run is enqueued with its conversationId; the API layer
+  // (POST /api/team/conversations/:id/messages) is the only path that
+  // creates runs, and it always supplies one. If we ever see a null
+  // here, the run was created by some legacy path that hasn't been
+  // migrated — fail loud instead of inferring.
+  if (!run.conversationId) {
+    await markFailed(
+      deps,
+      runId,
+      `run ${runId} has no conversationId — all runs must be enqueued with an explicit conversation`,
+    );
+    return;
+  }
+  const conversationId: string = run.conversationId;
+
+  // --- 4a) Pre-flight weekly budget check ---
+  // Refuse to start the coordinator loop when the team has already
+  // spent its weekly allowance. Without this guard, a team whose budget
+  // is exhausted still burns Sonnet turns in the coordinator's own
+  // reason/query loop — the downstream Task-tool check only gates
+  // subagent spawns, not the coordinator itself. This is the
+  // strongest point to stop the spend.
+  //
+  // Fails open when the budget subsystem errors (transient DB hiccup,
+  // feature flag disabled) — `teamHasBudgetRemaining` already handles
+  // that path. The snapshot fetch below is defensive: we only read it
+  // when we already know the budget is exhausted, so it runs at most
+  // once per paused run.
+  const hasBudget = await teamHasBudgetRemaining(team.id, deps.db);
+  if (!hasBudget) {
+    let spentUsd = 0;
+    let weeklyBudgetUsd = 0;
+    try {
+      const snap = await getTeamBudgetSnapshot(team.id, deps.db);
+      spentUsd = snap.spentUsd;
+      weeklyBudgetUsd = snap.weeklyBudgetUsd;
+    } catch {
+      // Snapshot failure should not block the pause — we already know
+      // budget is exhausted from the boolean check.
+    }
+    const message =
+      `BUDGET_EXCEEDED: team ${team.id} weekly budget reached ` +
+      `(spent $${spentUsd.toFixed(4)} / budget $${weeklyBudgetUsd.toFixed(2)}). ` +
+      `Resets Monday 00:00 UTC.`;
+    baseLog.warn(
+      `team-run ${runId} aborted pre-flight: ${message}`,
+    );
+    await markFailed(deps, runId, message);
+    return;
+  }
+
   const members = await deps.db
     .select({
       id: teamMembers.id,
@@ -352,6 +481,25 @@ export async function processTeamRunInternal(
 
   const agentConfig = buildAgentConfigFromDefinition(agentDef);
 
+  // Inject the live agent roster into the Task tool's `description`
+  // field so the delegating agent's prompt lists every specialist by
+  // name + frontmatter description + tool allowlist. Without this
+  // override, Task ships with a static "launch a specialist subagent"
+  // string that names ZERO specialists — the delegator then has to
+  // infer subagent_type from its own AGENT.md references, misses
+  // recently-added agents (e.g. discovery-scout), and hallucinates
+  // type names ("x-reply-finder"). `buildTaskDescription` was
+  // dead code before this wiring.
+  if (agentConfig.tools.some((t) => t.name === TASK_TOOL_NAME)) {
+    const allAgents = await getAvailableAgents();
+    const dynamicTaskDescription = buildTaskDescription(allAgents);
+    agentConfig.tools = agentConfig.tools.map((t) =>
+      t.name === TASK_TOOL_NAME
+        ? { ...t, description: dynamicTaskDescription }
+        : t,
+    );
+  }
+
   // Resolve the per-agent StructuredOutput schema. Tests pass
   // `rootOutputSchema` directly to override this lookup with a fixture-
   // specific shape; production callers let it fall through to the
@@ -377,6 +525,7 @@ export async function processTeamRunInternal(
     await recordMessage(deps, {
       runId,
       teamId: team.id,
+      conversationId,
       fromMemberId: null, // user
       toMemberId: rootMember.id,
       type: 'user_prompt',
@@ -386,6 +535,17 @@ export async function processTeamRunInternal(
   }
 
   // --- 7) Build ToolContext with deps ---
+  // Preload every platform client the team's specialists might need.
+  // Without this, Task-spawned subagents (e.g. discovery-scout calling
+  // `x_search_batch`) blow up with `Missing dependency: xaiClient`
+  // because the synchronous `ctx.get(key)` switch below has nowhere to
+  // load clients on demand. Loaded once per run — the child contexts
+  // delegate through `parent.get()` so all nested specialists share.
+  const platformDeps = await createTeamPlatformDeps(
+    team.userId,
+    team.productId ?? null,
+  );
+
   const controller = new AbortController();
   // `onEvent` is plumbed through the ToolContext so nested subagents
   // (spawned via Task) can forward their tool_start / tool_done events
@@ -398,6 +558,9 @@ export async function processTeamRunInternal(
   const toolCtx: ToolContext = {
     abortSignal: controller.signal,
     get<V>(key: string): V {
+      // Platform clients (xaiClient / redditClient / xClient / memoryStore)
+      // take precedence — they were preloaded above for this run.
+      if (key in platformDeps) return platformDeps[key] as V;
       switch (key) {
         case 'db':
           return deps.db as unknown as V;
@@ -407,6 +570,8 @@ export async function processTeamRunInternal(
           return team.userId as unknown as V;
         case 'productId':
           return (team.productId ?? null) as unknown as V;
+        case 'conversationId':
+          return conversationId as unknown as V;
         case 'runId':
           return runId as unknown as V;
         case 'currentMemberId':
@@ -489,6 +654,18 @@ export async function processTeamRunInternal(
   };
 
   // --- 10) Run! ---
+  // Load the coordinator's conversation history from team_messages so
+  // this fresh spawn sees prior turns (Claude's stateless-API pattern:
+  // the DB is the source of truth; we rebuild the message array on
+  // every run and let prompt caching amortize the cost). Exclude this
+  // run's own rows — `run.goal` is the fresh user_prompt that
+  // runAgent will add as the "current" message.
+  const priorMessages = await loadConversationHistory(team.id, {
+    conversationId,
+    excludeRunId: runId,
+    db: deps.db,
+  });
+
   try {
     const result = await runAgent(
       agentConfig,
@@ -500,6 +677,7 @@ export async function processTeamRunInternal(
       undefined, // onIdleReset
       (event) => emitToolEvent(deps, toolCtx, event),
       injectMessages,
+      priorMessages,
     );
 
     // Persist agent's final text block (if any) as a completion message.
@@ -511,6 +689,7 @@ export async function processTeamRunInternal(
     await recordMessage(deps, {
       runId,
       teamId: team.id,
+      conversationId,
       fromMemberId: rootMember.id,
       toMemberId: null, // broadcast / user
       type: 'completion',
@@ -618,6 +797,7 @@ export async function processTeamRunInternal(
         await deps.publish(teamMessagesChannel(team.id), {
           messageId: crypto.randomUUID(),
           runId,
+          conversationId,
           teamId: team.id,
           from: rootMember.id,
           to: null,
@@ -634,6 +814,7 @@ export async function processTeamRunInternal(
     await recordMessage(deps, {
       runId,
       teamId: team.id,
+      conversationId,
       fromMemberId: rootMember.id,
       toMemberId: null,
       type: 'error',
@@ -722,6 +903,7 @@ export async function emitToolEvent(
   let teamId: string;
   let runId: string;
   let callerMemberId: string | null = null;
+  let conversationId: string | null = null;
   try {
     teamId = ctx.get<string>('teamId');
     runId = ctx.get<string>('runId');
@@ -729,6 +911,11 @@ export async function emitToolEvent(
       callerMemberId = ctx.get<string>('currentMemberId');
     } catch {
       callerMemberId = null;
+    }
+    try {
+      conversationId = ctx.get<string>('conversationId') ?? null;
+    } catch {
+      conversationId = null;
     }
   } catch {
     // Not a team-run context — nothing to record.
@@ -755,6 +942,7 @@ export async function emitToolEvent(
     await emitAssistantTextEvent(deps, {
       teamId,
       runId,
+      conversationId,
       fromMemberId: textFromMemberId,
       spawnMeta: assistantSpawn ?? null,
       event,
@@ -771,6 +959,7 @@ export async function emitToolEvent(
       await deps.publish(teamMessagesChannel(teamId), {
         messageId: event.toolUseId,
         runId,
+        conversationId,
         teamId,
         from: callerMemberId,
         to: null,
@@ -796,6 +985,7 @@ export async function emitToolEvent(
     await recordMessage(deps, {
       runId,
       teamId,
+      conversationId,
       fromMemberId,
       toMemberId: null,
       type: 'tool_call',
@@ -819,6 +1009,7 @@ export async function emitToolEvent(
     await recordMessage(deps, {
       runId,
       teamId,
+      conversationId,
       fromMemberId,
       toMemberId: null,
       type: 'tool_result',
@@ -847,6 +1038,7 @@ export async function emitToolEvent(
 interface AssistantTextContext {
   teamId: string;
   runId: string;
+  conversationId: string | null;
   fromMemberId: string | null;
   spawnMeta: StreamEventSpawnMeta | null;
   event:
@@ -887,7 +1079,7 @@ async function emitAssistantTextEvent(
   deps: TeamRunDeps,
   ctx: AssistantTextContext,
 ): Promise<void> {
-  const { teamId, runId, fromMemberId, spawnMeta, event } = ctx;
+  const { teamId, runId, conversationId, fromMemberId, spawnMeta, event } = ctx;
 
   // Every publish carries the nesting anchors when present, so the
   // client's reducer can route the row to the right dispatch card.
@@ -903,6 +1095,7 @@ async function emitAssistantTextEvent(
     await safePublish(deps, teamId, {
       messageId: event.messageId,
       runId,
+      conversationId,
       teamId,
       from: fromMemberId,
       to: null,
@@ -922,6 +1115,7 @@ async function emitAssistantTextEvent(
     await safePublish(deps, teamId, {
       messageId: event.messageId,
       runId,
+      conversationId,
       teamId,
       from: fromMemberId,
       to: null,
@@ -945,6 +1139,7 @@ async function emitAssistantTextEvent(
     await safePublish(deps, teamId, {
       messageId: event.messageId,
       runId,
+      conversationId,
       teamId,
       from: fromMemberId,
       to: null,
@@ -965,6 +1160,7 @@ async function emitAssistantTextEvent(
     id: event.messageId,
     runId,
     teamId,
+    conversationId,
     fromMemberId,
     toMemberId: null,
     type: 'agent_text',
@@ -979,6 +1175,7 @@ async function emitAssistantTextEvent(
   await safePublish(deps, teamId, {
     messageId: event.messageId,
     runId,
+    conversationId,
     teamId,
     from: fromMemberId,
     to: null,

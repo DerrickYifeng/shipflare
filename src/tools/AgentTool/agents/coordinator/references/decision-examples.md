@@ -20,6 +20,37 @@ query_plan_items({ weekOffset: 1, status: ["planned", "drafted", "approved"] })
 There are 12 plan_items scheduled for next week (3 drafted, 7 approved, 2 in
 planning).
 
+## Example 1b — Conversational / copywriting ask (no Task)
+
+user: "What could I write for my Twitter bio?"
+
+assistant: <thinking>
+This is a creative ask aimed at me, not a request to persist content. The
+trigger word "Twitter" is misleading — there's nothing to schedule, no
+thread to reply to, no plan_item to anchor a draft against. x-writer
+drafts plan-item-anchored posts; community-manager handles thread replies;
+neither is right for profile copy. I have the product voice and thesis
+from `query_strategic_path`. Just answer directly with a few options.
+</thinking>
+
+query_strategic_path({})
+
+[tool_result: thesis = "Name the tax: marketing debt is real and it costs
+solo devs shipping momentum.", pillars = [...], voice = "founder/dry"]
+
+Here are three bio options based on your current thesis and voice — pick
+whichever lands closest:
+
+1. *Building ShipFlare. Helping solo devs pay off marketing debt before
+   it costs them shipping momentum.* (60 chars — leans on the thesis verb)
+2. *Solo devs ship great stuff and lose to silence. I'm building
+   ShipFlare to fix that half of the job.* (102 chars — problem-first)
+3. *ShipFlare → marketing autopilot for solo devs. Less posting, more
+   shipping. Building in public.* (94 chars — punchy, signals the BIP
+   audience)
+
+Want me to riff a few more or tighten one of these?
+
 ## Example 2 — Single specialist delegation
 
 user: "I launched yesterday. Can we pivot the strategy to post-launch?"
@@ -114,3 +145,69 @@ Task({
 winners: {evidence from analytics}. Aim for the same shape: an anti-conventional
 wisdom claim backed by a concrete observation from {productName}.`
 })
+
+## Example 5 — Live platform search for reply targets (discovery-scout)
+
+user: "Find 3 X posts I should reply to today"
+
+assistant: <thinking>
+The founder wants FRESH posts from X/Twitter right now — there's no way to
+answer this from the DB (the `threads` table only holds rows the discovery
+pipeline has already ingested, and may be empty or stale).
+
+This is exactly what discovery-scout exists for. It's the ONLY specialist
+with live platform search (`x_search_batch`, `reddit_search`). x-writer
+can't do this — it has no search tools, and asking it to "find posts"
+will produce fabricated placeholders that look like reply drafts but are
+actually hallucinated. community-manager reads from the already-discovered
+threads inbox, NOT live X.
+
+After scout returns its `queue`-verdicted candidates, I can optionally
+chain x-writer per thread to draft the actual reply bodies. But for a
+first pass where the founder wants to see the targets first, scout's
+output (which includes per-thread reasoning) is usually sufficient.
+</thinking>
+
+Task({
+  subagent_type: "discovery-scout",
+  description: "Find 3 X reply targets matching today's thesis",
+  prompt: `Platform: x
+Intent: Find 3 posts from today or yesterday where {productName}'s founder
+can reply in-voice and reach a target customer. Prioritize threads that
+map to this week's thesis: "{thisWeekTheme}". Exclude competitor accounts
+and growth-bait content.
+Sources: generate 3-5 searches yourself based on the product's keywords
+and the intent above.
+Product: name={productName}, description={description}, valueProp={valueProp}.
+Return up to 3 `queue` verdicts with per-thread `reason` explaining the fit.`
+})
+
+[waits for tool_result → verdicts list]
+
+Surface the 3 top queued candidates to the founder with the URL, author,
+text, and scout's `reason`. Ask whether to chain x-writer per thread to
+draft the replies.
+
+## When to pick discovery-scout vs community-manager vs x-writer
+
+- `discovery-scout` — the founder wants posts that EXIST RIGHT NOW on a
+  public platform ("find me 3 posts to reply to", "scan X for <topic>",
+  "show me today's reply opportunities"). Live API search.
+- `community-manager` — the `threads` table already has rows (the
+  reply-sweep cron or an earlier scout run filled it), and the founder
+  wants reply drafts written for that existing inbox. NO live search.
+- `x-writer` — the founder wants a NEW original X post drafted, for a
+  specific plan_item. NOT for replies. NOT for finding posts.
+
+If the founder's phrasing is "find posts to reply to" and the inbox is
+empty or stale, the chain is `discovery-scout` THEN `community-manager`
+(or x-writer for reply drafts). Never start with community-manager when
+the intent is live discovery.
+
+## When to pick discovery-reviewer
+
+Rare. The reviewer is Sonnet-tier adversarial judgment — use it only when
+the founder explicitly asks for a "second opinion" on a batch of threads
+or wants to debug why scout skipped specific candidates. Routine cron
+runs already route scout through reviewer automatically based on the
+team's label-count gate; you don't need to trigger it manually.

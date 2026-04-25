@@ -103,7 +103,12 @@ type RawTodoItem = Omit<TodoItem, 'cardFormat'>;
 function deriveCardFormat(item: RawTodoItem): 'post' | 'reply' {
   if (item.draftType === 'original_post') return 'post';
   if (item.draftType === 'reply') return 'reply';
-  // Fallback when no draft is linked
+  // Fallback when no draft is linked: honor the plan_item's `kind`
+  // (surfaced as `calendarContentType`). Without this, every
+  // content_reply plan_item without a drafted body was being classed
+  // as 'post' and shown in the Scheduled posts section with a
+  // placeholder title — even though the underlying slot is a reply.
+  if (item.calendarContentType === 'content_reply') return 'reply';
   return item.source === 'calendar' ? 'post' : 'reply';
 }
 

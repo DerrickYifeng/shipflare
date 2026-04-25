@@ -22,6 +22,7 @@ import { and, desc, eq, gte } from 'drizzle-orm';
 import { db as defaultDb, type Database } from '@/lib/db';
 import { teamMembers, teamRuns, teams, threads } from '@/lib/db/schema';
 import { enqueueTeamRun as defaultEnqueueTeamRun } from '@/lib/queue/team-run';
+import { createAutomationConversation } from '@/lib/team-conversation-helpers';
 import type { EnqueueTeamRunInput, EnqueueTeamRunResult } from '@/lib/queue/team-run';
 import { createLogger } from '@/lib/logger';
 
@@ -140,6 +141,7 @@ export async function maybeEnqueueReplySweep(
   //    onboarding) is active, it returns alreadyRunning=true and we
   //    surface that as a skip so the cron tick doesn't treat a concurrent
   //    run as a success.
+  const sweepConvId = await createAutomationConversation(team.id, 'reply_sweep');
   const result = await enqueueTeamRun({
     teamId: team.id,
     trigger: 'reply_sweep',
@@ -150,6 +152,7 @@ export async function maybeEnqueueReplySweep(
       `for founder approval. Skip threads that don't clear the bar — zero ` +
       `drafts from a healthy-looking sweep is a valid outcome.`,
     rootMemberId: coordinator.id,
+    conversationId: sweepConvId,
   });
 
   if (result.alreadyRunning) {

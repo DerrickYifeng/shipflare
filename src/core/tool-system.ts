@@ -45,11 +45,19 @@ export function buildTool<TInput, TOutput>(config: {
 /**
  * Convert a ToolDefinition to an Anthropic API tool parameter.
  * Uses zod-to-json-schema like engine/Tool.ts does.
+ *
+ * Target: `jsonSchema7`. The prior `openAi` target emitted
+ * `exclusiveMinimum: true` (draft-4 boolean form) for `.positive()` /
+ * `.negative()` numbers, which Anthropic's draft-2020-12 validator
+ * rejects with `tools.N.custom.input_schema: JSON schema is invalid`.
+ * jsonSchema7 emits the number form (`exclusiveMinimum: 0`) that is
+ * forward-compatible with 2020-12. Also treats `.optional()` as
+ * actually-optional instead of `anyOf: [X, null]` + required.
  */
 export function toAnthropicTool(tool: ToolDefinition): Anthropic.Messages.Tool {
   const jsonSchema = zodToJsonSchema(tool.inputSchema, {
     $refStrategy: 'none',
-    target: 'openAi',
+    target: 'jsonSchema7',
   });
 
   // Strip the JSON Schema `$schema` meta field — Anthropic rejects it.

@@ -18,17 +18,17 @@ import {
 describe('SKILL_CATALOG', () => {
   const SKILLS_DIR = join(process.cwd(), 'src/skills');
 
-  it('exports the 5 runtime-loaded skills that survived Phase E', () => {
+  it('exports the 4 runtime-loaded skills that survived Discovery v3', () => {
     const names = SKILL_CATALOG.map((s) => s.name);
     for (const required of [
       'draft-single-reply',
-      'discovery',
       'draft-review',
       'posting',
       'voice-extractor',
     ]) {
       expect(names).toContain(required);
     }
+    expect(names).not.toContain('discovery');
   });
 
   it('has a unique name per entry', () => {

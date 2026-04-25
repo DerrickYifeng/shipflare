@@ -37,6 +37,7 @@ interface MemberRow {
 interface RunRow {
   id: string;
   teamId: string;
+  conversationId?: string | null;
   status: string;
   goal: string;
   rootAgentId: string;
@@ -289,6 +290,7 @@ vi.mock('@/lib/db', async () => {
 });
 
 vi.mock('@/lib/redis', () => ({
+  getBullMQConnection: () => ({}),
   getPubSubPublisher: () => ({
     publish: async () => 1,
   }),
@@ -298,6 +300,24 @@ vi.mock('@/lib/redis', () => ({
     unsubscribe: async () => {},
     disconnect: () => {},
   }),
+}));
+
+// Team-run preloads platform clients into the ToolContext via
+// `createTeamPlatformDeps`. The integration fixture doesn't care about
+// real clients — stub it out so the fake db doesn't need to satisfy
+// the channels query.
+vi.mock('@/lib/platform-deps', () => ({
+  createTeamPlatformDeps: async () => ({}),
+}));
+
+// Phase 2 wiring: conversation history + registry. Tests here don't
+// exercise continuity; stub both so the integration harness stays
+// focused on the coordinator/task mechanics.
+vi.mock('@/lib/team-conversation', () => ({
+  loadConversationHistory: async () => [],
+}));
+vi.mock('@/lib/team-conversation-registry', () => ({
+  ensureActiveConversation: async () => 'conv-stub',
 }));
 
 // ---------------------------------------------------------------------------
@@ -428,6 +448,7 @@ describe('Phase A Day 4 — team-run integration', () => {
     runsTable.push({
       id: 'run-1',
       teamId: 'team-1',
+      conversationId: 'conv-1',
       status: 'pending',
       goal: 'Echo the greeting',
       rootAgentId: 'mem-coord',
@@ -581,6 +602,7 @@ describe('Phase A Day 4 — team-run integration', () => {
     runsTable.push({
       id: 'run-nested',
       teamId: 'team-n',
+      conversationId: 'conv-nested',
       status: 'pending',
       goal: 'Nested echo',
       rootAgentId: 'mem-coord-n',
@@ -751,6 +773,7 @@ describe('Phase A Day 4 — team-run integration', () => {
     runsTable.push({
       id: 'run-inj',
       teamId: 'team-inj',
+      conversationId: 'conv-inj',
       status: 'pending',
       goal: 'Initial goal',
       rootAgentId: 'mem-inj-coord',
@@ -856,6 +879,7 @@ describe('Phase A Day 4 — team-run integration', () => {
     runsTable.push({
       id: 'run-sub',
       teamId: 'team-sub',
+      conversationId: 'conv-sub',
       status: 'pending',
       goal: 'Just run',
       rootAgentId: 'mem-sub-coord',

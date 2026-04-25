@@ -13,16 +13,24 @@ import { RedditClient } from '@/lib/reddit-client';
 import { XAIClient } from '@/lib/xai-client';
 import { XClient } from '@/lib/x-client';
 import { PLATFORMS } from '@/lib/platform-config';
+import { MemoryStore } from '@/memory/store';
 
 /**
  * Create platform-specific dependencies for a user.
  *
- * Returns a Record to inject into `runSkill({ deps })`.
- * Throws if a required channel is missing.
+ * Returns a Record to inject into `runSkill({ deps })` or as a
+ * ToolContext dep bag for `runAgent(...)`. Throws if a required
+ * channel is missing.
+ *
+ * When `productId` is provided, the returned bag also includes a
+ * scoped `memoryStore` — discovery v3 (scout + reviewer) needs it
+ * to read the onboarding rubric and write reviewer-disagreement
+ * logs. Existing callers that omit `productId` see no change.
  */
 export async function createPlatformDeps(
   platform: string,
   userId: string,
+  productId?: string,
 ): Promise<Record<string, unknown>> {
   // Explicit projection — this is the only sanctioned path where
   // oauth tokens are read out of the DB (see CLAUDE.md → Security TODO).
@@ -38,19 +46,27 @@ export async function createPlatformDeps(
     .where(and(eq(channels.userId, userId), eq(channels.platform, platform)))
     .limit(1);
 
+  const memoryDeps: Record<string, unknown> = productId
+    ? { memoryStore: new MemoryStore(userId, productId) }
+    : {};
+
   switch (platform) {
     case 'reddit': {
       if (!channel) throw new Error('No Reddit channel connected');
-      return { redditClient: RedditClient.fromChannel(channel) };
+      return {
+        redditClient: RedditClient.fromChannel(channel),
+        ...memoryDeps,
+      };
     }
     case 'x': {
       return {
         xaiClient: new XAIClient(),
         ...(channel ? { xClient: XClient.fromChannel(channel) } : {}),
+        ...memoryDeps,
       };
     }
     default:
-      return {};
+      return memoryDeps;
   }
 }
 
@@ -115,6 +131,76 @@ export async function createClientFromChannelById(
   if (!client) return null;
 
   return { client, platform: channel.platform };
+}
+
+/**
+ * Aggregate platform deps for a team-run's ToolContext.
+ *
+ * Loads every platform client the team could need in one pass so the
+ * ToolContext's synchronous `get(key)` lookup can serve them without
+ * fanning out DB queries per tool call:
+ *
+ *   - `xaiClient` — always instantiated when `XAI_API_KEY` is set
+ *     (Grok search is env-gated, not channel-gated). Specialists like
+ *     `discovery-scout` read this for `x_search_batch`.
+ *   - `redditClient` / `xClient` — instantiated for every platform the
+ *     user has connected a channel for. Skipped silently when the
+ *     channel is missing or the token decrypt fails; the per-tool error
+ *     ("Missing dependency: xClient") will surface downstream for the
+ *     specialist to decide whether to abort or skip.
+ *   - `memoryStore` — scoped to `(userId, productId)` when a product
+ *     exists. Needed for specialists that read agent memory mid-run.
+ *
+ * Returns a plain Record so the caller can spread it into its own
+ * get-switch or Map. Never throws — a missing dep surfaces at the
+ * tool-execution boundary, not here.
+ */
+export async function createTeamPlatformDeps(
+  userId: string,
+  productId: string | null,
+): Promise<Record<string, unknown>> {
+  const deps: Record<string, unknown> = {};
+
+  if (process.env.XAI_API_KEY) {
+    try {
+      deps.xaiClient = new XAIClient();
+    } catch {
+      // Key present but invalid — fall through; x_search_batch will
+      // raise its own clearer error.
+    }
+  }
+
+  // Load every channel the user owns in one query — explicit projection
+  // includes token columns (the project-wide security guard allows this
+  // helper to read them; see CLAUDE.md Security TODO).
+  const userChannels = await db
+    .select({
+      id: channels.id,
+      platform: channels.platform,
+      oauthTokenEncrypted: channels.oauthTokenEncrypted,
+      refreshTokenEncrypted: channels.refreshTokenEncrypted,
+      tokenExpiresAt: channels.tokenExpiresAt,
+    })
+    .from(channels)
+    .where(eq(channels.userId, userId));
+
+  for (const ch of userChannels) {
+    try {
+      const client = createClientFromChannel(ch.platform, ch);
+      if (!client) continue;
+      if (ch.platform === 'reddit') deps.redditClient = client;
+      if (ch.platform === 'x') deps.xClient = client;
+    } catch {
+      // Corrupt row / expired token — skip so one broken channel
+      // doesn't block sibling clients.
+    }
+  }
+
+  if (productId) {
+    deps.memoryStore = new MemoryStore(userId, productId);
+  }
+
+  return deps;
 }
 
 /**

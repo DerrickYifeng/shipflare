@@ -39,6 +39,9 @@ export interface InArraySentinel {
 export interface AndSentinel {
   __and: Array<WhereSentinel>;
 }
+export interface OrSentinel {
+  __or: Array<WhereSentinel>;
+}
 export interface NotSentinel {
   __not: WhereSentinel;
 }
@@ -51,6 +54,7 @@ export type WhereSentinel =
   | LtSentinel
   | InArraySentinel
   | AndSentinel
+  | OrSentinel
   | NotSentinel;
 
 export interface FilterValue {
@@ -89,7 +93,44 @@ export function flattenFilters(
     // the clause as a trivially-satisfied no-op.
     return [];
   }
+  if ('__or' in cond) {
+    // OR clauses can't collapse into the flat AND-list representation.
+    // Callers that only support AND (legacy integration tests) see an
+    // empty list — i.e., "no filtering". Callers that care should use
+    // `rowMatches` instead of `flattenFilters`.
+    return [];
+  }
   return cond.__and.flatMap((c) => flattenFilters(c));
+}
+
+/**
+ * Predicate-based matcher that understands AND/OR/NOT recursion —
+ * use this instead of `flattenFilters` for any query that may include
+ * `or(...)` clauses.
+ */
+export function rowMatches(
+  row: Record<string, unknown>,
+  cond: WhereSentinel | undefined,
+): boolean {
+  if (!cond) return true;
+  if ('__and' in cond) {
+    return cond.__and.every((c) => rowMatches(row, c));
+  }
+  if ('__or' in cond) {
+    return cond.__or.some((c) => rowMatches(row, c));
+  }
+  if ('__not' in cond) {
+    return !rowMatches(row, cond.__not);
+  }
+  const leaves = flattenFilters(cond);
+  return leaves.every((f) => {
+    const key = findRowKey(row, columnKeys(f.column));
+    if (key !== null) return matchesFilter(row[key], f);
+    if (f.op === 'eq') {
+      return Object.values(row).some((v) => matchesFilter(v, f));
+    }
+    return false;
+  });
 }
 
 export interface InMemoryStore {
@@ -217,23 +258,9 @@ export function createInMemoryStore(): InMemoryStore {
 
       function materialize(): unknown[] {
         const rows = store.get(targetTable);
-        const filters = flattenFilters(filter);
-        const matching = rows.filter((row) => {
-          const r = row as Record<string, unknown>;
-          return filters.every((f) => {
-            const key = findRowKey(r, columnKeys(f.column));
-            if (key !== null) {
-              return matchesFilter(r[key], f);
-            }
-            // Fall back (eq only): look for any row field that equals
-            // the filter value — suitable when the harness can't map
-            // the column alias but the filter value is unique.
-            if (f.op === 'eq') {
-              return Object.values(r).some((v) => matchesFilter(v, f));
-            }
-            return false;
-          });
-        });
+        const matching = rows.filter((row) =>
+          rowMatches(row as Record<string, unknown>, filter),
+        );
 
         // Apply SELECT projection when cols is supplied.
         let projected: unknown[] = matching;
@@ -263,9 +290,35 @@ export function createInMemoryStore(): InMemoryStore {
       return {
         values(row: Record<string, unknown> | Array<Record<string, unknown>>) {
           const rows = Array.isArray(row) ? row : [row];
-          const list = store.get(table);
-          for (const r of rows) list.push(r);
-          return Promise.resolve();
+          const list = store.get<Record<string, unknown>>(table);
+          const inserted: Array<Record<string, unknown>> = [];
+          for (const r of rows) {
+            const withId = {
+              ...r,
+              id: (r.id as string | undefined) ?? `mem-${list.length + 1}`,
+            };
+            list.push(withId);
+            inserted.push(withId);
+          }
+          const p = Promise.resolve(inserted) as Promise<
+            Array<Record<string, unknown>>
+          > & {
+            returning: (
+              projection?: Record<string, unknown>,
+            ) => Promise<Array<Record<string, unknown>>>;
+          };
+          p.returning = (projection?: Record<string, unknown>) => {
+            if (!projection) return Promise.resolve(inserted);
+            const keys = Object.keys(projection);
+            return Promise.resolve(
+              inserted.map((row) => {
+                const out: Record<string, unknown> = {};
+                for (const k of keys) out[k] = row[k];
+                return out;
+              }),
+            );
+          };
+          return p;
         },
       };
     },
@@ -281,19 +334,9 @@ export function createInMemoryStore(): InMemoryStore {
           filter = c;
           return Promise.resolve().then(() => {
             const rows = store.get<Record<string, unknown>>(table);
-            const filters = flattenFilters(filter);
             for (const row of rows) {
-              const r = row as Record<string, unknown>;
-              const allMatch = filters.every((f) => {
-                const key = findRowKey(r, columnKeys(f.column));
-                if (key !== null) return matchesFilter(r[key], f);
-                if (f.op === 'eq') {
-                  return Object.values(r).some((v) => matchesFilter(v, f));
-                }
-                return false;
-              });
-              if (allMatch) {
-                Object.assign(r, patch);
+              if (rowMatches(row as Record<string, unknown>, filter)) {
+                Object.assign(row, patch);
               }
             }
           });
@@ -328,6 +371,7 @@ export function drizzleMockFactory(
       __inArray: { column: col, values },
     }),
     and: (...clauses: WhereSentinel[]): AndSentinel => ({ __and: clauses }),
+    or: (...clauses: WhereSentinel[]): OrSentinel => ({ __or: clauses }),
     // Negation is only used by the worker's cancel-race guards — it
     // never narrows a row-by-id path in integration tests, so the fake
     // treats it as a passthrough of the inner node (flattenFilters

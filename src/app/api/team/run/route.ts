@@ -3,7 +3,7 @@ import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { teams, teamMembers, products } from '@/lib/db/schema';
+import { teams, teamMembers, teamConversations, products } from '@/lib/db/schema';
 import { enqueueTeamRun, type TeamRunTrigger } from '@/lib/queue/team-run';
 import { createLogger } from '@/lib/logger';
 
@@ -42,6 +42,19 @@ const requestSchema = z.object({
    * entry point per spec §4.1 request flow.
    */
   rootMemberId: z.string().optional(),
+  /**
+   * Chat refactor: runs live inside a conversation. Callers MUST
+   * supply this. The only path that creates runs without an explicit
+   * conversation is `POST /api/team/conversations` (which mints the
+   * conversation first and then sends the message via
+   * `/conversations/:id/messages`) — routed through a different
+   * endpoint, so this requirement is safe here.
+   *
+   * If the caller has no conversation yet (e.g. cron), they should
+   * create one first via `POST /api/team/conversations` and pass its
+   * id here.
+   */
+  conversationId: z.string().min(1),
 });
 
 /**
@@ -197,11 +210,31 @@ export async function POST(request: NextRequest): Promise<Response> {
     }
   }
 
+  // Chat refactor: the conversation MUST be supplied by the caller.
+  // Validate it exists + belongs to this team before enqueueing.
+  const [conv] = await db
+    .select({ id: teamConversations.id })
+    .from(teamConversations)
+    .where(
+      and(
+        eq(teamConversations.id, body.conversationId),
+        eq(teamConversations.teamId, body.teamId),
+      ),
+    )
+    .limit(1);
+  if (!conv) {
+    return NextResponse.json(
+      { error: 'conversation_not_found' },
+      { status: 404 },
+    );
+  }
+
   const { runId, traceId, alreadyRunning } = await enqueueTeamRun({
     teamId: body.teamId,
     goal,
     trigger,
     rootMemberId,
+    conversationId: body.conversationId,
   });
 
   log.info(
@@ -209,7 +242,7 @@ export async function POST(request: NextRequest): Promise<Response> {
   );
 
   return NextResponse.json(
-    { runId, traceId, alreadyRunning },
+    { runId, traceId, alreadyRunning, conversationId: body.conversationId },
     { status: alreadyRunning ? 200 : 202 },
   );
 }

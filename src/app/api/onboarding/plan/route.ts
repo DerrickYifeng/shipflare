@@ -11,6 +11,7 @@ import { recordPipelineEvent } from '@/lib/pipeline-events';
 import { createLogger, loggerForRequest } from '@/lib/logger';
 import { ensureTeamExists } from '@/lib/team-provisioner';
 import { enqueueTeamRun } from '@/lib/queue/team-run';
+import { createAutomationConversation } from '@/lib/team-conversation-helpers';
 import { subscribeToStrategicPathEvents } from '@/lib/onboarding-team-run';
 
 const baseLog = createLogger('api:onboarding:plan');
@@ -350,11 +351,13 @@ async function runViaTeamRun(
     `via the write_strategic_path tool. Do not emit the terminal ` +
     `StructuredOutput until write_strategic_path has succeeded.`;
 
+  const conversationId = await createAutomationConversation(teamId, 'onboarding');
   const { runId } = await enqueueTeamRun({
     teamId,
     trigger: 'onboarding',
     goal,
     rootMemberId: memberIds['growth-strategist'],
+    conversationId,
   });
 
   // 3) Subscribe to the team's Redis channel, translate events to the

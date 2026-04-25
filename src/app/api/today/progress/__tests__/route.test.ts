@@ -246,32 +246,12 @@ describe('GET /api/today/progress', () => {
     expect(body.teamRun).toEqual({ teamId: 'team-1', runId: 'run-4' });
   });
 
-  it('passes calibration rows through unchanged', async () => {
+  it('returns an empty calibration.platforms list (discovery v3 has no calibration)', async () => {
     state.teamRows = [{ id: 'team-1' }];
     state.runRows = [];
-    state.calibrationRows = [
-      {
-        platform: 'reddit',
-        calibrationStatus: 'running',
-        calibrationRound: 2,
-        calibrationPrecision: 0.65,
-      },
-      {
-        platform: 'x',
-        calibrationStatus: 'completed',
-        calibrationRound: 3,
-        calibrationPrecision: 0.82,
-      },
-    ];
     const { GET } = await import('../route');
     const res = await GET(makeRequest());
     const body = await res.json();
-    expect(body.calibration.platforms).toHaveLength(2);
-    expect(body.calibration.platforms[0]).toEqual({
-      platform: 'reddit',
-      status: 'running',
-      round: 2,
-      precision: 0.65,
-    });
+    expect(body.calibration.platforms).toEqual([]);
   });
 });

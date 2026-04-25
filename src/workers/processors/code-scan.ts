@@ -1,10 +1,9 @@
 import type { Job } from 'bullmq';
 import { eq, isNotNull } from 'drizzle-orm';
 import { db } from '@/lib/db';
-import { products, codeSnapshots, channels, discoveryConfigs } from '@/lib/db/schema';
+import { products, codeSnapshots, channels } from '@/lib/db/schema';
 import { getPubSubPublisher } from '@/lib/redis';
-import { enqueueCalibration, codeScanQueue } from '@/lib/queue';
-import { isPlatformAvailable } from '@/lib/platform-config';
+import { codeScanQueue } from '@/lib/queue';
 import { createLogger, loggerForJob, type Logger } from '@/lib/logger';
 import { getGitHubToken } from '@/lib/github';
 import {
@@ -241,27 +240,9 @@ export async function processCodeScan(job: Job<CodeScanJobData>): Promise<void> 
         .returning({ id: products.id });
       productId = newProduct.id;
 
-      // Trigger calibration for new product created from code scan
-      const userChannels = await db
-        .select({ platform: channels.platform })
-        .from(channels)
-        .where(eq(channels.userId, userId));
-
-      const platforms = [
-        ...new Set(userChannels.map((c) => c.platform)),
-      ].filter(isPlatformAvailable);
-
-      for (const platform of platforms) {
-        await db
-          .insert(discoveryConfigs)
-          .values({ userId, platform, calibrationStatus: 'pending' })
-          .onConflictDoNothing();
-      }
-
-      if (platforms.length > 0) {
-        await enqueueCalibration({ userId, productId });
-        log.info(`Enqueued calibration for code-scanned product ${productId}`);
-      }
+      // Discovery v3: no calibration. The first discovery-scan for this
+      // product generates the onboarding rubric lazily via
+      // `generateOnboardingRubric`; no per-platform config rows needed.
 
       // Phase F: seed the team roster for the newly-scanned product. Best-
       // effort — if it fails the scan job still succeeds and the team will

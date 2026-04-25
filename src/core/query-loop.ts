@@ -286,6 +286,24 @@ export async function runAgent<T>(
    * next turn boundary.
    */
   injectMessages?: () => Anthropic.Messages.MessageParam[],
+  /**
+   * Prior conversation history to prepend BEFORE the fresh `userMessage`.
+   * Mirrors Claude's stateless-API pattern: the caller rebuilds the
+   * conversation from an external store (team_messages table) and hands
+   * the reconstructed Anthropic messages array here. runAgent treats
+   * the prior block as an opaque prefix — no cache-control is added,
+   * no validation is performed beyond the type — so the caller
+   * controls tool_use / tool_result pairing. Pairs well with
+   * prompt_caching (already on by default) for low per-turn cost
+   * after the first call.
+   *
+   * Mutually exclusive with `prebuilt.forkContextMessages` — that path
+   * is for cache-safe parallel-agent forks; this path is for persistent
+   * conversations. If both are supplied, priorMessages is IGNORED and
+   * we log a warning (forkContextMessages wins because cache-safety
+   * is load-bearing for the swarm path).
+   */
+  priorMessages?: Anthropic.Messages.MessageParam[],
 ): Promise<AgentResult<T>> {
   log.debug(`Agent "${config.name}" starting (model=${config.model}, maxTurns=${config.maxTurns})`);
 
@@ -311,10 +329,23 @@ export async function runAgent<T>(
     );
   }
 
+  if (prebuilt?.forkContextMessages && priorMessages) {
+    log.warn(
+      `Agent "${config.name}" received both prebuilt.forkContextMessages and priorMessages; using forkContextMessages (cache-safe path wins).`,
+    );
+  }
+  const resolvedPrior: Anthropic.Messages.MessageParam[] =
+    prebuilt?.forkContextMessages ?? priorMessages ?? [];
+
   const messages: Anthropic.Messages.MessageParam[] = [
-    ...(prebuilt?.forkContextMessages ?? []),
+    ...resolvedPrior,
     { role: 'user', content: userMessage },
   ];
+  if (priorMessages && priorMessages.length > 0 && !prebuilt?.forkContextMessages) {
+    log.debug(
+      `Agent "${config.name}" starting with ${priorMessages.length} prior messages (conversation continuity)`,
+    );
+  }
 
   const tracker = new UsageTracker();
   let currentMaxTokens = 16_384;

@@ -39,7 +39,7 @@ interface ThreadRow {
   author: string | null;
   upvotes: number | null;
   commentCount: number | null;
-  relevanceScore: number;
+  scoutConfidence: number | null;
   postedAt: Date | null;
   discoveredAt: Date;
 }
@@ -72,7 +72,7 @@ function seed(store: InMemoryStore, rows: Partial<ThreadRow>[]): void {
     author: r.author ?? null,
     upvotes: r.upvotes ?? null,
     commentCount: r.commentCount ?? null,
-    relevanceScore: r.relevanceScore ?? 0.5,
+    scoutConfidence: r.scoutConfidence ?? 0.5,
     postedAt: r.postedAt ?? new Date(now - 60 * 60_000),
     discoveredAt: r.discoveredAt ?? new Date(now - 30 * 60_000),
   }));
@@ -87,8 +87,8 @@ beforeEach(() => {
 describe('findThreadsTool', () => {
   it('returns recent threads scoped to the caller userId', async () => {
     seed(store, [
-      { id: 't-a', userId: 'user-1', title: 'mine A', relevanceScore: 0.9 },
-      { id: 't-b', userId: 'user-2', title: 'theirs B', relevanceScore: 0.9 },
+      { id: 't-a', userId: 'user-1', title: 'mine A', scoutConfidence: 0.9 },
+      { id: 't-b', userId: 'user-2', title: 'theirs B', scoutConfidence: 0.9 },
     ]);
     const ctx = makeCtx(store, { userId: 'user-1', productId: 'prod-1' });
     const result = await findThreadsTool.execute({}, ctx);
@@ -98,8 +98,8 @@ describe('findThreadsTool', () => {
 
   it('applies the platforms filter when supplied', async () => {
     seed(store, [
-      { id: 't-r', platform: 'reddit', relevanceScore: 0.8 },
-      { id: 't-x', platform: 'x', relevanceScore: 0.8 },
+      { id: 't-r', platform: 'reddit', scoutConfidence: 0.8 },
+      { id: 't-x', platform: 'x', scoutConfidence: 0.8 },
     ]);
     const ctx = makeCtx(store, { userId: 'user-1', productId: 'prod-1' });
     const result = await findThreadsTool.execute({ platforms: ['x'] }, ctx);
@@ -109,8 +109,8 @@ describe('findThreadsTool', () => {
 
   it('filters by minRelevance client-side', async () => {
     seed(store, [
-      { id: 't-lo', relevanceScore: 0.2 },
-      { id: 't-hi', relevanceScore: 0.9 },
+      { id: 't-lo', scoutConfidence: 0.2 },
+      { id: 't-hi', scoutConfidence: 0.9 },
     ]);
     const ctx = makeCtx(store, { userId: 'user-1', productId: 'prod-1' });
     const result = await findThreadsTool.execute({ minRelevance: 0.5 }, ctx);

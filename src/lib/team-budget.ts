@@ -29,9 +29,10 @@ const log = createLogger('lib:team-budget');
 
 /**
  * Default weekly budget applied when `teams.config.weeklyBudgetUsd` is
- * absent. Kept at $5 per spec §11 Phase G.
+ * absent. Temporarily raised to $50 from the spec §11 Phase G baseline
+ * of $5 to avoid auto-pausing during the Discovery v3 rollout.
  */
-export const DEFAULT_WEEKLY_BUDGET_USD = 5;
+export const DEFAULT_WEEKLY_BUDGET_USD = 50;
 
 /**
  * Feature flag: when false, budget checks are bypassed entirely. Defaults

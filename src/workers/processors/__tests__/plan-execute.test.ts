@@ -56,6 +56,14 @@ vi.mock('@/lib/db', () => ({
         }),
       }),
     }),
+    // Chat refactor: plan-execute mints a conversation for its writer
+    // team-run via createAutomationConversation. The mock returns a
+    // fixed id so enqueueTeamRun gets a valid conversationId.
+    insert: () => ({
+      values: () => ({
+        returning: () => [{ id: 'conv-plan-execute-test' }],
+      }),
+    }),
     update: () => ({
       set: (patch: Partial<Row>) => ({
         where: (cond: { id?: string }) => {

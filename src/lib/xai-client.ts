@@ -51,11 +51,24 @@ export interface XSearchResult {
   searchCalls: number;
 }
 
+export interface XSearchBatchInput {
+  id: string;
+  query: string;
+  maxResults?: number;
+}
+
+export interface XSearchBatchResult {
+  queryId: string;
+  tweets: XSearchTweet[];
+}
+
 export interface XAuthorBio {
   username: string;
   bio: string | null;
   followerCount: number | null;
 }
+
+export const SEARCH_TWEETS_BATCH_MAX_QUERIES = 10;
 
 /**
  * xAI Grok API client for searching X/Twitter content.
@@ -147,6 +160,104 @@ export class XAIClient {
       rawText,
       searchCalls: data.server_side_tool_usage?.x_search_calls ?? 0,
     };
+  }
+
+  /**
+   * Run multiple X/Twitter searches in one Grok call. Grok's server-side
+   * `x_search` tool is invoked once per query in parallel (still counts as
+   * multiple `x_search_calls` for billing, but saves the Responses-API
+   * round-trip, prompt duplication, and most of the wall-clock latency).
+   *
+   * Callers must pass unique ids — results are returned keyed by those ids.
+   * Unknown ids in Grok's output are dropped; queries that produce zero
+   * results come back with `tweets: []` rather than being omitted.
+   *
+   * Upstream callers wanting retry-on-partial-failure should compare the
+   * returned `tweets.length` per query against expectations and fall back
+   * to `searchTweets()` for any misses. This method does not auto-fallback
+   * — a single malformed response shouldn't silently amplify cost.
+   */
+  async searchTweetsBatch(
+    queries: XSearchBatchInput[],
+    opts?: { signal?: AbortSignal },
+  ): Promise<XSearchBatchResult[]> {
+    if (queries.length === 0) return [];
+    if (queries.length > SEARCH_TWEETS_BATCH_MAX_QUERIES) {
+      throw new Error(
+        `searchTweetsBatch: max ${SEARCH_TWEETS_BATCH_MAX_QUERIES} queries per call, got ${queries.length}`,
+      );
+    }
+    const ids = new Set<string>();
+    for (const q of queries) {
+      if (ids.has(q.id)) {
+        throw new Error(`searchTweetsBatch: duplicate query id ${q.id}`);
+      }
+      ids.add(q.id);
+    }
+
+    const systemPrompt = [
+      'You are a batch X/Twitter search assistant. For each query listed by the user, run an x_search and return the matching tweets.',
+      'Output format — one line per tweet:',
+      'TWEET|<query_id>|<tweet_url>|<author_username>|<tweet_text_on_one_line>',
+      'If a query has zero results, output exactly one line: NO_RESULTS|<query_id>',
+      'Rules:',
+      '- Output ONLY TWEET and NO_RESULTS lines. No headers, commentary, or blank lines.',
+      '- Use the exact query_id provided in brackets — never invent new ids.',
+      '- Respect each query\'s maxResults cap.',
+      '- Replace any newlines inside tweet text with spaces so each tweet stays on one line.',
+    ].join('\n');
+
+    const userLines = queries
+      .map(
+        (q) =>
+          `[${q.id}] (maxResults=${q.maxResults ?? 10}) ${q.query}`,
+      )
+      .join('\n');
+
+    const requestBody = JSON.stringify({
+      model: XAI_MODEL,
+      tools: [{ type: 'x_search' }],
+      input: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userLines },
+      ],
+    });
+
+    log.debug(`Batch searching X via xAI: ${queries.length} queries`);
+
+    let data: XAIResponse;
+    try {
+      data = await this.fetchWithTimeout(requestBody, FETCH_TIMEOUT_MS, opts?.signal);
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        log.warn(
+          `xAI batch search timed out after ${FETCH_TIMEOUT_MS}ms, retrying with ${FETCH_RETRY_TIMEOUT_MS}ms`,
+        );
+        data = await this.fetchWithTimeout(
+          requestBody,
+          FETCH_RETRY_TIMEOUT_MS,
+          opts?.signal,
+        );
+      } else {
+        throw err;
+      }
+    }
+
+    const rawText = this.extractText(data);
+    const grouped = this.parseBatchLines(rawText, ids);
+
+    const totalTweets = Array.from(grouped.values()).reduce(
+      (n, arr) => n + arr.length,
+      0,
+    );
+    log.info(
+      `xAI batch search: ${queries.length} queries → ${totalTweets} tweets, ${data.server_side_tool_usage?.x_search_calls ?? 0} search calls`,
+    );
+
+    return queries.map((q) => ({
+      queryId: q.id,
+      tweets: (grouped.get(q.id) ?? []).slice(0, q.maxResults ?? 10),
+    }));
   }
 
   /**
@@ -303,6 +414,42 @@ export class XAIClient {
     }
 
     return tweets;
+  }
+
+  /**
+   * Parse the batched Grok response into tweets grouped by query id.
+   * Lines with unknown ids are dropped. NO_RESULTS lines are no-ops — the
+   * caller already pre-seeds empty arrays for every requested id.
+   */
+  private parseBatchLines(
+    text: string,
+    validIds: ReadonlySet<string>,
+  ): Map<string, XSearchTweet[]> {
+    const out = new Map<string, XSearchTweet[]>();
+    for (const id of validIds) out.set(id, []);
+
+    for (const line of text.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('TWEET|')) continue;
+      const parts = trimmed.split('|');
+      if (parts.length < 5) continue;
+
+      const queryId = parts[1]!.trim();
+      if (!validIds.has(queryId)) continue;
+
+      const url = parts[2]!.trim();
+      const tweetId = this.extractTweetId(url);
+      if (!tweetId) continue;
+
+      out.get(queryId)!.push({
+        tweetId,
+        url,
+        authorUsername: parts[3]!.trim().replace(/^@/, ''),
+        text: parts.slice(4).join('|').trim(),
+      });
+    }
+
+    return out;
   }
 
   /**

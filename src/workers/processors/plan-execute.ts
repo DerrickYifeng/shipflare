@@ -16,6 +16,7 @@ import {
 } from '@/lib/plan-state';
 import { ensureTeamExists } from '@/lib/team-provisioner';
 import { enqueueTeamRun } from '@/lib/queue/team-run';
+import { createAutomationConversation } from '@/lib/team-conversation-helpers';
 
 const baseLog = createLogger('worker:plan-execute');
 
@@ -125,11 +126,13 @@ export async function processPlanExecute(
         `The writer reads the plan_item, calls draft_post to generate + persist the body, ` +
         `and flips the plan_item state to 'drafted'. Don't call draft_post yourself — ` +
         `delegate to the writer and return its summary.`;
+      const draftConvId = await createAutomationConversation(teamId, 'draft_post');
       await enqueueTeamRun({
         teamId,
         trigger: 'draft_post',
         goal,
         rootMemberId: memberIds.coordinator,
+        conversationId: draftConvId,
       });
       log.info(
         `plan_item ${planItemId}: draft phase → enqueued team-run agent=${writerAgent} channel=${row.channel}`,

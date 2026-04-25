@@ -10,6 +10,7 @@ import { acquireRateLimit } from '@/lib/rate-limit';
 import { getUserChannels } from '@/lib/user-channels';
 import { ensureTeamExists } from '@/lib/team-provisioner';
 import { enqueueTeamRun } from '@/lib/queue/team-run';
+import { createAutomationConversation } from '@/lib/team-conversation-helpers';
 import { createLogger, loggerForRequest } from '@/lib/logger';
 
 const baseLog = createLogger('api:product:phase');
@@ -201,11 +202,16 @@ export async function POST(request: NextRequest): Promise<Response> {
       `Active channels: ${activeChannels.join(', ')}. ` +
       `Write a new strategic path reflecting the new phase, then plan the coming week.`;
 
+    const conversationId = await createAutomationConversation(
+      teamId,
+      'phase_transition',
+    );
     const enqueued = await enqueueTeamRun({
       teamId,
       trigger: 'phase_transition',
       goal,
       rootMemberId: memberIds.coordinator,
+      conversationId,
     });
     runId = enqueued.runId;
   } catch (err) {

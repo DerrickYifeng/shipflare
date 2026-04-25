@@ -375,7 +375,8 @@ async function processXMonitorForUser(
           community: `@${tweetInput.authorUsername}`,
           title: tweetInput.tweetText.slice(0, 200),
           url: buildContentUrl('x', tweetInput.authorUsername, tweetInput.tweetId),
-          relevanceScore: replyOutput.confidence,
+          scoutConfidence: replyOutput.confidence,
+          scoutReason: 'monitor-drafted',
         })
         .onConflictDoNothing()
         .returning();
