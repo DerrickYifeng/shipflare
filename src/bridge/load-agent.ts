@@ -39,12 +39,22 @@ export function clearAgentConfigCache(): void {
 
 function getReactPreamble(agentsDir: string): string {
   if (reactPreambleCache !== null) return reactPreambleCache;
-  const preamblePath = join(agentsDir, 'react-preamble.md');
-  if (existsSync(preamblePath)) {
-    reactPreambleCache = readFileSync(preamblePath, 'utf-8').trim();
-  } else {
-    reactPreambleCache = '';
+  // Try sibling first (legacy `src/agents/<name>.md` layout). Then fall
+  // back to the canonical legacy location for the new
+  // `src/tools/AgentTool/agents/<name>/AGENT.md` layout — the preamble
+  // file still lives at `src/agents/react-preamble.md` per the cleanup
+  // plan ("keep schemas.ts and react-preamble.md").
+  const candidates = [
+    join(agentsDir, 'react-preamble.md'),
+    join(process.cwd(), 'src', 'agents', 'react-preamble.md'),
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      reactPreambleCache = readFileSync(candidate, 'utf-8').trim();
+      return reactPreambleCache;
+    }
   }
+  reactPreambleCache = '';
   return reactPreambleCache;
 }
 
@@ -96,6 +106,12 @@ export function loadAgentsFromDir(
 /**
  * Parse markdown with YAML frontmatter into AgentConfig.
  * Automatically injects the ReAct preamble into all agent system prompts.
+ *
+ * When the AGENT.md frontmatter declares a `references:` array, each entry
+ * is resolved against `<agentDir>/references/<entry>.md` and appended to
+ * the system prompt — matching the unified registry loader behavior so
+ * the same AGENT.md works for both bridge consumers (workers) and the
+ * unified `loadAgent()` used by the AgentTool registry.
  */
 export function parseAgentMarkdown(
   raw: string,
@@ -133,6 +149,28 @@ export function parseAgentMarkdown(
     const preamble = getReactPreamble(agentsDir);
     if (preamble) {
       systemPrompt = `${preamble}\n\n${systemPrompt}`;
+    }
+  }
+
+  // Inline per-agent references when declared. Files live in
+  // `<agentDir>/references/<entry>.md`; the AGENT.md sits one level up
+  // (`<agentDir>/AGENT.md`). Skip silently when no references list is
+  // present — most legacy single-file agents don't have any.
+  const referenceEntries: string[] = Array.isArray(meta.references)
+    ? meta.references
+    : [];
+  if (referenceEntries.length > 0 && agentsDir) {
+    for (const entry of referenceEntries) {
+      const filename = entry.endsWith('.md') ? entry : `${entry}.md`;
+      const refPath = join(agentsDir, 'references', filename);
+      if (!existsSync(refPath)) {
+        throw new Error(
+          `Agent "${name}": references missing file "${filename}" at ${refPath}`,
+        );
+      }
+      const refContent = readFileSync(refPath, 'utf-8').trim();
+      const refLabel = filename.replace(/\.md$/, '');
+      systemPrompt = `${systemPrompt}\n\n## ${refLabel}\n\n${refContent}\n`;
     }
   }
 

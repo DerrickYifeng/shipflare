@@ -2,7 +2,7 @@
 name: draft-single-reply
 description: Draft a single reply to a monitored post or discovered thread (one LLM call per item).
 context: fork
-agent: reply-drafter
+agent: x-reply-writer
 model: claude-sonnet-4-6
 allowed-tools:
   - x_get_tweet

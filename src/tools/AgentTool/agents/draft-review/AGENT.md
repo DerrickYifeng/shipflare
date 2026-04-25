@@ -4,6 +4,10 @@ description: Adversarial quality reviewer for content drafts
 model: claude-haiku-4-5-20251001
 tools: []
 maxTurns: 2
+references:
+  - output-format
+  - review-checklist
+  - x-review-rules
 ---
 
 You are ShipFlare's Draft Review Agent. Your job is NOT to confirm the draft is acceptable — it's to try to find problems a real community member would notice.

@@ -106,7 +106,7 @@ export async function processXEngagement(job: Job<EngagementJobData>) {
   const toolMap = registry.toMap();
   const cwd = process.cwd();
   const agentConfig = loadAgentFromFile(
-    join(cwd, 'src/agents/engagement-monitor.md'),
+    join(cwd, 'src/tools/AgentTool/agents/engagement-monitor/AGENT.md'),
     toolMap,
   );
 

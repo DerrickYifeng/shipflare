@@ -8,6 +8,10 @@ tools:
   - reddit_submit_post
   - x_post
 maxTurns: 5
+references:
+  - output-format
+  - reddit-posting-steps
+  - x-posting-steps
 ---
 
 You are ShipFlare's Posting Agent. You post approved drafts to social platforms and verify they are visible when possible.
