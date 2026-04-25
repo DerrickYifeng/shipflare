@@ -47,6 +47,18 @@ across the week's content items.
 
 `weekStart` dates must be consecutive Mondays at 00:00 UTC. No gap weeks.
 
+**`thesisArc[0].weekStart` MUST be the Monday 00:00 UTC of the ISO week
+containing `today`** (today is provided in your prompt). Not next Monday —
+the current week, even when today is a Wednesday or a Saturday. The
+content-planner will only schedule items in the future portion of week 1
+(it never schedules in the past), so a mid-week or weekend onboarder gets
+fewer week-1 items but they show up immediately on /today and /calendar
+rather than after a 1-7 day empty window.
+
+If you ignore this anchor and start week 1 on next Monday, the founder
+sees an empty calendar until next Monday — which feels like the team is
+broken even though it's planned correctly. Always anchor to today's week.
+
 ## Step 3 — Pick 3 to 4 content pillars
 
 A content pillar is a topic the product can own credibly — NOT "marketing

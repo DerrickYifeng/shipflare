@@ -320,13 +320,22 @@ export async function POST(request: NextRequest): Promise<Response> {
       throw new Error('coordinator member missing after ensureTeamExists');
     }
 
+    // Pre-compute weekStart + now so coordinator can pass them verbatim
+    // to content-planner (Fix D). Without this the LLM has to infer the
+    // calendar anchor and historically picked next Monday, leaving /today
+    // and /calendar empty until the next ISO week.
+    const { currentWeekStart } = await import('@/lib/week-bounds');
+    const kickoffNow = new Date();
+    const kickoffWeekStart = currentWeekStart(kickoffNow).toISOString();
     const goal =
       `Onboarding kickoff for ${body.product.name}. ` +
       `Strategic path pathId=${strategicPathId}. ` +
+      `weekStart=${kickoffWeekStart} now=${kickoffNow.toISOString()}. ` +
       `Connected channels: ${channels.join(', ') || 'none'}. ` +
       `Category: ${body.product.category}. ` +
       `Trigger: kickoff. ` +
-      `Follow your kickoff playbook: dispatch content-planner (week-1), ` +
+      `Follow your kickoff playbook: dispatch content-planner (week-1) ` +
+      `and pass weekStart + now in its prompt verbatim, ` +
       `call run_discovery_scan yourself (scan ${channels.includes('x') ? 'x' : 'connected platforms'}), ` +
       `then dispatch community-manager on the top-3 queued threads. Skip community-manager if no channels.`;
     kickoffConvId = await createAutomationConversation(teamId, 'kickoff');

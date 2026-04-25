@@ -11,6 +11,7 @@ import { getUserChannels } from '@/lib/user-channels';
 import { ensureTeamExists } from '@/lib/team-provisioner';
 import { enqueueTeamRun } from '@/lib/queue/team-run';
 import { createAutomationConversation } from '@/lib/team-conversation-helpers';
+import { weekBounds } from '@/lib/week-bounds';
 import { createLogger, loggerForRequest } from '@/lib/logger';
 
 const baseLog = createLogger('api:product:phase');
@@ -23,16 +24,7 @@ const requestBodySchema = z.object({
   launchedAt: z.string().datetime().nullable().optional(),
 });
 
-function weekBounds(now: Date): { weekStart: Date; weekEnd: Date } {
-  const d = new Date(now);
-  d.setUTCHours(0, 0, 0, 0);
-  const dayOffset = (d.getUTCDay() + 6) % 7;
-  d.setUTCDate(d.getUTCDate() - dayOffset);
-  const weekStart = new Date(d);
-  const weekEnd = new Date(d);
-  weekEnd.setUTCDate(weekEnd.getUTCDate() + 7);
-  return { weekStart, weekEnd };
-}
+// weekBounds: see src/lib/week-bounds.ts
 
 /**
  * POST /api/product/phase
@@ -194,13 +186,15 @@ export async function POST(request: NextRequest): Promise<Response> {
   let runId: string;
   try {
     const { teamId, memberIds } = await ensureTeamExists(userId, product.id);
+    const phaseNow = new Date();
     const goal =
       `Phase change for ${product.name}: the user updated their launch situation. ` +
       `New state: ${state}. New phase: ${currentPhase}. ` +
+      `weekStart=${weekStart.toISOString()} now=${phaseNow.toISOString()} today=${phaseNow.toISOString().slice(0, 10)}. ` +
       (launchDate ? `Launch date: ${launchDate.toISOString().slice(0, 10)}. ` : '') +
       (launchedAt ? `Launched: ${launchedAt.toISOString().slice(0, 10)}. ` : '') +
       `Active channels: ${activeChannels.join(', ')}. ` +
-      `Write a new strategic path reflecting the new phase, then plan the coming week.`;
+      `Write a new strategic path reflecting the new phase (anchor thesisArc[0].weekStart to ${weekStart.toISOString().slice(0, 10)}), then plan the coming week. Pass weekStart + now to content-planner verbatim in its spawn prompt.`;
 
     const conversationId = await createAutomationConversation(
       teamId,

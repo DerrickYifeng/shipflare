@@ -4,6 +4,7 @@ import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { planItems } from '@/lib/db/schema';
 import type { PlanItemState } from '@/lib/plan-state';
+import { currentWeekStart } from '@/lib/week-bounds';
 
 // Calendar view: 7-day window over `plan_items`, grouped by day.
 //
@@ -62,19 +63,9 @@ interface CalendarResponse {
 
 const MS_PER_DAY = 86_400_000;
 
-/**
- * Monday 00:00 UTC of the week containing `d`. Matches the week boundary
- * the tactical planner uses (see `src/app/api/onboarding/plan/route.ts`
- * weekBounds helper) so the calendar week lines up with the plan.
- */
-function mondayUtc(d: Date): Date {
-  const w = new Date(d);
-  w.setUTCHours(0, 0, 0, 0);
-  const day = w.getUTCDay(); // 0 = Sun
-  const diff = (day + 6) % 7; // days since Monday
-  w.setUTCDate(w.getUTCDate() - diff);
-  return w;
-}
+// mondayUtc: aliased from the shared helper. Matches the week boundary the
+// tactical planner uses so the calendar week lines up with the plan.
+const mondayUtc = currentWeekStart;
 
 function toYmd(d: Date): string {
   return d.toISOString().slice(0, 10);
