@@ -21,7 +21,9 @@
 export type BaseAgentType =
   | 'coordinator'
   | 'growth-strategist'
-  | 'content-planner';
+  | 'content-planner'
+  | 'community-scout'
+  | 'reply-drafter';
 
 /**
  * Writer + community agents layered on top of the baseline by preset.
@@ -69,6 +71,8 @@ export interface DisplayNameMap {
   coordinator: string;
   'growth-strategist': string;
   'content-planner': string;
+  'community-scout': string;
+  'reply-drafter': string;
   'x-writer': string;
   'reddit-writer': string;
   'community-manager': string;
@@ -83,6 +87,8 @@ export const DEFAULT_DISPLAY_NAMES: DisplayNameMap = {
   coordinator: 'Chief of Staff',
   'growth-strategist': 'Head of Growth',
   'content-planner': 'Head of Content',
+  'community-scout': 'Community Scout',
+  'reply-drafter': 'Reply Drafter',
   'x-writer': 'X Writer',
   'reddit-writer': 'Reddit Writer',
   'community-manager': 'Community Manager',
@@ -120,6 +126,8 @@ export function getTeamCompositionForPreset(preset: TeamPreset): AgentType[] {
     'coordinator',
     'growth-strategist',
     'content-planner',
+    'community-scout',
+    'reply-drafter',
   ];
   switch (preset) {
     case 'dev-squad':

@@ -139,7 +139,13 @@ export async function ensureTeamExists(
 
   const roster: AgentType[] = options?.preset
     ? getTeamCompositionForPreset(options.preset)
-    : ['coordinator', 'growth-strategist', 'content-planner'];
+    : [
+        'coordinator',
+        'growth-strategist',
+        'content-planner',
+        'community-scout',
+        'reply-drafter',
+      ];
 
   for (const agentType of roster) {
     if (byType.has(agentType)) continue;
@@ -163,6 +169,8 @@ export async function ensureTeamExists(
     coordinator: byType.get('coordinator')!,
     'growth-strategist': byType.get('growth-strategist')!,
     'content-planner': byType.get('content-planner')!,
+    'community-scout': byType.get('community-scout')!,
+    'reply-drafter': byType.get('reply-drafter')!,
   };
 
   return { teamId, memberIds, created };
