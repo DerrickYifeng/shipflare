@@ -1,6 +1,7 @@
 /**
  * Build the <voice_profile> XML block injected into the post-writer agent
- * prompt and the draft-single-reply skill. Pure function — takes a profile
+ * prompt, the community-manager agent prompt, and the x-reply-writer
+ * agent prompt (via reply-hardening). Pure function — takes a profile
  * row, returns a string (or null when profile is absent).
  */
 

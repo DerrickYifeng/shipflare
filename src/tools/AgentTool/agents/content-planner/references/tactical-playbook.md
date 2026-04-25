@@ -136,8 +136,10 @@ For every scheduled item:
   - `content_post` → **leave `skillName: null`**. Content posts route
     through the post-writer team-run; the agent reads `plan_items.channel`
     (`x` or `reddit`) and consults the matching guide at draft time.
-  - `content_reply` → `draft-single-reply` (only for `channel: 'x'` —
-    reddit reply drafting isn't wired yet).
+  - `content_reply` → **leave `skillName: null`**. Reply drafting is
+    owned end-to-end by the community-manager team-run agent; the
+    plan-execute dispatcher manual-completes the row and the actual
+    drafts come from the discovery → community-manager Task fan-out.
   - `email_send` → `skillName: null`. Manual-completion until a future
     phase wires an email agent.
   - `interview` → `skillName: null` (founder runs the interview manually).

@@ -18,9 +18,14 @@ describe('dispatchPlanItem — happy paths', () => {
     expect(route!.defaultUserAction).toBe('approve');
   });
 
-  it('routes content_reply + x to draft-single-reply / posting / approve', () => {
+  it('routes content_reply + x to null draft / posting execute / approve', () => {
+    // Phase 6 (agent-cleanup) deleted the draft-single-reply skill —
+    // community-manager owns reply drafting end-to-end via the discovery
+    // → community-manager Task fan-out. The dispatch route still
+    // resolves so the state machine keeps flowing; only the execute
+    // path (posting) is consulted from here.
     const route = dispatchPlanItem({ kind: 'content_reply', channel: 'x' });
-    expect(route!.draftSkill).toBe('draft-single-reply');
+    expect(route!.draftSkill).toBeNull();
     expect(route!.executeSkill).toBe('posting');
     expect(route!.defaultUserAction).toBe('approve');
   });

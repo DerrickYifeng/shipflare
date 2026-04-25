@@ -36,7 +36,6 @@ import { draftPostTool } from './DraftPostTool/DraftPostTool';
 import { findThreadsTool } from './FindThreadsTool/FindThreadsTool';
 import { draftReplyTool } from './DraftReplyTool/DraftReplyTool';
 import { runDiscoveryScanTool } from './RunDiscoveryScanTool/RunDiscoveryScanTool';
-import { draftSingleReplyTool } from './DraftReplyTool/DraftSingleReplyTool';
 
 /**
  * Central tool registry for ShipFlare agents.
@@ -109,15 +108,13 @@ registry.register(findThreadsTool);
 registry.register(draftReplyTool);
 
 // ---------------------------------------------------------------------------
-// Unified discovery pipeline tools (team-run wrappers). `run_discovery_scan`
-// wraps `runDiscoveryV3` so the coordinator can drive discovery inline
-// from a team-run loop. `draft_single_reply` wraps the draft-single-reply
-// skill (full opportunity-judge + drafter + ai-slop validation pipeline)
-// — distinct from the persist-only `draft_reply` above, which the caller
-// uses when it has already drafted the body.
+// Unified discovery pipeline tools. `run_discovery_scan` wraps
+// `runDiscoveryV3` so the coordinator can drive discovery inline from a
+// team-run loop. The persist-only `draft_reply` above is the only reply
+// tool community-manager needs — it drafts the body in its own LLM turn
+// using the prose rules in `community-manager/references/`.
 // ---------------------------------------------------------------------------
 registry.register(runDiscoveryScanTool);
-registry.register(draftSingleReplyTool);
 
 export { registry };
 

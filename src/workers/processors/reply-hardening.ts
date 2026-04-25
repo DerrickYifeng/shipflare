@@ -98,11 +98,20 @@ async function runReplyDrafter(
  *
  * Stages:
  *   1. product-opportunity-judge — determines whether the product may be mentioned
- *   2. draft-single-reply (reply-drafter) — drafts the reply with canMentionProduct context
+ *   2. x-reply-writer — drafts the reply with canMentionProduct context
  *   3. content-validator pipeline — length, platform-leak, hallucinated-stats
  *      with up to `MAX_REGEN_ATTEMPTS` regeneration passes
  *   4. ai-slop-validator — rejects AI-sounding preambles and banned vocabulary
  *   5. anchor-token-validator — rejects replies with no concrete anchor (number/date/brand)
+ *
+ * This is the programmatic monitor.ts pipeline (one tweet → one draft, with
+ * a code-driven regen loop). It is intentionally distinct from the
+ * community-manager team-run path, which does the entire opportunity-judge +
+ * draft + self-check inline in a single LLM turn using prose references.
+ * Both paths produce a `drafts` row; both eventually land on the same
+ * review queue. The split exists because monitor.ts is per-tweet retry
+ * logic, not an agent conversation — keeping it programmatic preserves
+ * the deterministic regen budget.
  *
  * Returns strategy='skip' with rejectionReasons when any stage fails. If
  * regeneration exhausts on content-validator failures, sets `needsReview`

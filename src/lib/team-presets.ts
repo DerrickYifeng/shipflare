@@ -17,18 +17,23 @@
  * Baseline agent roster present in every team. `memberIds` exposes one id
  * per BaseAgentType so `plan-execute` / `team-run` callers can route
  * without reading the config.
+ *
+ * Phase 6 (agent-cleanup) dropped `reply-drafter` from the baseline —
+ * community-manager now owns reply drafting end-to-end (drafts the body
+ * inline + self-checks against the slop / anchor / length / stats rules
+ * in its references), so the standalone reply-drafter teammate is gone.
  */
 export type BaseAgentType =
   | 'coordinator'
   | 'growth-strategist'
-  | 'content-planner'
-  | 'reply-drafter';
+  | 'content-planner';
 
 /**
  * Writer + community agents layered on top of the baseline by preset.
  * `post-writer` is a single channel-aware writer — `plan_items.channel`
  * (`x` or `reddit`) decides the platform tone via the writer's reference
  * docs at draft time, so we no longer split the roster by platform.
+ * `community-manager` owns the entire reply pipeline post-Phase-6.
  */
 export type WriterAgentType =
   | 'post-writer'
@@ -72,7 +77,6 @@ export interface DisplayNameMap {
   coordinator: string;
   'growth-strategist': string;
   'content-planner': string;
-  'reply-drafter': string;
   'post-writer': string;
   'community-manager': string;
 }
@@ -86,7 +90,6 @@ export const DEFAULT_DISPLAY_NAMES: DisplayNameMap = {
   coordinator: 'Chief of Staff',
   'growth-strategist': 'Head of Growth',
   'content-planner': 'Head of Content',
-  'reply-drafter': 'Reply Drafter',
   'post-writer': 'Post Writer',
   'community-manager': 'Community Manager',
 };
@@ -123,7 +126,6 @@ export function getTeamCompositionForPreset(preset: TeamPreset): AgentType[] {
     'coordinator',
     'growth-strategist',
     'content-planner',
-    'reply-drafter',
   ];
   switch (preset) {
     case 'dev-squad':

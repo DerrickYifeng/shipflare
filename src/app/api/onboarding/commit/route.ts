@@ -306,7 +306,7 @@ export async function POST(request: NextRequest): Promise<Response> {
   // Post-onboarding kickoff: ONE team-run rooted at coordinator that
   // dispatches content-planner (week-1 plan_items), runs `run_discovery_scan`
   // inline (live conversations on connected platforms), and then dispatches
-  // reply-drafter (top-3 replies for queued threads). Visible in /team chat.
+  // community-manager (top-3 replies for queued threads). Visible in /team chat.
   let kickoffConvId: string | null = null;
   try {
     const { teamId } = await ensureTeamExists(userId, productId);
@@ -328,7 +328,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       `Trigger: kickoff. ` +
       `Follow your kickoff playbook: dispatch content-planner (week-1), ` +
       `call run_discovery_scan yourself (scan ${channels.includes('x') ? 'x' : 'connected platforms'}), ` +
-      `then dispatch reply-drafter on the top-3 queued threads. Skip drafter if no channels.`;
+      `then dispatch community-manager on the top-3 queued threads. Skip community-manager if no channels.`;
     kickoffConvId = await createAutomationConversation(teamId, 'kickoff');
     const { runId: kickoffRunId } = await enqueueTeamRun({
       teamId,

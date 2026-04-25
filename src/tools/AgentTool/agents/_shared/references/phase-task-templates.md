@@ -20,8 +20,10 @@ content-planner:
 - `content_post` rows MUST set `skillName: null` and route via `channel`
   (`x` and `reddit` both go to `post-writer`; the writer reads `channel`
   to pick the right platform guide).
-- `content_reply` on X MAY set `skillName: 'draft-single-reply'`; Reddit
-  reply drafting is not wired yet.
+- `content_reply` rows MUST set `skillName: null`. Reply drafting is
+  owned end-to-end by the community-manager team-run agent; the plan-
+  execute dispatcher manual-completes the row and the actual drafts
+  come from the discovery → community-manager Task fan-out.
 - `setup_task` voice work MAY set `skillName: 'voice-extractor'`.
 - **Every other template's `skillName` is currently retired** — leave
   `null` and the plan-execute dispatcher will route via the shell-route
@@ -164,7 +166,7 @@ Goal: build launch-ready audience. Weekly rhythm matters most here.
   15-min window. Max 3 to the same community."
 - `channel`: 'x'
 - `userAction`: 'approve'
-- `skillName`: 'draft-single-reply'
+- `skillName`: null  # community-manager owns reply drafting end-to-end
 - `params`: `{ targetCount: 5 }`
 
 ### 4. setup_task — Identify and queue 20 hunters
@@ -407,7 +409,7 @@ Goal: durable rhythm. No panic moves.
 - `description`: "5 high-signal replies within the 15-min window."
 - `channel`: 'x'
 - `userAction`: 'approve'
-- `skillName`: 'draft-single-reply'
+- `skillName`: null  # community-manager owns reply drafting end-to-end
 - `params`: `{ targetCount: 5 }`
 
 ### 3. email_send — Weekly digest

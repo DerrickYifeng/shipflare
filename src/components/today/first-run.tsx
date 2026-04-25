@@ -12,9 +12,9 @@ interface FirstRunProps {
 // Stages map to the real v3 agent pipeline. Each advances when the
 // corresponding SSE agent_start / agent_complete / draft_reviewed
 // event arrives. Backend agent names emitted on /api/events:
-//   - 'discovery'      (automation/run route)
-//   - 'reply-drafter'  (monitor.ts — maps into the content bucket)
-//   - 'x-metrics'      (metrics.ts — not part of first-run)
+//   - 'discovery'        (automation/run route)
+//   - 'x-reply-writer'   (monitor.ts — maps into the content bucket)
+//   - 'x-metrics'        (metrics.ts — not part of first-run)
 // Onboarding kickoff goes through a coordinator team-run (separate SSE
 // channel), so that path's progress shows up in /team chat rather than
 // here; this component still works as a polling-based fallback when
@@ -51,7 +51,7 @@ interface SSEAgentEvent {
 function agentToStage(agentName: string | undefined): Stage | null {
   if (!agentName) return null;
   if (agentName === 'discovery') return 'discovery';
-  if (agentName === 'reply-drafter') return 'content';
+  if (agentName === 'x-reply-writer') return 'content';
   return null;
 }
 

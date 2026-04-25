@@ -52,7 +52,7 @@ export const runDiscoveryScanTool: ToolDefinition<
   description:
     'Run discovery scout on a platform (x | reddit). Returns the threads ' +
     'judged "queue"-worthy with their confidence + reason. The threads ' +
-    'are persisted to the threads table (state=queued); reply-drafter ' +
+    'are persisted to the threads table (state=queued); community-manager ' +
     'should then be dispatched against the returned externalIds. Skips ' +
     'gracefully when no channel for the platform is connected.',
   inputSchema,

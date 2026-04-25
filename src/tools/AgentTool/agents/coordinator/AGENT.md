@@ -96,16 +96,20 @@ parallel:
    threads inline; no specialist spawn needed.
 3. If step 2 returned `skipped: true` (no channel connected), tell the
    user "Connect X to see your scout in action." Skip step 4.
-4. If step 2 returned `queued.length > 0`, dispatch reply-drafter on the
-   top 3 by confidence:
-   `Task({ subagent_type: 'reply-drafter', description: 'draft top-3 replies', prompt: <thread list> })`.
+4. If step 2 returned `queued.length > 0`, dispatch community-manager on
+   the top 3 by confidence:
+   `Task({ subagent_type: 'community-manager', description: 'draft top-3 replies', prompt: <thread list> })`.
+   community-manager owns reply drafting end-to-end — it judges the
+   opportunity inline, drafts the body in its own LLM turn, self-checks
+   against the slop / anchor / length / hallucinated-stats rules in its
+   references, and persists via `draft_reply`.
 
 Final user-facing summary should list: items planned, threads scanned,
 drafts ready for review.
 
 ### `trigger: 'discovery_cron'` (daily 13:00 UTC)
 
-Daily discovery sweep. Run scans yourself; only dispatch reply-drafter
+Daily discovery sweep. Run scans yourself; only dispatch community-manager
 if there's something to draft:
 
 1. Call `run_discovery_scan({ platform: 'x' })` (and `{ platform: 'reddit' }`
@@ -113,7 +117,7 @@ if there's something to draft:
    in parallel).
 2. Combine the `queued` arrays across platforms and pick the top 3 by
    `confidence`. If non-empty:
-   `Task({ subagent_type: 'reply-drafter', description: 'draft top-3 replies', prompt: <thread list> })`
+   `Task({ subagent_type: 'community-manager', description: 'draft top-3 replies', prompt: <thread list> })`
 3. If every scan returned 0 queued threads, your final reply is one line:
    "Scanned X today, no relevant new conversations."
 
@@ -123,7 +127,7 @@ planning is owned by a separate weekly cron.
 ### `trigger: 'manual'` (user said "scan X again")
 
 Same as `discovery_cron` — call `run_discovery_scan` directly, then
-dispatch reply-drafter on the top results — except respect any user
+dispatch community-manager on the top results — except respect any user
 hints in the goal text (e.g. "draft 5 replies, not 3", "scan reddit
 only").
 

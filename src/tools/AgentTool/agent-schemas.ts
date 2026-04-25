@@ -18,7 +18,6 @@ import { postWriterOutputSchema } from './agents/post-writer/schema';
 import { communityManagerOutputSchema } from './agents/community-manager/schema';
 import { discoveryScoutOutputSchema } from './agents/discovery-scout/schema';
 import { discoveryReviewerOutputSchema } from './agents/discovery-reviewer/schema';
-import { replyDrafterOutputSchema } from './agents/reply-drafter/schema';
 import { draftReviewOutputSchema } from './agents/draft-review/schema';
 import { postingOutputSchema } from './agents/posting/schema';
 import { engagementMonitorOutputSchema } from './agents/engagement-monitor/schema';
@@ -34,7 +33,6 @@ const registry: Record<string, ZodType<unknown>> = {
   'community-manager': communityManagerOutputSchema as ZodType<unknown>,
   'discovery-scout': discoveryScoutOutputSchema as ZodType<unknown>,
   'discovery-reviewer': discoveryReviewerOutputSchema as ZodType<unknown>,
-  'reply-drafter': replyDrafterOutputSchema as ZodType<unknown>,
   'draft-review': draftReviewOutputSchema as ZodType<unknown>,
   posting: postingOutputSchema as ZodType<unknown>,
   'engagement-monitor': engagementMonitorOutputSchema as ZodType<unknown>,
@@ -61,7 +59,6 @@ export {
   communityManagerOutputSchema,
   discoveryScoutOutputSchema,
   discoveryReviewerOutputSchema,
-  replyDrafterOutputSchema,
   draftReviewOutputSchema,
   postingOutputSchema,
   engagementMonitorOutputSchema,
