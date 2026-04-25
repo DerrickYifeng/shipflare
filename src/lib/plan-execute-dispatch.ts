@@ -61,11 +61,11 @@ const ROUTES: ReadonlyArray<
   }
 > = [
   // --- content_post ---
-  // Phase E Day 3: plan-execute's writer branch owns the DRAFT phase for
-  // content_post + x/reddit (x-writer / reddit-writer spawned via team-run).
-  // The EXECUTE phase still flows through dispatch → posting, since posting
-  // is an actual runtime-loaded skill (src/skills/posting) that the execute
-  // branch uses as a string label to advance the state machine.
+  // plan-execute's writer branch owns the DRAFT phase for content_post +
+  // x/reddit (post-writer spawned via team-run). The EXECUTE phase still
+  // flows through dispatch → posting, since posting is an actual
+  // runtime-loaded skill (src/skills/posting) that the execute branch uses
+  // as a string label to advance the state machine.
   {
     kind: 'content_post',
     channel: 'x',

@@ -139,7 +139,7 @@ context (`query_strategic_path` + `query_team_status` give you the
 voice + thesis); just write the answer yourself in 2–5 short options
 with a one-line "why" each. Do NOT dispatch:
 
-- NOT to `x-writer` — that agent drafts plan_item-anchored posts, not
+- NOT to `post-writer` — that agent drafts plan_item-anchored posts, not
   profile copy or off-the-cuff suggestions.
 - NOT to `community-manager` — that agent only handles thread replies
   from the `threads` inbox.

@@ -1,9 +1,9 @@
 // draft_post — generate an X (or future-platform) post body for one
 // plan_items row and persist it.
 //
-// Called by: x-writer (and, in Phase E Day 2, reddit-writer via the same
-// tool with a different channel). The caller is spawned as a subagent;
-// its Task prompt carries the `planItemId`. The tool:
+// Called by: post-writer (the single channel-aware writer agent). The
+// caller is spawned as a subagent; its Task prompt carries the `planItemId`.
+// The tool:
 //
 //   1. Reads the plan_items row (scoped to userId + productId).
 //   2. Pulls product context (name, description, valueProp) for the
@@ -13,9 +13,9 @@
 //   4. UPDATEs `plan_items.output.draft_body` + state='drafted'.
 //
 // The channel is derived from plan_items.channel; callers cannot override.
-// This keeps the tool honest: x-writer spawned against a reddit plan_item
-// would generate reddit-shaped copy, not X-shaped — surfaces mis-routing
-// as content mismatch rather than silent wrong-platform posts.
+// This keeps the tool honest: a writer spawned against a reddit plan_item
+// generates reddit-shaped copy, not X-shaped — surfaces mis-routing as
+// content mismatch rather than silent wrong-platform posts.
 
 import { z } from 'zod';
 import { and, eq, sql } from 'drizzle-orm';

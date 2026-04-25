@@ -76,39 +76,40 @@ see:
 ## Optional: pre-draft by spawning writers
 
 After you've added the week's plan_items with `add_plan_item`, you CAN
-spawn writers in parallel to pre-draft the bodies. Pick the writer by
-the plan_item's `channel`:
+spawn `post-writer` in parallel to pre-draft the bodies. The same writer
+handles both X and Reddit — `plan_items.channel` rides through to
+`draft_post`, which picks the right platform-specific guide:
 
-| plan_item.channel | Writer subagent_type |
-|---|---|
-| `x`               | `x-writer`           |
-| `reddit`          | `reddit-writer`      |
-| `email` / `none`  | skip — no writer yet, plan-execute drafts later |
+| plan_item.channel | Writer subagent_type | What the writer reads |
+|---|---|---|
+| `x`               | `post-writer`        | x-content-guide section          |
+| `reddit`          | `post-writer`        | reddit-content-guide section     |
+| `email` / `none`  | skip — no writer yet, plan-execute drafts later |        |
 
 Emit one `Task` call per eligible plan_item, in ONE response so the
-spawns run concurrently. Each writer has `draft_post` in its tool
-allowlist; it reads the plan_item row, generates the body via
-`sideQuery`, and UPDATEs `plan_items.output.draft_body` + transitions
-the row to `state='drafted'`.
+spawns run concurrently. The writer has `draft_post` in its tool
+allowlist; it reads the plan_item row, generates the body, and UPDATEs
+`plan_items.output.draft_body` + transitions the row to `state='drafted'`.
 
 Example (single response, multiple Task calls):
 
 ```
 Task({
-  subagent_type: "x-writer",
+  subagent_type: "post-writer",
   description: "draft X post for plan_item abc-123",
-  prompt: "planItemId: abc-123\ncontext: { theme: 'week-1 thesis', angle: 'claim', pillar: 'speed', voice: 'terse' }"
+  prompt: "planItemId: abc-123\ncontext: { channel: 'x', theme: 'week-1 thesis', angle: 'claim', pillar: 'speed', voice: 'terse' }"
 }) × N
 Task({
-  subagent_type: "reddit-writer",
+  subagent_type: "post-writer",
   description: "draft reddit post for plan_item def-456",
-  prompt: "planItemId: def-456\ncontext: { theme: '...', angle: 'story', pillar: 'reliability' }"
+  prompt: "planItemId: def-456\ncontext: { channel: 'reddit', theme: '...', angle: 'story', pillar: 'reliability' }"
 }) × M
 ```
 
 The `prompt` is free-form text — just include `planItemId` (required)
 and any `context` hints the writer might want (optional). The plan_item
-row is the source of truth for channel + title + description + params.
+row is the source of truth for channel + title + description + params,
+so passing `channel` in `context` is belt-and-suspenders, not required.
 
 ### When to skip fan-out
 

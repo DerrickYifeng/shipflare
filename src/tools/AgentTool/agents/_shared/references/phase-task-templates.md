@@ -18,7 +18,8 @@ annotates each dead hint with `# Phase E Day 3: skill retired`. For the
 content-planner:
 
 - `content_post` rows MUST set `skillName: null` and route via `channel`
-  (`x` → x-writer, `reddit` → reddit-writer).
+  (`x` and `reddit` both go to `post-writer`; the writer reads `channel`
+  to pick the right platform guide).
 - `content_reply` on X MAY set `skillName: 'draft-single-reply'`; Reddit
   reply drafting is not wired yet.
 - `setup_task` voice work MAY set `skillName: 'voice-extractor'`.
@@ -94,7 +95,7 @@ Goal: de-risk positioning + plant audience seeds.
   month. End on a question inviting replies."
 - `channel`: 'x'
 - `userAction`: 'approve'
-- `skillName`: null  # Phase E Day 3: content_post routes to x-writer / reddit-writer via channel
+- `skillName`: null  # content_post routes to post-writer via channel
 - `params`: `{ angle: 'story', pillar: '{contentPillars[0]}' }`
 
 ### 7. email_send — Waitlist welcome drip
@@ -121,7 +122,7 @@ Goal: de-risk positioning + plant audience seeds.
   category. Defend with a specific reason."
 - `channel`: 'x'
 - `userAction`: 'approve'
-- `skillName`: null  # Phase E Day 3: content_post routes to x-writer / reddit-writer via channel
+- `skillName`: null  # content_post routes to post-writer via channel
 - `params`: `{ angle: 'contrarian', pillar: '{contentPillars[1]}' }`
 
 ### 10. setup_task — Seed waitlist with 10 founders
@@ -145,7 +146,7 @@ Goal: build launch-ready audience. Weekly rhythm matters most here.
   unpack why it matters."
 - `channel`: 'x'
 - `userAction`: 'approve'
-- `skillName`: null  # Phase E Day 3: content_post routes to x-writer / reddit-writer via channel
+- `skillName`: null  # content_post routes to post-writer via channel
 - `params`: `{ angle: 'data', pillar: '{contentPillars[0]}' }`
 
 ### 2. content_post — Howto playbook post
@@ -154,7 +155,7 @@ Goal: build launch-ready audience. Weekly rhythm matters most here.
   Each step independently verifiable."
 - `channel`: 'x'
 - `userAction`: 'approve'
-- `skillName`: null  # Phase E Day 3: content_post routes to x-writer / reddit-writer via channel
+- `skillName`: null  # content_post routes to post-writer via channel
 - `params`: `{ angle: 'howto', pillar: '{contentPillars[1]}' }`
 
 ### 3. content_reply — Reply-guy engine session
@@ -210,7 +211,7 @@ Goal: build launch-ready audience. Weekly rhythm matters most here.
   facing generalization in the last sentence."
 - `channel`: 'x'
 - `userAction`: 'approve'
-- `skillName`: null  # Phase E Day 3: content_post routes to x-writer / reddit-writer via channel
+- `skillName`: null  # content_post routes to post-writer via channel
 - `params`: `{ angle: 'case', pillar: '{contentPillars[2]}' }`
 
 ### 9. launch_asset — Community hot-posts scan
@@ -280,7 +281,7 @@ Goal: maximize launch-day reach. Fewer net-new projects; tighten every asset.
   week's theme. 5 posts across the week."
 - `channel`: 'x'
 - `userAction`: 'approve'
-- `skillName`: null  # Phase E Day 3: content_post routes to x-writer / reddit-writer via channel
+- `skillName`: null  # content_post routes to post-writer via channel
 - `params`: `{ angle: 'claim' }`
 
 ### 6. email_send — Pre-launch reminder to waitlist
@@ -324,7 +325,7 @@ Goal: maximize launch-day reach. Fewer net-new projects; tighten every asset.
   thesis."
 - `channel`: 'x'
 - `userAction`: 'approve'
-- `skillName`: null  # Phase E Day 3: content_post routes to x-writer / reddit-writer via channel
+- `skillName`: null  # content_post routes to post-writer via channel
 - `params`: `{ angle: 'contrarian' }`
 
 ---
@@ -348,7 +349,7 @@ Goal: convert launch-day audience into retention + second wave.
   focus. 200-240 words."
 - `channel`: 'x'
 - `userAction`: 'approve'
-- `skillName`: null  # Phase E Day 3: content_post routes to x-writer / reddit-writer via channel
+- `skillName`: null  # content_post routes to post-writer via channel
 - `params`: `{ angle: 'data', pillar: 'retro' }`
 
 ### 2. email_send — Thank-you email to top supporters
@@ -383,7 +384,7 @@ Goal: convert launch-day audience into retention + second wave.
 - `description`: "With consent. Anchored to the week's theme."
 - `channel`: 'x'
 - `userAction`: 'approve'
-- `skillName`: null  # Phase E Day 3: content_post routes to x-writer / reddit-writer via channel
+- `skillName`: null  # content_post routes to post-writer via channel
 - `params`: `{ angle: 'case' }`
 
 ---
@@ -398,7 +399,7 @@ Goal: durable rhythm. No panic moves.
   angleMix."
 - `channel`: 'x'
 - `userAction`: 'approve'
-- `skillName`: null  # Phase E Day 3: content_post routes to x-writer / reddit-writer via channel
+- `skillName`: null  # content_post routes to post-writer via channel
 - `params`: `{}`
 
 ### 2. content_reply — Reply session

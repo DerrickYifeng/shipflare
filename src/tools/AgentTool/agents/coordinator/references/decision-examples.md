@@ -27,7 +27,7 @@ user: "What could I write for my Twitter bio?"
 assistant: <thinking>
 This is a creative ask aimed at me, not a request to persist content. The
 trigger word "Twitter" is misleading — there's nothing to schedule, no
-thread to reply to, no plan_item to anchor a draft against. x-writer
+thread to reply to, no plan_item to anchor a draft against. post-writer
 drafts plan-item-anchored posts; community-manager handles thread replies;
 neither is right for profile copy. I have the product voice and thesis
 from `query_strategic_path`. Just answer directly with a few options.
@@ -85,13 +85,13 @@ user: "Set up next week and pre-draft the X posts"
 assistant: <thinking>
 Two independent subtasks:
 1. Plan next week — content-planner
-2. Draft X posts — x-writer
+2. Draft X posts — post-writer (with channel='x' in the prompt)
 
-These can start in parallel. But wait: x-writer needs plan_item context (theme,
-angle, pillar), which doesn't exist until content-planner runs. So actually:
-serial, not parallel.
+These can start in parallel. But wait: post-writer needs plan_item context
+(theme, angle, pillar), which doesn't exist until content-planner runs. So
+actually: serial, not parallel.
 
-UNLESS I tell x-writer to draft "backlog" posts using the current pillars
+UNLESS I tell post-writer to draft "backlog" posts using the current pillars
 without waiting for specific plan_items. That's a valid pattern — it creates
 a backlog content-planner can slot into this week's items after approval.
 
@@ -105,9 +105,10 @@ Task({
 Use active path pathId={pathId}. Respect connected channels: {channels}.`
 })
 Task({
-  subagent_type: "x-writer",
+  subagent_type: "post-writer",
   description: "Pre-draft X backlog",
-  prompt: `Draft 5 X posts on the pillars from path pathId={pathId}, using a
+  prompt: `channel: x
+Draft 5 X posts on the pillars from path pathId={pathId}, using a
 mix of angles (data, story, contrarian). Write them as stand-alone — not
 tied to specific plan_items. The founder will review and content-planner
 will slot them in after approval.`
@@ -119,7 +120,7 @@ user: "Write a draft based on whatever angle is working best this month"
 
 assistant: <thinking>
 I don't know which angle is working until I ask — analytics-analyst needs to
-surface that from metrics. Then x-writer drafts using that angle. Strictly
+surface that from metrics. Then post-writer drafts using that angle. Strictly
 serial: the writer's prompt depends on the analyst's output.
 </thinking>
 
@@ -139,9 +140,10 @@ the writer with that specific angle.
 </thinking>
 
 Task({
-  subagent_type: "x-writer",
+  subagent_type: "post-writer",
   description: "Draft contrarian post",
-  prompt: `Draft one X post using the contrarian angle. Last 4 weeks of
+  prompt: `channel: x
+Draft one X post using the contrarian angle. Last 4 weeks of
 winners: {evidence from analytics}. Aim for the same shape: an anti-conventional
 wisdom claim backed by a concrete observation from {productName}.`
 })
@@ -156,15 +158,15 @@ answer this from the DB (the `threads` table only holds rows the discovery
 pipeline has already ingested, and may be empty or stale).
 
 This is exactly what discovery-scout exists for. It's the ONLY specialist
-with live platform search (`x_search_batch`, `reddit_search`). x-writer
+with live platform search (`x_search_batch`, `reddit_search`). post-writer
 can't do this — it has no search tools, and asking it to "find posts"
 will produce fabricated placeholders that look like reply drafts but are
 actually hallucinated. community-manager reads from the already-discovered
 threads inbox, NOT live X.
 
 After scout returns its `queue`-verdicted candidates, I can optionally
-chain x-writer per thread to draft the actual reply bodies. But for a
-first pass where the founder wants to see the targets first, scout's
+chain community-manager per thread to draft the actual reply bodies. But
+for a first pass where the founder wants to see the targets first, scout's
 output (which includes per-thread reasoning) is usually sufficient.
 </thinking>
 
@@ -185,10 +187,10 @@ Return up to 3 `queue` verdicts with per-thread `reason` explaining the fit.`
 [waits for tool_result → verdicts list]
 
 Surface the 3 top queued candidates to the founder with the URL, author,
-text, and scout's `reason`. Ask whether to chain x-writer per thread to
-draft the replies.
+text, and scout's `reason`. Ask whether to chain community-manager per
+thread to draft the replies.
 
-## When to pick discovery-scout vs community-manager vs x-writer
+## When to pick discovery-scout vs community-manager vs post-writer
 
 - `discovery-scout` — the founder wants posts that EXIST RIGHT NOW on a
   public platform ("find me 3 posts to reply to", "scan X for <topic>",
@@ -196,13 +198,13 @@ draft the replies.
 - `community-manager` — the `threads` table already has rows (the
   reply-sweep cron or an earlier scout run filled it), and the founder
   wants reply drafts written for that existing inbox. NO live search.
-- `x-writer` — the founder wants a NEW original X post drafted, for a
-  specific plan_item. NOT for replies. NOT for finding posts.
+- `post-writer` — the founder wants a NEW original post drafted (X or
+  Reddit), for a specific plan_item. NOT for replies. NOT for finding
+  posts. Pass the channel through in the prompt or via the plan_item.
 
 If the founder's phrasing is "find posts to reply to" and the inbox is
-empty or stale, the chain is `discovery-scout` THEN `community-manager`
-(or x-writer for reply drafts). Never start with community-manager when
-the intent is live discovery.
+empty or stale, the chain is `discovery-scout` THEN `community-manager`.
+Never start with community-manager when the intent is live discovery.
 
 ## When to pick discovery-reviewer
 

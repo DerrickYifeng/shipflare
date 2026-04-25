@@ -6,10 +6,11 @@ import {
 
 describe('dispatchPlanItem — happy paths', () => {
   it('routes content_post + x to null draft / posting execute / approve', () => {
-    // Phase E Day 3: the writer branch in plan-execute owns the DRAFT phase
-    // for content_post (spawns x-writer / reddit-writer via team-run). The
-    // dispatch table's draftSkill for content_post is intentionally null;
-    // only the execute path (posting) is still consulted here.
+    // The writer branch in plan-execute owns the DRAFT phase for content_post
+    // (spawns post-writer via team-run; the writer reads `plan_items.channel`
+    // to pick the right platform guide). The dispatch table's draftSkill for
+    // content_post is intentionally null; only the execute path (posting) is
+    // still consulted here.
     const route = dispatchPlanItem({ kind: 'content_post', channel: 'x' });
     expect(route).not.toBeNull();
     expect(route!.draftSkill).toBeNull();

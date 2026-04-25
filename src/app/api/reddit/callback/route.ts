@@ -156,9 +156,10 @@ export async function GET(request: NextRequest) {
 
   log.info(`Reddit account connected: u/${me.name}`);
 
-  // Phase F: silently reconcile the team roster — a newly-connected
-  // Reddit channel may add reddit-writer when the category warrants it.
-  // Best-effort; channel connection succeeds either way.
+  // Silently reconcile the team roster — a newly-connected Reddit channel
+  // may upgrade the preset (e.g. default-squad → consumer-squad), which
+  // adds community-manager. Best-effort; channel connection succeeds
+  // either way.
   try {
     const [productRow] = await db
       .select({ id: products.id })

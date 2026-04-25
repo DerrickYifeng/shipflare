@@ -21,13 +21,13 @@ import { createAutomationConversation } from '@/lib/team-conversation-helpers';
 const baseLog = createLogger('worker:plan-execute');
 
 /**
- * (kind, channel) combinations that route draft-phase jobs to a writer
- * team-run instead of the legacy dispatch table. Phase E Day 3.
+ * Channels that route draft-phase content_post jobs to the post-writer
+ * team-run instead of the legacy dispatch table. The writer is the same
+ * agent for both platforms — `plan_items.channel` rides through to
+ * `draft_post`, which picks the right platform-specific drafting prompt.
  */
-const WRITER_AGENT_BY_CHANNEL: Record<string, string> = {
-  x: 'x-writer',
-  reddit: 'reddit-writer',
-};
+const WRITER_CHANNELS = new Set<string>(['x', 'reddit']);
+const POST_WRITER_AGENT = 'post-writer';
 
 function writerAgentFor(
   kind: PlanItemKind,
@@ -35,7 +35,7 @@ function writerAgentFor(
 ): string | null {
   if (kind !== 'content_post') return null;
   if (!channel) return null;
-  return WRITER_AGENT_BY_CHANNEL[channel] ?? null;
+  return WRITER_CHANNELS.has(channel) ? POST_WRITER_AGENT : null;
 }
 
 /**
