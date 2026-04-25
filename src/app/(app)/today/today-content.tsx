@@ -1,21 +1,14 @@
 'use client';
 
 /**
- * ShipFlare v2 — Today (approval inbox + cinematic scan)
+ * ShipFlare v2 — Today (approval inbox)
  *
  * Boss/employee framing: the agents drafted these replies and posts;
  * the user approves / edits / skips. Replaces the v1 "task list" view.
  *
- * This file orchestrates:
- *  - SWR hydration from /api/today (server-seeded fallback).
- *  - Scan flow state via `useScanFlow` (real BullMQ fan-out, no mocks).
- *  - The cinematic ScanDrawer, SourceFilterRail, ReplyCard / PostCard
- *    render surfaces.
- *  - Optimistic approve/skip/edit with action toasts.
- *  - NewCardReveal stagger once a scan completes.
- *
- * All platform-specific behavior goes through `PLATFORMS` + the three
- * sanctioned platform-deps helpers (server-side) per CLAUDE.md.
+ * Discovery is cron-driven (daily team-run fanout) — there is no manual
+ * scan trigger in the UI. The page renders whatever the workers have
+ * surfaced into `/api/today`.
  */
 
 import {
@@ -23,10 +16,9 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
 } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { SWRConfig, useSWRConfig } from 'swr';
 import { TodayActionError, useToday } from '@/hooks/use-today';
 import type { TodoItem, TodayStats } from '@/hooks/use-today';
@@ -36,22 +28,17 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { Button } from '@/components/ui/button';
 import { Ops } from '@/components/ui/ops';
 import { StatusDot } from '@/components/ui/status-dot';
-import { NewCardReveal } from '@/components/ui/new-card-reveal';
 import { ShortcutsHelp, type ShortcutBinding } from '@/components/ui/shortcuts-help';
 import { HeaderBar } from '@/components/layout/header-bar';
-import { FirstRun } from '@/components/today/first-run';
 import { CompletionState, type YesterdayTop } from '@/components/today/completion-state';
-import { TodayLandedHero } from '@/components/today/today-landed-hero';
-import {
-  TodayWelcomeRibbon,
-  WELCOME_HERO_SEEN_KEY,
-} from '@/components/today/today-welcome-ribbon';
+import { TodayWelcomeRibbon } from '@/components/today/today-welcome-ribbon';
 import { TacticalProgressCard } from '@/components/today/tactical-progress-card';
 import { ReplyCard } from './_components/reply-card';
 import { PostCard } from './_components/post-card';
-import { ScanDrawer } from './_components/scan-drawer';
-import { SourceFilterRail } from './_components/source-filter-rail';
-import { useScanFlow, type ScanSource } from './_hooks/use-scan-flow';
+import {
+  SourceFilterRail,
+  type SourceFilterEntry,
+} from './_components/source-filter-rail';
 
 /* ─────────────────────────────────────────────────────────────────── */
 
@@ -66,8 +53,6 @@ interface TodayFallbackData {
 }
 
 export interface TodayContentProps {
-  isFirstRun: boolean;
-  hasChannel: boolean;
   fallbackData: TodayFallbackData;
   yesterdayTop: YesterdayTop | null;
   lastScanAt: Date | null;
@@ -87,8 +72,6 @@ function platformLabel(platform: string | undefined): string {
  * without a client-side refetch flash.
  */
 export function TodayContent({
-  isFirstRun,
-  hasChannel,
   fallbackData,
   yesterdayTop,
   lastScanAt,
@@ -97,8 +80,6 @@ export function TodayContent({
   return (
     <SWRConfig value={{ fallback: { '/api/today': fallbackData } }}>
       <TodayContentInner
-        isFirstRun={isFirstRun}
-        hasChannel={hasChannel}
         yesterdayTop={yesterdayTop}
         initialLastScanAt={lastScanAt}
         onboardingCompletedAt={onboardingCompletedAt}
@@ -110,16 +91,12 @@ export function TodayContent({
 /* ─── Inner view ────────────────────────────────────────────────────── */
 
 interface TodayContentInnerProps {
-  isFirstRun: boolean;
-  hasChannel: boolean;
   yesterdayTop: YesterdayTop | null;
   initialLastScanAt: Date | null;
   onboardingCompletedAt: Date | null;
 }
 
 function TodayContentInner({
-  isFirstRun,
-  hasChannel,
   yesterdayTop,
   initialLastScanAt,
   onboardingCompletedAt,
@@ -127,57 +104,17 @@ function TodayContentInner({
   const {
     items,
     stats,
-    hasAnyPlanItems,
     isLoading,
     approve: rawApprove,
     skip: rawSkip,
     edit: rawEdit,
     reschedule: rawReschedule,
-    mutate,
   } = useToday();
   const { toast, toastWithAction } = useToast();
   const { mutate: globalMutate } = useSWRConfig();
   const router = useRouter();
-  const searchParams = useSearchParams();
-
-  // Onboarding-landed hero state — shown once when the user arrives at /today
-  // directly from the onboarding finish step. Subsequent visits within 24h
-  // fall back to the quieter welcome ribbon.
-  //
-  // We hold the hero in a useState seeded on mount (not on render) so the
-  // URL query param doesn't keep re-triggering the hero after its first
-  // collapse. `HERO_SEEN_KEY` in localStorage prevents re-show across
-  // refreshes within 24h.
-  const [showLandedHero, setShowLandedHero] = useState(false);
-  useEffect(() => {
-    if (searchParams?.get('from') !== 'onboarding') return;
-    try {
-      const seen = window.localStorage.getItem(WELCOME_HERO_SEEN_KEY);
-      if (seen) return; // already seen in the past 24h
-    } catch {
-      // localStorage unavailable — still show once this session.
-    }
-    setShowLandedHero(true);
-  }, [searchParams]);
-
-  const dismissLandedHero = useCallback(() => {
-    setShowLandedHero(false);
-    try {
-      window.localStorage.setItem(
-        WELCOME_HERO_SEEN_KEY,
-        String(Date.now()),
-      );
-    } catch {
-      /* ignore */
-    }
-    // Strip the query param so a refresh doesn't re-trigger the hero.
-    if (searchParams?.get('from') === 'onboarding') {
-      router.replace('/today');
-    }
-  }, [router, searchParams]);
 
   // Local UI state ────────────────────────────────────────────────────
-  const [showFirstRun, setShowFirstRun] = useState(isFirstRun);
   // Start at -1 so no card is keyboard-active on first render. Pressing j
   // advances to 0 (first card); pressing k stays at the first card. Avoids
   // the signal outline appearing on the first card before the user has
@@ -187,84 +124,9 @@ function TodayContentInner({
   const [helpOpen, setHelpOpen] = useState(false);
   const [sourceFilterId, setSourceFilterId] = useState<string | null>(null);
 
-  // Ref to the set of IDs currently on screen, so scan-diff works even
-  // when the list mutates asynchronously during a scan.
-  const currentIdsRef = useRef<Set<string>>(new Set(items.map((i) => i.id)));
-  useEffect(() => {
-    currentIdsRef.current = new Set(items.map((i) => i.id));
-  }, [items]);
-
-  // Scan flow ─────────────────────────────────────────────────────────
-  const {
-    state: scan,
-    startScan,
-    retrySource,
-    closeDrawer,
-    clearNewIds,
-    chipState,
-  } = useScanFlow({
-    mutateToday: mutate,
-    existingIdsRef: currentIdsRef,
-    onComplete: ({ newCount, failed }) => {
-      if (failed) {
-        toastWithAction({
-          message: 'Scan failed across all sources — retry?',
-          variant: 'error',
-          action: {
-            label: 'Retry',
-            onClick: () => {
-              void handleScanClick();
-            },
-          },
-        });
-      } else {
-        toast(
-          newCount === 0
-            ? 'Scan complete · no new drafts this round'
-            : `Scan complete · ${newCount} new ${newCount === 1 ? 'reply' : 'replies'} drafted`,
-          'success',
-        );
-      }
-      closeDrawer();
-    },
-  });
-
-  // Clear the NewCardReveal stagger after the animation finishes so the
-  // cards don't re-animate when the user interacts with them.
-  useEffect(() => {
-    if (scan.newTodoIds.size === 0) return;
-    const t = setTimeout(() => clearNewIds(), 1500);
-    return () => clearTimeout(t);
-  }, [scan.newTodoIds, clearNewIds]);
-
-  // Track the most recent scan wall clock. Prefer live value from scan flow,
-  // fallback to server-seeded initial.
-  const lastScanAt = scan.lastScanAt ?? initialLastScanAt;
-
-  // Scan now (handles the 429 / no-channel branches) ─────────────────
-  const handleScanClick = useCallback(async () => {
-    if (!hasChannel) {
-      toastWithAction({
-        message: 'Connect an account to scan for replies.',
-        variant: 'warning',
-        action: {
-          label: 'Go to Settings',
-          onClick: () => router.push('/settings#connections'),
-        },
-      });
-      return;
-    }
-    const result = await startScan();
-    if (result.ok) return;
-    if (result.kind === 'rate_limited') {
-      toast(
-        `Just scanned — next available in ${result.retryAfterSeconds}s`,
-        'info',
-      );
-    } else {
-      toast(result.message, 'error');
-    }
-  }, [hasChannel, router, startScan, toast, toastWithAction]);
+  // Discovery is cron-driven; the page only consumes whatever the
+  // workers have surfaced. The "last scan" timestamp is server-seeded.
+  const lastScanAt = initialLastScanAt;
 
   // Approve with 5s undo window ──────────────────────────────────────
   const surfaceError = useCallback(
@@ -363,12 +225,6 @@ function TodayContentInner({
     [rawReschedule, toast, surfaceError],
   );
 
-  // First-run fallthrough ────────────────────────────────────────────
-  const handleItemsReady = useCallback(() => {
-    setShowFirstRun(false);
-    mutate();
-  }, [mutate]);
-
   // Keyboard shortcuts (j/k/a/e/s/?) ─────────────────────────────────
   const shortcutBindings: ShortcutBinding[] = useMemo(
     () => [
@@ -425,12 +281,11 @@ function TodayContentInner({
     return { replies: rs, posts: ps, filteredReplies: filtered };
   }, [items, sourceFilterId]);
 
-  // Derive implicit sources from current replies so the filter rail shows
-  // chips even before the first scan runs (prototype index.html:266 seeds
-  // them from a static list; we derive from live reply data instead).
-  const implicitSources = useMemo<ScanSource[]>(() => {
+  // Filter rail entries derived from the replies currently in view —
+  // each unique (platform, community) pair becomes a chip.
+  const displaySources = useMemo<SourceFilterEntry[]>(() => {
     const seen = new Set<string>();
-    const out: ScanSource[] = [];
+    const out: SourceFilterEntry[] = [];
     for (const r of replies) {
       if (r.community === null) continue;
       const key = `${r.platform}:${r.community}`;
@@ -441,22 +296,8 @@ function TodayContentInner({
     return out;
   }, [replies]);
 
-  // Prefer the live scan's source list when one is running; otherwise fall
-  // back to the derived list so the rail never renders empty with replies
-  // in view.
-  const displaySources =
-    scan.sources.length > 0 ? scan.sources : implicitSources;
-
   const activeItem = items[activeIndex];
   const activeId = activeItem?.id ?? null;
-
-  // Post-onboarding landing: the former full-bleed "You're set. Scout is
-  // already working." hero + "Your marketing team is getting ready..."
-  // FirstRun warmup are both intentionally off now. Users land directly
-  // in the normal Today shell with the welcome ribbon + TacticalProgressCard
-  // carrying the post-onboarding progress story. Keeps the flow single-
-  // surface and avoids two separate waiting screens.
-  const landedHero = null;
 
   const welcomeRibbon = (
     <TodayWelcomeRibbon onboardingCompletedAt={onboardingCompletedAt} />
@@ -468,59 +309,25 @@ function TodayContentInner({
     return null;
   }
 
-  // Meta line for HeaderBar: "{n} to review · ● {n} shipped today · last scan {t}"
-  //
-  // Middle segment carries a live pulsing StatusDot — pulses with
-  // --sf-accent while a scan is running, settles to --sf-success when idle.
-  // "{n} to review" is bolded in --sf-fg-2 per prototype index.html:228-237.
+  // Meta line for HeaderBar: "{n} to review · ● {n} shipped today · last run {t}"
   const metaLine = (
     <MetaLine
       toReview={stats.pending_count ?? items.length}
       shippedToday={stats.acted_today}
       lastScan={lastScanAt}
-      scanning={scan.isRunning}
     />
-  );
-
-  const scanButton = (
-    <Button
-      variant="primary"
-      size="md"
-      onClick={handleScanClick}
-      disabled={scan.isRunning || !hasChannel}
-      title={
-        !hasChannel
-          ? 'Connect a channel before scanning for replies'
-          : scan.isRunning
-            ? 'Scan already in progress'
-            : undefined
-      }
-    >
-      {scan.isRunning ? 'Scanning…' : 'Scan now'}
-    </Button>
   );
 
   return (
     <>
-      {landedHero}
-      <HeaderBar title="Today" meta={metaLine} action={scanButton} />
+      <HeaderBar title="Today" meta={metaLine} />
       {welcomeRibbon}
       <TacticalProgressCard />
 
-      <ScanDrawer
-        open={scan.drawerOpen}
-        onClose={closeDrawer}
-        thoughtIdx={scan.thoughtIdx}
-        isRunning={scan.isRunning}
-      />
-
       <SourceFilterRail
         sources={displaySources}
-        chipState={chipState}
         filterId={sourceFilterId}
         onFilterChange={setSourceFilterId}
-        onRetrySource={retrySource}
-        scanning={scan.drawerOpen && scan.isRunning}
         totalCount={replies.length}
       />
 
@@ -550,7 +357,7 @@ function TodayContentInner({
               hint={
                 sourceFilterId
                   ? undefined
-                  : 'We scan every 4h. New threads will show here.'
+                  : 'Discovery runs daily. New threads will show here.'
               }
               action={
                 sourceFilterId ? (
@@ -561,16 +368,7 @@ function TodayContentInner({
                   >
                     Clear filter
                   </Button>
-                ) : (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleScanClick}
-                    disabled={scan.isRunning || !hasChannel}
-                  >
-                    {scan.isRunning ? 'Scanning…' : 'Scan now'}
-                  </Button>
-                )
+                ) : undefined
               }
             />
           ) : (
@@ -581,26 +379,18 @@ function TodayContentInner({
                 gap: 12,
               }}
             >
-              {filteredReplies.map((item, i) => {
-                const isNew = scan.newTodoIds.has(item.id);
-                return (
-                  <NewCardReveal
-                    key={item.id}
-                    isNew={isNew}
-                    delay={isNew ? 120 * i : 0}
-                  >
-                    <ReplyCard
-                      item={item}
-                      onApprove={approve}
-                      onSkip={skip}
-                      onEdit={edit}
-                      isActive={item.id === activeId}
-                      forceEditing={item.id === editingId}
-                      onEditDone={() => setEditingId(null)}
-                    />
-                  </NewCardReveal>
-                );
-              })}
+              {filteredReplies.map((item) => (
+                <ReplyCard
+                  key={item.id}
+                  item={item}
+                  onApprove={approve}
+                  onSkip={skip}
+                  onEdit={edit}
+                  isActive={item.id === activeId}
+                  forceEditing={item.id === editingId}
+                  onEditDone={() => setEditingId(null)}
+                />
+              ))}
             </div>
           )}
         </Section>
@@ -615,27 +405,19 @@ function TodayContentInner({
                 gap: 12,
               }}
             >
-              {posts.map((item, i) => {
-                const isNew = scan.newTodoIds.has(item.id);
-                return (
-                  <NewCardReveal
-                    key={item.id}
-                    isNew={isNew}
-                    delay={isNew ? 120 * (replies.length + i) : 0}
-                  >
-                    <PostCard
-                      item={item}
-                      onApprove={approve}
-                      onSkip={skip}
-                      onEdit={edit}
-                      onReschedule={reschedule}
-                      isActive={item.id === activeId}
-                      forceEditing={item.id === editingId}
-                      onEditDone={() => setEditingId(null)}
-                    />
-                  </NewCardReveal>
-                );
-              })}
+              {posts.map((item) => (
+                <PostCard
+                  key={item.id}
+                  item={item}
+                  onApprove={approve}
+                  onSkip={skip}
+                  onEdit={edit}
+                  onReschedule={reschedule}
+                  isActive={item.id === activeId}
+                  forceEditing={item.id === editingId}
+                  onEditDone={() => setEditingId(null)}
+                />
+              ))}
             </div>
           </Section>
         ) : null}
@@ -713,19 +495,9 @@ interface MetaLineProps {
   toReview: number;
   shippedToday: number;
   lastScan: Date | null;
-  scanning: boolean;
 }
 
-/**
- * HeaderBar meta line, per prototype source/app/index.html:228-237.
- *
- * Layout: "{N} to review · ● {N} shipped today · last scan {t}"
- *  - "{N} to review" is bolded in --sf-fg-2 (weight 500)
- *  - A live StatusDot sits before "shipped today": pulses --sf-accent
- *    while a scan runs, settles to --sf-success when the pipeline is idle
- *  - The rest of the line keeps the standard --sf-fg-3 treatment from HeaderBar
- */
-function MetaLine({ toReview, shippedToday, lastScan, scanning }: MetaLineProps) {
+function MetaLine({ toReview, shippedToday, lastScan }: MetaLineProps) {
   const separator = (
     <span
       aria-hidden="true"
@@ -748,14 +520,8 @@ function MetaLine({ toReview, shippedToday, lastScan, scanning }: MetaLineProps)
       {separator}
       <span>{shippedToday} shipped today</span>
       {separator}
-      <StatusDot
-        state={scanning ? 'active' : 'success'}
-        size={6}
-        aria-label={scanning ? 'Scanning in progress' : 'Pipeline idle'}
-      />
-      <span style={{ marginLeft: 6 }}>Auto-scans every 4h</span>
-      {separator}
-      <span>last run {relativeScan(lastScan)}</span>
+      <StatusDot state="success" size={6} aria-label="Pipeline idle" />
+      <span style={{ marginLeft: 6 }}>last run {relativeScan(lastScan)}</span>
     </span>
   );
 }
