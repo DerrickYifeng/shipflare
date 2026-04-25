@@ -1,5 +1,5 @@
 // run_discovery_scan — wraps the v3 discovery pipeline as a synchronous
-// tool callable from a team-member agent loop (community-scout). The
+// tool callable from a team-member agent loop (the coordinator). The
 // existing BullMQ discovery-scan worker enqueued one of these per
 // (user, platform); after the unified-pipeline migration the same logic
 // lives here, called inline from inside a team-run.
@@ -53,7 +53,7 @@ export const runDiscoveryScanTool: ToolDefinition<
     'Run discovery scout on a platform (x | reddit). Returns the threads ' +
     'judged "queue"-worthy with their confidence + reason. The threads ' +
     'are persisted to the threads table (state=queued); reply-drafter ' +
-    'should be dispatched against the returned externalIds. Skips ' +
+    'should then be dispatched against the returned externalIds. Skips ' +
     'gracefully when no channel for the platform is connected.',
   inputSchema,
   isConcurrencySafe: false,

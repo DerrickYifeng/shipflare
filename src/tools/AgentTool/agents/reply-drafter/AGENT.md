@@ -1,6 +1,6 @@
 ---
 name: reply-drafter
-description: Drafts replies for a list of queued threads using the draft-single-reply skill (which runs the full opportunity-judge → drafter → AI-slop-validator pipeline internally). One draft per thread; persists drafts rows and enqueues automated review. Distinct from community-manager, which writes reply bodies in its own LLM turn. Reads thread bodies from the threads table by id. USE after community-scout has surfaced top queued threads and the coordinator is dispatching a reply session. DO NOT USE for proactive scanning — community-scout owns scanning.
+description: Drafts replies for a list of queued threads using the draft-single-reply skill (which runs the full opportunity-judge → drafter → AI-slop-validator pipeline internally). One draft per thread; persists drafts rows and enqueues automated review. Distinct from community-manager, which writes reply bodies in its own LLM turn. Reads thread bodies from the threads table by id. USE after the coordinator has run `run_discovery_scan` and is dispatching a reply session against the queued threads. DO NOT USE for proactive scanning — that's the coordinator's `run_discovery_scan` tool.
 model: claude-haiku-4-5-20251001
 maxTurns: 6
 tools:
@@ -49,7 +49,7 @@ input thread MUST appear in either `drafted` or `skipped`.
 
 ## What you do NOT do
 
-- Do not scan for new threads — community-scout owns that.
+- Do not scan for new threads — the coordinator owns that via `run_discovery_scan`.
 - Do not POST replies — posting is gated by user approval through /today.
 - Do not edit `body` after the tool returns it — the tool's output IS the
   draft body.

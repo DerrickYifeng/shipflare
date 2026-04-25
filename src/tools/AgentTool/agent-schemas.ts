@@ -19,7 +19,6 @@ import { redditWriterOutputSchema } from './agents/reddit-writer/schema';
 import { communityManagerOutputSchema } from './agents/community-manager/schema';
 import { discoveryScoutOutputSchema } from './agents/discovery-scout/schema';
 import { discoveryReviewerOutputSchema } from './agents/discovery-reviewer/schema';
-import { communityScoutOutputSchema } from './agents/community-scout/schema';
 import { replyDrafterOutputSchema } from './agents/reply-drafter/schema';
 import { draftReviewOutputSchema } from './agents/draft-review/schema';
 import { postingOutputSchema } from './agents/posting/schema';
@@ -37,7 +36,6 @@ const registry: Record<string, ZodType<unknown>> = {
   'community-manager': communityManagerOutputSchema as ZodType<unknown>,
   'discovery-scout': discoveryScoutOutputSchema as ZodType<unknown>,
   'discovery-reviewer': discoveryReviewerOutputSchema as ZodType<unknown>,
-  'community-scout': communityScoutOutputSchema as ZodType<unknown>,
   'reply-drafter': replyDrafterOutputSchema as ZodType<unknown>,
   'draft-review': draftReviewOutputSchema as ZodType<unknown>,
   posting: postingOutputSchema as ZodType<unknown>,
@@ -66,7 +64,6 @@ export {
   communityManagerOutputSchema,
   discoveryScoutOutputSchema,
   discoveryReviewerOutputSchema,
-  communityScoutOutputSchema,
   replyDrafterOutputSchema,
   draftReviewOutputSchema,
   postingOutputSchema,
