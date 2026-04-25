@@ -12,11 +12,13 @@ interface FirstRunProps {
 // Stages map to the real v3 agent pipeline. Each advances when the
 // corresponding SSE agent_start / agent_complete / draft_reviewed
 // event arrives. Backend agent names emitted on /api/events:
-//   - 'discovery'      (automation/run route + discovery-scan.ts)
+//   - 'discovery'      (automation/run route)
 //   - 'reply-drafter'  (monitor.ts — maps into the content bucket)
 //   - 'x-metrics'      (metrics.ts — not part of first-run)
-// v1's scout + content-batch agents were retired in the Phase 2 cleanup;
-// the first-run arc is now discovery → content → review.
+// Onboarding kickoff goes through a coordinator team-run (separate SSE
+// channel), so that path's progress shows up in /team chat rather than
+// here; this component still works as a polling-based fallback when
+// users land on /today before plan_items have streamed in.
 const STAGES = ['discovery', 'content', 'review'] as const;
 type Stage = (typeof STAGES)[number];
 
@@ -40,8 +42,6 @@ interface SSEAgentEvent {
     | 'agent_start'
     | 'agent_complete'
     | 'draft_reviewed'
-    | 'discovery_start'
-    | 'discovery_complete'
     | 'connected'
     | 'heartbeat'
     | string;
@@ -52,9 +52,6 @@ function agentToStage(agentName: string | undefined): Stage | null {
   if (!agentName) return null;
   if (agentName === 'discovery') return 'discovery';
   if (agentName === 'reply-drafter') return 'content';
-  // Bracketing 'discovery_start' / 'discovery_complete' SSE events (from
-  // discovery-scan.ts) are handled separately in the event reducer; this
-  // mapping is only for the generic agent_start / agent_complete payloads.
   return null;
 }
 
@@ -106,14 +103,7 @@ export function FirstRun({ onItemsReady, hasChannel = true }: FirstRunProps) {
 
         const stage = agentToStage(event.agentName);
 
-        if (event.type === 'discovery_start') {
-          // discovery-scan.ts emits this when its search-source fan-out
-          // begins. Park progress at the 'discovery' slot so the bar
-          // doesn't stall while search-source jobs churn.
-          setStageIdx((prev) => Math.max(prev, STAGES.indexOf('discovery')));
-        } else if (event.type === 'discovery_complete') {
-          setStageIdx((prev) => Math.max(prev, STAGES.indexOf('discovery') + 1));
-        } else if (event.type === 'agent_start' && stage) {
+        if (event.type === 'agent_start' && stage) {
           setStageIdx((prev) => Math.max(prev, STAGES.indexOf(stage)));
         } else if (event.type === 'agent_complete' && stage) {
           setStageIdx((prev) => Math.max(prev, STAGES.indexOf(stage) + 1));
