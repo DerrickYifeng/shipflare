@@ -9,26 +9,26 @@ import {
 } from '../_catalog';
 
 /**
- * Phase E Day 3 trimmed the catalog from 22 to 5 entries — the remaining
- * entries are the skills still loaded at runtime by their workers. The v2
- * atomic-skill set that the tactical-planner used to select via skillName
- * is gone; plan_items now flow through team-run coordinators + Task-spawned
- * writer agents, so the planner no longer drives a catalog lookup.
+ * Phase 5 (agent-cleanup) further trimmed the catalog to the 2 skills that
+ * still run via `runSkill()`: draft-single-reply and voice-extractor. The
+ * other former entries (posting, draft-review, product-opportunity-judge)
+ * are now invoked by their workers via `runAgent(loadAgentFromFile(...))`
+ * directly against the unified registry under `src/tools/AgentTool/agents/`.
  */
 describe('SKILL_CATALOG', () => {
   const SKILLS_DIR = join(process.cwd(), 'src/skills');
 
-  it('exports the 4 runtime-loaded skills that survived Discovery v3', () => {
+  it('exports the 2 runtime-loaded skills that survived agent-cleanup phase 5', () => {
     const names = SKILL_CATALOG.map((s) => s.name);
     for (const required of [
       'draft-single-reply',
-      'draft-review',
-      'posting',
       'voice-extractor',
     ]) {
       expect(names).toContain(required);
     }
     expect(names).not.toContain('discovery');
+    expect(names).not.toContain('posting');
+    expect(names).not.toContain('draft-review');
   });
 
   it('has a unique name per entry', () => {

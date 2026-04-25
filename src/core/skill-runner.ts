@@ -52,10 +52,10 @@ export interface SkillRunResult<T = unknown> {
 
 // Phase 3 (agent cleanup) moved every legacy agent .md file into the
 // unified registry at `src/tools/AgentTool/agents/<name>/AGENT.md`.
-// `runSkill` is on its way out (Phase 5), but until then it needs to
-// resolve `<agent_name>` against the new layout. Supporting BOTH paths
-// keeps any in-flight ports from breaking — bridge's `loadAgentFromFile`
-// also reads the new layout via the inlined `references:` field.
+// Phase 5 deleted the runSkill callers for posting/draft-review/judge —
+// only voice-extractor (setup_task plan_item) and draft-single-reply
+// (consumed by DraftSingleReplyTool, dies in Phase 6) still route through
+// here.
 const UNIFIED_AGENTS_DIR = join(
   process.cwd(),
   'src',
