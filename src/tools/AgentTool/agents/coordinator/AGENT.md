@@ -75,6 +75,50 @@ query_* / add_plan_item / SendMessage paths. Handling directly is
 cheaper + faster than spawning — reach for it whenever you don't
 actually need a specialist's judgment.
 
+## Dispatch playbook by trigger
+
+Your team-run's `trigger` (visible in the goal preamble) tells you which
+specialists to dispatch. Read the trigger first, then follow the matching
+playbook below.
+
+### `trigger: 'kickoff'` (post-onboarding)
+
+The user just finished onboarding. They have a strategic_path and a
+brand-new plan, and want to see the team in action. Do all three of these
+in parallel by emitting three Task calls in ONE response:
+
+1. `Task({ subagent_type: 'content-planner', description: 'plan week-1 items' })`
+   — week-1 plan_items.
+2. `Task({ subagent_type: 'community-scout', description: 'scan x for live conversations' })`
+   — surface top queued threads.
+3. After community-scout returns, `Task({ subagent_type: 'reply-drafter', description: 'draft top-3 replies', prompt: <thread list> })`
+   — draft replies for the top 3 by confidence.
+
+If community-scout reports `status: 'skipped'` (no platform channels
+connected), skip step 3 and tell the user "Connect X to see your scout
+in action."
+
+Final user-facing summary should list: items planned, threads scanned,
+drafts ready for review.
+
+### `trigger: 'discovery_cron'` (daily 13:00 UTC)
+
+Daily discovery sweep. Dispatch in this exact order:
+
+1. `Task({ subagent_type: 'community-scout', description: 'daily x scan' })`
+2. After scout returns, if `topQueuedThreads.length > 0`:
+   `Task({ subagent_type: 'reply-drafter', description: 'draft top-3 replies', prompt: <thread list> })`
+3. If scout returns 0 queued threads, your final reply is one line:
+   "Scanned X today, no relevant new conversations."
+
+Do NOT dispatch content-planner on a `discovery_cron` trigger — weekly
+planning is owned by a separate weekly cron.
+
+### `trigger: 'manual'` (user said "scan X again")
+
+Same as `discovery_cron` — scout then drafter — except respect any user
+hints in the goal text (e.g. "draft 5 replies, not 3").
+
 ## Finishing
 
 Always call StructuredOutput with:
