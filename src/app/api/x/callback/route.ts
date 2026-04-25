@@ -142,9 +142,9 @@ export async function GET(request: NextRequest) {
 
   log.info(`X account connected: @${username}`);
 
-  // Phase F: silently reconcile the team roster — a newly-connected X
-  // channel may add x-writer to a default-squad team. Best-effort; channel
-  // connection succeeds either way.
+  // Silently reconcile the team roster — a newly-connected X channel may
+  // upgrade the preset (e.g. default-squad → dev-squad), which adds
+  // community-manager. Best-effort; channel connection succeeds either way.
   try {
     const [productRow] = await db
       .select({ id: products.id })

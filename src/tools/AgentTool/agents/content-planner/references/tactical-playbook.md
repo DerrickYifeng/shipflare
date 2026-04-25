@@ -134,8 +134,8 @@ For every scheduled item:
   entries below; for any other kind, leave `skillName: null` and the
   dispatcher will route via (kind, channel) or manual-complete the row:
   - `content_post` → **leave `skillName: null`**. Content posts route
-    through the writer team-run (x-writer for `channel: 'x'`,
-    reddit-writer for `channel: 'reddit'`) rather than a string skill.
+    through the post-writer team-run; the agent reads `plan_items.channel`
+    (`x` or `reddit`) and consults the matching guide at draft time.
   - `content_reply` → `draft-single-reply` (only for `channel: 'x'` —
     reddit reply drafting isn't wired yet).
   - `email_send` → `skillName: null`. Manual-completion until a future
@@ -206,11 +206,13 @@ Report the count in your StructuredOutput `stalledCarriedOver`.
 ## Step 6 — Optionally fan out to writers
 
 After every `add_plan_item` call has returned and your `update_plan_item`
-carryovers have landed, you MAY spawn writer subagents in parallel to
-pre-draft `content_post` bodies. Route by channel:
+carryovers have landed, you MAY spawn `post-writer` subagents in parallel
+to pre-draft `content_post` bodies. The same agent handles both X and
+Reddit — `plan_items.channel` decides which platform guide it consults
+at draft time.
 
-- `content_post` with `channel: 'x'` → `Task(x-writer, ...)`
-- `content_post` with `channel: 'reddit'` → `Task(reddit-writer, ...)`
+- `content_post` with `channel: 'x'` → `Task(post-writer, ...)`
+- `content_post` with `channel: 'reddit'` → `Task(post-writer, ...)`
 - `content_post` with `channel: 'email'` or any other value → do NOT
   fan out. Those channels don't have a writer subagent yet; the
   plan-execute worker will draft them after approval.

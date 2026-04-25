@@ -183,7 +183,8 @@ describe('processPlanExecute — draft phase', () => {
     expect(call.teamId).toBe('team-1');
     expect(call.trigger).toBe('draft_post');
     expect(call.rootMemberId).toBe('mem-coord');
-    expect(call.goal).toContain('x-writer');
+    expect(call.goal).toContain('post-writer');
+    expect(call.goal).toContain('channel=x');
     expect(call.goal).toContain('item-1');
   });
 
@@ -204,7 +205,8 @@ describe('processPlanExecute — draft phase', () => {
     expect(rows.get('item-r')!.state).toBe('planned');
     expect(enqueueTeamRunMock).toHaveBeenCalledTimes(1);
     const call = enqueueTeamRunMock.mock.calls[0]?.[0] as { goal: string };
-    expect(call.goal).toContain('reddit-writer');
+    expect(call.goal).toContain('post-writer');
+    expect(call.goal).toContain('channel=reddit');
   });
 
   it('no-ops when row is no longer in planned state', async () => {

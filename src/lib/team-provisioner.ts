@@ -2,9 +2,11 @@
 //
 // Phase B shipped the minimal baseline roster (coordinator + growth-strategist +
 // content-planner + reply-drafter). Phase F layers category presets on top —
-// dev_tool picks up an x-writer + community-manager, consumer picks up a
-// reddit-writer + community-manager, etc. The baseline stays as the floor so
-// legacy callers of `ensureTeamExists` keep working and older teams keep rendering.
+// dev_tool / saas / consumer pick up a post-writer + community-manager,
+// default-squad picks up just the post-writer. The baseline stays as the floor
+// so legacy callers of `ensureTeamExists` keep working and older teams keep
+// rendering. (`post-writer` is one channel-aware writer; the platform comes in
+// via `plan_items.channel`, so we no longer split the roster by platform.)
 //
 // Idempotent: re-running against an existing team returns the existing ids
 // without mutating rows. The unique index on `team_members (team_id,
@@ -196,7 +198,7 @@ export interface ProvisionResult {
  * Safe to call repeatedly:
  *   - First call creates the team + all members.
  *   - Subsequent calls after a new channel connects insert only the
- *     delta (e.g. adding `reddit-writer` when reddit becomes available).
+ *     delta (e.g. adding `community-manager` when a category is upgraded).
  *   - Existing members are never renamed, re-statused, or removed.
  *
  * When `productId` is null or the product doesn't exist, falls back to
@@ -253,29 +255,26 @@ export async function provisionTeamForProduct(
 
   const basePreset = pickPresetByCategory(category);
 
-  // Channel-aware adjustment: if the user has only X connected, skip
-  // reddit-writer even for a consumer preset (and vice versa). Minimal rule:
-  // when the preset asks for reddit-writer but the user has no reddit
-  // channel connected, fall back to default-squad so we don't seed a dead
-  // member. The `ensureTeamExists` reconcile path will add reddit-writer
-  // later when reddit connects.
+  // Channel-aware adjustment: if no platform channel is connected at all,
+  // fall back to default-squad — the community-manager has no inbox to
+  // monitor. The post-writer is channel-agnostic at the agent layer
+  // (`plan_items.channel` decides which guide it consults at draft time),
+  // so we no longer split writers by platform — any of x / reddit being
+  // connected is enough to seed the full preset.
   const userChannels = await db
     .select({ platform: channels.platform })
     .from(channels)
     .where(eq(channels.userId, userId));
   const hasReddit = userChannels.some((c) => c.platform === 'reddit');
   const hasX = userChannels.some((c) => c.platform === 'x');
+  const hasAnyPlatformChannel = hasReddit || hasX;
 
   let preset = basePreset;
-  if (basePreset === 'consumer-squad' && !hasReddit) {
-    // Keep community-manager but swap the writer: if they have X, use
-    // dev-squad's composition; otherwise default-squad (no writer yet).
-    preset = hasX ? 'saas-squad' : 'default-squad';
-  }
   if (
-    (basePreset === 'dev-squad' || basePreset === 'saas-squad') &&
-    !hasX &&
-    !hasReddit
+    (basePreset === 'dev-squad' ||
+      basePreset === 'saas-squad' ||
+      basePreset === 'consumer-squad') &&
+    !hasAnyPlatformChannel
   ) {
     preset = 'default-squad';
   }

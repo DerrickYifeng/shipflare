@@ -39,14 +39,13 @@ describe('community-manager loader smoke', () => {
     expect(cm.systemPrompt).toContain('## base-guidelines');
   });
 
-  it('loads cleanly alongside the other Phase E agents', async () => {
+  it('loads cleanly alongside the other writer/community agents', async () => {
     const agents = await loadAgentsDir(AGENTS_ROOT);
     const names = agents.map((a) => a.name).sort();
-    // All four Phase E writers/community agents present.
-    expect(names).toContain('x-writer');
-    expect(names).toContain('reddit-writer');
+    // The unified post-writer + community-manager pair.
+    expect(names).toContain('post-writer');
     expect(names).toContain('community-manager');
-    // And the Phase A-B agents.
+    // And the baseline planner/strategist agents.
     expect(names).toContain('coordinator');
     expect(names).toContain('growth-strategist');
     expect(names).toContain('content-planner');

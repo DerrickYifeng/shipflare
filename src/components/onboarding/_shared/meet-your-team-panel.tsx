@@ -43,8 +43,7 @@ const ROLE_DESCRIPTION: Record<string, string> = {
   coordinator: 'Runs the team and keeps work moving.',
   'growth-strategist': 'Shapes your positioning and long-term arc.',
   'content-planner': 'Builds the weekly plan from your strategy.',
-  'x-writer': 'Drafts posts and threads for X.',
-  'reddit-writer': 'Drafts posts and replies for Reddit communities.',
+  'post-writer': 'Drafts posts for X and Reddit, tuned to each platform.',
   'community-manager': 'Monitors conversations and drafts replies.',
 };
 
@@ -213,7 +212,6 @@ const DEFAULT_LABELS: Record<string, string> = {
   coordinator: 'Chief of Staff',
   'growth-strategist': 'Head of Growth',
   'content-planner': 'Head of Content',
-  'x-writer': 'X Writer',
-  'reddit-writer': 'Reddit Writer',
+  'post-writer': 'Post Writer',
   'community-manager': 'Community Manager',
 };

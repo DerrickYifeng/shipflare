@@ -222,7 +222,7 @@ describe('getTeamCompositionForPreset', () => {
     }
   });
 
-  it('dev-squad: base + x-writer + community-manager', async () => {
+  it('dev-squad: base + post-writer + community-manager', async () => {
     const { getTeamCompositionForPreset } = await import(
       '@/lib/team-provisioner'
     );
@@ -231,12 +231,12 @@ describe('getTeamCompositionForPreset', () => {
       'growth-strategist',
       'content-planner',
       'reply-drafter',
-      'x-writer',
+      'post-writer',
       'community-manager',
     ]);
   });
 
-  it('saas-squad: base + x-writer + community-manager', async () => {
+  it('saas-squad: base + post-writer + community-manager', async () => {
     const { getTeamCompositionForPreset } = await import(
       '@/lib/team-provisioner'
     );
@@ -245,12 +245,12 @@ describe('getTeamCompositionForPreset', () => {
       'growth-strategist',
       'content-planner',
       'reply-drafter',
-      'x-writer',
+      'post-writer',
       'community-manager',
     ]);
   });
 
-  it('consumer-squad: base + reddit-writer + community-manager', async () => {
+  it('consumer-squad: base + post-writer + community-manager', async () => {
     const { getTeamCompositionForPreset } = await import(
       '@/lib/team-provisioner'
     );
@@ -259,12 +259,12 @@ describe('getTeamCompositionForPreset', () => {
       'growth-strategist',
       'content-planner',
       'reply-drafter',
-      'reddit-writer',
+      'post-writer',
       'community-manager',
     ]);
   });
 
-  it('default-squad: base + x-writer', async () => {
+  it('default-squad: base + post-writer', async () => {
     const { getTeamCompositionForPreset } = await import(
       '@/lib/team-provisioner'
     );
@@ -273,7 +273,7 @@ describe('getTeamCompositionForPreset', () => {
       'growth-strategist',
       'content-planner',
       'reply-drafter',
-      'x-writer',
+      'post-writer',
     ]);
   });
 });
@@ -334,7 +334,7 @@ describe('ensureTeamExists (with preset)', () => {
         'growth-strategist',
         'content-planner',
         'reply-drafter',
-        'x-writer',
+        'post-writer',
         'community-manager',
       ]),
     );
@@ -355,7 +355,7 @@ describe('ensureTeamExists (with preset)', () => {
         'growth-strategist',
         'content-planner',
         'reply-drafter',
-        'reddit-writer',
+        'post-writer',
         'community-manager',
       ]),
     );
@@ -370,7 +370,7 @@ describe('ensureTeamExists (with preset)', () => {
     expect(nameByType['coordinator']).toBe('Chief of Staff');
     expect(nameByType['growth-strategist']).toBe('Head of Growth');
     expect(nameByType['content-planner']).toBe('Head of Content');
-    expect(nameByType['x-writer']).toBe('X Writer');
+    expect(nameByType['post-writer']).toBe('Post Writer');
     expect(nameByType['community-manager']).toBe('Community Manager');
   });
 });
@@ -389,33 +389,33 @@ describe('provisionTeamForProduct', () => {
       'growth-strategist',
       'content-planner',
       'reply-drafter',
-      'x-writer',
+      'post-writer',
       'community-manager',
     ]);
     expect(getTeamMembers()).toHaveLength(6);
   });
 
-  it('consumer category + no reddit channel → falls back so we do not seed dead reddit-writer', async () => {
+  it('consumer category + only X connected → still consumer-squad (post-writer is channel-agnostic)', async () => {
     rows[productsTable].push({ id: 'p-1', userId: 'u-1', category: 'consumer' });
     rows[channelsTable].push({ id: 'c-1', userId: 'u-1', platform: 'x' });
-    // No reddit channel connected.
+    // No reddit channel connected, but post-writer covers X just as well —
+    // the channel comes in via plan_items.channel.
     const { provisionTeamForProduct } = await import('@/lib/team-provisioner');
     const res = await provisionTeamForProduct('u-1', 'p-1');
-    // Fallback (hasX=true, hasReddit=false) → saas-squad composition.
-    expect(res.preset).toBe('saas-squad');
+    expect(res.preset).toBe('consumer-squad');
     const types = new Set(getTeamMembers().map((m) => m.agentType));
-    expect(types).not.toContain('reddit-writer');
-    expect(types).toContain('x-writer');
+    expect(types).toContain('post-writer');
+    expect(types).toContain('community-manager');
   });
 
-  it('consumer category + reddit channel connected → consumer-squad seeds reddit-writer', async () => {
+  it('consumer category + reddit channel connected → consumer-squad seeds post-writer + community-manager', async () => {
     rows[productsTable].push({ id: 'p-1', userId: 'u-1', category: 'consumer' });
     rows[channelsTable].push({ id: 'c-1', userId: 'u-1', platform: 'reddit' });
     const { provisionTeamForProduct } = await import('@/lib/team-provisioner');
     const res = await provisionTeamForProduct('u-1', 'p-1');
     expect(res.preset).toBe('consumer-squad');
     const types = new Set(getTeamMembers().map((m) => m.agentType));
-    expect(types).toContain('reddit-writer');
+    expect(types).toContain('post-writer');
     expect(types).toContain('community-manager');
   });
 
@@ -431,31 +431,29 @@ describe('provisionTeamForProduct', () => {
         'growth-strategist',
         'content-planner',
         'reply-drafter',
-        'x-writer',
+        'post-writer',
       ]),
     );
   });
 
   it('reconciles when a new channel connects after initial provisioning', async () => {
     rows[productsTable].push({ id: 'p-1', userId: 'u-1', category: 'consumer' });
-    rows[channelsTable].push({ id: 'c-1', userId: 'u-1', platform: 'x' });
+    // No platform channels yet → falls back to default-squad (post-writer only,
+    // no community-manager because there's no inbox to monitor).
     const { provisionTeamForProduct } = await import('@/lib/team-provisioner');
-
-    // Initial run: no reddit → falls back to saas-squad (x-writer + cm).
     await provisionTeamForProduct('u-1', 'p-1');
     expect(
       new Set(getTeamMembers().map((m) => m.agentType)),
-    ).not.toContain('reddit-writer');
+    ).not.toContain('community-manager');
 
-    // User connects reddit, re-run.
-    rows[channelsTable].push({ id: 'c-2', userId: 'u-1', platform: 'reddit' });
+    // User connects X, re-run — full consumer-squad now seeds.
+    rows[channelsTable].push({ id: 'c-1', userId: 'u-1', platform: 'x' });
     const second = await provisionTeamForProduct('u-1', 'p-1');
     expect(second.preset).toBe('consumer-squad');
     const types = new Set(getTeamMembers().map((m) => m.agentType));
-    expect(types).toContain('reddit-writer');
-    expect(types).toContain('x-writer'); // existing members preserved
+    expect(types).toContain('post-writer'); // existing member preserved
     expect(types).toContain('community-manager');
-    // Baseline 3 still present.
+    // Baseline still present.
     expect(types).toContain('coordinator');
   });
 

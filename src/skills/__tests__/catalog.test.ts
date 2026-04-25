@@ -105,8 +105,8 @@ describe('skillsForKind', () => {
   });
 
   it('returns an empty array when no catalog skill supports the requested kind', () => {
-    // content_post flows through team-run writers (x-writer / reddit-writer),
-    // not a catalog-registered skill — so catalog lookup for this kind is
+    // content_post flows through the post-writer team-run, not a
+    // catalog-registered skill — so catalog lookup for this kind is
     // deliberately empty.
     const matches = skillsForKind('content_post');
     expect(matches).toEqual([]);

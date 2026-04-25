@@ -26,10 +26,12 @@ export type BaseAgentType =
 
 /**
  * Writer + community agents layered on top of the baseline by preset.
+ * `post-writer` is a single channel-aware writer — `plan_items.channel`
+ * (`x` or `reddit`) decides the platform tone via the writer's reference
+ * docs at draft time, so we no longer split the roster by platform.
  */
 export type WriterAgentType =
-  | 'x-writer'
-  | 'reddit-writer'
+  | 'post-writer'
   | 'community-manager';
 
 /**
@@ -71,23 +73,21 @@ export interface DisplayNameMap {
   'growth-strategist': string;
   'content-planner': string;
   'reply-drafter': string;
-  'x-writer': string;
-  'reddit-writer': string;
+  'post-writer': string;
   'community-manager': string;
 }
 
 /**
  * Default display names used by the provisioner and the "Meet your team"
  * onboarding card. Role labels (not personal names) so copy reads honestly —
- * "X Writer" instead of "Jordan".
+ * "Post Writer" instead of "Jordan".
  */
 export const DEFAULT_DISPLAY_NAMES: DisplayNameMap = {
   coordinator: 'Chief of Staff',
   'growth-strategist': 'Head of Growth',
   'content-planner': 'Head of Content',
   'reply-drafter': 'Reply Drafter',
-  'x-writer': 'X Writer',
-  'reddit-writer': 'Reddit Writer',
+  'post-writer': 'Post Writer',
   'community-manager': 'Community Manager',
 };
 
@@ -127,12 +127,12 @@ export function getTeamCompositionForPreset(preset: TeamPreset): AgentType[] {
   ];
   switch (preset) {
     case 'dev-squad':
-      return [...base, 'x-writer', 'community-manager'];
+      return [...base, 'post-writer', 'community-manager'];
     case 'saas-squad':
-      return [...base, 'x-writer', 'community-manager'];
+      return [...base, 'post-writer', 'community-manager'];
     case 'consumer-squad':
-      return [...base, 'reddit-writer', 'community-manager'];
+      return [...base, 'post-writer', 'community-manager'];
     case 'default-squad':
-      return [...base, 'x-writer'];
+      return [...base, 'post-writer'];
   }
 }

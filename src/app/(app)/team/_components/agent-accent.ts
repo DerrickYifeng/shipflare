@@ -7,8 +7,8 @@ import type { BadgeVariant } from '@/components/ui/badge';
  * color, monogram, and role code for an agent.
  *
  * The base triad (coordinator / growth-strategist / content-planner)
- * maps onto existing `--sf-*` tokens. The writer triad adopts iOS
- * system hues by literal hex — they have no matching semantic token in
+ * maps onto existing `--sf-*` tokens. The writer + community pair adopts
+ * iOS system hues by literal hex — they have no matching semantic token in
  * globals.css, and the plan calls out that we keep the inline hex
  * values right here rather than inventing new CSS variables.
  *
@@ -60,23 +60,14 @@ const CONTENT: AgentAccent = {
   initial: 'P',
   colorHex: '#c67a05',
 };
-const X_WRITER: AgentAccent = {
+const POST_WRITER: AgentAccent = {
   solid: '#5e5ce6',
   soft: '#ecebfb',
   ink: '#3f3dc0',
   badgeVariant: 'accent',
-  code: 'X WRITER',
-  initial: 'X',
+  code: 'POST WRITER',
+  initial: 'W',
   colorHex: '#5e5ce6',
-};
-const REDDIT_WRITER: AgentAccent = {
-  solid: '#ff9500',
-  soft: '#fff1d9',
-  ink: '#c66b00',
-  badgeVariant: 'warning',
-  code: 'REDDIT WRITER',
-  initial: 'R',
-  colorHex: '#ff9500',
 };
 const COMMUNITY: AgentAccent = {
   solid: '#af52de',
@@ -92,8 +83,7 @@ const ACCENTS: Record<string, AgentAccent> = {
   coordinator: COORDINATOR,
   'growth-strategist': GROWTH,
   'content-planner': CONTENT,
-  'x-writer': X_WRITER,
-  'reddit-writer': REDDIT_WRITER,
+  'post-writer': POST_WRITER,
   'community-manager': COMMUNITY,
 };
 

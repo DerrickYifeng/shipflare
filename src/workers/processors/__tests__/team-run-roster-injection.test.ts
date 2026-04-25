@@ -276,7 +276,7 @@ describe('processTeamRun — Task roster injection', () => {
     // appear in the injected roster. discovery-scout is the one that
     // specifically got lost before this wiring — assert it by name.
     expect(taskTool?.description).toContain('- discovery-scout:');
-    expect(taskTool?.description).toContain('- x-writer:');
+    expect(taskTool?.description).toContain('- post-writer:');
     expect(taskTool?.description).toContain('- community-manager:');
   });
 });

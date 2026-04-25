@@ -8,9 +8,9 @@ import type { PlanItemState } from '@/lib/plan-state';
 // V3 Today feed — merges two sources:
 //
 //  1. `plan_items` in `drafted | ready_for_review | approved`. These are
-//     scheduled original posts drafted by the x-writer / reddit-writer
-//     agents. The draft body lives in `plan_items.output.draft_body`
-//     (written by DraftPostTool).
+//     scheduled original posts drafted by the post-writer agent (channel
+//     comes in via plan_items.channel). The draft body lives in
+//     `plan_items.output.draft_body` (written by DraftPostTool).
 //
 //  2. `drafts` in `status='pending'` joined to `threads`. These are
 //     reply drafts the community-manager agent drafted against scanned

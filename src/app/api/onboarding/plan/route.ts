@@ -317,8 +317,8 @@ async function runViaTeamRun(
   //
   //    Pre-Phase-F we rooted onboarding at the coordinator so it could
   //    delegate, but the coordinator kept making bad parallel-spawn
-  //    decisions (spawning content-planner + x-writer before the
-  //    strategic_path existed → x-writer hallucinated plan_item IDs →
+  //    decisions (spawning content-planner + a writer before the
+  //    strategic_path existed → the writer hallucinated plan_item IDs →
   //    wasted 15s + retries). Since onboarding is a single-responsibility
   //    flow ("write the strategic path"), we skip the delegation turn
   //    and root the run directly at growth-strategist. Content-planner

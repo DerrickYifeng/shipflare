@@ -14,8 +14,7 @@ import type { ZodType } from 'zod';
 import { coordinatorOutputSchema } from './agents/coordinator/schema';
 import { growthStrategistOutputSchema } from './agents/growth-strategist/schema';
 import { contentPlannerOutputSchema } from './agents/content-planner/schema';
-import { xWriterOutputSchema } from './agents/x-writer/schema';
-import { redditWriterOutputSchema } from './agents/reddit-writer/schema';
+import { postWriterOutputSchema } from './agents/post-writer/schema';
 import { communityManagerOutputSchema } from './agents/community-manager/schema';
 import { discoveryScoutOutputSchema } from './agents/discovery-scout/schema';
 import { discoveryReviewerOutputSchema } from './agents/discovery-reviewer/schema';
@@ -31,8 +30,7 @@ const registry: Record<string, ZodType<unknown>> = {
   coordinator: coordinatorOutputSchema as ZodType<unknown>,
   'growth-strategist': growthStrategistOutputSchema as ZodType<unknown>,
   'content-planner': contentPlannerOutputSchema as ZodType<unknown>,
-  'x-writer': xWriterOutputSchema as ZodType<unknown>,
-  'reddit-writer': redditWriterOutputSchema as ZodType<unknown>,
+  'post-writer': postWriterOutputSchema as ZodType<unknown>,
   'community-manager': communityManagerOutputSchema as ZodType<unknown>,
   'discovery-scout': discoveryScoutOutputSchema as ZodType<unknown>,
   'discovery-reviewer': discoveryReviewerOutputSchema as ZodType<unknown>,
@@ -59,8 +57,7 @@ export {
   coordinatorOutputSchema,
   growthStrategistOutputSchema,
   contentPlannerOutputSchema,
-  xWriterOutputSchema,
-  redditWriterOutputSchema,
+  postWriterOutputSchema,
   communityManagerOutputSchema,
   discoveryScoutOutputSchema,
   discoveryReviewerOutputSchema,
