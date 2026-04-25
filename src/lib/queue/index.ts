@@ -1,36 +1,29 @@
-import { randomUUID, createHash } from 'crypto';
+import { randomUUID } from 'crypto';
 import { Queue, type JobsOptions } from 'bullmq';
 import { getBullMQConnection } from '@/lib/redis';
 import { createLogger } from '@/lib/logger';
 import {
-  discoveryJobSchema,
   reviewJobSchema,
   postingJobSchema,
   healthScoreJobSchema,
   dreamJobSchema,
   codeScanJobSchema,
   monitorJobSchema,
-  searchSourceJobSchema,
-  discoveryScanJobSchema,
   engagementJobSchema,
   metricsJobSchema,
   analyticsJobSchema,
-  calibrationJobSchema,
 } from './types';
 import type {
-  DiscoveryJobData,
   ReviewJobData,
   PostingJobData,
   HealthScoreJobData,
   DreamJobData,
   CodeScanJobData,
   MonitorJobData,
-  SearchSourceJobData,
   DiscoveryScanJobData,
   EngagementJobData,
   MetricsJobData,
   AnalyticsJobData,
-  CalibrationJobData,
 } from './types';
 
 const log = createLogger('lib:queue');
@@ -62,10 +55,6 @@ const defaultJobOptions: JobsOptions = {
   ...DEFAULT_RETRY,
 };
 
-export const discoveryQueue = new Queue<DiscoveryJobData>('discovery', {
-  ...connection,
-  defaultJobOptions,
-});
 export const reviewQueue = new Queue<ReviewJobData>('review', {
   ...connection,
   defaultJobOptions,
@@ -95,25 +84,9 @@ export const monitorQueue = new Queue<MonitorJobData>('monitor', {
 });
 
 /**
- * Per-source reply discovery. One job per Reddit subreddit / X query. Enqueued
- * by the discovery-scan orchestrator; writes threads rows.
- */
-export const searchSourceQueue = new Queue<SearchSourceJobData>(
-  'search-source',
-  {
-    ...connection,
-    defaultJobOptions: {
-      removeOnComplete: { count: 500, age: 24 * 3600 },
-      removeOnFail: { count: 1000, age: 7 * 24 * 3600 },
-      attempts: 3,
-      backoff: { type: 'exponential', delay: 5000 },
-    },
-  },
-);
-
-/**
- * Top-level scan orchestrator. Lightweight — no LLM — just fans out into
- * search-source jobs. Lower retention because each scan logs its own events.
+ * Top-level scan orchestrator. Runs the discovery-scout agent inline;
+ * there's no per-source fan-out anymore. Lower retention because each
+ * scan logs its own events.
  */
 export const discoveryScanQueue = new Queue<DiscoveryScanJobData>(
   'discovery-scan',
@@ -179,18 +152,6 @@ function describePayload(p: unknown): string {
   if (typeof obj.platform === 'string') parts.push(`platform=${obj.platform}`);
   if (typeof obj.productId === 'string') parts.push(`product=${obj.productId}`);
   return parts.length ? parts.join(' ') : 'payload';
-}
-
-/**
- * Enqueue a discovery scan for a user's product across sources (subreddits or topics).
- */
-export async function enqueueDiscovery(data: DiscoveryJobData): Promise<void> {
-  const payload = discoveryJobSchema.parse(withEnvelope(data));
-  log.debug(`Enqueued discovery (${describePayload(payload)})`);
-  await discoveryQueue.add('scan', payload, {
-    attempts: 3,
-    backoff: { type: 'exponential', delay: 5000 },
-  });
 }
 
 /**
@@ -282,44 +243,6 @@ export async function enqueueMonitor(data: MonitorJobData): Promise<void> {
 }
 
 /**
- * Enqueue one reply-discovery source job. Deduped by `(scanRunId, platform,
- * source)`; the source portion is SHA1'd to keep jobIds bounded and
- * redis-safe for sources containing whitespace/punctuation.
- */
-export async function enqueueSearchSource(
-  data: SearchSourceJobData,
-): Promise<string> {
-  const payload = searchSourceJobSchema.parse(withEnvelope(data));
-  const sourceHash = createHash('sha1').update(payload.source).digest('hex').slice(0, 10);
-  const jobId = `ssrc-${payload.scanRunId}-${payload.platform}-${sourceHash}`;
-  log.debug(`Enqueued search-source (${describePayload(payload)} source=${payload.source})`);
-  const job = await searchSourceQueue.add('search', payload, { jobId });
-  return job.id ?? jobId;
-}
-
-/**
- * Enqueue a per-user scan orchestrator job. Deduped by `scanRunId` so a mashed
- * Scan button within the same run collapses to one fan-out. The `fanout`
- * variant of the schema is reserved for the 4h cron entry, which is scheduled
- * directly via `discoveryScanQueue.add('fanout', …)` at worker boot; callers
- * of this helper always enqueue a per-user job.
- */
-export async function enqueueDiscoveryScan(
-  data: Extract<DiscoveryScanJobData, { userId: string }>,
-): Promise<string> {
-  const payload = discoveryScanJobSchema.parse(withEnvelope(data));
-  if (payload.kind === 'fanout') {
-    throw new Error(
-      'enqueueDiscoveryScan does not accept fanout payloads; schedule via discoveryScanQueue.add directly',
-    );
-  }
-  const jobId = `scan-${payload.scanRunId}-${payload.platform}`;
-  log.debug(`Enqueued discovery-scan (${describePayload(payload)} trigger=${payload.trigger})`);
-  const job = await discoveryScanQueue.add('scan', payload, { jobId });
-  return job.id ?? jobId;
-}
-
-/**
  * Enqueue engagement monitoring for a recently posted piece of content.
  * Accepts a delay (ms) for scheduling checks at +15/30/60 minutes.
  */
@@ -388,30 +311,3 @@ export {
 } from './plan-execute';
 export type { PlanExecuteJobData } from './plan-execute';
 
-// ----------------------------------------------------------------
-//  Calibration queue
-// ----------------------------------------------------------------
-
-export const calibrationQueue = new Queue<CalibrationJobData>('calibration', {
-  ...connection,
-  defaultJobOptions: {
-    ...DEFAULT_RETENTION,
-    attempts: 1, // Calibration checkpoints progress to DB; never auto-retry
-  },
-});
-
-/**
- * Enqueue discovery calibration: run the optimize loop for a user's product.
- * No retries — partial progress is checkpointed to DB after each round.
- */
-export async function enqueueCalibration(
-  data: CalibrationJobData,
-): Promise<void> {
-  const payload = calibrationJobSchema.parse(withEnvelope(data));
-  log.debug(
-    `Enqueued calibration for product ${payload.productId} (maxRounds=${payload.maxRounds ?? 10})`,
-  );
-  await calibrationQueue.add('calibrate', payload, {
-    attempts: 1,
-  });
-}

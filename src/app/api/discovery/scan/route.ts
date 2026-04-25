@@ -1,12 +1,13 @@
 import { NextResponse } from 'next/server';
-import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { products, channels } from '@/lib/db/schema';
-import { enqueueDiscoveryScan } from '@/lib/queue';
+import { products, channels, teamMembers } from '@/lib/db/schema';
 import { getPlatformConfig, isPlatformAvailable } from '@/lib/platform-config';
 import { getKeyValueClient } from '@/lib/redis';
+import { ensureTeamExists } from '@/lib/team-provisioner';
+import { enqueueTeamRun } from '@/lib/queue/team-run';
+import { resolveRollingConversation } from '@/lib/team-rolling-conversation';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('api:discovery:scan');
@@ -14,9 +15,10 @@ const DEBOUNCE_SECONDS = 120;
 
 /**
  * POST /api/discovery/scan
- * Fan out a per-platform discovery-scan job for every platform the user has
- * a connected channel on. One scanRunId groups all sources across platforms
- * so scan-status + SSE remain coherent. Global 2-minute debounce per user.
+ * Manual scan with a 2-minute global debounce. Enqueues one
+ * coordinator-rooted team-run (trigger='manual') into the team's rolling
+ * 'Discovery' conversation; the coordinator dispatches community-scout
+ * (and downstream reply-drafter) per its playbook.
  */
 export async function POST() {
   const session = await auth();
@@ -37,7 +39,7 @@ export async function POST() {
   }
 
   const [product] = await db
-    .select({ id: products.id })
+    .select({ id: products.id, name: products.name })
     .from(products)
     .where(eq(products.userId, userId))
     .limit(1);
@@ -64,19 +66,38 @@ export async function POST() {
     );
   }
 
-  const scanRunId = `manual-${Date.now()}-${randomUUID().slice(0, 8)}`;
-  const sources: Array<{ platform: string; source: string }> = [];
+  const { teamId } = await ensureTeamExists(userId, product.id);
+  const memberRows = await db
+    .select({ id: teamMembers.id, agentType: teamMembers.agentType })
+    .from(teamMembers)
+    .where(eq(teamMembers.teamId, teamId));
+  const coordinator = memberRows.find((m) => m.agentType === 'coordinator');
+  if (!coordinator) {
+    await redis.del(debounceKey);
+    return NextResponse.json(
+      { error: 'team_misconfigured', detail: 'coordinator member missing' },
+      { status: 500 },
+    );
+  }
 
+  const conversationId = await resolveRollingConversation(teamId, 'Discovery');
+  const goal =
+    `Manual discovery scan for ${product.name}. ` +
+    `Platforms: ${platforms.join(', ')}. ` +
+    `Trigger: manual.`;
+
+  const { runId, alreadyRunning } = await enqueueTeamRun({
+    teamId,
+    trigger: 'manual',
+    goal,
+    rootMemberId: coordinator.id,
+    conversationId,
+  });
+
+  // Preserve the per-source preview list so existing callers that render
+  // "queued" rows up front (scan-status + SSE consumers) keep working.
+  const sources: Array<{ platform: string; source: string }> = [];
   for (const platform of platforms) {
-    await enqueueDiscoveryScan({
-      schemaVersion: 1,
-      traceId: randomUUID(),
-      userId,
-      productId: product.id,
-      platform,
-      scanRunId,
-      trigger: 'manual',
-    });
     const config = getPlatformConfig(platform);
     for (const source of config.defaultSources) {
       sources.push({ platform, source });
@@ -84,11 +105,17 @@ export async function POST() {
   }
 
   log.info(
-    `discovery scan enqueued: scanRunId=${scanRunId} platforms=${platforms.join(',')}`,
+    `discovery scan team-run enqueued: runId=${runId} platforms=${platforms.join(',')} alreadyRunning=${alreadyRunning}`,
   );
 
   return NextResponse.json(
-    { status: 'queued', scanRunId, platforms, sources },
+    {
+      status: alreadyRunning ? 'already_running' : 'queued',
+      runId,
+      conversationId,
+      platforms,
+      sources,
+    },
     { status: 202 },
   );
 }

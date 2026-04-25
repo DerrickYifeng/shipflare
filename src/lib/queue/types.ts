@@ -21,32 +21,6 @@ const SCHEMA_VERSION = z.literal(1).default(1);
 const TRACE_ID = z.string().min(1).optional();
 
 // ---------------------------------------------------------------------------
-// Discovery
-// ---------------------------------------------------------------------------
-
-const discoveryUserJobSchema = z.object({
-  kind: z.literal('user').optional(),
-  schemaVersion: SCHEMA_VERSION,
-  traceId: TRACE_ID,
-  userId: z.string().min(1),
-  productId: z.string().min(1),
-  sources: z.array(z.string()),
-  platform: z.string().min(1),
-});
-
-const discoveryFanoutJobSchema = z.object({
-  kind: z.literal('fanout'),
-  schemaVersion: SCHEMA_VERSION,
-  traceId: TRACE_ID,
-});
-
-export const discoveryJobSchema = z.union([
-  discoveryFanoutJobSchema,
-  discoveryUserJobSchema,
-]);
-export type DiscoveryJobData = z.input<typeof discoveryJobSchema>;
-
-// ---------------------------------------------------------------------------
 // Review / Posting
 // ---------------------------------------------------------------------------
 
@@ -208,74 +182,24 @@ export const analyticsJobSchema = z.union([
 export type AnalyticsJobData = z.input<typeof analyticsJobSchema>;
 
 // ---------------------------------------------------------------------------
-// Calibration
-// ---------------------------------------------------------------------------
-
-export const calibrationJobSchema = z.object({
-  kind: z.literal('user').optional(),
-  schemaVersion: SCHEMA_VERSION,
-  traceId: TRACE_ID,
-  userId: z.string().min(1),
-  productId: z.string().min(1),
-  /** Max calibration rounds (default: 10). Use 3 for mini re-calibration. */
-  maxRounds: z.number().int().positive().optional(),
-});
-export type CalibrationJobData = z.input<typeof calibrationJobSchema>;
-
-// ---------------------------------------------------------------------------
-// Per-item fan-out queues (Reply journey)
+// Discovery scan (top-level orchestrator)
 // ---------------------------------------------------------------------------
 
 /**
- * One job per reply-discovery source (e.g. `r/SaaS`, `x:"pricing feedback"`).
- * Deduped by `(scanRunId, platform, source)`; re-clicking Scan mints a fresh
- * scanRunId so duplicate clicks within a run collapse but a new run always
- * runs. Enqueued by the `discovery-scan` orchestrator.
+ * Top-level scan orchestrator job. Runs the discovery-scout agent
+ * The discovery-scan queue is now fanout-only: a daily cron drops one
+ * fanout job and the processor (`discovery-cron-fanout.ts`) iterates
+ * every user with at least one channel + product and enqueues a
+ * coordinator-rooted team-run for each. The pre-team-run per-user
+ * `kind: 'user'` shape (and its `enqueueDiscoveryScan` helper) is
+ * retired — manual "scan now" buttons enqueue team-runs directly via
+ * the `/api/discovery/{trigger,scan}` and `/api/automation/run` routes.
  */
-export const searchSourceJobSchema = z.object({
-  kind: z.literal('user').optional(),
-  schemaVersion: SCHEMA_VERSION,
-  traceId: TRACE_ID,
-  userId: z.string().min(1),
-  productId: z.string().min(1),
-  platform: z.string().min(1),
-  source: z.string().min(1),
-  scanRunId: z.string().min(1),
-});
-export type SearchSourceJobData = z.input<typeof searchSourceJobSchema>;
-
-/**
- * Top-level scan orchestrator job. Fans out into N `search-source` jobs.
- * `trigger` distinguishes cron sweeps from user-initiated scans and from
- * onboarding-driven first runs for observability.
- *
- * The `fanout` variant is the cron entry: every 4h a single fanout job fires
- * and the processor iterates all `(userId, platform)` pairs that have both a
- * channel and a product, enqueueing a per-user `user` job for each. The per-
- * user variant is the real work (which mirrors the pre-fanout shape so the
- * manual `/api/discovery/scan` API is unchanged).
- */
-const discoveryScanUserJobSchema = z.object({
-  kind: z.literal('user').optional(),
-  schemaVersion: SCHEMA_VERSION,
-  traceId: TRACE_ID,
-  userId: z.string().min(1),
-  productId: z.string().min(1),
-  platform: z.string().min(1),
-  scanRunId: z.string().min(1),
-  trigger: z.enum(['cron', 'manual', 'onboarding']),
-});
-
-const discoveryScanFanoutJobSchema = z.object({
+export const discoveryScanJobSchema = z.object({
   kind: z.literal('fanout'),
   schemaVersion: SCHEMA_VERSION,
   traceId: TRACE_ID,
 });
-
-export const discoveryScanJobSchema = z.union([
-  discoveryScanFanoutJobSchema,
-  discoveryScanUserJobSchema,
-]);
 export type DiscoveryScanJobData = z.input<typeof discoveryScanJobSchema>;
 
 // ---------------------------------------------------------------------------
@@ -288,19 +212,16 @@ export type XMetricsJobData = MetricsJobData;
 export type XAnalyticsJobData = AnalyticsJobData;
 
 export type JobData =
-  | DiscoveryJobData
   | ReviewJobData
   | PostingJobData
   | HealthScoreJobData
   | DreamJobData
   | CodeScanJobData
   | MonitorJobData
-  | SearchSourceJobData
   | DiscoveryScanJobData
   | EngagementJobData
   | MetricsJobData
-  | AnalyticsJobData
-  | CalibrationJobData;
+  | AnalyticsJobData;
 
 // ---------------------------------------------------------------------------
 // Runtime helpers for processors
