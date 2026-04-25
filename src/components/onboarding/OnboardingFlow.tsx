@@ -701,7 +701,11 @@ function StageRouter({
               };
               throw new Error(err.detail || err.error || `Commit failed (${res.status})`);
             }
-            window.location.href = '/today?from=onboarding';
+            const ok = (await res.json()) as { conversationId?: string | null };
+            const convQuery = ok.conversationId
+              ? `&conv=${encodeURIComponent(ok.conversationId)}`
+              : '';
+            window.location.href = `/team?from=onboarding${convQuery}`;
           }}
         />
       );
