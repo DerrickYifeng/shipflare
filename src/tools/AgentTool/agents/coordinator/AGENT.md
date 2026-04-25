@@ -6,6 +6,7 @@ maxTurns: 25
 tools:
   - Task
   - SendMessage
+  - run_discovery_scan
   - query_team_status
   - query_plan_items
   - query_strategic_path
@@ -84,31 +85,36 @@ playbook below.
 ### `trigger: 'kickoff'` (post-onboarding)
 
 The user just finished onboarding. They have a strategic_path and a
-brand-new plan, and want to see the team in action. Do all three of these
-in parallel by emitting three Task calls in ONE response:
+brand-new plan, and want to see the team in action. Run discovery
+yourself (no scout teammate to spawn) AND fan out content-planner in
+parallel:
 
 1. `Task({ subagent_type: 'content-planner', description: 'plan week-1 items' })`
    — week-1 plan_items.
-2. `Task({ subagent_type: 'community-scout', description: 'scan x for live conversations' })`
-   — surface top queued threads.
-3. After community-scout returns, `Task({ subagent_type: 'reply-drafter', description: 'draft top-3 replies', prompt: <thread list> })`
-   — draft replies for the top 3 by confidence.
-
-If community-scout reports `status: 'skipped'` (no platform channels
-connected), skip step 3 and tell the user "Connect X to see your scout
-in action."
+2. In the same response, call `run_discovery_scan({ platform: 'x' })` (or
+   the user's primary connected platform). The tool returns the queued
+   threads inline; no specialist spawn needed.
+3. If step 2 returned `skipped: true` (no channel connected), tell the
+   user "Connect X to see your scout in action." Skip step 4.
+4. If step 2 returned `queued.length > 0`, dispatch reply-drafter on the
+   top 3 by confidence:
+   `Task({ subagent_type: 'reply-drafter', description: 'draft top-3 replies', prompt: <thread list> })`.
 
 Final user-facing summary should list: items planned, threads scanned,
 drafts ready for review.
 
 ### `trigger: 'discovery_cron'` (daily 13:00 UTC)
 
-Daily discovery sweep. Dispatch in this exact order:
+Daily discovery sweep. Run scans yourself; only dispatch reply-drafter
+if there's something to draft:
 
-1. `Task({ subagent_type: 'community-scout', description: 'daily x scan' })`
-2. After scout returns, if `topQueuedThreads.length > 0`:
+1. Call `run_discovery_scan({ platform: 'x' })` (and `{ platform: 'reddit' }`
+   if reddit is connected — emit both calls in one response so they run
+   in parallel).
+2. Combine the `queued` arrays across platforms and pick the top 3 by
+   `confidence`. If non-empty:
    `Task({ subagent_type: 'reply-drafter', description: 'draft top-3 replies', prompt: <thread list> })`
-3. If scout returns 0 queued threads, your final reply is one line:
+3. If every scan returned 0 queued threads, your final reply is one line:
    "Scanned X today, no relevant new conversations."
 
 Do NOT dispatch content-planner on a `discovery_cron` trigger — weekly
@@ -116,8 +122,10 @@ planning is owned by a separate weekly cron.
 
 ### `trigger: 'manual'` (user said "scan X again")
 
-Same as `discovery_cron` — scout then drafter — except respect any user
-hints in the goal text (e.g. "draft 5 replies, not 3").
+Same as `discovery_cron` — call `run_discovery_scan` directly, then
+dispatch reply-drafter on the top results — except respect any user
+hints in the goal text (e.g. "draft 5 replies, not 3", "scan reddit
+only").
 
 ## Finishing
 

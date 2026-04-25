@@ -230,7 +230,6 @@ describe('getTeamCompositionForPreset', () => {
       'coordinator',
       'growth-strategist',
       'content-planner',
-      'community-scout',
       'reply-drafter',
       'x-writer',
       'community-manager',
@@ -245,7 +244,6 @@ describe('getTeamCompositionForPreset', () => {
       'coordinator',
       'growth-strategist',
       'content-planner',
-      'community-scout',
       'reply-drafter',
       'x-writer',
       'community-manager',
@@ -260,7 +258,6 @@ describe('getTeamCompositionForPreset', () => {
       'coordinator',
       'growth-strategist',
       'content-planner',
-      'community-scout',
       'reply-drafter',
       'reddit-writer',
       'community-manager',
@@ -275,7 +272,6 @@ describe('getTeamCompositionForPreset', () => {
       'coordinator',
       'growth-strategist',
       'content-planner',
-      'community-scout',
       'reply-drafter',
       'x-writer',
     ]);
@@ -289,7 +285,7 @@ describe('getTeamCompositionForPreset', () => {
 describe('ensureTeamExists (baseline, no preset)', () => {
   beforeEach(() => resetTables());
 
-  it('creates a new team with the 5 baseline members on first call', async () => {
+  it('creates a new team with the 4 baseline members on first call', async () => {
     const { ensureTeamExists } = await import('@/lib/team-provisioner');
     const res = await ensureTeamExists('u-1', 'p-1');
     expect(res.created).toBe(true);
@@ -297,18 +293,16 @@ describe('ensureTeamExists (baseline, no preset)', () => {
     expect(res.memberIds.coordinator).toBeTruthy();
     expect(res.memberIds['growth-strategist']).toBeTruthy();
     expect(res.memberIds['content-planner']).toBeTruthy();
-    expect(res.memberIds['community-scout']).toBeTruthy();
     expect(res.memberIds['reply-drafter']).toBeTruthy();
 
     const members = getTeamMembers();
-    expect(members).toHaveLength(5);
+    expect(members).toHaveLength(4);
     const types = new Set(members.map((m) => m.agentType));
     expect(types).toEqual(
       new Set([
         'coordinator',
         'growth-strategist',
         'content-planner',
-        'community-scout',
         'reply-drafter',
       ]),
     );
@@ -321,25 +315,24 @@ describe('ensureTeamExists (baseline, no preset)', () => {
     expect(first.teamId).toBe(second.teamId);
     expect(first.memberIds).toEqual(second.memberIds);
     expect(second.created).toBe(false);
-    expect(getTeamMembers()).toHaveLength(5);
+    expect(getTeamMembers()).toHaveLength(4);
   });
 });
 
 describe('ensureTeamExists (with preset)', () => {
   beforeEach(() => resetTables());
 
-  it('dev-squad preset seeds 7 members on a fresh team', async () => {
+  it('dev-squad preset seeds 6 members on a fresh team', async () => {
     const { ensureTeamExists } = await import('@/lib/team-provisioner');
     const res = await ensureTeamExists('u-1', 'p-1', { preset: 'dev-squad' });
     expect(res.created).toBe(true);
-    expect(getTeamMembers()).toHaveLength(7);
+    expect(getTeamMembers()).toHaveLength(6);
     const types = new Set(getTeamMembers().map((m) => m.agentType));
     expect(types).toEqual(
       new Set([
         'coordinator',
         'growth-strategist',
         'content-planner',
-        'community-scout',
         'reply-drafter',
         'x-writer',
         'community-manager',
@@ -349,19 +342,18 @@ describe('ensureTeamExists (with preset)', () => {
 
   it('reconciles — adding preset on an existing baseline team inserts the delta', async () => {
     const { ensureTeamExists } = await import('@/lib/team-provisioner');
-    await ensureTeamExists('u-1', 'p-1'); // baseline: 5 members
-    expect(getTeamMembers()).toHaveLength(5);
+    await ensureTeamExists('u-1', 'p-1'); // baseline: 4 members
+    expect(getTeamMembers()).toHaveLength(4);
 
     // Now a channel connects and we re-run with the consumer-squad preset.
     await ensureTeamExists('u-1', 'p-1', { preset: 'consumer-squad' });
-    expect(getTeamMembers()).toHaveLength(7);
+    expect(getTeamMembers()).toHaveLength(6);
     const types = new Set(getTeamMembers().map((m) => m.agentType));
     expect(types).toEqual(
       new Set([
         'coordinator',
         'growth-strategist',
         'content-planner',
-        'community-scout',
         'reply-drafter',
         'reddit-writer',
         'community-manager',
@@ -386,7 +378,7 @@ describe('ensureTeamExists (with preset)', () => {
 describe('provisionTeamForProduct', () => {
   beforeEach(() => resetTables());
 
-  it('dev_tool category + X channel connected → dev-squad with 7 members', async () => {
+  it('dev_tool category + X channel connected → dev-squad with 6 members', async () => {
     rows[productsTable].push({ id: 'p-1', userId: 'u-1', category: 'dev_tool' });
     rows[channelsTable].push({ id: 'c-1', userId: 'u-1', platform: 'x' });
     const { provisionTeamForProduct } = await import('@/lib/team-provisioner');
@@ -396,12 +388,11 @@ describe('provisionTeamForProduct', () => {
       'coordinator',
       'growth-strategist',
       'content-planner',
-      'community-scout',
       'reply-drafter',
       'x-writer',
       'community-manager',
     ]);
-    expect(getTeamMembers()).toHaveLength(7);
+    expect(getTeamMembers()).toHaveLength(6);
   });
 
   it('consumer category + no reddit channel → falls back so we do not seed dead reddit-writer', async () => {
@@ -439,7 +430,6 @@ describe('provisionTeamForProduct', () => {
         'coordinator',
         'growth-strategist',
         'content-planner',
-        'community-scout',
         'reply-drafter',
         'x-writer',
       ]),

@@ -28,7 +28,7 @@ const fixtures = {
   teamMembers: {
     'team-u-1': [
       { id: 'm-coord-1', agentType: 'coordinator' },
-      { id: 'm-other-1', agentType: 'community-scout' },
+      { id: 'm-other-1', agentType: 'reply-drafter' },
     ],
     'team-u-2': [{ id: 'm-coord-2', agentType: 'coordinator' }],
     'team-u-4': [{ id: 'm-coord-4', agentType: 'coordinator' }],

@@ -110,11 +110,11 @@ registry.register(draftReplyTool);
 
 // ---------------------------------------------------------------------------
 // Unified discovery pipeline tools (team-run wrappers). `run_discovery_scan`
-// wraps `runDiscoveryV3` so a community-scout agent can drive discovery
-// inline from a team-run loop. `draft_single_reply` wraps the
-// draft-single-reply skill (full opportunity-judge + drafter + ai-slop
-// validation pipeline) — distinct from the persist-only `draft_reply`
-// above, which the caller uses when it has already drafted the body.
+// wraps `runDiscoveryV3` so the coordinator can drive discovery inline
+// from a team-run loop. `draft_single_reply` wraps the draft-single-reply
+// skill (full opportunity-judge + drafter + ai-slop validation pipeline)
+// — distinct from the persist-only `draft_reply` above, which the caller
+// uses when it has already drafted the body.
 // ---------------------------------------------------------------------------
 registry.register(runDiscoveryScanTool);
 registry.register(draftSingleReplyTool);

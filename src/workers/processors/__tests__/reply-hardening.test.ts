@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const runSkillMock = vi.fn();
+const runAgentMock = vi.fn();
 
 vi.mock('@/lib/db', () => ({ db: {} }));
 vi.mock('@/lib/platform-deps', () => ({ createPlatformDeps: async () => ({}) }));
@@ -9,10 +9,21 @@ vi.mock('@/lib/redis', () => ({ publishUserEvent: vi.fn() }));
 vi.mock('@/lib/pipeline-events', () => ({ recordPipelineEvent: vi.fn() }));
 vi.mock('@/memory/store', () => ({ MemoryStore: class {} }));
 vi.mock('@/memory/prompt-builder', () => ({ buildMemoryPrompt: async () => '' }));
-vi.mock('@/core/skill-runner', () => ({ runSkill: runSkillMock }));
-// Mock loadSkill so the helper can pre-load both skills without hitting the FS
-vi.mock('@/core/skill-loader', () => ({
-  loadSkill: (dir: string) => ({ name: dir.includes('product-opportunity-judge') ? 'product-opportunity-judge' : 'draft-single-reply' }),
+vi.mock('@/bridge/agent-runner', () => ({
+  runAgent: runAgentMock,
+  createToolContext: () => ({}),
+}));
+vi.mock('@/bridge/load-agent', () => ({
+  loadAgentFromFile: (filePath: string) => ({
+    name: filePath.includes('product-opportunity-judge') ? 'product-opportunity-judge' : 'x-reply-writer',
+    systemPrompt: '',
+    model: 'claude-haiku-4-5',
+    tools: [],
+    maxTurns: 5,
+  }),
+}));
+vi.mock('@/tools/registry', () => ({
+  registry: { toMap: () => new Map() },
 }));
 
 beforeEach(() => {
@@ -23,20 +34,20 @@ beforeEach(() => {
 
 describe('reply pipeline hardening', () => {
   it('rejects drafts that fail ai-slop validation and emits skip', async () => {
-    runSkillMock
+    runAgentMock
       // product-opportunity-judge pass — mute
       .mockResolvedValueOnce({
-        results: [{ allowMention: false, signal: 'no_fit', confidence: 0.9, reason: 'no fit' }],
-        errors: [], usage: { costUsd: 0 },
+        result: { allowMention: false, signal: 'no_fit', confidence: 0.9, reason: 'no fit' },
+        usage: { costUsd: 0 },
       })
       // reply-drafter pass — returns slop
       .mockResolvedValueOnce({
-        results: [{
+        result: {
           replyText: 'Great post! this really resonates.',
           confidence: 0.8,
           strategy: 'supportive_peer',
-        }],
-        errors: [], usage: { costUsd: 0 },
+        },
+        usage: { costUsd: 0 },
       });
 
     const { draftReplyWithHardening } = await import('../reply-hardening');
@@ -50,18 +61,18 @@ describe('reply pipeline hardening', () => {
   });
 
   it('accepts drafts that pass both validators', async () => {
-    runSkillMock
+    runAgentMock
       .mockResolvedValueOnce({
-        results: [{ allowMention: true, signal: 'tool_question', confidence: 0.8, reason: 'ask' }],
-        errors: [], usage: { costUsd: 0 },
+        result: { allowMention: true, signal: 'tool_question', confidence: 0.8, reason: 'ask' },
+        usage: { costUsd: 0 },
       })
       .mockResolvedValueOnce({
-        results: [{
+        result: {
           replyText: 'took us 14 months to hit that. channel was cold email.',
           confidence: 0.8,
           strategy: 'data_add',
-        }],
-        errors: [], usage: { costUsd: 0 },
+        },
+        usage: { costUsd: 0 },
       });
 
     const { draftReplyWithHardening } = await import('../reply-hardening');
@@ -76,14 +87,14 @@ describe('reply pipeline hardening', () => {
   });
 
   it('rejects drafts with no anchor token', async () => {
-    runSkillMock
+    runAgentMock
       .mockResolvedValueOnce({
-        results: [{ allowMention: false, signal: 'no_fit', confidence: 0.9, reason: 'no fit' }],
-        errors: [], usage: { costUsd: 0 },
+        result: { allowMention: false, signal: 'no_fit', confidence: 0.9, reason: 'no fit' },
+        usage: { costUsd: 0 },
       })
       .mockResolvedValueOnce({
-        results: [{ replyText: 'agree with this', confidence: 0.7, strategy: 'supportive_peer' }],
-        errors: [], usage: { costUsd: 0 },
+        result: { replyText: 'agree with this', confidence: 0.7, strategy: 'supportive_peer' },
+        usage: { costUsd: 0 },
       });
 
     const { draftReplyWithHardening } = await import('../reply-hardening');

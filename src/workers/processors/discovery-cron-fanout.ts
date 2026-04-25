@@ -1,8 +1,8 @@
 // Daily 13:00 UTC fanout. For each user with at least one connected
 // channel AND a product, enqueue one coordinator-rooted team-run with
-// `trigger='discovery_cron'`. The coordinator's playbook handles
-// dispatching community-scout + reply-drafter via Task — scout no
-// longer runs as a standalone BullMQ job.
+// `trigger='discovery_cron'`. The coordinator's playbook handles calling
+// `run_discovery_scan` inline + dispatching reply-drafter via Task — the
+// scan no longer runs as a standalone BullMQ job.
 //
 // Replaces the prior `discovery-scan.ts` processor. The
 // `discovery-scan` BullMQ queue is preserved (the cron schedule still
@@ -84,7 +84,8 @@ export async function processDiscoveryCronFanout(
         `Daily discovery scan for ${product.name}. ` +
         `Connected platforms: ${platforms}. ` +
         `Trigger: discovery_cron. ` +
-        `Follow your discovery_cron playbook: scan, then draft top-3 replies.`;
+        `Follow your discovery_cron playbook: call run_discovery_scan ` +
+        `yourself per platform, then dispatch reply-drafter on the top-3.`;
 
       await enqueueTeamRun({
         teamId,

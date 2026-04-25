@@ -1,27 +1,18 @@
 /**
  * Machine-readable skill catalog.
  *
- * Phase E Day 3 (Task #23): trimmed to the 5 skills that are still loaded
- * at runtime via `runSkill()` — draft-single-reply, discovery, draft-review,
- * posting, voice-extractor. The v2 atomic-skill set (18 entries) was deleted
- * in the same commit sweep; plan_items that formerly routed through those
- * skills now flow through team-run coordinators (content_post → x-writer /
- * reddit-writer via Task) or have no equivalent yet — Phase F will wire
- * email / launch-asset / analytics paths to agents when/if they come back.
- *
- * Adding a new skill (if we add any back before full team-run migration):
- *   1. Land the skill dir (SKILL.md + agent ref + references/).
- *   2. Add an output schema to `src/agents/schemas.ts` if one doesn't exist.
- *   3. Define an input schema here (or import from schemas.ts).
- *   4. Append a new `SKILL_CATALOG` entry with accurate `supportedKinds`
- *      and `channels` arrays.
- *   5. Run `pnpm test src/skills/__tests__/catalog` to validate.
+ * Phase 5 (agent-cleanup) trimmed this to the 2 skills that still run via
+ * `runSkill()`: draft-single-reply (consumed by the reply-drafter Task
+ * teammate via DraftSingleReplyTool, slated for deletion in Phase 6) and
+ * voice-extractor (consumed by the voice-extract worker for the
+ * `setup_task` plan_item route). The other former entries (posting,
+ * draft-review, product-opportunity-judge) are now invoked directly by
+ * their workers via `runAgent(loadAgentFromFile(...))` against the unified
+ * registry under `src/tools/AgentTool/agents/`.
  */
 
 import { z, type ZodTypeAny } from 'zod';
 import {
-  draftReviewOutputSchema,
-  postingOutputSchema,
   replyDrafterOutputSchema,
   voiceExtractorOutputSchema,
 } from '@/agents/schemas';
@@ -98,26 +89,6 @@ const draftSingleReplyInput = z.object({
     .min(1),
 });
 
-const draftReviewInput = z.object({
-  platform: z.string().min(1),
-  kind: z.enum(['reply', 'original_post']),
-  replyBody: z.string(),
-  thread: z
-    .object({
-      title: z.string().nullable().optional(),
-      body: z.string().nullable().optional(),
-      url: z.string().nullable().optional(),
-    })
-    .optional(),
-  product: productContextSchema,
-});
-
-const postingInput = z.object({
-  draftId: z.string().min(1),
-  channelId: z.string().min(1),
-  platform: z.string().min(1),
-});
-
 const voiceExtractorInput = z.object({
   userId: z.string().min(1),
   platform: z.string().min(1),
@@ -137,25 +108,6 @@ export const SKILL_CATALOG: readonly SkillMeta[] = [
     outputSchema: replyDrafterOutputSchema,
     supportedKinds: ['content_reply'],
     channels: ['x'],
-  },
-  {
-    name: 'draft-review',
-    description:
-      'Adversarial quality check for a drafted post or reply. Returns pass/fail per dimension and suggestions.',
-    inputSchema: draftReviewInput,
-    outputSchema: draftReviewOutputSchema,
-    // Inline quality gate, not a plan_items step. Chained between
-    // drafted → ready_for_review for content_post / content_reply items.
-    supportedKinds: [],
-  },
-  {
-    name: 'posting',
-    description:
-      'Publish an approved draft to its platform. Serial worker — never retried, to avoid duplicate publishes.',
-    inputSchema: postingInput,
-    outputSchema: postingOutputSchema,
-    // Selected directly from the item's execution phase, not via skillName.
-    supportedKinds: [],
   },
   {
     name: 'voice-extractor',

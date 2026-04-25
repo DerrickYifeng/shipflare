@@ -2,8 +2,9 @@ import type { Job } from 'bullmq';
 import { db } from '@/lib/db';
 import { drafts, threads, products, channels, userPreferences } from '@/lib/db/schema';
 import { eq, and, gte, sql } from 'drizzle-orm';
-import { loadSkill } from '@/core/skill-loader';
-import { runSkill } from '@/core/skill-runner';
+import { runAgent, createToolContext } from '@/bridge/agent-runner';
+import { loadAgentFromFile } from '@/bridge/load-agent';
+import { registry } from '@/tools/registry';
 import { draftReviewOutputSchema } from '@/agents/schemas';
 import { publishUserEvent } from '@/lib/redis';
 import { enqueueDream, enqueuePosting } from '@/lib/queue';
@@ -15,10 +16,14 @@ import { MemoryStore } from '@/memory/store';
 import { AgentDream } from '@/memory/dream';
 import { buildMemoryPrompt } from '@/memory/prompt-builder';
 import { recordPipelineEvent } from '@/lib/pipeline-events';
+import { addCost } from '@/lib/cost-bucket';
 
 const baseLog = createLogger('worker:review');
 
-const SKILLS_DIR = join(process.cwd(), 'src', 'skills');
+const DRAFT_REVIEW_AGENT_PATH = join(
+  process.cwd(),
+  'src/tools/AgentTool/agents/draft-review/AGENT.md',
+);
 
 export async function processReview(job: Job<ReviewJobData>) {
   const traceId = getTraceId(job.data, job.id);
@@ -57,13 +62,23 @@ export async function processReview(job: Job<ReviewJobData>) {
   const dream = new AgentDream(memoryStore);
   const memoryPrompt = await buildMemoryPrompt(memoryStore);
 
-  // Run draft-review skill (single-item fan-out)
-  const skill = loadSkill(join(SKILLS_DIR, 'draft-review'));
+  // Run draft-review agent. Shallow-clone the cached config so memory
+  // injection doesn't accumulate across review jobs.
+  const baseConfig = loadAgentFromFile(
+    DRAFT_REVIEW_AGENT_PATH,
+    registry.toMap(),
+  );
+  const agentConfig = memoryPrompt
+    ? {
+        ...baseConfig,
+        systemPrompt: `${baseConfig.systemPrompt}\n\n## Memory\n\n${memoryPrompt}`,
+      }
+    : baseConfig;
 
   try {
-    const { results, usage } = await runSkill({
-      skill,
-      input: {
+    const { result, usage } = await runAgent(
+      agentConfig,
+      JSON.stringify({
         drafts: [
           {
             replyBody: draft.replyBody,
@@ -76,17 +91,11 @@ export async function processReview(job: Job<ReviewJobData>) {
             whyItWorks: draft.whyItWorks ?? '',
           },
         ],
-      },
-      memoryPrompt: memoryPrompt || undefined,
-      outputSchema: draftReviewOutputSchema,
-      runId: traceId,
-    });
-
-    const result = results[0];
-    if (!result) {
-      log.warn(`Review skill returned no results for draft ${draftId}, leaving as pending`);
-      return;
-    }
+      }),
+      createToolContext({}),
+      draftReviewOutputSchema,
+    );
+    await addCost(traceId, usage);
 
     log.info(`Review verdict: ${result.verdict}, score=${result.score.toFixed(2)}, cost=$${usage.costUsd.toFixed(4)}`);
 

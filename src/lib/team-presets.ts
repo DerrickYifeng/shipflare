@@ -14,15 +14,14 @@
 // ---------------------------------------------------------------------------
 
 /**
- * Baseline agent roster present in every team. `memberIds` always exposes
- * exactly these three ids so `plan-execute` / `team-run` callers can route
+ * Baseline agent roster present in every team. `memberIds` exposes one id
+ * per BaseAgentType so `plan-execute` / `team-run` callers can route
  * without reading the config.
  */
 export type BaseAgentType =
   | 'coordinator'
   | 'growth-strategist'
   | 'content-planner'
-  | 'community-scout'
   | 'reply-drafter';
 
 /**
@@ -71,7 +70,6 @@ export interface DisplayNameMap {
   coordinator: string;
   'growth-strategist': string;
   'content-planner': string;
-  'community-scout': string;
   'reply-drafter': string;
   'x-writer': string;
   'reddit-writer': string;
@@ -87,7 +85,6 @@ export const DEFAULT_DISPLAY_NAMES: DisplayNameMap = {
   coordinator: 'Chief of Staff',
   'growth-strategist': 'Head of Growth',
   'content-planner': 'Head of Content',
-  'community-scout': 'Community Scout',
   'reply-drafter': 'Reply Drafter',
   'x-writer': 'X Writer',
   'reddit-writer': 'Reddit Writer',
@@ -126,7 +123,6 @@ export function getTeamCompositionForPreset(preset: TeamPreset): AgentType[] {
     'coordinator',
     'growth-strategist',
     'content-planner',
-    'community-scout',
     'reply-drafter',
   ];
   switch (preset) {

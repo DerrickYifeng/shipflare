@@ -1,10 +1,10 @@
 // Team provisioner.
 //
-// Phase B shipped the minimal 3-role roster (coordinator + growth-strategist +
-// content-planner). Phase F layers category presets on top — dev_tool picks
-// up an x-writer + community-manager, consumer picks up a reddit-writer +
-// community-manager, etc. The 3-role baseline stays as the floor so legacy
-// callers of `ensureTeamExists` keep working and older teams keep rendering.
+// Phase B shipped the minimal baseline roster (coordinator + growth-strategist +
+// content-planner + reply-drafter). Phase F layers category presets on top —
+// dev_tool picks up an x-writer + community-manager, consumer picks up a
+// reddit-writer + community-manager, etc. The baseline stays as the floor so
+// legacy callers of `ensureTeamExists` keep working and older teams keep rendering.
 //
 // Idempotent: re-running against an existing team returns the existing ids
 // without mutating rows. The unique index on `team_members (team_id,
@@ -50,9 +50,9 @@ export type {
 const log = createLogger('lib:team-provisioner');
 
 // ---------------------------------------------------------------------------
-// ensureTeamExists — preserved baseline API (3 roles) used by plan-execute +
-// team-run callers. Now optionally takes a preset; when absent it defaults
-// to the baseline roster (backwards compatible).
+// ensureTeamExists — preserved baseline API used by plan-execute + team-run
+// callers. Now optionally takes a preset; when absent it defaults to the
+// baseline roster (backwards compatible).
 // ---------------------------------------------------------------------------
 
 export interface EnsureTeamResult {
@@ -71,15 +71,15 @@ export interface EnsureTeamOptions {
   /**
    * Optional preset. When provided, the full preset roster is ensured
    * (baseline + writers + community roles). When absent the function
-   * seeds only the 3-role baseline for backwards compatibility with
-   * pre-Phase-F callers.
+   * seeds only the baseline for backwards compatibility with pre-Phase-F
+   * callers.
    */
   preset?: TeamPreset;
 }
 
 /**
  * Ensure a team + roster exists for (userId, productId). Returns the
- * teamId and a map of the 3 baseline agent_types → member id. Callers
+ * teamId and a map of the baseline agent_types → member id. Callers
  * that need writer/community member ids should re-query `team_members`.
  */
 export async function ensureTeamExists(
@@ -143,7 +143,6 @@ export async function ensureTeamExists(
         'coordinator',
         'growth-strategist',
         'content-planner',
-        'community-scout',
         'reply-drafter',
       ];
 
@@ -163,13 +162,12 @@ export async function ensureTeamExists(
     );
   }
 
-  // Baseline 3 must always be present after this call — the insert loop
+  // Baseline must always be present after this call — the insert loop
   // above guarantees it by including them in `roster`.
   const memberIds: Record<BaseAgentType, string> = {
     coordinator: byType.get('coordinator')!,
     'growth-strategist': byType.get('growth-strategist')!,
     'content-planner': byType.get('content-planner')!,
-    'community-scout': byType.get('community-scout')!,
     'reply-drafter': byType.get('reply-drafter')!,
   };
 
