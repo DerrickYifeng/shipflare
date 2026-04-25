@@ -1,21 +1,21 @@
 /**
  * Machine-readable skill catalog.
  *
- * Phase 5 (agent-cleanup) trimmed this to the 2 skills that still run via
- * `runSkill()`: draft-single-reply (consumed by the reply-drafter Task
- * teammate via DraftSingleReplyTool, slated for deletion in Phase 6) and
- * voice-extractor (consumed by the voice-extract worker for the
- * `setup_task` plan_item route). The other former entries (posting,
- * draft-review, product-opportunity-judge) are now invoked directly by
- * their workers via `runAgent(loadAgentFromFile(...))` against the unified
- * registry under `src/tools/AgentTool/agents/`.
+ * Phase 5 (agent-cleanup) trimmed this to skills that still run via
+ * `runSkill()`. Phase 6 deleted the last team-run-side skill
+ * (`draft-single-reply`) when community-manager absorbed reply drafting
+ * end-to-end. Only `voice-extractor` remains — consumed by the
+ * voice-extract worker for the `setup_task` plan_item route.
+ *
+ * Every other former entry (posting, draft-review, product-opportunity-judge,
+ * draft-single-reply) is now invoked directly by its caller via
+ * `runAgent(loadAgentFromFile(...))` against the unified registry under
+ * `src/tools/AgentTool/agents/` — or absorbed entirely (draft-single-reply
+ * lives in community-manager's per-thread workflow now).
  */
 
 import { z, type ZodTypeAny } from 'zod';
-import {
-  replyDrafterOutputSchema,
-  voiceExtractorOutputSchema,
-} from '@/agents/schemas';
+import { voiceExtractorOutputSchema } from '@/agents/schemas';
 
 /**
  * Mirror of the `plan_item_kind` Postgres enum. Kept here as a string-literal
@@ -57,37 +57,8 @@ export interface SkillMeta {
 }
 
 // ---------------------------------------------------------------------------
-// Minimal input schemas — one per catalog entry. Prose input shapes still
-// live in each SKILL.md for humans; these are the runtime contract.
+// Minimal input schemas — one per catalog entry.
 // ---------------------------------------------------------------------------
-
-const productContextSchema = z.object({
-  name: z.string(),
-  description: z.string(),
-  valueProp: z.string().nullable().optional(),
-  keywords: z.array(z.string()),
-  currentPhase: z.string().optional(),
-});
-
-const draftSingleReplyInput = z.object({
-  tweets: z
-    .array(
-      z.object({
-        tweetId: z.string().min(1),
-        tweetText: z.string(),
-        authorUsername: z.string(),
-        platform: z.literal('x'),
-        productName: z.string(),
-        productDescription: z.string(),
-        valueProp: z.string().nullable().optional(),
-        keywords: z.array(z.string()),
-        canMentionProduct: z.boolean(),
-        voiceBlock: z.string().nullable(),
-        repairPrompt: z.string().optional(),
-      }),
-    )
-    .min(1),
-});
 
 const voiceExtractorInput = z.object({
   userId: z.string().min(1),
@@ -100,15 +71,6 @@ const voiceExtractorInput = z.object({
 // ---------------------------------------------------------------------------
 
 export const SKILL_CATALOG: readonly SkillMeta[] = [
-  {
-    name: 'draft-single-reply',
-    description:
-      'Draft one reply to a monitored post or discovered thread. One LLM call per item, runs the product-opportunity-judge pre-pass and validator hardening downstream.',
-    inputSchema: draftSingleReplyInput,
-    outputSchema: replyDrafterOutputSchema,
-    supportedKinds: ['content_reply'],
-    channels: ['x'],
-  },
   {
     name: 'voice-extractor',
     description:

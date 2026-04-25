@@ -52,10 +52,10 @@ export interface SkillRunResult<T = unknown> {
 
 // Phase 3 (agent cleanup) moved every legacy agent .md file into the
 // unified registry at `src/tools/AgentTool/agents/<name>/AGENT.md`.
-// Phase 5 deleted the runSkill callers for posting/draft-review/judge —
-// only voice-extractor (setup_task plan_item) and draft-single-reply
-// (consumed by DraftSingleReplyTool, dies in Phase 6) still route through
-// here.
+// Phase 5 deleted the runSkill callers for posting/draft-review/judge,
+// and Phase 6 deleted the draft-single-reply skill / DraftSingleReplyTool
+// when community-manager absorbed reply drafting end-to-end. Only
+// voice-extractor (setup_task plan_item) still routes through here.
 const UNIFIED_AGENTS_DIR = join(
   process.cwd(),
   'src',

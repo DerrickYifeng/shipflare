@@ -63,11 +63,11 @@ Threads that fail any of these checks → skip, don't draft.
 
 Chat register. Lowercase openings are fine. Fragments are fine. Every
 reply needs an anchor token (number, proper noun, timestamp, or URL)
-or it gets classified as generic by the slop validator.
+or it gets classified as generic by your inline self-check.
 
-See the existing `draft-single-reply` x-reply-rules for the full
-8-register / 6-archetype decision tree. Until that file is ported to
-this agent's references (planned Phase E cleanup), the short version is:
+The full register → archetype decision tree lives in
+`reply-quality-bar` alongside the slop / anchor / length / stats
+rules. Short version:
 
 - Register → archetype → shortest version that carries the archetype
 - 40-140 characters is the target band (240 hard cap)

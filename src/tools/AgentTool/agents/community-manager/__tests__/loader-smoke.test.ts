@@ -28,11 +28,12 @@ describe('community-manager loader smoke', () => {
       'StructuredOutput',
     ]);
     expect(cm.model).toBe('claude-haiku-4-5-20251001');
-    expect(cm.maxTurns).toBe(12);
+    expect(cm.maxTurns).toBe(16);
 
     // Per-agent references inlined under "## <name>" headers.
     expect(cm.systemPrompt).toContain('## engagement-playbook');
     expect(cm.systemPrompt).toContain('## reply-quality-bar');
+    expect(cm.systemPrompt).toContain('## opportunity-judgment');
     expect(cm.systemPrompt).toContain('three-gate test');
 
     // Shared reference (base-guidelines) also inlined.

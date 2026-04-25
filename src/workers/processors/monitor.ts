@@ -317,14 +317,15 @@ async function processXMonitorForUser(
       ),
     );
 
-  // Run draft-single-reply skill for tweets within reply window
+  // Run hardened reply pipeline for tweets within reply window
   if (tweetsForReply.length > 0) {
     const memoryStore = new MemoryStore(userId, productId);
     const dream = new AgentDream(memoryStore);
 
-    // Run hardened reply pipeline: per-tweet parallel execution.
-    // Each tweet goes through: product-opportunity-judge → reply-drafter → ai-slop + anchor validators.
-    // Memory injection happens inside the skill's own mechanism via skill-runner deps.
+    // Per-tweet parallel execution. Each tweet goes through:
+    //   product-opportunity-judge → x-reply-writer → ai-slop + anchor validators.
+    // Both LLM stages run via direct `runAgent(loadAgentFromFile(...))`
+    // against the unified registry — no skill-runner wrapper.
     // If quality regression is observed, thread buildMemoryPrompt(memoryStore) into HardenedReplyInput and forward it.
     const hardenedResults = await Promise.all(
       tweetsForReply.map((t) =>
@@ -429,7 +430,7 @@ async function processXMonitorForUser(
     // Publish SSE event
     await publishUserEvent(userId, 'tweets', {
       type: 'agent_complete',
-      agentName: 'reply-drafter',
+      agentName: 'x-reply-writer',
       stats: {
         tweetsScanned: totalNewTweets,
         withinWindow: tweetsForReply.length,

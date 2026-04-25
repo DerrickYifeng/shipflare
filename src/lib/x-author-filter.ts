@@ -117,7 +117,7 @@ You will be given the product's context (name, description, value prop) and a ba
 - Operators who build real products/services AND *also* run a podcast, newsletter, community, or content brand. Hybrid identity is normal across every vertical.
 - Fund / VC / holdco / agency operators with real portfolio work.
 - Creators, coaches, or service-providers whose audience overlaps the product's ICP — even if they sell a course or run a paid community. If the user's product serves *their* audience, they're a valuable reach, not a competitor.
-- Anyone whose bio you cannot unambiguously categorize against THIS product. When in doubt, pass — the reply-drafter has downstream safeguards for bait content.
+- Anyone whose bio you cannot unambiguously categorize against THIS product. When in doubt, pass — the community-manager / x-reply-writer has downstream safeguards for bait content.
 
 **Key calibration:** an account described as "copywriter teaching you to write" is a competitor for a SaaS tool aimed at SaaS founders, but an ideal ICP for an AI-writing-assistant product whose users *are* writers. The verdict must flip with the product, not stay fixed. Read the product description carefully before each judgment.
 

@@ -40,7 +40,7 @@ describe('reply pipeline hardening', () => {
         result: { allowMention: false, signal: 'no_fit', confidence: 0.9, reason: 'no fit' },
         usage: { costUsd: 0 },
       })
-      // reply-drafter pass — returns slop
+      // x-reply-writer pass — returns slop
       .mockResolvedValueOnce({
         result: {
           replyText: 'Great post! this really resonates.',

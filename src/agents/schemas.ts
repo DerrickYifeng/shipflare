@@ -88,8 +88,14 @@ export const communityIntelOutputSchema = z.object({
 });
 
 /**
- * Output schema for the reply-drafter agent (used by draft-single-reply skill).
- * Generates a high-value reply to a monitored post or discovered thread.
+ * Output schema for the x-reply-writer agent — the per-tweet leaf the
+ * monitor.ts → reply-hardening pipeline runs against each in-window
+ * monitored tweet. Generates a high-value reply with confidence score
+ * and chosen archetype, or `strategy: 'skip'` to bail out.
+ *
+ * (Historically named after the `reply-drafter` Task teammate that was
+ * deleted in the agent-cleanup Phase 6 migration. The shape stayed
+ * because the programmatic monitor.ts pipeline still consumes it.)
  */
 export const replyDrafterOutputSchema = z.object({
   replyText: z.string(),

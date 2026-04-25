@@ -9,26 +9,23 @@ import {
 } from '../_catalog';
 
 /**
- * Phase 5 (agent-cleanup) further trimmed the catalog to the 2 skills that
- * still run via `runSkill()`: draft-single-reply and voice-extractor. The
- * other former entries (posting, draft-review, product-opportunity-judge)
- * are now invoked by their workers via `runAgent(loadAgentFromFile(...))`
- * directly against the unified registry under `src/tools/AgentTool/agents/`.
+ * Phase 6 (agent-cleanup) trimmed the catalog to the single skill that
+ * still runs via `runSkill()`: voice-extractor (consumed by the
+ * voice-extract worker for the `setup_task` plan_item route). All other
+ * former entries were either deleted (draft-single-reply, absorbed into
+ * community-manager) or migrated to direct `runAgent(loadAgentFromFile())`
+ * calls against the unified registry under `src/tools/AgentTool/agents/`.
  */
 describe('SKILL_CATALOG', () => {
   const SKILLS_DIR = join(process.cwd(), 'src/skills');
 
-  it('exports the 2 runtime-loaded skills that survived agent-cleanup phase 5', () => {
+  it('exports the single runtime-loaded skill that survived agent-cleanup phase 6', () => {
     const names = SKILL_CATALOG.map((s) => s.name);
-    for (const required of [
-      'draft-single-reply',
-      'voice-extractor',
-    ]) {
-      expect(names).toContain(required);
-    }
+    expect(names).toEqual(['voice-extractor']);
     expect(names).not.toContain('discovery');
     expect(names).not.toContain('posting');
     expect(names).not.toContain('draft-review');
+    expect(names).not.toContain('draft-single-reply');
   });
 
   it('has a unique name per entry', () => {
@@ -76,26 +73,31 @@ describe('SKILL_CATALOG', () => {
 
 describe('findSkill', () => {
   it('returns the catalog entry by exact name', () => {
-    const entry = findSkill('draft-single-reply');
+    const entry = findSkill('voice-extractor');
     expect(entry).toBeDefined();
-    expect(entry?.name).toBe('draft-single-reply');
+    expect(entry?.name).toBe('voice-extractor');
   });
 
   it('returns undefined for an unknown skill name', () => {
     expect(findSkill('does-not-exist')).toBeUndefined();
   });
+
+  it('returns undefined for the deleted draft-single-reply skill', () => {
+    expect(findSkill('draft-single-reply')).toBeUndefined();
+  });
 });
 
 describe('skillsForKind', () => {
-  it('returns draft-single-reply for content_reply on x', () => {
+  it('returns no catalog skill for content_reply on x — community-manager owns this end-to-end', () => {
+    // Phase 6: community-manager team-run agent handles content_reply
+    // drafting itself; no catalog-registered skill matches.
     const matches = skillsForKind('content_reply', 'x');
-    expect(matches.map((s) => s.name)).toContain('draft-single-reply');
+    expect(matches).toEqual([]);
   });
 
-  it('excludes channel-scoped skills for other channels', () => {
+  it('returns no catalog skill for content_reply on reddit', () => {
     const matches = skillsForKind('content_reply', 'reddit');
-    // draft-single-reply advertises channels: ['x'] only; it should not match.
-    expect(matches.map((s) => s.name)).not.toContain('draft-single-reply');
+    expect(matches).toEqual([]);
   });
 
   it('includes channel-agnostic skills for any channel', () => {

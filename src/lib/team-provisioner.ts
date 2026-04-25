@@ -1,12 +1,15 @@
 // Team provisioner.
 //
-// Phase B shipped the minimal baseline roster (coordinator + growth-strategist +
-// content-planner + reply-drafter). Phase F layers category presets on top —
-// dev_tool / saas / consumer pick up a post-writer + community-manager,
-// default-squad picks up just the post-writer. The baseline stays as the floor
-// so legacy callers of `ensureTeamExists` keep working and older teams keep
-// rendering. (`post-writer` is one channel-aware writer; the platform comes in
-// via `plan_items.channel`, so we no longer split the roster by platform.)
+// Baseline roster: coordinator + growth-strategist + content-planner.
+// Phase F layers category presets on top — dev_tool / saas / consumer pick
+// up a post-writer + community-manager, default-squad picks up just the
+// post-writer. The baseline stays as the floor so legacy callers of
+// `ensureTeamExists` keep working and older teams keep rendering.
+// (`post-writer` is one channel-aware writer; the platform comes in via
+// `plan_items.channel`, so we no longer split the roster by platform.
+// `community-manager` owns reply drafting end-to-end since Phase 6 of
+// the agent-cleanup migration — there is no separate reply-drafter
+// teammate.)
 //
 // Idempotent: re-running against an existing team returns the existing ids
 // without mutating rows. The unique index on `team_members (team_id,
@@ -145,7 +148,6 @@ export async function ensureTeamExists(
         'coordinator',
         'growth-strategist',
         'content-planner',
-        'reply-drafter',
       ];
 
   for (const agentType of roster) {
@@ -170,7 +172,6 @@ export async function ensureTeamExists(
     coordinator: byType.get('coordinator')!,
     'growth-strategist': byType.get('growth-strategist')!,
     'content-planner': byType.get('content-planner')!,
-    'reply-drafter': byType.get('reply-drafter')!,
   };
 
   return { teamId, memberIds, created };
