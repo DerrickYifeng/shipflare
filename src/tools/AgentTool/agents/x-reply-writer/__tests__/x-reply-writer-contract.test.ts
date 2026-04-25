@@ -2,9 +2,12 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-describe('reply-drafter prompt contract', () => {
+describe('x-reply-writer prompt contract', () => {
   const prompt = readFileSync(
-    join(process.cwd(), 'src/agents/reply-drafter.md'),
+    join(
+      process.cwd(),
+      'src/tools/AgentTool/agents/x-reply-writer/AGENT.md',
+    ),
     'utf8',
   );
 

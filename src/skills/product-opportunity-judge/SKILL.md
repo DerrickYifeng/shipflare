@@ -14,9 +14,10 @@ output-schema: productOpportunityJudgeOutputSchema
 
 # Product Opportunity Judge Skill
 
-Runs **before** `reply-drafter` on every in-scope tweet. Emits a boolean
+Runs **before** `x-reply-writer` on every in-scope tweet. Emits a boolean
 `allowMention` flag consumed by the drafter. Policy for which signals count
-as green-light vs hard-mute lives in `src/agents/product-opportunity-judge.md`.
+as green-light vs hard-mute lives in
+`src/tools/AgentTool/agents/product-opportunity-judge/AGENT.md`.
 
 ## Input
 

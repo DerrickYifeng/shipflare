@@ -50,7 +50,19 @@ export interface SkillRunResult<T = unknown> {
 // Constants
 // ---------------------------------------------------------------------------
 
-const AGENTS_DIR = join(process.cwd(), 'src', 'agents');
+// Phase 3 (agent cleanup) moved every legacy agent .md file into the
+// unified registry at `src/tools/AgentTool/agents/<name>/AGENT.md`.
+// `runSkill` is on its way out (Phase 5), but until then it needs to
+// resolve `<agent_name>` against the new layout. Supporting BOTH paths
+// keeps any in-flight ports from breaking — bridge's `loadAgentFromFile`
+// also reads the new layout via the inlined `references:` field.
+const UNIFIED_AGENTS_DIR = join(
+  process.cwd(),
+  'src',
+  'tools',
+  'AgentTool',
+  'agents',
+);
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -72,8 +84,10 @@ export async function runSkill<T>(config: SkillRunConfig<T>): Promise<SkillRunRe
   const { skill, input, deps = {}, memoryPrompt, outputSchema, onProgress, runId } = config;
   log.info(`Running skill "${skill.name}"`);
 
-  // Load agent definition
-  const agentPath = join(AGENTS_DIR, `${skill.agent ?? skill.name}.md`);
+  // Load agent definition. Phase 3: agents live at
+  // `src/tools/AgentTool/agents/<name>/AGENT.md` after the registry unification.
+  const agentName = skill.agent ?? skill.name;
+  const agentPath = join(UNIFIED_AGENTS_DIR, agentName, 'AGENT.md');
   const agentConfig = loadAgentFromFile(agentPath, registry);
 
   // Override model if skill specifies one

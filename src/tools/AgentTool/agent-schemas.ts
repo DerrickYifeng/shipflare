@@ -21,6 +21,12 @@ import { discoveryScoutOutputSchema } from './agents/discovery-scout/schema';
 import { discoveryReviewerOutputSchema } from './agents/discovery-reviewer/schema';
 import { communityScoutOutputSchema } from './agents/community-scout/schema';
 import { replyDrafterOutputSchema } from './agents/reply-drafter/schema';
+import { draftReviewOutputSchema } from './agents/draft-review/schema';
+import { postingOutputSchema } from './agents/posting/schema';
+import { engagementMonitorOutputSchema } from './agents/engagement-monitor/schema';
+import { productOpportunityJudgeOutputSchema } from './agents/product-opportunity-judge/schema';
+import { voiceExtractorOutputSchema } from './agents/voice-extractor/schema';
+import { xReplyWriterOutputSchema } from './agents/x-reply-writer/schema';
 
 const registry: Record<string, ZodType<unknown>> = {
   coordinator: coordinatorOutputSchema as ZodType<unknown>,
@@ -33,6 +39,12 @@ const registry: Record<string, ZodType<unknown>> = {
   'discovery-reviewer': discoveryReviewerOutputSchema as ZodType<unknown>,
   'community-scout': communityScoutOutputSchema as ZodType<unknown>,
   'reply-drafter': replyDrafterOutputSchema as ZodType<unknown>,
+  'draft-review': draftReviewOutputSchema as ZodType<unknown>,
+  posting: postingOutputSchema as ZodType<unknown>,
+  'engagement-monitor': engagementMonitorOutputSchema as ZodType<unknown>,
+  'product-opportunity-judge': productOpportunityJudgeOutputSchema as ZodType<unknown>,
+  'voice-extractor': voiceExtractorOutputSchema as ZodType<unknown>,
+  'x-reply-writer': xReplyWriterOutputSchema as ZodType<unknown>,
 };
 
 /**
@@ -56,4 +68,10 @@ export {
   discoveryReviewerOutputSchema,
   communityScoutOutputSchema,
   replyDrafterOutputSchema,
+  draftReviewOutputSchema,
+  postingOutputSchema,
+  engagementMonitorOutputSchema,
+  productOpportunityJudgeOutputSchema,
+  voiceExtractorOutputSchema,
+  xReplyWriterOutputSchema,
 };
