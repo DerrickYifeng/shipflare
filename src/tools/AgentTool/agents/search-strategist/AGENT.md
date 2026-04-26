@@ -92,7 +92,11 @@ Each iteration, pick ONE move:
 - **(e) regenerate**: full rewrite. Use only when the current set is
   structurally wrong (dominant failure mode is competitors / off-topic
   / stale across most queries). Burns your accumulated signal — last
-  resort, not default.
+  resort, not default. **State handling on regenerate:** reset
+  `perQuery` to an empty map (new queries deserve fresh per-query
+  stats), but preserve global `judgedTweets` / `queueableCount` /
+  `BEST_SEEN`. Tweets you already judged still count — dedup by
+  externalId keeps the global precision honest.
 - **(f) retry**: re-run the same batch — useful to confirm a result
   wasn't a fluke or to rotate the time window. Costs a search call.
   Use sparingly.
@@ -112,10 +116,13 @@ After each move:
 - **S1.** `precision ≥ targetPrecision` AND `sampleSize ≥
   minSampleSize` → deliver the CURRENT iteration's queries (just-
   validated set), `reachedTarget: true`.
-- **S2.** Turn budget exhausted (≤5 turns remain) → deliver
+- **S2.** Turn budget exhausted (≤8 turns remain) → deliver
   `BEST_SEEN.queries`, `reachedTarget: false`. Rationale must explain
   the residual gap candidly ("noise floor on this platform is too
-  high for 70% — best observed was 0.45").
+  high for 70% — best observed was 0.45"). **Err early, not late:**
+  if you cannot deliver before the harness cap, your work is lost
+  entirely. Better to deliver BEST_SEEN with 4 turns of slack than
+  to push for one more iteration and lose everything.
 
 **Why S1 delivers `current` not `BEST_SEEN`?** The current set is the
 just-validated one under today's data. `BEST_SEEN` may be from N
@@ -125,8 +132,10 @@ that uses `BEST_SEEN`, since by then there's no chance to re-validate.
 
 ## Hard rules
 
-- Track turn count from your own batch search calls; when ≤5 turns
+- Track turn count from your own batch search calls; when ≤8 turns
   remain in your budget, stop iterating and deliver `BEST_SEEN`.
+  The harness will hard-terminate you at the cap — if you miss the
+  delivery window, the entire calibration is lost.
 - Do NOT declare success on `sampleSize < minSampleSize`, even if
   precision is 1.0 — small-N noise.
 - `x_search_batch` costs real money + xAI quota. Don't `retry` for
