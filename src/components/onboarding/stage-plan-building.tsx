@@ -36,7 +36,6 @@ interface PlanRequest {
   state: ProductState;
   launchDate?: string | null;
   launchedAt?: string | null;
-  voiceProfile?: string | null;
   launchChannel?: 'producthunt' | 'showhn' | 'both' | 'other' | null;
   usersBucket?: '<100' | '100-1k' | '1k-10k' | '10k+' | null;
 }
@@ -138,7 +137,6 @@ export function StagePlanBuilding({
           state,
           launchDate: state === 'launching' ? toIsoOrNull(d.launchDate) : null,
           launchedAt: state === 'launched' ? toIsoOrNull(d.launchedAt) : null,
-          voiceProfile: d.voice || null,
           // launchChannel + usersBucket: backend Zod schema doesn't accept
           // these yet (audit #5). Sent anyway so the moment the schema is
           // extended they flow through with zero client-side churn. Zod

@@ -71,41 +71,6 @@ export const runSummaryOutputSchema = z.object({
 });
 
 /**
- * Output schema for the community-discovery agent (formerly scout).
- * Returns a list of communities ranked by audience fit.
- */
-export const communityDiscoveryOutputSchema = z.object({
-  communities: z.array(
-    z.object({
-      platform: z.string(),
-      name: z.string(),
-      subscribers: z.number().nullable().optional(),
-      audienceFit: z.number(),
-      activityLevel: z.number(),
-      engageability: z.number(),
-      reason: z.string(),
-    }),
-  ),
-});
-
-/**
- * Output schema for the (retired) community-intel skill. Retained here as
- * a type only — `runFullScan` keeps the pipeline's `communityIntel` field
- * shape for downstream consumers even though no skill produces it today.
- */
-export const communityIntelOutputSchema = z.object({
-  community: z.string(),
-  rules: z.object({
-    allowed: z.array(z.string()),
-    banned: z.array(z.string()),
-    selfPromoPolicy: z.string(),
-  }),
-  hotTopics: z.array(z.string()),
-  bestPostFormat: z.string(),
-  recommendedApproach: z.enum(['reply', 'original_post', 'both', 'not_recommended']),
-});
-
-/**
  * Output schema for the x-reply-writer agent — the per-tweet leaf the
  * monitor.ts → reply-hardening pipeline runs against each in-window
  * monitored tweet. Generates a high-value reply with confidence score
@@ -175,29 +140,8 @@ export const productOpportunityJudgeOutputSchema = z.object({
   reason: z.string().min(1).max(200),
 });
 
-/**
- * Output schema for the voice-extractor agent. Consumes ≤30 sample tweets +
- * the user's structured preferences; emits a markdown style card plus
- * auxiliary metrics used for re-extraction heuristics.
- *
- * The style card is capped at 4000 chars to keep the injected voice block
- * small enough that the primary task prompt retains attention.
- */
-export const voiceExtractorOutputSchema = z.object({
-  styleCardMd: z.string().min(40).max(4000),
-  detectedBannedWords: z.array(z.string()).max(30),
-  topBigrams: z.array(z.tuple([z.string(), z.string()])).max(30),
-  avgSentenceLength: z.number().positive().max(80),
-  lengthHistogram: z.record(z.string(), z.number()),
-  openerHistogram: z.record(z.string(), z.number()),
-  confidence: z.number().min(0).max(1),
-});
-
-export type CommunityDiscoveryOutput = z.infer<typeof communityDiscoveryOutputSchema>;
-export type CommunityIntelOutput = z.infer<typeof communityIntelOutputSchema>;
 export type PostingOutput = z.infer<typeof postingOutputSchema>;
 export type RunSummaryOutput = z.infer<typeof runSummaryOutputSchema>;
 export type ReplyDrafterOutput = z.infer<typeof replyDrafterOutputSchema>;
 export type EngagementMonitorOutput = z.infer<typeof engagementMonitorOutputSchema>;
 export type ProductOpportunityJudgeOutput = z.infer<typeof productOpportunityJudgeOutputSchema>;
-export type VoiceExtractorOutput = z.infer<typeof voiceExtractorOutputSchema>;

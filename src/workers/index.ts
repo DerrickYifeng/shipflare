@@ -10,7 +10,6 @@ import { processXEngagement } from './processors/engagement';
 import { processXMetrics } from './processors/metrics';
 import { processXAnalytics } from './processors/analytics';
 import { processDiscoveryCronFanout } from './processors/discovery-cron-fanout';
-import { processVoiceExtract } from './processors/voice-extract';
 import { processPlanExecute } from './processors/plan-execute';
 import { processPlanExecuteSweeper } from './processors/plan-execute-sweeper';
 import { processStaleSweeper } from './processors/stale-sweeper';
@@ -27,7 +26,6 @@ import { dreamQueue, discoveryScanQueue, monitorQueue, metricsQueue, analyticsQu
 import type { PlanExecuteJobData } from '@/lib/queue';
 import { createLogger, loggerForJob } from '@/lib/logger';
 import type { ReviewJobData, PostingJobData, HealthScoreJobData, DreamJobData, CodeScanJobData, MonitorJobData, DiscoveryScanJobData, EngagementJobData, MetricsJobData, AnalyticsJobData } from '@/lib/queue/types';
-import type { VoiceExtractJobData } from '@/lib/queue/voice-extract';
 
 // ----------------------------------------------------------------
 //  Phase 7 cron-only queues (no enqueue helpers — scheduled below)
@@ -152,12 +150,6 @@ const discoveryScanWorker = new Worker<DiscoveryScanJobData>(
   { ...BASE_OPTS, concurrency: 2, lockDuration: 15_000 },
 );
 
-const voiceExtractWorker = new Worker<VoiceExtractJobData>(
-  'voice-extract',
-  async (job) => processVoiceExtract(job),
-  { ...BASE_OPTS, concurrency: 1 },
-);
-
 // --- Phase 7: plan-execute workers ---
 
 const planExecuteWorker = new Worker<PlanExecuteJobData>(
@@ -212,7 +204,6 @@ const workers = [
   discoveryScanWorker,
   engagementWorker,
   metricsWorker, analyticsWorker,
-  voiceExtractWorker,
   // Phase 7
   planExecuteWorker, planExecuteSweeperWorker,
   staleSweeperWorker, weeklyReplanWorker,
@@ -376,7 +367,7 @@ Promise.all([
   log.error('Failed to schedule cron jobs:', err.message);
 });
 
-log.info('All workers started: review, posting, health-score, dream, code-scan, monitor, discovery-scan, engagement, metrics, analytics, voice-extract, plan-execute, plan-execute-sweeper, stale-sweeper, weekly-replan, team-run. discovery-scan daily 13:00 UTC, plan-execute-sweeper every 1m, stale-sweeper every 1h, weekly-replan Monday 00:00 UTC, all others daily.');
+log.info('All workers started: review, posting, health-score, dream, code-scan, monitor, discovery-scan, engagement, metrics, analytics, plan-execute, plan-execute-sweeper, stale-sweeper, weekly-replan, team-run. discovery-scan daily 13:00 UTC, plan-execute-sweeper every 1m, stale-sweeper every 1h, weekly-replan Monday 00:00 UTC, all others daily.');
 
 // Graceful shutdown
 async function shutdown() {

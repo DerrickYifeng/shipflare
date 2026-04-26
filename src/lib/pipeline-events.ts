@@ -72,8 +72,6 @@ export type PipelineStage =
   | 'thread_drafting'
   | 'thread_ready'
   | 'thread_failed'
-  // Voice extraction lifecycle
-  | 'voice_extracted'
   // Launch-plan lifecycle (Phase 8 planner chain via POST /api/onboarding/plan)
   | 'launch_plan_started'
   | 'launch_plan_completed'

@@ -1,17 +1,12 @@
-// Domain schemas shared by the 10 Phase B domain tools.
+// Domain schemas shared by the Phase B domain tools.
 //
 // Moved from `src/agents/schemas.ts` per spec §11 Phase B Day 1 + §13.
-// Only two schemas survive the move — the others either:
-//   - belong to the old skill-runner pipeline that Phase C deletes, or
-//   - live elsewhere (StructuredOutput is synthesized per-agent inside
-//     runAgent, not here).
+// Only two schemas survive the move — the others live elsewhere
+// (StructuredOutput is synthesized per-agent inside runAgent, not here).
 //
-// We intentionally DO NOT delete `src/agents/schemas.ts` in this phase —
-// it's still imported by tactical-generate / re-plan / /api/onboarding/commit
-// which Phase C will delete atomically. Re-exporting from the old file
-// would keep two copies in lock-step unnecessarily; instead, new code
-// imports from `src/tools/schemas.ts` and old code keeps reading from
-// `src/agents/schemas.ts` until Phase C.
+// `src/agents/schemas.ts` is still imported by tactical-generate /
+// re-plan / /api/onboarding/commit; new code imports from
+// `src/tools/schemas.ts` instead.
 
 import { z } from 'zod';
 

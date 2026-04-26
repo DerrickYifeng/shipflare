@@ -78,16 +78,6 @@ describe('dispatchPlanItem — reddit not wired yet', () => {
 });
 
 describe('dispatchPlanItem — skillName override', () => {
-  it('uses plan_items.skillName for a setup_task that advertises one', () => {
-    const route = dispatchPlanItem({
-      kind: 'setup_task',
-      skillName: 'voice-extractor',
-    });
-    expect(route!.draftSkill).toBe('voice-extractor');
-    // Default userAction stays 'manual' from the route.
-    expect(route!.defaultUserAction).toBe('manual');
-  });
-
   it('uses plan_items.skillName for a launch_asset row', () => {
     const route = dispatchPlanItem({
       kind: 'launch_asset',

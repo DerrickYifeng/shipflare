@@ -44,7 +44,6 @@ export type ProductCategory =
 export interface DraftState {
   product: ExtractedProfile | null;
   audience: string;
-  voice: string;
   category: ProductCategory;
   reviewed: boolean;
   productState: ProductState | null;
@@ -65,7 +64,6 @@ export interface DraftState {
 const INITIAL_DRAFT: DraftState = {
   product: null,
   audience: '',
-  voice: '',
   category: 'other',
   reviewed: false,
   productState: null,
@@ -508,7 +506,6 @@ function StageRouter({
             name: draft.product?.name ?? '',
             description: draft.product?.description ?? '',
             audience: initialAudience,
-            voice: draft.voice || 'Technical, calm, spec-like',
             keywords: draft.product?.keywords ?? [],
             category: initialCategory,
           }}
@@ -536,7 +533,6 @@ function StageRouter({
                     seoAudit: null,
                   },
               audience: v.audience,
-              voice: v.voice,
               category: v.category,
             };
             mirrorToRedis(next);
@@ -556,7 +552,6 @@ function StageRouter({
                 keywords: v.keywords,
               },
               audience: v.audience,
-              voice: v.voice,
               category: v.category,
               reviewed: true,
             };
@@ -648,7 +643,6 @@ function StageRouter({
                   }
                 : product,
               ...(patch.audience !== undefined ? { audience: patch.audience } : {}),
-              ...(patch.voice !== undefined ? { voice: patch.voice } : {}),
             };
             updateDraft(next);
             mirrorToRedis(next);

@@ -52,10 +52,10 @@ function writerAgentFor(
  *
  * 2) **Legacy state-machine stub** — for every other (kind, phase)
  *    combination. Runs the state transitions from the existing dispatch
- *    table without invoking a skill. The 11 keep-until-Phase-E skills
- *    (posting, voice-extract, draft-review, etc.) still arrive here; a
- *    future Phase E/F migration will route them through writer/reply
- *    team-runs too.
+ *    table without invoking a skill. The remaining keep-until-Phase-E
+ *    skills (posting, draft-review, etc.) still arrive here; a future
+ *    Phase E/F migration will route them through writer/reply team-runs
+ *    too.
  *
  * State transitions for the legacy path:
  *  - phase='draft' + state='planned' → moves planned → drafted

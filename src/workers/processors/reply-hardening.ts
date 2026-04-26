@@ -16,7 +16,6 @@ import {
   type ReplyDrafterOutput,
   type ProductOpportunityJudgeOutput,
 } from '@/agents/schemas';
-import { loadVoiceBlockForUser } from '@/lib/voice/inject';
 import { createLogger } from '@/lib/logger';
 
 const JUDGE_AGENT_PATH = join(
@@ -67,7 +66,6 @@ export interface HardenedReplyOutput extends ReplyDrafterOutput {
 async function runReplyDrafter(
   input: HardenedReplyInput,
   canMentionProduct: boolean,
-  voiceBlock: string | null,
   repairPrompt: string | null,
 ): Promise<ReplyDrafterOutput | undefined> {
   const agentConfig = loadAgentFromFile(
@@ -79,7 +77,6 @@ async function runReplyDrafter(
       {
         ...input,
         canMentionProduct,
-        voiceBlock,
         ...(repairPrompt ? { repairPrompt } : {}),
       },
     ],
@@ -145,15 +142,10 @@ export async function draftReplyWithHardening(
 
   const canMentionProduct = judgment.allowMention && judgment.confidence >= 0.6;
 
-  const voiceBlock = input.userId
-    ? await loadVoiceBlockForUser(input.userId, REPLY_PLATFORM)
-    : null;
-
   // Step 2 + 3: draft + content-validator regen loop.
   let draft: ReplyDrafterOutput | undefined = await runReplyDrafter(
     input,
     canMentionProduct,
-    voiceBlock,
     null,
   );
   let lastFailures: ContentValidatorFailure[] = [];
@@ -184,7 +176,6 @@ export async function draftReplyWithHardening(
     draft = await runReplyDrafter(
       input,
       canMentionProduct,
-      voiceBlock,
       repairPrompt,
     );
   }

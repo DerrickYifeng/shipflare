@@ -17,9 +17,9 @@ function lookupTool(source: ToolSource, name: string): AnyToolDefinition | undef
 let reactPreambleCache: string | null = null;
 
 /**
- * Parsed AgentConfig cache keyed by agent file path. Each `runSkill` call
- * previously re-parsed the markdown + YAML and re-resolved tools; this cache
- * collapses that to a single parse per process lifetime.
+ * Parsed AgentConfig cache keyed by agent file path. Each load previously
+ * re-parsed the markdown + YAML and re-resolved tools; this cache collapses
+ * that to a single parse per process lifetime.
  *
  * Disable with `DISABLE_SKILL_CACHE=1` for local development so edits to
  * agent .md files take effect without a restart.

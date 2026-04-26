@@ -294,13 +294,6 @@ export const enqueueXMetrics = enqueueMetrics;
 export const enqueueXAnalytics = enqueueAnalytics;
 
 // ----------------------------------------------------------------
-//  Voice extraction queue
-// ----------------------------------------------------------------
-
-export { voiceExtractQueue, enqueueVoiceExtract } from './voice-extract';
-export type { VoiceExtractJobData } from './voice-extract';
-
-// ----------------------------------------------------------------
 //  Plan-execute queue (Phase 7)
 // ----------------------------------------------------------------
 

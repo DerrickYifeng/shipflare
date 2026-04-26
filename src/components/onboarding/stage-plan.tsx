@@ -31,7 +31,6 @@ interface StagePlanProps {
     name?: string;
     description?: string;
     audience?: string;
-    voice?: string;
     keywords?: string[];
   }) => void;
   onCommit: () => Promise<void>;
@@ -246,14 +245,6 @@ function AboutPanel({
         onEdit={() => setEditing('audience')}
         onDone={() => setEditing(null)}
         onChange={(v) => onEdit({ audience: v })}
-      />
-      <EditRow
-        label={COPY.stage7.aboutLabels.voice}
-        value={draft.voice ?? ''}
-        editing={editing === 'voice'}
-        onEdit={() => setEditing('voice')}
-        onDone={() => setEditing(null)}
-        onChange={(v) => onEdit({ voice: v })}
       />
       <KeywordsRow
         keywords={draft.product?.keywords ?? []}

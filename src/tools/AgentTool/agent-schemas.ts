@@ -22,7 +22,6 @@ import { draftReviewOutputSchema } from './agents/draft-review/schema';
 import { postingOutputSchema } from './agents/posting/schema';
 import { engagementMonitorOutputSchema } from './agents/engagement-monitor/schema';
 import { productOpportunityJudgeOutputSchema } from './agents/product-opportunity-judge/schema';
-import { voiceExtractorOutputSchema } from './agents/voice-extractor/schema';
 import { xReplyWriterOutputSchema } from './agents/x-reply-writer/schema';
 
 const registry: Record<string, ZodType<unknown>> = {
@@ -37,7 +36,6 @@ const registry: Record<string, ZodType<unknown>> = {
   posting: postingOutputSchema as ZodType<unknown>,
   'engagement-monitor': engagementMonitorOutputSchema as ZodType<unknown>,
   'product-opportunity-judge': productOpportunityJudgeOutputSchema as ZodType<unknown>,
-  'voice-extractor': voiceExtractorOutputSchema as ZodType<unknown>,
   'x-reply-writer': xReplyWriterOutputSchema as ZodType<unknown>,
 };
 
@@ -63,6 +61,5 @@ export {
   postingOutputSchema,
   engagementMonitorOutputSchema,
   productOpportunityJudgeOutputSchema,
-  voiceExtractorOutputSchema,
   xReplyWriterOutputSchema,
 };
