@@ -303,7 +303,9 @@ export async function POST(request: NextRequest): Promise<Response> {
   // dispatch instead of a live one. Returning a null conversationId is
   // safe: the team page selects its latest conversation on load, which
   // becomes the kickoff conversation as soon as ensureKickoffEnqueued
-  // creates it.
+  // creates it. The weekStart/now context that used to live in this
+  // goal text now lives in `team-kickoff.ts` so the coordinator gets
+  // the same calendar anchor on first visit.
 
   // Discovery v3: no calibration. The first discovery-scan for this
   // product generates the onboarding rubric lazily. If the product

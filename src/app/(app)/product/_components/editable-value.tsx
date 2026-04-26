@@ -8,7 +8,7 @@
  * caller rolls the value back and surfaces a toast.
  */
 
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 
 export interface EditableValueProps {
   value: string;
@@ -44,6 +44,16 @@ export function EditableValue({
       inputRef.current.select();
     }
   }, [editing]);
+
+  // Auto-grow the textarea to fit its content so multi-line values aren't
+  // visually truncated to a fixed `rows={3}` viewport when editing.
+  useLayoutEffect(() => {
+    if (!editing || !multiline) return;
+    const el = inputRef.current as HTMLTextAreaElement | null;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  }, [editing, multiline, draft]);
 
   const commit = async () => {
     if (draft === value) {
@@ -101,8 +111,14 @@ export function EditableValue({
         onChange={(e) => setDraft(e.target.value)}
         onBlur={() => void commit()}
         onKeyDown={onKeyDown}
-        rows={3}
-        style={{ ...commonStyle, resize: 'vertical' }}
+        rows={2}
+        style={{
+          ...commonStyle,
+          resize: 'vertical',
+          minHeight: 64,
+          overflow: 'hidden',
+          lineHeight: 'var(--sf-lh-normal)',
+        }}
       />
     ) : (
       <input
@@ -126,7 +142,8 @@ export function EditableValue({
       type="button"
       onClick={() => setEditing(true)}
       style={{
-        display: 'inline',
+        display: 'block',
+        width: '100%',
         textAlign: 'left',
         padding: 0,
         margin: 0,
@@ -138,6 +155,9 @@ export function EditableValue({
         fontStyle: empty ? 'italic' : 'normal',
         cursor: 'text',
         fontFamily: 'inherit',
+        whiteSpace: multiline ? 'pre-wrap' : 'normal',
+        wordBreak: 'break-word',
+        lineHeight: 'var(--sf-lh-normal)',
         transition: 'border-color var(--sf-dur-fast) var(--sf-ease-swift)',
       }}
       onMouseEnter={(e) => {

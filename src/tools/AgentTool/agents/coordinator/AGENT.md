@@ -93,8 +93,21 @@ will read in the chat: **plan draft → calibration → search + draft.**
 Run them in order. Each step depends on the previous, so do NOT
 parallelize.
 
-1. `Task({ subagent_type: 'content-planner', description: 'plan week-1 items' })`
-   — week-1 plan_items. (Plan draft.)
+1. Spawn content-planner. **Extract `weekStart=...` and `now=...` from
+   the goal preamble and pass them verbatim into the prompt** — the
+   planner needs them to anchor scheduling and refuse past-dated items:
+
+   ```
+   Task({
+     subagent_type: 'content-planner',
+     description: 'plan week-1 items',
+     prompt: 'weekStart: <weekStart from goal>\nnow: <now from goal>\npathId: <strategicPathId from goal>\ntrigger: kickoff'
+   })
+   ```
+
+   If the goal preamble does NOT carry `weekStart=` (older callers), fall
+   back to today's Monday 00:00 UTC. Every modern caller seeds them —
+   kickoff, weekly replan, phase transition. (Plan draft.)
 2. `calibrate_search_strategy({ platform: 'x' })` (or the primary
    connected platform). This spawns search-strategist, runs an
    iterative query-design loop (3 rounds max), and persists the
@@ -139,6 +152,17 @@ if there's something to draft:
 
 Do NOT dispatch content-planner on a `discovery_cron` trigger — weekly
 planning is owned by a separate weekly cron.
+
+### `trigger: 'weekly'` / `'phase_transition'` (replan)
+
+Same shape as kickoff for the planning side: extract `weekStart=...` and
+`now=...` from the goal preamble and pass them verbatim into
+content-planner's prompt. Phase transition triggers also expect
+growth-strategist to write a fresh strategic_path first; the goal will
+spell out the order ("write a new strategic path then plan the coming
+week"). Strategic path goals carry `weekStart` so growth-strategist
+anchors `thesisArc[0].weekStart` correctly — see growth-strategist's
+strategic-path-playbook.
 
 ### `trigger: 'manual'` (user said "scan X again")
 

@@ -243,11 +243,5 @@ export const COPY = {
     quota: 'Quota',
     pending: 'pending',
     launchCta: 'Launch the agents',
-    meetYourTeam: {
-      heading: 'Meet your team',
-      sub: "Your team is ready to launch. They'll start working the moment you approve your first plan.",
-      previewNote:
-        "These roles will be ready after you ship your first plan.",
-    },
   },
 } as const;

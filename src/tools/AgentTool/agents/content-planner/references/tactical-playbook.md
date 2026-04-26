@@ -17,9 +17,14 @@ page renders without the founder wondering "what does this mean?".
 
 ## Before you start — gather context
 
-Your prompt will include the `weekStart` ISO timestamp (Monday 00:00 UTC
-of the week to plan) and the active `pathId`. Fetch the supporting signals
-yourself:
+Your prompt will include:
+
+- `weekStart` — Monday 00:00 UTC of the week to plan (ISO timestamp)
+- `pathId` — the active strategic path
+- `now` — the current UTC timestamp (ISO). Items must NEVER be scheduled
+  with `scheduledAt <= now` — see the "scheduling in the past" rule below.
+
+Fetch the supporting signals yourself:
 
 - `query_strategic_path` — reads the active path (narrative, thesisArc,
   channelMix, contentPillars, milestones, phaseGoals).
@@ -185,6 +190,14 @@ emit `skillName: null` and `userAction: 'manual'`.
   week's `theme` (from step 1).
 - `scheduledAt` for every item must fall in `[weekStart, weekEnd]` —
   the week you're planning, nothing before or after.
+- **Never schedule in the past.** If `now > weekStart` (mid-week or
+  weekend planning), the planning window collapses to
+  `[max(now + 1 hour, weekStart), weekEnd]`. Pick `scheduledAt` only from
+  this remaining window. If there's not enough remaining window for the
+  full `channelMix.perWeek` cadence (e.g. onboarding fires Saturday with
+  perWeek=3 and only Sat/Sun left), schedule what fits and emit the rest
+  with `notes` flagging the truncation. Better to ship 1 item Saturday
+  than 3 items in the past.
 - Minimum 3 items per week. Maximum 40.
 
 ## Stalled-item carryover

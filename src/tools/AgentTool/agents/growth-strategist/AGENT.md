@@ -29,6 +29,11 @@ the next 30 days.
 
 ## Your input (passed by coordinator as prompt)
 
+- **`today` (UTC date)** — the calendar anchor. `thesisArc[0].weekStart`
+  MUST equal the Monday 00:00 UTC of the ISO week containing `today`.
+  See the strategic-path-playbook for the rationale.
+- **`weekStart`** (sometimes pre-computed by the caller) — the same Monday,
+  serialised as ISO. Use this verbatim when present.
 - Product context (name, description, valueProp, category, targetAudience)
 - State: mvp | launching | launched
 - Current phase

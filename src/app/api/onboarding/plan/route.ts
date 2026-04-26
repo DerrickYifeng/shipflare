@@ -338,9 +338,24 @@ async function runViaTeamRun(
   // Growth-strategist-specific goal: tell it directly to call
   // write_strategic_path, not the generic "plan the launch" goal which
   // the model can misread as "return a description".
+  //
+  // We pass `today` and `weekStart` (Monday 00:00 UTC of the ISO week
+  // containing today) so the LLM doesn't have to infer the calendar
+  // anchor — `thesisArc[0].weekStart` MUST equal this value, even when
+  // onboarding fires on a Saturday or Sunday. Anchoring to current week
+  // (vs. next Monday) means the founder sees plan items for the current
+  // week immediately rather than a 1-7 day empty window.
+  const { currentWeekStart } = await import('@/lib/week-bounds');
+  const now = new Date();
+  const todayIso = now.toISOString().slice(0, 10);
+  const week1Start = currentWeekStart(now).toISOString().slice(0, 10);
   const goal =
     `Write the 30-day strategic path for ${body.product.name} by calling ` +
     `write_strategic_path. ` +
+    `Today (UTC): ${todayIso}. ` +
+    `thesisArc[0].weekStart MUST equal ${week1Start} (Monday of the ISO ` +
+    `week containing today — NOT next Monday). Subsequent thesisArc entries ` +
+    `are consecutive Mondays after that. ` +
     `Category: ${body.product.category}. ` +
     `State: ${body.state}. Phase: ${currentPhase}. ` +
     `Channels: ${body.channels.join(', ')}.` +

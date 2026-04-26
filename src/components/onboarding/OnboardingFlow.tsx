@@ -112,6 +112,8 @@ interface PersistedDraft {
   keywords?: string[];
   targetAudience?: string | null;
   category?: ProductCategory;
+  /** True once Stage 3 review was confirmed; gates Stage 4 resume. */
+  reviewed?: boolean;
   channels?: Array<'x' | 'reddit' | 'email'>;
   state?: ProductState;
   launchDate?: string | null;
@@ -199,6 +201,7 @@ function applyPersistedToDraft(
     product,
     audience: persisted.targetAudience ?? existing.audience,
     category: persisted.category ?? existing.category,
+    reviewed: persisted.reviewed ?? existing.reviewed,
     productState: persisted.state ?? existing.productState,
     launchDate: persisted.launchDate ?? existing.launchDate,
     launchedAt: persisted.launchedAt ?? existing.launchedAt,
@@ -306,6 +309,7 @@ export function OnboardingFlow({ initialStage }: OnboardingFlowProps = {}) {
         keywords: d.product?.keywords ?? [],
         targetAudience: d.audience || null,
         category: d.category,
+        reviewed: d.reviewed,
         state: d.productState ?? undefined,
         launchDate: d.launchDate ?? null,
         launchedAt: d.launchedAt ?? null,

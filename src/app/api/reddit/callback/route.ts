@@ -8,6 +8,7 @@ import { eq, and } from 'drizzle-orm';
 import { createLogger } from '@/lib/logger';
 import { PLATFORMS } from '@/lib/platform-config';
 import { provisionTeamForProduct } from '@/lib/team-provisioner';
+import { readReturnToCookie, clearReturnToCookie } from '@/lib/oauth-return';
 
 const log = createLogger('api:reddit');
 
@@ -222,5 +223,10 @@ export async function GET(request: NextRequest) {
     log.warn(`Failed to fetch Reddit post history: ${err instanceof Error ? err.message : err}`);
   }
 
-  return clearStateCookie(NextResponse.redirect(new URL('/today', request.url)));
+  // Redirect to wherever the connect flow was initiated from (set via
+  // `?returnTo=` on /api/reddit/connect). Defaults to /today.
+  const returnTo = readReturnToCookie(request);
+  return clearReturnToCookie(
+    clearStateCookie(NextResponse.redirect(new URL(returnTo, request.url))),
+  );
 }

@@ -6,6 +6,7 @@ import { getUserChannels } from '@/lib/user-channels';
 import { ensureTeamExists } from '@/lib/team-provisioner';
 import { enqueueTeamRun } from '@/lib/queue/team-run';
 import { createAutomationConversation } from '@/lib/team-conversation-helpers';
+import { weekBounds } from '@/lib/week-bounds';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('lib:re-plan');
@@ -155,17 +156,6 @@ export type ReplanResult =
       detail?: string;
     };
 
-function weekBounds(now: Date): { weekStart: Date; weekEnd: Date } {
-  const d = new Date(now);
-  d.setUTCHours(0, 0, 0, 0);
-  const dayOffset = (d.getUTCDay() + 6) % 7;
-  d.setUTCDate(d.getUTCDate() - dayOffset);
-  const weekStart = new Date(d);
-  const weekEnd = new Date(d);
-  weekEnd.setUTCDate(weekEnd.getUTCDate() + 7);
-  return { weekStart, weekEnd };
-}
-
 /**
  * Load the user's product + active strategic path, supersede the week's
  * pre-approval items, and enqueue a team-run to produce the new items.
@@ -246,10 +236,13 @@ export async function runTacticalReplan(
   let runId: string;
   try {
     const { teamId, memberIds } = await ensureTeamExists(userId, row.productId);
+    const replanNow = new Date();
     const goal =
       `Re-plan week ${weekStart.toISOString().slice(0, 10)} for ${row.productName}. ` +
+      `weekStart=${weekStart.toISOString()} now=${replanNow.toISOString()}. ` +
       `State: ${state}. Phase: ${currentPhase}. ` +
       `Channels: ${channels.join(', ')}. ` +
+      `Pass weekStart + now to content-planner verbatim in its spawn prompt. ` +
       (trigger === 'weekly'
         ? 'Monday cron replan — produce fresh plan_items for the coming 7 days.'
         : 'Manual replan — previous week items have been superseded; produce fresh plan_items for the coming 7 days.');

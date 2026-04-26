@@ -17,11 +17,17 @@
 
 import { and, eq } from 'drizzle-orm';
 import { db } from '@/lib/db';
-import { products, teamMembers, teamRuns } from '@/lib/db/schema';
+import {
+  products,
+  strategicPaths,
+  teamMembers,
+  teamRuns,
+} from '@/lib/db/schema';
 import { getUserChannels } from '@/lib/user-channels';
 import { enqueueTeamRun } from '@/lib/queue/team-run';
 import { createAutomationConversation } from '@/lib/team-conversation-helpers';
 import { finalizePendingOnboardingRuns } from '@/lib/onboarding-run-finalizer';
+import { currentWeekStart } from '@/lib/week-bounds';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('lib:team-kickoff');
@@ -99,17 +105,40 @@ export async function ensureKickoffEnqueued(args: {
   const channels = await getUserChannels(userId);
   const primary = channels.includes('x') ? 'x' : channels[0] ?? 'x';
 
+  // Pre-compute the calendar anchor so coordinator can pass it verbatim
+  // to content-planner. Without `weekStart=` / `now=` in the goal the
+  // planner has to infer them from the model's clock and historically
+  // picked next Monday — leaving /today and /calendar empty until the
+  // following ISO week. See coordinator/AGENT.md `trigger: 'kickoff'`.
+  const kickoffNow = new Date();
+  const kickoffWeekStart = currentWeekStart(kickoffNow).toISOString();
+
+  // Look up the active strategic path so content-planner can anchor its
+  // pillar selection. Optional — kickoff still fires if the path is
+  // missing (the planner will ask). The schema has only one path per
+  // user today, so a single SELECT with a generatedAt tiebreak picks
+  // the latest after any future replan.
+  const [activePath] = await db
+    .select({ id: strategicPaths.id })
+    .from(strategicPaths)
+    .where(eq(strategicPaths.userId, userId))
+    .orderBy(strategicPaths.generatedAt)
+    .limit(1);
+  const pathId = activePath?.id ?? null;
+
   // The kickoff playbook is in coordinator/AGENT.md (`trigger: 'kickoff'`).
   // The goal text gives the coordinator just enough context to dispatch:
-  // primary platform for calibration, channel list for the
-  // skip-with-message branch. The detailed step ordering lives in the
-  // playbook so we can change it without redeploying API code.
+  // calendar anchor for content-planner, primary platform for calibration,
+  // channel list for the skip-with-message branch. Detailed step ordering
+  // lives in the playbook so we can change it without redeploying API code.
   const goal =
     `First-visit kickoff for ${productRow.name}. ` +
+    (pathId ? `Strategic path pathId=${pathId}. ` : '') +
+    `weekStart=${kickoffWeekStart} now=${kickoffNow.toISOString()}. ` +
     `Connected channels: ${channels.join(', ') || 'none'}. ` +
     `Trigger: kickoff. ` +
     `Follow your kickoff playbook end-to-end: ` +
-    `(1) Task content-planner for week-1 plan items, ` +
+    `(1) Task content-planner for week-1 plan items — pass weekStart + now in its prompt verbatim, ` +
     `(2) call calibrate_search_strategy({ platform: '${primary}' }), ` +
     `(3) call run_discovery_scan({ platform: '${primary}' }), ` +
     `(4) Task community-manager on the top-3 queued threads. ` +

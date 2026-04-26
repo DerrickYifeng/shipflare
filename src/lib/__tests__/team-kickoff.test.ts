@@ -82,6 +82,8 @@ describe('ensureKickoffEnqueued', () => {
         { id: 'm-other', agentType: 'content-planner' },
       ]),
     );
+    // 4. strategic_paths lookup — non-empty so the goal carries pathId.
+    dbSelectMock.mockReturnValueOnce(buildSelectChain([{ id: 'path-1' }]));
 
     vi.mocked(enqueueTeamRun).mockResolvedValueOnce({
       runId: 'run-new',
@@ -105,6 +107,9 @@ describe('ensureKickoffEnqueued', () => {
     expect(callArg.conversationId).toBe('conv-1');
     expect(callArg.goal).toContain('calibrate_search_strategy');
     expect(callArg.goal).toContain('run_discovery_scan');
+    expect(callArg.goal).toContain('weekStart=');
+    expect(callArg.goal).toContain('now=');
+    expect(callArg.goal).toContain('pathId=path-1');
   });
 
   it('returns no_coordinator when team has no coordinator member', async () => {

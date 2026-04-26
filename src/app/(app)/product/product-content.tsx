@@ -17,9 +17,7 @@ import { useRouter } from 'next/navigation';
 import { HeaderBar } from '@/components/layout/header-bar';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Ops } from '@/components/ui/ops';
-import { SectionBar } from '@/components/ui/section-bar';
 import { FieldRow } from '@/components/ui/field-row';
 import { useToast } from '@/components/ui/toast';
 import { EditableValue } from './_components/editable-value';
@@ -55,41 +53,13 @@ export interface ProductSnapshot {
   valueProp: string | null;
   url: string | null;
   state: State;
+  /** ISO date — required when state='launching'. */
+  launchDate: string | null;
+  /** ISO date — required when state='launched'. */
+  launchedAt: string | null;
   currentPhase: LaunchPhase;
   updatedAt: string;
 }
-
-/**
- * Five product-identity fields we preserve as reserved UI slots. These live on
- * the handoff prototype but do not yet have dedicated schema columns — see
- * TODOS.md follow-up "Product profile: positioning / ICP / competitors /
- * approved links schema". Until the columns land, the rows render with an
- * inline empty-state message so the UI slot stays claimed.
- */
-const PLACEHOLDER_FIELDS: readonly { label: string; hint: string }[] = [
-  {
-    label: 'Tagline',
-    hint: 'One tight line that sets the product apart.',
-  },
-  {
-    label: 'Core positioning',
-    hint: 'Category, wedge, and who it beats.',
-  },
-  {
-    label: 'Primary ICP',
-    hint: 'The first customer you write to by default.',
-  },
-  {
-    label: 'Competitors',
-    hint: 'The three alternatives you get compared to.',
-  },
-  {
-    label: 'Approved links',
-    hint: 'Pages safe to cite in replies (docs, changelog, launch posts).',
-  },
-];
-
-const PLACEHOLDER_EMPTY_COPY = 'Not yet captured';
 
 interface ProductContentProps {
   initial: ProductSnapshot;
@@ -112,14 +82,6 @@ export function ProductContent({ initial }: ProductContentProps) {
     revalidateOnMount: false,
   });
   const product = data ?? initial;
-
-  const [bannedPhrases, setBannedPhrases] = useState<string[]>([
-    'crushing it',
-    'game-changer',
-    'unlock',
-    '10x',
-    'revolutionize',
-  ]);
 
   const commitField = async (patch: Partial<ProductSnapshot>) => {
     const previous = product;
@@ -162,23 +124,10 @@ export function ProductContent({ initial }: ProductContentProps) {
     <>
       <HeaderBar
         title="My Product"
-        meta={`The product profile your AI team writes against · Last updated ${lastUpdated}`}
-        action={
-          <Button variant="ghost" size="sm" onClick={() => router.push('/onboarding')}>
-            Edit in onboarding
-          </Button>
-        }
+        meta={`Click any field to edit · Last updated ${lastUpdated}`}
       />
       <div style={{ padding: '0 clamp(16px, 3vw, 32px) 48px' }}>
-        {/* Identity + Positioning — 2-col hero */}
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'minmax(0, 1.15fr) minmax(0, 1fr)',
-            gap: 16,
-          }}
-          className="product-hero-grid"
-        >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <Card padding={24}>
             <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
               <div
@@ -244,43 +193,44 @@ export function ProductContent({ initial }: ProductContentProps) {
               <FieldRow label="Value prop">
                 <EditableValue
                   value={product.valueProp ?? ''}
+                  multiline
                   placeholder="One sentence — what your product does."
                   onCommit={(next) => commitField({ valueProp: next.trim() || null })}
                 />
               </FieldRow>
-              {PLACEHOLDER_FIELDS.map((f) => (
-                <FieldRow key={f.label} label={f.label} muted>
-                  <PlaceholderValue hint={f.hint} />
-                </FieldRow>
-              ))}
               <FieldRow label="Keywords">
                 <KeywordsEditor
                   value={product.keywords}
                   onCommit={(next) => commitField({ keywords: next })}
                 />
               </FieldRow>
-              <FieldRow label="State" muted>
-                <span
-                  className="sf-mono"
-                  style={{
-                    fontSize: 'var(--sf-text-xs)',
-                    color: 'var(--sf-fg-2)',
-                    letterSpacing: 'var(--sf-track-mono)',
+              <FieldRow label="State">
+                <StateEditor
+                  state={product.state}
+                  launchDate={product.launchDate}
+                  launchedAt={product.launchedAt}
+                  onSaved={async () => {
+                    await mutate();
+                    router.refresh();
                   }}
-                >
-                  {STATE_LABEL[product.state]}
-                </span>
+                />
               </FieldRow>
               <FieldRow label="Phase" muted>
                 <span
-                  className="sf-mono"
                   style={{
-                    fontSize: 'var(--sf-text-xs)',
+                    fontSize: 'var(--sf-text-sm)',
                     color: 'var(--sf-fg-2)',
-                    letterSpacing: 'var(--sf-track-mono)',
+                    display: 'inline-flex',
+                    gap: 8,
+                    alignItems: 'baseline',
                   }}
                 >
-                  {PHASE_LABEL[product.currentPhase]}
+                  <span className="sf-mono" style={{ letterSpacing: 'var(--sf-track-mono)' }}>
+                    {PHASE_LABEL[product.currentPhase]}
+                  </span>
+                  <span style={{ fontSize: 11, color: 'var(--sf-fg-4)' }}>
+                    derived from state + launch date
+                  </span>
                 </span>
               </FieldRow>
             </div>
@@ -309,109 +259,9 @@ export function ProductContent({ initial }: ProductContentProps) {
               </span>
             </div>
           </Card>
-
-          {/* Voice tone sliders */}
-          <VoiceDnaCard />
-        </div>
-
-        {/* Guardrails */}
-        <SectionBar count={`${bannedPhrases.length} rules`}>Guardrails</SectionBar>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-            gap: 12,
-          }}
-        >
-          <Card padding={20}>
-            <Ops style={{ display: 'block', marginBottom: 10 }}>Never say</Ops>
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              {bannedPhrases.map((w) => (
-                <span
-                  key={w}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 4,
-                    padding: '3px 8px',
-                    borderRadius: 'var(--sf-radius-pill)',
-                    background: 'var(--sf-error-light)',
-                    color: 'var(--sf-error-ink)',
-                    fontSize: 'var(--sf-text-xs)',
-                    fontWeight: 500,
-                  }}
-                >
-                  <span style={{ textDecoration: 'line-through', opacity: 0.7 }}>{w}</span>
-                  <button
-                    type="button"
-                    onClick={() => setBannedPhrases((prev) => prev.filter((p) => p !== w))}
-                    aria-label={`Remove ${w}`}
-                    style={{
-                      background: 'transparent',
-                      border: 'none',
-                      color: 'inherit',
-                      cursor: 'pointer',
-                      padding: 0,
-                      marginLeft: 2,
-                      fontSize: 11,
-                    }}
-                  >
-                    ×
-                  </button>
-                </span>
-              ))}
-              <AddPhraseButton
-                onAdd={(phrase) => setBannedPhrases((prev) => [...prev, phrase])}
-              />
-            </div>
-          </Card>
-          <Card padding={20}>
-            <Ops style={{ display: 'block', marginBottom: 10 }}>FTC disclosures</Ops>
-            <p
-              style={{
-                margin: 0,
-                fontSize: 'var(--sf-text-sm)',
-                color: 'var(--sf-fg-2)',
-                lineHeight: 'var(--sf-lh-normal)',
-              }}
-            >
-              Every reply mentioning{' '}
-              <span style={{ fontWeight: 600, color: 'var(--sf-fg-1)' }}>{product.name}</span>{' '}
-              includes an
-              <span
-                style={{
-                  display: 'inline-block',
-                  margin: '0 4px',
-                  padding: '1px 6px',
-                  borderRadius: 3,
-                  background: 'var(--sf-bg-tertiary)',
-                  fontFamily: 'var(--sf-font-mono)',
-                  fontSize: 'var(--sf-text-xs)',
-                }}
-              >
-                (I work here)
-              </span>
-              affiliation tag.
-            </p>
-          </Card>
-          <Card padding={20}>
-            <Ops style={{ display: 'block', marginBottom: 10 }}>Hard caps</Ops>
-            <div style={{ display: 'grid', gap: 8, fontSize: 'var(--sf-text-sm)' }}>
-              <CapRow label="Replies per community / day" value="3" />
-              <CapRow label="Hours between any 2 replies" value="1h" />
-              <CapRow label="Monthly post budget" value="120" />
-            </div>
-          </Card>
         </div>
       </div>
 
-      <style jsx>{`
-        @media (max-width: 900px) {
-          .product-hero-grid {
-            grid-template-columns: minmax(0, 1fr) !important;
-          }
-        }
-      `}</style>
     </>
   );
 }
@@ -424,44 +274,308 @@ function phaseVariant(
   return 'warning';
 }
 
-/**
- * Read-only empty-state value for FieldRows that are visible in the handoff
- * prototype but do not yet have schema columns. Keeps the click-to-edit hit
- * target empty so users don't try to type into a field that would silently
- * drop their input.
- */
-function PlaceholderValue({ hint }: { hint: string }) {
-  return (
-    <span
-      aria-disabled="true"
-      style={{
-        display: 'inline-flex',
-        flexDirection: 'column',
-        gap: 2,
-        color: 'var(--sf-fg-3)',
-      }}
-    >
-      <span style={{ fontStyle: 'italic' }}>{PLACEHOLDER_EMPTY_COPY}</span>
-      <span
-        style={{
-          fontSize: 11,
-          color: 'var(--sf-fg-4)',
-          lineHeight: 1.4,
-        }}
-      >
-        {hint}
-      </span>
-    </span>
-  );
+// ----------------------------------------------------------------
+// State editor — picker for mvp / launching / launched + the
+// matching launch date. Saves via POST /api/product/phase, which
+// kicks off an async strategic replan; the row updates immediately
+// and the team-run runs in the background.
+// ----------------------------------------------------------------
+
+const STATE_OPTIONS: { id: State; label: string; sub: string }[] = [
+  { id: 'mvp', label: 'MVP', sub: 'Building, no launch date yet' },
+  { id: 'launching', label: 'Launching', sub: 'Has a launch date' },
+  { id: 'launched', label: 'Launched', sub: 'Already in market' },
+];
+
+function todayYmd(): string {
+  return new Date().toISOString().slice(0, 10);
 }
 
-function CapRow({ label, value }: { label: string; value: string }) {
+function ymdPlusDays(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function isoToYmd(iso: string | null): string {
+  if (!iso) return '';
+  return iso.slice(0, 10);
+}
+
+function ymdToIso(ymd: string): string {
+  return new Date(`${ymd}T00:00:00.000Z`).toISOString();
+}
+
+function StateEditor({
+  state,
+  launchDate,
+  launchedAt,
+  onSaved,
+}: {
+  state: State;
+  launchDate: string | null;
+  launchedAt: string | null;
+  onSaved: () => Promise<void> | void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draftState, setDraftState] = useState<State>(state);
+  const [draftLaunchDate, setDraftLaunchDate] = useState<string>(
+    isoToYmd(launchDate) || ymdPlusDays(7),
+  );
+  const [draftLaunchedAt, setDraftLaunchedAt] = useState<string>(
+    isoToYmd(launchedAt) || todayYmd(),
+  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const { toast } = useToast();
+
+  const reset = () => {
+    setDraftState(state);
+    setDraftLaunchDate(isoToYmd(launchDate) || ymdPlusDays(7));
+    setDraftLaunchedAt(isoToYmd(launchedAt) || todayYmd());
+    setError(null);
+    setEditing(false);
+  };
+
+  const summary = (() => {
+    if (state === 'mvp') return STATE_LABEL.mvp;
+    if (state === 'launching') {
+      const date = isoToYmd(launchDate);
+      return date ? `${STATE_LABEL.launching} · ${date}` : STATE_LABEL.launching;
+    }
+    const date = isoToYmd(launchedAt);
+    return date ? `${STATE_LABEL.launched} · ${date}` : STATE_LABEL.launched;
+  })();
+
+  const hasChanges = (() => {
+    if (draftState !== state) return true;
+    if (draftState === 'launching' && draftLaunchDate !== isoToYmd(launchDate)) return true;
+    if (draftState === 'launched' && draftLaunchedAt !== isoToYmd(launchedAt)) return true;
+    return false;
+  })();
+
+  const save = async () => {
+    setError(null);
+    setSaving(true);
+    try {
+      const body: Record<string, unknown> = { state: draftState };
+      if (draftState === 'launching') {
+        body.launchDate = ymdToIso(draftLaunchDate);
+        body.launchedAt = null;
+      } else if (draftState === 'launched') {
+        body.launchedAt = ymdToIso(draftLaunchedAt);
+        body.launchDate = null;
+      } else {
+        body.launchDate = null;
+        body.launchedAt = null;
+      }
+
+      const res = await fetch('/api/product/phase', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const payload = (await res.json().catch(() => null)) as
+          | { error?: string; detail?: unknown }
+          | null;
+        throw new Error(payload?.error ?? 'phase_change_failed');
+      }
+      toast('State updated — replanning your launch in the background.');
+      setEditing(false);
+      await onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        onClick={() => setEditing(true)}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'baseline',
+          gap: 8,
+          padding: 0,
+          margin: 0,
+          background: 'transparent',
+          border: 'none',
+          borderBottom: '1px dashed transparent',
+          cursor: 'text',
+          fontFamily: 'inherit',
+          color: 'var(--sf-fg-1)',
+          fontSize: 'var(--sf-text-sm)',
+          transition: 'border-color var(--sf-dur-fast) var(--sf-ease-swift)',
+        }}
+        onMouseEnter={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.borderBottomColor = 'var(--sf-border)';
+        }}
+        onMouseLeave={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.borderBottomColor = 'transparent';
+        }}
+      >
+        <span className="sf-mono" style={{ letterSpacing: 'var(--sf-track-mono)' }}>
+          {summary}
+        </span>
+      </button>
+    );
+  }
+
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-      <span style={{ color: 'var(--sf-fg-2)' }}>{label}</span>
-      <span className="sf-mono" style={{ color: 'var(--sf-fg-1)' }}>
-        {value}
-      </span>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+        {STATE_OPTIONS.map((opt) => {
+          const selected = draftState === opt.id;
+          return (
+            <button
+              key={opt.id}
+              type="button"
+              disabled={saving}
+              onClick={() => setDraftState(opt.id)}
+              title={opt.sub}
+              style={{
+                padding: '6px 12px',
+                borderRadius: 'var(--sf-radius-pill)',
+                border: selected
+                  ? '1px solid var(--sf-accent)'
+                  : '1px solid var(--sf-border)',
+                background: selected ? 'var(--sf-accent-light)' : 'var(--sf-bg-primary)',
+                color: selected ? 'var(--sf-accent-ink)' : 'var(--sf-fg-1)',
+                fontSize: 'var(--sf-text-sm)',
+                fontWeight: selected ? 600 : 500,
+                cursor: saving ? 'wait' : 'pointer',
+                fontFamily: 'inherit',
+              }}
+            >
+              {opt.label}
+            </button>
+          );
+        })}
+      </div>
+      {draftState === 'launching' && (
+        <label
+          style={{
+            display: 'flex',
+            gap: 8,
+            alignItems: 'center',
+            fontSize: 'var(--sf-text-xs)',
+            color: 'var(--sf-fg-3)',
+          }}
+        >
+          Launch date
+          <input
+            type="date"
+            value={draftLaunchDate}
+            disabled={saving}
+            min={todayYmd()}
+            max={ymdPlusDays(90)}
+            onChange={(e) => setDraftLaunchDate(e.target.value)}
+            style={{
+              padding: '4px 8px',
+              fontSize: 'var(--sf-text-sm)',
+              border: '1px solid var(--sf-border)',
+              borderRadius: 'var(--sf-radius-sm)',
+              background: 'var(--sf-bg-primary)',
+              color: 'var(--sf-fg-1)',
+              fontFamily: 'inherit',
+            }}
+          />
+        </label>
+      )}
+      {draftState === 'launched' && (
+        <label
+          style={{
+            display: 'flex',
+            gap: 8,
+            alignItems: 'center',
+            fontSize: 'var(--sf-text-xs)',
+            color: 'var(--sf-fg-3)',
+          }}
+        >
+          Launched on
+          <input
+            type="date"
+            value={draftLaunchedAt}
+            disabled={saving}
+            max={todayYmd()}
+            onChange={(e) => setDraftLaunchedAt(e.target.value)}
+            style={{
+              padding: '4px 8px',
+              fontSize: 'var(--sf-text-sm)',
+              border: '1px solid var(--sf-border)',
+              borderRadius: 'var(--sf-radius-sm)',
+              background: 'var(--sf-bg-primary)',
+              color: 'var(--sf-fg-1)',
+              fontFamily: 'inherit',
+            }}
+          />
+        </label>
+      )}
+      {hasChanges && (
+        <div
+          role="status"
+          style={{
+            padding: '10px 12px',
+            borderRadius: 'var(--sf-radius-sm)',
+            border: '1px solid var(--sf-warning-border, rgba(180, 120, 0, 0.3))',
+            background: 'var(--sf-warning-light, rgba(255, 196, 0, 0.08))',
+            color: 'var(--sf-warning-ink, var(--sf-fg-2))',
+            fontSize: 'var(--sf-text-xs)',
+            lineHeight: 'var(--sf-lh-normal)',
+          }}
+        >
+          <strong style={{ fontWeight: 600 }}>Heads up:</strong> saving replans
+          your launch. This week's pre-approval plan items get superseded and
+          a fresh strategic + tactical run kicks off in the background
+          (≈30–60s). Already-approved or posted items aren't touched.
+        </div>
+      )}
+      {error && (
+        <span style={{ fontSize: 'var(--sf-text-xs)', color: 'var(--sf-error-ink)' }}>
+          {error}
+        </span>
+      )}
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button
+          type="button"
+          disabled={saving || !hasChanges}
+          onClick={() => void save()}
+          style={{
+            padding: '4px 12px',
+            borderRadius: 'var(--sf-radius-sm)',
+            border: '1px solid var(--sf-accent)',
+            background: hasChanges ? 'var(--sf-accent)' : 'var(--sf-bg-tertiary)',
+            color: hasChanges ? 'var(--sf-on-accent)' : 'var(--sf-fg-3)',
+            fontSize: 'var(--sf-text-sm)',
+            cursor: saving ? 'wait' : hasChanges ? 'pointer' : 'not-allowed',
+            fontFamily: 'inherit',
+            opacity: !hasChanges ? 0.6 : 1,
+          }}
+        >
+          {saving ? 'Replanning…' : hasChanges ? 'Replan launch' : 'No changes'}
+        </button>
+        <button
+          type="button"
+          disabled={saving}
+          onClick={reset}
+          style={{
+            padding: '4px 12px',
+            borderRadius: 'var(--sf-radius-sm)',
+            border: '1px solid var(--sf-border)',
+            background: 'transparent',
+            color: 'var(--sf-fg-2)',
+            fontSize: 'var(--sf-text-sm)',
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+          }}
+        >
+          Cancel
+        </button>
+      </div>
     </div>
   );
 }
@@ -563,192 +677,4 @@ function KeywordsEditor({
   );
 }
 
-function AddPhraseButton({ onAdd }: { onAdd: (phrase: string) => void }) {
-  const [adding, setAdding] = useState(false);
-  const [draft, setDraft] = useState('');
-  if (adding) {
-    return (
-      <input
-        autoFocus
-        type="text"
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') {
-            e.preventDefault();
-            if (draft.trim()) onAdd(draft.trim());
-            setDraft('');
-            setAdding(false);
-          }
-          if (e.key === 'Escape') {
-            setDraft('');
-            setAdding(false);
-          }
-        }}
-        onBlur={() => {
-          if (draft.trim()) onAdd(draft.trim());
-          setDraft('');
-          setAdding(false);
-        }}
-        placeholder="Phrase to ban"
-        style={{
-          padding: '2px 10px',
-          height: 22,
-          borderRadius: 'var(--sf-radius-pill)',
-          border: '1px solid var(--sf-accent)',
-          background: 'var(--sf-bg-primary)',
-          color: 'var(--sf-fg-1)',
-          fontSize: 'var(--sf-text-xs)',
-          outline: 'none',
-          fontFamily: 'inherit',
-        }}
-      />
-    );
-  }
-  return (
-    <button
-      type="button"
-      onClick={() => setAdding(true)}
-      style={{
-        padding: '3px 10px',
-        borderRadius: 'var(--sf-radius-pill)',
-        border: '1px dashed var(--sf-border)',
-        background: 'transparent',
-        color: 'var(--sf-fg-3)',
-        fontSize: 'var(--sf-text-xs)',
-        cursor: 'pointer',
-        fontFamily: 'inherit',
-      }}
-    >
-      + add
-    </button>
-  );
-}
 
-function VoiceDnaCard() {
-  const [tone, setTone] = useState({ warmth: 55, wit: 68, formality: 28, brevity: 72 });
-  const axes: { key: keyof typeof tone; left: string; right: string }[] = [
-    { key: 'warmth', left: 'Blunt', right: 'Warm' },
-    { key: 'wit', left: 'Serious', right: 'Witty' },
-    { key: 'formality', left: 'Casual', right: 'Formal' },
-    { key: 'brevity', left: 'Expansive', right: 'Brief' },
-  ];
-  const phrases = [
-    'Moved from Jira → Linear 8 months ago',
-    'cmd+k everywhere',
-    'Counterintuitive:',
-    'Worth a weekend trial',
-  ];
-  return (
-    <Card padding={24}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-        <h3 className="sf-h4" style={{ margin: 0, color: 'var(--sf-fg-1)' }}>
-          Voice DNA
-        </h3>
-        <Badge variant="accent" mono>
-          TRAINED
-        </Badge>
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        {axes.map((s) => (
-          <div key={s.key}>
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                fontSize: 11,
-                color: 'var(--sf-fg-3)',
-                marginBottom: 4,
-                fontFamily: 'var(--sf-font-mono)',
-                letterSpacing: 'var(--sf-track-mono)',
-              }}
-            >
-              <span>{s.left}</span>
-              <span style={{ color: 'var(--sf-fg-1)', fontWeight: 600 }}>{tone[s.key]}</span>
-              <span>{s.right}</span>
-            </div>
-            <div
-              style={{
-                position: 'relative',
-                height: 6,
-                borderRadius: 3,
-                background: 'var(--sf-bg-tertiary)',
-              }}
-            >
-              <div
-                style={{
-                  position: 'absolute',
-                  left: 0,
-                  top: 0,
-                  bottom: 0,
-                  width: `${tone[s.key]}%`,
-                  background:
-                    'linear-gradient(90deg, var(--sf-accent), var(--sf-accent))',
-                  borderRadius: 3,
-                }}
-              />
-              <input
-                type="range"
-                min={0}
-                max={100}
-                value={tone[s.key]}
-                onChange={(e) =>
-                  setTone((prev) => ({ ...prev, [s.key]: Number(e.target.value) }))
-                }
-                aria-label={`${s.left} to ${s.right}`}
-                style={{
-                  position: 'absolute',
-                  inset: 0,
-                  width: '100%',
-                  height: '100%',
-                  opacity: 0,
-                  cursor: 'ew-resize',
-                }}
-              />
-              <div
-                style={{
-                  position: 'absolute',
-                  left: `calc(${tone[s.key]}% - 7px)`,
-                  top: -4,
-                  width: 14,
-                  height: 14,
-                  borderRadius: 7,
-                  background: 'var(--sf-bg-primary)',
-                  border: '2px solid var(--sf-accent)',
-                  boxShadow: 'var(--sf-shadow-card)',
-                  pointerEvents: 'none',
-                }}
-              />
-            </div>
-          </div>
-        ))}
-      </div>
-      <div
-        style={{
-          marginTop: 20,
-          padding: 14,
-          background: 'var(--sf-bg-tertiary)',
-          borderRadius: 'var(--sf-radius-md)',
-        }}
-      >
-        <Ops style={{ marginBottom: 8, display: 'block' }}>Signature phrases</Ops>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {phrases.map((p) => (
-            <div
-              key={p}
-              style={{
-                fontSize: 'var(--sf-text-sm)',
-                color: 'var(--sf-fg-1)',
-                fontStyle: 'italic',
-                borderLeft: '2px solid var(--sf-accent)',
-                paddingLeft: 10,
-              }}
-            >
-              &ldquo;{p}&rdquo;
-            </div>
-          ))}
-        </div>
-      </div>
-    </Card>
-  );
-}

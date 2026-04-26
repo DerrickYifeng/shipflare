@@ -14,11 +14,6 @@ import { OnbButton } from './_shared/onb-button';
 import { OnbMono } from './_shared/onb-mono';
 import { ArrowRight, Pencil, XClose } from './icons';
 import { COPY } from './_copy';
-import { MeetYourTeamPanel } from './_shared/meet-your-team-panel';
-import {
-  pickPresetByCategory,
-  getTeamCompositionForPreset,
-} from '@/lib/team-presets';
 import type { StrategicPath } from '@/tools/schemas';
 import type { DraftState, ProductState } from './OnboardingFlow';
 
@@ -66,15 +61,6 @@ export function StagePlan({
   const summary =
     path.narrative.split(/(?<=\.)\s+/)[0] ?? path.narrative;
 
-  // Phase F: the "Meet your team" preview uses the same pickPresetByCategory
-  // the provisioner will run post-commit. Channel-aware adjustments
-  // (consumer → saas-squad when no reddit) happen server-side; the preview
-  // shows the category-driven target.
-  const meetYourTeamRoster = useMemo(
-    () => getTeamCompositionForPreset(pickPresetByCategory(draft.category)),
-    [draft.category],
-  );
-
   return (
     <div>
       <StepHeader
@@ -89,8 +75,6 @@ export function StagePlan({
           </>
         }
       />
-
-      <MeetYourTeamPanel roster={meetYourTeamRoster} />
 
       <Tabs value={tab} onChange={setTab} />
 
