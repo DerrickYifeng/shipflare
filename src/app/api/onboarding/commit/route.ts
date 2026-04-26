@@ -23,6 +23,7 @@ import {
 } from '@/lib/team-provisioner';
 import { enqueueTeamRun } from '@/lib/queue/team-run';
 import { createAutomationConversation } from '@/lib/team-conversation-helpers';
+import { finalizePendingOnboardingRuns } from '@/lib/onboarding-run-finalizer';
 
 const baseLog = createLogger('api:onboarding:commit');
 
@@ -310,6 +311,29 @@ export async function POST(request: NextRequest): Promise<Response> {
   let kickoffConvId: string | null = null;
   try {
     const { teamId } = await ensureTeamExists(userId, productId);
+
+    // Pre-empt the kickoff race: if the analyst's onboarding-trigger run
+    // is still flagged `running` (the worker hasn't observed the
+    // StructuredOutput flip yet), `enqueueTeamRun` below would treat the
+    // team as busy and silently return `alreadyRunning: true`, leaving
+    // the freshly-minted Kickoff conversation unbound to any run. Mark
+    // any in-flight onboarding run cancelled + signal the worker so the
+    // partial unique index clears before we enqueue.
+    try {
+      const finalized = await finalizePendingOnboardingRuns(teamId);
+      if (finalized.finalized > 0) {
+        log.info(
+          `commit finalized ${finalized.finalized} stale onboarding run(s) ahead of kickoff: [${finalized.runIds.join(',')}]`,
+        );
+      }
+    } catch (err) {
+      // Non-fatal — the alreadyRunning guard would still kick in, but
+      // the user already has a strategic path; they can re-trigger.
+      log.warn(
+        `finalizePendingOnboardingRuns failed (non-fatal) user=${userId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
     const channels = await getUserChannels(userId);
     const memberRows = await db
       .select({ id: teamMembers.id, agentType: teamMembers.agentType })
