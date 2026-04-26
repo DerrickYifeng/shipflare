@@ -19,7 +19,6 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Ops } from '@/components/ui/ops';
-import { SectionBar } from '@/components/ui/section-bar';
 import { FieldRow } from '@/components/ui/field-row';
 import { useToast } from '@/components/ui/toast';
 import { EditableValue } from './_components/editable-value';
@@ -112,14 +111,6 @@ export function ProductContent({ initial }: ProductContentProps) {
     revalidateOnMount: false,
   });
   const product = data ?? initial;
-
-  const [bannedPhrases, setBannedPhrases] = useState<string[]>([
-    'crushing it',
-    'game-changer',
-    'unlock',
-    '10x',
-    'revolutionize',
-  ]);
 
   const commitField = async (patch: Partial<ProductSnapshot>) => {
     const previous = product;
@@ -302,96 +293,6 @@ export function ProductContent({ initial }: ProductContentProps) {
             </div>
           </Card>
         </div>
-
-        {/* Guardrails */}
-        <SectionBar count={`${bannedPhrases.length} rules`}>Guardrails</SectionBar>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-            gap: 12,
-          }}
-        >
-          <Card padding={20}>
-            <Ops style={{ display: 'block', marginBottom: 10 }}>Never say</Ops>
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              {bannedPhrases.map((w) => (
-                <span
-                  key={w}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 4,
-                    padding: '3px 8px',
-                    borderRadius: 'var(--sf-radius-pill)',
-                    background: 'var(--sf-error-light)',
-                    color: 'var(--sf-error-ink)',
-                    fontSize: 'var(--sf-text-xs)',
-                    fontWeight: 500,
-                  }}
-                >
-                  <span style={{ textDecoration: 'line-through', opacity: 0.7 }}>{w}</span>
-                  <button
-                    type="button"
-                    onClick={() => setBannedPhrases((prev) => prev.filter((p) => p !== w))}
-                    aria-label={`Remove ${w}`}
-                    style={{
-                      background: 'transparent',
-                      border: 'none',
-                      color: 'inherit',
-                      cursor: 'pointer',
-                      padding: 0,
-                      marginLeft: 2,
-                      fontSize: 11,
-                    }}
-                  >
-                    ×
-                  </button>
-                </span>
-              ))}
-              <AddPhraseButton
-                onAdd={(phrase) => setBannedPhrases((prev) => [...prev, phrase])}
-              />
-            </div>
-          </Card>
-          <Card padding={20}>
-            <Ops style={{ display: 'block', marginBottom: 10 }}>FTC disclosures</Ops>
-            <p
-              style={{
-                margin: 0,
-                fontSize: 'var(--sf-text-sm)',
-                color: 'var(--sf-fg-2)',
-                lineHeight: 'var(--sf-lh-normal)',
-              }}
-            >
-              Every reply mentioning{' '}
-              <span style={{ fontWeight: 600, color: 'var(--sf-fg-1)' }}>{product.name}</span>{' '}
-              includes an
-              <span
-                style={{
-                  display: 'inline-block',
-                  margin: '0 4px',
-                  padding: '1px 6px',
-                  borderRadius: 3,
-                  background: 'var(--sf-bg-tertiary)',
-                  fontFamily: 'var(--sf-font-mono)',
-                  fontSize: 'var(--sf-text-xs)',
-                }}
-              >
-                (I work here)
-              </span>
-              affiliation tag.
-            </p>
-          </Card>
-          <Card padding={20}>
-            <Ops style={{ display: 'block', marginBottom: 10 }}>Hard caps</Ops>
-            <div style={{ display: 'grid', gap: 8, fontSize: 'var(--sf-text-sm)' }}>
-              <CapRow label="Replies per community / day" value="3" />
-              <CapRow label="Hours between any 2 replies" value="1h" />
-              <CapRow label="Monthly post budget" value="120" />
-            </div>
-          </Card>
-        </div>
       </div>
 
     </>
@@ -434,17 +335,6 @@ function PlaceholderValue({ hint }: { hint: string }) {
         {hint}
       </span>
     </span>
-  );
-}
-
-function CapRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-      <span style={{ color: 'var(--sf-fg-2)' }}>{label}</span>
-      <span className="sf-mono" style={{ color: 'var(--sf-fg-1)' }}>
-        {value}
-      </span>
-    </div>
   );
 }
 
@@ -545,65 +435,4 @@ function KeywordsEditor({
   );
 }
 
-function AddPhraseButton({ onAdd }: { onAdd: (phrase: string) => void }) {
-  const [adding, setAdding] = useState(false);
-  const [draft, setDraft] = useState('');
-  if (adding) {
-    return (
-      <input
-        autoFocus
-        type="text"
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') {
-            e.preventDefault();
-            if (draft.trim()) onAdd(draft.trim());
-            setDraft('');
-            setAdding(false);
-          }
-          if (e.key === 'Escape') {
-            setDraft('');
-            setAdding(false);
-          }
-        }}
-        onBlur={() => {
-          if (draft.trim()) onAdd(draft.trim());
-          setDraft('');
-          setAdding(false);
-        }}
-        placeholder="Phrase to ban"
-        style={{
-          padding: '2px 10px',
-          height: 22,
-          borderRadius: 'var(--sf-radius-pill)',
-          border: '1px solid var(--sf-accent)',
-          background: 'var(--sf-bg-primary)',
-          color: 'var(--sf-fg-1)',
-          fontSize: 'var(--sf-text-xs)',
-          outline: 'none',
-          fontFamily: 'inherit',
-        }}
-      />
-    );
-  }
-  return (
-    <button
-      type="button"
-      onClick={() => setAdding(true)}
-      style={{
-        padding: '3px 10px',
-        borderRadius: 'var(--sf-radius-pill)',
-        border: '1px dashed var(--sf-border)',
-        background: 'transparent',
-        color: 'var(--sf-fg-3)',
-        fontSize: 'var(--sf-text-xs)',
-        cursor: 'pointer',
-        fontFamily: 'inherit',
-      }}
-    >
-      + add
-    </button>
-  );
-}
 
