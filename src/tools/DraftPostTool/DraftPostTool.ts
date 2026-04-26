@@ -64,15 +64,22 @@ const REDDIT_SYSTEM_PROMPT =
   'in the same sentence. Return ONLY the post body (no title prefix, no ' +
   'JSON, no markdown fences).';
 
+// Caller hints. Known keys feed buildUserBrief verbatim; unknown keys are
+// silently stripped (zod default) — earlier `.strict()` rejected runs where
+// the LLM helpfully passed `channel`/`phase`/`topic` from its own preamble,
+// burning a turn + ~600ms per draft on a self-recoverable mistake. We'd
+// rather drop a redundant key than spend an LLM round-trip teaching the
+// model the exact shape.
 const CONTEXT_SCHEMA = z
   .object({
     theme: z.string().optional(),
     angle: z.string().optional(),
     pillar: z.string().optional(),
     voice: z.string().optional(),
+    topic: z.string().optional(),
+    targetSubreddit: z.string().optional(),
   })
-  .partial()
-  .strict();
+  .partial();
 
 export const draftPostInputSchema = z
   .object({

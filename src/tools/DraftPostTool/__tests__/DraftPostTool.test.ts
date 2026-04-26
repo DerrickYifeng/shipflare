@@ -175,6 +175,51 @@ describe('draftPostTool', () => {
     expect((updated.output as Record<string, unknown>).channel).toBe('x');
   });
 
+  it('silently drops unknown context keys instead of bouncing the call', async () => {
+    // Regression: post-writer LLMs habitually pass `channel`/`phase`/`topic`
+    // inside `context`. The earlier `.strict()` schema rejected these and
+    // forced a self-recovery turn (~600ms each). The schema now strips
+    // unknown keys and accepts the call on the first try. `topic` is now a
+    // documented hint that flows into the brief.
+    const { planItemId } = seedHappyPath(store);
+    const sideQueryStub: SideQueryStub = vi.fn(async (_opts: SideQueryOptions) =>
+      mockResponse('Shipping the planner today. #buildinpublic'),
+    );
+    const ctx = makeCtx(store, {
+      userId: 'user-1',
+      productId: 'prod-1',
+      sideQuery: sideQueryStub,
+    });
+
+    // The runtime parses the input through `inputSchema` before handing
+    // it to `execute` (see core/tool-executor). We replicate that here so
+    // the strip-unknown behaviour from the zod schema actually takes
+    // effect — tests that pre-parse mirror what the agent loop does.
+    const rawInput = {
+      planItemId,
+      context: {
+        angle: 'claim',
+        topic: 'shipping cadence',
+        // unknown keys — should be silently stripped by the schema
+        channel: 'x',
+        phase: 'foundation',
+      },
+    };
+    const parsed = draftPostTool.inputSchema.parse(rawInput);
+    const result = await draftPostTool.execute(parsed, ctx);
+
+    expect(result.channel).toBe('x');
+    expect(vi.mocked(sideQueryStub)).toHaveBeenCalledTimes(1);
+    const userMsg = String(
+      vi.mocked(sideQueryStub).mock.calls[0]![0].messages[0]!.content,
+    );
+    // Known keys flow into the brief…
+    expect(userMsg).toContain('angle: claim');
+    expect(userMsg).toContain('topic: shipping cadence');
+    // …unknown keys silently dropped.
+    expect(userMsg).not.toContain('phase: foundation');
+  });
+
   it('picks the reddit prompt when the plan_item channel is reddit', async () => {
     const { planItemId } = seedHappyPath(store);
     // Flip channel on the seeded row.

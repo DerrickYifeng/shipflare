@@ -40,13 +40,21 @@ The caller (coordinator or content-planner) invokes you with a prompt
 containing:
 
 - `planItemId` — the UUID of the plan_items row to draft for
-- `context` — optional hints about theme, angle, pillar, voice,
-  target subreddit (when channel=reddit)
+- `context` — optional hints. Accepted keys (anything else is silently
+  dropped, so don't bounce on extras):
+  - `theme` — overarching theme of the post
+  - `angle` — story / claim / contrarian / how-to
+  - `pillar` — strategic-path pillar this post anchors to
+  - `voice` — voice override (e.g. "terse", "data-led")
+  - `topic` — single concrete topic phrase
+  - `targetSubreddit` — only when channel=reddit
 
 Anything the caller leaves out is fine — `draft_post` reads the plan_item
-row itself (title, description, channel, params including `subreddit`
-when set) and generates from there. Pass `context` through verbatim when
-it's provided; the tool merges it with the row for the final draft prompt.
+row itself (title, description, channel, params) and generates from
+there. **Don't** pass `channel` / `phase` / `planItemId` inside `context`
+— those live on the row or as siblings of `context`. The tool will drop
+them silently but it costs an extra LLM turn to retry, so write the
+right shape on the first call.
 
 ## Your workflow
 
