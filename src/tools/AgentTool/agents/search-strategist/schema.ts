@@ -43,9 +43,11 @@ export const searchStrategistOutputSchema = z.object({
   /** True iff strategist hit `precision ≥ targetPrecision` AND
    *  `sampleSize ≥ minSampleSize` before the turn budget ran out. */
   reachedTarget: z.boolean(),
-  /** Iterations consumed (≈ batch search calls). Ceiling matches the
-   *  `maxTurns` input ceiling on `CalibrateSearchTool.inputSchema`
-   *  (Task 3) — keep them in sync. */
+  /** Iterations consumed (≈ batch search calls). Ceiling 120 matches
+   *  `CalibrateSearchTool.inputSchema.maxTurns.max()` — the absolute
+   *  upper bound a caller can request, NOT the runtime default (60).
+   *  Three values to keep straight: schema max (120), default (60),
+   *  caller override (anywhere in [10, 120]). */
   turnsUsed: z.number().int().min(1).max(120),
   /** Total unique tweets the strategist applied the rubric to. Used
    *  alongside `observedPrecision` so a 1/1 = 100% precision cannot

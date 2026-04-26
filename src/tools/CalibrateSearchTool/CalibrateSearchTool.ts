@@ -54,8 +54,12 @@ const inputSchema = z.object({
   targetPrecision: z.number().min(0).max(1).optional(),
   /** Iteration budget. Default 60. MUST stay in sync with the
    *  search-strategist AGENT.md frontmatter `maxTurns` value or
-   *  the LLM will think it has more budget than the harness allows. */
-  maxTurns: z.number().int().min(5).max(120).optional(),
+   *  the LLM will think it has more budget than the harness allows.
+   *  Floor is 10: anything lower and the strategist's S2 margin (≤8
+   *  turns remaining triggers BEST_SEEN delivery) fires before the
+   *  seed iteration runs, producing an empty `queries` array that
+   *  fails Zod validation on `searchStrategistOutputSchema.queries.min(1)`. */
+  maxTurns: z.number().int().min(10).max(120).optional(),
   /** Minimum unique results the strategist must judge before
    *  declaring `reachedTarget: true`. Default 20 — guards against
    *  1-of-1 = 100% false positives. */
@@ -76,7 +80,8 @@ export interface CalibrateSearchStrategyResult {
   turnsUsed?: number;
   /** Present only when `saved` is true. */
   sampleSize?: number;
-  rationale: string;
+  /** Present only when `saved` is true. */
+  rationale?: string;
   costUsd: number;
 }
 
@@ -131,7 +136,6 @@ export const calibrateSearchStrategyTool: ToolDefinition<
         reason: `no_${platform}_channel`,
         platform,
         queries: [],
-        rationale: '',
         costUsd: 0,
       };
     }

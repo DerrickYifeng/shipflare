@@ -135,7 +135,7 @@ Each iteration, pick ONE move:
 Stop conditions (whichever first):
   S1. precision ≥ targetPrecision AND sampleSize ≥ minSampleSize
       → deliver the CURRENT iteration's queries (just-validated set).
-  S2. turn budget exhausted (≤5 turns remain)
+  S2. turn budget exhausted (≤8 turns remain)
       → deliver BEST_SEEN.queries with reachedTarget=false and a
         candid rationale explaining the residual gap.
 ```
@@ -143,7 +143,7 @@ Stop conditions (whichever first):
 **Hard rules diff:**
 
 - Remove "never exceed `maxRounds`".
-- Add "Track turn count from input; when ≤5 remain, stop iterating
+- Add "Track turn count from input; when ≤8 remain, stop iterating
   and deliver `BEST_SEEN`."
 - Add "Do NOT declare success on `sampleSize < minSampleSize`, even
   if precision is 1.0 — small-N noise."
@@ -184,7 +184,7 @@ const inputSchema = z.object({
 const inputSchema = z.object({
   platform: z.enum(['x', 'reddit']),
   targetPrecision: z.number().min(0).max(1).optional(),  // default 0.7
-  maxTurns: z.number().int().min(20).max(120).optional(), // default 60
+  maxTurns: z.number().int().min(10).max(120).optional(), // default 60
   minSampleSize: z.number().int().min(5).max(200).optional(), // default 20
 });
 ```

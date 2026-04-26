@@ -141,9 +141,12 @@ if there's something to draft:
    in parallel).
 2. If a scan returns `skipped: true, reason: 'strategy_not_calibrated'`,
    call `calibrate_search_strategy({ platform })` for that platform,
-   then retry the scan in the next response. (This only happens if
-   kickoff was bypassed; daily runs assume calibration is already
-   cached.)
+   then **immediately call `run_discovery_scan({ platform })` again in
+   the same run** (one tool turn after `calibrate_search_strategy`
+   returns) — do NOT defer to the next cron tick. The whole sequence
+   must complete inside this one team-run. This only happens if
+   kickoff was bypassed or the cached strategy was at the rejected v1
+   schema; daily runs otherwise assume calibration is already cached.
 3. Combine the `queued` arrays across platforms and pick the top 3 by
    `confidence`. If non-empty:
    `Task({ subagent_type: 'community-manager', description: 'draft top-3 replies', prompt: <thread list> })`
