@@ -24,7 +24,10 @@ vi.mock('@/tools/AgentTool/registry', () => ({
 }));
 
 vi.mock('@/tools/AgentTool/spawn', () => ({
-  buildAgentConfigFromDefinition: vi.fn(() => ({ name: 'search-strategist' })),
+  buildAgentConfigFromDefinition: vi.fn(() => ({
+    name: 'search-strategist',
+    maxTurns: 60,
+  })),
 }));
 
 vi.mock('@/bridge/agent-runner', () => ({
@@ -200,5 +203,54 @@ describe('calibrate_search_strategy tool', () => {
       ),
     ).rejects.toThrow(/product missing not found/);
     expect(saveEntryMock).not.toHaveBeenCalled();
+  });
+
+  it('propagates input maxTurns override into the strategist agent config', async () => {
+    vi.mocked(createPlatformDeps).mockResolvedValueOnce({} as never);
+    dbSelectMock.mockReturnValueOnce(
+      buildSelectChain([
+        {
+          id: 'p1',
+          name: 'Shipflare',
+          description: 'ship faster',
+          valueProp: null,
+          keywords: ['ship'],
+        },
+      ]),
+    );
+    vi.mocked(resolveAgent).mockResolvedValueOnce({
+      name: 'search-strategist',
+    } as never);
+    vi.mocked(runAgent).mockResolvedValueOnce({
+      result: {
+        queries: ['q'],
+        negativeTerms: [],
+        rationale: 'r',
+        observedPrecision: 0.8,
+        reachedTarget: true,
+        turnsUsed: 30,
+        sampleSize: 25,
+        sampleVerdicts: [],
+      },
+      usage: { costUsd: 0.01 },
+    } as never);
+
+    await calibrateSearchStrategyTool.execute(
+      { platform: 'x', maxTurns: 100 },
+      makeCtx({ userId: 'u1', productId: 'p1' }),
+    );
+
+    // The strategistConfig (1st arg) handed to runAgent must carry the
+    // overridden maxTurns — otherwise the LLM thinks it has 100 turns
+    // while the harness still enforces the frontmatter default.
+    const callArgs = vi.mocked(runAgent).mock.calls[0]!;
+    const config = callArgs[0] as { maxTurns: number };
+    expect(config.maxTurns).toBe(100);
+
+    // And the prompt JSON the LLM sees must match.
+    const promptJson = JSON.parse(callArgs[1] as string) as {
+      maxTurns: number;
+    };
+    expect(promptJson.maxTurns).toBe(100);
   });
 });

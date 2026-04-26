@@ -155,6 +155,11 @@ export const calibrateSearchStrategyTool: ToolDefinition<
       );
     }
     const strategistConfig = buildAgentConfigFromDefinition(strategistDef);
+    // Keep the harness-enforced cap in lockstep with the prompt-stated
+    // budget — otherwise the LLM self-paces against `maxTurns` while
+    // runAgent cuts it off at the frontmatter default. See spec
+    // §"maxTurns dual-source caveat".
+    strategistConfig.maxTurns = maxTurns;
 
     const strategistCtx = createToolContext({
       ...(deps as Record<string, unknown>),
