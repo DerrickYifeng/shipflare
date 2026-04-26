@@ -24,5 +24,5 @@ export function searchStrategyMemoryName(platform: 'x' | 'reddit'): string {
 export interface PersistedSearchStrategy extends SearchStrategistOutput {
   platform: 'x' | 'reddit';
   generatedAt: string; // ISO timestamp
-  schemaVersion: 1;
+  schemaVersion: 2;
 }

@@ -119,8 +119,10 @@ describe('calibrate_search_strategy tool', () => {
         queries: ['solo founder asking', '0 to first user'],
         negativeTerms: ['affiliate'],
         rationale: 'pain-point queries beat keyword queries',
-        observedYield: 0.75,
-        roundsUsed: 2,
+        observedPrecision: 0.75,
+        reachedTarget: true,
+        turnsUsed: 8,
+        sampleSize: 24,
         sampleVerdicts: [],
       },
       usage: { costUsd: 0.04 },
@@ -137,8 +139,10 @@ describe('calibrate_search_strategy tool', () => {
       'solo founder asking',
       '0 to first user',
     ]);
-    expect(result.observedYield).toBe(0.75);
-    expect(result.roundsUsed).toBe(2);
+    expect(result.observedPrecision).toBe(0.75);
+    expect(result.reachedTarget).toBe(true);
+    expect(result.turnsUsed).toBe(8);
+    expect(result.sampleSize).toBe(24);
     expect(saveEntryMock).toHaveBeenCalledTimes(1);
 
     // The persisted blob must round-trip through JSON.parse to the
@@ -155,13 +159,17 @@ describe('calibrate_search_strategy tool', () => {
       queries: string[];
       schemaVersion: number;
       generatedAt: string;
+      observedPrecision: number;
+      reachedTarget: boolean;
     };
     expect(parsed.platform).toBe('x');
     expect(parsed.queries).toEqual([
       'solo founder asking',
       '0 to first user',
     ]);
-    expect(parsed.schemaVersion).toBe(1);
+    expect(parsed.schemaVersion).toBe(2);
+    expect(parsed.observedPrecision).toBe(0.75);
+    expect(parsed.reachedTarget).toBe(true);
     expect(typeof parsed.generatedAt).toBe('string');
   });
 

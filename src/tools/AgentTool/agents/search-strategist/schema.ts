@@ -24,18 +24,32 @@ export type SearchStrategySampleVerdict = z.infer<
 >;
 
 export const searchStrategistOutputSchema = z.object({
-  /** 2-8 winning queries, ready for x_search_batch / reddit_search. */
+  /** 2-8 winning queries, ready for x_search_batch / reddit_search.
+   *  When `reachedTarget` is true these are the just-validated set;
+   *  when false, they are BEST_SEEN — the highest-precision set
+   *  observed during the iteration. */
   queries: z.array(z.string().min(1)).min(1),
   /** Terms the strategist learned hurt yield (competitor handles, spam
-   *  cues bleeding into results). Empty array is fine. */
+   *  cues bleeding into results). Empty array is fine. Judgment hint
+   *  only — not injected as a search operator. */
   negativeTerms: z.array(z.string().min(1)),
   /** 2-4 sentences for the founder + future debugger. References the
-   *  dominant signal that drove the final query set. */
+   *  dominant signal that drove the final query set. When
+   *  `reachedTarget` is false, MUST explain the residual gap. */
   rationale: z.string().min(1),
-  /** 0..1; usableQueries / totalQueries on the winning round. */
-  observedYield: z.number().min(0).max(1),
-  /** How many rounds the strategist used (1, 2, or 3). */
-  roundsUsed: z.number().int().min(1).max(3),
+  /** Per-tweet precision: queueable / judged. Self-reported by the
+   *  strategist over the unique tweets it judged across iterations. */
+  observedPrecision: z.number().min(0).max(1),
+  /** True iff strategist hit `precision ≥ targetPrecision` AND
+   *  `sampleSize ≥ minSampleSize` before the turn budget ran out. */
+  reachedTarget: z.boolean(),
+  /** Iterations consumed (≈ batch search calls). Capped at the
+   *  caller-configured `maxTurns`. */
+  turnsUsed: z.number().int().min(1).max(120),
+  /** Total unique tweets the strategist applied the rubric to. Used
+   *  alongside `observedPrecision` so a 1/1 = 100% precision cannot
+   *  be confused with a proven strategy. */
+  sampleSize: z.number().int().min(0),
   /** 3-5 representative samples for caller transparency. */
   sampleVerdicts: z.array(searchStrategySampleVerdictSchema),
 });

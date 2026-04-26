@@ -60,8 +60,10 @@ export interface CalibrateSearchStrategyResult {
   reason?: string;
   platform: 'x' | 'reddit';
   queries: string[];
-  observedYield: number;
-  roundsUsed: number;
+  observedPrecision: number;
+  reachedTarget: boolean;
+  turnsUsed: number;
+  sampleSize: number;
   rationale: string;
   costUsd: number;
 }
@@ -117,8 +119,10 @@ export const calibrateSearchStrategyTool: ToolDefinition<
         reason: `no_${platform}_channel`,
         platform,
         queries: [],
-        observedYield: 0,
-        roundsUsed: 0,
+        observedPrecision: 0,
+        reachedTarget: false,
+        turnsUsed: 0,
+        sampleSize: 0,
         rationale: '',
         costUsd: 0,
       };
@@ -178,7 +182,7 @@ export const calibrateSearchStrategyTool: ToolDefinition<
       ...strategy,
       platform,
       generatedAt: new Date().toISOString(),
-      schemaVersion: 1,
+      schemaVersion: 2,
     };
 
     const store = new MemoryStore(userId, productId);
@@ -186,23 +190,28 @@ export const calibrateSearchStrategyTool: ToolDefinition<
       name: searchStrategyMemoryName(platform),
       description:
         `Calibrated ${platform} search strategy — ${strategy.queries.length} queries, ` +
-        `${(strategy.observedYield * 100).toFixed(0)}% yield in ${strategy.roundsUsed} round(s)`,
+        `${(strategy.observedPrecision * 100).toFixed(0)}% precision over ` +
+        `${strategy.sampleSize} judged tweets in ${strategy.turnsUsed} turn(s)` +
+        `${strategy.reachedTarget ? '' : ' (best-effort, target not reached)'}`,
       type: 'reference',
       content: JSON.stringify(persisted, null, 2),
     });
 
     log.info(
       `calibrated ${platform} search strategy for product=${productId}: ` +
-        `${strategy.queries.length} queries, yield=${strategy.observedYield.toFixed(2)}, ` +
-        `rounds=${strategy.roundsUsed}, cost=$${run.usage.costUsd.toFixed(4)}`,
+        `${strategy.queries.length} queries, precision=${strategy.observedPrecision.toFixed(2)}, ` +
+        `sample=${strategy.sampleSize}, turns=${strategy.turnsUsed}, ` +
+        `reached=${strategy.reachedTarget}, cost=$${run.usage.costUsd.toFixed(4)}`,
     );
 
     return {
       saved: true,
       platform,
       queries: strategy.queries,
-      observedYield: strategy.observedYield,
-      roundsUsed: strategy.roundsUsed,
+      observedPrecision: strategy.observedPrecision,
+      reachedTarget: strategy.reachedTarget,
+      turnsUsed: strategy.turnsUsed,
+      sampleSize: strategy.sampleSize,
       rationale: strategy.rationale,
       costUsd: run.usage.costUsd,
     };
