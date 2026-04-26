@@ -31,6 +31,15 @@ intent?: string                // optional free-form "what to look for"
                                // from coordinator (empty on cron runs)
 coldStart: boolean             // true when MemoryStore has no
                                // approve/skip labels for this product
+presetQueries?: string[]       // calibrated queries from the cached
+                               // search strategy. When non-empty, you
+                               // SKIP query generation and run these
+                               // verbatim. See "Workflow" below.
+negativeTerms?: string[]       // anti-signal terms learned during
+                               // calibration. Use them to deprioritise
+                               // matching results; do NOT inject as
+                               // search operators (the strategy already
+                               // accounted for that).
 ```
 
 Read `<agent-memory>` in your system prompt — it holds the onboarding
@@ -42,9 +51,14 @@ judgment-rubric defaults when they conflict.
 
 ### On X
 
-1. Generate 2-8 queries from `sources` + `intent` + product keywords.
-   Compress related phrasings into one query; do not pay for
-   duplicates.
+1. **If `presetQueries` is non-empty, use it verbatim** — these are
+   the cached, pre-calibrated queries. Skip generation. Skip the
+   "compress related phrasings" step. Just feed them to
+   `x_search_batch`. The one-time `search-strategist` already paid
+   the design cost; your job here is judgment, not query design.
+   Otherwise (legacy / cold path), generate 2-8 queries from
+   `sources` + `intent` + product keywords. Compress related
+   phrasings into one query; do not pay for duplicates.
 2. Call `x_search_batch` ONCE with all queries (it's literally one
    Grok round-trip — sequential `x_search` calls are waste).
 3. Each tweet in the results comes with an **enriched author** object:
@@ -71,10 +85,15 @@ judgment-rubric defaults when they conflict.
 ### On both platforms
 
 - If `coldStart=true`, bias conservative — see judgment-rubric §
-  "Cold-start bias".
-- Ignore results that fail hard filters (platform mismatch, missing
-  author on X, clearly language you can't judge). Do not emit
-  low-effort `skip` verdicts for those — just omit them.
+  "Cold-start bias". Conservative means **emit a `skip` verdict**
+  with a reason, not omit. The founder needs to see what you
+  considered and why it didn't make the cut.
+- Only omit results that fail HARD filters (platform mismatch,
+  missing author on X, clearly language you can't judge). Every
+  other rejection becomes a `skip` verdict so the count in
+  `0 queue / N skip` is legible. **Empty `verdicts` is reserved
+  for "search returned zero candidates"**, not "I rejected
+  everything silently".
 
 ## Hard rules
 
@@ -88,9 +107,11 @@ judgment-rubric defaults when they conflict.
   present. Err toward skip.
 - Do NOT queue duplicates. If the same thread surfaces from multiple
   queries, emit one verdict. Deduplicate by `externalId`.
-- `verdicts` MAY be empty when every candidate failed the rubric. A
-  cron run that produces zero queues is a legitimate outcome, not a
-  failure — explain in `notes`.
+- `verdicts` is empty ONLY when search returned no candidates at
+  all. If you saw N candidates and rejected all of them, emit N
+  `skip` verdicts with reasons. Empty + non-empty `notes` is
+  reserved for the "no live signal today" case (search returned 0
+  results, or every result hit a hard filter).
 
 ## Delivering
 

@@ -12,9 +12,11 @@ import {
   teamMessages,
   teamTasks,
   teamConversations,
+  products,
 } from '@/lib/db/schema';
 import { EmptyState } from '@/components/ui/empty-state';
 import { getTeamBudgetSnapshot } from '@/lib/team-budget';
+import { ensureKickoffEnqueued } from '@/lib/team-kickoff';
 import type {
   TeamActivityMessage,
   TeamMessageType,
@@ -105,6 +107,30 @@ export default async function TeamPage({
   }
 
   const team = teamRow[0];
+
+  // First-visit kickoff bootstrap. Idempotent: a row in `team_runs` with
+  // `trigger='kickoff'` (any status) short-circuits this on every
+  // subsequent render. We resolve the product synchronously before
+  // firing because the kickoff playbook needs `productId` for the
+  // search-strategist + run_discovery_scan tools — both pull deps off
+  // the team-run worker context. See `src/lib/team-kickoff.ts`.
+  const [productRow] = await db
+    .select({ id: products.id })
+    .from(products)
+    .where(eq(products.userId, userId))
+    .orderBy(desc(products.createdAt))
+    .limit(1);
+  if (productRow) {
+    // Fire-and-forget — the kickoff helper is itself idempotent and
+    // awaiting it just delays the server render by a few ms (one
+    // SELECT, one INSERT, one job enqueue). On re-render after the
+    // kickoff exists it's a single SELECT.
+    await ensureKickoffEnqueued({
+      userId,
+      productId: productRow.id,
+      teamId: team.id,
+    });
+  }
 
   const [
     members,

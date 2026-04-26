@@ -7,23 +7,15 @@ import {
   products,
   strategicPaths,
   plans,
-  teamMembers,
 } from '@/lib/db/schema';
 import { strategicPathSchema } from '@/tools/schemas';
 import { derivePhase } from '@/lib/launch-phase';
 import { validateLaunchDates } from '@/lib/launch-date-rules';
 import { acquireRateLimit } from '@/lib/rate-limit';
-import { getUserChannels } from '@/lib/user-channels';
 import { deleteDraft } from '@/lib/onboarding-draft';
 import { recordPipelineEvent } from '@/lib/pipeline-events';
 import { createLogger, loggerForRequest } from '@/lib/logger';
-import {
-  ensureTeamExists,
-  provisionTeamForProduct,
-} from '@/lib/team-provisioner';
-import { enqueueTeamRun } from '@/lib/queue/team-run';
-import { createAutomationConversation } from '@/lib/team-conversation-helpers';
-import { finalizePendingOnboardingRuns } from '@/lib/onboarding-run-finalizer';
+import { provisionTeamForProduct } from '@/lib/team-provisioner';
 
 const baseLog = createLogger('api:onboarding:commit');
 
@@ -304,74 +296,14 @@ export async function POST(request: NextRequest): Promise<Response> {
     );
   }
 
-  // Post-onboarding kickoff: ONE team-run rooted at coordinator that
-  // dispatches content-planner (week-1 plan_items), runs `run_discovery_scan`
-  // inline (live conversations on connected platforms), and then dispatches
-  // community-manager (top-3 replies for queued threads). Visible in /team chat.
-  let kickoffConvId: string | null = null;
-  try {
-    const { teamId } = await ensureTeamExists(userId, productId);
-
-    // Pre-empt the kickoff race: if the analyst's onboarding-trigger run
-    // is still flagged `running` (the worker hasn't observed the
-    // StructuredOutput flip yet), `enqueueTeamRun` below would treat the
-    // team as busy and silently return `alreadyRunning: true`, leaving
-    // the freshly-minted Kickoff conversation unbound to any run. Mark
-    // any in-flight onboarding run cancelled + signal the worker so the
-    // partial unique index clears before we enqueue.
-    try {
-      const finalized = await finalizePendingOnboardingRuns(teamId);
-      if (finalized.finalized > 0) {
-        log.info(
-          `commit finalized ${finalized.finalized} stale onboarding run(s) ahead of kickoff: [${finalized.runIds.join(',')}]`,
-        );
-      }
-    } catch (err) {
-      // Non-fatal — the alreadyRunning guard would still kick in, but
-      // the user already has a strategic path; they can re-trigger.
-      log.warn(
-        `finalizePendingOnboardingRuns failed (non-fatal) user=${userId}: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-
-    const channels = await getUserChannels(userId);
-    const memberRows = await db
-      .select({ id: teamMembers.id, agentType: teamMembers.agentType })
-      .from(teamMembers)
-      .where(eq(teamMembers.teamId, teamId));
-    const coordinator = memberRows.find((m) => m.agentType === 'coordinator');
-    if (!coordinator) {
-      throw new Error('coordinator member missing after ensureTeamExists');
-    }
-
-    const goal =
-      `Onboarding kickoff for ${body.product.name}. ` +
-      `Strategic path pathId=${strategicPathId}. ` +
-      `Connected channels: ${channels.join(', ') || 'none'}. ` +
-      `Category: ${body.product.category}. ` +
-      `Trigger: kickoff. ` +
-      `Follow your kickoff playbook: dispatch content-planner (week-1), ` +
-      `call run_discovery_scan yourself (scan ${channels.includes('x') ? 'x' : 'connected platforms'}), ` +
-      `then dispatch community-manager on the top-3 queued threads. Skip community-manager if no channels.`;
-    kickoffConvId = await createAutomationConversation(teamId, 'kickoff');
-    const { runId: kickoffRunId } = await enqueueTeamRun({
-      teamId,
-      trigger: 'kickoff',
-      goal,
-      rootMemberId: coordinator.id,
-      conversationId: kickoffConvId,
-    });
-    enqueued.push(`team-run:kickoff:${kickoffRunId}`);
-    log.info(
-      `enqueued kickoff team-run user=${userId} run=${kickoffRunId} conv=${kickoffConvId}`,
-    );
-  } catch (err) {
-    // Non-fatal — user already has strategic_path persisted; they can
-    // manually trigger a scan from /team if this enqueue failed.
-    log.warn(
-      `failed to enqueue kickoff team-run (non-fatal) user=${userId}: ${err instanceof Error ? err.message : String(err)}`,
-    );
-  }
+  // Kickoff is now triggered on the user's first visit to /team — see
+  // `ensureKickoffEnqueued` in src/lib/team-kickoff.ts. Firing it here
+  // would spin up the AI team while the user is still on the onboarding
+  // "thanks!" screen, so they'd land on /team and find a half-done
+  // dispatch instead of a live one. Returning a null conversationId is
+  // safe: the team page selects its latest conversation on load, which
+  // becomes the kickoff conversation as soon as ensureKickoffEnqueued
+  // creates it.
 
   // Discovery v3: no calibration. The first discovery-scan for this
   // product generates the onboarding rubric lazily. If the product
@@ -430,7 +362,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     {
       success: true,
       productId,
-      conversationId: kickoffConvId,
+      conversationId: null,
       enqueued,
     },
     { headers: { 'x-trace-id': traceId } },

@@ -411,7 +411,13 @@ describe('POST /api/onboarding/commit — happy path', () => {
     expect(payload.productId).toBe('prod-new-1');
   });
 
-  it('enqueues a kickoff team-run rooted at coordinator and returns conversationId', async () => {
+  it('does NOT enqueue kickoff at commit time — kickoff fires on first /team visit', async () => {
+    // Kickoff moved out of /api/onboarding/commit and into the team page
+    // server component (`ensureKickoffEnqueued`). This keeps the
+    // commit-time response cheap and lets the AI team work visibly when
+    // the founder lands on /team rather than silently while they're
+    // still on the onboarding "thanks" screen. The response shape stays
+    // backwards-compatible (conversationId field present, just null).
     const { POST } = await import('../route');
     const res = await POST(makeRequest(bodyFor('mvp')));
     expect(res.status).toBe(200);
@@ -419,23 +425,12 @@ describe('POST /api/onboarding/commit — happy path', () => {
       conversationId: string | null;
       enqueued: string[];
     };
-    expect(typeof payload.conversationId).toBe('string');
-    expect(payload.conversationId).toBe('conv-1');
-    expect(payload.enqueued.some((e) => e.startsWith('team-run:kickoff:'))).toBe(
-      true,
-    );
-    expect(createAutomationConversationMock).toHaveBeenCalledWith(
-      'team-1',
-      'kickoff',
-    );
-    expect(enqueueTeamRunMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        teamId: 'team-1',
-        trigger: 'kickoff',
-        rootMemberId: 'member-coord',
-        conversationId: 'conv-1',
-      }),
-    );
+    expect(payload.conversationId).toBeNull();
+    expect(
+      payload.enqueued.some((e) => e.startsWith('team-run:kickoff:')),
+    ).toBe(false);
+    expect(createAutomationConversationMock).not.toHaveBeenCalled();
+    expect(enqueueTeamRunMock).not.toHaveBeenCalled();
   });
 
   it('clears the Redis draft after a successful commit', async () => {

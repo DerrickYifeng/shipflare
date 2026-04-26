@@ -55,6 +55,17 @@ export interface V3PipelineInput {
     valueProp: string | null;
     keywords: string[];
   };
+  /**
+   * Pre-calibrated search queries from the cached strategy doc. When
+   * present, scout uses these verbatim instead of generating its own —
+   * one-time `calibrate_search_strategy` does the expensive query
+   * design, run_discovery_scan reuses the result on every run.
+   * Empty / undefined → scout falls back to inline query generation.
+   */
+  presetQueries?: string[];
+  /** Anti-signal terms learned during calibration; passed alongside
+   *  `presetQueries` so scout knows which result patterns to deprioritise. */
+  negativeTerms?: string[];
 }
 
 export interface V3PipelineDeps {
@@ -105,6 +116,11 @@ function buildScoutMessage(input: V3PipelineInput, coldStart: boolean): string {
       product: input.product,
       intent: input.intent ?? null,
       coldStart,
+      // Calibrated queries (when set) tell scout to skip the
+      // generation step and use these verbatim. See AGENT.md
+      // "Workflow → presetQueries" branch.
+      presetQueries: input.presetQueries ?? null,
+      negativeTerms: input.negativeTerms ?? null,
     },
     null,
     2,

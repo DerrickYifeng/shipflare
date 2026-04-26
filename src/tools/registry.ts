@@ -37,6 +37,7 @@ import { findThreadsTool } from './FindThreadsTool/FindThreadsTool';
 import { draftReplyTool } from './DraftReplyTool/DraftReplyTool';
 import { validateDraftTool } from './ValidateDraftTool/ValidateDraftTool';
 import { runDiscoveryScanTool } from './RunDiscoveryScanTool/RunDiscoveryScanTool';
+import { calibrateSearchStrategyTool } from './CalibrateSearchTool/CalibrateSearchTool';
 
 /**
  * Central tool registry for ShipFlare agents.
@@ -123,6 +124,13 @@ registry.register(validateDraftTool);
 // using the prose rules in `community-manager/references/`.
 // ---------------------------------------------------------------------------
 registry.register(runDiscoveryScanTool);
+
+// `calibrate_search_strategy` is the one-time companion to run_discovery_scan.
+// First scan for a (user, product, platform) triggers calibration; subsequent
+// scans pull the persisted strategy from MemoryStore. Lives next to
+// run_discovery_scan in the registry so the coordinator's allowlist can
+// declare them together.
+registry.register(calibrateSearchStrategyTool);
 
 export { registry };
 

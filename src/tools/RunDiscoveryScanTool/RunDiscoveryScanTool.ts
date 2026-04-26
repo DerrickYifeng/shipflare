@@ -3,6 +3,13 @@
 // existing BullMQ discovery-scan worker enqueued one of these per
 // (user, platform); after the unified-pipeline migration the same logic
 // lives here, called inline from inside a team-run.
+//
+// The tool now reads a cached search strategy out of MemoryStore and
+// passes it down as `presetQueries` so scout skips query generation.
+// When the strategy is missing, the tool returns `skipped: true` with
+// `reason: 'strategy_not_calibrated'` — the coordinator's kickoff
+// playbook treats that as a signal to call `calibrate_search_strategy`
+// first, then retry.
 
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
@@ -15,6 +22,11 @@ import { persistScoutVerdicts } from '@/lib/discovery/persist-scout-verdicts';
 import { createPlatformDeps } from '@/lib/platform-deps';
 import { getPlatformConfig } from '@/lib/platform-config';
 import { readDomainDeps } from '@/tools/context-helpers';
+import { MemoryStore } from '@/memory/store';
+import {
+  searchStrategyMemoryName,
+  type PersistedSearchStrategy,
+} from '@/tools/CalibrateSearchTool/strategy-memory';
 
 export const RUN_DISCOVERY_SCAN_TOOL_NAME = 'run_discovery_scan';
 
@@ -41,7 +53,31 @@ export interface RunDiscoveryScanResult {
   reason?: string;
   scanned: number;
   queued: QueuedThreadSummary[];
+  /**
+   * Sweep-level commentary from the scout — surfaces the "I rejected all
+   * 22 because they were competitor reposts" story to the coordinator,
+   * which would otherwise see only `queued: []` and confabulate. Empty
+   * string when the scout didn't run (skipped path).
+   */
+  scoutNotes: string;
   costUsd: number;
+}
+
+/** Try to parse a persisted strategy entry. Returns null when the entry
+ *  is missing, malformed, or for the wrong platform. */
+function loadStrategy(
+  raw: string | undefined,
+  platform: 'x' | 'reddit',
+): PersistedSearchStrategy | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as PersistedSearchStrategy;
+    if (parsed.platform !== platform) return null;
+    if (!Array.isArray(parsed.queries) || parsed.queries.length === 0) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
 }
 
 export const runDiscoveryScanTool: ToolDefinition<
@@ -50,11 +86,15 @@ export const runDiscoveryScanTool: ToolDefinition<
 > = buildTool({
   name: RUN_DISCOVERY_SCAN_TOOL_NAME,
   description:
-    'Run discovery scout on a platform (x | reddit). Returns the threads ' +
-    'judged "queue"-worthy with their confidence + reason. The threads ' +
-    'are persisted to the threads table (state=queued); community-manager ' +
-    'should then be dispatched against the returned externalIds. Skips ' +
-    'gracefully when no channel for the platform is connected.',
+    'Run discovery scout on a platform (x | reddit) using the cached ' +
+    'search strategy. Returns queue-worthy threads with confidence + reason ' +
+    'and a `scoutNotes` summary explaining what was filtered. Threads are ' +
+    'persisted to the threads table (state=queued); dispatch ' +
+    'community-manager against the returned externalIds. ' +
+    'Returns `skipped:true, reason:"strategy_not_calibrated"` when ' +
+    'no cached strategy exists — call `calibrate_search_strategy` first ' +
+    'and retry. Returns `skipped:true, reason:"no_${platform}_channel"` ' +
+    'when no channel is connected.',
   inputSchema,
   isConcurrencySafe: false,
   isReadOnly: false,
@@ -74,6 +114,7 @@ export const runDiscoveryScanTool: ToolDefinition<
         reason: `no_${platform}_channel`,
         scanned: 0,
         queued: [],
+        scoutNotes: '',
         costUsd: 0,
       };
     }
@@ -85,6 +126,25 @@ export const runDiscoveryScanTool: ToolDefinition<
       .limit(1);
     if (!productRow) {
       throw new Error(`product ${productId} not found`);
+    }
+
+    // Strategy preflight — calibration must have run before the first
+    // scan so scout has a vetted query set. We could fall back to inline
+    // generation, but that's exactly the silent-omit failure mode we're
+    // fixing. Better to surface the missing strategy and let the
+    // coordinator dispatch calibration explicitly.
+    const store = new MemoryStore(userId, productId);
+    const entry = await store.loadEntry(searchStrategyMemoryName(platform));
+    const strategy = loadStrategy(entry?.content, platform);
+    if (!strategy) {
+      return {
+        skipped: true,
+        reason: 'strategy_not_calibrated',
+        scanned: 0,
+        queued: [],
+        scoutNotes: '',
+        costUsd: 0,
+      };
     }
 
     const config = getPlatformConfig(platform);
@@ -100,6 +160,7 @@ export const runDiscoveryScanTool: ToolDefinition<
         reason: `no_${platform}_channel`,
         scanned: 0,
         queued: [],
+        scoutNotes: '',
         costUsd: 0,
       };
     }
@@ -116,6 +177,8 @@ export const runDiscoveryScanTool: ToolDefinition<
           valueProp: productRow.valueProp ?? null,
           keywords: productRow.keywords,
         },
+        presetQueries: strategy.queries,
+        negativeTerms: strategy.negativeTerms,
       },
       deps,
     );
@@ -144,6 +207,7 @@ export const runDiscoveryScanTool: ToolDefinition<
       skipped: false,
       scanned: result.verdicts.length,
       queued,
+      scoutNotes: result.scoutNotes,
       costUsd,
     };
   },

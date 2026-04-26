@@ -18,6 +18,17 @@ vi.mock('@/lib/db', () => ({
   },
 }));
 
+// MemoryStore is mocked so each test can decide whether the cached
+// strategy entry exists. The tool reads it via `loadEntry` to decide
+// whether to short-circuit with `strategy_not_calibrated`.
+const loadEntryMock = vi.fn();
+vi.mock('@/memory/store', () => {
+  class MemoryStore {
+    loadEntry = loadEntryMock;
+  }
+  return { MemoryStore };
+});
+
 import { runDiscoveryScanTool } from '../RunDiscoveryScanTool';
 import { runDiscoveryV3 } from '@/lib/discovery/v3-pipeline';
 import { persistScoutVerdicts } from '@/lib/discovery/persist-scout-verdicts';
@@ -54,10 +65,29 @@ function buildSelectChain(rows: unknown[]) {
   return chain;
 }
 
+/** A valid persisted strategy doc — the shape RunDiscoveryScanTool
+ *  expects to find under `loadEntry('${platform}-search-strategy')`. */
+function makeStrategyEntry(platform: 'x' | 'reddit' = 'x') {
+  return {
+    content: JSON.stringify({
+      platform,
+      schemaVersion: 1,
+      generatedAt: '2026-04-26T00:00:00.000Z',
+      queries: ['solo founder asking', '0 to first user'],
+      negativeTerms: ['affiliate'],
+      rationale: 'pain-point queries beat keyword queries',
+      observedYield: 0.75,
+      roundsUsed: 2,
+      sampleVerdicts: [],
+    }),
+  };
+}
+
 describe('run_discovery_scan tool', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     dbSelectMock.mockReset();
+    loadEntryMock.mockReset();
   });
 
   it('returns skipped:true when user has no channel for the platform', async () => {
@@ -70,13 +100,42 @@ describe('run_discovery_scan tool', () => {
     );
 
     expect(result.skipped).toBe(true);
+    expect(result.reason).toBe('no_x_channel');
     expect(result.queued).toHaveLength(0);
   });
 
-  it('returns persisted queued threads with thread ids', async () => {
-    // First select() → channel preflight with an 'x' row.
+  it('returns skipped:strategy_not_calibrated when MemoryStore has no strategy', async () => {
+    // Channel preflight: connected → moves on to product lookup.
     dbSelectMock.mockReturnValueOnce(buildSelectChain([{ platform: 'x' }]));
-    // Second select() → product lookup.
+    // Product lookup → present.
+    dbSelectMock.mockReturnValueOnce(
+      buildSelectChain([
+        {
+          id: 'p1',
+          name: 'Shipflare',
+          description: 'ship things',
+          valueProp: null,
+          keywords: ['ship'],
+        },
+      ]),
+    );
+    // No cached strategy → should short-circuit before calling the
+    // platform deps factory or v3-pipeline.
+    loadEntryMock.mockResolvedValueOnce(null);
+
+    const result = await runDiscoveryScanTool.execute(
+      { platform: 'x' },
+      makeCtx({ userId: 'u1', productId: 'p1' }),
+    );
+
+    expect(result.skipped).toBe(true);
+    expect(result.reason).toBe('strategy_not_calibrated');
+    expect(createPlatformDeps).not.toHaveBeenCalled();
+    expect(runDiscoveryV3).not.toHaveBeenCalled();
+  });
+
+  it('surfaces scoutNotes and passes presetQueries from the cached strategy', async () => {
+    dbSelectMock.mockReturnValueOnce(buildSelectChain([{ platform: 'x' }]));
     dbSelectMock.mockReturnValueOnce(
       buildSelectChain([
         {
@@ -88,10 +147,53 @@ describe('run_discovery_scan tool', () => {
         },
       ]),
     );
-    // Third select() (and any subsequent) → empty fallback so persistScoutVerdicts
-    // can safely call db internally via its own mock path.
     dbSelectMock.mockReturnValue(buildSelectChain([]));
 
+    loadEntryMock.mockResolvedValueOnce(makeStrategyEntry('x'));
+    vi.mocked(createPlatformDeps).mockResolvedValueOnce({} as never);
+    vi.mocked(runDiscoveryV3).mockResolvedValueOnce({
+      verdicts: [],
+      review: { ran: false, decision: { mode: 'skip' }, disagreements: null },
+      scoutNotes:
+        'Searched 22 tweets; rejected all (competitor reposts dominated).',
+      usage: { scout: { costUsd: 0.018 }, reviewer: null },
+      rubricGenerated: false,
+    } as never);
+
+    const result = await runDiscoveryScanTool.execute(
+      { platform: 'x' },
+      makeCtx({ userId: 'u1', productId: 'p1' }),
+    );
+
+    expect(result.skipped).toBe(false);
+    expect(result.queued).toHaveLength(0);
+    expect(result.scoutNotes).toContain('rejected all');
+    // The pipeline call must receive the preset queries from the
+    // strategy doc — that's the whole point of the calibration cache.
+    const callArg = vi.mocked(runDiscoveryV3).mock.calls[0]![0];
+    expect(callArg.presetQueries).toEqual([
+      'solo founder asking',
+      '0 to first user',
+    ]);
+    expect(callArg.negativeTerms).toEqual(['affiliate']);
+  });
+
+  it('persists queued verdicts and returns thread summaries', async () => {
+    dbSelectMock.mockReturnValueOnce(buildSelectChain([{ platform: 'x' }]));
+    dbSelectMock.mockReturnValueOnce(
+      buildSelectChain([
+        {
+          id: 'p1',
+          name: 'Shipflare',
+          description: 'ship things',
+          valueProp: null,
+          keywords: ['ship', 'deploy'],
+        },
+      ]),
+    );
+    dbSelectMock.mockReturnValue(buildSelectChain([]));
+
+    loadEntryMock.mockResolvedValueOnce(makeStrategyEntry('x'));
     vi.mocked(createPlatformDeps).mockResolvedValueOnce({} as never);
     vi.mocked(runDiscoveryV3).mockResolvedValueOnce({
       verdicts: [
@@ -108,6 +210,7 @@ describe('run_discovery_scan tool', () => {
         },
       ],
       review: { ran: false, decision: { mode: 'skip' }, disagreements: null },
+      scoutNotes: '1 queueable found.',
       usage: { scout: { costUsd: 0.012 }, reviewer: null },
       rubricGenerated: false,
     } as never);
@@ -123,5 +226,6 @@ describe('run_discovery_scan tool', () => {
     expect(result.queued[0].externalId).toBe('tweet-1');
     expect(result.queued[0].confidence).toBe(0.92);
     expect(result.scanned).toBe(1);
+    expect(result.scoutNotes).toBe('1 queueable found.');
   });
 });
