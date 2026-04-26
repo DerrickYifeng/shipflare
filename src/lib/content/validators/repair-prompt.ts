@@ -22,33 +22,11 @@ export function buildRepairPrompt(
   for (const f of failures) {
     switch (f.validator) {
       case 'length': {
-        if (f.reason === 'too_many_segments') {
-          instructions.push(
-            `Your previous draft has ${f.segmentCount} thread segments — ` +
-              `the platform allows at most 25 tweets per thread. Cut it down.`,
-          );
-          break;
-        }
-        if (f.isThread && f.segments && f.segments.length > 0) {
-          const offending = f.segments.filter((s) => !s.ok);
-          const lines = offending.map(
-            (s) =>
-              `  - tweet #${s.index + 1}: ${s.length}/${f.limit} chars ` +
-              `(+${s.excess})`,
-          );
-          instructions.push(
-            `Your previous draft thread has ${offending.length} tweet(s) ` +
-              `over the ${f.limit}-char-per-tweet cap (twitter-text weighted: ` +
-              `t.co URLs = 23, emoji = 2, CJK = 2):\n${lines.join('\n')}\n` +
-              `Rewrite ONLY the offending tweets. Preserve the rest.`,
-          );
-        } else {
-          instructions.push(
-            `Your previous draft was ${f.length} characters but the limit is ` +
-              `${f.limit}. Rewrite it to fit within ${f.limit} characters, ` +
-              `preserving the core claim. Current overshoot: ${f.excess}.`,
-          );
-        }
+        instructions.push(
+          `Your previous draft was ${f.length} characters but the limit is ` +
+            `${f.limit}. Rewrite it to fit within ${f.limit} characters, ` +
+            `preserving the core claim. Current overshoot: ${f.excess}.`,
+        );
         break;
       }
       case 'platform_leak': {
@@ -126,13 +104,6 @@ export function summarizeFailures(
     .map((f) => {
       switch (f.validator) {
         case 'length':
-          if (f.reason === 'too_many_segments') {
-            return `too many thread tweets (${f.segmentCount}/25)`;
-          }
-          if (f.isThread && f.segments) {
-            const overCount = f.segments.filter((s) => !s.ok).length;
-            return `thread has ${overCount} over-cap tweet(s); worst ${f.length}/${f.limit}`;
-          }
           return `too long (${f.length}/${f.limit}, +${f.excess})`;
         case 'platform_leak':
           return `mentions other platform(s): ${f.leakedPlatforms.join(', ')}`;

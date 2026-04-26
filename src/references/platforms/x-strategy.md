@@ -18,7 +18,6 @@
 - **Goal:** Build initial audience through high-value replies to bigger accounts
 - **Daily workflow:** 80% replying, 20% posting
 - **Original posts per day:** 1-2
-- **Threads per week:** 1 (5-8 tweets)
 - **Content mix for original posts:**
   - 50% metric (build-in-public updates with real numbers)
   - 30% educational (lessons learned, tips)
@@ -39,7 +38,6 @@
 - **Goal:** Shift to original content creation while maintaining engagement
 - **Daily workflow:** 50% replying, 50% original content
 - **Original posts per day:** 2-3
-- **Threads per week:** 1-2
 - **Content mix:**
   - 40% metric (build-in-public updates, revenue, users, decisions, struggles)
   - 30% educational (tips, frameworks, lessons learned)
@@ -61,22 +59,21 @@
   - "Drop a reply if you want early access" tweet
   - DM 30-50 engaged followers offering beta access
 - **Launch day (Tuesday-Thursday, 13:00 UTC / 9 AM EST):**
-  - Launch thread (7-8 tweets): Hook > Problem > Solution (with GIF) > Key features > Social proof > Behind the scenes > Pricing > CTA with link
-  - Put the link in the LAST tweet only (algorithm suppresses link tweets)
+  - Launch tweet: a single compressed hook that lands the problem, the solution, and the link target in 280 chars or less
+  - Drop the link as the first reply to that tweet (algorithm suppresses link tweets)
   - Share in all X Communities joined
-  - Ask warm contacts to RT the first tweet
+  - Ask warm contacts to RT the launch tweet
   - Reply to every comment all day
 - **Post-launch:**
   - Day 2: "24 hours later, here are the numbers"
   - Week 1: Individual feature highlights
-  - Week 2: Retrospective thread
+  - Week 2: Retrospective tweet with the headline number
 
 ### Phase 4: Ongoing Growth Engine (2,000+ followers)
 - **Trigger:** `followerCount >= 2000`
 - **Goal:** Compound growth through consistent high-quality content
 - **Daily workflow:** 30% replying, 70% original content
 - **Original posts per day:** 3+
-- **Threads per week:** 2+
 - **Content mix:**
   - 35% metric (milestones, numbers, build-in-public)
   - 30% educational (deep insights, frameworks)
@@ -90,7 +87,7 @@
 - **Growth tactics:**
   - Milestone posts for every win: "100 users!", "First paying customer!", "$1K MRR!"
   - Quote-tweet exchanges with founders at similar level
-  - Repurpose: Top tweets > threads > blog posts > tweet series
+  - Repurpose: top tweets → blog posts → follow-up tweets riffing on the same point
   - Track X Analytics weekly, double down on formats with most bookmarks
 
 ## Universal Rules
@@ -114,18 +111,6 @@
 - Go viral once then disappear for 2 weeks
 - Use AI-sounding language ("leverage", "delve", "comprehensive")
 - Overuse emojis (max 1-2 per tweet)
-
-## Thread Best Practices
-
-- **Hook tweet (Tweet #1):** Must stop the scroll. Specific, slightly provocative, promises value.
-- **Body tweets (#2-6):** One idea per tweet. Short sentences. White space. No filler.
-- **Closing tweet:** Call to action or summary. Link goes in FIRST REPLY, not in the thread.
-- **Best thread topics:**
-  - "I built X this week. Here's what I learned:"
-  - Revenue/user number updates with screenshots
-  - A specific technical or marketing lesson
-  - "X things I wish I knew before building Y"
-  - Comparison/analysis threads with real data
 
 ## Algorithm Signals (2025-2026)
 

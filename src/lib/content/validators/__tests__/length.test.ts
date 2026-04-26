@@ -16,8 +16,6 @@ describe('validateReplyLength', () => {
       expect(r.excess).toBe(0);
       expect(r.limit).toBe(280);
       expect(r.length).toBe('hi there'.length);
-      expect(r.isThread).toBe(false);
-      expect(r.segmentCount).toBe(1);
     });
 
     it('passes text at exactly the X cap', () => {
@@ -107,57 +105,6 @@ describe('validateReplyLength', () => {
       // Leading mentions are counted; we'll be over the cap.
       expect(r.ok).toBe(false);
       expect(r.length).toBeGreaterThan(280);
-    });
-  });
-
-  describe('X — thread support', () => {
-    it('treats \\n\\n-separated X posts as a thread and validates each tweet', () => {
-      const tweet1 = 'First tweet, well within the cap.';
-      const tweet2 = 'Second tweet, also fine.';
-      const r = validateReplyLength(`${tweet1}\n\n${tweet2}`, {
-        platform: 'x',
-        kind: 'post',
-      });
-      expect(r.isThread).toBe(true);
-      expect(r.segmentCount).toBe(2);
-      expect(r.ok).toBe(true);
-      expect(r.segments).toHaveLength(2);
-      expect(r.segments?.[0].ok).toBe(true);
-      expect(r.segments?.[1].ok).toBe(true);
-    });
-
-    it('fails the thread when ANY single tweet exceeds 280 weighted chars', () => {
-      const okTweet = 'Short tweet.';
-      const overTweet = 'a'.repeat(281);
-      const r = validateReplyLength(`${okTweet}\n\n${overTweet}`, {
-        platform: 'x',
-        kind: 'post',
-      });
-      expect(r.ok).toBe(false);
-      expect(r.reason).toBe('too_long');
-      expect(r.segments?.[0].ok).toBe(true);
-      expect(r.segments?.[1].ok).toBe(false);
-      expect(r.segments?.[1].excess).toBe(1);
-    });
-
-    it('flags too_many_segments when a thread has more than 25 tweets', () => {
-      const tweets = Array.from({ length: 26 }, (_, i) => `Tweet ${i + 1}.`);
-      const r = validateReplyLength(tweets.join('\n\n'), {
-        platform: 'x',
-        kind: 'post',
-      });
-      expect(r.ok).toBe(false);
-      expect(r.reason).toBe('too_many_segments');
-      expect(r.segmentCount).toBe(26);
-    });
-
-    it('does not split single-newline content as a thread', () => {
-      const r = validateReplyLength('line one\nline two', {
-        platform: 'x',
-        kind: 'post',
-      });
-      expect(r.isThread).toBe(false);
-      expect(r.segmentCount).toBe(1);
     });
   });
 

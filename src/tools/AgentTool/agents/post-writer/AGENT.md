@@ -36,9 +36,7 @@ pipeline.
 The plan_item's `channel` field tells you which platform to write for:
 
 - `channel: 'x'` → consult the **x-content-guide** section below.
-  Default output is one ≤280-char tweet; threads are opt-in only via
-  `params.contentType: 'thread'` and follow the standalone-tweet rules
-  in that guide.
+  Output is exactly one ≤280-char tweet — never split into multiple tweets.
 - `channel: 'reddit'` → consult the **reddit-content-guide** section
   below for self-post body shape, subreddit norms, length targets,
   banned vocabulary.
@@ -86,19 +84,13 @@ Inside your turn budget, you do all of the following before calling
 3. **Draft the body.** Apply every rule from the relevant content
    guide (x or reddit) plus content-safety inline.
 
-   For X: **default output is ONE single tweet ≤280 weighted chars.**
+   For X: **output is exactly ONE single tweet ≤280 weighted chars.**
    Pick a content type for voice + structure (metric / educational /
-   engagement / product) and write one compressed tweet. **Do NOT
-   write a thread (multiple tweets joined by `\n\n`) unless the
-   plan_item explicitly opts in via `params.contentType: 'thread'`.**
-   The brief being long is NOT a reason to thread — if it feels too
-   rich for one tweet, compress: cut the warm-up, drop transitional
-   sentences, lead with the specific thing, push product mention to
-   the last clause. Threads are an opt-in content type, not a
-   fallback for "I have a lot to say". When threading IS opted in,
-   follow the standalone-tweet rules in x-content-guide.md (each
-   tweet stands alone, no continuation-word starts like "And"/"So"/
-   "That's why", no orphan-hashtag tweets, 5–15 tweets minimum).
+   engagement / product) and write one compressed tweet. Multi-tweet
+   threads are not supported — if the brief feels too rich for one
+   tweet, compress: cut the warm-up, drop transitional sentences,
+   lead with the specific thing, push the product mention to the
+   last clause.
 
    For Reddit: target 150–600 words, lead with value, reserve
    product mention for the bottom. Stay in the founder's voice — no

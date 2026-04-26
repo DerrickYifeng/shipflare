@@ -66,28 +66,6 @@ describe('validate_draft', () => {
     expect(result.ok).toBe(true);
   });
 
-  it('validates each tweet of an X thread separately', async () => {
-    const tweet1 = 'short hook.';
-    const tooLong = 'a'.repeat(281);
-    const result = await validateDraftTool.execute(
-      {
-        text: `${tweet1}\n\n${tooLong}`,
-        platform: 'x',
-        kind: 'post',
-      },
-      ctx,
-    );
-    expect(result.ok).toBe(false);
-    const length = result.failures.find((f) => f.validator === 'length');
-    expect(length).toBeDefined();
-    if (length && length.validator === 'length') {
-      expect(length.isThread).toBe(true);
-      expect(length.segmentCount).toBe(2);
-      expect(length.segments?.[1].ok).toBe(false);
-    }
-    expect(result.repairPrompt).toMatch(/tweet #2/);
-  });
-
   it('reports warnings without failing ok (anchor token, hashtag count)', async () => {
     const result = await validateDraftTool.execute(
       {

@@ -28,20 +28,10 @@ export interface ContentValidatorInput {
 export type ContentValidatorFailure =
   | {
       validator: 'length';
-      reason: 'too_long' | 'too_many_segments';
+      reason: 'too_long';
       limit: number;
       length: number;
       excess: number;
-      /** Per-tweet results when the input was an X thread. */
-      segments?: Array<{
-        index: number;
-        text: string;
-        ok: boolean;
-        length: number;
-        excess: number;
-      }>;
-      isThread: boolean;
-      segmentCount: number;
     }
   | {
       validator: 'platform_leak';
@@ -115,19 +105,10 @@ export function runContentValidators(
   if (!length.ok) {
     failures.push({
       validator: 'length',
-      reason: length.reason ?? 'too_long',
+      reason: 'too_long',
       limit: length.limit,
       length: length.length,
       excess: length.excess,
-      segments: length.segments?.map((s) => ({
-        index: s.index,
-        text: s.text,
-        ok: s.ok,
-        length: s.length,
-        excess: s.excess,
-      })),
-      isThread: length.isThread,
-      segmentCount: length.segmentCount,
     });
   }
 

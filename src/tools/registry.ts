@@ -18,7 +18,6 @@ import { xGetUserTweetsTool } from './XGetUserTweetsTool/XGetUserTweetsTool';
 import { xGetTweetTool } from './XGetTweetTool/XGetTweetTool';
 import { xGetMentionsTool } from './XGetMentionsTool/XGetMentionsTool';
 import { xGetMetricsTool } from './XGetMetricsTool/XGetMetricsTool';
-import { xThreadPostTool } from './XThreadPostTool/XThreadPostTool';
 // Phase B domain tools — one folder per tool (Claude Code convention).
 // Registering them here makes them discoverable by AGENT.md `tools: [...]`
 // allowlists via the central registry.
@@ -69,7 +68,6 @@ registry.register(xGetUserTweetsTool);
 registry.register(xGetTweetTool);
 registry.register(xGetMentionsTool);
 registry.register(xGetMetricsTool);
-registry.register(xThreadPostTool);
 
 // Generic tools
 registry.register(classifyIntentTool);

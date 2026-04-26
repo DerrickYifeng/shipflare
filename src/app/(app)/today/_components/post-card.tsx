@@ -19,7 +19,6 @@ import { Button } from '@/components/ui/button';
 import { Toggle } from '@/components/ui/toggle';
 import { PLATFORMS } from '@/lib/platform-config';
 import type { TodoItem } from '@/hooks/use-today';
-import { splitXTweets } from '@/lib/content/x-thread';
 import { PlatformGlyph } from './platform-glyph';
 
 interface PostCardProps {
@@ -69,24 +68,7 @@ export function PostCard({
   const isEditing = localEditing || forceEditing;
   const cap = getPostCap(item.platform);
   const activeBody = isEditing ? editBody : item.draftBody ?? '';
-
-  // X posts can be a thread — the post-writer separates tweets with a
-  // blank line (`\n\n`), and the server-side validator splits on the
-  // same boundary to enforce the 280 cap per tweet. Mirror that split
-  // here so a 7-tweet thread renders as 7 tweets each ≤280 instead of
-  // one 823-char block flagged red. Codepoint length is an approximation
-  // of twitter-text's weighted length (URLs=23, emoji=2, CJK=2 there);
-  // the persisted body is always weight-validated server-side, so the
-  // small UI mismatch is cosmetic.
-  const isX = item.platform === 'x';
-  const xTweets = isX ? splitXTweets(activeBody) : [];
-  const isXThread = xTweets.length > 1;
-  // Headline length: max segment length on a thread, total length
-  // otherwise. Drives the footer counter color and the over/disabled
-  // gate on the Schedule button.
-  const len = isXThread
-    ? xTweets.reduce((max, t) => Math.max(max, t.length), 0)
-    : activeBody.length;
+  const len = activeBody.length;
   const over = len > cap;
 
   useEffect(() => {
@@ -222,89 +204,18 @@ export function PostCard({
         ) : null}
 
         {!isEditing && item.draftBody ? (
-          isXThread ? (
-            // Render each tweet as its own surface with a "Tweet N / M"
-            // pip + per-tweet count. Mirrors how the post will actually
-            // be sent (one tweet per row). Single big block + total
-            // count was misleading — a 7-tweet thread at 7 × ≤280 chars
-            // looked like a hard-fail 823/280 even though the validator
-            // passed each segment.
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {xTweets.map((tweet, i) => {
-                const tweetOver = tweet.length > cap;
-                return (
-                  <div
-                    key={i}
-                    style={{
-                      background: 'var(--sf-bg-tertiary)',
-                      border: '1px solid var(--sf-border-subtle)',
-                      borderRadius: 'var(--sf-radius-md)',
-                      padding: 12,
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        gap: 8,
-                        marginBottom: 6,
-                      }}
-                    >
-                      <span
-                        className="sf-mono"
-                        style={{
-                          fontSize: 'var(--sf-text-xs)',
-                          color: 'var(--sf-fg-4)',
-                          letterSpacing: 'var(--sf-track-mono)',
-                          textTransform: 'uppercase',
-                        }}
-                      >
-                        Tweet {i + 1} / {xTweets.length}
-                      </span>
-                      <span
-                        className="sf-mono"
-                        style={{
-                          fontSize: 'var(--sf-text-xs)',
-                          color: tweetOver
-                            ? 'var(--sf-error)'
-                            : 'var(--sf-fg-4)',
-                          letterSpacing: 'var(--sf-track-mono)',
-                        }}
-                      >
-                        {tweet.length}/{cap}
-                      </span>
-                    </div>
-                    <p
-                      style={{
-                        margin: 0,
-                        fontSize: 'var(--sf-text-base)',
-                        color: 'var(--sf-fg-1)',
-                        letterSpacing: 'var(--sf-track-normal)',
-                        lineHeight: 'var(--sf-lh-relaxed)',
-                        whiteSpace: 'pre-wrap',
-                      }}
-                    >
-                      {tweet}
-                    </p>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <p
-              style={{
-                margin: 0,
-                fontSize: 'var(--sf-text-base)',
-                color: 'var(--sf-fg-1)',
-                letterSpacing: 'var(--sf-track-normal)',
-                lineHeight: 'var(--sf-lh-relaxed)',
-                whiteSpace: 'pre-wrap',
-              }}
-            >
-              {item.draftBody}
-            </p>
-          )
+          <p
+            style={{
+              margin: 0,
+              fontSize: 'var(--sf-text-base)',
+              color: 'var(--sf-fg-1)',
+              letterSpacing: 'var(--sf-track-normal)',
+              lineHeight: 'var(--sf-lh-relaxed)',
+              whiteSpace: 'pre-wrap',
+            }}
+          >
+            {item.draftBody}
+          </p>
         ) : null}
 
         {!isEditing && !item.draftBody ? (
@@ -384,11 +295,7 @@ export function PostCard({
               onClick={() => onApprove(item.id)}
               disabled={over}
               title={
-                over
-                  ? isXThread
-                    ? `One tweet in this thread is ${len - cap} chars over the ${cap} cap`
-                    : `Post is ${len - cap} chars over the ${cap} cap`
-                  : undefined
+                over ? `Post is ${len - cap} chars over the ${cap} cap` : undefined
               }
             >
               {item.draftBody ? 'Schedule' : 'Approve'}
@@ -427,15 +334,9 @@ export function PostCard({
             color: over ? 'var(--sf-error)' : 'var(--sf-fg-4)',
             letterSpacing: 'var(--sf-track-mono)',
           }}
-          title={
-            isXThread
-              ? `${xTweets.length} tweets, longest ${len}/${cap}`
-              : undefined
-          }
         >
-          {isXThread
-            ? `${xTweets.length} tweets · max ${len}/${cap}`
-            : `${len}${cap < 10_000 ? ` / ${cap}` : ''}`}
+          {len}
+          {cap < 10_000 ? ` / ${cap}` : ''}
         </span>
       </div>
     </article>

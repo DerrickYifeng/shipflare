@@ -230,36 +230,6 @@ export class XClient {
     };
   }
 
-  /**
-   * Post a multi-tweet thread (chain of replies to own tweets).
-   */
-  async postThread(
-    tweets: string[],
-  ): Promise<Array<{ tweetId: string; url: string }>> {
-    if (tweets.length === 0) throw new Error('Thread must have at least one tweet');
-    for (const [i, tweet] of tweets.entries()) {
-      if (tweet.length > 280) {
-        throw new Error(`Tweet ${i + 1} exceeds 280 characters (${tweet.length})`);
-      }
-    }
-
-    const results: Array<{ tweetId: string; url: string }> = [];
-
-    // First tweet is a standalone post
-    const first = await this.postTweet(tweets[0]);
-    results.push(first);
-
-    // Subsequent tweets reply to the previous one
-    for (let i = 1; i < tweets.length; i++) {
-      const prev = results[i - 1];
-      const reply = await this.replyToTweet(prev.tweetId, tweets[i]);
-      results.push(reply);
-    }
-
-    log.info(`Posted thread of ${tweets.length} tweets`);
-    return results;
-  }
-
   // ----------------------------------------------------------------
   //  READ endpoints (require Basic tier $200/month)
   // ----------------------------------------------------------------

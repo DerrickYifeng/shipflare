@@ -30,10 +30,9 @@ import { readDomainDeps } from '@/tools/context-helpers';
 
 export const DRAFT_POST_TOOL_NAME = 'draft_post';
 
-// Reddit's per-post body cap is 40,000 chars; X is 280 per tweet but a
-// thread can run up to 25 tweets joined by `\n\n`. The cap below is the
-// loosest of the two — each platform's hard rule is enforced by
-// `validate_draft` before the agent calls this tool.
+// Reddit's per-post body cap is 40,000 chars; X is 280 per tweet. The
+// cap below is the loosest of the two — each platform's hard rule is
+// enforced by `validate_draft` before the agent calls this tool.
 const DRAFT_BODY_MAX = 40_000;
 
 export const draftPostInputSchema = z

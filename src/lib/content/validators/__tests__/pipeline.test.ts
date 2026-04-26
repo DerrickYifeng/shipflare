@@ -124,18 +124,4 @@ describe('runContentValidators', () => {
     });
   });
 
-  describe('thread support', () => {
-    it('reports per-segment length failures for an X thread', () => {
-      const text = 'short tweet.\n\n' + 'a'.repeat(281);
-      const r = runContentValidators({ text, platform: 'x', kind: 'post' });
-      expect(r.ok).toBe(false);
-      const length = r.failures.find((f) => f.validator === 'length');
-      expect(length).toBeDefined();
-      if (length && length.validator === 'length') {
-        expect(length.isThread).toBe(true);
-        expect(length.segmentCount).toBe(2);
-        expect(length.segments?.[1].ok).toBe(false);
-      }
-    });
-  });
 });

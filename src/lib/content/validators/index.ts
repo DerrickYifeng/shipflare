@@ -12,7 +12,6 @@ export {
   validateReplyLength,
   type ReplyLengthOptions,
   type ReplyLengthResult,
-  type SegmentLengthResult,
 } from './length';
 
 export {

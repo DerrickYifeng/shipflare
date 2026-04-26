@@ -8,8 +8,8 @@
 // What it checks:
 //
 //   ERRORS  (platform will reject, or shipping damages cross-platform rep)
-//     • length          — twitter-text weighted on X (URL=23, emoji=2, CJK=2),
-//                         per-tweet for X threads; codepoints elsewhere
+//     • length          — twitter-text weighted on X (URL=23, emoji=2, CJK=2);
+//                         codepoints elsewhere
 //     • platform_leak   — siblng-platform mention without contrast marker
 //     • hallucinated_stats — unsourced number
 //
