@@ -67,17 +67,22 @@ function buildSelectChain(rows: unknown[]) {
 
 /** A valid persisted strategy doc — the shape RunDiscoveryScanTool
  *  expects to find under `loadEntry('${platform}-search-strategy')`. */
-function makeStrategyEntry(platform: 'x' | 'reddit' = 'x') {
+function makeStrategyEntry(
+  platform: 'x' | 'reddit' = 'x',
+  schemaVersion: 1 | 2 = 2,
+) {
   return {
     content: JSON.stringify({
       platform,
-      schemaVersion: 1,
+      schemaVersion,
       generatedAt: '2026-04-26T00:00:00.000Z',
       queries: ['solo founder asking', '0 to first user'],
       negativeTerms: ['affiliate'],
       rationale: 'pain-point queries beat keyword queries',
-      observedYield: 0.75,
-      roundsUsed: 2,
+      observedPrecision: 0.75,
+      reachedTarget: true,
+      turnsUsed: 8,
+      sampleSize: 24,
       sampleVerdicts: [],
     }),
   };
@@ -227,5 +232,35 @@ describe('run_discovery_scan tool', () => {
     expect(result.queued[0].confidence).toBe(0.92);
     expect(result.scanned).toBe(1);
     expect(result.scoutNotes).toBe('1 queueable found.');
+  });
+
+  it('treats a v1 strategy entry as missing (auto-recalibration trigger)', async () => {
+    // Channel preflight: connected.
+    dbSelectMock.mockReturnValueOnce(buildSelectChain([{ platform: 'x' }]));
+    // Product lookup: present.
+    dbSelectMock.mockReturnValueOnce(
+      buildSelectChain([
+        {
+          id: 'p1',
+          name: 'Shipflare',
+          description: 'ship things',
+          valueProp: null,
+          keywords: ['ship'],
+        },
+      ]),
+    );
+    // Cached entry exists, but at v1 — must be treated as missing so
+    // the coordinator triggers fresh calibration on the new logic.
+    loadEntryMock.mockResolvedValueOnce(makeStrategyEntry('x', 1));
+
+    const result = await runDiscoveryScanTool.execute(
+      { platform: 'x' },
+      makeCtx({ userId: 'u1', productId: 'p1' }),
+    );
+
+    expect(result.skipped).toBe(true);
+    expect(result.reason).toBe('strategy_not_calibrated');
+    expect(createPlatformDeps).not.toHaveBeenCalled();
+    expect(runDiscoveryV3).not.toHaveBeenCalled();
   });
 });

@@ -72,6 +72,7 @@ function loadStrategy(
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as PersistedSearchStrategy;
+    if (parsed.schemaVersion !== 2) return null;
     if (parsed.platform !== platform) return null;
     if (!Array.isArray(parsed.queries) || parsed.queries.length === 0) return null;
     return parsed;
