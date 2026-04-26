@@ -45,6 +45,8 @@ export default async function ProductPage() {
     valueProp: row.valueProp,
     url: row.url,
     state,
+    launchDate: row.launchDate ? row.launchDate.toISOString() : null,
+    launchedAt: row.launchedAt ? row.launchedAt.toISOString() : null,
     currentPhase,
     updatedAt: row.updatedAt.toISOString(),
   };

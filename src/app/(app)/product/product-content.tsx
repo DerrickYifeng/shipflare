@@ -53,6 +53,10 @@ export interface ProductSnapshot {
   valueProp: string | null;
   url: string | null;
   state: State;
+  /** ISO date — required when state='launching'. */
+  launchDate: string | null;
+  /** ISO date — required when state='launched'. */
+  launchedAt: string | null;
   currentPhase: LaunchPhase;
   updatedAt: string;
 }
@@ -200,28 +204,33 @@ export function ProductContent({ initial }: ProductContentProps) {
                   onCommit={(next) => commitField({ keywords: next })}
                 />
               </FieldRow>
-              <FieldRow label="State" muted>
-                <span
-                  className="sf-mono"
-                  style={{
-                    fontSize: 'var(--sf-text-xs)',
-                    color: 'var(--sf-fg-2)',
-                    letterSpacing: 'var(--sf-track-mono)',
+              <FieldRow label="State">
+                <StateEditor
+                  state={product.state}
+                  launchDate={product.launchDate}
+                  launchedAt={product.launchedAt}
+                  onSaved={async () => {
+                    await mutate();
+                    router.refresh();
                   }}
-                >
-                  {STATE_LABEL[product.state]}
-                </span>
+                />
               </FieldRow>
               <FieldRow label="Phase" muted>
                 <span
-                  className="sf-mono"
                   style={{
-                    fontSize: 'var(--sf-text-xs)',
+                    fontSize: 'var(--sf-text-sm)',
                     color: 'var(--sf-fg-2)',
-                    letterSpacing: 'var(--sf-track-mono)',
+                    display: 'inline-flex',
+                    gap: 8,
+                    alignItems: 'baseline',
                   }}
                 >
-                  {PHASE_LABEL[product.currentPhase]}
+                  <span className="sf-mono" style={{ letterSpacing: 'var(--sf-track-mono)' }}>
+                    {PHASE_LABEL[product.currentPhase]}
+                  </span>
+                  <span style={{ fontSize: 11, color: 'var(--sf-fg-4)' }}>
+                    derived from state + launch date
+                  </span>
                 </span>
               </FieldRow>
             </div>
@@ -263,6 +272,285 @@ function phaseVariant(
   if (phase === 'launch') return 'success';
   if (phase === 'compound' || phase === 'steady') return 'accent';
   return 'warning';
+}
+
+// ----------------------------------------------------------------
+// State editor — picker for mvp / launching / launched + the
+// matching launch date. Saves via POST /api/product/phase, which
+// kicks off an async strategic replan; the row updates immediately
+// and the team-run runs in the background.
+// ----------------------------------------------------------------
+
+const STATE_OPTIONS: { id: State; label: string; sub: string }[] = [
+  { id: 'mvp', label: 'MVP', sub: 'Building, no launch date yet' },
+  { id: 'launching', label: 'Launching', sub: 'Has a launch date' },
+  { id: 'launched', label: 'Launched', sub: 'Already in market' },
+];
+
+function todayYmd(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function ymdPlusDays(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function isoToYmd(iso: string | null): string {
+  if (!iso) return '';
+  return iso.slice(0, 10);
+}
+
+function ymdToIso(ymd: string): string {
+  return new Date(`${ymd}T00:00:00.000Z`).toISOString();
+}
+
+function StateEditor({
+  state,
+  launchDate,
+  launchedAt,
+  onSaved,
+}: {
+  state: State;
+  launchDate: string | null;
+  launchedAt: string | null;
+  onSaved: () => Promise<void> | void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draftState, setDraftState] = useState<State>(state);
+  const [draftLaunchDate, setDraftLaunchDate] = useState<string>(
+    isoToYmd(launchDate) || ymdPlusDays(7),
+  );
+  const [draftLaunchedAt, setDraftLaunchedAt] = useState<string>(
+    isoToYmd(launchedAt) || todayYmd(),
+  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const { toast } = useToast();
+
+  const reset = () => {
+    setDraftState(state);
+    setDraftLaunchDate(isoToYmd(launchDate) || ymdPlusDays(7));
+    setDraftLaunchedAt(isoToYmd(launchedAt) || todayYmd());
+    setError(null);
+    setEditing(false);
+  };
+
+  const summary = (() => {
+    if (state === 'mvp') return STATE_LABEL.mvp;
+    if (state === 'launching') {
+      const date = isoToYmd(launchDate);
+      return date ? `${STATE_LABEL.launching} · ${date}` : STATE_LABEL.launching;
+    }
+    const date = isoToYmd(launchedAt);
+    return date ? `${STATE_LABEL.launched} · ${date}` : STATE_LABEL.launched;
+  })();
+
+  const save = async () => {
+    setError(null);
+    setSaving(true);
+    try {
+      const body: Record<string, unknown> = { state: draftState };
+      if (draftState === 'launching') {
+        body.launchDate = ymdToIso(draftLaunchDate);
+        body.launchedAt = null;
+      } else if (draftState === 'launched') {
+        body.launchedAt = ymdToIso(draftLaunchedAt);
+        body.launchDate = null;
+      } else {
+        body.launchDate = null;
+        body.launchedAt = null;
+      }
+
+      const res = await fetch('/api/product/phase', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const payload = (await res.json().catch(() => null)) as
+          | { error?: string; detail?: unknown }
+          | null;
+        throw new Error(payload?.error ?? 'phase_change_failed');
+      }
+      toast('State updated — replanning your launch in the background.');
+      setEditing(false);
+      await onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        onClick={() => setEditing(true)}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'baseline',
+          gap: 8,
+          padding: 0,
+          margin: 0,
+          background: 'transparent',
+          border: 'none',
+          borderBottom: '1px dashed transparent',
+          cursor: 'text',
+          fontFamily: 'inherit',
+          color: 'var(--sf-fg-1)',
+          fontSize: 'var(--sf-text-sm)',
+          transition: 'border-color var(--sf-dur-fast) var(--sf-ease-swift)',
+        }}
+        onMouseEnter={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.borderBottomColor = 'var(--sf-border)';
+        }}
+        onMouseLeave={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.borderBottomColor = 'transparent';
+        }}
+      >
+        <span className="sf-mono" style={{ letterSpacing: 'var(--sf-track-mono)' }}>
+          {summary}
+        </span>
+      </button>
+    );
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+        {STATE_OPTIONS.map((opt) => {
+          const selected = draftState === opt.id;
+          return (
+            <button
+              key={opt.id}
+              type="button"
+              disabled={saving}
+              onClick={() => setDraftState(opt.id)}
+              title={opt.sub}
+              style={{
+                padding: '6px 12px',
+                borderRadius: 'var(--sf-radius-pill)',
+                border: selected
+                  ? '1px solid var(--sf-accent)'
+                  : '1px solid var(--sf-border)',
+                background: selected ? 'var(--sf-accent-light)' : 'var(--sf-bg-primary)',
+                color: selected ? 'var(--sf-accent-ink)' : 'var(--sf-fg-1)',
+                fontSize: 'var(--sf-text-sm)',
+                fontWeight: selected ? 600 : 500,
+                cursor: saving ? 'wait' : 'pointer',
+                fontFamily: 'inherit',
+              }}
+            >
+              {opt.label}
+            </button>
+          );
+        })}
+      </div>
+      {draftState === 'launching' && (
+        <label
+          style={{
+            display: 'flex',
+            gap: 8,
+            alignItems: 'center',
+            fontSize: 'var(--sf-text-xs)',
+            color: 'var(--sf-fg-3)',
+          }}
+        >
+          Launch date
+          <input
+            type="date"
+            value={draftLaunchDate}
+            disabled={saving}
+            min={todayYmd()}
+            max={ymdPlusDays(90)}
+            onChange={(e) => setDraftLaunchDate(e.target.value)}
+            style={{
+              padding: '4px 8px',
+              fontSize: 'var(--sf-text-sm)',
+              border: '1px solid var(--sf-border)',
+              borderRadius: 'var(--sf-radius-sm)',
+              background: 'var(--sf-bg-primary)',
+              color: 'var(--sf-fg-1)',
+              fontFamily: 'inherit',
+            }}
+          />
+        </label>
+      )}
+      {draftState === 'launched' && (
+        <label
+          style={{
+            display: 'flex',
+            gap: 8,
+            alignItems: 'center',
+            fontSize: 'var(--sf-text-xs)',
+            color: 'var(--sf-fg-3)',
+          }}
+        >
+          Launched on
+          <input
+            type="date"
+            value={draftLaunchedAt}
+            disabled={saving}
+            max={todayYmd()}
+            onChange={(e) => setDraftLaunchedAt(e.target.value)}
+            style={{
+              padding: '4px 8px',
+              fontSize: 'var(--sf-text-sm)',
+              border: '1px solid var(--sf-border)',
+              borderRadius: 'var(--sf-radius-sm)',
+              background: 'var(--sf-bg-primary)',
+              color: 'var(--sf-fg-1)',
+              fontFamily: 'inherit',
+            }}
+          />
+        </label>
+      )}
+      {error && (
+        <span style={{ fontSize: 'var(--sf-text-xs)', color: 'var(--sf-error-ink)' }}>
+          {error}
+        </span>
+      )}
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button
+          type="button"
+          disabled={saving}
+          onClick={() => void save()}
+          style={{
+            padding: '4px 12px',
+            borderRadius: 'var(--sf-radius-sm)',
+            border: '1px solid var(--sf-accent)',
+            background: 'var(--sf-accent)',
+            color: 'var(--sf-on-accent)',
+            fontSize: 'var(--sf-text-sm)',
+            cursor: saving ? 'wait' : 'pointer',
+            fontFamily: 'inherit',
+          }}
+        >
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+        <button
+          type="button"
+          disabled={saving}
+          onClick={reset}
+          style={{
+            padding: '4px 12px',
+            borderRadius: 'var(--sf-radius-sm)',
+            border: '1px solid var(--sf-border)',
+            background: 'transparent',
+            color: 'var(--sf-fg-2)',
+            fontSize: 'var(--sf-text-sm)',
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+          }}
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function KeywordsEditor({
