@@ -55,8 +55,8 @@ const inputSchema = z.object({
   /** Iteration budget. Default 60. MUST stay in sync with the
    *  search-strategist AGENT.md frontmatter `maxTurns` value or
    *  the LLM will think it has more budget than the harness allows. */
-  maxTurns: z.number().int().min(20).max(120).optional(),
-  /** Minimum unique tweets the strategist must judge before
+  maxTurns: z.number().int().min(5).max(120).optional(),
+  /** Minimum unique results the strategist must judge before
    *  declaring `reachedTarget: true`. Default 20 — guards against
    *  1-of-1 = 100% false positives. */
   minSampleSize: z.number().int().min(5).max(200).optional(),
