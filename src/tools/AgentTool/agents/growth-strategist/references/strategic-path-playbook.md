@@ -97,15 +97,21 @@ launch phase.
 ## Step 5 — Recommend channel mix
 
 For each entry in the input `channels` array, emit an entry in
-`channelMix` with `perWeek` (the planned post count) + `preferredHours`
-(1-6 UTC hours).
+`channelMix` with:
+
+- `perWeek` — planned ORIGINAL POST count for the week.
+- `repliesPerDay` — daily REPLY budget. Set this for X using the
+  ranges + follower-tier guidance in the "channel-cadence" reference.
+  **Leave NULL/omit for Reddit** — reddit punishes high reply volume
+  with shadowbans; reply automation is X-only at this stage.
+- `preferredHours` — 1-6 UTC hours.
 
 For `reddit`, also include `preferredCommunities` — 2-4 subreddit names
 relevant to the category.
 
-See the "channel-cadence" reference for the per-phase `perWeek` ranges
-and the hard rule: never emit a cadence entry for a channel the user
-has not connected.
+See the "channel-cadence" reference for the per-phase `perWeek` and
+`repliesPerDay` ranges plus the hard rule: never emit a cadence entry
+for a channel the user has not connected.
 
 ## Step 6 — Write the narrative (200-2400 chars)
 

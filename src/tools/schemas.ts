@@ -58,12 +58,21 @@ export const strategicThesisWeekSchema = z.object({
 });
 
 /**
- * Channel-level cadence. `perWeek` is the planned post count. `preferredHours`
- * is a small list of UTC hours the planner should prefer when allocating
- * slots. `preferredCommunities` applies to reddit only.
+ * Channel-level cadence.
+ *
+ * - `perWeek` is the planned ORIGINAL POST count for the week.
+ * - `repliesPerDay` is the planned REPLY count per day — the daily
+ *   reply-sweep cron uses this as the `targetCount` to fill against
+ *   `content_reply` plan_items. Nullish/0 disables reply automation
+ *   for the channel (used for Reddit, where high reply volume invites
+ *   shadowbans).
+ * - `preferredHours` is a small list of UTC hours the planner should
+ *   prefer when allocating post / reply-session slots.
+ * - `preferredCommunities` applies to reddit only.
  */
 export const strategicChannelCadenceSchema = z.object({
   perWeek: z.number().int().min(0).max(21),
+  repliesPerDay: z.number().int().min(0).max(50).nullish(),
   preferredHours: z.array(z.number().int().min(0).max(23)).min(1).max(6),
   preferredCommunities: z.array(z.string().min(1)).nullish(),
 });
