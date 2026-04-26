@@ -18,9 +18,8 @@ import { MemoryStore } from '@/memory/store';
 /**
  * Create platform-specific dependencies for a user.
  *
- * Returns a Record to inject into `runSkill({ deps })` or as a
- * ToolContext dep bag for `runAgent(...)`. Throws if a required
- * channel is missing.
+ * Returns a Record to inject as a ToolContext dep bag for
+ * `runAgent(...)`. Throws if a required channel is missing.
  *
  * When `productId` is provided, the returned bag also includes a
  * scoped `memoryStore` — discovery v3 (scout + reviewer) needs it

@@ -44,8 +44,8 @@ const requestBodySchema = z.object({
  *      plan_items). Both land via their domain tools; this route returns
  *      immediately with a runId.
  *
- * Phase E Day 3: replaces the legacy runSkill(strategic) + runSkill(tactical)
- * chain. The team-run is async — the client should subscribe to
+ * Phase E Day 3: replaces the legacy strategic + tactical chain. The
+ * team-run is async — the client should subscribe to
  * `/api/team/events?runId=...` for progress. Drops the legacy `{ path,
  * plan, items }` response envelope.
  *

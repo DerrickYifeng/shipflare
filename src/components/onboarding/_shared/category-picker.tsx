@@ -1,6 +1,4 @@
 // CategoryPicker — 7 capsule chips, radio-group behavior.
-// Matches the Stage 3 `VoicePicker` preset chip style so the review
-// form reads as a consistent list of 6-ish editable bands.
 
 import type { ProductCategory } from '../OnboardingFlow';
 

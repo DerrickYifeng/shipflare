@@ -94,8 +94,8 @@ If the product state is `mvp` or the launch phase is `foundation` /
 `audience`, you MUST include:
 
 - At least 1 `interview` item (e.g. "Run 3 customer interviews").
-- At least 1-2 `setup_task` items (e.g. "Extract voice profile",
-  "Validate messaging with 10 potential users").
+- At least 1-2 `setup_task` items (e.g. "Validate messaging with 10
+  potential users", "Set up basic analytics").
 
 These de-risk the launch. The maximum-2-setup-task + 1-interview rule is
 a ceiling, not a floor — in these phases aim FOR 1-2 setup_tasks and 1
@@ -148,8 +148,8 @@ For every scheduled item:
   - `email_send` → `skillName: null`. Manual-completion until a future
     phase wires an email agent.
   - `interview` → `skillName: null` (founder runs the interview manually).
-  - `setup_task` → `voice-extractor` ONLY if voice hasn't been extracted
-    yet; most setup_tasks have `skillName: null` (manual labor).
+  - `setup_task` → `skillName: null` (manual labor — no setup_task skills
+    are currently registered).
   - `launch_asset` → `skillName: null`. The individual launch-asset
     skills (draft-hunter-outreach, draft-waitlist-page, etc.) were
     retired; founders handle launch assets off-platform in the current

@@ -325,7 +325,7 @@ async function processXMonitorForUser(
     // Per-tweet parallel execution. Each tweet goes through:
     //   product-opportunity-judge → x-reply-writer → ai-slop + anchor validators.
     // Both LLM stages run via direct `runAgent(loadAgentFromFile(...))`
-    // against the unified registry — no skill-runner wrapper.
+    // against the unified registry.
     // If quality regression is observed, thread buildMemoryPrompt(memoryStore) into HardenedReplyInput and forward it.
     const hardenedResults = await Promise.all(
       tweetsForReply.map((t) =>

@@ -122,8 +122,8 @@ export async function supersedeForStrategicReplan(
 // weekly-replan cron processor. Callers choose the `trigger` value
 // (`manual` vs `weekly`) for the team_runs row.
 //
-// Phase C: the legacy skill-runner path (runSkill(tactical-planner) inside a
-// supersede+insert transaction) is gone. The tactical replan now:
+// Phase C: the legacy in-transaction tactical-planner skill call is gone.
+// The tactical replan now:
 //   1. Reads the active strategic path (still required — we surface
 //      `no_active_path` if the user hasn't committed one yet).
 //   2. Intersects channelMix with currently-connected channels.

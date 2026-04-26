@@ -69,7 +69,6 @@ const requestBodySchema = z.object({
       }),
     )
     .optional(),
-  voiceProfile: z.string().nullable().optional(),
 });
 
 type RequestBody = z.infer<typeof requestBodySchema>;

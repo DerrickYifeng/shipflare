@@ -57,21 +57,14 @@ export interface ProductSnapshot {
   state: State;
   currentPhase: LaunchPhase;
   updatedAt: string;
-  /**
-   * ISO timestamp of the most recent voice-scan extraction across channels.
-   * Non-null → the profile has been through a successful voice scan and the
-   * VERIFIED badge is shown next to the lifecycle phase.
-   */
-  voiceScannedAt: string | null;
 }
 
 /**
  * Five product-identity fields we preserve as reserved UI slots. These live on
  * the handoff prototype but do not yet have dedicated schema columns — see
  * TODOS.md follow-up "Product profile: positioning / ICP / competitors /
- * approved links schema".  Until the columns land, the rows render with an
- * inline empty-state message so the UI slot stays claimed and users discover
- * that running a voice scan will populate them.
+ * approved links schema". Until the columns land, the rows render with an
+ * inline empty-state message so the UI slot stays claimed.
  */
 const PLACEHOLDER_FIELDS: readonly { label: string; hint: string }[] = [
   {
@@ -96,7 +89,7 @@ const PLACEHOLDER_FIELDS: readonly { label: string; hint: string }[] = [
   },
 ];
 
-const PLACEHOLDER_EMPTY_COPY = 'Not yet captured — run voice scan';
+const PLACEHOLDER_EMPTY_COPY = 'Not yet captured';
 
 interface ProductContentProps {
   initial: ProductSnapshot;
@@ -169,10 +162,10 @@ export function ProductContent({ initial }: ProductContentProps) {
     <>
       <HeaderBar
         title="My Product"
-        meta={`The voice and rules your AI team uses when writing as you · Last updated ${lastUpdated}`}
+        meta={`The product profile your AI team writes against · Last updated ${lastUpdated}`}
         action={
           <Button variant="ghost" size="sm" onClick={() => router.push('/onboarding')}>
-            Re-run voice scan
+            Edit in onboarding
           </Button>
         }
       />
@@ -220,11 +213,6 @@ export function ProductContent({ initial }: ProductContentProps) {
                   <h2 className="sf-h3" style={{ margin: 0, color: 'var(--sf-fg-1)' }}>
                     {product.name}
                   </h2>
-                  {product.voiceScannedAt && (
-                    <Badge variant="success" mono>
-                      VERIFIED
-                    </Badge>
-                  )}
                   <Badge variant={phaseVariant(product.currentPhase)} mono>
                     {PHASE_LABEL[product.currentPhase]}
                   </Badge>
@@ -438,10 +426,9 @@ function phaseVariant(
 
 /**
  * Read-only empty-state value for FieldRows that are visible in the handoff
- * prototype but do not yet have schema columns. The cell shows an inline
- * message + a secondary hint describing what the field will hold once the
- * voice scan captures it. Keeps the click-to-edit hit target empty so users
- * don't try to type into a field that would silently drop their input.
+ * prototype but do not yet have schema columns. Keeps the click-to-edit hit
+ * target empty so users don't try to type into a field that would silently
+ * drop their input.
  */
 function PlaceholderValue({ hint }: { hint: string }) {
   return (

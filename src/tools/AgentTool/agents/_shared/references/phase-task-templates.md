@@ -24,11 +24,10 @@ content-planner:
   owned end-to-end by the community-manager team-run agent; the plan-
   execute dispatcher manual-completes the row and the actual drafts
   come from the discovery → community-manager Task fan-out.
-- `setup_task` voice work MAY set `skillName: 'voice-extractor'`.
-- **Every other template's `skillName` is currently retired** — leave
-  `null` and the plan-execute dispatcher will route via the shell-route
-  table (manual / auto completion) until a future phase rewires the
-  kind to a team-run agent.
+- **Every template's `skillName` is currently retired** — leave `null`
+  and the plan-execute dispatcher will route via the shell-route table
+  (manual / auto completion) until a future phase rewires the kind to
+  a team-run agent.
 
 The kind + userAction + channel + params fields still matter exactly as
 written; only the skillName column changed.
@@ -63,17 +62,7 @@ Goal: de-risk positioning + plant audience seeds.
 - `skillName`: null  # Phase E Day 3: skill retired; manual-completion
 - `params`: `{ intent: 'discovery' }`
 
-### 3. setup_task — Extract voice profile
-- `title`: "Voice-scan recent posts"
-- `description`: "Run voice-extractor over the founder's last 30 X
-  posts to seed the style card. Required before any content_post
-  ships."
-- `channel`: 'x'
-- `userAction`: 'approve'
-- `skillName`: 'voice-extractor'
-- `params`: `{ platform: 'x', samplePostCount: 30 }`
-
-### 4. setup_task — Draft waitlist page
+### 3. setup_task — Draft waitlist page
 - `title`: "Draft {product.name} waitlist page"
 - `description`: "Generate HTML + structured copy for the waitlist
   landing. Founder hosts on their domain."
@@ -82,7 +71,7 @@ Goal: de-risk positioning + plant audience seeds.
 - `skillName`: null  # Phase E Day 3: skill retired
 - `params`: `{ includeEmailCapture: true }`
 
-### 5. setup_task — Nail positioning one-liner
+### 4. setup_task — Nail positioning one-liner
 - `title`: "Ship a tested one-liner for {product.name}"
 - `description`: "One sentence that names the outcome + the ICP. Test
   it on 3 people outside the product — does it survive?"
@@ -91,7 +80,7 @@ Goal: de-risk positioning + plant audience seeds.
 - `skillName`: null
 - `params`: `{}`
 
-### 6. content_post — Build-in-public opener
+### 5. content_post — Build-in-public opener
 - `title`: "First build-in-public post: why {product.name} exists"
 - `description`: "Story-angle origin. Specific problem you hit last
   month. End on a question inviting replies."
@@ -100,7 +89,7 @@ Goal: de-risk positioning + plant audience seeds.
 - `skillName`: null  # content_post routes to post-writer via channel
 - `params`: `{ angle: 'story', pillar: '{contentPillars[0]}' }`
 
-### 7. email_send — Waitlist welcome drip
+### 6. email_send — Waitlist welcome drip
 - `title`: "Welcome email draft for waitlist signups"
 - `description`: "Triggered on first signup. 100-120 words, invite a
   reply, no CTA."
@@ -109,7 +98,7 @@ Goal: de-risk positioning + plant audience seeds.
 - `skillName`: null  # Phase E Day 3: skill retired
 - `params`: `{ emailType: 'welcome' }`
 
-### 8. analytics_summary — Week 1 baseline
+### 7. analytics_summary — Week 1 baseline
 - `title`: "Baseline metrics for week 1"
 - `description`: "Baseline posts published + followers + engagement
   rate. Feeds future retros."
@@ -118,7 +107,7 @@ Goal: de-risk positioning + plant audience seeds.
 - `skillName`: null  # Phase E Day 3: skill retired
 - `params`: `{}`
 
-### 9. content_post — Contrarian week-opener
+### 8. content_post — Contrarian week-opener
 - `title`: "Contrarian post: the category assumption {product.name} rejects"
 - `description`: "One claim against the default solution in the
   category. Defend with a specific reason."
@@ -127,7 +116,7 @@ Goal: de-risk positioning + plant audience seeds.
 - `skillName`: null  # content_post routes to post-writer via channel
 - `params`: `{ angle: 'contrarian', pillar: '{contentPillars[1]}' }`
 
-### 10. setup_task — Seed waitlist with 10 founders
+### 9. setup_task — Seed waitlist with 10 founders
 - `title`: "Seed waitlist with 10 founders from your network"
 - `description`: "Warm outreach to 10 founders in the ICP. No
   pitch — just 'I'm building X, curious if this maps to your pain.'"

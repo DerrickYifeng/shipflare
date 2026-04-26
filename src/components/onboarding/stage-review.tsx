@@ -19,7 +19,6 @@ import { OnbInput } from './_shared/onb-input';
 import { OnbTextarea } from './_shared/onb-textarea';
 import { Field } from './_shared/field';
 import { FieldReveal } from './_shared/field-reveal';
-import { VoicePicker } from './_shared/voice-picker';
 import { KeywordEditor } from './_shared/keyword-editor';
 import { CategoryPicker } from './_shared/category-picker';
 import { ArrowRight, Check, GitHub, Globe } from './icons';
@@ -30,7 +29,6 @@ export interface StageReviewValue {
   name: string;
   description: string;
   audience: string;
-  voice: string;
   keywords: string[];
   category: ProductCategory;
 }
@@ -59,7 +57,7 @@ export function StageReview({
 
   useEffect(() => {
     const t = setInterval(
-      () => setRevealed((r) => (r >= 7 ? r : r + 1)),
+      () => setRevealed((r) => (r >= 6 ? r : r + 1)),
       90,
     );
     return () => clearInterval(t);
@@ -179,20 +177,6 @@ export function StageReview({
 
         <FieldReveal shown={revealed >= 4}>
           <Field
-            label={COPY.stage3.fields.voice.label}
-            hint={COPY.stage3.fields.voice.hint}
-          >
-            <VoicePicker
-              value={value.voice}
-              onChange={(v) => update('voice', v)}
-              presets={COPY.stage3.voicePresets}
-              freeformPlaceholder={COPY.stage3.voiceFreeformPlaceholder}
-            />
-          </Field>
-        </FieldReveal>
-
-        <FieldReveal shown={revealed >= 5}>
-          <Field
             label={COPY.stage3.fields.keywords.label}
             hint={COPY.stage3.fields.keywords.hint}
           >
@@ -205,7 +189,7 @@ export function StageReview({
           </Field>
         </FieldReveal>
 
-        <FieldReveal shown={revealed >= 6}>
+        <FieldReveal shown={revealed >= 5}>
           <Field
             label={COPY.stage3.fields.category.label}
             hint={COPY.stage3.fields.category.hint}
@@ -218,7 +202,7 @@ export function StageReview({
           </Field>
         </FieldReveal>
 
-        <FieldReveal shown={revealed >= 7}>
+        <FieldReveal shown={revealed >= 6}>
           <div
             style={{
               marginTop: 4,

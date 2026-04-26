@@ -1,9 +1,9 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { z } from 'zod';
-import { desc, eq } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { products, voiceProfiles } from '@/lib/db/schema';
+import { products } from '@/lib/db/schema';
 import { derivePhase, type ProductState } from '@/lib/launch-phase';
 import { auditSeo } from '@/tools/seo-audit';
 import { acquireRateLimit } from '@/lib/rate-limit';
@@ -33,8 +33,7 @@ const patchBodySchema = z
 /**
  * GET /api/product
  * Returns the authenticated user's product snapshot. Used by the v2 My Product
- * page for SWR revalidation after inline edits. Also surfaces the voice-scan
- * completion timestamp so the identity header can render the VERIFIED badge.
+ * page for SWR revalidation after inline edits.
  */
 export async function GET() {
   const session = await auth();
@@ -64,13 +63,6 @@ export async function GET() {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
 
-  const [voice] = await db
-    .select({ lastExtractedAt: voiceProfiles.lastExtractedAt })
-    .from(voiceProfiles)
-    .where(eq(voiceProfiles.userId, session.user.id))
-    .orderBy(desc(voiceProfiles.lastExtractedAt))
-    .limit(1);
-
   const state = row.state as ProductState;
   const currentPhase = derivePhase({
     state,
@@ -91,7 +83,6 @@ export async function GET() {
     category: row.category,
     currentPhase,
     updatedAt: row.updatedAt.toISOString(),
-    voiceScannedAt: voice?.lastExtractedAt ? voice.lastExtractedAt.toISOString() : null,
   });
 }
 

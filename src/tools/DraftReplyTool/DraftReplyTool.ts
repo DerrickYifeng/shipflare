@@ -2,9 +2,8 @@
 //
 // Unlike draft_post (which calls sideQuery to generate the body), this
 // tool takes the body as input. The community-manager agent uses its
-// own turn budget to draft the reply text before calling the tool —
-// this mirrors the original skill-runner pattern and keeps the
-// agent's reasoning and the final body tightly coupled.
+// own turn budget to draft the reply text before calling the tool, so
+// the agent's reasoning and the final body stay tightly coupled.
 //
 // Side effect: INSERT drafts row with state='pending'. Scoped to
 // userId; the tool verifies the referenced thread belongs to the

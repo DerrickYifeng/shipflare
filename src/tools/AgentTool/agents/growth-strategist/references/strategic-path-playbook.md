@@ -162,8 +162,6 @@ summary + notes for the coordinator.
 
 ## When inputs are thin
 
-- `voiceProfile: null` → use a neutral founder voice; prefer "we" over
-  "I" when the product brand isn't clearly solo-branded.
 - `recentMilestones: []` → set the thesis off the product's value prop
   alone; note in the narrative that the first week's theme may want to
   rotate once shipping signals return.

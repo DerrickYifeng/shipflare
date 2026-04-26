@@ -64,6 +64,13 @@
       "when": 1777872000000,
       "tag": "0008_chat_refactor",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1777958400000,
+      "tag": "0009_drop_voice_profiles",
+      "breakpoints": true
     }
   ]
 }

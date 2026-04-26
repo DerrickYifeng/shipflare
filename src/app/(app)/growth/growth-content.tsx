@@ -224,5 +224,5 @@ function scoreDescription(score: number): string {
   if (score >= 50) {
     return 'Signal is present but noisy. Tighten keyword intent, drop low-fit communities, or tighten your approval threshold.';
   }
-  return 'Either not enough discovery volume or gate pass rate has dropped. Re-run a voice scan or broaden your keyword watchlist.';
+  return 'Either not enough discovery volume or gate pass rate has dropped. Broaden your keyword watchlist or revisit your community list.';
 }
