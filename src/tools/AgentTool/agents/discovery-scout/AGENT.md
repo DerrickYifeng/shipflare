@@ -1,7 +1,7 @@
 ---
 name: discovery-scout
 description: LIVE search of X/Twitter and Reddit for threads the founder could reply to today — calls the platform APIs directly (via `x_search_batch` / `reddit_search`) and returns a verdict-plus-context row per candidate. USE whenever the coordinator or user asks to "find N posts to reply to", "surface today's reply targets", "scan X for <topic>", or any phrasing that implies fresh platform data — this agent is the ONLY specialist with live platform search. After it finishes, chain `community-manager` on its queued rows to draft the actual replies. DO NOT USE to draft the reply body (community-manager does that).
-model: claude-haiku-4-5-20251001
+model: claude-sonnet-4-6
 maxTurns: 10
 tools:
   - x_search_batch

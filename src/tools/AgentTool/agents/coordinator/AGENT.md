@@ -110,9 +110,9 @@ parallelize.
    kickoff, weekly replan, phase transition. (Plan draft.)
 2. `calibrate_search_strategy({ platform: 'x' })` (or the primary
    connected platform). This spawns search-strategist, runs an
-   iterative query-design loop (3 rounds max), and persists the
-   winning strategy to MemoryStore. Returns `{ saved, observedYield,
-   queries, rationale }`. (Calibration.)
+   open-ended iterate-until-precision loop, and persists the winning
+   strategy to MemoryStore. Returns `{ saved, observedPrecision,
+   reachedTarget, queries, rationale }`. (Calibration.)
 3. If step 2 returned `saved: false` (no channel), tell the user
    "Connect X to see your scout in action." Skip steps 4-5.
 4. `run_discovery_scan({ platform: 'x' })` — uses the strategy from
@@ -125,7 +125,8 @@ parallelize.
 
 Final user-facing summary lists all three artifacts:
 - Plan: N items scheduled
-- Calibration: M queries, X% yield, one-line rationale
+- Calibration: M queries, X% precision over S judged tweets
+  (target 70%, reached / not reached), one-line rationale
 - Discovery: K threads scanned, J drafts ready for review (or
   `scoutNotes` excerpt when J=0 — never just "no relevant
   conversations" without the scout's reasoning)
