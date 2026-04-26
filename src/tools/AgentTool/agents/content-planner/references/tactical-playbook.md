@@ -76,6 +76,38 @@ Call `add_plan_item` once per item. You MAY emit multiple `add_plan_item`
 calls in one response (they're independent and the tool is concurrency-
 safe).
 
+## Step 2.5 — Allocate daily reply slots per `channelMix[ch].repliesPerDay`
+
+For each channel where `channelMix[channel].repliesPerDay > 0`:
+
+- Emit ONE `content_reply` `plan_item` per day in the planned week.
+  Seven days = seven `content_reply` rows per channel, max. (If
+  planning starts mid-week, emit slots only for the remaining days —
+  skip past dates per the "never schedule in the past" rule.)
+- Each slot:
+  - `kind: 'content_reply'`
+  - `channel: <channel>` (X only at this stage; reddit's
+    `repliesPerDay` is null/omitted by the strategist, so this loop
+    naturally skips reddit.)
+  - `userAction: 'approve'`
+  - `skillName: null` (the daily reply-sweep cron + community-manager
+    own this end-to-end)
+  - `params: { targetCount: <channelMix[channel].repliesPerDay> }`
+  - `scheduledAt`: pick the FIRST UTC hour from
+    `channelMix[channel].preferredHours` and apply it to every day.
+    All seven slots share the same hour-of-day — the daily cron fires
+    once and walks each day's slot.
+  - `title`: `"Reply session: ${repliesPerDay} replies"` (use the
+    actual integer)
+  - `description`: explain that the daily reply automation will run
+    discovery + drafting and surface up to `targetCount` reply drafts
+    on the Today page for approval.
+
+If `channelMix.x.repliesPerDay` is null/0/omitted, skip this step
+entirely — reply automation is opt-in per channel. The cap of one
+slot per day per channel keeps the calendar uncluttered and matches
+the cron's "once per UTC day per user" throttle.
+
 ## Step 3 — Schedule phase-appropriate setup_tasks / interviews
 
 Draw from the "phase-task-templates" reference. Rules:
@@ -142,9 +174,11 @@ For every scheduled item:
     through the post-writer team-run; the agent reads `plan_items.channel`
     (`x` or `reddit`) and consults the matching guide at draft time.
   - `content_reply` → **leave `skillName: null`**. Reply drafting is
-    owned end-to-end by the community-manager team-run agent; the
-    plan-execute dispatcher manual-completes the row and the actual
-    drafts come from the discovery → community-manager Task fan-out.
+    owned end-to-end by the daily reply-sweep cron — it reads each
+    `content_reply` row's `params.targetCount`, runs discovery-scout +
+    community-manager up to 3 inner attempts until the target is
+    drafted, then transitions the row to `state='drafted'` (drafts
+    surface on the Today page for the founder to approve).
   - `email_send` → `skillName: null`. Manual-completion until a future
     phase wires an email agent.
   - `interview` → `skillName: null` (founder runs the interview manually).

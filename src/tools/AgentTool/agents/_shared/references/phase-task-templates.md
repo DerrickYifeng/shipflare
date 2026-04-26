@@ -21,9 +21,11 @@ content-planner:
   (`x` and `reddit` both go to `post-writer`; the writer reads `channel`
   to pick the right platform guide).
 - `content_reply` rows MUST set `skillName: null`. Reply drafting is
-  owned end-to-end by the community-manager team-run agent; the plan-
-  execute dispatcher manual-completes the row and the actual drafts
-  come from the discovery → community-manager Task fan-out.
+  owned end-to-end by the daily reply-sweep cron, which reads each
+  row's `params.targetCount`, runs discovery-scout + community-manager
+  in a retry loop until the target is filled (max 3 inner attempts),
+  and transitions the row to `state='drafted'` so the drafts surface
+  on the Today page.
 - **Every template's `skillName` is currently retired** — leave `null`
   and the plan-execute dispatcher will route via the shell-route table
   (manual / auto completion) until a future phase rewires the kind to
@@ -149,14 +151,20 @@ Goal: build launch-ready audience. Weekly rhythm matters most here.
 - `skillName`: null  # content_post routes to post-writer via channel
 - `params`: `{ angle: 'howto', pillar: '{contentPillars[1]}' }`
 
-### 3. content_reply — Reply-guy engine session
-- `title`: "Reply session: 5 high-signal replies this hour"
-- `description`: "Review monitor queue, draft 5 replies within the
-  15-min window. Max 3 to the same community."
-- `channel`: 'x'
+### 3. content_reply — Daily reply slot (one per day per channel)
+- `title`: "Reply session: ${targetCount} replies"  # use the
+  channelMix[channel].repliesPerDay value verbatim
+- `description`: "Daily reply automation runs at this hour:
+  discovery-scout finds candidate threads, community-manager drafts up
+  to ${targetCount} replies for your review. The session retries up to
+  3 times within the day if the first scan comes up short."
+- `channel`: 'x'  # X only at this stage; reddit repliesPerDay stays null
 - `userAction`: 'approve'
-- `skillName`: null  # community-manager owns reply drafting end-to-end
-- `params`: `{ targetCount: 5 }`
+- `skillName`: null  # daily reply-sweep cron owns this end-to-end
+- `params`: `{ targetCount: <channelMix.x.repliesPerDay> }`
+- `scheduledAt`: same UTC hour every day (use the first
+  `channelMix.x.preferredHours` entry — the daily cron fires once per
+  UTC day per user, so all seven slots share the same hour-of-day)
 
 ### 4. setup_task — Identify and queue 20 hunters
 - `title`: "Build hunter target list for Product Hunt"
