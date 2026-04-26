@@ -347,6 +347,13 @@ function StateEditor({
     return date ? `${STATE_LABEL.launched} · ${date}` : STATE_LABEL.launched;
   })();
 
+  const hasChanges = (() => {
+    if (draftState !== state) return true;
+    if (draftState === 'launching' && draftLaunchDate !== isoToYmd(launchDate)) return true;
+    if (draftState === 'launched' && draftLaunchedAt !== isoToYmd(launchedAt)) return true;
+    return false;
+  })();
+
   const save = async () => {
     setError(null);
     setSaving(true);
@@ -508,6 +515,25 @@ function StateEditor({
           />
         </label>
       )}
+      {hasChanges && (
+        <div
+          role="status"
+          style={{
+            padding: '10px 12px',
+            borderRadius: 'var(--sf-radius-sm)',
+            border: '1px solid var(--sf-warning-border, rgba(180, 120, 0, 0.3))',
+            background: 'var(--sf-warning-light, rgba(255, 196, 0, 0.08))',
+            color: 'var(--sf-warning-ink, var(--sf-fg-2))',
+            fontSize: 'var(--sf-text-xs)',
+            lineHeight: 'var(--sf-lh-normal)',
+          }}
+        >
+          <strong style={{ fontWeight: 600 }}>Heads up:</strong> saving replans
+          your launch. This week's pre-approval plan items get superseded and
+          a fresh strategic + tactical run kicks off in the background
+          (≈30–60s). Already-approved or posted items aren't touched.
+        </div>
+      )}
       {error && (
         <span style={{ fontSize: 'var(--sf-text-xs)', color: 'var(--sf-error-ink)' }}>
           {error}
@@ -516,20 +542,21 @@ function StateEditor({
       <div style={{ display: 'flex', gap: 8 }}>
         <button
           type="button"
-          disabled={saving}
+          disabled={saving || !hasChanges}
           onClick={() => void save()}
           style={{
             padding: '4px 12px',
             borderRadius: 'var(--sf-radius-sm)',
             border: '1px solid var(--sf-accent)',
-            background: 'var(--sf-accent)',
-            color: 'var(--sf-on-accent)',
+            background: hasChanges ? 'var(--sf-accent)' : 'var(--sf-bg-tertiary)',
+            color: hasChanges ? 'var(--sf-on-accent)' : 'var(--sf-fg-3)',
             fontSize: 'var(--sf-text-sm)',
-            cursor: saving ? 'wait' : 'pointer',
+            cursor: saving ? 'wait' : hasChanges ? 'pointer' : 'not-allowed',
             fontFamily: 'inherit',
+            opacity: !hasChanges ? 0.6 : 1,
           }}
         >
-          {saving ? 'Saving…' : 'Save'}
+          {saving ? 'Replanning…' : hasChanges ? 'Replan launch' : 'No changes'}
         </button>
         <button
           type="button"
