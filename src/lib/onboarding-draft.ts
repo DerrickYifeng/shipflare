@@ -32,6 +32,8 @@ export interface OnboardingDraft {
     | 'agency'
     | 'ai_app'
     | 'other';
+  /** True once the user has confirmed the extracted profile on Stage 3. */
+  reviewed?: boolean;
   // Step 4 — connect (mirror of channels table, read-only here)
   channels?: Array<'x' | 'reddit' | 'email'>;
   // Step 5 — state picker
