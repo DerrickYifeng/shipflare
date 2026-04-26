@@ -170,15 +170,7 @@ export function ProductContent({ initial }: ProductContentProps) {
         }
       />
       <div style={{ padding: '0 clamp(16px, 3vw, 32px) 48px' }}>
-        {/* Identity + Positioning — 2-col hero */}
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'minmax(0, 1.15fr) minmax(0, 1fr)',
-            gap: 16,
-          }}
-          className="product-hero-grid"
-        >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <Card padding={24}>
             <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
               <div
@@ -309,9 +301,6 @@ export function ProductContent({ initial }: ProductContentProps) {
               </span>
             </div>
           </Card>
-
-          {/* Voice tone sliders */}
-          <VoiceDnaCard />
         </div>
 
         {/* Guardrails */}
@@ -405,13 +394,6 @@ export function ProductContent({ initial }: ProductContentProps) {
         </div>
       </div>
 
-      <style jsx>{`
-        @media (max-width: 900px) {
-          .product-hero-grid {
-            grid-template-columns: minmax(0, 1fr) !important;
-          }
-        }
-      `}</style>
     </>
   );
 }
@@ -625,130 +607,3 @@ function AddPhraseButton({ onAdd }: { onAdd: (phrase: string) => void }) {
   );
 }
 
-function VoiceDnaCard() {
-  const [tone, setTone] = useState({ warmth: 55, wit: 68, formality: 28, brevity: 72 });
-  const axes: { key: keyof typeof tone; left: string; right: string }[] = [
-    { key: 'warmth', left: 'Blunt', right: 'Warm' },
-    { key: 'wit', left: 'Serious', right: 'Witty' },
-    { key: 'formality', left: 'Casual', right: 'Formal' },
-    { key: 'brevity', left: 'Expansive', right: 'Brief' },
-  ];
-  const phrases = [
-    'Moved from Jira → Linear 8 months ago',
-    'cmd+k everywhere',
-    'Counterintuitive:',
-    'Worth a weekend trial',
-  ];
-  return (
-    <Card padding={24}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-        <h3 className="sf-h4" style={{ margin: 0, color: 'var(--sf-fg-1)' }}>
-          Voice DNA
-        </h3>
-        <Badge variant="accent" mono>
-          TRAINED
-        </Badge>
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        {axes.map((s) => (
-          <div key={s.key}>
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                fontSize: 11,
-                color: 'var(--sf-fg-3)',
-                marginBottom: 4,
-                fontFamily: 'var(--sf-font-mono)',
-                letterSpacing: 'var(--sf-track-mono)',
-              }}
-            >
-              <span>{s.left}</span>
-              <span style={{ color: 'var(--sf-fg-1)', fontWeight: 600 }}>{tone[s.key]}</span>
-              <span>{s.right}</span>
-            </div>
-            <div
-              style={{
-                position: 'relative',
-                height: 6,
-                borderRadius: 3,
-                background: 'var(--sf-bg-tertiary)',
-              }}
-            >
-              <div
-                style={{
-                  position: 'absolute',
-                  left: 0,
-                  top: 0,
-                  bottom: 0,
-                  width: `${tone[s.key]}%`,
-                  background:
-                    'linear-gradient(90deg, var(--sf-accent), var(--sf-accent))',
-                  borderRadius: 3,
-                }}
-              />
-              <input
-                type="range"
-                min={0}
-                max={100}
-                value={tone[s.key]}
-                onChange={(e) =>
-                  setTone((prev) => ({ ...prev, [s.key]: Number(e.target.value) }))
-                }
-                aria-label={`${s.left} to ${s.right}`}
-                style={{
-                  position: 'absolute',
-                  inset: 0,
-                  width: '100%',
-                  height: '100%',
-                  opacity: 0,
-                  cursor: 'ew-resize',
-                }}
-              />
-              <div
-                style={{
-                  position: 'absolute',
-                  left: `calc(${tone[s.key]}% - 7px)`,
-                  top: -4,
-                  width: 14,
-                  height: 14,
-                  borderRadius: 7,
-                  background: 'var(--sf-bg-primary)',
-                  border: '2px solid var(--sf-accent)',
-                  boxShadow: 'var(--sf-shadow-card)',
-                  pointerEvents: 'none',
-                }}
-              />
-            </div>
-          </div>
-        ))}
-      </div>
-      <div
-        style={{
-          marginTop: 20,
-          padding: 14,
-          background: 'var(--sf-bg-tertiary)',
-          borderRadius: 'var(--sf-radius-md)',
-        }}
-      >
-        <Ops style={{ marginBottom: 8, display: 'block' }}>Signature phrases</Ops>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {phrases.map((p) => (
-            <div
-              key={p}
-              style={{
-                fontSize: 'var(--sf-text-sm)',
-                color: 'var(--sf-fg-1)',
-                fontStyle: 'italic',
-                borderLeft: '2px solid var(--sf-accent)',
-                paddingLeft: 10,
-              }}
-            >
-              &ldquo;{p}&rdquo;
-            </div>
-          ))}
-        </div>
-      </div>
-    </Card>
-  );
-}
