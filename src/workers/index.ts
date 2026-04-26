@@ -186,11 +186,15 @@ const teamRunWorker = new Worker<TeamRunJobData>(
   { ...BASE_OPTS, concurrency: getTeamRunConcurrency(), lockDuration: 15 * 60_000 },
 );
 
-// Phase E Day 2 — reply-sweep fan-out. The processor walks teams every
-// 6h (cadence defined in src/lib/queue/reply-sweep-cron.ts) and calls
-// `maybeEnqueueReplySweep(userId)` for each owner. The helper is
-// idempotent and throttles against recent reply_sweep runs, so safe to
-// re-fire. See scheduleReplySweepCron() below.
+// Reply-sweep fan-out — runs ONCE per day. The processor walks teams
+// (cadence defined in src/lib/queue/reply-sweep-cron.ts) and calls
+// `maybeEnqueueReplySweep(userId)` for each owner. The helper finds
+// today's `content_reply` plan_item slots, throttles against any
+// reply_sweep that already started today, and enqueues a team_run with
+// each slot's planItemId + targetCount baked into the goal. The
+// coordinator inside the run drives the discovery → community-manager
+// retry loop until each slot is filled (or 3 attempts exhausted) and
+// transitions the plan_item to state='drafted'.
 const replySweepCronWorker = new Worker<ReplySweepCronJobData>(
   REPLY_SWEEP_CRON_QUEUE_NAME,
   async (job) => processReplySweepCron(job),
