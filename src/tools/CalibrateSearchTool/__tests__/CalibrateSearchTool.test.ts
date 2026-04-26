@@ -175,6 +175,18 @@ describe('calibrate_search_strategy tool', () => {
     expect(parsed.turnsUsed).toBe(8);
     expect(parsed.sampleSize).toBe(24);
     expect(typeof parsed.generatedAt).toBe('string');
+
+    // Defaults must reach the strategist's prompt JSON unchanged so
+    // the LLM self-paces against the same numbers the harness enforces.
+    const runAgentArgs = vi.mocked(runAgent).mock.calls[0]!;
+    const promptJson = JSON.parse(runAgentArgs[1] as string) as {
+      targetPrecision: number;
+      maxTurns: number;
+      minSampleSize: number;
+    };
+    expect(promptJson.targetPrecision).toBe(0.7);
+    expect(promptJson.maxTurns).toBe(60);
+    expect(promptJson.minSampleSize).toBe(20);
   });
 
   it('throws when product is missing (data integrity, not user-facing)', async () => {

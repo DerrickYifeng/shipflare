@@ -48,10 +48,18 @@ export {
 
 const inputSchema = z.object({
   platform: z.enum(['x', 'reddit']),
-  /** Override defaults — caller can dial cost vs. quality. */
-  targetYield: z.number().min(0).max(1).optional(),
-  queriesPerRound: z.number().int().min(1).max(8).optional(),
-  maxRounds: z.number().int().min(1).max(5).optional(),
+  /** Per-tweet queueable precision required to declare success.
+   *  Default 0.7. Lower for hard-to-find niches; higher only if
+   *  the founder explicitly wants stricter queues. */
+  targetPrecision: z.number().min(0).max(1).optional(),
+  /** Iteration budget. Default 60. MUST stay in sync with the
+   *  search-strategist AGENT.md frontmatter `maxTurns` value or
+   *  the LLM will think it has more budget than the harness allows. */
+  maxTurns: z.number().int().min(20).max(120).optional(),
+  /** Minimum unique tweets the strategist must judge before
+   *  declaring `reachedTarget: true`. Default 20 — guards against
+   *  1-of-1 = 100% false positives. */
+  minSampleSize: z.number().int().min(5).max(200).optional(),
 });
 
 export interface CalibrateSearchStrategyResult {
@@ -81,9 +89,9 @@ function buildStrategistMessage(args: {
     valueProp: string | null;
     keywords: string[];
   };
-  targetYield: number;
-  queriesPerRound: number;
-  maxRounds: number;
+  targetPrecision: number;
+  maxTurns: number;
+  minSampleSize: number;
 }): string {
   return JSON.stringify(args, null, 2);
 }
@@ -108,9 +116,9 @@ export const calibrateSearchStrategyTool: ToolDefinition<
   ): Promise<CalibrateSearchStrategyResult> {
     const { userId, productId, db } = readDomainDeps(ctx);
     const { platform } = input;
-    const targetYield = input.targetYield ?? 0.5;
-    const queriesPerRound = input.queriesPerRound ?? 4;
-    const maxRounds = input.maxRounds ?? 3;
+    const targetPrecision = input.targetPrecision ?? 0.7;
+    const maxTurns = input.maxTurns ?? 60;
+    const minSampleSize = input.minSampleSize ?? 20;
 
     // Channel preflight — calibration without a connected channel is
     // a no-op; the strategist's tools would fail anyway.
@@ -164,9 +172,9 @@ export const calibrateSearchStrategyTool: ToolDefinition<
         valueProp: productRow.valueProp ?? null,
         keywords: productRow.keywords,
       },
-      targetYield,
-      queriesPerRound,
-      maxRounds,
+      targetPrecision,
+      maxTurns,
+      minSampleSize,
     });
 
     const run = await runAgent<SearchStrategistOutput>(
