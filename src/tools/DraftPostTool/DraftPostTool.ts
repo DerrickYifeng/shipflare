@@ -28,6 +28,13 @@ import {
   type SideQueryOptions,
 } from '@/core/api-client';
 import type Anthropic from '@anthropic-ai/sdk';
+import {
+  runContentValidators,
+  buildRepairPrompt,
+  summarizeFailures,
+  type ContentValidatorFailure,
+  type ContentValidatorWarning,
+} from '@/lib/content/validators';
 
 export const DRAFT_POST_TOOL_NAME = 'draft_post';
 
@@ -80,6 +87,17 @@ export interface DraftPostResult {
   planItemId: string;
   draft_body: string;
   channel: string;
+  /**
+   * Validation summary for the persisted body. `failures` is always empty
+   * on success — the tool refuses to persist a draft with platform-hard
+   * failures. `warnings` may be non-empty (ShipFlare style); they're
+   * surfaced so post-writer / the founder can audit before approving.
+   */
+  validation: {
+    failures: ContentValidatorFailure[];
+    warnings: ContentValidatorWarning[];
+    repairAttempted: boolean;
+  };
 }
 
 interface DraftBriefInputs {
@@ -238,11 +256,65 @@ export const draftPostTool: ToolDefinition<DraftPostInput, DraftPostResult> =
         signal: ctx.abortSignal,
       });
 
-      const draftBody = firstTextBlock(response);
+      let draftBody = firstTextBlock(response);
       if (!draftBody) {
         throw new Error(
           `draft_post: sideQuery returned no text block for plan_item ` +
             `${input.planItemId}`,
+        );
+      }
+
+      // 3a. Validate before persisting. The same content validators that
+      // gate the reply-hardening pipeline (length with twitter-text
+      // weighting on X, sibling-platform leak, hallucinated stats) run
+      // here so we don't write a body the platform will reject. One
+      // repair pass on failure — match the reply-hardening budget so
+      // `draft_post` doesn't burn unbounded sideQuery turns on a bad
+      // brief. After the repair attempt we persist whatever we have and
+      // surface the validation status to the caller.
+      let validation = runContentValidators({
+        text: draftBody,
+        platform: channel,
+        kind: 'post',
+      });
+      let repairAttempted = false;
+      if (!validation.ok) {
+        repairAttempted = true;
+        const repairPrompt = buildRepairPrompt(
+          validation.failures,
+          channel,
+          validation.warnings,
+        );
+        const repairResponse = await sideQueryFn({
+          model: 'claude-haiku-4-5-20251001',
+          system: systemPrompt,
+          messages: [
+            { role: 'user', content: userBrief },
+            { role: 'assistant', content: draftBody },
+            {
+              role: 'user',
+              content:
+                `${repairPrompt}\n\nRewrite the draft. Return only the body text.`,
+            },
+          ],
+          maxTokens: 2048,
+          signal: ctx.abortSignal,
+        });
+        const repaired = firstTextBlock(repairResponse);
+        if (repaired) {
+          draftBody = repaired;
+          validation = runContentValidators({
+            text: draftBody,
+            platform: channel,
+            kind: 'post',
+          });
+        }
+      }
+      if (!validation.ok) {
+        throw new Error(
+          `draft_post: draft for plan_item ${input.planItemId} failed ` +
+            `platform validation after repair pass — ` +
+            summarizeFailures(validation.failures),
         );
       }
 
@@ -254,7 +326,15 @@ export const draftPostTool: ToolDefinition<DraftPostInput, DraftPostResult> =
       // the same row.
       const prevOutput =
         (item.output as Record<string, unknown> | null | undefined) ?? {};
-      const nextOutput = { ...prevOutput, draft_body: draftBody, channel };
+      const nextOutput = {
+        ...prevOutput,
+        draft_body: draftBody,
+        channel,
+        validation: {
+          warnings: validation.warnings,
+          repairAttempted,
+        },
+      };
 
       await db
         .update(planItems)
@@ -275,6 +355,15 @@ export const draftPostTool: ToolDefinition<DraftPostInput, DraftPostResult> =
         planItemId: input.planItemId,
         draft_body: draftBody,
         channel,
+        validation: {
+          // We only reach this point with `validation.ok === true`, so
+          // `failures` is always empty here — included in the return shape
+          // so callers can rely on the property existing without optional
+          // chaining.
+          failures: [],
+          warnings: validation.warnings,
+          repairAttempted,
+        },
       };
     },
   });

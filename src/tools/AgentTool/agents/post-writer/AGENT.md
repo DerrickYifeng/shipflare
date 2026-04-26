@@ -5,6 +5,7 @@ model: claude-haiku-4-5-20251001
 maxTurns: 4
 tools:
   - draft_post
+  - validate_draft
   - SendMessage
   - StructuredOutput
 references:
@@ -52,12 +53,20 @@ it's provided; the tool merges it with the row for the final draft prompt.
 1. Parse `planItemId` + optional `context` from the prompt.
 2. Call `draft_post({ planItemId, context })` exactly once. The tool
    reads the plan_item's `channel` value to route to the right
-   platform-specific drafting prompt, handles LLM generation and
-   validation, and UPDATEs `plan_items.output.draft_body`.
-3. If `draft_post` returns `is_error=true`, read the diagnostic and
+   platform-specific drafting prompt, generates the body, runs
+   `validate_draft` internally, and UPDATEs `plan_items.output.draft_body`.
+   The tool will not persist a draft that fails platform-hard rules
+   (length, sibling-platform leak, unsourced stats) — it repairs once
+   and surfaces an error if the repair also fails.
+3. If `draft_post` succeeds, you MAY call `validate_draft({ text:
+   <draft_body>, platform: <channel>, kind: 'post' })` for an
+   independent re-check on the persisted body — useful when you want
+   to surface stylistic warnings (hashtag count, links in body) to
+   the founder without a second draft pass.
+4. If `draft_post` returns `is_error=true`, read the diagnostic and
    either retry once with a corrected `context`, or give up and surface
    the error in StructuredOutput. Do not spin on the same failing input.
-4. Emit StructuredOutput.
+5. Emit StructuredOutput.
 
 ## Content rules
 

@@ -12,6 +12,7 @@ export {
   validateReplyLength,
   type ReplyLengthOptions,
   type ReplyLengthResult,
+  type SegmentLengthResult,
 } from './length';
 
 export {
@@ -26,10 +27,20 @@ export {
 } from './hallucinated-stats';
 
 export {
+  validateHashtagCount,
+  validateLinksInReply,
+  validateLinksInPostBody,
+  type HashtagCountResult,
+  type LinksInReplyResult,
+  type LinksInPostBodyResult,
+} from './editorial';
+
+export {
   runContentValidators,
   type ContentValidatorInput,
   type ContentValidatorResult,
   type ContentValidatorFailure,
+  type ContentValidatorWarning,
 } from './pipeline';
 
 export {

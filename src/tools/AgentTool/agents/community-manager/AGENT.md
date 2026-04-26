@@ -6,6 +6,7 @@ maxTurns: 16
 tools:
   - find_threads
   - draft_reply
+  - validate_draft
   - SendMessage
   - StructuredOutput
 shared-references:
@@ -85,21 +86,22 @@ turn before calling `draft_reply`:
      "robust", etc.) and no AI structural tells (em-dash overuse,
      "not just X — it's Y" binary, triple-grouping rhythm,
      negation cadence)
-   - At least one anchor token (number, proper noun / named tool,
-     timestamp phrase, or URL)
-   - Length within the platform's reply cap
-   - No unsourced numeric claims — every percentage / multiplier /
-     "$N" / "over N" needs a real citation ("according to X", a
-     URL, an @handle, "source:") in the same sentence, otherwise
-     drop the number
-   - No mention of sibling platforms (when target is X, no
-     "reddit", "r/", "subreddit", "upvote", "karma" without an
-     explicit contrast marker like "unlike", "vs", "instead of";
-     same in reverse for Reddit drafts)
+
+   Then **call `validate_draft({ text: <yourDraft>, platform: <x|reddit>, kind: 'reply' })`** — this is the authoritative check for:
+   - Length: weighted (twitter-text on X — t.co URLs = 23, emoji = 2,
+     CJK = 2; codepoints on Reddit). Don't pre-count yourself; the
+     tool returns `length`, `limit`, and `excess`.
+   - Platform leak: sibling-platform mentions without a contrast marker.
+   - Hallucinated stats: every number needs a citation in-sentence.
+   - Anchor token: the reply must contain a concrete anchor (warning).
+   - Links in reply body: forbidden (warning).
+
+   `validate_draft` returns `{ ok, failures, warnings, summary, repairPrompt }`. **`failures` are platform-hard rejects — never ship past them.** **`warnings` are ShipFlare style — repair when you can, ship if you must.**
 5. **Rewrite ONCE if the self-check fails.** Same LLM turn — you
-   have the budget for one targeted repair pass per draft. Name the
-   failure category in your internal reasoning and rewrite the
-   single sentence that broke the rule, not the whole reply.
+   have the budget for one targeted repair pass per draft. Use the
+   `repairPrompt` from `validate_draft` as your guide; rewrite the
+   single sentence that broke the rule, not the whole reply. After
+   rewriting, call `validate_draft` once more to confirm.
 6. **Decide what to persist.**
    - Self-check passes after the rewrite → call
      `draft_reply({ threadId, draftBody, confidence, whyItWorks })`

@@ -64,8 +64,9 @@ Six shapes. Pick one, write the shortest version that carries it.
 ## Cross-cutting rules
 
 ### Length
-- **Target: 40–140 characters** (≈ 7–28 words). This is where top-performing replies cluster.
-- **Hard cap: 240 characters.** Only exceed 180 when the reply carries a specific number, named anecdote, or correction-with-receipt.
+- **Style target: 40–140 weighted characters** (≈ 7–28 words). This is where top-performing replies cluster. Stylistic, not enforced.
+- **Stretch ceiling: 240 weighted chars.** Only exceed 180 when the reply carries a specific number, named anecdote, or correction-with-receipt.
+- **Platform hard cap: 280 weighted chars** — `validate_draft({ platform: 'x', kind: 'reply' })` is the source of truth here. The cap is twitter-text weighted: t.co URLs = 23, emoji = 2, CJK = 2. Don't pre-count by hand.
 - If the reply has a second sentence, it must be shorter than the first — otherwise cut it.
 - Never multi-paragraph. Never line breaks inside a reply.
 
@@ -189,12 +190,13 @@ If removing your reply wouldn't change the conversation, it shouldn't exist. Eit
 
 ## Self-check before returning
 
+Run `validate_draft({ text, platform: 'x', kind: 'reply' })` first — it covers length, sibling-platform leak, unsourced stats, hashtag count, links-in-reply, and anchor token. Then audit the items below it can't see (register fit, archetype, voice).
+
+- [ ] `validate_draft` returned `ok: true` (failures empty)
 - [ ] Identified register (1–8) — strategy matches the register's allowed list
-- [ ] ≤ 240 chars, ideally 40–140
+- [ ] Style: 40–140 weighted chars ideally; ≤240 stretch; 280 is the hard platform cap (twitter-text counts URLs as 23, emoji as 2, CJK as 2)
 - [ ] One archetype only, shortest version that carries it
 - [ ] Zero forbidden phrases or triplets
-- [ ] Contains at least one anchor token (number, proper noun, timestamp, or URL) — or is `skip`
-- [ ] Zero links. Zero hashtags. ≤1 emoji.
 - [ ] Acknowledgment rule honored (required on 1/2/5, forbidden on 4/7, optional on 3/6)
 - [ ] If two sentences, second is shorter than first
 - [ ] Reads like a chat message, not a LinkedIn post

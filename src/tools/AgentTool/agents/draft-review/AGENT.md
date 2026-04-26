@@ -2,7 +2,8 @@
 name: draft-review
 description: Adversarial quality reviewer for content drafts
 model: claude-haiku-4-5-20251001
-tools: []
+tools:
+  - validate_draft
 maxTurns: 2
 references:
   - output-format
@@ -56,6 +57,12 @@ Would a real community member write this?
 Does the content meet platform-specific compliance requirements?
 - Follow the compliance rules defined in the References section.
 - Some platforms require disclosures, others do not.
+- For the platform + length checks specifically: call
+  `validate_draft({ text: <draft>, platform: <x|reddit>, kind: <post|reply> })`
+  and treat `failures` (length, sibling-platform leak, unsourced stats)
+  as hard blockers — do not approve a draft that fails them. Treat
+  `warnings` (hashtag count, links-in-body, anchor token) as
+  informational; flag them in your output but they don't auto-block.
 
 ### 6. Risk Assessment
 Would this get the account flagged or banned?

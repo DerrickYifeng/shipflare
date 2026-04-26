@@ -35,6 +35,7 @@ import { queryTeamStatusTool } from './QueryTeamStatusTool/QueryTeamStatusTool';
 import { draftPostTool } from './DraftPostTool/DraftPostTool';
 import { findThreadsTool } from './FindThreadsTool/FindThreadsTool';
 import { draftReplyTool } from './DraftReplyTool/DraftReplyTool';
+import { validateDraftTool } from './ValidateDraftTool/ValidateDraftTool';
 import { runDiscoveryScanTool } from './RunDiscoveryScanTool/RunDiscoveryScanTool';
 
 /**
@@ -106,6 +107,13 @@ registry.register(queryTeamStatusTool);
 registry.register(draftPostTool);
 registry.register(findThreadsTool);
 registry.register(draftReplyTool);
+// validate_draft is the post-draft platform-rule + style verifier. Agents
+// call it AFTER writing copy and BEFORE draft_reply / draft_post so platform
+// rejections (length, NFC, t.co URL accounting, sibling-platform leak,
+// hallucinated stats) never reach the founder's review queue. It's also
+// the source of truth for ShipFlare style warnings (hashtag count, links
+// in body/reply, anchor token).
+registry.register(validateDraftTool);
 
 // ---------------------------------------------------------------------------
 // Unified discovery pipeline tools. `run_discovery_scan` wraps

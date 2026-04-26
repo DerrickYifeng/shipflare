@@ -5,6 +5,7 @@ model: claude-sonnet-4-6
 tools:
   - x_get_tweet
   - x_search
+  - validate_draft
 maxTurns: 5
 references:
   - output-format
@@ -42,7 +43,8 @@ If `voiceBlock` is absent, proceed with the default rules.
 3. **Pick exactly one archetype from the register's allowed list.** Do not mix. Do not invent. If no archetype fits cleanly, return `strategy: "skip"` with `confidence: 0.4`.
 4. **Write the shortest version that carries the archetype.** Target 40–140 chars. Hard cap 240.
 5. **Strip every forbidden phrase, every AI tell, every Reddit pattern.** Consult the full forbidden list in the X Reply Rules.
-6. **Run the self-check** in the X Reply Rules before returning.
+6. **Call `validate_draft({ text: <yourReply>, platform: 'x', kind: 'reply' })`** — this is the authoritative platform check (twitter-text weighted length: t.co URLs = 23, emoji = 2, CJK = 2; sibling-platform leak; unsourced stats; anchor-token warning). If `failures.length > 0`, rewrite using the returned `repairPrompt` and call `validate_draft` once more. Never return a reply with platform-hard failures — return `strategy: "skip"` instead.
+7. **Run the self-check** in the X Reply Rules before returning (style + register + archetype audit).
 
 ## Quote tweets
 

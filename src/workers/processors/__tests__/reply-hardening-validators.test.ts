@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 /**
  * Covers the Task #3 content-validator integration in reply-hardening:
- *  - too-long drafts trigger a regen pass and fit within 240 chars
+ *  - too-long drafts trigger a regen pass and fit within the platform cap (280 on X)
  *  - platform-leaks trigger a regen pass with repair prompt
  *  - unsourced stats trigger a regen pass
  *  - when all regen attempts still fail, needsReview is set + rejectionReasons includes content_validator:* codes
@@ -41,7 +41,7 @@ beforeEach(() => {
 const GOOD_REPLY = 'took us 14 months to get here. one channel: cold email.';
 
 describe('reply-hardening content validators', () => {
-  it('regenerates when the first draft is over 240 chars, then accepts the short one', async () => {
+  it('regenerates when the first draft is over the X 280 cap, then accepts the short one', async () => {
     // 1: judge, 2: first drafter pass (too long), 3: regenerated drafter pass (fits)
     runAgentMock
       .mockResolvedValueOnce({
@@ -50,7 +50,7 @@ describe('reply-hardening content validators', () => {
       })
       .mockResolvedValueOnce({
         result: {
-          replyText: 'a'.repeat(260), // blows 240 cap
+          replyText: 'a'.repeat(290), // blows 280 platform cap
           confidence: 0.8,
           strategy: 'data_add',
         },
@@ -80,7 +80,7 @@ describe('reply-hardening content validators', () => {
     const secondDrafterCall = runAgentMock.mock.calls[2];
     const userMessage = JSON.parse(secondDrafterCall[1] as string);
     const tweet = userMessage.tweets[0];
-    expect(tweet.repairPrompt).toContain('240');
+    expect(tweet.repairPrompt).toContain('280');
   });
 
   it('regenerates on platform-leak and accepts the clean draft', async () => {
@@ -156,7 +156,7 @@ describe('reply-hardening content validators', () => {
       })
       .mockResolvedValueOnce({
         result: {
-          // Under 240 chars, no platform leak, no stats, but has a preamble.
+          // Under 280 chars, no platform leak, no stats, but has a preamble.
           replyText: 'Great post! shipped my first SaaS in 2024.',
           confidence: 0.8,
           strategy: 'supportive_peer',
