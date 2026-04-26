@@ -189,6 +189,7 @@ export function ProductContent({ initial }: ProductContentProps) {
               <FieldRow label="Value prop">
                 <EditableValue
                   value={product.valueProp ?? ''}
+                  multiline
                   placeholder="One sentence — what your product does."
                   onCommit={(next) => commitField({ valueProp: next.trim() || null })}
                 />
