@@ -7,6 +7,7 @@ import { encrypt } from '@/lib/encryption';
 import { eq, and } from 'drizzle-orm';
 import { createLogger } from '@/lib/logger';
 import { provisionTeamForProduct } from '@/lib/team-provisioner';
+import { readReturnToCookie, clearReturnToCookie } from '@/lib/oauth-return';
 
 const log = createLogger('api:x');
 
@@ -221,9 +222,12 @@ export async function GET(request: NextRequest) {
     log.warn(`Failed to fetch X post history: ${err instanceof Error ? err.message : err}`);
   }
 
-  // Clear PKCE cookies and redirect
-  const response = NextResponse.redirect(new URL('/today', request.url));
+  // Clear PKCE cookies and redirect to wherever the connect flow was
+  // initiated from (set via `?returnTo=` on /api/x/connect). Defaults
+  // to /today when no return path was supplied.
+  const returnTo = readReturnToCookie(request);
+  const response = NextResponse.redirect(new URL(returnTo, request.url));
   response.cookies.delete('x_code_verifier');
   response.cookies.delete('x_oauth_state');
-  return response;
+  return clearReturnToCookie(response);
 }

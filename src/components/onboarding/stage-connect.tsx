@@ -75,8 +75,8 @@ export function StageConnect({ onBack, onContinue }: StageConnectProps) {
       [platform]: { state: 'connecting', error: null },
     }));
     // Redirect to the existing OAuth initiator route; the callback will
-    // write the channels row and redirect back.
-    window.location.href = `/api/${platform}/connect`;
+    // write the channels row and bring us back to the onboarding flow.
+    window.location.href = `/api/${platform}/connect?returnTo=${encodeURIComponent('/onboarding')}`;
   };
 
   const disconnect = async (platform: Platform) => {
