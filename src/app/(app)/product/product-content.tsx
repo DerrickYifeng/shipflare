@@ -58,38 +58,6 @@ export interface ProductSnapshot {
   updatedAt: string;
 }
 
-/**
- * Five product-identity fields we preserve as reserved UI slots. These live on
- * the handoff prototype but do not yet have dedicated schema columns — see
- * TODOS.md follow-up "Product profile: positioning / ICP / competitors /
- * approved links schema". Until the columns land, the rows render with an
- * inline empty-state message so the UI slot stays claimed.
- */
-const PLACEHOLDER_FIELDS: readonly { label: string; hint: string }[] = [
-  {
-    label: 'Tagline',
-    hint: 'One tight line that sets the product apart.',
-  },
-  {
-    label: 'Core positioning',
-    hint: 'Category, wedge, and who it beats.',
-  },
-  {
-    label: 'Primary ICP',
-    hint: 'The first customer you write to by default.',
-  },
-  {
-    label: 'Competitors',
-    hint: 'The three alternatives you get compared to.',
-  },
-  {
-    label: 'Approved links',
-    hint: 'Pages safe to cite in replies (docs, changelog, launch posts).',
-  },
-];
-
-const PLACEHOLDER_EMPTY_COPY = 'Not yet captured';
-
 interface ProductContentProps {
   initial: ProductSnapshot;
 }
@@ -231,11 +199,6 @@ export function ProductContent({ initial }: ProductContentProps) {
                   onCommit={(next) => commitField({ valueProp: next.trim() || null })}
                 />
               </FieldRow>
-              {PLACEHOLDER_FIELDS.map((f) => (
-                <FieldRow key={f.label} label={f.label} muted>
-                  <PlaceholderValue hint={f.hint} />
-                </FieldRow>
-              ))}
               <FieldRow label="Keywords">
                 <KeywordsEditor
                   value={product.keywords}
@@ -305,37 +268,6 @@ function phaseVariant(
   if (phase === 'launch') return 'success';
   if (phase === 'compound' || phase === 'steady') return 'accent';
   return 'warning';
-}
-
-/**
- * Read-only empty-state value for FieldRows that are visible in the handoff
- * prototype but do not yet have schema columns. Keeps the click-to-edit hit
- * target empty so users don't try to type into a field that would silently
- * drop their input.
- */
-function PlaceholderValue({ hint }: { hint: string }) {
-  return (
-    <span
-      aria-disabled="true"
-      style={{
-        display: 'inline-flex',
-        flexDirection: 'column',
-        gap: 2,
-        color: 'var(--sf-fg-3)',
-      }}
-    >
-      <span style={{ fontStyle: 'italic' }}>{PLACEHOLDER_EMPTY_COPY}</span>
-      <span
-        style={{
-          fontSize: 11,
-          color: 'var(--sf-fg-4)',
-          lineHeight: 1.4,
-        }}
-      >
-        {hint}
-      </span>
-    </span>
-  );
 }
 
 function KeywordsEditor({
