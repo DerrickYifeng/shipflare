@@ -17,7 +17,6 @@ import { useRouter } from 'next/navigation';
 import { HeaderBar } from '@/components/layout/header-bar';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Ops } from '@/components/ui/ops';
 import { FieldRow } from '@/components/ui/field-row';
 import { useToast } from '@/components/ui/toast';
@@ -121,12 +120,7 @@ export function ProductContent({ initial }: ProductContentProps) {
     <>
       <HeaderBar
         title="My Product"
-        meta={`The product profile your AI team writes against · Last updated ${lastUpdated}`}
-        action={
-          <Button variant="ghost" size="sm" onClick={() => router.push('/onboarding')}>
-            Edit in onboarding
-          </Button>
-        }
+        meta={`Click any field to edit · Last updated ${lastUpdated}`}
       />
       <div style={{ padding: '0 clamp(16px, 3vw, 32px) 48px' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
