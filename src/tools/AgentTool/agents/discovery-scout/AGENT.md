@@ -47,9 +47,18 @@ judgment-rubric defaults when they conflict.
    duplicates.
 2. Call `x_search_batch` ONCE with all queries (it's literally one
    Grok round-trip — sequential `x_search` calls are waste).
-3. For each tweet in the results, apply the judgment rubric.
-4. Emit one verdict per tweet. Fields are copied from the tweet;
-   `verdict` / `confidence` / `reason` are yours.
+3. Each tweet in the results comes with an **enriched author** object:
+   `{ handle, bio, followerCount }`. The tool runs one batch profile
+   lookup so you don't have to. `bio` may be `null` (deleted account /
+   brand-new handle / Grok timed out) — see the rubric's "When the
+   bio is null" section for fallback rules.
+4. For each tweet, apply the judgment rubric. Author identity gates
+   first (using `bio` + `followerCount` against the product context),
+   then opportunity + reply-welcome signals on the tweet body.
+5. Emit one verdict per tweet. Fields are copied from the tweet;
+   `verdict` / `confidence` / `reason` are yours. The verdict's
+   `author` field is just the handle string (not the enriched object) —
+   bios are an input signal, not a persisted artifact.
 
 ### On Reddit
 

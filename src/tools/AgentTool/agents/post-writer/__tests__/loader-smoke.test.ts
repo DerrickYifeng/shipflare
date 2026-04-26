@@ -24,6 +24,7 @@ describe('post-writer loader smoke', () => {
 
     expect(writer.tools).toEqual([
       'draft_post',
+      'validate_draft',
       'SendMessage',
       'StructuredOutput',
     ]);
@@ -32,7 +33,7 @@ describe('post-writer loader smoke', () => {
 
     // Both platform guides inlined under the loader's "## <name>" header.
     expect(writer.systemPrompt).toContain('## x-content-guide');
-    expect(writer.systemPrompt).toContain('280 characters MAX per tweet');
+    expect(writer.systemPrompt).toContain('280 weighted chars per tweet');
     expect(writer.systemPrompt).toContain('## reddit-content-guide');
     expect(writer.systemPrompt).toContain('Target: 150–600 words');
     expect(writer.systemPrompt).toContain('## content-safety');

@@ -24,6 +24,7 @@ describe('community-manager loader smoke', () => {
     expect(cm.tools).toEqual([
       'find_threads',
       'draft_reply',
+      'validate_draft',
       'SendMessage',
       'StructuredOutput',
     ]);

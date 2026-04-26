@@ -98,7 +98,9 @@ describe('platform-config', () => {
     });
 
     it('returns the reply cap for reply kind', () => {
-      expect(getPlatformCharLimits('x', 'reply')).toBe(240);
+      // X reply shares the 280 platform cap; the 240 stylistic target
+      // lives in agent prose, not platform-config.
+      expect(getPlatformCharLimits('x', 'reply')).toBe(280);
       expect(getPlatformCharLimits('reddit', 'reply')).toBe(10_000);
     });
 

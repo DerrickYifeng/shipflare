@@ -128,7 +128,7 @@ describe('reply-hardening content validators', () => {
 
     for (let i = 0; i < 3; i++) {
       runAgentMock.mockResolvedValueOnce({
-        result: { replyText: 'b'.repeat(260), confidence: 0.8, strategy: 'data_add' },
+        result: { replyText: 'b'.repeat(290), confidence: 0.8, strategy: 'data_add' },
         usage: { costUsd: 0 },
       });
     }
