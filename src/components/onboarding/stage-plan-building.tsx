@@ -251,7 +251,7 @@ export function StagePlanBuilding({
       </h2>
       <p
         style={{
-          margin: '0 0 24px',
+          margin: '0 0 6px',
           fontSize: 15,
           lineHeight: 1.47,
           letterSpacing: '-0.224px',
@@ -271,6 +271,30 @@ export function StagePlanBuilding({
           {stateLabel}
         </span>{' '}
         {COPY.stage6.subSuffix}
+      </p>
+      <p
+        style={{
+          margin: '0 0 24px',
+          display: 'flex',
+          alignItems: 'baseline',
+          gap: 8,
+          fontSize: 13,
+          lineHeight: 1.4,
+          letterSpacing: '-0.08px',
+          color: 'var(--sf-fg-3)',
+        }}
+      >
+        <span
+          style={{
+            fontFamily: 'var(--sf-font-mono)',
+            fontSize: 13,
+            color: 'var(--sf-accent)',
+            letterSpacing: '-0.08px',
+          }}
+        >
+          {COPY.stage6.durationHint}
+        </span>
+        <span>{COPY.stage6.durationCaption}</span>
       </p>
 
       <SixStepAnimator

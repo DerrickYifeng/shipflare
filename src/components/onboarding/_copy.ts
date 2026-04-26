@@ -204,9 +204,11 @@ export const COPY = {
   },
   stage6: {
     kicker: 'Step 4 · Building plan',
-    title: 'Calibrating your plan',
-    subPrefix: 'Analyst is shaping a plan around a',
+    title: 'AI is calibrating your plan',
+    subPrefix: 'Our agents are shaping a plan around your',
     subSuffix: 'product.',
+    durationHint: '≈ 30s',
+    durationCaption: 'sit tight — six checks running in parallel',
     agentName: 'Analyst',
     timeoutMessage: 'This is taking longer than expected.',
     retryCta: 'Retry',
