@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Toggle } from '@/components/ui/toggle';
 import type { TodoItem } from '@/hooks/use-today';
+import { splitXTweets } from '@/lib/content/x-thread';
 
 interface PostCardProps {
   item: TodoItem;
@@ -86,8 +87,21 @@ export function PostCard({
     ? contentTypeBadge[item.calendarContentType]
     : null;
 
-  const charCount = (isEditing ? editBody : item.draftBody ?? '').length;
-  const showCharCount = item.platform === 'x' && (item.draftBody || isEditing);
+  // X posts can be a thread — the post-writer separates tweets with a
+  // blank line (`\n\n`), and the server-side validator splits on the
+  // same boundary to enforce the 280 cap per tweet. Mirror that split
+  // here so a valid thread renders as 5 tweets each ≤280 instead of one
+  // 1086-char block flagged red. Codepoint count is an approximation
+  // of twitter-text's weighted length (URLs=23, emoji=2, CJK=2 there);
+  // the persisted body is always weight-validated server-side, so the
+  // small UI mismatch is cosmetic.
+  const sourceBody = isEditing ? editBody : item.draftBody ?? '';
+  const isX = item.platform === 'x';
+  const xTweets = isX ? splitXTweets(sourceBody) : [];
+  const isXThread = xTweets.length > 1;
+  const showCharCount = isX && (item.draftBody || isEditing);
+  // Single-tweet count for the non-thread path + edit-mode footer.
+  const charCount = sourceBody.length;
 
   return (
     <div
@@ -127,16 +141,49 @@ export function PostCard({
 
       {/* Draft body preview */}
       {item.draftBody && !isEditing && (
-        <div className="bg-[#f5f5f7] rounded-[var(--radius-sf-md)] p-3 mb-3">
-          <p className="text-[14px] tracking-[-0.224px] text-sf-text-primary leading-relaxed whitespace-pre-wrap">
-            {item.draftBody}
-          </p>
-          {showCharCount && (
-            <p className={`font-mono text-[12px] tracking-[-0.12px] mt-2 tabular-nums ${charCountColor(charCount)}`}>
-              {charCount}/280
+        isXThread ? (
+          // Thread: render each tweet as its own surface with its own
+          // count + position pip. Mirrors how the post will actually be
+          // sent (one tweet per row). Single big block + total count was
+          // misleading — a 5-tweet thread at 5 × 240 chars looked like a
+          // hard-fail 1086/280 even though the validator passed it.
+          <div className="mb-3 flex flex-col gap-2">
+            {xTweets.map((tweet, i) => {
+              const len = tweet.length;
+              return (
+                <div
+                  key={i}
+                  className="bg-[#f5f5f7] rounded-[var(--radius-sf-md)] p-3"
+                >
+                  <div className="flex items-center justify-between gap-2 mb-1.5">
+                    <span className="font-mono text-[11px] tracking-[-0.11px] text-sf-text-tertiary uppercase">
+                      Tweet {i + 1} / {xTweets.length}
+                    </span>
+                    <span
+                      className={`font-mono text-[11px] tracking-[-0.11px] tabular-nums ${charCountColor(len)}`}
+                    >
+                      {len}/280
+                    </span>
+                  </div>
+                  <p className="text-[14px] tracking-[-0.224px] text-sf-text-primary leading-relaxed whitespace-pre-wrap">
+                    {tweet}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="bg-[#f5f5f7] rounded-[var(--radius-sf-md)] p-3 mb-3">
+            <p className="text-[14px] tracking-[-0.224px] text-sf-text-primary leading-relaxed whitespace-pre-wrap">
+              {item.draftBody}
             </p>
-          )}
-        </div>
+            {showCharCount && (
+              <p className={`font-mono text-[12px] tracking-[-0.12px] mt-2 tabular-nums ${charCountColor(charCount)}`}>
+                {charCount}/280
+              </p>
+            )}
+          </div>
+        )
       )}
 
       {/* No draft yet — show topic */}
@@ -161,9 +208,26 @@ export function PostCard({
             rows={4}
           />
           {showCharCount && (
-            <p className={`font-mono text-[12px] tracking-[-0.12px] mt-1 tabular-nums ${charCountColor(charCount)}`}>
-              {charCount}/280
-            </p>
+            isXThread ? (
+              // While editing a thread, show one count line per tweet so
+              // the user sees which segment is over the cap. The user
+              // separates tweets with a blank line; that's the same
+              // boundary the validator uses.
+              <div className="mt-1 flex flex-col gap-0.5">
+                {xTweets.map((tweet, i) => (
+                  <p
+                    key={i}
+                    className={`font-mono text-[11px] tracking-[-0.11px] tabular-nums ${charCountColor(tweet.length)}`}
+                  >
+                    Tweet {i + 1}/{xTweets.length}: {tweet.length}/280
+                  </p>
+                ))}
+              </div>
+            ) : (
+              <p className={`font-mono text-[12px] tracking-[-0.12px] mt-1 tabular-nums ${charCountColor(charCount)}`}>
+                {charCount}/280
+              </p>
+            )
           )}
           <div className="flex gap-2 mt-2">
             <Button onClick={handleSaveEdit}>Save</Button>
