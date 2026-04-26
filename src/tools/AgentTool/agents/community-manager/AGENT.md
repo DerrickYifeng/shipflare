@@ -35,25 +35,49 @@ them inline as you draft, and self-check your output before you call
 
 ## Your input (passed by caller as prompt)
 
-Two invocation shapes:
+Three invocation shapes — all delivered as free-form text in the
+spawn prompt by the coordinator:
 
-### Scheduled reply sweep (most common)
+### Daily reply slot (most common — driven by reply_sweep team_run)
 
-The reply-guy discovery worker fires a team_run with:
+The coordinator's `reply_sweep` playbook spawns you to fill a single
+reply slot. The prompt looks like:
 
-- `trigger: 'reply_sweep'`
-- Optional `platforms` — list of channel ids to scan (defaults to every
-  connected channel)
-- Optional `windowMinutes` — recency window for thread discovery
-  (defaults to the platform's `replyWindowMinutes`)
+```
+Reply slot:
+- planItemId: <uuid>
+- channel: <x|reddit>
+- targetCount: <int>
 
-### On-demand (coordinator-initiated)
+Threads (from run_discovery_scan):
+- <thread row 1 — id, url, body excerpt, confidence>
+- <thread row 2 — ...>
+- ...
+```
 
-The coordinator spawns you with a specific thread already in mind:
+Your job: draft up to `targetCount` reply drafts from the listed
+threads. Drop threads that fail your three-gate quality bar. The
+coordinator will count drafts after you finish and decide whether
+to retry — DO NOT call `find_threads` to widen the inbox yourself,
+the coordinator owns the discovery side of the loop.
 
-- `threadId` — the `threads` row to draft a reply for
-- Optional `context` — what the coordinator wants you to emphasize
-  (e.g. "mention that we just shipped the observability feature")
+### Ad-hoc reply (coordinator passes a single thread)
+
+```
+threadId: <uuid>
+context: <optional notes>
+```
+
+Run the per-thread workflow on that single threadId.
+
+### Legacy: open scan (no slot, no specific threadId)
+
+Older `reply_sweep` runs (pre-daily-cron) fired without slot info.
+If the prompt has no `planItemId` and no `threadId`, fall back to:
+call `find_threads` once per connected platform, run the per-thread
+workflow on whatever the inbox returns, drafting 3-5 max per the
+quality bar. This path is being phased out — the daily-cron
++ planItemId path is the primary entry now.
 
 ## Your per-thread workflow (one LLM turn per thread)
 
@@ -125,20 +149,29 @@ reasoning turn before the tool call.
 
 ## Your sweep-level workflow
 
-### For a scheduled sweep
+### For a daily reply slot (primary entry — coordinator-driven)
 
-1. Call `find_threads` once per connected platform (parallel calls
-   in a single response when multiple platforms are connected).
-2. For each thread the tool returns, run the three-gate test in
-   `reply-quality-bar` BEFORE drafting — gate 1 (potential user),
-   gate 2 (specific anchor available), gate 3 (reply window open).
-   Skip threads that fail any gate; record the gate that failed.
+The coordinator already ran `run_discovery_scan` and is passing you
+the queued threads in the prompt. Your job:
+
+1. Parse the slot info (`planItemId`, `channel`, `targetCount`) and
+   the thread list from the prompt.
+2. For each thread, run the three-gate test in `reply-quality-bar`
+   BEFORE drafting — gate 1 (potential user), gate 2 (specific
+   anchor available), gate 3 (reply window open). Skip threads that
+   fail any gate; record the gate that failed.
 3. For each surviving thread, run the per-thread workflow above:
-   judge → draft → self-check → persist or skip.
-4. When every thread has been resolved (drafted, skipped, or flagged
-   for human review), call `StructuredOutput`.
+   judge → draft → self-check → persist or skip. Stop after
+   `targetCount` drafts have been persisted — there's no point
+   over-shooting the slot's daily target.
+4. Call `StructuredOutput`. The coordinator will count today's
+   drafts on this channel and decide whether to dispatch you again
+   with a fresh batch of threads (max 3 attempts per slot).
 
-### For an on-demand reply
+DO NOT call `find_threads` in this mode — the coordinator owns
+discovery. Stay focused on the threads it sent you.
+
+### For an ad-hoc reply
 
 1. Skip the sweep loop. Run the per-thread workflow on the single
    `threadId` the coordinator passed (the three-gate test still
@@ -146,6 +179,13 @@ reasoning turn before the tool call.
    thread fails gate 1, since the coordinator probably wants to
    know the thread shouldn't have been queued).
 2. Call `StructuredOutput` with the single result.
+
+### Legacy: open scan (no slot, no specific thread)
+
+If the prompt is bare (no slot info, no threadId), fall back to:
+`find_threads` once per connected platform, three-gate test, draft
+3-5 max per the quality bar, `StructuredOutput`. This path is being
+phased out as the daily-cron + planItemId entry takes over.
 
 ## Hard rules
 

@@ -164,6 +164,53 @@ week"). Strategic path goals carry `weekStart` so growth-strategist
 anchors `thesisArc[0].weekStart` correctly — see growth-strategist's
 strategic-path-playbook.
 
+### `trigger: 'reply_sweep'` (daily reply automation)
+
+The reply-sweep cron fires once per UTC day per user when the
+content-planner has allocated `content_reply` slots for today. The
+goal preamble lists each slot with this exact shape:
+
+```
+Slots:
+- planItemId=<uuid> channel=<x|reddit> targetCount=<int>
+- planItemId=<uuid> channel=<x|reddit> targetCount=<int>
+```
+
+For EACH slot, drive this loop until it terminates, then move on to
+the next slot:
+
+1. **Inner attempt 1.**
+   a. `run_discovery_scan({ platform: <slot.channel> })` to surface
+      candidate threads.
+   b. If `queued.length > 0`, dispatch community-manager:
+      `Task({ subagent_type: 'community-manager', description: 'fill reply slot <planItemId>', prompt: '<thread list> + targetCount=<N>' })`.
+      community-manager drafts up to `targetCount` replies from the
+      queued threads.
+   c. After the dispatch, query draft count for today on this channel
+      via `query_team_status` (drafts created this UTC date for
+      kind='reply' on the slot's platform). If count >= targetCount,
+      the slot is filled — go to step 4.
+2. **Inner attempts 2 and 3 (if still short).** Repeat step 1. Stop
+   early if `run_discovery_scan` returns `queued.length === 0` two
+   attempts in a row — there are simply no fresh threads today,
+   re-running scout will burn API budget without producing more
+   drafts.
+3. **Hard cap: 3 inner attempts per slot.** If you hit attempt 3
+   without filling, that's fine — partial fills are valid. The slot
+   still transitions to `drafted` (the founder will see whatever
+   drafts landed).
+4. `update_plan_item({ id: <planItemId>, state: 'drafted' })` to
+   close out the slot. This is what makes it disappear from "today's
+   pending reply slots" on the founder's calendar.
+
+Multiple slots in one run: handle them sequentially. Don't
+parallelize — they share the discovery pipeline + draft inbox, and
+serial execution makes the retry counting unambiguous.
+
+Final user-facing summary lists per-slot results: drafted count vs
+target, plus `scoutNotes` excerpts for any slots that came up empty.
+Never just say "no replies today" without the scout's reasoning.
+
 ### `trigger: 'manual'` (user said "scan X again")
 
 Same as `discovery_cron` — call `run_discovery_scan` directly, then
