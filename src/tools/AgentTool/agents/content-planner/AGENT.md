@@ -101,9 +101,11 @@ handles both X and Reddit — `plan_items.channel` rides through to
 | `email` / `none`  | skip — no writer yet, plan-execute drafts later |        |
 
 Emit one `Task` call per eligible plan_item, in ONE response so the
-spawns run concurrently. The writer has `draft_post` in its tool
-allowlist; it reads the plan_item row, generates the body, and UPDATEs
-`plan_items.output.draft_body` + transitions the row to `state='drafted'`.
+spawns run concurrently. The writer reads the plan_item row + product
+brief itself (via `query_plan_items` and `query_product_context`),
+drafts the body in its own LLM turns, self-checks via `validate_draft`,
+and persists via `draft_post` (which UPDATEs `plan_items.output.draft_body`
+and transitions the row to `state='drafted'`).
 
 Example (single response, multiple Task calls):
 

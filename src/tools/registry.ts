@@ -32,6 +32,7 @@ import { queryLastWeekCompletionsTool } from './QueryLastWeekCompletionsTool/Que
 import { queryRecentMilestonesTool } from './QueryRecentMilestonesTool/QueryRecentMilestonesTool';
 import { queryMetricsTool } from './QueryMetricsTool/QueryMetricsTool';
 import { queryTeamStatusTool } from './QueryTeamStatusTool/QueryTeamStatusTool';
+import { queryProductContextTool } from './QueryProductContextTool/QueryProductContextTool';
 import { draftPostTool } from './DraftPostTool/DraftPostTool';
 import { findThreadsTool } from './FindThreadsTool/FindThreadsTool';
 import { draftReplyTool } from './DraftReplyTool/DraftReplyTool';
@@ -91,6 +92,7 @@ registry.register(queryLastWeekCompletionsTool);
 registry.register(queryRecentMilestonesTool);
 registry.register(queryMetricsTool);
 registry.register(queryTeamStatusTool);
+registry.register(queryProductContextTool);
 
 // ---------------------------------------------------------------------------
 // Phase E drafting tools (spec §9.1 + §11 Phase E). Flat snake_case

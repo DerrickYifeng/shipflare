@@ -1,90 +1,54 @@
-// draft_post — generate an X (or future-platform) post body for one
-// plan_items row and persist it.
+// draft_post — persist a post body that the post-writer agent has
+// already drafted (and validated via `validate_draft`) for one
+// `plan_items` row.
 //
-// Called by: post-writer (the single channel-aware writer agent). The
-// caller is spawned as a subagent; its Task prompt carries the `planItemId`.
-// The tool:
+// This used to call `sideQuery` itself with an inline X / Reddit system
+// prompt. That meant the platform reference docs (x-content-guide,
+// reddit-content-guide, content-safety) lived on the post-writer agent
+// but never reached the actual body generator — `sideQuery` ran in its
+// own isolated turn with only the short inline prompt. The result was
+// posts that ignored content-type rules, hashtag style, voice, etc.
+// We now mirror the reply flow: the agent owns drafting + self-checking
+// (with full references in its system prompt + `validate_draft`), and
+// this tool's only job is to persist the row.
 //
-//   1. Reads the plan_items row (scoped to userId + productId).
-//   2. Pulls product context (name, description, valueProp) for the
-//      draft prompt.
-//   3. Calls `sideQuery` with a channel-specific system prompt + user
-//      brief. Returns a single body string (tweet or thread-joined text).
-//   4. UPDATEs `plan_items.output.draft_body` + state='drafted'.
-//
-// The channel is derived from plan_items.channel; callers cannot override.
-// This keeps the tool honest: a writer spawned against a reddit plan_item
-// generates reddit-shaped copy, not X-shaped — surfaces mis-routing as
-// content mismatch rather than silent wrong-platform posts.
+// Side effects:
+//   1. Verifies the plan_item is owned by (userId, productId) and has
+//      kind='content_post' + a non-null `channel`.
+//   2. UPDATEs `plan_items.output.draft_body` (merging onto any prior
+//      keys) and flips state to 'drafted'. The `channel` is read from
+//      the plan_item row, never overridden by the caller — surfaces
+//      mis-routing as a state-machine error rather than a wrong-channel
+//      post going out.
 
 import { z } from 'zod';
 import { and, eq, sql } from 'drizzle-orm';
 import { buildTool } from '@/core/tool-system';
 import type { ToolDefinition } from '@/core/types';
-import { planItems, products } from '@/lib/db/schema';
-import { readDomainDeps, tryGet } from '@/tools/context-helpers';
-import {
-  sideQuery as defaultSideQuery,
-  type SideQueryOptions,
-} from '@/core/api-client';
-import type Anthropic from '@anthropic-ai/sdk';
-import {
-  runContentValidators,
-  buildRepairPrompt,
-  summarizeFailures,
-  type ContentValidatorFailure,
-  type ContentValidatorWarning,
-} from '@/lib/content/validators';
+import { planItems } from '@/lib/db/schema';
+import { readDomainDeps } from '@/tools/context-helpers';
 
 export const DRAFT_POST_TOOL_NAME = 'draft_post';
 
-// Per-channel system prompts. Kept short — the agent's own
-// system prompt (AGENT.md + inlined references) carries the bulk of the
-// platform guidance. This prompt is just enough to orient sideQuery's
-// isolated Anthropic call, which does NOT see the caller's system text.
-const X_SYSTEM_PROMPT =
-  'You are a staff writer for an indie product\'s X (Twitter) presence. ' +
-  'Draft ONE original post or short thread based on the brief. Respect: ' +
-  '280 chars per tweet (hard cap), #buildinpublic hashtag, first-person ' +
-  'voice, no corporate tone, no emoji spam (max 1-2 per tweet), no links ' +
-  'in tweet body (put links in first-reply if needed). Threads are 3-7 ' +
-  'tweets joined by a double newline in your output. A single tweet is ' +
-  'one body string. Do NOT mention reddit, subreddits, karma, or upvotes ' +
-  'without an explicit contrast marker (unlike/vs/instead of). Numeric ' +
-  'claims require a citation in the same sentence — if you don\'t have ' +
-  'one, rewrite qualitatively. Return ONLY the draft body, no preamble, ' +
-  'no JSON, no markdown fences.';
-
-const REDDIT_SYSTEM_PROMPT =
-  'You are a staff writer for an indie product\'s Reddit presence. ' +
-  'Draft ONE original post based on the brief. Respect: max 40,000 chars, ' +
-  'honest non-promotional tone, no self-promotion in the opening, provide ' +
-  'value before any product mention. Do NOT mention X/Twitter or tweets ' +
-  'without an explicit contrast marker. Numeric claims require a citation ' +
-  'in the same sentence. Return ONLY the post body (no title prefix, no ' +
-  'JSON, no markdown fences).';
-
-// Caller hints. Known keys feed buildUserBrief verbatim; unknown keys are
-// silently stripped (zod default) — earlier `.strict()` rejected runs where
-// the LLM helpfully passed `channel`/`phase`/`topic` from its own preamble,
-// burning a turn + ~600ms per draft on a self-recoverable mistake. We'd
-// rather drop a redundant key than spend an LLM round-trip teaching the
-// model the exact shape.
-const CONTEXT_SCHEMA = z
-  .object({
-    theme: z.string().optional(),
-    angle: z.string().optional(),
-    pillar: z.string().optional(),
-    voice: z.string().optional(),
-    topic: z.string().optional(),
-    targetSubreddit: z.string().optional(),
-  })
-  .partial();
+// Reddit's per-post body cap is 40,000 chars; X is 280 per tweet but a
+// thread can run up to 25 tweets joined by `\n\n`. The cap below is the
+// loosest of the two — each platform's hard rule is enforced by
+// `validate_draft` before the agent calls this tool.
+const DRAFT_BODY_MAX = 40_000;
 
 export const draftPostInputSchema = z
   .object({
     planItemId: z.string().min(1, 'planItemId is required'),
-    context: CONTEXT_SCHEMA.optional(),
+    draftBody: z
+      .string()
+      .min(1, 'draftBody cannot be empty')
+      .max(DRAFT_BODY_MAX, 'draftBody exceeds the Reddit-post ceiling'),
+    /**
+     * Optional rationale shown next to the draft in the founder's review
+     * UI. The post-writer fills this with a one-sentence summary of why
+     * the angle / hook works for the planned theme.
+     */
+    whyItWorks: z.string().max(500).optional(),
   })
   .strict();
 
@@ -94,82 +58,26 @@ export interface DraftPostResult {
   planItemId: string;
   draft_body: string;
   channel: string;
-  /**
-   * Validation summary for the persisted body. `failures` is always empty
-   * on success — the tool refuses to persist a draft with platform-hard
-   * failures. `warnings` may be non-empty (ShipFlare style); they're
-   * surfaced so post-writer / the founder can audit before approving.
-   */
-  validation: {
-    failures: ContentValidatorFailure[];
-    warnings: ContentValidatorWarning[];
-    repairAttempted: boolean;
-  };
 }
-
-interface DraftBriefInputs {
-  productName: string;
-  productDescription: string;
-  valueProp: string | null;
-  itemTitle: string;
-  itemDescription: string | null;
-  itemParams: Record<string, unknown>;
-  context: DraftPostInput['context'];
-}
-
-function buildUserBrief(inputs: DraftBriefInputs): string {
-  const lines: string[] = [];
-  lines.push(`Product: ${inputs.productName}`);
-  lines.push(`Description: ${inputs.productDescription}`);
-  if (inputs.valueProp) lines.push(`Value prop: ${inputs.valueProp}`);
-  lines.push('');
-  lines.push(`Plan item: ${inputs.itemTitle}`);
-  if (inputs.itemDescription) {
-    lines.push(`Item description: ${inputs.itemDescription}`);
-  }
-  if (inputs.itemParams && Object.keys(inputs.itemParams).length > 0) {
-    lines.push(`Item params: ${JSON.stringify(inputs.itemParams)}`);
-  }
-  if (inputs.context) {
-    const ctxPairs = Object.entries(inputs.context).filter(
-      ([, v]) => v !== undefined && v !== '',
-    );
-    if (ctxPairs.length > 0) {
-      lines.push('');
-      lines.push('Caller context:');
-      for (const [k, v] of ctxPairs) lines.push(`- ${k}: ${v}`);
-    }
-  }
-  lines.push('');
-  lines.push('Draft the post body now. Output only the body text.');
-  return lines.join('\n');
-}
-
-/** Extract the first text block from a sideQuery response. */
-function firstTextBlock(response: Anthropic.Messages.Message): string | null {
-  const block = response.content.find((b) => b.type === 'text');
-  if (!block || block.type !== 'text') return null;
-  return block.text.trim();
-}
-
-type SideQueryFn = (opts: SideQueryOptions) => Promise<Anthropic.Messages.Message>;
 
 export const draftPostTool: ToolDefinition<DraftPostInput, DraftPostResult> =
   buildTool({
     name: DRAFT_POST_TOOL_NAME,
     description:
-      'Generate the body text for a single content_post plan_item and ' +
-      'persist it to plan_items.output.draft_body. Pass the plan_item id ' +
-      'and optional context hints (theme, angle, pillar, voice). The ' +
-      'channel is read from the plan_items row — do NOT pass it. Safe to ' +
-      'call in parallel for distinct plan_item ids.',
+      'Persist a post body the writer has already drafted + validated to ' +
+      'a `plan_items` row. Pass the `planItemId` (from the spawn prompt), ' +
+      'the final `draftBody` text, and an optional `whyItWorks` blurb. ' +
+      'The tool reads `channel` from the plan_item row (never overridden) ' +
+      'and merges the body into `plan_items.output.draft_body`, flipping ' +
+      'state to `drafted`. Call this AFTER `validate_draft` returns ok — ' +
+      'no validation runs here. Safe to call in parallel for distinct ' +
+      'plan_item ids.',
     inputSchema: draftPostInputSchema,
     isConcurrencySafe: true,
     isReadOnly: false,
     async execute(input, ctx): Promise<DraftPostResult> {
       const { db, userId, productId } = readDomainDeps(ctx);
 
-      // 1. Load the plan_item, scoped to (userId, productId).
       const itemRows = await db
         .select({
           id: planItems.id,
@@ -177,9 +85,6 @@ export const draftPostTool: ToolDefinition<DraftPostInput, DraftPostResult> =
           productId: planItems.productId,
           channel: planItems.channel,
           kind: planItems.kind,
-          title: planItems.title,
-          description: planItems.description,
-          params: planItems.params,
           output: planItems.output,
         })
         .from(planItems)
@@ -206,142 +111,22 @@ export const draftPostTool: ToolDefinition<DraftPostInput, DraftPostResult> =
       const channel = item.channel;
       if (!channel) {
         throw new Error(
-          `draft_post: plan_item ${input.planItemId} has no channel set; ` +
-            `cannot pick a platform-specific drafting prompt`,
+          `draft_post: plan_item ${input.planItemId} has no channel set`,
         );
       }
 
-      const systemPrompt =
-        channel === 'x'
-          ? X_SYSTEM_PROMPT
-          : channel === 'reddit'
-            ? REDDIT_SYSTEM_PROMPT
-            : null;
-      if (systemPrompt === null) {
-        throw new Error(
-          `draft_post: unsupported channel "${channel}" — only x and ` +
-            `reddit are wired for drafting. Add a system prompt to ` +
-            `src/tools/DraftPostTool/DraftPostTool.ts to extend.`,
-        );
-      }
-
-      // 2. Product context.
-      const productRows = await db
-        .select({
-          name: products.name,
-          description: products.description,
-          valueProp: products.valueProp,
-        })
-        .from(products)
-        .where(and(eq(products.id, productId), eq(products.userId, userId)))
-        .limit(1);
-      const product = productRows[0];
-      if (!product) {
-        throw new Error(
-          `draft_post: product ${productId} not found for user ${userId}`,
-        );
-      }
-
-      // 3. sideQuery. Callers in tests inject a stub via ctx.get('sideQuery').
-      const sideQueryFn = tryGet<SideQueryFn>(ctx, 'sideQuery') ?? defaultSideQuery;
-
-      const userBrief = buildUserBrief({
-        productName: product.name,
-        productDescription: product.description,
-        valueProp: product.valueProp,
-        itemTitle: item.title,
-        itemDescription: item.description,
-        itemParams: (item.params as Record<string, unknown>) ?? {},
-        context: input.context,
-      });
-
-      const response = await sideQueryFn({
-        model: 'claude-haiku-4-5-20251001',
-        system: systemPrompt,
-        messages: [{ role: 'user', content: userBrief }],
-        maxTokens: 2048,
-        signal: ctx.abortSignal,
-      });
-
-      let draftBody = firstTextBlock(response);
-      if (!draftBody) {
-        throw new Error(
-          `draft_post: sideQuery returned no text block for plan_item ` +
-            `${input.planItemId}`,
-        );
-      }
-
-      // 3a. Validate before persisting. The same content validators that
-      // gate the reply-hardening pipeline (length with twitter-text
-      // weighting on X, sibling-platform leak, hallucinated stats) run
-      // here so we don't write a body the platform will reject. One
-      // repair pass on failure — match the reply-hardening budget so
-      // `draft_post` doesn't burn unbounded sideQuery turns on a bad
-      // brief. After the repair attempt we persist whatever we have and
-      // surface the validation status to the caller.
-      let validation = runContentValidators({
-        text: draftBody,
-        platform: channel,
-        kind: 'post',
-      });
-      let repairAttempted = false;
-      if (!validation.ok) {
-        repairAttempted = true;
-        const repairPrompt = buildRepairPrompt(
-          validation.failures,
-          channel,
-          validation.warnings,
-        );
-        const repairResponse = await sideQueryFn({
-          model: 'claude-haiku-4-5-20251001',
-          system: systemPrompt,
-          messages: [
-            { role: 'user', content: userBrief },
-            { role: 'assistant', content: draftBody },
-            {
-              role: 'user',
-              content:
-                `${repairPrompt}\n\nRewrite the draft. Return only the body text.`,
-            },
-          ],
-          maxTokens: 2048,
-          signal: ctx.abortSignal,
-        });
-        const repaired = firstTextBlock(repairResponse);
-        if (repaired) {
-          draftBody = repaired;
-          validation = runContentValidators({
-            text: draftBody,
-            platform: channel,
-            kind: 'post',
-          });
-        }
-      }
-      if (!validation.ok) {
-        throw new Error(
-          `draft_post: draft for plan_item ${input.planItemId} failed ` +
-            `platform validation after repair pass — ` +
-            summarizeFailures(validation.failures),
-        );
-      }
-
-      // 4. Persist to plan_items.output.draft_body.
-      // Schema carries a single jsonb `output` column (no dedicated
-      // draft_body text column). We merge — keeping any prior keys
-      // (e.g. `confidence`, `whyItWorks` from future validators) —
-      // rather than overwriting, so downstream tools can accrete on
-      // the same row.
+      // Merge — keeping any prior keys (`confidence`, etc.) — rather than
+      // overwriting, so downstream tools can accrete on the same row.
       const prevOutput =
         (item.output as Record<string, unknown> | null | undefined) ?? {};
-      const nextOutput = {
+      const nextOutput: Record<string, unknown> = {
         ...prevOutput,
-        draft_body: draftBody,
+        draft_body: input.draftBody,
         channel,
-        validation: {
-          warnings: validation.warnings,
-          repairAttempted,
-        },
       };
+      if (input.whyItWorks !== undefined) {
+        nextOutput.whyItWorks = input.whyItWorks;
+      }
 
       await db
         .update(planItems)
@@ -360,17 +145,8 @@ export const draftPostTool: ToolDefinition<DraftPostInput, DraftPostResult> =
 
       return {
         planItemId: input.planItemId,
-        draft_body: draftBody,
+        draft_body: input.draftBody,
         channel,
-        validation: {
-          // We only reach this point with `validation.ok === true`, so
-          // `failures` is always empty here — included in the return shape
-          // so callers can rely on the property existing without optional
-          // chaining.
-          failures: [],
-          warnings: validation.warnings,
-          repairAttempted,
-        },
       };
     },
   });
