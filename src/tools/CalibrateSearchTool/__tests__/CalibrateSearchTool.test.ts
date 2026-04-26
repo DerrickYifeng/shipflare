@@ -161,6 +161,8 @@ describe('calibrate_search_strategy tool', () => {
       generatedAt: string;
       observedPrecision: number;
       reachedTarget: boolean;
+      turnsUsed: number;
+      sampleSize: number;
     };
     expect(parsed.platform).toBe('x');
     expect(parsed.queries).toEqual([
@@ -170,6 +172,8 @@ describe('calibrate_search_strategy tool', () => {
     expect(parsed.schemaVersion).toBe(2);
     expect(parsed.observedPrecision).toBe(0.75);
     expect(parsed.reachedTarget).toBe(true);
+    expect(parsed.turnsUsed).toBe(8);
+    expect(parsed.sampleSize).toBe(24);
     expect(typeof parsed.generatedAt).toBe('string');
   });
 

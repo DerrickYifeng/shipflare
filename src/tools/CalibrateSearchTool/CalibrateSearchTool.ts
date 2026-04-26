@@ -60,10 +60,14 @@ export interface CalibrateSearchStrategyResult {
   reason?: string;
   platform: 'x' | 'reddit';
   queries: string[];
-  observedPrecision: number;
-  reachedTarget: boolean;
-  turnsUsed: number;
-  sampleSize: number;
+  /** Present only when `saved` is true. */
+  observedPrecision?: number;
+  /** Present only when `saved` is true. */
+  reachedTarget?: boolean;
+  /** Present only when `saved` is true. */
+  turnsUsed?: number;
+  /** Present only when `saved` is true. */
+  sampleSize?: number;
   rationale: string;
   costUsd: number;
 }
@@ -119,10 +123,6 @@ export const calibrateSearchStrategyTool: ToolDefinition<
         reason: `no_${platform}_channel`,
         platform,
         queries: [],
-        observedPrecision: 0,
-        reachedTarget: false,
-        turnsUsed: 0,
-        sampleSize: 0,
         rationale: '',
         costUsd: 0,
       };
