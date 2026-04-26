@@ -35,6 +35,7 @@ import { TodayWelcomeRibbon } from '@/components/today/today-welcome-ribbon';
 import { TacticalProgressCard } from '@/components/today/tactical-progress-card';
 import { ReplyCard } from './_components/reply-card';
 import { PostCard } from './_components/post-card';
+import { ReplySlotCard } from './_components/reply-slot-card';
 import {
   SourceFilterRail,
   type SourceFilterEntry,
@@ -103,6 +104,7 @@ function TodayContentInner({
 }: TodayContentInnerProps) {
   const {
     items,
+    replySlots,
     stats,
     isLoading,
     approve: rawApprove,
@@ -347,6 +349,25 @@ function TodayContentInner({
               : undefined
           }
         >
+          {/* Daily reply-session progress (one row per channel slot
+              scheduled for today). Sits above the per-thread reply
+              cards so the founder sees the day's target + drafted
+              count before scrolling through drafts. */}
+          {replySlots.length > 0 ? (
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 8,
+                marginBottom: 12,
+              }}
+            >
+              {replySlots.map((slot) => (
+                <ReplySlotCard key={slot.id} slot={slot} />
+              ))}
+            </div>
+          ) : null}
+
           {filteredReplies.length === 0 ? (
             <EmptyState
               title={

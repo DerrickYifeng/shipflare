@@ -112,9 +112,29 @@ function deriveCardFormat(item: RawTodoItem): 'post' | 'reply' {
   return item.source === 'calendar' ? 'post' : 'reply';
 }
 
+/**
+ * Daily reply-slot progress row (one per `content_reply` plan_item
+ * scheduled for today). Surfaced separately from the post + reply
+ * cards so the UI can render a single "Today's reply session: Y of N
+ * drafted" progress card per channel — rather than showing N empty
+ * placeholder cards before the daily cron has filled them.
+ */
+export interface ReplySlot {
+  id: string;
+  channel: string;
+  scheduledAt: string;
+  targetCount: number;
+  draftedToday: number;
+  state: 'planned' | 'drafted' | 'completed';
+}
+
 interface TodayResponse {
   items: RawTodoItem[];
   stats: TodayStats;
+  /** Today's reply-slot progress rows. Always present in the response;
+   *  empty array when the user has no `content_reply` slots scheduled
+   *  for today (channelMix.x.repliesPerDay is null/0/omitted). */
+  replySlots?: ReplySlot[];
   /** True iff the user has at least one plan_items row (any state). Drives
    *  the Today-level FirstRun gate — distinguishes "no plan yet" from
    *  "plan exists, everything handled today". */
@@ -223,6 +243,7 @@ export function useToday() {
 
   return {
     items,
+    replySlots: data?.replySlots ?? [],
     stats: data?.stats ?? { published_yesterday: 0, pending_count: 0, acted_today: 0 },
     // Fall back to items.length > 0 before the first hydration so the
     // hook stays honest when /api/today responds without the flag (e.g.

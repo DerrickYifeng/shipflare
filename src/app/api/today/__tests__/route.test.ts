@@ -5,12 +5,15 @@ vi.mock('@/lib/auth', () => ({
   auth: async () => (authUserId ? { user: { id: authUserId } } : null),
 }));
 
-// Three query paths fan out from GET:
-//   (a) pending plan_items list  — fields include `output` (no `anyItems`)
-//   (b) pending drafts ⨯ threads — fields include `replyBody`
-//   (c) stats aggregate           — fields include `anyItems`
-// The mock dispatches on field presence so the route-level order doesn't
-// couple the test to the implementation's call sequence.
+// Five query paths fan out from GET (in implementation order):
+//   (a) pending plan_items list           — fields include `output`
+//   (b) pending drafts ⨯ threads           — fields include `replyBody`
+//   (c) today's content_reply slot rows    — fields include `params`
+//   (d) today's drafts-by-channel count    — fields are exactly
+//                                            { platform, createdAt }
+//   (e) stats aggregate                    — fields include `anyItems`
+// The mock dispatches on field presence so the route-level order
+// doesn't couple the test to the implementation's call sequence.
 type PlanRow = {
   id: string;
   kind: string;
@@ -50,9 +53,22 @@ type StatsRow = {
   planPending: number;
   anyItems: number;
 };
+type ReplySlotRow = {
+  id: string;
+  channel: string | null;
+  state: string;
+  scheduledAt: Date;
+  params: Record<string, unknown> | null;
+};
+type DraftCountRow = {
+  platform: string | null;
+  createdAt: Date;
+};
 
 let planRows: PlanRow[] = [];
 let draftRows: DraftJoinRow[] = [];
+let replySlotRows: ReplySlotRow[] = [];
+let draftCountRows: DraftCountRow[] = [];
 let statsRow: StatsRow = {
   publishedYesterday: 0,
   actedToday: 0,
@@ -66,6 +82,12 @@ vi.mock('@/lib/db', () => ({
       const fields = Object.keys(projection);
       const isStats = fields.includes('anyItems');
       const isDrafts = fields.includes('replyBody');
+      const isReplySlot =
+        fields.includes('params') && fields.includes('scheduledAt');
+      const isDraftCount =
+        fields.length === 2 &&
+        fields.includes('platform') &&
+        fields.includes('createdAt');
 
       // Stats aggregate: `.from(...).where(...)` — awaited directly.
       if (isStats) {
@@ -74,7 +96,8 @@ vi.mock('@/lib/db', () => ({
         };
       }
 
-      // Drafts ⨯ threads: `.from(...).innerJoin(...).where(...).orderBy(...)`.
+      // Drafts ⨯ threads (full pendingDrafts list):
+      // `.from(...).innerJoin(...).where(...).orderBy(...)`.
       if (isDrafts) {
         return {
           from: () => ({
@@ -82,6 +105,31 @@ vi.mock('@/lib/db', () => ({
               where: () => ({
                 orderBy: () => Promise.resolve(draftRows),
               }),
+            }),
+          }),
+        };
+      }
+
+      // Today's draft-count rows (drafts ⨯ threads, no orderBy):
+      // `.from(drafts).innerJoin(threads, ...).where(...)` — awaited
+      // directly. Used to resolve "drafted Y of N" per slot channel.
+      if (isDraftCount) {
+        return {
+          from: () => ({
+            innerJoin: () => ({
+              where: () => Promise.resolve(draftCountRows),
+            }),
+          }),
+        };
+      }
+
+      // Today's content_reply slots:
+      // `.from(planItems).where(...).orderBy(...)`.
+      if (isReplySlot) {
+        return {
+          from: () => ({
+            where: () => ({
+              orderBy: () => Promise.resolve(replySlotRows),
             }),
           }),
         };
@@ -122,6 +170,8 @@ beforeEach(() => {
   authUserId = 'user-1';
   planRows = [];
   draftRows = [];
+  replySlotRows = [];
+  draftCountRows = [];
   statsRow = {
     publishedYesterday: 0,
     actedToday: 0,
@@ -414,5 +464,82 @@ describe('GET /api/today', () => {
     expect(body.hasAnyPlanItems).toBe(true);
     expect(body.stats.published_yesterday).toBe(2);
     expect(body.stats.acted_today).toBe(1);
+  });
+
+  it('surfaces today\'s content_reply slots with progress, dropping them from items[]', async () => {
+    const now = new Date();
+    replySlotRows = [
+      {
+        id: 'slot-x-1',
+        channel: 'x',
+        state: 'drafted',
+        scheduledAt: now,
+        params: { targetCount: 5 },
+      },
+    ];
+    draftCountRows = [
+      { platform: 'x', createdAt: now },
+      { platform: 'x', createdAt: now },
+      { platform: 'x', createdAt: now },
+    ];
+
+    const { GET } = await import('../route');
+    const res = await GET();
+    const body = (await res.json()) as {
+      items: unknown[];
+      replySlots: Array<{
+        id: string;
+        channel: string;
+        targetCount: number;
+        draftedToday: number;
+        state: string;
+      }>;
+    };
+
+    expect(body.replySlots).toHaveLength(1);
+    expect(body.replySlots[0]).toEqual({
+      id: 'slot-x-1',
+      channel: 'x',
+      scheduledAt: now.toISOString(),
+      targetCount: 5,
+      draftedToday: 3,
+      state: 'drafted',
+    });
+    // content_reply rows must NOT also appear in items[].
+    expect(body.items).toEqual([]);
+  });
+
+  it('skips reply slots with missing/zero targetCount', async () => {
+    const now = new Date();
+    replySlotRows = [
+      {
+        id: 'slot-no-target',
+        channel: 'x',
+        state: 'planned',
+        scheduledAt: now,
+        params: {},
+      },
+      {
+        id: 'slot-zero-target',
+        channel: 'x',
+        state: 'planned',
+        scheduledAt: now,
+        params: { targetCount: 0 },
+      },
+    ];
+
+    const { GET } = await import('../route');
+    const res = await GET();
+    const body = (await res.json()) as {
+      replySlots: unknown[];
+    };
+    expect(body.replySlots).toEqual([]);
+  });
+
+  it('returns replySlots: [] when the user has no reply slots scheduled today', async () => {
+    const { GET } = await import('../route');
+    const res = await GET();
+    const body = (await res.json()) as { replySlots: unknown[] };
+    expect(body.replySlots).toEqual([]);
   });
 });

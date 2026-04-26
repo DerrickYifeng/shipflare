@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, lt, sql } from 'drizzle-orm';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { drafts, planItems, threads } from '@/lib/db/schema';
@@ -112,6 +112,30 @@ function readDraftBody(output: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
+/** Extract `targetCount` from `plan_items.params` without trusting its shape. */
+function readTargetCount(params: unknown): number | null {
+  if (params === null || typeof params !== 'object') return null;
+  const value = (params as Record<string, unknown>).targetCount;
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.trunc(value)
+    : null;
+}
+
+/**
+ * Today-page reply slot: a `content_reply` plan_item scheduled for
+ * today (UTC) with a positive `targetCount`. Surfaced separately from
+ * the post + draft cards so the UI can render a "Today's reply session:
+ * Y of N drafted" progress card instead of an empty placeholder.
+ */
+export interface ReplySlotRow {
+  id: string;
+  channel: string;
+  scheduledAt: string;
+  targetCount: number;
+  draftedToday: number;
+  state: 'planned' | 'drafted' | 'completed';
+}
+
 export async function GET() {
   const session = await auth();
   if (!session?.user?.id) {
@@ -181,6 +205,63 @@ export async function GET() {
     )
     .orderBy(desc(drafts.createdAt));
 
+  // ------------------------------------------------------------------
+  // 3) Today's reply slots (`content_reply` plan_items with a positive
+  //    targetCount, scheduled for today's UTC window). Surface these
+  //    so the UI can show "Today's reply session: Y of N drafted"
+  //    progress separately from the per-thread reply cards.
+  // ------------------------------------------------------------------
+  const todayReplySlotRows = await db
+    .select({
+      id: planItems.id,
+      channel: planItems.channel,
+      state: planItems.state,
+      scheduledAt: planItems.scheduledAt,
+      params: planItems.params,
+    })
+    .from(planItems)
+    .where(
+      and(
+        eq(planItems.userId, userId),
+        eq(planItems.kind, 'content_reply'),
+        gte(planItems.scheduledAt, todayStart),
+        lt(planItems.scheduledAt, todayEnd),
+        inArray(planItems.state, ['planned', 'drafted', 'completed']),
+      ),
+    )
+    .orderBy(planItems.scheduledAt);
+
+  // Count drafts created today on the relevant channel(s) so each
+  // slot can render its "drafted Y of N" progress without the client
+  // re-counting on every render. We count by (userId, draftType,
+  // platform-of-thread, createdAt::date) — drafts join to threads to
+  // resolve platform.
+  const todayDraftRows = todayReplySlotRows.length === 0
+    ? []
+    : await db
+        .select({
+          platform: threads.platform,
+          createdAt: drafts.createdAt,
+        })
+        .from(drafts)
+        .innerJoin(threads, eq(drafts.threadId, threads.id))
+        .where(
+          and(
+            eq(drafts.userId, userId),
+            eq(drafts.draftType, 'reply'),
+            gte(drafts.createdAt, todayStart),
+            lt(drafts.createdAt, todayEnd),
+          ),
+        );
+  const draftCountsByChannel = todayDraftRows.reduce<Record<string, number>>(
+    (acc, row) => {
+      const key = row.platform ?? '';
+      acc[key] = (acc[key] ?? 0) + 1;
+      return acc;
+    },
+    {},
+  );
+
   // Stats — single aggregate round-trip. Yesterday completions, today
   // completions+skips, and the pending plan_items count.
   //
@@ -216,21 +297,20 @@ export async function GET() {
     .from(planItems)
     .where(eq(planItems.userId, userId));
 
-  // Map plan_items → TodoItem rows. Drop `content_reply` plan_items
-  // that have no draft body — those are placeholder slots the planner
-  // scheduled for a reply that nobody has drafted yet. They render as
-  // empty cards in the UI (no thread context, no draft text), and the
-  // user can't approve / edit / skip them in any useful way until a
-  // body lands. Exposing them is pure noise; the actual reply drafts
-  // (community-manager output) come through the `pendingDrafts` path
-  // below with full thread context.
+  // Map plan_items → TodoItem rows. `content_reply` plan_items are
+  // ALWAYS dropped from the items[] feed — they're slots, not cards.
+  // Today's slots surface separately via the `replySlots` field so the
+  // UI can render a single "Today's reply session: Y of N drafted"
+  // progress card instead of empty placeholder cards. The actual reply
+  // bodies (community-manager output) flow through the `pendingDrafts`
+  // path below with full thread context.
   const planRows: TodoItemRow[] = pendingPlan
     .map((row) => {
       const draftBody = readDraftBody(row.output);
       return { row, draftBody };
     })
-    .filter(({ row, draftBody }) => {
-      if (row.kind === 'content_reply' && !draftBody) return false;
+    .filter(({ row }) => {
+      if (row.kind === 'content_reply') return false;
       return true;
     })
     .map(({ row, draftBody }) => ({
@@ -331,11 +411,35 @@ export async function GET() {
   const merged = [...replyRows, ...planRows];
   const items = merged.map(({ _sortKey: _sk, ...rest }) => rest);
 
+  // Build today's reply-slot progress rows for the UI. `state` only
+  // takes 'planned' | 'drafted' | 'completed' here — the query already
+  // filtered to those — but we narrow defensively in case the schema
+  // adds new states later.
+  const replySlots: ReplySlotRow[] = todayReplySlotRows
+    .map((row) => {
+      const target = readTargetCount(row.params);
+      if (!row.channel || target == null || target <= 0) return null;
+      const slotState: ReplySlotRow['state'] =
+        row.state === 'planned' || row.state === 'drafted' || row.state === 'completed'
+          ? row.state
+          : 'planned';
+      return {
+        id: row.id,
+        channel: row.channel,
+        scheduledAt: row.scheduledAt.toISOString(),
+        targetCount: target,
+        draftedToday: draftCountsByChannel[row.channel] ?? 0,
+        state: slotState,
+      };
+    })
+    .filter((s): s is ReplySlotRow => s !== null);
+
   const planPending = planStats?.planPending ?? 0;
   const anyPlanItems = (planStats?.anyItems ?? 0) > 0;
 
   return NextResponse.json({
     items,
+    replySlots,
     // First-run gate: "any plan items" OR "any reply drafts in flight"
     // counts as having started the loop. Otherwise users who connect X,
     // scan once, and get a reply draft before the first tactical plan
