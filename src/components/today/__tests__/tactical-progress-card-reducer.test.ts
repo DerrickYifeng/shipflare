@@ -80,4 +80,41 @@ describe('reduceToolProgress', () => {
     expect(next.ticker?.message).toBe('doing a thing 5/10');
     expect(next.ticker?.toolName).toBe('some_future_tool');
   });
+
+  it('routes calibrate_search_strategy events keyed by metadata.platform when present', () => {
+    const event: ToolProgressEventInput = {
+      type: 'tool_progress',
+      toolName: 'calibrate_search_strategy',
+      callId: 'c1',
+      message: 'Round 5/60',
+      metadata: { platform: 'x', round: 5, maxTurns: 60 },
+      ts: 1000,
+    };
+    const next = reduceToolProgress(empty, event);
+    expect(next.calibration['x']).toBeDefined();
+    expect(next.calibration['default']).toBeUndefined();
+    expect(next.calibration['x']!.platform).toBe('x');
+  });
+
+  it('drops out-of-order ticker events even when toolName + callId differ', () => {
+    const newer: ToolProgressEventInput = {
+      type: 'tool_progress',
+      toolName: 'tool_a',
+      callId: 'c1',
+      message: 'A new',
+      ts: 5000,
+    };
+    const olderFromOtherTool: ToolProgressEventInput = {
+      type: 'tool_progress',
+      toolName: 'tool_b',
+      callId: 'c2',
+      message: 'B old',
+      ts: 4000,
+    };
+    const afterNewer = reduceToolProgress(empty, newer);
+    const afterOlder = reduceToolProgress(afterNewer, olderFromOtherTool);
+    // The older B event must NOT clobber the newer A event in the ticker slot.
+    expect(afterOlder.ticker?.message).toBe('A new');
+    expect(afterOlder.ticker?.toolName).toBe('tool_a');
+  });
 });

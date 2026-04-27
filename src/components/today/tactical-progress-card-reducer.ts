@@ -122,7 +122,7 @@ export function reduceToolProgress(
     };
   }
 
-  if (state.ticker && state.ticker.callId === event.callId && state.ticker.ts >= event.ts) {
+  if (state.ticker && state.ticker.ts >= event.ts) {
     return state;
   }
   return {

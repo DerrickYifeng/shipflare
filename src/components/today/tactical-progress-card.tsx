@@ -67,7 +67,6 @@ interface TeamRunRef {
 interface ProgressSnapshot {
   tactical: TacticalSnapshot;
   teamRun: TeamRunRef | null;
-  calibration: { platforms: { platform: string; status: string; precision: number | null; round: number }[] };
 }
 
 /* ─── View state ─────────────────────────────────────────────────────── */
@@ -91,6 +90,12 @@ const INITIAL_VIEW: ViewState = {
   snapshotLoaded: false,
 };
 
+// Seeds the legacy ViewState from the REST snapshot. Note: this does NOT
+// hydrate toolProgress.calibration — calibration rows are fed exclusively
+// by live SSE `tool_progress` events, so a user reloading mid-calibration
+// sees an empty row until the next strategist turn lands an event. This
+// is a deliberate trade-off; the snapshot path is being phased out for
+// calibration display in favor of the unified tool_progress channel.
 function seedFromSnapshot(state: ViewState, snap: ProgressSnapshot): ViewState {
   return {
     ...state,
@@ -335,6 +340,18 @@ export function TacticalProgressCard() {
     }
   }, [view.tactical.status]);
 
+  // Schedule a re-render at the end of the ticker's 30s TTL so visibility
+  // re-evaluates and the card can self-hide if nothing else is in flight.
+  // Without this, the card stays pinned past the TTL until some unrelated
+  // state change happens to trigger a re-render.
+  useEffect(() => {
+    if (!toolProgress.ticker) return;
+    const expiresIn = toolProgress.ticker.ts + TICKER_TTL_MS - Date.now();
+    if (expiresIn <= 0) return; // already expired; nothing to schedule
+    const t = window.setTimeout(() => forceTick((n) => n + 1), expiresIn + 100);
+    return () => window.clearTimeout(t);
+  }, [toolProgress.ticker]);
+
   const fromOnboarding = fromOnboardingSession || fromOnboardingQuery;
   const visible = useMemo(
     () =>
@@ -373,7 +390,7 @@ export function TacticalProgressCard() {
       }}
     >
       {showTactical && <TacticalSection tactical={view.tactical} />}
-      <CalibrationSection rows={calibrationRows} hasTacticalDivider={showTactical} />
+      <CalibrationSection rows={calibrationRows} hasDivider={showTactical} />
       <DiscoverySection rows={discoveryRows} hasDivider={showTactical || calibrationRows.length > 0} />
       <ActivityTicker
         row={toolProgress.ticker}
@@ -568,17 +585,17 @@ function PulsingDot() {
 
 function CalibrationSection({
   rows,
-  hasTacticalDivider,
+  hasDivider,
 }: {
   rows: CalibrationRow[];
-  hasTacticalDivider: boolean;
+  hasDivider: boolean;
 }) {
   if (rows.length === 0) return null;
   return (
     <div
       style={{
         padding: '16px 20px',
-        borderTop: hasTacticalDivider ? '1px solid rgba(0,0,0,0.06)' : undefined,
+        borderTop: hasDivider ? '1px solid rgba(0,0,0,0.06)' : undefined,
       }}
     >
       <OnbMono style={{ marginBottom: 12, display: 'inline-block' }}>
