@@ -113,13 +113,20 @@ If no channels are connected, skip steps 2-3 and tell the user "Connect X to see
 
 The discovery-agent returns a StructuredOutput with `topQueued` (top-N by engagement-weighted score). Read it directly; do not re-query the threads table.
 
-**Step 3 — Drafts.** If the discovery-agent's `queued > 0`, dispatch community-manager on the top 3 from `topQueued`:
+**Step 3 — Drafts.** If the discovery-agent's `queued > 0`, dispatch community-manager on the top **N** from `topQueued`, where **N comes from today's `content_reply` slot's `targetCount`** (the founder's strategic-path-declared `repliesPerDay` for the primary channel). Falling back to a hardcoded 3 leaves the founder's stated reply target unmet on day one.
+
+Procedure:
+
+1. Call `query_plan_items({ status: ['planned'] })` and find today's slot — the row whose `kind === 'content_reply'`, `channel === '<primary>'`, and `scheduledAt` falls in today's UTC window.
+2. Read `params.targetCount` (an integer). If the slot is missing or `targetCount` isn't an integer, default `N = 3`.
+3. Compute `N = min(targetCount, topQueued.length)` — never request more drafts than candidates the agent surfaced.
+4. Dispatch community-manager:
 
 ```
 Task({
   subagent_type: 'community-manager',
-  description: 'draft top-3 replies',
-  prompt: <serialize the top 3 entries from topQueued as a thread list>
+  description: 'draft top-N kickoff replies',
+  prompt: <serialize the top N entries from topQueued as a thread list> + 'targetCount=<N>'
 })
 ```
 
@@ -135,7 +142,7 @@ Final user-facing summary lists the artifacts:
 Daily discovery sweep. For each platform that has a connected channel and a discovery-agent path (X for v1; Reddit is deferred), dispatch the discovery-agent and then community-manager on the top results:
 
 1. For X (and only X for v1): `Task({ subagent_type: 'discovery-agent', description: 'daily X discovery', prompt: 'trigger: discovery_cron\nmaxResults: 10' })`. The agent returns a StructuredOutput with `queued`, `topQueued`, and `scoutNotes`.
-2. If `queued > 0`, dispatch community-manager on the top 3 from `topQueued`: `Task({ subagent_type: 'community-manager', description: 'draft top-3 replies', prompt: <serialize the top 3> })`.
+2. If `queued > 0`, look up today's `content_reply` slot for the platform via `query_plan_items({ status: ['planned'] })` (filter to `kind === 'content_reply'` AND today's UTC scheduledAt) and read `params.targetCount`. Compute `N = min(targetCount ?? 3, topQueued.length)`. Dispatch community-manager on the top N: `Task({ subagent_type: 'community-manager', description: 'draft top-N replies', prompt: <serialize the top N> + 'targetCount=<N>' })`.
 3. If `queued === 0`, your final reply quotes the agent's `scoutNotes` — "Today's scan: <scoutNotes>". Do NOT just say "no relevant conversations" without the reasoning.
 
 Do NOT dispatch content-planner on a `discovery_cron` trigger — weekly planning is owned by a separate weekly cron.

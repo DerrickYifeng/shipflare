@@ -2,8 +2,11 @@ import { z } from 'zod';
 
 /**
  * StructuredOutput shape the discovery-agent emits at the end of its run.
- * The coordinator reads `topQueued` to dispatch community-manager on the
- * top-3 without re-querying the threads table.
+ * The coordinator reads `topQueued` to dispatch community-manager without
+ * re-querying the threads table. Cap is 20 (was 10) so the coordinator
+ * can serve a high `repliesPerDay` strategic-path setting in one batch
+ * — kickoff dispatches community-manager on the top-N where N comes from
+ * today's content_reply slot's `targetCount` (capped at topQueued.length).
  */
 export const discoveryAgentOutputSchema = z.object({
   queued: z.number().int().min(0),
@@ -22,7 +25,7 @@ export const discoveryAgentOutputSchema = z.object({
         confidence: z.number().min(0).max(1),
       }),
     )
-    .max(10),
+    .max(20),
 });
 
 export type DiscoveryAgentOutput = z.infer<typeof discoveryAgentOutputSchema>;
