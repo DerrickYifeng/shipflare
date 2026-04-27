@@ -187,7 +187,7 @@ export default async function AdminTeamRunDetailPage({
         <h2 style={headingStyle()}>Spawned tasks ({tasks.length})</h2>
         {tasks.length === 0 ? (
           <p style={{ color: 'var(--sf-fg-4)', fontSize: 12.5 }}>
-            This run didn't spawn any subagents via Task.
+            This run didn&apos;t spawn any subagents via Task.
           </p>
         ) : (
           <table style={tableStyle()}>

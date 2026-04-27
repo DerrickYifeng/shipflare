@@ -406,7 +406,9 @@ function StageRouter({
   mirrorToRedis,
 }: StageRouterProps) {
   const draftRef = useRef(draft);
-  draftRef.current = draft;
+  useEffect(() => {
+    draftRef.current = draft;
+  });
 
   switch (stage) {
     case 'source':

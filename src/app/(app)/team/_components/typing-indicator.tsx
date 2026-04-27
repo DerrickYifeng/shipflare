@@ -24,15 +24,16 @@ export interface TypingIndicatorProps {
  * counter resets — exactly the behavior we want, no manual reset.
  */
 export function TypingIndicator({ label = 'working' }: TypingIndicatorProps = {}) {
-  const startedAtRef = useRef(Date.now());
+  const startedAtRef = useRef<number | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
   useEffect(() => {
+    startedAtRef.current = Date.now();
     // Tick once per second — fine-grained enough for human perception,
     // coarse enough not to thrash layout. Cleared on unmount.
     const interval = setInterval(() => {
       setElapsedSeconds(
-        Math.floor((Date.now() - startedAtRef.current) / 1000),
+        Math.floor((Date.now() - (startedAtRef.current ?? Date.now())) / 1000),
       );
     }, 1000);
     return () => clearInterval(interval);

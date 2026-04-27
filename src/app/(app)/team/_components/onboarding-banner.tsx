@@ -7,13 +7,15 @@ const STORAGE_KEY = 'sf:team-onboarding-banner-dismissed:v1';
 export function OnboardingBanner(): React.ReactElement | null {
   const [dismissed, setDismissed] = useState(true);
   useEffect(() => {
+    let show = false;
     try {
       const flag = window.localStorage.getItem(STORAGE_KEY);
-      if (flag !== '1') setDismissed(false);
+      if (flag !== '1') show = true;
     } catch {
       // localStorage may be blocked — show once anyway, harmless.
-      setDismissed(false);
+      show = true;
     }
+    if (show) queueMicrotask(() => setDismissed(false));
   }, []);
 
   if (dismissed) return null;

@@ -159,7 +159,8 @@ function SubtaskCard({
     prevStatusRef.current = task.status;
     if (prev === 'working' && task.status !== 'working') {
       // Task just settled — fold once. User can reopen by clicking.
-      setExpanded(false);
+      // queueMicrotask defers the setState past the current render cycle.
+      queueMicrotask(() => setExpanded(false));
     }
   }, [task.status]);
 
@@ -535,11 +536,12 @@ function ResultSummary({
  * terminal status replaces it — no explicit reset needed.
  */
 function ThinkingRow({ accentColor }: { accentColor: string }) {
-  const startedAtRef = useRef(Date.now());
+  const startedAtRef = useRef<number | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   useEffect(() => {
+    startedAtRef.current = Date.now();
     const id = setInterval(() => {
-      setElapsedSeconds(Math.floor((Date.now() - startedAtRef.current) / 1000));
+      setElapsedSeconds(Math.floor((Date.now() - (startedAtRef.current ?? Date.now())) / 1000));
     }, 1000);
     return () => clearInterval(id);
   }, []);

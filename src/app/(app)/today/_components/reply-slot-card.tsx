@@ -84,7 +84,7 @@ export function ReplySlotCard({ slot }: ReplySlotCardProps) {
     <article style={articleStyle} aria-label="Today's reply session">
       <span style={dotStyle} aria-hidden />
       <span style={{ fontWeight: 500, color: 'var(--sf-fg-1)' }}>
-        Today's {platformDisplay(slot.channel)} reply session
+        Today&apos;s {platformDisplay(slot.channel)} reply session
       </span>
       <span style={{ color: 'var(--sf-fg-3)' }}>·</span>
       <span

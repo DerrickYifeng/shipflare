@@ -423,13 +423,14 @@ function ElapsedCounter({
   task: DelegationTask;
   isRunning: boolean;
 }) {
-  const startedAtRef = useRef(Date.now());
+  const startedAtRef = useRef<number | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   useEffect(() => {
     if (!isRunning) return;
+    if (startedAtRef.current === null) startedAtRef.current = Date.now();
     const id = setInterval(() => {
       setElapsedSeconds(
-        Math.floor((Date.now() - startedAtRef.current) / 1000),
+        Math.floor((Date.now() - (startedAtRef.current ?? Date.now())) / 1000),
       );
     }, 1000);
     return () => clearInterval(id);

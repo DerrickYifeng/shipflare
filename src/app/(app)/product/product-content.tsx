@@ -529,9 +529,9 @@ function StateEditor({
           }}
         >
           <strong style={{ fontWeight: 600 }}>Heads up:</strong> saving replans
-          your launch. This week's pre-approval plan items get superseded and
+          your launch. This week&apos;s pre-approval plan items get superseded and
           a fresh strategic + tactical run kicks off in the background
-          (≈30–60s). Already-approved or posted items aren't touched.
+          (≈30–60s). Already-approved or posted items aren&apos;t touched.
         </div>
       )}
       {error && (

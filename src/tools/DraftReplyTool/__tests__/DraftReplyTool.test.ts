@@ -120,23 +120,21 @@ describe('draftReplyTool', () => {
 
   it('rejects a draft body over the 40k ceiling', () => {
     const hugeBody = 'x'.repeat(40_001);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const bad = {
+    const bad: unknown = {
       threadId: 't-1',
       draftBody: hugeBody,
       confidence: 0.5,
-    } as any;
+    };
     const parse = draftReplyTool.inputSchema.safeParse(bad);
     expect(parse.success).toBe(false);
   });
 
   it('rejects an out-of-range confidence', () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const bad = {
+    const bad: unknown = {
       threadId: 't-1',
       draftBody: 'ok',
       confidence: 1.5,
-    } as any;
+    };
     const parse = draftReplyTool.inputSchema.safeParse(bad);
     expect(parse.success).toBe(false);
   });

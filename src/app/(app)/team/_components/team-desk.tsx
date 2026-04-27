@@ -246,14 +246,17 @@ export function TeamDesk({
   // Hydrate from server props.
   useEffect(() => {
     if (!conversations) return;
-    setConversationList((prev) => {
-      const next = new Map<string, ConversationMeta>();
-      for (const c of prev) next.set(c.id, c);
-      for (const c of conversations) next.set(c.id, c);
-      return Array.from(next.values()).sort((a, b) =>
-        a.updatedAt > b.updatedAt ? -1 : 1,
-      );
-    });
+    const snapshot = conversations;
+    queueMicrotask(() =>
+      setConversationList((prev) => {
+        const next = new Map<string, ConversationMeta>();
+        for (const c of prev) next.set(c.id, c);
+        for (const c of snapshot) next.set(c.id, c);
+        return Array.from(next.values()).sort((a, b) =>
+          a.updatedAt > b.updatedAt ? -1 : 1,
+        );
+      }),
+    );
   }, [conversations]);
 
   // Bump sidebar `updatedAt` from SSE deltas so the most recently
@@ -271,18 +274,21 @@ export function TeamDesk({
     }
     if (latestByConv.size === 0) return;
 
-    setConversationList((prev) => {
-      let changed = false;
-      const next = prev.map((c) => {
-        const latest = latestByConv.get(c.id);
-        if (!latest) return c;
-        if (latest <= c.updatedAt) return c;
-        changed = true;
-        return { ...c, updatedAt: latest };
-      });
-      if (!changed) return prev;
-      return [...next].sort((a, b) => (a.updatedAt > b.updatedAt ? -1 : 1));
-    });
+    const byConv = latestByConv;
+    queueMicrotask(() =>
+      setConversationList((prev) => {
+        let changed = false;
+        const next = prev.map((c) => {
+          const latest = byConv.get(c.id);
+          if (!latest) return c;
+          if (latest <= c.updatedAt) return c;
+          changed = true;
+          return { ...c, updatedAt: latest };
+        });
+        if (!changed) return prev;
+        return [...next].sort((a, b) => (a.updatedAt > b.updatedAt ? -1 : 1));
+      }),
+    );
   }, [liveMessages]);
 
   // Derive title from the first user_prompt in each conversation when

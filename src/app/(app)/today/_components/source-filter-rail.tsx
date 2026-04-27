@@ -198,10 +198,10 @@ function useRevealed(appearDelay: number): boolean {
   const [revealed, setRevealed] = useState(appearDelay === 0);
   useEffect(() => {
     if (appearDelay === 0) {
-      setRevealed(true);
+      queueMicrotask(() => setRevealed(true));
       return;
     }
-    setRevealed(false);
+    queueMicrotask(() => setRevealed(false));
     const t = setTimeout(() => setRevealed(true), appearDelay);
     return () => clearTimeout(t);
   }, [appearDelay]);

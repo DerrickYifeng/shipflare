@@ -65,7 +65,9 @@ export function StageReview({
 
   // Debounced autosave.
   const autoSaveRef = useRef(onAutoSave);
-  autoSaveRef.current = onAutoSave;
+  useEffect(() => {
+    autoSaveRef.current = onAutoSave;
+  });
   useEffect(() => {
     if (!autoSaveRef.current) return;
     const t = setTimeout(() => autoSaveRef.current?.(value), 400);

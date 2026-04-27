@@ -44,8 +44,11 @@ export function TodayWelcomeRibbon({
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
-    setMounted(true);
-    setVisible(shouldShowRibbon(onboardingCompletedAt));
+    const visible = shouldShowRibbon(onboardingCompletedAt);
+    queueMicrotask(() => {
+      setMounted(true);
+      setVisible(visible);
+    });
   }, [onboardingCompletedAt]);
 
   if (!mounted || !visible || !onboardingCompletedAt) return null;
