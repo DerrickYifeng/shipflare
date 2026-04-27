@@ -854,9 +854,11 @@ export async function runAgent<T>(
 export function createToolContext(
   deps: Record<string, unknown>,
   abortSignal?: AbortSignal,
+  emitProgress?: ToolContext['emitProgress'],
 ): ToolContext {
   return {
     abortSignal: abortSignal ?? new AbortController().signal,
+    ...(emitProgress ? { emitProgress } : {}),
     get<T>(key: string): T {
       const value = deps[key];
       if (value === undefined) {
