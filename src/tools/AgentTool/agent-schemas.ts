@@ -23,6 +23,7 @@ import { postingOutputSchema } from './agents/posting/schema';
 import { engagementMonitorOutputSchema } from './agents/engagement-monitor/schema';
 import { productOpportunityJudgeOutputSchema } from './agents/product-opportunity-judge/schema';
 import { xReplyWriterOutputSchema } from './agents/x-reply-writer/schema';
+import { discoveryAgentOutputSchema } from './agents/discovery-agent/schema';
 
 const registry: Record<string, ZodType<unknown>> = {
   coordinator: coordinatorOutputSchema as ZodType<unknown>,
@@ -37,6 +38,7 @@ const registry: Record<string, ZodType<unknown>> = {
   'engagement-monitor': engagementMonitorOutputSchema as ZodType<unknown>,
   'product-opportunity-judge': productOpportunityJudgeOutputSchema as ZodType<unknown>,
   'x-reply-writer': xReplyWriterOutputSchema as ZodType<unknown>,
+  'discovery-agent': discoveryAgentOutputSchema as ZodType<unknown>,
 };
 
 /**
@@ -62,4 +64,5 @@ export {
   engagementMonitorOutputSchema,
   productOpportunityJudgeOutputSchema,
   xReplyWriterOutputSchema,
+  discoveryAgentOutputSchema,
 };
