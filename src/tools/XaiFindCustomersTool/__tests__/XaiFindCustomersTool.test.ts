@@ -146,7 +146,7 @@ describe('xai_find_customers tool', () => {
     ]);
   });
 
-  it('throws when xAI response fails the tweet schema', async () => {
+  it('throws when xAI response fails the tweet schema (zod validation)', async () => {
     respondConversationalMock.mockResolvedValueOnce({
       output: { tweets: [{ external_id: 't1' /* missing required fields */ }], notes: '' },
       assistantMessage: { role: 'assistant', content: '...' },
@@ -163,6 +163,32 @@ describe('xai_find_customers tool', () => {
         makeCtx({}),
       ),
     ).rejects.toThrow();
+  });
+
+  it('synthesizes empty result + prose-as-notes when xAI returns non-JSON (output: null)', async () => {
+    respondConversationalMock.mockResolvedValueOnce({
+      output: null,
+      parseError: 'Unexpected token N in JSON at position 0',
+      assistantMessage: {
+        role: 'assistant',
+        content: '**No strong, high-quality matches found** in the last 7 days.',
+      },
+      usage: { inputTokens: 100, outputTokens: 20, totalTokens: 120 },
+    });
+
+    const result = await xaiFindCustomersTool.execute(
+      {
+        messages: [{ role: 'user', content: 'x' }],
+        productContext: PRODUCT,
+        reasoning: false,
+      },
+      makeCtx({}),
+    );
+
+    // No throw — degraded path returns synthesized empty response.
+    expect(result.tweets).toEqual([]);
+    expect(result.notes).toContain('No strong, high-quality matches');
+    expect(result.assistantMessage.content).toContain('No strong, high-quality matches');
   });
 
   it('propagates xAI HTTP errors verbatim (no swallow)', async () => {

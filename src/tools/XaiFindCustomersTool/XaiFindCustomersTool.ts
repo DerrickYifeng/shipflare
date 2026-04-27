@@ -109,13 +109,42 @@ export const xaiFindCustomersTool = buildTool({
       signal: ctx.abortSignal,
     });
 
-    // xAI guarantees schema match for supported features. A zod parse
-    // failure here = our schema uses an unsupported keyword (programming
-    // bug, not runtime variance). Throw with a clear prefix.
+    // Degraded path: Grok ignored response_format and returned prose.
+    // Empirically common when x_search finds nothing — Grok writes a
+    // sentence like "No strong matches found." instead of returning
+    // `{ tweets: [], notes: ... }`. Synthesize the equivalent so the
+    // agent still has a structured response to reason about.
+    if (result.output === null) {
+      log.warn(
+        `xai_find_customers (${modeLabel}): xAI returned non-JSON; ` +
+          `synthesizing { tweets: [], notes: <prose> }. parseError=${result.parseError ?? 'unknown'}`,
+      );
+      ctx.emitProgress?.(
+        'xai_find_customers',
+        `Got 0 candidates (Grok returned prose, not JSON)`,
+        {
+          candidateCount: 0,
+          degraded: true,
+          inputTokens: result.usage.inputTokens,
+          outputTokens: result.usage.outputTokens,
+        },
+      );
+      return {
+        tweets: [],
+        notes: result.assistantMessage.content.slice(0, 1000),
+        assistantMessage: result.assistantMessage,
+        usage: result.usage,
+      };
+    }
+
+    // Strict path: xAI honored response_format and we got JSON. Validate
+    // against the zod schema; a failure here means a real schema-shape
+    // mismatch (e.g. xAI returned `{ tweets: [...] }` but a tweet is
+    // missing a required field). Throw — the agent can retry.
     const parsed = xaiFindCustomersResponseSchema.safeParse(result.output);
     if (!parsed.success) {
       throw new Error(
-        `schema-construction-bug: xAI output failed zod validation: ${parsed.error.message}`,
+        `xai_find_customers: parsed JSON failed schema validation: ${parsed.error.message}`,
       );
     }
 

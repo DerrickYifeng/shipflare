@@ -92,10 +92,21 @@ export interface ConversationalRequest {
 }
 
 export interface ConversationalResponse {
-  /** Parsed JSON when `responseFormat.type === 'json_schema'`; raw string otherwise. */
+  /**
+   * Parsed JSON when `responseFormat.type === 'json_schema'` AND the parse
+   * succeeded; raw string when `responseFormat` was omitted; `null` when
+   * we requested json_schema but the parse failed (Grok ignored the
+   * response_format and returned prose — observed empirically when the
+   * x_search tool returns no results, despite xAI's documented "guaranteed
+   * schema match"). Callers should check for `null` and fall back to
+   * `assistantMessage.content` when extracting prose.
+   */
   output: unknown;
   /** Verbatim assistant message — agent threads this back into the next call. */
   assistantMessage: ConversationalMessage;
+  /** Set to the parse error message when `output === null` due to a
+   *  json_schema parse failure. Useful for logging / agent context. */
+  parseError?: string;
   usage: {
     inputTokens: number;
     outputTokens: number;
@@ -395,20 +406,44 @@ export class XAIClient {
    * founder's product.
    *
    * On non-2xx HTTP: throws `xAI API error <status>: <body>`.
+   *
    * On JSON parse failure when `responseFormat.type === 'json_schema'`:
-   *   throws `schema-construction-bug: ...` — indicates we built an
-   *   unsupported schema. xAI guarantees match for supported features
-   *   (per https://docs.x.ai/.../structured-outputs); a parse failure
-   *   means our toolside bug, not runtime variance. Don't paper over.
+   * does NOT throw. Returns `{ output: null, parseError: <msg>, ... }`
+   * with the raw text preserved in `assistantMessage.content`. The
+   * structured-outputs contract should hold for supported Grok 4 family
+   * models when the wire format is correct (we use the Responses-API
+   * `text.format` envelope, NOT the chat-completions `response_format`).
+   * The null path is a defense-in-depth safety net for cases where Grok
+   * still emits prose (e.g. transient model behavior) — callers handle
+   * by synthesizing a degraded response from the prose.
    */
   async respondConversational(
     args: ConversationalRequest,
   ): Promise<ConversationalResponse> {
+    // Responses API wire format: structured output goes into `text.format`,
+    // not `response_format` (the chat-completions param name). xAI's docs
+    // example for tools+structured-output uses this exact shape — if you
+    // pass `response_format` to /v1/responses it gets silently ignored
+    // and Grok returns prose, which we observed in production.
+    const textEnvelope =
+      args.responseFormat?.type === 'json_schema'
+        ? {
+            text: {
+              format: {
+                type: 'json_schema' as const,
+                name: args.responseFormat.json_schema.name,
+                schema: args.responseFormat.json_schema.schema,
+                strict: args.responseFormat.json_schema.strict,
+              },
+            },
+          }
+        : {};
+
     const requestBody = JSON.stringify({
       model: args.model,
       input: args.messages.map((m) => ({ role: m.role, content: m.content })),
       ...(args.tools && args.tools.length > 0 ? { tools: args.tools } : {}),
-      ...(args.responseFormat ? { response_format: args.responseFormat } : {}),
+      ...textEnvelope,
     });
 
     let data: XAIResponse;
@@ -436,16 +471,22 @@ export class XAIClient {
 
     const text = this.extractText(data);
     let output: unknown = text;
+    let parseError: string | undefined;
     if (args.responseFormat?.type === 'json_schema') {
       try {
         output = JSON.parse(text);
       } catch (err) {
-        throw new Error(
-          `schema-construction-bug: xAI output_text did not parse as JSON ` +
-            `despite response_format=json_schema. ` +
-            `text="${text.slice(0, 200)}..." parseError=${
-              err instanceof Error ? err.message : String(err)
-            }`,
+        // Don't throw — Grok ignores response_format more often than its
+        // docs suggest (observed when x_search returns no candidates).
+        // Surface as null + parseError so the caller can synthesize a
+        // degraded response from the prose. See the JSDoc above.
+        output = null;
+        parseError =
+          err instanceof Error ? err.message : String(err);
+        log.warn(
+          `respondConversational: xAI returned non-JSON despite ` +
+            `response_format=json_schema. parseError=${parseError} ` +
+            `text="${text.slice(0, 200)}..."`,
         );
       }
     }
@@ -453,6 +494,7 @@ export class XAIClient {
     return {
       output,
       assistantMessage: { role: 'assistant', content: text },
+      ...(parseError ? { parseError } : {}),
       usage: {
         inputTokens: data.usage?.input_tokens ?? 0,
         outputTokens: data.usage?.output_tokens ?? 0,

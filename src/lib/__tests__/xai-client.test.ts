@@ -67,9 +67,23 @@ describe('XAIClient.respondConversational', () => {
     expect(body.model).toBe('grok-4.20-non-reasoning');
     expect(body.input).toEqual([{ role: 'user', content: 'find me indie founders' }]);
     expect(body.tools).toEqual([{ type: 'x_search' }]);
-    expect(body.response_format).toMatchObject({
-      type: 'json_schema',
-      json_schema: { name: 'TweetList', strict: true },
+    // Responses API: structured output is `text.format`, NOT `response_format`.
+    // (The chat-completions endpoint uses `response_format`; the Responses
+    // endpoint uses `text.format`. Sending the wrong key gets silently
+    // ignored, which is what we hit in production before this fix.)
+    expect(body.response_format).toBeUndefined();
+    expect(body.text).toMatchObject({
+      format: {
+        type: 'json_schema',
+        name: 'TweetList',
+        strict: true,
+        schema: {
+          type: 'object',
+          properties: { tweets: { type: 'array' }, notes: { type: 'string' } },
+          required: ['tweets', 'notes'],
+          additionalProperties: false,
+        },
+      },
     });
   });
 
@@ -89,7 +103,7 @@ describe('XAIClient.respondConversational', () => {
     ).rejects.toThrow(/xAI API error 500/);
   });
 
-  it('throws when output_text is not valid JSON for json_schema responseFormat', async () => {
+  it('returns output=null and parseError when xAI ignores response_format and returns prose', async () => {
     fetchMock.mockResolvedValueOnce({
       ok: true,
       json: async () => ({
@@ -98,22 +112,27 @@ describe('XAIClient.respondConversational', () => {
           {
             type: 'message',
             role: 'assistant',
-            content: [{ type: 'output_text', text: 'not valid json' }],
+            content: [{ type: 'output_text', text: 'No strong matches found.' }],
           },
         ],
       }),
     });
 
     const client = new XAIClient('test-key');
-    await expect(
-      client.respondConversational({
-        model: 'grok-4.20-non-reasoning',
-        messages: [{ role: 'user', content: 'x' }],
-        responseFormat: {
-          type: 'json_schema',
-          json_schema: { name: 'X', schema: {}, strict: true },
-        },
-      }),
-    ).rejects.toThrow(/schema-construction-bug/);
+    const result = await client.respondConversational({
+      model: 'grok-4.20-non-reasoning',
+      messages: [{ role: 'user', content: 'x' }],
+      responseFormat: {
+        type: 'json_schema',
+        json_schema: { name: 'X', schema: {}, strict: true },
+      },
+    });
+
+    // Degraded path: no throw — caller decides how to interpret.
+    expect(result.output).toBeNull();
+    expect(result.parseError).toBeDefined();
+    expect(typeof result.parseError).toBe('string');
+    // Raw text preserved verbatim for caller to extract prose.
+    expect(result.assistantMessage.content).toBe('No strong matches found.');
   });
 });
