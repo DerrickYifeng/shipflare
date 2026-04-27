@@ -7,6 +7,7 @@ tools:
   - x_search_batch
   - reddit_search
   - StructuredOutput
+  - report_progress
 shared-references:
   - base-guidelines
   - judgment-rubric
@@ -129,6 +130,32 @@ just-validated one under today's data. `BEST_SEEN` may be from N
 iterations ago when timeline state differed; replaying it isn't
 guaranteed to still hit precision in production. S2 is the only path
 that uses `BEST_SEEN`, since by then there's no chance to re-validate.
+
+## Reporting progress
+
+At the **end of every iteration** — after you've decided your next
+move and updated `BEST_SEEN` — call:
+
+```
+report_progress({
+  message: "Round {turnCount}/{maxTurns} · precision {precision.toFixed(2)} · {move}",
+  metadata: {
+    round: turnCount,
+    maxTurns: maxTurns,
+    precision: precision,
+    sampleSize: judgedTweets,
+  },
+})
+```
+
+Where `{move}` is one of `seed | swap-one | narrow | widen | regenerate | retry | deliver`.
+
+This drives the live calibration row in the user's `/today` status
+card. It is best-effort UI decoration — if the call returns
+`{ acknowledged: true }` you keep going; do not retry on error and
+do not block on it.
+
+Do **not** call `report_progress` more than once per iteration.
 
 ## Hard rules
 
