@@ -45,6 +45,7 @@ export {
   searchStrategyMemoryName,
   type PersistedSearchStrategy,
 } from './strategy-memory';
+import { REPORT_PROGRESS_TOOL_NAME } from './report-progress-tool-name';
 
 const inputSchema = z.object({
   platform: z.enum(['x', 'reddit']),
@@ -114,7 +115,7 @@ function buildReportProgressTool(
   { acknowledged: true }
 > {
   return buildTool({
-    name: 'report_progress',
+    name: REPORT_PROGRESS_TOOL_NAME,
     description:
       'Emit a one-line progress update to the user. Call at the end of ' +
       'each iteration with key state. Message ≤200 chars; include round / ' +

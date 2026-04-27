@@ -8,6 +8,7 @@ import type { z } from 'zod';
 import { runAgent } from '@/core/query-loop';
 import { registry } from '@/tools/registry';
 import { STRUCTURED_OUTPUT_TOOL_NAME } from '@/tools/StructuredOutputTool/StructuredOutputTool';
+import { REPORT_PROGRESS_TOOL_NAME } from '@/tools/CalibrateSearchTool/report-progress-tool-name';
 import type {
   AgentConfig,
   AgentResult,
@@ -88,12 +89,20 @@ export interface SpawnCallbacks {
  * telling downstream readers ("this agent emits structured output") — the
  * entry isn't resolved here. See src/tools/registry.ts for why it's
  * intentionally not registered.
+ *
+ * `report_progress` is similarly per-call-injected: callers like
+ * `calibrate_search_strategy` build a closure-capturing instance via
+ * `buildReportProgressTool(ctx.emitProgress)` and append it to the
+ * sub-agent's `strategistConfig.tools`. The frontmatter declaration is
+ * documentation that "this agent emits live progress events" — the
+ * resolution is done by the parent tool, not the global registry.
  */
 export function resolveAgentTools(def: AgentDefinition): AnyToolDefinition[] {
   const resolved: AnyToolDefinition[] = [];
   const missing: string[] = [];
   for (const toolName of def.tools) {
     if (toolName === STRUCTURED_OUTPUT_TOOL_NAME) continue;
+    if (toolName === REPORT_PROGRESS_TOOL_NAME) continue;
     const tool = registry.get(toolName);
     if (!tool) {
       missing.push(toolName);

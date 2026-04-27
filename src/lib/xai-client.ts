@@ -68,7 +68,16 @@ export interface XAuthorBio {
   followerCount: number | null;
 }
 
-export const SEARCH_TWEETS_BATCH_MAX_QUERIES = 10;
+/**
+ * Self-imposed cap on queries per `searchTweetsBatch` call. Not an xAI
+ * API limit — the Grok responses endpoint accepts longer prompts. We
+ * cap at 20 to bound the response token count and to align with
+ * `RunDiscoveryScanTool`'s `inlineQueryCount.max(20)` so a scout that
+ * generates breadth-spanning query sets at kickoff doesn't trip the
+ * Zod guard. Bumped from 10 after a kickoff scan with 12 queries
+ * failed validation in production (2026-04-26).
+ */
+export const SEARCH_TWEETS_BATCH_MAX_QUERIES = 20;
 
 /**
  * xAI Grok API client for searching X/Twitter content.

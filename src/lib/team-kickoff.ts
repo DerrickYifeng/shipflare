@@ -139,7 +139,7 @@ export async function ensureKickoffEnqueued(args: {
     `Trigger: kickoff. ` +
     `Follow your kickoff playbook end-to-end (plan → scan → drafts → calibrate → re-scan): ` +
     `(1) Task content-planner for week-1 plan items — pass weekStart + now in its prompt verbatim, ` +
-    `(2) call run_discovery_scan({ platform: '${primary}', inlineQueryCount: 12 }) — fast-path inline scan so the founder sees drafts immediately, ` +
+    `(2) call run_discovery_scan({ platform: '${primary}', inlineQueryCount: 6 }) — fast-path inline scan, 6 focused queries so the founder sees drafts in ~60-90s, ` +
     `(3) Task community-manager on the top-3 queued threads (skip this step if scan returned 0 queued), ` +
     `(4) call calibrate_search_strategy({ platform: '${primary}' }) — runs in background while founder uses /today, ` +
     `(5) call run_discovery_scan({ platform: '${primary}' }) — uses the calibrated strategy from step 4, dedupe-inserts new threads. ` +

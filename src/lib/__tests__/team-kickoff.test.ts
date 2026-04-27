@@ -111,7 +111,7 @@ describe('ensureKickoffEnqueued', () => {
     // New playbook ordering: plan → scan → drafts → calibrate → re-scan.
     expect(callArg.goal).toContain('content-planner');
     expect(callArg.goal).toContain(
-      "run_discovery_scan({ platform: 'x', inlineQueryCount: 12 })",
+      "run_discovery_scan({ platform: 'x', inlineQueryCount: 6 })",
     );
     expect(callArg.goal).toContain('community-manager');
     expect(callArg.goal).toContain(
@@ -125,7 +125,7 @@ describe('ensureKickoffEnqueued', () => {
     // Order assertion: scan happens before calibration.
     const goal: string = callArg.goal;
     const scanIdx = goal.indexOf(
-      "run_discovery_scan({ platform: 'x', inlineQueryCount: 12 })",
+      "run_discovery_scan({ platform: 'x', inlineQueryCount: 6 })",
     );
     const calibrateIdx = goal.indexOf('calibrate_search_strategy');
     expect(scanIdx).toBeGreaterThan(0);

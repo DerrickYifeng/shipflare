@@ -43,9 +43,10 @@ negativeTerms?: string[]       // anti-signal terms learned during
 inlineQueryCount?: number      // when `presetQueries` is empty/absent,
                                // produce this many queries instead of
                                // your 2-8 default. Kickoff sets this to
-                               // 12 to deliberately span breadth so the
-                               // first scan returns something even
-                               // before calibration has run.
+                               // 6 (focused, fast — fewer raw tweets to
+                               // judge so the founder sees results in
+                               // ~60-90s instead of 5+ minutes).
+                               // Calibration broadens later.
 ```
 
 Read `<agent-memory>` in your system prompt — it holds the onboarding
@@ -62,16 +63,15 @@ judgment-rubric defaults when they conflict.
    "compress related phrasings" step. Just feed them to
    `x_search_batch`. The one-time `search-strategist` already paid
    the design cost; your job here is judgment, not query design.
-   Otherwise (cold / fast-path) generate queries from `sources` +
-   `intent` + product keywords. Default count: **2-8**. When
-   `inlineQueryCount >= 10`, deliberately span breadth instead of
-   compressing — produce roughly:
-     - 3-4 **broad** queries (product name, category, top-level pain),
-     - 4-5 **medium** queries (specific pain phrasings, value-prop language),
-     - 3-4 **specific** queries (ICP voice — "solo founder asking",
-       subreddit-native phrasings, niche operators).
-   Breadth beats precision for the kickoff first round; calibration
-   will refine on the next scan.
+   Otherwise (cold / fast-path) generate `inlineQueryCount` focused
+   queries from `sources` + `intent` + product keywords. Default
+   when no count given: **2-8**. Kickoff fast-path passes
+   `inlineQueryCount: 6` — produce 4-6 high-signal queries, mixing
+   product-keyword phrasings with ICP voice (e.g. "solo founder
+   asking how do you", subreddit-native phrasings). Keep it tight
+   — fewer high-quality queries return fewer raw tweets, which
+   means scout judgment finishes in seconds instead of minutes.
+   Calibration will broaden + refine on a later scan.
 2. Call `x_search_batch` ONCE with all queries (it's literally one
    Grok round-trip — sequential `x_search` calls are waste).
 3. Each tweet in the results comes with an **enriched author** object:

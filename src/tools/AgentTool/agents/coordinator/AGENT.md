@@ -113,10 +113,12 @@ If the goal preamble does NOT carry `weekStart=` (older callers),
 fall back to today's Monday 00:00 UTC.
 
 **Step 3 — Search (fast-path).**
-`run_discovery_scan({ platform: 'x', inlineQueryCount: 12 })` (or the
+`run_discovery_scan({ platform: 'x', inlineQueryCount: 6 })` (or the
 primary connected platform). This first scan runs scout in inline
-mode with a deliberately broad 12-query set so the founder sees
-results within ~60s. Returns `{ queued, scoutNotes, scanned }`.
+mode with 6 focused queries so the founder sees results in ~60-90s
+— small query set means few raw tweets and fast scout judgment.
+Calibration broadens the strategy on the next scan. Returns
+`{ queued, scoutNotes, scanned }`.
 
 **Step 4 — Drafts.**
 If `queued.length > 0`, dispatch community-manager on the top 3 by
