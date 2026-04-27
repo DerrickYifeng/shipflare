@@ -71,6 +71,13 @@
       "when": 1777958400000,
       "tag": "0009_drop_voice_profiles",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1779700002000,
+      "tag": "0010_threads_engagement_and_repost",
+      "breakpoints": true
     }
   ]
 }
