@@ -28,6 +28,7 @@ import {
   getTeamBudgetSnapshot,
 } from '@/lib/team-budget';
 import { createTeamPlatformDeps } from '@/lib/platform-deps';
+import { publishToolProgress } from '@/lib/sse/publish-tool-progress';
 import { loadConversationHistory } from '@/lib/team-conversation';
 import { buildAgentConfigFromDefinition } from '@/tools/AgentTool/spawn';
 import { resolveAgent, getAvailableAgents } from '@/tools/AgentTool/registry';
@@ -557,6 +558,14 @@ export async function processTeamRunInternal(
     { fn: null };
   const toolCtx: ToolContext = {
     abortSignal: controller.signal,
+    emitProgress: (toolName, message, metadata) => {
+      void publishToolProgress({
+        userId: team.userId,
+        toolName,
+        message,
+        ...(metadata ? { metadata } : {}),
+      });
+    },
     get<V>(key: string): V {
       // Platform clients (xaiClient / redditClient / xClient / memoryStore)
       // take precedence — they were preloaded above for this run.
