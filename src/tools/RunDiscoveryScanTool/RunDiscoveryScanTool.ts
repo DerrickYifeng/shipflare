@@ -4,12 +4,11 @@
 // (user, platform); after the unified-pipeline migration the same logic
 // lives here, called inline from inside a team-run.
 //
-// The tool now reads a cached search strategy out of MemoryStore and
-// passes it down as `presetQueries` so scout skips query generation.
-// When the strategy is missing, the tool returns `skipped: true` with
-// `reason: 'strategy_not_calibrated'` — the coordinator's kickoff
-// playbook treats that as a signal to call `calibrate_search_strategy`
-// first, then retry.
+// The tool reads a cached search strategy out of MemoryStore and passes
+// it down as `presetQueries` when present. When the strategy is missing
+// or at a legacy schemaVersion, the tool falls back to scout's inline
+// query generation — the kickoff fast path relies on this so a fresh
+// user gets results without waiting for the full calibration loop.
 
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
@@ -35,6 +34,11 @@ const inputSchema = z.object({
   /** Override default sources from platform-config; coordinator can pass
    * a narrower list (e.g. just 2 hot subreddits) for cheap onboarding scans. */
   sources: z.array(z.string().min(1)).optional(),
+  /** Number of queries scout should generate when no calibrated strategy
+   * exists in MemoryStore. Default (scout's): 8. Pass 12 from the kickoff
+   * fast-path scan to deliberately span breadth (broad + medium + specific).
+   * Ignored when a calibrated strategy is loaded. */
+  inlineQueryCount: z.number().int().min(4).max(20).optional(),
 });
 
 export interface QueuedThreadSummary {
@@ -87,14 +91,14 @@ export const runDiscoveryScanTool: ToolDefinition<
 > = buildTool({
   name: RUN_DISCOVERY_SCAN_TOOL_NAME,
   description:
-    'Run discovery scout on a platform (x | reddit) using the cached ' +
-    'search strategy. Returns queue-worthy threads with confidence + reason ' +
-    'and a `scoutNotes` summary explaining what was filtered. Threads are ' +
-    'persisted to the threads table (state=queued); dispatch ' +
-    'community-manager against the returned externalIds. ' +
-    'Returns `skipped:true, reason:"strategy_not_calibrated"` when ' +
-    'no cached strategy exists — call `calibrate_search_strategy` first ' +
-    'and retry. Returns `skipped:true, reason:"no_${platform}_channel"` ' +
+    'Run discovery scout on a platform (x | reddit). When a calibrated ' +
+    'search strategy exists in MemoryStore it is loaded and used verbatim; ' +
+    'otherwise scout falls back to inline query generation (pass ' +
+    '`inlineQueryCount` to widen breadth — kickoff uses 12). Returns ' +
+    'queue-worthy threads with confidence + reason and a `scoutNotes` ' +
+    'summary explaining what was filtered. Threads are persisted to the ' +
+    'threads table (state=queued); dispatch community-manager against the ' +
+    'returned externalIds. Returns `skipped:true, reason:"no_${platform}_channel"` ' +
     'when no channel is connected.',
   inputSchema,
   isConcurrencySafe: false,
@@ -129,27 +133,25 @@ export const runDiscoveryScanTool: ToolDefinition<
       throw new Error(`product ${productId} not found`);
     }
 
-    // Strategy preflight — calibration must have run before the first
-    // scan so scout has a vetted query set. We could fall back to inline
-    // generation, but that's exactly the silent-omit failure mode we're
-    // fixing. Better to surface the missing strategy and let the
-    // coordinator dispatch calibration explicitly.
+    // Load the cached search strategy if present. When missing or at a
+    // legacy schemaVersion we run scout in inline mode (no preset
+    // queries) — the kickoff fast path relies on this so a fresh user
+    // gets results without waiting for the full calibration loop.
     const store = new MemoryStore(userId, productId);
     const entry = await store.loadEntry(searchStrategyMemoryName(platform));
     const strategy = loadStrategy(entry?.content, platform);
-    if (!strategy) {
-      return {
-        skipped: true,
-        reason: 'strategy_not_calibrated',
-        scanned: 0,
-        queued: [],
-        scoutNotes: '',
-        costUsd: 0,
-      };
-    }
 
     const config = getPlatformConfig(platform);
     const sources = input.sources ?? [...config.defaultSources];
+
+    const queryCountForLog = strategy
+      ? strategy.queries.length
+      : input.inlineQueryCount ?? 8;
+    ctx.emitProgress?.(
+      'run_discovery_scan',
+      `Searching ${platform} with ${queryCountForLog} ${strategy ? 'calibrated' : 'inline'} queries`,
+      { platform, queryCount: queryCountForLog, mode: strategy ? 'calibrated' : 'inline' },
+    );
 
     let deps;
     try {
@@ -178,8 +180,9 @@ export const runDiscoveryScanTool: ToolDefinition<
           valueProp: productRow.valueProp ?? null,
           keywords: productRow.keywords,
         },
-        presetQueries: strategy.queries,
-        negativeTerms: strategy.negativeTerms,
+        ...(strategy
+          ? { presetQueries: strategy.queries, negativeTerms: strategy.negativeTerms }
+          : { inlineQueryCount: input.inlineQueryCount }),
       },
       deps,
     );
@@ -188,6 +191,16 @@ export const runDiscoveryScanTool: ToolDefinition<
     if (queueVerdicts.length > 0) {
       await persistScoutVerdicts({ userId, verdicts: queueVerdicts, db });
     }
+
+    ctx.emitProgress?.(
+      'run_discovery_scan',
+      `Scanned ${result.verdicts.length} threads · ${queueVerdicts.length} queueable`,
+      {
+        platform,
+        scanned: result.verdicts.length,
+        queued: queueVerdicts.length,
+      },
+    );
 
     const queued: QueuedThreadSummary[] = queueVerdicts.map((v) => ({
       externalId: v.externalId,

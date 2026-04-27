@@ -96,7 +96,6 @@ describe('run_discovery_scan tool', () => {
   });
 
   it('returns skipped:true when user has no channel for the platform', async () => {
-    // Channel preflight: zero rows → preflight hits the skip path.
     dbSelectMock.mockReturnValueOnce(buildSelectChain([]));
 
     const result = await runDiscoveryScanTool.execute(
@@ -109,10 +108,8 @@ describe('run_discovery_scan tool', () => {
     expect(result.queued).toHaveLength(0);
   });
 
-  it('returns skipped:strategy_not_calibrated when MemoryStore has no strategy', async () => {
-    // Channel preflight: connected → moves on to product lookup.
+  it('falls back to scout-inline mode when MemoryStore has no strategy', async () => {
     dbSelectMock.mockReturnValueOnce(buildSelectChain([{ platform: 'x' }]));
-    // Product lookup → present.
     dbSelectMock.mockReturnValueOnce(
       buildSelectChain([
         {
@@ -124,19 +121,63 @@ describe('run_discovery_scan tool', () => {
         },
       ]),
     );
-    // No cached strategy → should short-circuit before calling the
-    // platform deps factory or v3-pipeline.
+    dbSelectMock.mockReturnValue(buildSelectChain([]));
+
     loadEntryMock.mockResolvedValueOnce(null);
+    vi.mocked(createPlatformDeps).mockResolvedValueOnce({} as never);
+    vi.mocked(runDiscoveryV3).mockResolvedValueOnce({
+      verdicts: [],
+      review: { ran: false, decision: { mode: 'skip' }, disagreements: null },
+      scoutNotes: 'inline scan ran',
+      usage: { scout: { costUsd: 0.01 }, reviewer: null },
+      rubricGenerated: false,
+    } as never);
+
+    const result = await runDiscoveryScanTool.execute(
+      { platform: 'x', inlineQueryCount: 12 },
+      makeCtx({ userId: 'u1', productId: 'p1' }),
+    );
+
+    expect(result.skipped).toBe(false);
+    const callArg = vi.mocked(runDiscoveryV3).mock.calls[0]![0];
+    expect(callArg.presetQueries).toBeUndefined();
+    expect(callArg.negativeTerms).toBeUndefined();
+    expect(callArg.inlineQueryCount).toBe(12);
+  });
+
+  it('treats a v1 strategy entry as missing (auto-recalibration trigger)', async () => {
+    dbSelectMock.mockReturnValueOnce(buildSelectChain([{ platform: 'x' }]));
+    dbSelectMock.mockReturnValueOnce(
+      buildSelectChain([
+        {
+          id: 'p1',
+          name: 'Shipflare',
+          description: 'ship things',
+          valueProp: null,
+          keywords: ['ship'],
+        },
+      ]),
+    );
+    dbSelectMock.mockReturnValue(buildSelectChain([]));
+
+    loadEntryMock.mockResolvedValueOnce(makeStrategyEntry('x', 1));
+    vi.mocked(createPlatformDeps).mockResolvedValueOnce({} as never);
+    vi.mocked(runDiscoveryV3).mockResolvedValueOnce({
+      verdicts: [],
+      review: { ran: false, decision: { mode: 'skip' }, disagreements: null },
+      scoutNotes: 'inline scan ran (v1 strategy ignored)',
+      usage: { scout: { costUsd: 0.01 }, reviewer: null },
+      rubricGenerated: false,
+    } as never);
 
     const result = await runDiscoveryScanTool.execute(
       { platform: 'x' },
       makeCtx({ userId: 'u1', productId: 'p1' }),
     );
 
-    expect(result.skipped).toBe(true);
-    expect(result.reason).toBe('strategy_not_calibrated');
-    expect(createPlatformDeps).not.toHaveBeenCalled();
-    expect(runDiscoveryV3).not.toHaveBeenCalled();
+    expect(result.skipped).toBe(false);
+    const callArg = vi.mocked(runDiscoveryV3).mock.calls[0]![0];
+    expect(callArg.presetQueries).toBeUndefined();
   });
 
   it('surfaces scoutNotes and passes presetQueries from the cached strategy', async () => {
@@ -173,8 +214,6 @@ describe('run_discovery_scan tool', () => {
     expect(result.skipped).toBe(false);
     expect(result.queued).toHaveLength(0);
     expect(result.scoutNotes).toContain('rejected all');
-    // The pipeline call must receive the preset queries from the
-    // strategy doc — that's the whole point of the calibration cache.
     const callArg = vi.mocked(runDiscoveryV3).mock.calls[0]![0];
     expect(callArg.presetQueries).toEqual([
       'solo founder asking',
@@ -234,10 +273,8 @@ describe('run_discovery_scan tool', () => {
     expect(result.scoutNotes).toBe('1 queueable found.');
   });
 
-  it('treats a v1 strategy entry as missing (auto-recalibration trigger)', async () => {
-    // Channel preflight: connected.
+  it('emits a tool_progress event before scout runs', async () => {
     dbSelectMock.mockReturnValueOnce(buildSelectChain([{ platform: 'x' }]));
-    // Product lookup: present.
     dbSelectMock.mockReturnValueOnce(
       buildSelectChain([
         {
@@ -249,18 +286,28 @@ describe('run_discovery_scan tool', () => {
         },
       ]),
     );
-    // Cached entry exists, but at v1 — must be treated as missing so
-    // the coordinator triggers fresh calibration on the new logic.
-    loadEntryMock.mockResolvedValueOnce(makeStrategyEntry('x', 1));
+    dbSelectMock.mockReturnValue(buildSelectChain([]));
 
-    const result = await runDiscoveryScanTool.execute(
-      { platform: 'x' },
-      makeCtx({ userId: 'u1', productId: 'p1' }),
-    );
+    loadEntryMock.mockResolvedValueOnce(makeStrategyEntry('x'));
+    vi.mocked(createPlatformDeps).mockResolvedValueOnce({} as never);
+    vi.mocked(runDiscoveryV3).mockResolvedValueOnce({
+      verdicts: [],
+      review: { ran: false, decision: { mode: 'skip' }, disagreements: null },
+      scoutNotes: '',
+      usage: { scout: { costUsd: 0.01 }, reviewer: null },
+      rubricGenerated: false,
+    } as never);
 
-    expect(result.skipped).toBe(true);
-    expect(result.reason).toBe('strategy_not_calibrated');
-    expect(createPlatformDeps).not.toHaveBeenCalled();
-    expect(runDiscoveryV3).not.toHaveBeenCalled();
+    const emit = vi.fn();
+    const ctx = makeCtx({ userId: 'u1', productId: 'p1' });
+    ctx.emitProgress = emit;
+
+    await runDiscoveryScanTool.execute({ platform: 'x' }, ctx);
+
+    expect(emit).toHaveBeenCalled();
+    const firstCall = emit.mock.calls[0]!;
+    expect(firstCall[0]).toBe('run_discovery_scan');
+    expect(typeof firstCall[1]).toBe('string');
+    expect(firstCall[1]).toMatch(/X|Reddit|querie/i);
   });
 });
