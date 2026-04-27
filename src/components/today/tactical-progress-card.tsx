@@ -10,7 +10,7 @@
 //                          message, and surface `error` messages.
 //   - Generic tool_progress feed: /api/events?channel=agents via useSSEChannel.
 //                          Routes `tool_progress` events by toolName:
-//                          · run_discovery_scan → DiscoverySection
+//                          · xai_find_customers → DiscoverySection
 //                          · anything else      → ActivityTicker
 //
 // Visibility gate: shows when `?from=onboarding` is in URL (within the same

@@ -141,7 +141,7 @@ export async function createClientFromChannelById(
  *
  *   - `xaiClient` — always instantiated when `XAI_API_KEY` is set
  *     (Grok search is env-gated, not channel-gated). Specialists like
- *     `discovery-scout` read this for `x_search_batch`.
+ *     `discovery-agent` read this for `xai_find_customers`.
  *   - `redditClient` / `xClient` — instantiated for every platform the
  *     user has connected a channel for. Skipped silently when the
  *     channel is missing or the token decrypt fails; the per-tool error
@@ -164,7 +164,7 @@ export async function createTeamPlatformDeps(
     try {
       deps.xaiClient = new XAIClient();
     } catch {
-      // Key present but invalid — fall through; x_search_batch will
+      // Key present but invalid — fall through; xai_find_customers will
       // raise its own clearer error.
     }
   }

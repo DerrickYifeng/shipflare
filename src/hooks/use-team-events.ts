@@ -12,9 +12,8 @@ export type TeamMessageType =
   | 'tool_call'
   | 'tool_result'
   /**
-   * Live progress line emitted by a slow tool (e.g. `run_discovery_scan`'s
-   * "Searching x with 6 inline queries", `calibrate_search_strategy`'s
-   * "Round 12/60 · precision 0.58"). Persisted alongside the tool_call /
+   * Live progress line emitted by a slow tool (e.g. `xai_find_customers`'s
+   * "Searching x with 6 queries"). Persisted alongside the tool_call /
    * tool_result pair so /team chat can render inline log lines under the
    * active dispatch card. `metadata.toolName` identifies which tool emitted
    * the line; the human-readable line itself lives in `content`.

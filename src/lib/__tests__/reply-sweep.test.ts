@@ -179,7 +179,7 @@ describe('maybeEnqueueReplySweep', () => {
     expect(arg.goal).toContain('channel=x');
     expect(arg.goal).toContain('targetCount=5');
     // And the retry-loop instructions.
-    expect(arg.goal).toContain('run_discovery_scan');
+    expect(arg.goal).toContain('discovery-agent');
     expect(arg.goal).toContain('community-manager');
     expect(arg.goal).toContain('update_plan_item');
   });

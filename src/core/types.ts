@@ -48,13 +48,10 @@ export interface ToolContext {
    * Emit a live progress update for a slow tool. Optional — tools that
    * are fast enough not to need a status line just don't call it.
    *
-   * `toolName` is passed explicitly so a sub-agent's report_progress
-   * tool can attribute progress to the *outer* tool that spawned it
-   * (e.g. the strategist running inside `calibrate_search_strategy`
-   * passes `toolName: 'calibrate_search_strategy'`, not its own
-   * sub-agent identifier). The transport (publishToolProgress) takes
-   * care of userId binding and Redis fan-out; failures inside
-   * `emitProgress` MUST NOT throw.
+   * `toolName` is passed explicitly so a tool can attribute progress
+   * events to the outer tool name visible to the user. The transport
+   * (publishToolProgress) takes care of userId binding and Redis fan-out;
+   * failures inside `emitProgress` MUST NOT throw.
    */
   emitProgress?: (
     toolName: string,

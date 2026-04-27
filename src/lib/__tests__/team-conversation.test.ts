@@ -204,7 +204,7 @@ describe('loadConversationHistory', () => {
       makeRow({
         type: 'tool_call',
         metadata: {
-          toolName: 'x_search_batch',
+          toolName: 'xai_find_customers',
           toolUseId: 'tu-internal',
           input: {},
           parentTaskId: 'parent-1',
@@ -294,7 +294,7 @@ describe('loadConversationHistory', () => {
       makeRow({
         type: 'tool_call',
         metadata: {
-          toolName: 'x_search_batch',
+          toolName: 'xai_find_customers',
           toolUseId: 'tu-orphan-result',
           input: {},
           parentTaskId: 'parent-1', // filtered out

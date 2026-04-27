@@ -11,9 +11,9 @@ import { classifyIntentTool } from './ClassifyIntentTool/ClassifyIntentTool';
 import { hnSearchTool } from './HnSearchTool/HnSearchTool';
 import { hnGetThreadTool } from './HnGetThreadTool/HnGetThreadTool';
 import { webSearchTool } from './WebSearchTool/WebSearchTool';
-import { xSearchTool } from './XSearchTool/XSearchTool';
-import { xSearchBatchTool } from './XSearchTool/XSearchBatchTool';
 import { xPostTool } from './XPostTool/XPostTool';
+import { xaiFindCustomersTool } from './XaiFindCustomersTool/XaiFindCustomersTool';
+import { persistQueueThreadsTool } from './PersistQueueThreadsTool/PersistQueueThreadsTool';
 import { xGetUserTweetsTool } from './XGetUserTweetsTool/XGetUserTweetsTool';
 import { xGetTweetTool } from './XGetTweetTool/XGetTweetTool';
 import { xGetMentionsTool } from './XGetMentionsTool/XGetMentionsTool';
@@ -36,8 +36,6 @@ import { draftPostTool } from './DraftPostTool/DraftPostTool';
 import { findThreadsTool } from './FindThreadsTool/FindThreadsTool';
 import { draftReplyTool } from './DraftReplyTool/DraftReplyTool';
 import { validateDraftTool } from './ValidateDraftTool/ValidateDraftTool';
-import { runDiscoveryScanTool } from './RunDiscoveryScanTool/RunDiscoveryScanTool';
-import { calibrateSearchStrategyTool } from './CalibrateSearchTool/CalibrateSearchTool';
 
 /**
  * Central tool registry for ShipFlare agents.
@@ -61,9 +59,9 @@ registry.register(hnSearchTool);
 registry.register(hnGetThreadTool);
 
 // X tools
-registry.register(xSearchTool);
-registry.register(xSearchBatchTool);
 registry.register(xPostTool);
+registry.register(xaiFindCustomersTool);
+registry.register(persistQueueThreadsTool);
 registry.register(xGetUserTweetsTool);
 registry.register(xGetTweetTool);
 registry.register(xGetMentionsTool);
@@ -115,22 +113,6 @@ registry.register(draftReplyTool);
 // the source of truth for ShipFlare style warnings (hashtag count, links
 // in body/reply, anchor token).
 registry.register(validateDraftTool);
-
-// ---------------------------------------------------------------------------
-// Unified discovery pipeline tools. `run_discovery_scan` wraps
-// `runDiscoveryV3` so the coordinator can drive discovery inline from a
-// team-run loop. The persist-only `draft_reply` above is the only reply
-// tool community-manager needs — it drafts the body in its own LLM turn
-// using the prose rules in `community-manager/references/`.
-// ---------------------------------------------------------------------------
-registry.register(runDiscoveryScanTool);
-
-// `calibrate_search_strategy` is the one-time companion to run_discovery_scan.
-// First scan for a (user, product, platform) triggers calibration; subsequent
-// scans pull the persisted strategy from MemoryStore. Lives next to
-// run_discovery_scan in the registry so the coordinator's allowlist can
-// declare them together.
-registry.register(calibrateSearchStrategyTool);
 
 export { registry };
 

@@ -239,7 +239,7 @@ function buildSweepGoal(slots: ReplySlot[]): string {
   lines.push('');
   lines.push('Per slot, run this loop up to 3 inner attempts:');
   lines.push(
-    '  1. Call run_discovery_scan on the slot channel to surface candidate threads.',
+    '  1. Dispatch discovery-agent via Task on the slot channel to surface candidate threads.',
   );
   lines.push(
     '  2. Dispatch community-manager via Task to draft replies from the queued threads.',

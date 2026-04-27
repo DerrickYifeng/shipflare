@@ -18,9 +18,8 @@ const baseLog = createLogger('api:automation:run');
  *
  * Manual "launch the agents" entry point. Enqueues one coordinator-rooted
  * team-run (trigger='manual') against the team's rolling 'Discovery'
- * conversation; the coordinator runs `run_discovery_scan` itself and then
- * dispatches community-manager (and content-planner where appropriate)
- * per its playbook.
+ * conversation; the coordinator dispatches discovery-agent per platform
+ * and community-manager (and content-planner where appropriate) per its playbook.
  */
 export async function POST(request: NextRequest) {
   const { log, traceId } = loggerForRequest(baseLog, request);

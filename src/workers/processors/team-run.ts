@@ -538,8 +538,8 @@ export async function processTeamRunInternal(
 
   // --- 7) Build ToolContext with deps ---
   // Preload every platform client the team's specialists might need.
-  // Without this, Task-spawned subagents (e.g. discovery-scout calling
-  // `x_search_batch`) blow up with `Missing dependency: xaiClient`
+  // Without this, Task-spawned subagents (e.g. discovery-agent calling
+  // `xai_find_customers`) blow up with `Missing dependency: xaiClient`
   // because the synchronous `ctx.get(key)` switch below has nowhere to
   // load clients on demand. Loaded once per run — the child contexts
   // delegate through `parent.get()` so all nested specialists share.

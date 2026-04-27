@@ -273,9 +273,9 @@ describe('processTeamRun — Task roster injection', () => {
     );
 
     // Every agent present on disk (registered via AGENT.md) should
-    // appear in the injected roster. discovery-scout is the one that
-    // specifically got lost before this wiring — assert it by name.
-    expect(taskTool?.description).toContain('- discovery-scout:');
+    // appear in the injected roster. discovery-agent is the canonical
+    // discovery specialist — assert it by name.
+    expect(taskTool?.description).toContain('- discovery-agent:');
     expect(taskTool?.description).toContain('- post-writer:');
     expect(taskTool?.description).toContain('- community-manager:');
   });

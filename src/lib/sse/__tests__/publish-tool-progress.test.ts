@@ -36,8 +36,8 @@ describe('publishToolProgress', () => {
 
     await publishToolProgress({
       userId: 'u1',
-      toolName: 'calibrate_search_strategy',
-      message: 'Round 12/60 · precision 0.58',
+      toolName: 'xai_find_customers',
+      message: 'Searching x with 12 queries',
       metadata: { round: 12, maxTurns: 60, precision: 0.58 },
     });
 
@@ -47,8 +47,8 @@ describe('publishToolProgress', () => {
     expect(channel).toBe('agents');
     expect(payload).toMatchObject({
       type: 'tool_progress',
-      toolName: 'calibrate_search_strategy',
-      message: 'Round 12/60 · precision 0.58',
+      toolName: 'xai_find_customers',
+      message: 'Searching x with 12 queries',
       metadata: { round: 12, maxTurns: 60, precision: 0.58 },
     });
     expect(typeof payload.callId).toBe('string');
@@ -62,7 +62,7 @@ describe('publishToolProgress', () => {
     await expect(
       publishToolProgress({
         userId: 'u1',
-        toolName: 'run_discovery_scan',
+        toolName: 'persist_queue_threads',
         message: 'Searching X with 12 queries',
       }),
     ).resolves.toBeUndefined();
@@ -71,7 +71,7 @@ describe('publishToolProgress', () => {
     const warnCallArgs = loggerWarnMock.mock.calls[0]!;
     expect(warnCallArgs[0]).toContain('dropped tool_progress event');
     expect(warnCallArgs[1]).toMatchObject({
-      toolName: 'run_discovery_scan',
+      toolName: 'persist_queue_threads',
       error: 'redis down',
     });
     expect(__getDroppedCount()).toBe(1);

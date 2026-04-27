@@ -1,7 +1,7 @@
 // Daily 13:00 UTC fanout. For each user with at least one connected
 // channel AND a product, enqueue one coordinator-rooted team-run with
 // `trigger='discovery_cron'`. The coordinator's playbook handles calling
-// `run_discovery_scan` inline + dispatching community-manager via Task
+// `Task('discovery-agent')` + dispatching community-manager via Task
 // for the queued threads — the scan no longer runs as a standalone
 // BullMQ job, and there is no separate reply-drafter teammate (Phase 6
 // of the agent-cleanup migration absorbed it into community-manager).
@@ -86,8 +86,8 @@ export async function processDiscoveryCronFanout(
         `Daily discovery scan for ${product.name}. ` +
         `Connected platforms: ${platforms}. ` +
         `Trigger: discovery_cron. ` +
-        `Follow your discovery_cron playbook: call run_discovery_scan ` +
-        `yourself per platform, then dispatch community-manager on the top-3.`;
+        `Follow your discovery_cron playbook: dispatch discovery-agent ` +
+        `per platform via Task, then dispatch community-manager on the top-3.`;
 
       await enqueueTeamRun({
         teamId,

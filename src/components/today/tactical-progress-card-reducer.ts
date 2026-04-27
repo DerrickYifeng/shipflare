@@ -60,7 +60,7 @@ export function reduceToolProgress(
 ): ToolProgressViewState {
   if (event.type !== 'tool_progress') return state;
 
-  if (event.toolName === 'run_discovery_scan') {
+  if (event.toolName === 'xai_find_customers') {
     const platform = readString(event.metadata, 'platform') ?? 'default';
     const prev = state.discovery[platform];
     if (prev && prev.callId === event.callId && prev.ts >= event.ts) {

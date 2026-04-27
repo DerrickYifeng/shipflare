@@ -112,8 +112,8 @@ export default async function TeamPage({
   // `trigger='kickoff'` (any status) short-circuits this on every
   // subsequent render. We resolve the product synchronously before
   // firing because the kickoff playbook needs `productId` for the
-  // search-strategist + run_discovery_scan tools — both pull deps off
-  // the team-run worker context. See `src/lib/team-kickoff.ts`.
+  // discovery-agent deps — all pulled off the team-run worker context.
+  // See `src/lib/team-kickoff.ts`.
   const [productRow] = await db
     .select({ id: products.id })
     .from(products)
