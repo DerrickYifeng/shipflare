@@ -120,8 +120,13 @@ function seedToolProgressFromSnapshot(
 ): ToolProgressViewState {
   const calibration: Record<string, CalibrationRow> = { ...state.calibration };
   for (const row of snap.calibration.platforms) {
-    if (row.status === 'failed') {
-      // Skip 'failed' for the seed — failure UI lives in the team-run tactical row.
+    if (row.status !== 'pending' && row.status !== 'running') {
+      // Skip 'completed' and 'failed':
+      //   - 'completed' rows would render as "Calibrating · Round ?/?" via the
+      //     CalibrationRowView (which ignores the row's message field) — misleading
+      //     because calibration is actually done. Once cal completes, the tactical
+      //     row carries the "ready" message; we don't need a dedicated row here.
+      //   - 'failed' UI lives on the team-run tactical row, not the cal row.
       continue;
     }
     if (calibration[row.platform]) continue; // a live event already populated this slot
@@ -132,10 +137,7 @@ function seedToolProgressFromSnapshot(
       maxTurns: null,
       precision: row.precision,
       sampleSize: null,
-      message:
-        row.status === 'completed'
-          ? `Calibrated · precision ${(row.precision ?? 0).toFixed(2)}`
-          : 'Calibrating…',
+      message: 'Calibrating…',
       ts: 0,
     };
   }
