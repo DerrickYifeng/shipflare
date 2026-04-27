@@ -6,8 +6,6 @@ maxTurns: 25
 tools:
   - Task
   - SendMessage
-  - run_discovery_scan
-  - calibrate_search_strategy
   - query_team_status
   - query_plan_items
   - query_strategic_path
@@ -85,21 +83,11 @@ playbook below.
 
 ### `trigger: 'kickoff'` (first time the founder enters team chat)
 
-The user just landed in /team for the first time. They have a
-strategic_path + plan from onboarding, and the AI team is now visibly
-working for them. Your kickoff produces FIVE artifacts the founder
-will read in the chat: **plan draft → search → drafts → calibration →
-refreshed search.**
+The user just landed in /team for the first time. They have a strategic_path + plan from onboarding, and the AI team is now visibly working for them. Your kickoff produces THREE artifacts the founder will read in the chat: **plan draft → discovery → drafts.**
 
-Run them in order. Steps are sequential — do NOT parallelize. The
-ordering is deliberate: the founder needs to see post + reply drafts
-in `/today` *before* calibration runs, so step 3 happens **before**
-step 2 in your dispatch order.
+Run them in order. Each step depends on the previous; do NOT parallelize.
 
-**Step 1 — Plan draft.** Spawn content-planner. **Extract
-`weekStart=...` and `now=...` from the goal preamble and pass them
-verbatim into the prompt** — the planner needs them to anchor
-scheduling and refuse past-dated items:
+**Step 1 — Plan draft.** Spawn content-planner. **Extract `weekStart=...` and `now=...` from the goal preamble and pass them verbatim into the prompt** — the planner needs them to anchor scheduling and refuse past-dated items:
 
 ```
 Task({
@@ -109,74 +97,48 @@ Task({
 })
 ```
 
-If the goal preamble does NOT carry `weekStart=` (older callers),
-fall back to today's Monday 00:00 UTC.
+If the goal preamble does NOT carry `weekStart=` (older callers), fall back to today's Monday 00:00 UTC.
 
-**Step 3 — Search (fast-path).**
-`run_discovery_scan({ platform: 'x', inlineQueryCount: 6 })` (or the
-primary connected platform). This first scan runs scout in inline
-mode with 6 focused queries so the founder sees results in ~60-90s
-— small query set means few raw tweets and fast scout judgment.
-Calibration broadens the strategy on the next scan. Returns
-`{ queued, scoutNotes, scanned }`.
+**Step 2 — Discovery.** If the goal preamble's `Connected channels:` includes `x`, dispatch the discovery-agent:
 
-**Step 4 — Drafts.**
-If `queued.length > 0`, dispatch community-manager on the top 3 by
-confidence:
-`Task({ subagent_type: 'community-manager', description: 'draft top-3 replies', prompt: <thread list> })`.
-community-manager owns reply drafting end-to-end.
-If `queued.length === 0`, **skip step 4 entirely** and proceed to
-step 2 — there's nothing to draft yet, the calibrated re-scan in
-step 3' (or the immediate post-step-2 scan in the 0-queued branch)
-will produce the first reply targets.
+```
+Task({
+  subagent_type: 'discovery-agent',
+  description: 'find X reply targets for kickoff',
+  prompt: 'trigger: kickoff\nmaxResults: 10\nintent: (none — use the rubric defaults)'
+})
+```
 
-**Step 2 — Calibration.**
-`calibrate_search_strategy({ platform: 'x' })`. This spawns
-search-strategist, runs an open-ended iterate-until-precision loop,
-and persists the winning strategy to MemoryStore. Returns
-`{ saved, observedPrecision, reachedTarget, queries, rationale }`.
-Runs in the background while the founder works in `/today`.
+If no channels are connected, skip steps 2-3 and tell the user "Connect X to see your scout in action."
 
-**Step 3' — Refreshed search.**
-`run_discovery_scan({ platform: 'x' })` — no `inlineQueryCount`,
-uses the calibrated strategy from step 2 verbatim. New threads
-dedupe-insert into the inbox. **Skip this step if you took the
-0-queued branch in step 4** — in that branch, run a single
-`run_discovery_scan({ platform: 'x' })` immediately after step 2
-(which becomes the first reply-eligible scan) and dispatch
-community-manager on its `queued` results.
+The discovery-agent returns a StructuredOutput with `topQueued` (top-N by engagement-weighted score). Read it directly; do not re-query the threads table.
 
-If the user has no channels connected, skip steps 2-3-3'-4 and tell
-them "Connect X to see your scout in action."
+**Step 3 — Drafts.** If the discovery-agent's `queued > 0`, dispatch community-manager on the top 3 from `topQueued`:
+
+```
+Task({
+  subagent_type: 'community-manager',
+  description: 'draft top-3 replies',
+  prompt: <serialize the top 3 entries from topQueued as a thread list>
+})
+```
+
+community-manager owns reply drafting end-to-end. Skip step 3 if `queued === 0`.
 
 Final user-facing summary lists the artifacts:
 - Plan: N items scheduled
-- Discovery (initial): K threads scanned, J drafts ready for review
-  (or `scoutNotes` excerpt when J=0 — never just "no relevant
-  conversations" without the scout's reasoning)
-- Calibration: M queries, X% precision over S judged tweets
-  (target 70%, reached / not reached), one-line rationale
-- Discovery (calibrated): K' new threads added (when step 3' ran)
+- Discovery: K threads queued (or `scoutNotes` excerpt when K=0 — never just "no relevant conversations" without the agent's reasoning)
+- Drafts: J replies drafted (skipped when no queued threads)
 
 ### `trigger: 'discovery_cron'` (daily 13:00 UTC)
 
-Daily discovery sweep. Run scans yourself; only dispatch community-manager
-if there's something to draft:
+Daily discovery sweep. For each platform that has a connected channel and a discovery-agent path (X for v1; Reddit is deferred), dispatch the discovery-agent and then community-manager on the top results:
 
-1. Call `run_discovery_scan({ platform: 'x' })` (and `{ platform: 'reddit' }`
-   if reddit is connected — emit both calls in one response so they run
-   in parallel). When a calibrated strategy exists in MemoryStore the
-   tool uses it; otherwise it falls back to inline mode automatically
-   (no `strategy_not_calibrated` skip — the tool deletes that branch).
-2. Combine the `queued` arrays across platforms and pick the top 3 by
-   `confidence`. If non-empty:
-   `Task({ subagent_type: 'community-manager', description: 'draft top-3 replies', prompt: <thread list> })`
-3. If every scan returned 0 queued threads, your final reply quotes the
-   `scoutNotes` from each scan — "Scanned X today; <scoutNotes>". Do
-   NOT just say "no relevant conversations" without the reasoning.
+1. For X (and only X for v1): `Task({ subagent_type: 'discovery-agent', description: 'daily X discovery', prompt: 'trigger: discovery_cron\nmaxResults: 10' })`. The agent returns a StructuredOutput with `queued`, `topQueued`, and `scoutNotes`.
+2. If `queued > 0`, dispatch community-manager on the top 3 from `topQueued`: `Task({ subagent_type: 'community-manager', description: 'draft top-3 replies', prompt: <serialize the top 3> })`.
+3. If `queued === 0`, your final reply quotes the agent's `scoutNotes` — "Today's scan: <scoutNotes>". Do NOT just say "no relevant conversations" without the reasoning.
 
-Do NOT dispatch content-planner on a `discovery_cron` trigger — weekly
-planning is owned by a separate weekly cron.
+Do NOT dispatch content-planner on a `discovery_cron` trigger — weekly planning is owned by a separate weekly cron.
 
 ### `trigger: 'weekly'` / `'phase_transition'` (replan)
 
@@ -238,10 +200,7 @@ Never just say "no replies today" without the scout's reasoning.
 
 ### `trigger: 'manual'` (user said "scan X again")
 
-Same as `discovery_cron` — call `run_discovery_scan` directly, then
-dispatch community-manager on the top results — except respect any user
-hints in the goal text (e.g. "draft 5 replies, not 3", "scan reddit
-only").
+Same as `discovery_cron` — dispatch `discovery-agent`, then community-manager on the top results — except respect any user hints in the goal text (e.g. "draft 5 replies, not 3", "scan reddit only").
 
 ## Finishing
 
