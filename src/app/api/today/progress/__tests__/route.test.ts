@@ -3,14 +3,22 @@
  * derivation of the tactical snapshot (the old plans/plan_items path was
  * deleted in Phase C — see tactical-progress-card.tsx header for context).
  *
- * The route runs 4 DB queries in order:
- *   1. teams                          (find the user's team)
- *   2. team_runs                      (most-recent tactical run within 24h)
- *   3. team_messages COUNT            (# of add_plan_item tool_calls)
- *   4. discovery_configs              (calibration rows — unchanged)
+ * The route runs DB queries via Promise.all:
+ *   loadTacticalStatus:
+ *     1. teams                  (find the user's team — id only, orderBy+limit)
+ *     2. team_runs              (most-recent tactical run within 24h)
+ *     3. team_messages COUNT    (# of add_plan_item tool_calls)
+ *   loadCalibrationState:
+ *     4. channels               (connected platforms — platform only)
+ *     5. products               (user's product id — id only, limit without orderBy)
  *
  * We stub the drizzle `db.select()` chain to dispatch on the projection
  * keys (each query has a distinctive shape) so the test stays declarative.
+ * For the two single-`id` projections (teams vs products), we use a call
+ * counter because teams is always fetched first (from loadTacticalStatus)
+ * and products second (from loadCalibrationState). Both halves run inside
+ * Promise.all, but JS microtask ordering ensures the synchronous dispatch
+ * sequence is stable within a single event-loop turn.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
@@ -33,8 +41,10 @@ vi.mock('@/lib/logger', () => ({
   }),
 }));
 
-// Query dispatch: each select() call inspects its projection keys to decide
-// which table/query it represents.
+// ---------------------------------------------------------------------------
+// Shared state — mutated in beforeEach + individual tests
+// ---------------------------------------------------------------------------
+
 interface State {
   teamRows: Array<{ id: string }>;
   runRows: Array<{
@@ -44,32 +54,70 @@ interface State {
     errorMessage: string | null;
   }>;
   addPlanItemCount: number;
-  calibrationRows: Array<{
-    platform: string;
-    calibrationStatus: 'pending' | 'running' | 'completed' | 'failed';
-    calibrationRound: number | null;
-    calibrationPrecision: number | null;
-  }>;
+  channelRows: Array<{ platform: string }>;
+  productRows: Array<{ id: string }>;
+  /**
+   * MemoryStore.loadEntry mock: keyed by entry name, returns null or the
+   * entry's content string. Set to null to simulate a cache miss.
+   */
+  memoryEntries: Map<string, string | null>;
 }
 
 const state: State = {
   teamRows: [],
   runRows: [],
   addPlanItemCount: 0,
-  calibrationRows: [],
+  channelRows: [],
+  productRows: [],
+  memoryEntries: new Map(),
 };
 
-function thenable<T>(rows: T): { orderBy: () => { limit: () => Promise<T> } } & {
+// ---------------------------------------------------------------------------
+// MemoryStore mock — must be declared before the route import
+// ---------------------------------------------------------------------------
+
+vi.mock('@/memory/store', () => ({
+  MemoryStore: class {
+    loadEntry(name: string) {
+      const content = state.memoryEntries.get(name);
+      if (content === undefined || content === null) {
+        return Promise.resolve(null);
+      }
+      return Promise.resolve({ name, content });
+    }
+  },
+}));
+
+vi.mock('@/tools/CalibrateSearchTool/strategy-memory', () => ({
+  searchStrategyMemoryName: (platform: string) => `${platform}-search-strategy`,
+}));
+
+// ---------------------------------------------------------------------------
+// DB select mock
+// ---------------------------------------------------------------------------
+
+// Track how many times the single-`id` projection has been called so we can
+// distinguish the teams query (1st call) from the products query (2nd call).
+let idProjectionCallCount = 0;
+
+/**
+ * Builds a thenable that supports:
+ *   - direct await                         (.then)
+ *   - .orderBy().limit()                   (teams / runs chain)
+ *   - .limit()                             (products chain — no orderBy)
+ */
+function thenable<T>(rows: T): {
+  orderBy: () => { limit: () => Promise<T> };
+  limit: () => Promise<T>;
   then: Promise<T>['then'];
 } {
-  // Support both `.orderBy().limit()` (team/runs queries) and direct
-  // await-on-the-chain (calibration + COUNT queries).
   const promise = Promise.resolve(rows);
   return Object.assign(
     {
       orderBy: () => ({
         limit: () => Promise.resolve(rows),
       }),
+      limit: () => Promise.resolve(rows),
       then: promise.then.bind(promise),
     },
     {},
@@ -87,18 +135,27 @@ vi.mock('@/lib/db', () => ({
             if (keys.length === 1 && keys[0] === 'n') {
               return thenable([{ n: state.addPlanItemCount }]);
             }
-            // teams query → `id` only
-            if (keys.length === 1 && keys[0] === 'id') {
-              return thenable(state.teamRows);
+
+            // Channels query → `platform` only
+            if (keys.length === 1 && keys[0] === 'platform') {
+              return thenable(state.channelRows);
             }
+
+            // Single-`id` projection: teams (1st call) or products (2nd call).
+            // Teams comes from loadTacticalStatus, products from
+            // loadCalibrationState; both are launched by Promise.all in
+            // buildSnapshot, but teams resolves its synchronous dispatch first.
+            if (keys.length === 1 && keys[0] === 'id') {
+              const isTeams = idProjectionCallCount === 0;
+              idProjectionCallCount += 1;
+              return thenable(isTeams ? state.teamRows : state.productRows);
+            }
+
             // team_runs query → has `status`, `completedAt`, etc.
             if (keys.includes('status') && keys.includes('completedAt')) {
               return thenable(state.runRows);
             }
-            // discovery_configs query → calibration* keys
-            if (keys.includes('calibrationStatus')) {
-              return thenable(state.calibrationRows);
-            }
+
             throw new Error(
               `Unexpected select projection: ${JSON.stringify(keys)}`,
             );
@@ -137,7 +194,10 @@ beforeEach(() => {
   state.teamRows = [];
   state.runRows = [];
   state.addPlanItemCount = 0;
-  state.calibrationRows = [];
+  state.channelRows = [];
+  state.productRows = [];
+  state.memoryEntries = new Map();
+  idProjectionCallCount = 0;
 });
 
 describe('GET /api/today/progress', () => {
@@ -246,12 +306,43 @@ describe('GET /api/today/progress', () => {
     expect(body.teamRun).toEqual({ teamId: 'team-1', runId: 'run-4' });
   });
 
-  it('returns an empty calibration.platforms list (discovery v3 has no calibration)', async () => {
+  it('returns calibration.platforms with status=pending when no strategy is cached', async () => {
     state.teamRows = [{ id: 'team-1' }];
     state.runRows = [];
+    state.channelRows = [{ platform: 'x' }];
+    state.productRows = [{ id: 'p1' }];
+    // No memoryEntries set → loadEntry returns null → status='pending'
     const { GET } = await import('../route');
     const res = await GET(makeRequest());
     const body = await res.json();
-    expect(body.calibration.platforms).toEqual([]);
+    expect(body.calibration.platforms).toEqual([
+      { platform: 'x', status: 'pending', precision: null, round: 0 },
+    ]);
+  });
+
+  it('returns calibration.platforms with status=completed when a strategy is cached', async () => {
+    state.teamRows = [{ id: 'team-1' }];
+    state.runRows = [];
+    state.channelRows = [{ platform: 'x' }];
+    state.productRows = [{ id: 'p1' }];
+    state.memoryEntries.set(
+      'x-search-strategy',
+      JSON.stringify({
+        platform: 'x',
+        schemaVersion: 2,
+        generatedAt: '2026-04-26T00:00:00.000Z',
+        queries: ['q1'],
+        observedPrecision: 0.82,
+        reachedTarget: true,
+        turnsUsed: 8,
+        sampleSize: 24,
+      }),
+    );
+    const { GET } = await import('../route');
+    const res = await GET(makeRequest());
+    const body = await res.json();
+    expect(body.calibration.platforms).toEqual([
+      { platform: 'x', status: 'completed', precision: 0.82, round: 0 },
+    ]);
   });
 });
