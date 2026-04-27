@@ -10,11 +10,18 @@ import { and, count, desc, eq, gte, inArray, sql } from 'drizzle-orm';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import {
+  channels,
+  products,
   teamMessages,
   teamRuns,
   teams,
 } from '@/lib/db/schema';
 import { createLogger, loggerForRequest } from '@/lib/logger';
+import { MemoryStore } from '@/memory/store';
+import {
+  searchStrategyMemoryName,
+  type PersistedSearchStrategy,
+} from '@/tools/CalibrateSearchTool/strategy-memory';
 
 const baseLog = createLogger('api:today:progress');
 
@@ -109,15 +116,60 @@ export async function GET(request: NextRequest): Promise<Response> {
 }
 
 async function buildSnapshot(userId: string): Promise<ProgressSnapshot> {
-  const { tactical, teamRun } = await loadTacticalStatus(userId);
-
-  // Discovery v3: no calibration state. Shape retained for client
-  // back-compat — always returns an empty platforms list.
+  const [{ tactical, teamRun }, platforms] = await Promise.all([
+    loadTacticalStatus(userId),
+    loadCalibrationState(userId),
+  ]);
   return {
     tactical,
     teamRun,
-    calibration: { platforms: [] },
+    calibration: { platforms },
   };
+}
+
+async function loadCalibrationState(userId: string): Promise<PlatformCalibration[]> {
+  // Connected platforms only — no point reporting on platforms the user can't use.
+  const channelRows = await db
+    .select({ platform: channels.platform })
+    .from(channels)
+    .where(eq(channels.userId, userId));
+  const platformsConnected = Array.from(
+    new Set(
+      channelRows
+        .map((r) => r.platform)
+        .filter((p): p is 'x' | 'reddit' => p === 'x' || p === 'reddit'),
+    ),
+  );
+
+  if (platformsConnected.length === 0) return [];
+
+  // MemoryStore is keyed (userId, productId) — one product per user.
+  const [productRow] = await db
+    .select({ id: products.id })
+    .from(products)
+    .where(eq(products.userId, userId))
+    .limit(1);
+  if (!productRow) return [];
+
+  const store = new MemoryStore(userId, productRow.id);
+  const out: PlatformCalibration[] = [];
+  for (const platform of platformsConnected) {
+    const entry = await store.loadEntry(searchStrategyMemoryName(platform));
+    if (!entry) {
+      out.push({ platform, status: 'pending', precision: null, round: 0 });
+      continue;
+    }
+    try {
+      const parsed = JSON.parse(entry.content) as PersistedSearchStrategy;
+      const precision =
+        typeof parsed.observedPrecision === 'number' ? parsed.observedPrecision : null;
+      out.push({ platform, status: 'completed', precision, round: 0 });
+    } catch {
+      // Malformed entry — treat as pending so a re-cal can replace it.
+      out.push({ platform, status: 'pending', precision: null, round: 0 });
+    }
+  }
+  return out;
 }
 
 async function loadTacticalStatus(userId: string): Promise<{

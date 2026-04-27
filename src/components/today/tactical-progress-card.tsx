@@ -67,6 +67,14 @@ interface TeamRunRef {
 interface ProgressSnapshot {
   tactical: TacticalSnapshot;
   teamRun: TeamRunRef | null;
+  calibration: {
+    platforms: Array<{
+      platform: string;
+      status: 'pending' | 'running' | 'completed' | 'failed';
+      precision: number | null;
+      round: number;
+    }>;
+  };
 }
 
 /* ─── View state ─────────────────────────────────────────────────────── */
@@ -90,12 +98,9 @@ const INITIAL_VIEW: ViewState = {
   snapshotLoaded: false,
 };
 
-// Seeds the legacy ViewState from the REST snapshot. Note: this does NOT
-// hydrate toolProgress.calibration — calibration rows are fed exclusively
-// by live SSE `tool_progress` events, so a user reloading mid-calibration
-// sees an empty row until the next strategist turn lands an event. This
-// is a deliberate trade-off; the snapshot path is being phased out for
-// calibration display in favor of the unified tool_progress channel.
+// Seeds the legacy ViewState from the REST snapshot. Note: the calibration
+// rows on `toolProgress` are seeded by `seedToolProgressFromSnapshot` below
+// — this function only handles the tactical + teamRun half of the snapshot.
 function seedFromSnapshot(state: ViewState, snap: ProgressSnapshot): ViewState {
   return {
     ...state,
@@ -103,6 +108,40 @@ function seedFromSnapshot(state: ViewState, snap: ProgressSnapshot): ViewState {
     teamRun: snap.teamRun,
     snapshotLoaded: true,
   };
+}
+
+// Best-effort: seed calibration rows from the persisted strategy state so a
+// user reloading mid-calibration sees something immediately. Live SSE events
+// refine these rows as the strategist runs further turns. We use ts=0 so the
+// first real `tool_progress` event always wins the dedup check in the reducer.
+function seedToolProgressFromSnapshot(
+  state: ToolProgressViewState,
+  snap: ProgressSnapshot,
+): ToolProgressViewState {
+  const calibration: Record<string, CalibrationRow> = { ...state.calibration };
+  for (const row of snap.calibration.platforms) {
+    if (row.status === 'failed') {
+      // Skip 'failed' for the seed — failure UI lives in the team-run tactical row.
+      continue;
+    }
+    if (calibration[row.platform]) continue; // a live event already populated this slot
+    calibration[row.platform] = {
+      platform: row.platform,
+      callId: `snapshot:${row.platform}`,
+      round: null,
+      maxTurns: null,
+      precision: row.precision,
+      sampleSize: null,
+      message:
+        row.status === 'completed'
+          ? `Calibrated · precision ${(row.precision ?? 0).toFixed(2)}`
+          : 'Calibrating…',
+      ts: 0,
+    };
+  }
+  return state.calibration === calibration
+    ? state
+    : { ...state, calibration };
 }
 
 /**
@@ -245,6 +284,7 @@ export function TacticalProgressCard() {
         if (!res.ok) throw new Error(`snapshot ${res.status}`);
         const snap = (await res.json()) as ProgressSnapshot;
         setView((prev) => seedFromSnapshot(prev, snap));
+        setToolProgress((prev) => seedToolProgressFromSnapshot(prev, snap));
       } catch {
         // Mark loaded even on failure so the visibility gate can still
         // decide (fromOnboarding-only case). Live events will populate
