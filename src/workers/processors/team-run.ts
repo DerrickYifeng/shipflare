@@ -214,6 +214,7 @@ interface RecordMessageInput {
     | 'agent_text'
     | 'tool_call'
     | 'tool_result'
+    | 'tool_progress'
     | 'completion'
     | 'error'
     | 'thinking';
@@ -559,11 +560,39 @@ export async function processTeamRunInternal(
   const toolCtx: ToolContext = {
     abortSignal: controller.signal,
     emitProgress: (toolName, message, metadata) => {
+      // Two-channel fan-out, both fire-and-forget:
+      //   1. /today TacticalProgressCard via SSE `agents` channel.
+      //   2. /team chat via team_messages (so the founder watching the
+      //      coordinator dispatch sees inline progress under the active
+      //      tool_call card). fromMemberId defaults to the coordinator —
+      //      sub-agent attribution requires a per-call toolUseId stack
+      //      that the current ctx shape doesn't track; out of scope here.
       void publishToolProgress({
         userId: team.userId,
         toolName,
         message,
         ...(metadata ? { metadata } : {}),
+      });
+      void recordMessage(deps, {
+        runId,
+        teamId: team.id,
+        conversationId,
+        fromMemberId: rootMember.id,
+        toMemberId: null,
+        type: 'tool_progress',
+        content: message,
+        metadata: {
+          toolName,
+          ...(metadata ?? {}),
+        },
+      }).catch((err) => {
+        // Best-effort — UI decoration only. Don't crash the agent loop
+        // if the DB insert fails.
+        baseLog.warn(
+          `tool_progress recordMessage failed (toolName=${toolName}): ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
       });
     },
     get<V>(key: string): V {

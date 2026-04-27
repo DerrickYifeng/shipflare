@@ -305,15 +305,40 @@ export function Conversation({
       actor = coord?.displayName ?? 'Team Lead';
     }
     return (
-      <ToolActivity
-        key={node.id}
-        toolName={node.toolName}
-        variant={node.variant}
-        elapsed={node.elapsed}
-        complete={node.complete}
-        errorText={node.errorText}
-        actor={actor}
-      />
+      <div key={node.id}>
+        <ToolActivity
+          toolName={node.toolName}
+          variant={node.variant}
+          elapsed={node.elapsed}
+          complete={node.complete}
+          errorText={node.errorText}
+          actor={actor}
+        />
+        {node.progress.length > 0 ? (
+          <div
+            style={{
+              padding: '0 0 6px 56px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 2,
+            }}
+          >
+            {node.progress.map((line, i) => (
+              <div
+                key={i}
+                style={{
+                  fontFamily: 'var(--sf-font-mono)',
+                  fontSize: 12,
+                  color: 'var(--sf-fg-3)',
+                  lineHeight: 1.4,
+                }}
+              >
+                · {line}
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </div>
     );
   };
 

@@ -246,15 +246,26 @@ describe('x_search_batch tool', () => {
     expect(parse.success).toBe(false);
   });
 
-  it('rejects more than 10 queries via schema', async () => {
-    const parse = xSearchBatchTool.inputSchema.safeParse({
-      queries: Array.from({ length: 11 }, (_, i) => ({
+  it('rejects more than the per-batch query cap via schema', async () => {
+    // Cap is exposed via SEARCH_TWEETS_BATCH_MAX_QUERIES (20). Anything
+    // over should fail; 20 itself should pass.
+    const overCap = xSearchBatchTool.inputSchema.safeParse({
+      queries: Array.from({ length: 21 }, (_, i) => ({
         id: `q${i}`,
         query: 'x',
         maxResults: 5,
       })),
     });
-    expect(parse.success).toBe(false);
+    expect(overCap.success).toBe(false);
+
+    const atCap = xSearchBatchTool.inputSchema.safeParse({
+      queries: Array.from({ length: 20 }, (_, i) => ({
+        id: `q${i}`,
+        query: 'x',
+        maxResults: 5,
+      })),
+    });
+    expect(atCap.success).toBe(true);
   });
 
   it('applies maxResults default of 10 when omitted', async () => {

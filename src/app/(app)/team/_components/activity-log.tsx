@@ -47,6 +47,7 @@ const KNOWN_TYPES: readonly TeamMessageType[] = [
   'agent_text',
   'tool_call',
   'tool_result',
+  'tool_progress',
   'completion',
   'error',
   'thinking',
@@ -501,6 +502,31 @@ function MessageBody({ type, content, metadata, fromOther }: MessageBodyProps) {
     );
   }
 
+  if (type === 'tool_progress') {
+    // Compact mono log line — written by slow tools' emitProgress.
+    // No collapsible: it's already one line and shouldn't add weight.
+    const toolName = extractToolName(metadata);
+    return (
+      <p
+        style={{
+          margin: 0,
+          fontFamily: 'var(--sf-font-mono)',
+          fontSize: 12,
+          color: 'var(--sf-fg-3)',
+          lineHeight: 1.4,
+        }}
+      >
+        {toolName ? (
+          <>
+            <code style={codeInline}>{toolName}</code>
+            <span style={{ color: 'var(--sf-fg-4)', margin: '0 6px' }}>·</span>
+          </>
+        ) : null}
+        {content}
+      </p>
+    );
+  }
+
   if (type === 'thinking') {
     return (
       <Collapsible summary={<em style={{ color: 'var(--sf-fg-3)' }}>thinking…</em>}>
@@ -554,6 +580,8 @@ function TypeBadge({ type }: { type: TeamActivityMessage['type'] }) {
       return <Badge variant="default">tool</Badge>;
     case 'tool_result':
       return <Badge variant="default">result</Badge>;
+    case 'tool_progress':
+      return <Badge variant="default">progress</Badge>;
     case 'completion':
       return <Badge variant="success">done</Badge>;
     case 'error':

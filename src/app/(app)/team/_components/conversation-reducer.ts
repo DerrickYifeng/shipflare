@@ -146,6 +146,14 @@ export interface ActivityNode {
    * member row for this spawn yet (Phase F gap). Null on main thread.
    */
   agentName: string | null;
+  /**
+   * Live progress lines emitted by the running tool via `ctx.emitProgress`
+   * — surfaced as compact mono log rows below the activity row so the
+   * founder can see "Searching x with 6 inline queries" / "Resolved
+   * 18/22 bios" while a slow tool is running. Frozen once the matching
+   * tool_result arrives. Always [] for tools that don't emit progress.
+   */
+  progress: string[];
 }
 
 export interface RawNode {
@@ -572,11 +580,35 @@ export function stitchLeadMessages(
         errorText: null,
         parentTaskId: extractParentTaskId(msg.metadata),
         agentName: extractAgentName(msg.metadata),
+        progress: [],
       };
       const useId = extractToolUseId(msg.metadata);
       if (useId) activityByUseId.set(useId, activity);
       activityById.set(msg.id, activity);
       nodes.push(activity);
+      continue;
+    }
+
+    if (msg.type === 'tool_progress') {
+      // Attach to the most-recent in-flight ActivityNode whose toolName
+      // matches the progress event's toolName. The emitProgress lambda
+      // doesn't carry parentToolUseId today, so we match by toolName +
+      // recency. If no match (rare — emitProgress fired before tool_call
+      // landed, or the tool emitted from outside a team-run), drop the
+      // event silently — it's UI decoration, not load-bearing.
+      const progressToolName = extractToolName(msg.metadata);
+      const line = (msg.content ?? '').trim();
+      if (!progressToolName || !line) continue;
+      let target: ActivityNode | null = null;
+      for (const candidate of activityById.values()) {
+        if (candidate.complete) continue;
+        if (candidate.runId !== msg.runId) continue;
+        if (candidate.toolName !== progressToolName) continue;
+        if (!target || candidate.createdAt > target.createdAt) {
+          target = candidate;
+        }
+      }
+      if (target) target.progress.push(line);
       continue;
     }
 
@@ -623,6 +655,7 @@ export function stitchLeadMessages(
         errorText: msg.content ? truncate(msg.content.trim(), ERROR_TRUNCATE_LEN) : null,
         parentTaskId: extractParentTaskId(msg.metadata),
         agentName: extractAgentName(msg.metadata),
+        progress: [],
       });
       continue;
     }
