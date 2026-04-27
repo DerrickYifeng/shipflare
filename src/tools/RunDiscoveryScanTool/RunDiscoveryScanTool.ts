@@ -144,14 +144,19 @@ export const runDiscoveryScanTool: ToolDefinition<
     const config = getPlatformConfig(platform);
     const sources = input.sources ?? [...config.defaultSources];
 
-    const queryCountForLog = strategy
+    const knownQueryCount: number | null = strategy
       ? strategy.queries.length
-      : input.inlineQueryCount ?? 8;
-    ctx.emitProgress?.(
-      'run_discovery_scan',
-      `Searching ${platform} with ${queryCountForLog} ${strategy ? 'calibrated' : 'inline'} queries`,
-      { platform, queryCount: queryCountForLog, mode: strategy ? 'calibrated' : 'inline' },
-    );
+      : input.inlineQueryCount ?? null;
+    const mode: 'calibrated' | 'inline' = strategy ? 'calibrated' : 'inline';
+    const preMessage =
+      knownQueryCount !== null
+        ? `Searching ${platform} with ${knownQueryCount} ${mode} queries`
+        : `Searching ${platform} with broad ${mode} queries`;
+    ctx.emitProgress?.('run_discovery_scan', preMessage, {
+      platform,
+      ...(knownQueryCount !== null ? { queryCount: knownQueryCount } : {}),
+      mode,
+    });
 
     let deps;
     try {
@@ -182,7 +187,9 @@ export const runDiscoveryScanTool: ToolDefinition<
         },
         ...(strategy
           ? { presetQueries: strategy.queries, negativeTerms: strategy.negativeTerms }
-          : { inlineQueryCount: input.inlineQueryCount }),
+          : input.inlineQueryCount !== undefined
+            ? { inlineQueryCount: input.inlineQueryCount }
+            : {}),
       },
       deps,
     );
@@ -199,6 +206,7 @@ export const runDiscoveryScanTool: ToolDefinition<
         platform,
         scanned: result.verdicts.length,
         queued: queueVerdicts.length,
+        mode,
       },
     );
 

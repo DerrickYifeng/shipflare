@@ -19,8 +19,9 @@ vi.mock('@/lib/db', () => ({
 }));
 
 // MemoryStore is mocked so each test can decide whether the cached
-// strategy entry exists. The tool reads it via `loadEntry` to decide
-// whether to short-circuit with `strategy_not_calibrated`.
+// strategy entry exists. When the entry is absent (or at a legacy
+// schemaVersion) the tool falls back to scout's inline-mode generation
+// instead of skipping — see the inline-fallback tests below.
 const loadEntryMock = vi.fn();
 vi.mock('@/memory/store', () => {
   class MemoryStore {
@@ -178,6 +179,10 @@ describe('run_discovery_scan tool', () => {
     expect(result.skipped).toBe(false);
     const callArg = vi.mocked(runDiscoveryV3).mock.calls[0]![0];
     expect(callArg.presetQueries).toBeUndefined();
+    // The caller did not pass inlineQueryCount and there's no strategy —
+    // the spread should omit the key entirely (not forward it as undefined).
+    expect(callArg.inlineQueryCount).toBeUndefined();
+    expect('inlineQueryCount' in callArg).toBe(false);
   });
 
   it('surfaces scoutNotes and passes presetQueries from the cached strategy', async () => {
@@ -273,7 +278,7 @@ describe('run_discovery_scan tool', () => {
     expect(result.scoutNotes).toBe('1 queueable found.');
   });
 
-  it('emits a tool_progress event before scout runs', async () => {
+  it('emits pre-scan and post-scan tool_progress events around the scout run', async () => {
     dbSelectMock.mockReturnValueOnce(buildSelectChain([{ platform: 'x' }]));
     dbSelectMock.mockReturnValueOnce(
       buildSelectChain([
@@ -290,6 +295,68 @@ describe('run_discovery_scan tool', () => {
 
     loadEntryMock.mockResolvedValueOnce(makeStrategyEntry('x'));
     vi.mocked(createPlatformDeps).mockResolvedValueOnce({} as never);
+
+    // Capture call order: emit happens before runDiscoveryV3 if we
+    // record the emit-call-count when runDiscoveryV3 is invoked.
+    let emitCountAtScanStart = -1;
+    const emit = vi.fn();
+    vi.mocked(runDiscoveryV3).mockImplementationOnce(async () => {
+      emitCountAtScanStart = emit.mock.calls.length;
+      return {
+        verdicts: [],
+        review: { ran: false, decision: { mode: 'skip' }, disagreements: null },
+        scoutNotes: '',
+        usage: { scout: { costUsd: 0.01 }, reviewer: null },
+        rubricGenerated: false,
+      } as never;
+    });
+
+    const ctx = makeCtx({ userId: 'u1', productId: 'p1' });
+    ctx.emitProgress = emit;
+
+    await runDiscoveryScanTool.execute({ platform: 'x' }, ctx);
+
+    // Two events total — pre-scan and post-scan.
+    expect(emit).toHaveBeenCalledTimes(2);
+
+    // Pre-scan fires before runDiscoveryV3 (call count was 1 when scan started).
+    expect(emitCountAtScanStart).toBe(1);
+
+    // Pre-scan call shape.
+    const [pre, post] = emit.mock.calls;
+    expect(pre![0]).toBe('run_discovery_scan');
+    expect(pre![1]).toMatch(/^Searching x /);
+    expect(pre![2]).toMatchObject({ platform: 'x', mode: 'calibrated' });
+    expect(pre![2]).toHaveProperty('queryCount', 2);
+
+    // Post-scan call shape.
+    expect(post![0]).toBe('run_discovery_scan');
+    expect(post![1]).toMatch(/^Scanned/);
+    expect(post![2]).toMatchObject({
+      platform: 'x',
+      scanned: 0,
+      queued: 0,
+      mode: 'calibrated',
+    });
+  });
+
+  it('omits queryCount from pre-scan metadata when running inline without an explicit count', async () => {
+    dbSelectMock.mockReturnValueOnce(buildSelectChain([{ platform: 'x' }]));
+    dbSelectMock.mockReturnValueOnce(
+      buildSelectChain([
+        {
+          id: 'p1',
+          name: 'Shipflare',
+          description: 'ship things',
+          valueProp: null,
+          keywords: ['ship'],
+        },
+      ]),
+    );
+    dbSelectMock.mockReturnValue(buildSelectChain([]));
+
+    loadEntryMock.mockResolvedValueOnce(null);
+    vi.mocked(createPlatformDeps).mockResolvedValueOnce({} as never);
     vi.mocked(runDiscoveryV3).mockResolvedValueOnce({
       verdicts: [],
       review: { ran: false, decision: { mode: 'skip' }, disagreements: null },
@@ -302,12 +369,13 @@ describe('run_discovery_scan tool', () => {
     const ctx = makeCtx({ userId: 'u1', productId: 'p1' });
     ctx.emitProgress = emit;
 
+    // No inlineQueryCount input.
     await runDiscoveryScanTool.execute({ platform: 'x' }, ctx);
 
-    expect(emit).toHaveBeenCalled();
-    const firstCall = emit.mock.calls[0]!;
-    expect(firstCall[0]).toBe('run_discovery_scan');
-    expect(typeof firstCall[1]).toBe('string');
-    expect(firstCall[1]).toMatch(/X|Reddit|querie/i);
+    const pre = emit.mock.calls[0]!;
+    expect(pre[1]).toMatch(/^Searching x with broad inline queries/);
+    // Honest about not knowing the count — omit the field entirely.
+    expect(pre[2]).not.toHaveProperty('queryCount');
+    expect(pre[2]).toMatchObject({ platform: 'x', mode: 'inline' });
   });
 });
