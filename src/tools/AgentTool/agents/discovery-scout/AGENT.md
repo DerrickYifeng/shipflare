@@ -40,6 +40,12 @@ negativeTerms?: string[]       // anti-signal terms learned during
                                // matching results; do NOT inject as
                                // search operators (the strategy already
                                // accounted for that).
+inlineQueryCount?: number      // when `presetQueries` is empty/absent,
+                               // produce this many queries instead of
+                               // your 2-8 default. Kickoff sets this to
+                               // 12 to deliberately span breadth so the
+                               // first scan returns something even
+                               // before calibration has run.
 ```
 
 Read `<agent-memory>` in your system prompt — it holds the onboarding
@@ -56,9 +62,16 @@ judgment-rubric defaults when they conflict.
    "compress related phrasings" step. Just feed them to
    `x_search_batch`. The one-time `search-strategist` already paid
    the design cost; your job here is judgment, not query design.
-   Otherwise (legacy / cold path), generate 2-8 queries from
-   `sources` + `intent` + product keywords. Compress related
-   phrasings into one query; do not pay for duplicates.
+   Otherwise (cold / fast-path) generate queries from `sources` +
+   `intent` + product keywords. Default count: **2-8**. When
+   `inlineQueryCount >= 10`, deliberately span breadth instead of
+   compressing — produce roughly:
+     - 3-4 **broad** queries (product name, category, top-level pain),
+     - 4-5 **medium** queries (specific pain phrasings, value-prop language),
+     - 3-4 **specific** queries (ICP voice — "solo founder asking",
+       subreddit-native phrasings, niche operators).
+   Breadth beats precision for the kickoff first round; calibration
+   will refine on the next scan.
 2. Call `x_search_batch` ONCE with all queries (it's literally one
    Grok round-trip — sequential `x_search` calls are waste).
 3. Each tweet in the results comes with an **enriched author** object:
