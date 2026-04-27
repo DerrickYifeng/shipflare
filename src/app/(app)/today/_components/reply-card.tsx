@@ -69,6 +69,82 @@ function relativeTime(iso: string | null): string | null {
  */
 const HALLUCINATED_POSTED_AT = '2021-01-01T00:00:00.000Z';
 
+/* ── Engagement helpers ─────────────────────────────────────────────── */
+
+function formatCount(n: number): string {
+  if (n < 1000) return String(n);
+  if (n < 10_000) return `${(n / 1000).toFixed(1)}k`;
+  if (n < 1_000_000) return `${Math.round(n / 1000)}k`;
+  return `${(n / 1_000_000).toFixed(1)}M`;
+}
+
+function EngagementBadge({
+  likes,
+  reposts,
+  replies,
+  views,
+}: {
+  likes: number | null;
+  reposts: number | null;
+  replies: number | null;
+  views: number | null;
+}) {
+  const parts: string[] = [];
+  if (likes != null) parts.push(`${formatCount(likes)} likes`);
+  if (reposts != null) parts.push(`${formatCount(reposts)} reposts`);
+  if (replies != null) parts.push(`${formatCount(replies)} replies`);
+  if (views != null) parts.push(`${formatCount(views)} views`);
+  if (parts.length === 0) return null;
+  return (
+    <div
+      style={{
+        fontFamily: 'var(--sf-font-mono)',
+        fontSize: 11,
+        color: 'var(--sf-fg-3)',
+        letterSpacing: 'var(--sf-track-mono)',
+        marginTop: 6,
+      }}
+    >
+      {parts.join(' · ')}
+    </div>
+  );
+}
+
+function ReposterChips({ handles }: { handles: string[] | null }) {
+  if (!handles || handles.length === 0) return null;
+  const visible = handles.slice(0, 3);
+  const overflow = handles.length - visible.length;
+  return (
+    <div
+      style={{
+        display: 'flex',
+        gap: 4,
+        flexWrap: 'wrap',
+        marginTop: 6,
+        fontSize: 11,
+        color: 'var(--sf-fg-3)',
+        alignItems: 'center',
+      }}
+    >
+      <span>Reposted by</span>
+      {visible.map((h) => (
+        <span
+          key={h}
+          style={{
+            padding: '1px 6px',
+            borderRadius: 4,
+            background: 'rgba(0,0,0,0.04)',
+            color: 'var(--sf-fg-2)',
+          }}
+        >
+          @{h.replace(/^@/, '')}
+        </span>
+      ))}
+      {overflow > 0 ? <span>+{overflow} more</span> : null}
+    </div>
+  );
+}
+
 /**
  * Platform-native primary identifier for the header.
  *   Reddit → `r/{community}` (the subreddit — what matters most on Reddit)
@@ -306,6 +382,13 @@ export function ReplyCard({
           >
             {item.threadBody}
           </blockquote>
+          <EngagementBadge
+            likes={item.threadLikesCount}
+            reposts={item.threadRepostsCount}
+            replies={item.threadRepliesCount}
+            views={item.threadViewsCount}
+          />
+          <ReposterChips handles={item.threadSurfacedVia} />
           {/* Exposure / engagement row — sits inside the clickable block
               so "comments" and "discovered time" share the same nav affordance
               (click anywhere on this zone → open original post). */}

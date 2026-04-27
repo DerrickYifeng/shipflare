@@ -85,6 +85,16 @@ export interface TodoItem {
   threadCommentCount: number | null;
   threadPostedAt: string | null;
   threadDiscoveredAt: string | null;
+  // Discovery conversational rewrite (2026-04-26): engagement signal +
+  // repost canonicalization joined from threads.
+  threadLikesCount: number | null;
+  threadRepostsCount: number | null;
+  threadRepliesCount: number | null;
+  threadViewsCount: number | null;
+  threadIsRepost: boolean;
+  threadOriginalUrl: string | null;
+  threadOriginalAuthorUsername: string | null;
+  threadSurfacedVia: string[] | null;
   // Joined from calendar
   calendarContentType: string | null;
   calendarScheduledAt: string | null;

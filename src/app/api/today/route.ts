@@ -98,6 +98,14 @@ interface TodoItemRow {
   threadCommentCount: number | null;
   threadPostedAt: string | null;
   threadDiscoveredAt: string | null;
+  threadLikesCount: number | null;
+  threadRepostsCount: number | null;
+  threadRepliesCount: number | null;
+  threadViewsCount: number | null;
+  threadIsRepost: boolean;
+  threadOriginalUrl: string | null;
+  threadOriginalAuthorUsername: string | null;
+  threadSurfacedVia: string[] | null;
   calendarContentType: string | null;
   calendarScheduledAt: string | null;
   /** Sort key (ms) — used only to merge the two sources into a stable
@@ -197,6 +205,14 @@ export async function GET() {
       threadCommentCount: threads.commentCount,
       threadPostedAt: threads.postedAt,
       threadDiscoveredAt: threads.discoveredAt,
+      threadLikesCount: threads.likesCount,
+      threadRepostsCount: threads.repostsCount,
+      threadRepliesCount: threads.repliesCount,
+      threadViewsCount: threads.viewsCount,
+      threadIsRepost: threads.isRepost,
+      threadOriginalUrl: threads.originalUrl,
+      threadOriginalAuthorUsername: threads.originalAuthorUsername,
+      threadSurfacedVia: threads.surfacedVia,
     })
     .from(drafts)
     .innerJoin(threads, eq(drafts.threadId, threads.id))
@@ -344,6 +360,14 @@ export async function GET() {
       threadCommentCount: null,
       threadPostedAt: null,
       threadDiscoveredAt: null,
+      threadLikesCount: null,
+      threadRepostsCount: null,
+      threadRepliesCount: null,
+      threadViewsCount: null,
+      threadIsRepost: false,
+      threadOriginalUrl: null,
+      threadOriginalAuthorUsername: null,
+      threadSurfacedVia: null,
       calendarContentType: row.kind,
       calendarScheduledAt: row.scheduledAt.toISOString(),
       _sortKey: row.scheduledAt.getTime(),
@@ -399,6 +423,14 @@ export async function GET() {
         ? row.threadPostedAt.toISOString()
         : null,
       threadDiscoveredAt: row.threadDiscoveredAt.toISOString(),
+      threadLikesCount: row.threadLikesCount,
+      threadRepostsCount: row.threadRepostsCount,
+      threadRepliesCount: row.threadRepliesCount,
+      threadViewsCount: row.threadViewsCount,
+      threadIsRepost: row.threadIsRepost,
+      threadOriginalUrl: row.threadOriginalUrl,
+      threadOriginalAuthorUsername: row.threadOriginalAuthorUsername,
+      threadSurfacedVia: row.threadSurfacedVia,
       calendarContentType: null,
       calendarScheduledAt: null,
       _sortKey: row.draftCreatedAt.getTime(),
