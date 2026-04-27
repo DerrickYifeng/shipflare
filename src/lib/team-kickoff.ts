@@ -4,8 +4,8 @@
  * never again. The kickoff run produces the three artefacts the founder
  * sees on their first visit to /team:
  *   1. plan draft (content-planner)
- *   2. search calibration (search-strategist via calibrate_search_strategy)
- *   3. live discovery + draft (run_discovery_scan + community-manager)
+ *   2. reply-target discovery (discovery-agent via Task dispatch)
+ *   3. draft replies (community-manager on top queued targets)
  *
  * Called from `app/(app)/team/page.tsx` server component on every render —
  * the first call schedules the run, subsequent calls are cheap no-ops.
@@ -128,7 +128,7 @@ export async function ensureKickoffEnqueued(args: {
 
   // The kickoff playbook is in coordinator/AGENT.md (`trigger: 'kickoff'`).
   // The goal text gives the coordinator just enough context to dispatch:
-  // calendar anchor for content-planner, primary platform for calibration,
+  // calendar anchor for content-planner, discovery-agent for async search,
   // channel list for the skip-with-message branch. Detailed step ordering
   // lives in the playbook so we can change it without redeploying API code.
   const goal =
@@ -137,14 +137,11 @@ export async function ensureKickoffEnqueued(args: {
     `weekStart=${kickoffWeekStart} now=${kickoffNow.toISOString()}. ` +
     `Connected channels: ${channels.join(', ') || 'none'}. ` +
     `Trigger: kickoff. ` +
-    `Follow your kickoff playbook end-to-end (plan → scan → drafts → calibrate → re-scan): ` +
-    `(1) Task content-planner for week-1 plan items — pass weekStart + now in its prompt verbatim, ` +
-    `(2) call run_discovery_scan({ platform: '${primary}', inlineQueryCount: 6 }) — fast-path inline scan, 6 focused queries so the founder sees drafts in ~60-90s, ` +
-    `(3) Task community-manager on the top-3 queued threads (skip this step if scan returned 0 queued), ` +
-    `(4) call calibrate_search_strategy({ platform: '${primary}' }) — runs in background while founder uses /today, ` +
-    `(5) call run_discovery_scan({ platform: '${primary}' }) — uses the calibrated strategy from step 4, dedupe-inserts new threads. ` +
-    `Skip step 5 if you took the 0-queued branch in step 3 (the post-calibration scan there is already calibrated). ` +
-    `Skip steps 2-3-3'-4 if no channels are connected.`;
+    `Follow your kickoff playbook end-to-end (plan → discovery → drafts): ` +
+    `(1) Task content-planner for week-1 plan items — pass weekStart + now in its prompt verbatim. ` +
+    `(2) Task({ subagent_type: 'discovery-agent', description: 'find X reply targets for kickoff', prompt: '...' }) — the agent talks to xAI Grok conversationally and persists the queue itself; read its StructuredOutput.topQueued for step 3. ` +
+    `(3) Task community-manager on the top 3 from step 2's topQueued (skip if step 2 reported queued: 0). ` +
+    `Skip steps 2-3 if no channels are connected.`;
 
   let conversationId: string;
   try {

@@ -108,28 +108,23 @@ describe('ensureKickoffEnqueued', () => {
     expect(callArg.goal).toContain('weekStart=');
     expect(callArg.goal).toContain('now=');
     expect(callArg.goal).toContain('pathId=path-1');
-    // New playbook ordering: plan → scan → drafts → calibrate → re-scan.
+    // New playbook: plan → discovery → drafts.
     expect(callArg.goal).toContain('content-planner');
-    expect(callArg.goal).toContain(
-      "run_discovery_scan({ platform: 'x', inlineQueryCount: 6 })",
-    );
+    expect(callArg.goal).toContain("subagent_type: 'discovery-agent'");
     expect(callArg.goal).toContain('community-manager');
-    expect(callArg.goal).toContain(
-      "calibrate_search_strategy({ platform: 'x' })",
-    );
-    // Step 3' — second scan, no inlineQueryCount.
-    expect(callArg.goal).toContain("run_discovery_scan({ platform: 'x' })");
-    // 0-result fallback referenced.
-    expect(callArg.goal).toContain('queued');
-    expect(callArg.goal).toContain("Skip steps 2-3-3'-4 if no channels");
-    // Order assertion: scan happens before calibration.
+    // Calibration / scout / reviewer / inline-mode references are gone.
+    expect(callArg.goal).not.toContain('calibrate_search_strategy');
+    expect(callArg.goal).not.toContain('run_discovery_scan');
+    expect(callArg.goal).not.toContain('inlineQueryCount');
+    expect(callArg.goal).not.toContain('discovery-scout');
+    // No-channels skip preserved.
+    expect(callArg.goal).toContain('Skip steps 2-3 if no channels');
+    // Order: discovery-agent appears before community-manager.
     const goal: string = callArg.goal;
-    const scanIdx = goal.indexOf(
-      "run_discovery_scan({ platform: 'x', inlineQueryCount: 6 })",
-    );
-    const calibrateIdx = goal.indexOf('calibrate_search_strategy');
-    expect(scanIdx).toBeGreaterThan(0);
-    expect(calibrateIdx).toBeGreaterThan(scanIdx);
+    const discoveryIdx = goal.indexOf("subagent_type: 'discovery-agent'");
+    const draftsIdx = goal.indexOf('community-manager');
+    expect(discoveryIdx).toBeGreaterThan(0);
+    expect(draftsIdx).toBeGreaterThan(discoveryIdx);
   });
 
   it('returns no_coordinator when team has no coordinator member', async () => {
