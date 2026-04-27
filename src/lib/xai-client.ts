@@ -4,8 +4,8 @@ const log = createLogger('lib:xai');
 
 const XAI_BASE_URL = 'https://api.x.ai/v1';
 const XAI_MODEL = 'grok-4-fast';
-const FETCH_TIMEOUT_MS = 15_000;
-const FETCH_RETRY_TIMEOUT_MS = 30_000;
+const FETCH_TIMEOUT_MS = 50_000;
+const FETCH_RETRY_TIMEOUT_MS = 60_000;
 
 export interface XSearchTweet {
   tweetId: string;
