@@ -71,7 +71,14 @@ export const updatePlanItemTool: ToolDefinition<
     'description. Scoped to the current user + product. REFUSES ' +
     'rows already in `executing` / `completed` / `failed` — those are ' +
     'frozen for audit; use add_plan_item to schedule a follow-up ' +
-    'instead of rewriting history.',
+    'instead of rewriting history.' +
+    '\n\n' +
+    'INPUT SHAPE (`patch` MUST be an object, NOT a string):\n' +
+    '{\n' +
+    '  "id": "plan-item-uuid-here",\n' +
+    '  "patch": { "state": "superseded", "title": "Updated title" }\n' +
+    '}\n\n' +
+    'Include only the fields you want to change in `patch` — omit unchanged fields entirely.',
   inputSchema: updatePlanItemInputSchema,
   // Serialize updates for the same id; the database handles cross-id
   // concurrency fine, but concurrency-safe=false signals the runner that

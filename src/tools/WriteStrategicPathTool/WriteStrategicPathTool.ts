@@ -33,7 +33,28 @@ export const writeStrategicPathTool: ToolDefinition<
     'Persist the strategic path (narrative + milestones + thesis arc + ' +
     'content pillars + channel mix + phase goals) for the current product. ' +
     'Singleton per product — overwrites an existing path; creates one ' +
-    'otherwise. Call this exactly once per strategic-planning run.',
+    'otherwise. Call this exactly once per strategic-planning run.' +
+    '\n\n' +
+    'INPUT SHAPE (`milestones` and `thesisArc` MUST be arrays of objects; ' +
+    '`channelMix` and `phaseGoals` MUST be objects, NOT strings):\n' +
+    '{\n' +
+    '  "narrative": "We are building ... (200-2400 chars)",\n' +
+    '  "milestones": [\n' +
+    '    { "atDayOffset": -14, "title": "Beta launch", "successMetric": "50 signups", "phase": "launch" }\n' +
+    '  ],\n' +
+    '  "thesisArc": [\n' +
+    '    { "weekStart": "2026-04-28T00:00:00Z", "theme": "Pain-point hooks", "angleMix": ["claim", "story"] }\n' +
+    '  ],\n' +
+    '  "contentPillars": ["CI pain", "cost savings", "indie founder life"],\n' +
+    '  "channelMix": {\n' +
+    '    "x": { "perWeek": 5, "repliesPerDay": 3, "preferredHours": [9, 14, 18] },\n' +
+    '    "reddit": null\n' +
+    '  },\n' +
+    '  "phaseGoals": {\n' +
+    '    "foundation": "Set up profile + first 10 posts",\n' +
+    '    "audience": null\n' +
+    '  }\n' +
+    '}',
   inputSchema: strategicPathSchema,
   isConcurrencySafe: false,
   isReadOnly: false,

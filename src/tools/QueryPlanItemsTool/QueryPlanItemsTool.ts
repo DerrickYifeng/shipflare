@@ -74,7 +74,11 @@ export const queryPlanItemsTool: ToolDefinition<
     'List plan_items for the current product. Filter by weekOffset ' +
     '(0=this week, 1=next, -1=last), by status (array of state values: ' +
     `${planItemStateValues.join(', ')}), or by a specific id. Omit ` +
-    'filters to skip them. Scoped to the current user + product.',
+    'filters to skip them. Scoped to the current user + product.' +
+    '\n\n' +
+    'INPUT SHAPE (`status` MUST be an array of strings, NOT a single string):\n' +
+    '{ "weekOffset": 0, "status": ["planned", "drafted"], "limit": 20 }\n\n' +
+    'To query a single state: `"status": ["planned"]` (still wrap it in an array).',
   inputSchema: queryPlanItemsInputSchema,
   isConcurrencySafe: true,
   isReadOnly: true,

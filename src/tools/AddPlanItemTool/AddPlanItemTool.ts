@@ -58,7 +58,20 @@ export const addPlanItemTool: ToolDefinition<PlanItemInput, AddPlanItemResult> =
       'Create a single plan_items row. Supply kind + phase + userAction + ' +
       'scheduledAt (ISO) + title; optionally channel / skillName / params / ' +
       "description. Attached to the current week's plan automatically. " +
-      'Safe to call many times in parallel when planning a week.',
+      'Safe to call many times in parallel when planning a week.' +
+      '\n\n' +
+      'INPUT SHAPE (`params` MUST be an object, NOT a string; use `null` for optional fields with no value):\n' +
+      '{\n' +
+      '  "kind": "content_post",\n' +
+      '  "userAction": "approve",\n' +
+      '  "phase": "audience",\n' +
+      '  "channel": "x",\n' +
+      '  "scheduledAt": "2026-04-28T09:00:00Z",\n' +
+      '  "skillName": "draft-single-post",\n' +
+      '  "params": { "angle": "contrarian", "theme": "CI cost pain" },\n' +
+      '  "title": "Post: CI cost pain for solo devs",\n' +
+      '  "description": null\n' +
+      '}',
     inputSchema: planItemInputSchema,
     isConcurrencySafe: true,
     isReadOnly: false,

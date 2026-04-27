@@ -40,7 +40,33 @@ export const persistQueueThreadsTool = buildTool({
     'desc order so the highest-leverage threads appear first. ' +
     'INSERT ON CONFLICT DO NOTHING dedups by (user_id, platform, ' +
     'external_id); when a repost row already exists, the tool merges its ' +
-    "new reposter handles into the existing row's surfaced_via JSONB.",
+    "new reposter handles into the existing row's surfaced_via JSONB." +
+    '\n\n' +
+    'INPUT SHAPE (`threads` MUST be an array of objects, NOT a string or flat list):\n' +
+    '{\n' +
+    '  "threads": [\n' +
+    '    {\n' +
+    '      "external_id": "1234567890",\n' +
+    '      "url": "https://twitter.com/user/status/1234567890",\n' +
+    '      "author_username": "indie_founder",\n' +
+    '      "author_bio": "Building in public",\n' +
+    '      "author_followers": 1200,\n' +
+    '      "body": "Struggling to find a CI tool that doesn\'t cost $300/mo...",\n' +
+    '      "posted_at": "2026-04-25T14:00:00Z",\n' +
+    '      "likes_count": 42,\n' +
+    '      "reposts_count": 5,\n' +
+    '      "replies_count": 3,\n' +
+    '      "views_count": 800,\n' +
+    '      "is_repost": false,\n' +
+    '      "original_url": null,\n' +
+    '      "original_author_username": null,\n' +
+    '      "surfaced_via": null,\n' +
+    '      "confidence": 0.82,\n' +
+    '      "reason": "Pain point match — CI cost is a core ICP problem"\n' +
+    '    }\n' +
+    '  ]\n' +
+    '}\n\n' +
+    'Pass an empty array `[]` when no qualifying tweets were found (returns { inserted: 0, deduped: 0 }).',
   inputSchema,
   isConcurrencySafe: false,
   isReadOnly: false,

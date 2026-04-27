@@ -44,7 +44,15 @@ const client = new Anthropic();
 export const classifyIntentTool = buildTool({
   name: 'classify_intent',
   description:
-    'Classify post intent: content type, buyer stage, and poster-need vs reader-need signal. Uses LLM for semantic understanding.',
+    'Classify post intent: content type, buyer stage, and poster-need vs reader-need signal. Uses LLM for semantic understanding.' +
+    '\n\n' +
+    'INPUT SHAPE (`metadata` MUST be an object, NOT a string):\n' +
+    '{\n' +
+    '  "title": "Anyone know a cheap CI solution for solo devs?",\n' +
+    '  "body": "I\'m paying $200/mo for CircleCI and it feels insane...",\n' +
+    '  "metadata": { "upvotes": 48, "commentCount": 12, "platform": "reddit" },\n' +
+    '  "productContext": "ShipFlare — automated social media posting for indie founders"\n' +
+    '}',
   isConcurrencySafe: true,
   isReadOnly: true,
   inputSchema: z.object({

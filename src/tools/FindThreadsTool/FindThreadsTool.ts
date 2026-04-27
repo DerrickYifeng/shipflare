@@ -67,7 +67,12 @@ export const findThreadsTool: ToolDefinition<FindThreadsInput, { threads: Thread
       'drop low-signal threads (0-1 scale, default 0), and `limit` to ' +
       'cap returned rows (default 20, max 100). Returns a compact summary ' +
       'per thread; fetch full bodies with platform-specific tools if ' +
-      'needed before drafting.',
+      'needed before drafting.' +
+      '\n\n' +
+      'INPUT SHAPE (`platforms` MUST be an array of strings, NOT a single string):\n' +
+      '{ "platforms": ["x", "reddit"], "windowMinutes": 1440, "minRelevance": 0.4, "limit": 20 }\n\n' +
+      'To filter a single platform: `"platforms": ["x"]` (still wrap it in an array). ' +
+      'Omit `platforms` entirely to return threads from all connected channels.',
     inputSchema: findThreadsInputSchema,
     isConcurrencySafe: true,
     isReadOnly: true,
