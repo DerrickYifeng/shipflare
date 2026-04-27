@@ -167,10 +167,9 @@ For EACH slot, drive this loop until it terminates, then move on to
 the next slot:
 
 1. **Inner attempt 1.**
-   a. `run_discovery_scan({ platform: <slot.channel> })` to surface
-      candidate threads.
-   b. If `queued.length > 0`, dispatch community-manager:
-      `Task({ subagent_type: 'community-manager', description: 'fill reply slot <planItemId>', prompt: '<thread list> + targetCount=<N>' })`.
+   a. `Task({ subagent_type: 'discovery-agent', description: 'fill reply slot <planItemId>', prompt: 'trigger: reply_sweep\nmaxResults: <slot.targetCount>\nintent: (none — use rubric defaults)' })` to surface candidate threads. The agent persists its `topQueued` and returns a StructuredOutput with `queued`, `topQueued`, and `scoutNotes`.
+   b. If `queued > 0`, dispatch community-manager on the top items:
+      `Task({ subagent_type: 'community-manager', description: 'fill reply slot <planItemId>', prompt: '<serialize topQueued> + targetCount=<N>' })`.
       community-manager drafts up to `targetCount` replies from the
       queued threads.
    c. After the dispatch, query draft count for today on this channel
@@ -178,10 +177,9 @@ the next slot:
       kind='reply' on the slot's platform). If count >= targetCount,
       the slot is filled — go to step 4.
 2. **Inner attempts 2 and 3 (if still short).** Repeat step 1. Stop
-   early if `run_discovery_scan` returns `queued.length === 0` two
-   attempts in a row — there are simply no fresh threads today,
-   re-running scout will burn API budget without producing more
-   drafts.
+   early if discovery-agent returns `queued === 0` two attempts in a
+   row — there are simply no fresh threads today, re-running discovery
+   will burn API budget without producing more drafts.
 3. **Hard cap: 3 inner attempts per slot.** If you hit attempt 3
    without filling, that's fine — partial fills are valid. The slot
    still transitions to `drafted` (the founder will see whatever
