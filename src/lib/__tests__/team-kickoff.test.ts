@@ -105,11 +105,31 @@ describe('ensureKickoffEnqueued', () => {
     expect(callArg.trigger).toBe('kickoff');
     expect(callArg.rootMemberId).toBe('m-coord');
     expect(callArg.conversationId).toBe('conv-1');
-    expect(callArg.goal).toContain('calibrate_search_strategy');
-    expect(callArg.goal).toContain('run_discovery_scan');
     expect(callArg.goal).toContain('weekStart=');
     expect(callArg.goal).toContain('now=');
     expect(callArg.goal).toContain('pathId=path-1');
+    // New playbook ordering: plan → scan → drafts → calibrate → re-scan.
+    expect(callArg.goal).toContain('content-planner');
+    expect(callArg.goal).toContain(
+      "run_discovery_scan({ platform: 'x', inlineQueryCount: 12 })",
+    );
+    expect(callArg.goal).toContain('community-manager');
+    expect(callArg.goal).toContain(
+      "calibrate_search_strategy({ platform: 'x' })",
+    );
+    // Step 3' — second scan, no inlineQueryCount.
+    expect(callArg.goal).toContain("run_discovery_scan({ platform: 'x' })");
+    // 0-result fallback referenced.
+    expect(callArg.goal).toContain('queued');
+    expect(callArg.goal).toContain("Skip steps 2-3-3'-4 if no channels");
+    // Order assertion: scan happens before calibration.
+    const goal: string = callArg.goal;
+    const scanIdx = goal.indexOf(
+      "run_discovery_scan({ platform: 'x', inlineQueryCount: 12 })",
+    );
+    const calibrateIdx = goal.indexOf('calibrate_search_strategy');
+    expect(scanIdx).toBeGreaterThan(0);
+    expect(calibrateIdx).toBeGreaterThan(scanIdx);
   });
 
   it('returns no_coordinator when team has no coordinator member', async () => {

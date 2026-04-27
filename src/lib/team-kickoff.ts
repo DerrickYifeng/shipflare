@@ -137,12 +137,14 @@ export async function ensureKickoffEnqueued(args: {
     `weekStart=${kickoffWeekStart} now=${kickoffNow.toISOString()}. ` +
     `Connected channels: ${channels.join(', ') || 'none'}. ` +
     `Trigger: kickoff. ` +
-    `Follow your kickoff playbook end-to-end: ` +
+    `Follow your kickoff playbook end-to-end (plan → scan → drafts → calibrate → re-scan): ` +
     `(1) Task content-planner for week-1 plan items — pass weekStart + now in its prompt verbatim, ` +
-    `(2) call calibrate_search_strategy({ platform: '${primary}' }), ` +
-    `(3) call run_discovery_scan({ platform: '${primary}' }), ` +
-    `(4) Task community-manager on the top-3 queued threads. ` +
-    `Skip steps 2-4 if no channels are connected.`;
+    `(2) call run_discovery_scan({ platform: '${primary}', inlineQueryCount: 12 }) — fast-path inline scan so the founder sees drafts immediately, ` +
+    `(3) Task community-manager on the top-3 queued threads (skip this step if scan returned 0 queued), ` +
+    `(4) call calibrate_search_strategy({ platform: '${primary}' }) — runs in background while founder uses /today, ` +
+    `(5) call run_discovery_scan({ platform: '${primary}' }) — uses the calibrated strategy from step 4, dedupe-inserts new threads. ` +
+    `Skip step 5 if you took the 0-queued branch in step 3 (the post-calibration scan there is already calibrated). ` +
+    `Skip steps 2-3-3'-4 if no channels are connected.`;
 
   let conversationId: string;
   try {
