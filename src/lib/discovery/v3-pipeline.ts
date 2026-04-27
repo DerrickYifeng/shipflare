@@ -66,6 +66,15 @@ export interface V3PipelineInput {
   /** Anti-signal terms learned during calibration; passed alongside
    *  `presetQueries` so scout knows which result patterns to deprioritise. */
   negativeTerms?: string[];
+  /**
+   * When `presetQueries` is empty/undefined, scout falls back to
+   * inline query generation. `inlineQueryCount` (default 8) tells
+   * scout how many queries to produce. Pass `12` from the kickoff
+   * fast-path scan so scout deliberately spans breadth (broad +
+   * medium + specific). Cron / subsequent scans omit this and let
+   * scout's default kick in.
+   */
+  inlineQueryCount?: number;
 }
 
 export interface V3PipelineDeps {
@@ -121,6 +130,7 @@ function buildScoutMessage(input: V3PipelineInput, coldStart: boolean): string {
       // "Workflow → presetQueries" branch.
       presetQueries: input.presetQueries ?? null,
       negativeTerms: input.negativeTerms ?? null,
+      inlineQueryCount: input.inlineQueryCount ?? null,
     },
     null,
     2,
