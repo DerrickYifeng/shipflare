@@ -68,6 +68,41 @@ export interface XAuthorBio {
   followerCount: number | null;
 }
 
+export interface ConversationalMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface ConversationalResponseFormat {
+  type: 'json_schema';
+  json_schema: {
+    name: string;
+    schema: object;
+    strict: boolean;
+  };
+}
+
+export interface ConversationalRequest {
+  /** xAI model id, e.g. `grok-4-fast` or `grok-4.20-reasoning`. */
+  model: string;
+  messages: ConversationalMessage[];
+  tools?: Array<{ type: 'x_search' | 'web_search' }>;
+  responseFormat?: ConversationalResponseFormat;
+  signal?: AbortSignal;
+}
+
+export interface ConversationalResponse {
+  /** Parsed JSON when `responseFormat.type === 'json_schema'`; raw string otherwise. */
+  output: unknown;
+  /** Verbatim assistant message — agent threads this back into the next call. */
+  assistantMessage: ConversationalMessage;
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+  };
+}
+
 /**
  * Self-imposed cap on queries per `searchTweetsBatch` call. Not an xAI
  * API limit — the Grok responses endpoint accepts longer prompts. We
@@ -348,6 +383,82 @@ export class XAIClient {
       `xAI bio lookup resolved ${results.filter((r) => r.bio).length}/${unique.length} handles`,
     );
     return results;
+  }
+
+  /**
+   * One-shot call to xAI Responses API with explicit messages history,
+   * server-side tools, and structured-output response format. Stateless —
+   * caller owns the conversation history and re-sends it each call.
+   *
+   * Used by the discovery-agent's `xai_find_customers` tool to talk to
+   * Grok conversationally about which tweets are reply targets for the
+   * founder's product.
+   *
+   * On non-2xx HTTP: throws `xAI API error <status>: <body>`.
+   * On JSON parse failure when `responseFormat.type === 'json_schema'`:
+   *   throws `schema-construction-bug: ...` — indicates we built an
+   *   unsupported schema. xAI guarantees match for supported features
+   *   (per https://docs.x.ai/.../structured-outputs); a parse failure
+   *   means our toolside bug, not runtime variance. Don't paper over.
+   */
+  async respondConversational(
+    args: ConversationalRequest,
+  ): Promise<ConversationalResponse> {
+    const requestBody = JSON.stringify({
+      model: args.model,
+      input: args.messages.map((m) => ({ role: m.role, content: m.content })),
+      ...(args.tools && args.tools.length > 0 ? { tools: args.tools } : {}),
+      ...(args.responseFormat ? { response_format: args.responseFormat } : {}),
+    });
+
+    let data: XAIResponse;
+    try {
+      data = await this.fetchWithTimeout(
+        requestBody,
+        FETCH_TIMEOUT_MS,
+        args.signal,
+      );
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        // One retry on timeout — same retry policy as searchTweetsBatch.
+        log.warn(
+          `respondConversational timed out after ${FETCH_TIMEOUT_MS}ms, retrying with ${FETCH_RETRY_TIMEOUT_MS}ms`,
+        );
+        data = await this.fetchWithTimeout(
+          requestBody,
+          FETCH_RETRY_TIMEOUT_MS,
+          args.signal,
+        );
+      } else {
+        throw err;
+      }
+    }
+
+    const text = this.extractText(data);
+    let output: unknown = text;
+    if (args.responseFormat?.type === 'json_schema') {
+      try {
+        output = JSON.parse(text);
+      } catch (err) {
+        throw new Error(
+          `schema-construction-bug: xAI output_text did not parse as JSON ` +
+            `despite response_format=json_schema. ` +
+            `text="${text.slice(0, 200)}..." parseError=${
+              err instanceof Error ? err.message : String(err)
+            }`,
+        );
+      }
+    }
+
+    return {
+      output,
+      assistantMessage: { role: 'assistant', content: text },
+      usage: {
+        inputTokens: data.usage?.input_tokens ?? 0,
+        outputTokens: data.usage?.output_tokens ?? 0,
+        totalTokens: data.usage?.total_tokens ?? 0,
+      },
+    };
   }
 
   private async fetchWithTimeout(
