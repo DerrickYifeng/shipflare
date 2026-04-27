@@ -74,11 +74,31 @@ export const xaiFindCustomersTool = buildTool({
   name: XAI_FIND_CUSTOMERS_TOOL_NAME,
   description:
     'Conversational X/Twitter search via xAI Grok with structured JSON ' +
-    'output. Pass the full prior xAI message history each call so Grok ' +
-    'understands refinements in context. Returns tweets matching the ' +
-    'product ICP with engagement stats + author bios. Set `reasoning: true` ' +
-    'to escalate to the reasoning-enabled Grok model after weak initial ' +
-    'rounds (2-5x cost, deeper analysis).',
+    'output. Pass the FULL prior xAI message history each call (you own ' +
+    'the conversation state — append the previous assistant reply before ' +
+    'sending your next refinement). Returns tweets matching the product ' +
+    'ICP with engagement stats + author bios. Set `reasoning: true` to ' +
+    'escalate to the reasoning-enabled Grok model after weak initial ' +
+    'rounds (2-5x cost, deeper analysis). ' +
+    '\n\n' +
+    'INPUT SHAPE (literal — `messages` MUST be an array of objects, NOT a string):\n' +
+    '{\n' +
+    '  "messages": [\n' +
+    '    { "role": "user", "content": "Find tweets where indie founders ..." }\n' +
+    '  ],\n' +
+    '  "productContext": { "name": "...", "description": "...", "valueProp": "...", "targetAudience": "...", "keywords": ["..."] },\n' +
+    '  "reasoning": false\n' +
+    '}\n\n' +
+    'On the SECOND call, append the prior assistant turn:\n' +
+    '{\n' +
+    '  "messages": [\n' +
+    '    { "role": "user", "content": "<your first prompt>" },\n' +
+    '    { "role": "assistant", "content": "<verbatim assistantMessage.content from the previous tool result>" },\n' +
+    '    { "role": "user", "content": "<your refinement, e.g. \'drop bot accounts, focus on <500 followers\'>" }\n' +
+    '  ],\n' +
+    '  "productContext": { ...same as before... },\n' +
+    '  "reasoning": false\n' +
+    '}',
   inputSchema,
   isConcurrencySafe: false,
   isReadOnly: true,

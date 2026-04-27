@@ -34,15 +34,53 @@ The ICP rubric (4-section onboarding-derived doc: ideal customer / not a fit / g
 You run a conversational loop with xAI. Each iteration:
 
 1. Compose a user message describing what you want xAI to find.
-2. Call `xai_find_customers({ messages: <full prior history>, productContext, reasoning: false })`.
-3. Append xAI's `assistantMessage` to your tracked history.
+2. Call `xai_find_customers` with the full prior xAI conversation as `messages`. **The `messages` parameter MUST be an ARRAY of `{ role, content }` objects, NOT a single string** — see the literal call shape in the next section.
+3. Append xAI's `assistantMessage` (returned by the tool) to your tracked history before the next call.
 4. Judge the returned `tweets[]` against the rubric. For each tweet ask: does the bio + body show this person publicly expressing the rubric's signals (positive ICP fit + key signals; not falling into "not a fit" patterns; gray-zone resolved by the named flip signal)?
 5. Decide:
    - **Enough strong candidates** (≥ `maxResults` × 0.8 with confidence ≥ 0.6, OR all of `maxResults` regardless of confidence): proceed to step 6.
    - **Refine and retry**: compose a refinement message ("Found 3 strong matches and 8 promotional accounts. Drop accounts whose bios mention X, focus on accounts with <2k followers, find more like {strong urls}"). Loop back to step 2.
 6. Build the final list (the strong subset of everything you've seen across all rounds, deduplicated by `external_id`).
-7. Call `persist_queue_threads({ threads: <final list> })`.
+7. Call `persist_queue_threads({ threads: [...] })` (also an ARRAY — one tweet object per row).
 8. Emit `StructuredOutput` with the summary.
+
+### Literal `xai_find_customers` call shape
+
+The most common failure mode is passing `messages` as a string. It is ALWAYS an array of `{role, content}` objects, even on the very first call (where the array has length 1).
+
+**First call** (no prior xAI conversation yet):
+
+```json
+{
+  "messages": [
+    { "role": "user", "content": "<your full first-turn message — see template below>" }
+  ],
+  "productContext": {
+    "name": "<productName>",
+    "description": "<productDescription>",
+    "valueProp": "<productValueProp or null>",
+    "targetAudience": "<productTargetAudience or null>",
+    "keywords": ["<keyword1>", "<keyword2>"]
+  },
+  "reasoning": false
+}
+```
+
+**Second call** (after judging the first response, you decide to refine). Take the `assistantMessage` returned by the previous call, append it as `role: "assistant"`, then append your refinement as a new `role: "user"`:
+
+```json
+{
+  "messages": [
+    { "role": "user", "content": "<your first-turn message, verbatim>" },
+    { "role": "assistant", "content": "<verbatim assistantMessage.content from the previous tool result>" },
+    { "role": "user", "content": "Drop accounts whose bios mention 'growth tips'. Focus on accounts with <2k followers. Find more like https://x.com/<good handle>/status/<id>." }
+  ],
+  "productContext": { /* same as first call */ },
+  "reasoning": false
+}
+```
+
+**Reasoning escalation:** flip `reasoning` to `true` (still keeping the same `messages` array shape).
 
 ### First-turn message template
 
