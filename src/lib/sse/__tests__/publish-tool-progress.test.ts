@@ -68,6 +68,12 @@ describe('publishToolProgress', () => {
     ).resolves.toBeUndefined();
 
     expect(loggerWarnMock).toHaveBeenCalledTimes(1);
+    const warnCallArgs = loggerWarnMock.mock.calls[0]!;
+    expect(warnCallArgs[0]).toContain('dropped tool_progress event');
+    expect(warnCallArgs[1]).toMatchObject({
+      toolName: 'run_discovery_scan',
+      error: 'redis down',
+    });
     expect(__getDroppedCount()).toBe(1);
   });
 });

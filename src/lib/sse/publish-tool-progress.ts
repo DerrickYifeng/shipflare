@@ -50,11 +50,11 @@ export async function publishToolProgress(
     );
   } catch (err) {
     droppedCount += 1;
-    log.warn(
-      `dropped tool_progress event tool=${args.toolName} user=${args.userId}: ${
-        err instanceof Error ? err.message : String(err)
-      }`,
-    );
+    log.warn('dropped tool_progress event', {
+      toolName: args.toolName,
+      userId: args.userId,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 
