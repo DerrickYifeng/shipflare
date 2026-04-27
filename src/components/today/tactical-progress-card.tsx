@@ -1,6 +1,6 @@
 // TacticalProgressCard — live progress widget pinned above the Today feed
 // while the post-commit team-run drafts this week's plan_items and
-// (optionally) calibration / discovery are still running.
+// (optionally) discovery is still running.
 //
 // Contract:
 //   - Mount-time snapshot: GET /api/today/progress (REST, JSON)
@@ -10,13 +10,12 @@
 //                          message, and surface `error` messages.
 //   - Generic tool_progress feed: /api/events?channel=agents via useSSEChannel.
 //                          Routes `tool_progress` events by toolName:
-//                          · calibrate_search_strategy → CalibrationSection
-//                          · run_discovery_scan        → DiscoverySection
-//                          · anything else             → ActivityTicker
+//                          · run_discovery_scan → DiscoverySection
+//                          · anything else      → ActivityTicker
 //
 // Visibility gate: shows when `?from=onboarding` is in URL (within the same
 // 24h TTL as the welcome ribbon) OR whenever the snapshot reports in-flight
-// tactical / calibration / discovery work, or the ticker has fired recently.
+// tactical / discovery work, or the ticker has fired recently.
 
 'use client';
 
@@ -32,7 +31,6 @@ import {
   INITIAL_TOOL_PROGRESS,
   type ToolProgressEventInput,
   type ToolProgressViewState,
-  type CalibrationRow,
   type DiscoveryRow,
   type TickerRow,
 } from './tactical-progress-card-reducer';
@@ -42,7 +40,6 @@ export {
   reduceToolProgress,
   type ToolProgressEventInput,
   type ToolProgressViewState,
-  type CalibrationRow,
   type DiscoveryRow,
   type TickerRow,
 } from './tactical-progress-card-reducer';
@@ -67,14 +64,6 @@ interface TeamRunRef {
 interface ProgressSnapshot {
   tactical: TacticalSnapshot;
   teamRun: TeamRunRef | null;
-  calibration: {
-    platforms: Array<{
-      platform: string;
-      status: 'pending' | 'running' | 'completed' | 'failed';
-      precision: number | null;
-      round: number;
-    }>;
-  };
 }
 
 /* ─── View state ─────────────────────────────────────────────────────── */
@@ -98,9 +87,6 @@ const INITIAL_VIEW: ViewState = {
   snapshotLoaded: false,
 };
 
-// Seeds the legacy ViewState from the REST snapshot. Note: the calibration
-// rows on `toolProgress` are seeded by `seedToolProgressFromSnapshot` below
-// — this function only handles the tactical + teamRun half of the snapshot.
 function seedFromSnapshot(state: ViewState, snap: ProgressSnapshot): ViewState {
   return {
     ...state,
@@ -108,42 +94,6 @@ function seedFromSnapshot(state: ViewState, snap: ProgressSnapshot): ViewState {
     teamRun: snap.teamRun,
     snapshotLoaded: true,
   };
-}
-
-// Best-effort: seed calibration rows from the persisted strategy state so a
-// user reloading mid-calibration sees something immediately. Live SSE events
-// refine these rows as the strategist runs further turns. We use ts=0 so the
-// first real `tool_progress` event always wins the dedup check in the reducer.
-function seedToolProgressFromSnapshot(
-  state: ToolProgressViewState,
-  snap: ProgressSnapshot,
-): ToolProgressViewState {
-  const calibration: Record<string, CalibrationRow> = { ...state.calibration };
-  for (const row of snap.calibration.platforms) {
-    if (row.status !== 'pending' && row.status !== 'running') {
-      // Skip 'completed' and 'failed':
-      //   - 'completed' rows would render as "Calibrating · Round ?/?" via the
-      //     CalibrationRowView (which ignores the row's message field) — misleading
-      //     because calibration is actually done. Once cal completes, the tactical
-      //     row carries the "ready" message; we don't need a dedicated row here.
-      //   - 'failed' UI lives on the team-run tactical row, not the cal row.
-      continue;
-    }
-    if (calibration[row.platform]) continue; // a live event already populated this slot
-    calibration[row.platform] = {
-      platform: row.platform,
-      callId: `snapshot:${row.platform}`,
-      round: null,
-      maxTurns: null,
-      precision: row.precision,
-      sampleSize: null,
-      message: 'Calibrating…',
-      ts: 0,
-    };
-  }
-  return state.calibration === calibration
-    ? state
-    : { ...state, calibration };
 }
 
 /**
@@ -236,7 +186,6 @@ function shouldRemainVisible(
     if (tacticalCollapsedAt === null) return true;
     if (Date.now() - tacticalCollapsedAt < SUCCESS_GRACE_MS) return true;
   }
-  if (Object.keys(toolProgress.calibration).length > 0) return true;
   if (Object.keys(toolProgress.discovery).length > 0) return true;
   if (toolProgress.ticker && Date.now() - toolProgress.ticker.ts < TICKER_TTL_MS) return true;
   return false;
@@ -286,7 +235,6 @@ export function TacticalProgressCard() {
         if (!res.ok) throw new Error(`snapshot ${res.status}`);
         const snap = (await res.json()) as ProgressSnapshot;
         setView((prev) => seedFromSnapshot(prev, snap));
-        setToolProgress((prev) => seedToolProgressFromSnapshot(prev, snap));
       } catch {
         // Mark loaded even on failure so the visibility gate can still
         // decide (fromOnboarding-only case). Live events will populate
@@ -405,7 +353,6 @@ export function TacticalProgressCard() {
 
   if (!visible) return null;
 
-  const calibrationRows = Object.values(toolProgress.calibration);
   const discoveryRows = Object.values(toolProgress.discovery);
   const showTactical =
     view.tactical.status === 'running' ||
@@ -415,7 +362,6 @@ export function TacticalProgressCard() {
 
   const showDismiss =
     view.tactical.status === 'completed' &&
-    calibrationRows.length === 0 &&
     discoveryRows.length === 0 &&
     !toolProgress.ticker;
 
@@ -432,11 +378,10 @@ export function TacticalProgressCard() {
       }}
     >
       {showTactical && <TacticalSection tactical={view.tactical} />}
-      <CalibrationSection rows={calibrationRows} hasDivider={showTactical} />
-      <DiscoverySection rows={discoveryRows} hasDivider={showTactical || calibrationRows.length > 0} />
+      <DiscoverySection rows={discoveryRows} hasDivider={showTactical} />
       <ActivityTicker
         row={toolProgress.ticker}
-        hasDivider={showTactical || calibrationRows.length > 0 || discoveryRows.length > 0}
+        hasDivider={showTactical || discoveryRows.length > 0}
       />
       {showDismiss && <DismissHandle onDismiss={() => setDismissed(true)} />}
     </section>
@@ -620,86 +565,6 @@ function PulsingDot() {
         }
       `}</style>
     </>
-  );
-}
-
-/* ─── Calibration section ────────────────────────────────────────────── */
-
-function CalibrationSection({
-  rows,
-  hasDivider,
-}: {
-  rows: CalibrationRow[];
-  hasDivider: boolean;
-}) {
-  if (rows.length === 0) return null;
-  return (
-    <div
-      style={{
-        padding: '16px 20px',
-        borderTop: hasDivider ? '1px solid rgba(0,0,0,0.06)' : undefined,
-      }}
-    >
-      <OnbMono style={{ marginBottom: 12, display: 'inline-block' }}>
-        Calibration
-      </OnbMono>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {rows.map((row) => (
-          <CalibrationRowView key={row.platform} row={row} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function CalibrationRowView({ row }: { row: CalibrationRow }) {
-  const cfg = PLATFORMS[row.platform];
-  const displayName = cfg?.displayName ?? row.platform;
-  const precisionText =
-    row.precision === null ? '—' : row.precision.toFixed(2);
-  const roundText = row.maxTurns
-    ? `Round ${row.round ?? '?'}/${row.maxTurns}`
-    : `Round ${row.round ?? '?'}`;
-
-  return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 10,
-        padding: '10px 12px',
-        borderRadius: 10,
-        background: 'rgba(0,0,0,0.03)',
-      }}
-    >
-      <span
-        aria-hidden
-        style={{
-          width: 7,
-          height: 7,
-          borderRadius: '50%',
-          background: 'var(--sf-accent)',
-          animation: 'sfTacticalPulse 1400ms ease-in-out infinite',
-          flexShrink: 0,
-        }}
-      />
-      <span
-        style={{
-          fontSize: 13,
-          fontWeight: 500,
-          letterSpacing: '-0.16px',
-          color: 'var(--sf-fg-1)',
-          width: 80,
-          flexShrink: 0,
-        }}
-      >
-        {displayName}
-      </span>
-      <OnbMono color="var(--sf-fg-3)">Calibrating</OnbMono>
-      <span style={{ flex: 1 }} />
-      <OnbMono color="var(--sf-fg-4)">{roundText}</OnbMono>
-      <OnbMono color="var(--sf-fg-4)">Precision {precisionText}</OnbMono>
-    </div>
   );
 }
 

@@ -14,17 +14,6 @@ export interface ToolProgressEventInput {
   ts: number;
 }
 
-export interface CalibrationRow {
-  platform: string;
-  callId: string;
-  round: number | null;
-  maxTurns: number | null;
-  precision: number | null;
-  sampleSize: number | null;
-  message: string;
-  ts: number;
-}
-
 export interface DiscoveryRow {
   platform: string;
   callId: string;
@@ -42,13 +31,11 @@ export interface TickerRow {
 }
 
 export interface ToolProgressViewState {
-  calibration: Record<string, CalibrationRow>;
   discovery: Record<string, DiscoveryRow>;
   ticker: TickerRow | null;
 }
 
 export const INITIAL_TOOL_PROGRESS: ToolProgressViewState = {
-  calibration: {},
   discovery: {},
   ticker: null,
 };
@@ -72,30 +59,6 @@ export function reduceToolProgress(
   event: ToolProgressEventInput,
 ): ToolProgressViewState {
   if (event.type !== 'tool_progress') return state;
-
-  if (event.toolName === 'calibrate_search_strategy') {
-    const platform = readString(event.metadata, 'platform') ?? 'default';
-    const prev = state.calibration[platform];
-    if (prev && prev.callId === event.callId && prev.ts >= event.ts) {
-      return state;
-    }
-    return {
-      ...state,
-      calibration: {
-        ...state.calibration,
-        [platform]: {
-          platform,
-          callId: event.callId,
-          round: readNumber(event.metadata, 'round'),
-          maxTurns: readNumber(event.metadata, 'maxTurns'),
-          precision: readNumber(event.metadata, 'precision'),
-          sampleSize: readNumber(event.metadata, 'sampleSize'),
-          message: event.message,
-          ts: event.ts,
-        },
-      },
-    };
-  }
 
   if (event.toolName === 'run_discovery_scan') {
     const platform = readString(event.metadata, 'platform') ?? 'default';

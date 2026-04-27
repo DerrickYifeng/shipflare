@@ -6,31 +6,11 @@ import {
 } from '../tactical-progress-card';
 
 const empty: ToolProgressViewState = {
-  calibration: {},
   discovery: {},
   ticker: null,
 };
 
 describe('reduceToolProgress', () => {
-  it('routes calibrate_search_strategy events to the calibration map', () => {
-    const event: ToolProgressEventInput = {
-      type: 'tool_progress',
-      toolName: 'calibrate_search_strategy',
-      callId: 'c1',
-      message: 'Round 12/60 · precision 0.58',
-      metadata: { round: 12, maxTurns: 60, precision: 0.58, sampleSize: 47 },
-      ts: 1000,
-    };
-    const next = reduceToolProgress(empty, event);
-    const row = next.calibration['default']!;
-    expect(row).toBeDefined();
-    expect(row.round).toBe(12);
-    expect(row.maxTurns).toBe(60);
-    expect(row.precision).toBeCloseTo(0.58);
-    expect(row.message).toBe('Round 12/60 · precision 0.58');
-    expect(row.ts).toBe(1000);
-  });
-
   it('routes run_discovery_scan events to the discovery map keyed by platform', () => {
     const event: ToolProgressEventInput = {
       type: 'tool_progress',
@@ -48,24 +28,23 @@ describe('reduceToolProgress', () => {
   it('drops out-of-order events for the same toolName + callId', () => {
     const newer: ToolProgressEventInput = {
       type: 'tool_progress',
-      toolName: 'calibrate_search_strategy',
+      toolName: 'run_discovery_scan',
       callId: 'c1',
-      message: 'Round 12',
-      metadata: { round: 12, maxTurns: 60 },
+      message: 'second pass',
+      metadata: { platform: 'x' },
       ts: 1000,
     };
     const older: ToolProgressEventInput = {
       type: 'tool_progress',
-      toolName: 'calibrate_search_strategy',
+      toolName: 'run_discovery_scan',
       callId: 'c1',
-      message: 'Round 8',
-      metadata: { round: 8, maxTurns: 60 },
+      message: 'first pass',
+      metadata: { platform: 'x' },
       ts: 500,
     };
     const afterNewer = reduceToolProgress(empty, newer);
     const afterOlder = reduceToolProgress(afterNewer, older);
-    expect(afterOlder.calibration['default']!.round).toBe(12);
-    expect(afterOlder.calibration['default']!.message).toBe('Round 12');
+    expect(afterOlder.discovery['x']!.message).toBe('second pass');
   });
 
   it('falls through to ActivityTicker for unknown toolNames', () => {
@@ -79,21 +58,6 @@ describe('reduceToolProgress', () => {
     const next = reduceToolProgress(empty, event);
     expect(next.ticker?.message).toBe('doing a thing 5/10');
     expect(next.ticker?.toolName).toBe('some_future_tool');
-  });
-
-  it('routes calibrate_search_strategy events keyed by metadata.platform when present', () => {
-    const event: ToolProgressEventInput = {
-      type: 'tool_progress',
-      toolName: 'calibrate_search_strategy',
-      callId: 'c1',
-      message: 'Round 5/60',
-      metadata: { platform: 'x', round: 5, maxTurns: 60 },
-      ts: 1000,
-    };
-    const next = reduceToolProgress(empty, event);
-    expect(next.calibration['x']).toBeDefined();
-    expect(next.calibration['default']).toBeUndefined();
-    expect(next.calibration['x']!.platform).toBe('x');
   });
 
   it('drops out-of-order ticker events even when toolName + callId differ', () => {
