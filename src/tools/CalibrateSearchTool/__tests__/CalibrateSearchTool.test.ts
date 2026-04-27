@@ -27,6 +27,7 @@ vi.mock('@/tools/AgentTool/spawn', () => ({
   buildAgentConfigFromDefinition: vi.fn(() => ({
     name: 'search-strategist',
     maxTurns: 60,
+    tools: [],
   })),
 }));
 
@@ -252,5 +253,79 @@ describe('calibrate_search_strategy tool', () => {
       maxTurns: number;
     };
     expect(promptJson.maxTurns).toBe(100);
+  });
+
+  it('injects a report_progress tool into the strategist that emits as calibrate_search_strategy', async () => {
+    // Channel preflight + product lookup setup.
+    vi.mocked(createPlatformDeps).mockResolvedValueOnce({} as never);
+    dbSelectMock.mockReturnValueOnce(
+      buildSelectChain([
+        {
+          id: 'p1',
+          name: 'Shipflare',
+          description: 'ship',
+          valueProp: null,
+          keywords: ['ship'],
+        },
+      ]),
+    );
+
+    // strategist agent definition exists.
+    const strategistDef = { name: 'search-strategist', tools: [] };
+    vi.mocked(resolveAgent).mockResolvedValueOnce(strategistDef as never);
+
+    // Capture the report_progress tool that was injected into the strategist's
+    // toolset, then exercise it.
+    let capturedReportProgress:
+      | ((
+          input: { message: string; metadata?: Record<string, unknown> },
+          ctx: unknown,
+        ) => Promise<unknown>)
+      | null = null;
+    vi.mocked(runAgent).mockImplementationOnce(async (config: unknown) => {
+      const c = config as { tools: Array<{ name: string; execute: unknown }> };
+      const reportTool = c.tools.find((t) => t.name === 'report_progress');
+      if (reportTool) {
+        capturedReportProgress = reportTool.execute as typeof capturedReportProgress;
+      }
+      return {
+        result: {
+          queries: ['q1'],
+          negativeTerms: [],
+          rationale: 'r',
+          observedPrecision: 0.7,
+          reachedTarget: true,
+          turnsUsed: 5,
+          sampleSize: 24,
+          sampleVerdicts: [],
+        },
+        usage: { costUsd: 0.05 },
+      } as never;
+    });
+
+    const emit = vi.fn();
+    // Do not inject db into ctx — let readDomainDeps fall back to the
+    // module-level @/lib/db mock (dbSelectMock) that is already set up above.
+    const ctx = makeCtx({ userId: 'u1', productId: 'p1' });
+    ctx.emitProgress = emit;
+
+    await calibrateSearchStrategyTool.execute({ platform: 'x' }, ctx);
+
+    expect(capturedReportProgress).toBeTypeOf('function');
+
+    // Simulate the strategist calling its injected report_progress tool.
+    await capturedReportProgress!(
+      {
+        message: 'Round 12/60 · precision 0.58',
+        metadata: { round: 12, maxTurns: 60, precision: 0.58 },
+      },
+      makeCtx({}),
+    );
+
+    expect(emit).toHaveBeenCalledWith(
+      'calibrate_search_strategy',
+      'Round 12/60 · precision 0.58',
+      { round: 12, maxTurns: 60, precision: 0.58 },
+    );
   });
 });

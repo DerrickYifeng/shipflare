@@ -16,7 +16,7 @@
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { buildTool } from '@/core/tool-system';
-import type { ToolDefinition } from '@/core/types';
+import type { ToolContext, ToolDefinition } from '@/core/types';
 import { products } from '@/lib/db/schema';
 import { resolveAgent } from '@/tools/AgentTool/registry';
 import { buildAgentConfigFromDefinition } from '@/tools/AgentTool/spawn';
@@ -101,6 +101,37 @@ function buildStrategistMessage(args: {
   return JSON.stringify(args, null, 2);
 }
 
+/**
+ * Build a `report_progress` tool whose implementation is closed over
+ * the outer calibrate-tool's emitter so it attributes progress to
+ * `calibrate_search_strategy`. Strategist gets this in its toolset
+ * for this single run; we don't add it to the global registry.
+ */
+function buildReportProgressTool(
+  outerEmit: ToolContext['emitProgress'],
+): ToolDefinition<
+  { message: string; metadata?: Record<string, unknown> },
+  { acknowledged: true }
+> {
+  return buildTool({
+    name: 'report_progress',
+    description:
+      'Emit a one-line progress update to the user. Call at the end of ' +
+      'each iteration with key state. Message ≤200 chars; include round / ' +
+      'precision / sampleSize in metadata for the UI to render structured.',
+    inputSchema: z.object({
+      message: z.string().min(1).max(200),
+      metadata: z.record(z.unknown()).optional(),
+    }),
+    isReadOnly: true,
+    isConcurrencySafe: true,
+    async execute(input) {
+      outerEmit?.('calibrate_search_strategy', input.message, input.metadata);
+      return { acknowledged: true } as const;
+    },
+  });
+}
+
 export const calibrateSearchStrategyTool: ToolDefinition<
   z.infer<typeof inputSchema>,
   CalibrateSearchStrategyResult
@@ -164,6 +195,10 @@ export const calibrateSearchStrategyTool: ToolDefinition<
     // runAgent cuts it off at the frontmatter default. See spec
     // §"maxTurns dual-source caveat".
     strategistConfig.maxTurns = maxTurns;
+    strategistConfig.tools = [
+      ...strategistConfig.tools,
+      buildReportProgressTool(ctx.emitProgress),
+    ];
 
     const strategistCtx = createToolContext({
       ...(deps as Record<string, unknown>),
