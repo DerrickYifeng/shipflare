@@ -3,7 +3,7 @@ import { createLogger } from '@/lib/logger';
 const log = createLogger('lib:xai');
 
 const XAI_BASE_URL = 'https://api.x.ai/v1';
-const XAI_MODEL = 'grok-4-fast';
+const XAI_MODEL = 'grok-4.20-non-reasoning';
 const FETCH_TIMEOUT_MS = 50_000;
 const FETCH_RETRY_TIMEOUT_MS = 60_000;
 
@@ -83,7 +83,7 @@ export interface ConversationalResponseFormat {
 }
 
 export interface ConversationalRequest {
-  /** xAI model id, e.g. `grok-4-fast` or `grok-4.20-reasoning`. */
+  /** xAI model id, e.g. `grok-4.20-non-reasoning` or `grok-4.20-reasoning`. */
   model: string;
   messages: ConversationalMessage[];
   tools?: Array<{ type: 'x_search' | 'web_search' }>;

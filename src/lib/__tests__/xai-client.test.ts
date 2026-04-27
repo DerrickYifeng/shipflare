@@ -33,7 +33,7 @@ describe('XAIClient.respondConversational', () => {
 
     const client = new XAIClient('test-key');
     const result = await client.respondConversational({
-      model: 'grok-4-fast',
+      model: 'grok-4.20-non-reasoning',
       messages: [
         { role: 'user', content: 'find me indie founders' },
       ],
@@ -64,7 +64,7 @@ describe('XAIClient.respondConversational', () => {
     const [url, init] = fetchMock.mock.calls[0]!;
     expect(url).toBe('https://api.x.ai/v1/responses');
     const body = JSON.parse((init as RequestInit).body as string);
-    expect(body.model).toBe('grok-4-fast');
+    expect(body.model).toBe('grok-4.20-non-reasoning');
     expect(body.input).toEqual([{ role: 'user', content: 'find me indie founders' }]);
     expect(body.tools).toEqual([{ type: 'x_search' }]);
     expect(body.response_format).toMatchObject({
@@ -83,7 +83,7 @@ describe('XAIClient.respondConversational', () => {
     const client = new XAIClient('test-key');
     await expect(
       client.respondConversational({
-        model: 'grok-4-fast',
+        model: 'grok-4.20-non-reasoning',
         messages: [{ role: 'user', content: 'x' }],
       }),
     ).rejects.toThrow(/xAI API error 500/);
@@ -107,7 +107,7 @@ describe('XAIClient.respondConversational', () => {
     const client = new XAIClient('test-key');
     await expect(
       client.respondConversational({
-        model: 'grok-4-fast',
+        model: 'grok-4.20-non-reasoning',
         messages: [{ role: 'user', content: 'x' }],
         responseFormat: {
           type: 'json_schema',

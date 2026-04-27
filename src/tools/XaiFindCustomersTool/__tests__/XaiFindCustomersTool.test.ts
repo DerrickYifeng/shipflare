@@ -34,7 +34,7 @@ const PRODUCT = {
 describe('xai_find_customers tool', () => {
   beforeEach(() => {
     respondConversationalMock.mockReset();
-    process.env.XAI_MODEL_FAST = 'grok-4-fast';
+    process.env.XAI_MODEL_FAST = 'grok-4.20-non-reasoning';
     process.env.XAI_MODEL_REASONING = 'grok-4.20-reasoning';
   });
 
@@ -56,7 +56,7 @@ describe('xai_find_customers tool', () => {
 
     expect(respondConversationalMock).toHaveBeenCalledTimes(1);
     const call = respondConversationalMock.mock.calls[0]![0];
-    expect(call.model).toBe('grok-4-fast');
+    expect(call.model).toBe('grok-4.20-non-reasoning');
     expect(call.messages).toEqual([{ role: 'user', content: 'find indie founders' }]);
     expect(call.tools).toEqual([{ type: 'x_search' }]);
     expect(call.responseFormat).toMatchObject({

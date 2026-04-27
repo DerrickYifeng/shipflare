@@ -67,7 +67,7 @@ function resolveModel(reasoning: boolean): string {
   if (reasoning) {
     return process.env.XAI_MODEL_REASONING ?? 'grok-4.20-reasoning';
   }
-  return process.env.XAI_MODEL_FAST ?? 'grok-4-fast';
+  return process.env.XAI_MODEL_FAST ?? 'grok-4.20-non-reasoning';
 }
 
 export const xaiFindCustomersTool = buildTool({
