@@ -6,53 +6,137 @@ describe('validateReplyLength', () => {
     process.env.XAI_API_KEY = 'test-key';
   });
 
-  it('passes text under the X reply cap (240)', () => {
-    const r = validateReplyLength('hi there', { platform: 'x', kind: 'reply' });
-    expect(r.ok).toBe(true);
-    expect(r.excess).toBeUndefined();
-    expect(r.limit).toBe(240);
-    expect(r.length).toBe('hi there'.length);
-  });
-
-  it('passes text at exactly the X reply cap', () => {
-    const r = validateReplyLength('a'.repeat(240), { platform: 'x', kind: 'reply' });
-    expect(r.ok).toBe(true);
-    expect(r.length).toBe(240);
-  });
-
-  it('fails text one over the X reply cap and reports excess', () => {
-    const r = validateReplyLength('a'.repeat(241), { platform: 'x', kind: 'reply' });
-    expect(r.ok).toBe(false);
-    expect(r.reason).toBe('too_long');
-    expect(r.excess).toBe(1);
-    expect(r.limit).toBe(240);
-    expect(r.length).toBe(241);
-  });
-
-  it('uses the post cap (280) for post kind', () => {
-    const r = validateReplyLength('a'.repeat(281), { platform: 'x', kind: 'post' });
-    expect(r.ok).toBe(false);
-    expect(r.limit).toBe(280);
-    expect(r.excess).toBe(1);
-  });
-
-  it('counts emoji as one character (code-point aware)', () => {
-    // Single astral emoji renders as 2 JS "chars" but 1 code point.
-    const r = validateReplyLength('a'.repeat(239) + '\uD83D\uDE80', {
-      platform: 'x',
-      kind: 'reply',
+  describe('X — twitter-text weighted counting', () => {
+    it('passes ASCII text under the X reply cap (280)', () => {
+      const r = validateReplyLength('hi there', {
+        platform: 'x',
+        kind: 'reply',
+      });
+      expect(r.ok).toBe(true);
+      expect(r.excess).toBe(0);
+      expect(r.limit).toBe(280);
+      expect(r.length).toBe('hi there'.length);
     });
-    expect(r.ok).toBe(true);
-    expect(r.length).toBe(240);
+
+    it('passes text at exactly the X cap', () => {
+      const r = validateReplyLength('a'.repeat(280), {
+        platform: 'x',
+        kind: 'reply',
+      });
+      expect(r.ok).toBe(true);
+      expect(r.length).toBe(280);
+      expect(r.excess).toBe(0);
+    });
+
+    it('fails text one over the X cap and reports excess', () => {
+      const r = validateReplyLength('a'.repeat(281), {
+        platform: 'x',
+        kind: 'reply',
+      });
+      expect(r.ok).toBe(false);
+      expect(r.reason).toBe('too_long');
+      expect(r.excess).toBe(1);
+      expect(r.limit).toBe(280);
+      expect(r.length).toBe(281);
+    });
+
+    it('counts URLs as exactly 23 chars (t.co accounting)', () => {
+      const url = 'https://this-is-a-very-long-url.example.com/foo/bar/baz';
+      // Pad with ASCII to land just under the cap when URL = 23.
+      // 280 - 23 - 1 (space) = 256 ASCII chars, then space + URL
+      const text = 'a'.repeat(256) + ' ' + url;
+      const r = validateReplyLength(text, { platform: 'x', kind: 'reply' });
+      // Weighted: 256 ASCII + 1 space + 23 (URL) = 280 → ok
+      expect(r.length).toBe(280);
+      expect(r.ok).toBe(true);
+    });
+
+    it('counts emoji as 2 weighted chars', () => {
+      // 278 ASCII + 1 emoji (= 2 weighted) = 280 → boundary pass
+      const r = validateReplyLength('a'.repeat(278) + '🚀', {
+        platform: 'x',
+        kind: 'reply',
+      });
+      expect(r.length).toBe(280);
+      expect(r.ok).toBe(true);
+
+      // One more ASCII pushes over
+      const r2 = validateReplyLength('a'.repeat(279) + '🚀', {
+        platform: 'x',
+        kind: 'reply',
+      });
+      expect(r2.ok).toBe(false);
+      expect(r2.length).toBe(281);
+    });
+
+    it('counts CJK characters as 2 weighted chars', () => {
+      // 140 CJK chars = 280 weighted → boundary pass
+      const r = validateReplyLength('中'.repeat(140), {
+        platform: 'x',
+        kind: 'reply',
+      });
+      expect(r.length).toBe(280);
+      expect(r.ok).toBe(true);
+
+      const r2 = validateReplyLength('中'.repeat(141), {
+        platform: 'x',
+        kind: 'reply',
+      });
+      expect(r2.ok).toBe(false);
+      expect(r2.length).toBe(282);
+    });
+
+    it('strips leading @mentions on a reply when hasLeadingMentions=true', () => {
+      // Leading auto-mentions ("@alice @bob ") + 280 ASCII chars of body
+      // are still ok because the mention prefix is excluded from the cap.
+      const text = '@alice @bob ' + 'a'.repeat(280);
+      const r = validateReplyLength(text, {
+        platform: 'x',
+        kind: 'reply',
+        hasLeadingMentions: true,
+      });
+      expect(r.ok).toBe(true);
+      expect(r.length).toBe(280);
+    });
+
+    it('does NOT strip leading mentions when the flag is omitted', () => {
+      const text = '@alice @bob ' + 'a'.repeat(280);
+      const r = validateReplyLength(text, { platform: 'x', kind: 'reply' });
+      // Leading mentions are counted; we'll be over the cap.
+      expect(r.ok).toBe(false);
+      expect(r.length).toBeGreaterThan(280);
+    });
   });
 
-  it('uses reddit post cap of 40,000', () => {
-    const r = validateReplyLength('a'.repeat(40_001), {
-      platform: 'reddit',
-      kind: 'post',
+  describe('Reddit — codepoint counting', () => {
+    it('uses reddit post cap of 40,000', () => {
+      const r = validateReplyLength('a'.repeat(40_001), {
+        platform: 'reddit',
+        kind: 'post',
+      });
+      expect(r.ok).toBe(false);
+      expect(r.limit).toBe(40_000);
+      expect(r.excess).toBe(1);
     });
-    expect(r.ok).toBe(false);
-    expect(r.limit).toBe(40_000);
+
+    it('uses reddit comment cap of 10,000', () => {
+      const r = validateReplyLength('a'.repeat(10_001), {
+        platform: 'reddit',
+        kind: 'reply',
+      });
+      expect(r.ok).toBe(false);
+      expect(r.limit).toBe(10_000);
+    });
+
+    it('counts emoji as one code point on Reddit (not weighted)', () => {
+      // Reddit doesn't apply Twitter-style weighting.
+      const r = validateReplyLength('a'.repeat(9999) + '🚀', {
+        platform: 'reddit',
+        kind: 'reply',
+      });
+      expect(r.ok).toBe(true);
+      expect(r.length).toBe(10_000);
+    });
   });
 
   it('throws on an unknown platform (fail loud, not silent)', () => {

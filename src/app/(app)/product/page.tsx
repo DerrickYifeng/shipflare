@@ -1,75 +1,55 @@
 import type { Metadata } from 'next';
-import { auth } from '@/lib/auth';
 import { redirect } from 'next/navigation';
+import { eq } from 'drizzle-orm';
+import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { products, codeSnapshots, accounts } from '@/lib/db/schema';
-import { eq, and } from 'drizzle-orm';
-import { HeaderBar } from '@/components/layout/header-bar';
+import { products } from '@/lib/db/schema';
+import { derivePhase, type ProductState } from '@/lib/launch-phase';
+import { ProductContent, type ProductSnapshot } from './product-content';
 
 export const metadata: Metadata = { title: 'My Product' };
-import { ProductInfoSection } from '@/components/product/product-info-section';
-import { CodeSnapshotSection } from '@/components/product/code-snapshot-section';
-import { WebsiteInfoSection } from '@/components/product/website-info-section';
-import type { SeoAuditResult } from '@/tools/seo-audit';
-import type { TechStack } from '@/types/code-scanner';
 
 export default async function ProductPage() {
   const session = await auth();
   if (!session?.user?.id) redirect('/');
 
-  const [product] = await db
-    .select()
+  const [row] = await db
+    .select({
+      name: products.name,
+      description: products.description,
+      keywords: products.keywords,
+      valueProp: products.valueProp,
+      url: products.url,
+      state: products.state,
+      launchDate: products.launchDate,
+      launchedAt: products.launchedAt,
+      updatedAt: products.updatedAt,
+    })
     .from(products)
     .where(eq(products.userId, session.user.id))
     .limit(1);
 
-  if (!product) redirect('/onboarding');
+  if (!row) redirect('/onboarding');
 
-  const [snapshot] = await db
-    .select()
-    .from(codeSnapshots)
-    .where(eq(codeSnapshots.productId, product.id))
-    .limit(1);
+  const state = row.state as ProductState;
+  const currentPhase = derivePhase({
+    state,
+    launchDate: row.launchDate,
+    launchedAt: row.launchedAt,
+  });
 
-  const [githubAccount] = await db
-    .select({ providerAccountId: accounts.providerAccountId })
-    .from(accounts)
-    .where(and(eq(accounts.userId, session.user.id), eq(accounts.provider, 'github')))
-    .limit(1);
+  const initial: ProductSnapshot = {
+    name: row.name,
+    description: row.description,
+    keywords: row.keywords,
+    valueProp: row.valueProp,
+    url: row.url,
+    state,
+    launchDate: row.launchDate ? row.launchDate.toISOString() : null,
+    launchedAt: row.launchedAt ? row.launchedAt.toISOString() : null,
+    currentPhase,
+    updatedAt: row.updatedAt.toISOString(),
+  };
 
-  const serializedSnapshot = snapshot
-    ? {
-        repoFullName: snapshot.repoFullName,
-        repoUrl: snapshot.repoUrl,
-        techStack: snapshot.techStack as TechStack,
-        scanSummary: snapshot.scanSummary,
-        commitSha: snapshot.commitSha,
-        scannedAt: snapshot.scannedAt.toISOString(),
-      }
-    : null;
-
-  return (
-    <>
-      <HeaderBar title="My Product" />
-      <div className="max-w-[640px] mx-auto p-6 flex flex-col gap-8">
-        <ProductInfoSection
-          product={{
-            name: product.name,
-            description: product.description,
-            keywords: product.keywords,
-            valueProp: product.valueProp,
-            lifecyclePhase: product.lifecyclePhase,
-          }}
-        />
-        <CodeSnapshotSection
-          snapshot={serializedSnapshot}
-          hasGitHub={!!githubAccount}
-        />
-        <WebsiteInfoSection
-          url={product.url}
-          seoAudit={product.seoAuditJson as SeoAuditResult | null}
-        />
-      </div>
-    </>
-  );
+  return <ProductContent initial={initial} />;
 }

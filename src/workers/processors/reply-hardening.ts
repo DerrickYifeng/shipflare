@@ -1,6 +1,7 @@
 import { join } from 'path';
-import { loadSkill } from '@/core/skill-loader';
-import { runSkill } from '@/core/skill-runner';
+import { runAgent, createToolContext } from '@/bridge/agent-runner';
+import { loadAgentFromFile } from '@/bridge/load-agent';
+import { registry } from '@/tools/registry';
 import { validateAiSlop } from '@/lib/reply/ai-slop-validator';
 import { validateAnchorToken } from '@/lib/reply/anchor-token-validator';
 import {
@@ -9,16 +10,21 @@ import {
   summarizeFailures,
   type ContentValidatorFailure,
 } from '@/lib/content/validators';
-import type { ReplyDrafterOutput, ProductOpportunityJudgeOutput } from '@/agents/schemas';
-import { loadVoiceBlockForUser } from '@/lib/voice/inject';
+import {
+  productOpportunityJudgeOutputSchema,
+  replyDrafterOutputSchema,
+  type ReplyDrafterOutput,
+  type ProductOpportunityJudgeOutput,
+} from '@/agents/schemas';
 import { createLogger } from '@/lib/logger';
 
-// Pre-load both skills at module init (same pattern as monitor.ts for replyScanSkill)
-const judgeSkill = loadSkill(
-  join(process.cwd(), 'src/skills/product-opportunity-judge'),
+const JUDGE_AGENT_PATH = join(
+  process.cwd(),
+  'src/tools/AgentTool/agents/product-opportunity-judge/AGENT.md',
 );
-const replyScanSkill = loadSkill(
-  join(process.cwd(), 'src/skills/reply-scan'),
+const X_REPLY_WRITER_AGENT_PATH = join(
+  process.cwd(),
+  'src/tools/AgentTool/agents/x-reply-writer/AGENT.md',
 );
 
 const log = createLogger('worker:reply-hardening');
@@ -60,23 +66,28 @@ export interface HardenedReplyOutput extends ReplyDrafterOutput {
 async function runReplyDrafter(
   input: HardenedReplyInput,
   canMentionProduct: boolean,
-  voiceBlock: string | null,
   repairPrompt: string | null,
 ): Promise<ReplyDrafterOutput | undefined> {
-  const drafterRes = await runSkill<ReplyDrafterOutput>({
-    skill: replyScanSkill,
-    input: {
-      tweets: [
-        {
-          ...input,
-          canMentionProduct,
-          voiceBlock,
-          ...(repairPrompt ? { repairPrompt } : {}),
-        },
-      ],
-    },
+  const agentConfig = loadAgentFromFile(
+    X_REPLY_WRITER_AGENT_PATH,
+    registry.toMap(),
+  );
+  const userMessage = JSON.stringify({
+    tweets: [
+      {
+        ...input,
+        canMentionProduct,
+        ...(repairPrompt ? { repairPrompt } : {}),
+      },
+    ],
   });
-  return drafterRes.results[0] as ReplyDrafterOutput | undefined;
+  const { result } = await runAgent(
+    agentConfig,
+    userMessage,
+    createToolContext({}),
+    replyDrafterOutputSchema,
+  );
+  return result as ReplyDrafterOutput | undefined;
 }
 
 /**
@@ -84,33 +95,45 @@ async function runReplyDrafter(
  *
  * Stages:
  *   1. product-opportunity-judge — determines whether the product may be mentioned
- *   2. reply-scan (reply-drafter) — drafts the reply with canMentionProduct context
+ *   2. x-reply-writer — drafts the reply with canMentionProduct context
  *   3. content-validator pipeline — length, platform-leak, hallucinated-stats
  *      with up to `MAX_REGEN_ATTEMPTS` regeneration passes
  *   4. ai-slop-validator — rejects AI-sounding preambles and banned vocabulary
  *   5. anchor-token-validator — rejects replies with no concrete anchor (number/date/brand)
+ *
+ * This is the programmatic monitor.ts pipeline (one tweet → one draft, with
+ * a code-driven regen loop). It is intentionally distinct from the
+ * community-manager team-run path, which does the entire opportunity-judge +
+ * draft + self-check inline in a single LLM turn using prose references.
+ * Both paths produce a `drafts` row; both eventually land on the same
+ * review queue. The split exists because monitor.ts is per-tweet retry
+ * logic, not an agent conversation — keeping it programmatic preserves
+ * the deterministic regen budget.
  *
  * Returns strategy='skip' with rejectionReasons when any stage fails. If
  * regeneration exhausts on content-validator failures, sets `needsReview`
  * so the caller can surface the draft for human approval rather than
  * silently discarding it.
  *
- * TODO: memory injection — the reply-scan skill receives no memoryPrompt here.
- * The caller (monitor.ts) used to inject memoryPrompt at the batch runSkill level;
- * that injection now happens inside reply-scan's own skill mechanism via skill-runner
- * when deps are provided. Per-tweet memory enrichment is a known limitation of this
- * per-tweet decomposition; revisit if quality regression is observed.
+ * TODO: memory injection — per-tweet memoryPrompt is not appended to the
+ * x-reply-writer system prompt. Known limitation of the per-tweet decomposition;
+ * revisit if quality regression is observed.
  */
 export async function draftReplyWithHardening(
   input: HardenedReplyInput,
 ): Promise<HardenedReplyOutput> {
   // Step 1: product-opportunity-judge (pre-pass).
-  const judgeRes = await runSkill<ProductOpportunityJudgeOutput>({
-    skill: judgeSkill,
-    input: { tweets: [input] },
-  });
-
-  const judgment = (judgeRes.results[0] ?? {
+  const judgeAgentConfig = loadAgentFromFile(
+    JUDGE_AGENT_PATH,
+    registry.toMap(),
+  );
+  const { result: judgeResult } = await runAgent(
+    judgeAgentConfig,
+    JSON.stringify({ tweets: [input] }),
+    createToolContext({}),
+    productOpportunityJudgeOutputSchema,
+  );
+  const judgment = (judgeResult ?? {
     allowMention: false,
     signal: 'no_fit' as const,
     confidence: 0,
@@ -119,15 +142,10 @@ export async function draftReplyWithHardening(
 
   const canMentionProduct = judgment.allowMention && judgment.confidence >= 0.6;
 
-  const voiceBlock = input.userId
-    ? await loadVoiceBlockForUser(input.userId, REPLY_PLATFORM)
-    : null;
-
   // Step 2 + 3: draft + content-validator regen loop.
   let draft: ReplyDrafterOutput | undefined = await runReplyDrafter(
     input,
     canMentionProduct,
-    voiceBlock,
     null,
   );
   let lastFailures: ContentValidatorFailure[] = [];
@@ -158,7 +176,6 @@ export async function draftReplyWithHardening(
     draft = await runReplyDrafter(
       input,
       canMentionProduct,
-      voiceBlock,
       repairPrompt,
     );
   }

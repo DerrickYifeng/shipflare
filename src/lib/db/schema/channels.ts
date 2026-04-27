@@ -5,6 +5,7 @@ import {
   real,
   integer,
   boolean,
+  jsonb,
   index,
   uniqueIndex,
   check,
@@ -53,7 +54,13 @@ export const threads = pgTable(
     author: text('author'),
     upvotes: integer('upvotes').default(0),
     commentCount: integer('comment_count').default(0),
-    relevanceScore: real('relevance_score').notNull(),
+    /**
+     * Discovery v3: scout agent's confidence (0..1) and 1-2 sentence
+     * rationale. Populated by the `discovery-scan` path running the
+     * discovery-scout agent.
+     */
+    scoutConfidence: real('scout_confidence'),
+    scoutReason: text('scout_reason'),
     isLocked: boolean('is_locked').default(false),
     isArchived: boolean('is_archived').default(false),
     postedAt: timestamp('posted_at', { mode: 'date' }),
@@ -65,6 +72,16 @@ export const threads = pgTable(
     retryCount: integer('retry_count').notNull().default(0),
     lastAttemptAt: timestamp('last_attempt_at', { mode: 'date' }),
     sourceJobId: text('source_job_id'),
+    // Discovery conversational rewrite (2026-04-26): engagement signal +
+    // repost canonicalization. Populated by `persist_queue_threads`.
+    likesCount: integer('likes_count'),
+    repostsCount: integer('reposts_count'),
+    repliesCount: integer('replies_count'),
+    viewsCount: integer('views_count'),
+    isRepost: boolean('is_repost').notNull().default(false),
+    originalUrl: text('original_url'),
+    originalAuthorUsername: text('original_author_username'),
+    surfacedVia: jsonb('surfaced_via').$type<string[] | null>(),
   },
   (t) => [
     index('threads_user_discovered_idx').on(t.userId, desc(t.discoveredAt)),

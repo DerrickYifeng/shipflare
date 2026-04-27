@@ -3,9 +3,9 @@ import { createLogger } from '@/lib/logger';
 const log = createLogger('lib:xai');
 
 const XAI_BASE_URL = 'https://api.x.ai/v1';
-const XAI_MODEL = 'grok-4-fast';
-const FETCH_TIMEOUT_MS = 15_000;
-const FETCH_RETRY_TIMEOUT_MS = 30_000;
+const XAI_MODEL = 'grok-4.20-non-reasoning';
+const FETCH_TIMEOUT_MS = 50_000;
+const FETCH_RETRY_TIMEOUT_MS = 60_000;
 
 export interface XSearchTweet {
   tweetId: string;
@@ -51,11 +51,79 @@ export interface XSearchResult {
   searchCalls: number;
 }
 
+export interface XSearchBatchInput {
+  id: string;
+  query: string;
+  maxResults?: number;
+}
+
+export interface XSearchBatchResult {
+  queryId: string;
+  tweets: XSearchTweet[];
+}
+
 export interface XAuthorBio {
   username: string;
   bio: string | null;
   followerCount: number | null;
 }
+
+export interface ConversationalMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface ConversationalResponseFormat {
+  type: 'json_schema';
+  json_schema: {
+    name: string;
+    schema: object;
+    strict: boolean;
+  };
+}
+
+export interface ConversationalRequest {
+  /** xAI model id, e.g. `grok-4.20-non-reasoning` or `grok-4.20-reasoning`. */
+  model: string;
+  messages: ConversationalMessage[];
+  tools?: Array<{ type: 'x_search' | 'web_search' }>;
+  responseFormat?: ConversationalResponseFormat;
+  signal?: AbortSignal;
+}
+
+export interface ConversationalResponse {
+  /**
+   * Parsed JSON when `responseFormat.type === 'json_schema'` AND the parse
+   * succeeded; raw string when `responseFormat` was omitted; `null` when
+   * we requested json_schema but the parse failed (Grok ignored the
+   * response_format and returned prose — observed empirically when the
+   * x_search tool returns no results, despite xAI's documented "guaranteed
+   * schema match"). Callers should check for `null` and fall back to
+   * `assistantMessage.content` when extracting prose.
+   */
+  output: unknown;
+  /** Verbatim assistant message — agent threads this back into the next call. */
+  assistantMessage: ConversationalMessage;
+  /** Set to the parse error message when `output === null` due to a
+   *  json_schema parse failure. Useful for logging / agent context. */
+  parseError?: string;
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+  };
+}
+
+/**
+ * Self-imposed cap on queries per `searchTweetsBatch` call. Not an xAI
+ * API limit — the Grok responses endpoint accepts longer prompts. We
+ * cap at 20 to bound the response token count and to align with
+ * `RunDiscoveryScanTool`'s `inlineQueryCount.max(20)` so a scout that
+ * generates breadth-spanning query sets at kickoff doesn't trip the
+ * Zod guard. Bumped from 10 after a kickoff scan with 12 queries
+ * failed validation in production (2026-04-26).
+ */
+export const SEARCH_TWEETS_BATCH_MAX_QUERIES = 20;
 
 /**
  * xAI Grok API client for searching X/Twitter content.
@@ -150,6 +218,104 @@ export class XAIClient {
   }
 
   /**
+   * Run multiple X/Twitter searches in one Grok call. Grok's server-side
+   * `x_search` tool is invoked once per query in parallel (still counts as
+   * multiple `x_search_calls` for billing, but saves the Responses-API
+   * round-trip, prompt duplication, and most of the wall-clock latency).
+   *
+   * Callers must pass unique ids — results are returned keyed by those ids.
+   * Unknown ids in Grok's output are dropped; queries that produce zero
+   * results come back with `tweets: []` rather than being omitted.
+   *
+   * Upstream callers wanting retry-on-partial-failure should compare the
+   * returned `tweets.length` per query against expectations and fall back
+   * to `searchTweets()` for any misses. This method does not auto-fallback
+   * — a single malformed response shouldn't silently amplify cost.
+   */
+  async searchTweetsBatch(
+    queries: XSearchBatchInput[],
+    opts?: { signal?: AbortSignal },
+  ): Promise<XSearchBatchResult[]> {
+    if (queries.length === 0) return [];
+    if (queries.length > SEARCH_TWEETS_BATCH_MAX_QUERIES) {
+      throw new Error(
+        `searchTweetsBatch: max ${SEARCH_TWEETS_BATCH_MAX_QUERIES} queries per call, got ${queries.length}`,
+      );
+    }
+    const ids = new Set<string>();
+    for (const q of queries) {
+      if (ids.has(q.id)) {
+        throw new Error(`searchTweetsBatch: duplicate query id ${q.id}`);
+      }
+      ids.add(q.id);
+    }
+
+    const systemPrompt = [
+      'You are a batch X/Twitter search assistant. For each query listed by the user, run an x_search and return the matching tweets.',
+      'Output format — one line per tweet:',
+      'TWEET|<query_id>|<tweet_url>|<author_username>|<tweet_text_on_one_line>',
+      'If a query has zero results, output exactly one line: NO_RESULTS|<query_id>',
+      'Rules:',
+      '- Output ONLY TWEET and NO_RESULTS lines. No headers, commentary, or blank lines.',
+      '- Use the exact query_id provided in brackets — never invent new ids.',
+      '- Respect each query\'s maxResults cap.',
+      '- Replace any newlines inside tweet text with spaces so each tweet stays on one line.',
+    ].join('\n');
+
+    const userLines = queries
+      .map(
+        (q) =>
+          `[${q.id}] (maxResults=${q.maxResults ?? 10}) ${q.query}`,
+      )
+      .join('\n');
+
+    const requestBody = JSON.stringify({
+      model: XAI_MODEL,
+      tools: [{ type: 'x_search' }],
+      input: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userLines },
+      ],
+    });
+
+    log.debug(`Batch searching X via xAI: ${queries.length} queries`);
+
+    let data: XAIResponse;
+    try {
+      data = await this.fetchWithTimeout(requestBody, FETCH_TIMEOUT_MS, opts?.signal);
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        log.warn(
+          `xAI batch search timed out after ${FETCH_TIMEOUT_MS}ms, retrying with ${FETCH_RETRY_TIMEOUT_MS}ms`,
+        );
+        data = await this.fetchWithTimeout(
+          requestBody,
+          FETCH_RETRY_TIMEOUT_MS,
+          opts?.signal,
+        );
+      } else {
+        throw err;
+      }
+    }
+
+    const rawText = this.extractText(data);
+    const grouped = this.parseBatchLines(rawText, ids);
+
+    const totalTweets = Array.from(grouped.values()).reduce(
+      (n, arr) => n + arr.length,
+      0,
+    );
+    log.info(
+      `xAI batch search: ${queries.length} queries → ${totalTweets} tweets, ${data.server_side_tool_usage?.x_search_calls ?? 0} search calls`,
+    );
+
+    return queries.map((q) => ({
+      queryId: q.id,
+      tweets: (grouped.get(q.id) ?? []).slice(0, q.maxResults ?? 10),
+    }));
+  }
+
+  /**
    * Look up a handful of X/Twitter author bios in one Grok call.
    *
    * Used by the discovery pipeline to filter out competitors and
@@ -230,6 +396,113 @@ export class XAIClient {
     return results;
   }
 
+  /**
+   * One-shot call to xAI Responses API with explicit messages history,
+   * server-side tools, and structured-output response format. Stateless —
+   * caller owns the conversation history and re-sends it each call.
+   *
+   * Used by the discovery-agent's `xai_find_customers` tool to talk to
+   * Grok conversationally about which tweets are reply targets for the
+   * founder's product.
+   *
+   * On non-2xx HTTP: throws `xAI API error <status>: <body>`.
+   *
+   * On JSON parse failure when `responseFormat.type === 'json_schema'`:
+   * does NOT throw. Returns `{ output: null, parseError: <msg>, ... }`
+   * with the raw text preserved in `assistantMessage.content`. The
+   * structured-outputs contract should hold for supported Grok 4 family
+   * models when the wire format is correct (we use the Responses-API
+   * `text.format` envelope, NOT the chat-completions `response_format`).
+   * The null path is a defense-in-depth safety net for cases where Grok
+   * still emits prose (e.g. transient model behavior) — callers handle
+   * by synthesizing a degraded response from the prose.
+   */
+  async respondConversational(
+    args: ConversationalRequest,
+  ): Promise<ConversationalResponse> {
+    // Responses API wire format: structured output goes into `text.format`,
+    // not `response_format` (the chat-completions param name). xAI's docs
+    // example for tools+structured-output uses this exact shape — if you
+    // pass `response_format` to /v1/responses it gets silently ignored
+    // and Grok returns prose, which we observed in production.
+    const textEnvelope =
+      args.responseFormat?.type === 'json_schema'
+        ? {
+            text: {
+              format: {
+                type: 'json_schema' as const,
+                name: args.responseFormat.json_schema.name,
+                schema: args.responseFormat.json_schema.schema,
+                strict: args.responseFormat.json_schema.strict,
+              },
+            },
+          }
+        : {};
+
+    const requestBody = JSON.stringify({
+      model: args.model,
+      input: args.messages.map((m) => ({ role: m.role, content: m.content })),
+      ...(args.tools && args.tools.length > 0 ? { tools: args.tools } : {}),
+      ...textEnvelope,
+    });
+
+    let data: XAIResponse;
+    try {
+      data = await this.fetchWithTimeout(
+        requestBody,
+        FETCH_TIMEOUT_MS,
+        args.signal,
+      );
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        // One retry on timeout — same retry policy as searchTweetsBatch.
+        log.warn(
+          `respondConversational timed out after ${FETCH_TIMEOUT_MS}ms, retrying with ${FETCH_RETRY_TIMEOUT_MS}ms`,
+        );
+        data = await this.fetchWithTimeout(
+          requestBody,
+          FETCH_RETRY_TIMEOUT_MS,
+          args.signal,
+        );
+      } else {
+        throw err;
+      }
+    }
+
+    const text = this.extractText(data);
+    let output: unknown = text;
+    let parseError: string | undefined;
+    if (args.responseFormat?.type === 'json_schema') {
+      try {
+        output = JSON.parse(text);
+      } catch (err) {
+        // Don't throw — Grok ignores response_format more often than its
+        // docs suggest (observed when x_search returns no candidates).
+        // Surface as null + parseError so the caller can synthesize a
+        // degraded response from the prose. See the JSDoc above.
+        output = null;
+        parseError =
+          err instanceof Error ? err.message : String(err);
+        log.warn(
+          `respondConversational: xAI returned non-JSON despite ` +
+            `response_format=json_schema. parseError=${parseError} ` +
+            `text="${text.slice(0, 200)}..."`,
+        );
+      }
+    }
+
+    return {
+      output,
+      assistantMessage: { role: 'assistant', content: text },
+      ...(parseError ? { parseError } : {}),
+      usage: {
+        inputTokens: data.usage?.input_tokens ?? 0,
+        outputTokens: data.usage?.output_tokens ?? 0,
+        totalTokens: data.usage?.total_tokens ?? 0,
+      },
+    };
+  }
+
   private async fetchWithTimeout(
     body: string,
     timeoutMs: number,
@@ -303,6 +576,42 @@ export class XAIClient {
     }
 
     return tweets;
+  }
+
+  /**
+   * Parse the batched Grok response into tweets grouped by query id.
+   * Lines with unknown ids are dropped. NO_RESULTS lines are no-ops — the
+   * caller already pre-seeds empty arrays for every requested id.
+   */
+  private parseBatchLines(
+    text: string,
+    validIds: ReadonlySet<string>,
+  ): Map<string, XSearchTweet[]> {
+    const out = new Map<string, XSearchTweet[]>();
+    for (const id of validIds) out.set(id, []);
+
+    for (const line of text.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('TWEET|')) continue;
+      const parts = trimmed.split('|');
+      if (parts.length < 5) continue;
+
+      const queryId = parts[1]!.trim();
+      if (!validIds.has(queryId)) continue;
+
+      const url = parts[2]!.trim();
+      const tweetId = this.extractTweetId(url);
+      if (!tweetId) continue;
+
+      out.get(queryId)!.push({
+        tweetId,
+        url,
+        authorUsername: parts[3]!.trim().replace(/^@/, ''),
+        text: parts.slice(4).join('|').trim(),
+      });
+    }
+
+    return out;
   }
 
   /**

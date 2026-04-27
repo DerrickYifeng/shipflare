@@ -41,6 +41,7 @@ export async function POST(request: Request) {
     description: analysis.oneLiner,
     keywords: analysis.keywords,
     valueProp: analysis.valueProp,
+    targetAudience: analysis.targetAudience,
     ogImage: scraped.ogImage,
     seoAudit,
   });

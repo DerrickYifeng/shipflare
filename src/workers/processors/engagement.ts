@@ -6,7 +6,6 @@ import {
   posts,
   threads,
   activityEvents,
-  todoItems,
 } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { XClient, XForbiddenError } from '@/lib/x-client';
@@ -107,7 +106,7 @@ export async function processXEngagement(job: Job<EngagementJobData>) {
   const toolMap = registry.toMap();
   const cwd = process.cwd();
   const agentConfig = loadAgentFromFile(
-    join(cwd, 'src/agents/engagement-monitor.md'),
+    join(cwd, 'src/tools/AgentTool/agents/engagement-monitor/AGENT.md'),
     toolMap,
   );
 
@@ -176,7 +175,13 @@ export async function processXEngagement(job: Job<EngagementJobData>) {
           community: `@${mention.authorUsername}`,
           title: mention.text.slice(0, 200),
           url: buildContentUrl('x', mention.authorUsername, mention.mentionId),
-          relevanceScore: mention.priority === 'high' ? 0.9 : mention.priority === 'medium' ? 0.7 : 0.5,
+          scoutConfidence:
+            mention.priority === 'high'
+              ? 0.9
+              : mention.priority === 'medium'
+                ? 0.7
+                : 0.5,
+          scoutReason: `engagement-mention (${mention.priority})`,
         })
         .onConflictDoNothing()
         .returning();
@@ -227,28 +232,9 @@ export async function processXEngagement(job: Job<EngagementJobData>) {
         traceId,
       });
 
-      // Inject time-sensitive todo item for the Today page
-      await db
-        .insert(todoItems)
-        .values({
-          userId,
-          draftId: draft.id,
-          todoType: 'respond_engagement',
-          source: 'engagement',
-          priority: 'time_sensitive',
-          title: `Reply to @${mention.authorUsername}: ${mention.text.slice(0, 80)}...`,
-          platform: 'x',
-          community: `@${mention.authorUsername}`,
-          externalUrl: buildContentUrl('x', mention.authorUsername, mention.mentionId),
-          confidence: mention.priority === 'high' ? 0.9 : 0.7,
-          expiresAt: new Date(Date.now() + 4 * 60 * 60 * 1000),
-        })
-        .onConflictDoNothing();
-
-      await publishUserEvent(userId, 'tweets', {
-        type: 'todo_added',
-        todoType: 'respond_engagement',
-      });
+      // (Phase 2 migration: todo_items table dropped. plan_items injection for
+      // engagement-triggered replies lands with the plan-execute dispatcher in
+      // Phase 7.)
     }
 
     // Publish SSE event for high-priority engagement

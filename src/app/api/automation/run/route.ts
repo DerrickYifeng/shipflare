@@ -1,11 +1,13 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { products } from '@/lib/db/schema';
+import { products, channels, teamMembers } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
-import { enqueueDiscovery } from '@/lib/queue';
 import { publishUserEvent } from '@/lib/redis';
 import { clearStop } from '@/lib/automation-stop';
+import { ensureTeamExists } from '@/lib/team-provisioner';
+import { enqueueTeamRun } from '@/lib/queue/team-run';
+import { resolveRollingConversation } from '@/lib/team-rolling-conversation';
 import { createLogger, loggerForRequest } from '@/lib/logger';
 import { PLATFORMS, isPlatformAvailable } from '@/lib/platform-config';
 
@@ -14,8 +16,10 @@ const baseLog = createLogger('api:automation:run');
 /**
  * POST /api/automation/run
  *
- * Triggers the full automation pipeline for the current user's product.
- * Enqueues a discovery job which cascades into content → review → posting.
+ * Manual "launch the agents" entry point. Enqueues one coordinator-rooted
+ * team-run (trigger='manual') against the team's rolling 'Discovery'
+ * conversation; the coordinator dispatches discovery-agent per platform
+ * and community-manager (and content-planner where appropriate) per its playbook.
  */
 export async function POST(request: NextRequest) {
   const { log, traceId } = loggerForRequest(baseLog, request);
@@ -26,9 +30,8 @@ export async function POST(request: NextRequest) {
 
   const userId = session.user.id;
 
-  // Load user's product
   const [product] = await db
-    .select()
+    .select({ id: products.id, name: products.name })
     .from(products)
     .where(eq(products.userId, userId))
     .limit(1);
@@ -36,62 +39,70 @@ export async function POST(request: NextRequest) {
   if (!product) {
     return NextResponse.json(
       { error: 'No product configured. Complete onboarding first.', code: 'NO_PRODUCT' },
-      { status: 400 },
+      { status: 400, headers: { 'x-trace-id': traceId } },
     );
   }
 
-  // Check for at least one connected channel on any known platform.
-  // Whitelist projection — we only need platform identity to route enqueues.
-  const { channels } = await import('@/lib/db/schema');
+  // Whitelist projection — we only need platform identity for the goal text.
   const userChannels = await db
-    .select({
-      id: channels.id,
-      platform: channels.platform,
-    })
+    .select({ platform: channels.platform })
     .from(channels)
     .where(eq(channels.userId, userId));
 
-  const connectedKnown = userChannels.filter((c) => c.platform in PLATFORMS);
-  if (connectedKnown.length === 0) {
+  const activePlatforms = [
+    ...new Set(userChannels.map((c) => c.platform)),
+  ].filter((p) => p in PLATFORMS && isPlatformAvailable(p));
+
+  if (activePlatforms.length === 0) {
     const supported = Object.values(PLATFORMS)
       .map((p) => p.displayName)
       .join(' or ');
     return NextResponse.json(
       { error: `Connect a ${supported} account first.`, code: 'NO_CHANNEL' },
-      { status: 400 },
+      { status: 400, headers: { 'x-trace-id': traceId } },
     );
   }
-
-  const activePlatforms: string[] = [];
 
   // Clear any stale stop flag from a previous session so the first worker
   // iteration doesn't immediately unwind.
   await clearStop(userId);
 
-  // Publish launch events so the UI shows agents waking up
+  // Publish launch event so the UI shows agents waking up.
   await publishUserEvent(userId, 'agents', {
     type: 'agent_start',
-    agentName: 'scout',
+    agentName: 'discovery',
     currentTask: 'Scanning communities...',
   });
 
-  // Enqueue discovery for each connected + available platform
-  for (const [platformId, config] of Object.entries(PLATFORMS)) {
-    const channel = userChannels.find((c) => c.platform === platformId);
-    if (!channel || !isPlatformAvailable(platformId)) continue;
-
-    activePlatforms.push(platformId);
-    await enqueueDiscovery({
-      userId,
-      productId: product.id,
-      sources: config.defaultSources,
-      platform: platformId,
-      traceId,
-    });
+  const { teamId } = await ensureTeamExists(userId, product.id);
+  const memberRows = await db
+    .select({ id: teamMembers.id, agentType: teamMembers.agentType })
+    .from(teamMembers)
+    .where(eq(teamMembers.teamId, teamId));
+  const coordinator = memberRows.find((m) => m.agentType === 'coordinator');
+  if (!coordinator) {
+    return NextResponse.json(
+      { error: 'team_misconfigured', detail: 'coordinator member missing' },
+      { status: 500, headers: { 'x-trace-id': traceId } },
+    );
   }
 
+  const conversationId = await resolveRollingConversation(teamId, 'Discovery');
+  const goal =
+    `Manual automation kickoff for ${product.name}. ` +
+    `Platforms: ${activePlatforms.join(', ')}. ` +
+    `Trigger: manual.`;
+
+  const { runId, alreadyRunning } = await enqueueTeamRun({
+    teamId,
+    trigger: 'manual',
+    goal,
+    rootMemberId: coordinator.id,
+    conversationId,
+  });
+
   log.info(
-    `Automation triggered for product "${product.name}" (${product.id}), platforms: ${activePlatforms.join(', ')}`,
+    `Automation triggered for product "${product.name}" (${product.id}), platforms: ${activePlatforms.join(', ')}, runId=${runId} alreadyRunning=${alreadyRunning}`,
   );
 
   return NextResponse.json(
@@ -99,6 +110,9 @@ export async function POST(request: NextRequest) {
       ok: true,
       product: product.name,
       platforms: activePlatforms,
+      runId,
+      conversationId,
+      alreadyRunning,
       traceId,
     },
     { headers: { 'x-trace-id': traceId } },

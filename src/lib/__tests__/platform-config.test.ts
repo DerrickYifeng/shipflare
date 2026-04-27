@@ -46,8 +46,10 @@ describe('platform-config', () => {
     });
 
     it('uses the X caps the validator pipeline expects', () => {
+      // Both kinds share X's 280 platform cap; stylistic targets (e.g.
+      // "aim for 40-140 on a reply") live in agent prose, not here.
       expect(PLATFORMS.x.maxCharLength.post).toBe(280);
-      expect(PLATFORMS.x.maxCharLength.reply).toBe(240);
+      expect(PLATFORMS.x.maxCharLength.reply).toBe(280);
     });
 
     it('keeps Reddit in the registry so workers/schema still resolve it', () => {
@@ -96,7 +98,9 @@ describe('platform-config', () => {
     });
 
     it('returns the reply cap for reply kind', () => {
-      expect(getPlatformCharLimits('x', 'reply')).toBe(240);
+      // X reply shares the 280 platform cap; the 240 stylistic target
+      // lives in agent prose, not platform-config.
+      expect(getPlatformCharLimits('x', 'reply')).toBe(280);
       expect(getPlatformCharLimits('reddit', 'reply')).toBe(10_000);
     });
 

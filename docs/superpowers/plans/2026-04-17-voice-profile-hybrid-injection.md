@@ -1,5 +1,7 @@
 # Voice Profile + Hybrid Injection Implementation Plan
 
+> **SUPERSEDED** by [2026-04-20-planner-and-skills-redesign-design.md](../specs/2026-04-20-planner-and-skills-redesign-design.md). Voice profile injection rides on the atomic skill prompts rather than the calendar-planner compound agent; kept here for context on the extraction pipeline.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Give each user a persistent *voice profile* that flows into every generated tweet and reply, so ShipFlare's output stops sounding generically AI and starts sounding like the specific founder it was written for.

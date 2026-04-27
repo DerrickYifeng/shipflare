@@ -2,10 +2,8 @@ import { NextResponse } from 'next/server';
 import type { Queue } from 'bullmq';
 import { auth } from '@/lib/auth';
 import {
-  calendarPlanQueue,
   discoveryScanQueue,
   codeScanQueue,
-  calibrationQueue,
 } from '@/lib/queue';
 import { createLogger } from '@/lib/logger';
 
@@ -21,10 +19,8 @@ const log = createLogger('api:jobs:in-flight');
  * time (see `enqueueCalendarPlan` et al. in `@/lib/queue`).
  */
 const KIND_TO_QUEUE: Record<string, Queue<unknown>> = {
-  'calendar-plan': calendarPlanQueue as unknown as Queue<unknown>,
   'discovery-scan': discoveryScanQueue as unknown as Queue<unknown>,
   'code-scan': codeScanQueue as unknown as Queue<unknown>,
-  calibration: calibrationQueue as unknown as Queue<unknown>,
 };
 
 /** BullMQ job states we consider "in flight" for UI lockout purposes. */

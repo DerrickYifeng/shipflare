@@ -1,30 +1,46 @@
 'use client';
 
-import { useState, useEffect, useCallback, createContext, useContext, type ReactNode } from 'react';
+import {
+  type CSSProperties,
+  type ReactNode,
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useState,
+} from 'react';
 
-type ToastVariant = 'success' | 'error' | 'warning' | 'info';
+/* =====================================================================
+   ShipFlare v2 Toast
+   ---------------------------------------------------------------------
+   Bottom-center, glass-y, auto-dismisses at 5s with an optional
+   undo affordance. Matches INTERACTIONS.md §7.
+   Only one toast visible at a time — a new toast replaces the current.
+   ===================================================================== */
 
-interface ToastAction {
+export type ToastVariant = 'success' | 'error' | 'warning' | 'info';
+
+export interface ToastAction {
   label: string;
   onClick: () => void;
 }
 
-interface Toast {
+export interface ToastWithActionOptions {
+  message: string;
+  variant?: ToastVariant;
+  action: ToastAction;
+  /** ms before auto-dismiss. Defaults to 5000. */
+  timeoutMs?: number;
+  /** Fires if the toast auto-dismisses without the action being clicked. */
+  onTimeout?: () => void;
+}
+
+interface InternalToast {
   id: string;
   message: string;
   variant: ToastVariant;
   action?: ToastAction;
   timeoutMs: number;
-  onTimeout?: () => void;
-}
-
-interface ToastWithActionOptions {
-  message: string;
-  variant?: ToastVariant;
-  action: ToastAction;
-  /** How long the toast stays visible before auto-dismiss (also fires onTimeout). */
-  timeoutMs?: number;
-  /** Fires when the toast auto-dismisses without the action being clicked. */
   onTimeout?: () => void;
 }
 
@@ -42,98 +58,166 @@ export function useToast() {
   return useContext(ToastContext);
 }
 
-const DEFAULT_TIMEOUT_MS = 4_000;
+const DEFAULT_TIMEOUT_MS = 5_000;
 
-const variantStyles: Record<ToastVariant, string> = {
-  success: 'bg-sf-success text-white',
-  error: 'bg-sf-error text-white',
-  warning: 'bg-sf-warning text-white',
-  info: 'bg-sf-accent text-white',
-};
+function randomId(): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID();
+  }
+  return `toast-${Math.random().toString(36).slice(2)}-${Date.now()}`;
+}
 
 export function ToastProvider({ children }: { children: ReactNode }) {
-  const [toasts, setToasts] = useState<Toast[]>([]);
+  // Replace-current behavior: only one toast slot at a time.
+  const [current, setCurrent] = useState<InternalToast | null>(null);
 
   const dismiss = useCallback((id: string) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
+    setCurrent((prev) => (prev && prev.id === id ? null : prev));
   }, []);
 
   const toast = useCallback((message: string, variant: ToastVariant = 'success') => {
-    const id = crypto.randomUUID();
-    setToasts((prev) => [
-      ...prev,
-      { id, message, variant, timeoutMs: DEFAULT_TIMEOUT_MS },
-    ]);
+    setCurrent({
+      id: randomId(),
+      message,
+      variant,
+      timeoutMs: DEFAULT_TIMEOUT_MS,
+    });
   }, []);
 
   const toastWithAction = useCallback((options: ToastWithActionOptions) => {
-    const id = crypto.randomUUID();
-    setToasts((prev) => [
-      ...prev,
-      {
-        id,
-        message: options.message,
-        variant: options.variant ?? 'info',
-        action: options.action,
-        timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-        onTimeout: options.onTimeout,
-      },
-    ]);
+    setCurrent({
+      id: randomId(),
+      message: options.message,
+      variant: options.variant ?? 'info',
+      action: options.action,
+      timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      onTimeout: options.onTimeout,
+    });
   }, []);
 
   return (
     <ToastContext value={{ toast, toastWithAction }}>
       {children}
-      <div
-        className="fixed bottom-4 right-4 z-50 flex flex-col gap-2"
-        aria-live="polite"
-        aria-label="Notifications"
-      >
-        {toasts.map((t) => (
-          <ToastItem key={t.id} toast={t} onDismiss={dismiss} />
-        ))}
-      </div>
+      <ToastViewport current={current} onDismiss={dismiss} />
     </ToastContext>
   );
 }
 
-function ToastItem({ toast: t, onDismiss }: { toast: Toast; onDismiss: (id: string) => void }) {
+const VIEWPORT_STYLE: CSSProperties = {
+  position: 'fixed',
+  bottom: 24,
+  left: '50%',
+  transform: 'translateX(-50%)',
+  zIndex: 'var(--sf-z-toast)' as unknown as number,
+  pointerEvents: 'none',
+  display: 'flex',
+  justifyContent: 'center',
+};
+
+function ToastViewport({
+  current,
+  onDismiss,
+}: {
+  current: InternalToast | null;
+  onDismiss: (id: string) => void;
+}) {
+  return (
+    <div style={VIEWPORT_STYLE} aria-live="polite" aria-label="Notifications">
+      {current ? <ToastItem toast={current} onDismiss={onDismiss} /> : null}
+    </div>
+  );
+}
+
+const VARIANT_ACCENT: Record<ToastVariant, string> = {
+  success: 'var(--sf-success)',
+  error: 'var(--sf-error)',
+  warning: 'var(--sf-warning)',
+  info: 'var(--sf-accent)',
+};
+
+function ToastItem({
+  toast,
+  onDismiss,
+}: {
+  toast: InternalToast;
+  onDismiss: (id: string) => void;
+}) {
   useEffect(() => {
     const timer = setTimeout(() => {
-      t.onTimeout?.();
-      onDismiss(t.id);
-    }, t.timeoutMs);
+      toast.onTimeout?.();
+      onDismiss(toast.id);
+    }, toast.timeoutMs);
     return () => clearTimeout(timer);
-  }, [t, onDismiss]);
+  }, [toast, onDismiss]);
 
   const handleAction = () => {
-    t.action?.onClick();
-    onDismiss(t.id);
+    toast.action?.onClick();
+    onDismiss(toast.id);
+  };
+
+  const handleClose = () => {
+    onDismiss(toast.id);
+  };
+
+  const shellStyle: CSSProperties = {
+    pointerEvents: 'auto',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 14,
+    minHeight: 44,
+    padding: '10px 16px 10px 14px',
+    borderRadius: 'var(--sf-radius-pill)',
+    background: 'var(--sf-bg-dark)',
+    color: 'var(--sf-fg-on-dark-1)',
+    fontSize: 'var(--sf-text-sm)',
+    fontWeight: 500,
+    letterSpacing: 'var(--sf-track-normal)',
+    boxShadow: 'var(--sf-shadow-elevated)',
+    animation: 'sf-slide-up var(--sf-dur-base) var(--sf-ease-swift)',
+  };
+
+  const dotStyle: CSSProperties = {
+    width: 8,
+    height: 8,
+    borderRadius: '50%',
+    background: VARIANT_ACCENT[toast.variant],
+    flexShrink: 0,
+  };
+
+  const actionStyle: CSSProperties = {
+    background: 'transparent',
+    border: 'none',
+    color: 'var(--sf-link-dark)',
+    fontSize: 'var(--sf-text-sm)',
+    fontWeight: 600,
+    cursor: 'pointer',
+    padding: '0 4px',
+    fontFamily: 'inherit',
+  };
+
+  const closeStyle: CSSProperties = {
+    background: 'transparent',
+    border: 'none',
+    color: 'var(--sf-fg-on-dark-3)',
+    fontSize: 18,
+    lineHeight: 1,
+    cursor: 'pointer',
+    padding: '0 4px',
+    fontFamily: 'inherit',
   };
 
   return (
-    <div
-      className={`
-        animate-sf-slide-up
-        flex items-center gap-3
-        px-4 py-3 rounded-[var(--radius-sf-lg)]
-        text-[14px] font-medium tracking-[-0.224px]
-        shadow-[var(--shadow-sf-elevated)]
-        backdrop-blur-xl
-        ${variantStyles[t.variant]}
-      `}
-      role="alert"
-    >
-      <span>{t.message}</span>
-      {t.action && (
-        <button
-          type="button"
-          onClick={handleAction}
-          className="text-[13px] font-semibold underline underline-offset-2 hover:opacity-90 transition-opacity"
-        >
-          {t.action.label}
+    <div role="alert" style={shellStyle}>
+      <span style={dotStyle} aria-hidden="true" />
+      <span>{toast.message}</span>
+      {toast.action ? (
+        <button type="button" onClick={handleAction} style={actionStyle}>
+          {toast.action.label}
         </button>
-      )}
+      ) : null}
+      <button type="button" onClick={handleClose} style={closeStyle} aria-label="Dismiss">
+        ×
+      </button>
     </div>
   );
 }

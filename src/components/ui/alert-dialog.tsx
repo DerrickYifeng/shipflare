@@ -94,7 +94,7 @@ export function AlertDialog({
             {cancelLabel}
           </Button>
           <Button
-            variant={destructive ? 'danger' : 'primary'}
+            variant={destructive ? 'error' : 'primary'}
             onClick={handleConfirm}
             disabled={confirmDisabled}
             autoFocus

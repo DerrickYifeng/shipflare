@@ -109,8 +109,6 @@ export interface CreateMessageOptions {
   maxTokens?: number;
   /** Enable prompt caching on system prompt + tools. Default: true. */
   promptCaching?: boolean;
-  /** Structured output schema for guaranteed JSON. */
-  outputSchema?: Record<string, unknown>;
   signal?: AbortSignal;
   /**
    * Pre-built system prompt blocks. When provided, overrides `system` string.
@@ -118,6 +116,16 @@ export interface CreateMessageOptions {
    * across parallel agents.
    */
   systemBlocks?: Anthropic.Messages.TextBlockParam[];
+  /**
+   * Raw Anthropic stream event hook. When provided, the underlying
+   * `messages.stream()` forwards every `content_block_start` /
+   * `content_block_delta` / `content_block_stop` event to this callback so
+   * the caller can push live deltas to a UI without re-implementing the
+   * retry + caching plumbing. Omit it to keep the current non-streaming
+   * behavior (we still consume the stream internally and await the final
+   * message, but nothing is forwarded).
+   */
+  onStreamEvent?: (event: Anthropic.Messages.RawMessageStreamEvent) => void;
 }
 
 export interface CreateMessageResult {
@@ -144,7 +152,6 @@ export async function createMessage(opts: CreateMessageOptions): Promise<CreateM
     tools,
     maxTokens = 8192,
     promptCaching = true,
-    outputSchema,
     signal,
   } = opts;
 
@@ -186,10 +193,23 @@ export async function createMessage(opts: CreateMessageOptions): Promise<CreateM
           system: systemBlocks,
           messages,
           ...(cachedTools ? { tools: cachedTools } : {}),
-          ...(outputSchema ? { output_config: { format: { type: 'json_schema' as const, schema: outputSchema } } } : {}),
         },
         { signal },
       );
+      if (opts.onStreamEvent) {
+        const handler = opts.onStreamEvent;
+        stream.on('streamEvent', (event) => {
+          try {
+            handler(event);
+          } catch (err) {
+            // A buggy forwarder must NOT poison the retry loop — the
+            // final message is still coming over the same connection.
+            log.warn(
+              `onStreamEvent handler threw: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+        });
+      }
       const response = await stream.finalMessage();
 
       const rawUsage = response.usage as unknown as Record<string, number>;
@@ -319,7 +339,6 @@ export interface SideQueryOptions {
   system: string;
   messages: Anthropic.Messages.MessageParam[];
   tools?: Anthropic.Messages.Tool[];
-  outputSchema?: Record<string, unknown>;
   maxTokens?: number;
   signal?: AbortSignal;
 }
@@ -336,7 +355,6 @@ export async function sideQuery(opts: SideQueryOptions): Promise<Anthropic.Messa
     messages: opts.messages,
     tools: opts.tools,
     maxTokens: opts.maxTokens ?? 1024,
-    outputSchema: opts.outputSchema,
     signal: opts.signal,
     promptCaching: false, // Side queries are short-lived, caching not beneficial
   });

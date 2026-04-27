@@ -8,8 +8,9 @@
 
 /**
  * Kind of content being written/validated. Most platforms have different
- * caps for a standalone post vs. a reply inside a thread (X's 280 vs. our
- * self-imposed 240 for replies so we keep room for context).
+ * caps for a standalone post vs. a reply (Reddit: 40k vs 10k). On X, both
+ * kinds share the same 280 platform cap; stylistic reply targets ("aim for
+ * 40-140 chars") live in agent prose, not as platform limits.
  */
 export type ContentKind = 'post' | 'reply';
 
@@ -44,8 +45,9 @@ export interface PlatformConfig {
   /**
    * Character limit for this platform, broken down by content kind so the
    * validator pipeline and UI can pull the right cap without hardcoding.
-   * `post` is the platform's hard ceiling; `reply` is our self-imposed cap
-   * (usually tighter to leave room for anchor context).
+   * Both `post` and `reply` are the platform's hard ceiling — stylistic
+   * targets (e.g. "aim for 40-140 chars on a reply") live in agent prose,
+   * not here, because they're editorial rather than platform-enforced.
    */
   maxCharLength: PlatformCharLimits;
   /**
@@ -94,7 +96,11 @@ export const PLATFORMS: Record<string, PlatformConfig> = {
     envGuard: 'XAI_API_KEY',
     sourceLabel: 'topic',
     replyWindowMinutes: 15,
-    maxCharLength: { post: 280, reply: 240 },
+    // Both posts and replies share X's 280-char platform cap. Twitter
+    // applies weighted counting (URLs = 23, emoji = 2, CJK = 2) — the
+    // length validator uses `twitter-text.parseTweet` so this number is
+    // measured against the same algorithm X enforces.
+    maxCharLength: { post: 280, reply: 280 },
     charLimit: 280,
     supportsAnonymousRead: true,
     // X/Twitter tweet IDs are purely numeric (snowflake IDs).

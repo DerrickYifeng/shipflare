@@ -71,7 +71,12 @@ export function ConnectionsSection({
               Disconnect
             </Button>
           ) : (
-            <Button variant="secondary" onClick={() => { window.location.href = '/api/reddit/connect'; }}>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                window.location.href = `/api/reddit/connect?returnTo=${encodeURIComponent('/settings#connections')}`;
+              }}
+            >
               Connect
             </Button>
           )}
@@ -101,7 +106,12 @@ export function ConnectionsSection({
               Disconnect
             </Button>
           ) : (
-            <Button variant="secondary" onClick={() => { window.location.href = '/api/x/connect'; }}>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                window.location.href = `/api/x/connect?returnTo=${encodeURIComponent('/settings#connections')}`;
+              }}
+            >
               Connect
             </Button>
           )}

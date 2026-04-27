@@ -1,70 +1,239 @@
 # TODOS
 
-## Now — UX Polish
+---
 
-### Today → Approval Inbox Redesign
-- **What:** Reframe `/today` from a task list that tells the user what to do into an approval inbox where agents surface drafts/decisions and the user approves, edits, or rejects. Copy, visual hierarchy, and CTA labels should all reinforce "you're the boss, agents did the work."
-- **Why:** Current flow feels coercive — user reported it "forces" them to act. Boss/employee framing increases perceived value and reduces guilt-driven churn; matches the product's positioning (agents do marketing for you).
-- **Context:** Route lives at `src/app/(app)/today/` (`page.tsx`, `today-content.tsx`). Likely needs: per-item status pills ("Drafted by Content Agent"), approve/edit/reject actions, empty-state that celebrates agents working rather than nagging the user. Pairs conceptually with the Warroom item below.
-- **Depends on:** None — pure frontend/copy pass on existing data.
-- **Source:** User feedback, 2026-04-17.
+## Recently Shipped — v3 Planner + Onboarding Rewrite (2026-04-20 — COMPLETE)
 
-### Agent Warroom Animation
-- **What:** Upgrade the existing `AgentsWarRoom` on `/automation` into an animated office scene — agent "characters" move between desks, hand off work, and display live status (Idle / Searching / Drafting / Posting / Error). Status should reflect real job state from the worker queue.
-- **Why:** Makes the invisible agent work visible and entertaining. Reinforces the "boss watching employees" frame from the Today redesign. Strong visual differentiator vs. competitors' dashboards.
-- **Context:** Component at `src/app/(app)/automation/agents-war-room.tsx` (wired in `automation/page.tsx:6`). Real agent states come from worker processors in `src/workers/processors/*`. Use compositor-friendly properties only (`transform`, `opacity`) per web perf rules. Respect `prefers-reduced-motion`.
-- **Depends on:** Stable job-state feed (SSE or polling) from the automation pipeline — partially wired via `PipelineStatus`.
-- **Source:** User feedback, 2026-04-17.
+**Canonical plan:** [`docs/superpowers/plans/2026-04-20-master-implementation-plan.md`](docs/superpowers/plans/2026-04-20-master-implementation-plan.md)
 
-## Phase 2
+**Spec docs:**
+- [`2026-04-20-planner-and-skills-redesign-design.md`](docs/superpowers/specs/2026-04-20-planner-and-skills-redesign-design.md) — backend canonical (schema, agents, APIs)
+- [`2026-04-20-onboarding-frontend-design.md`](docs/superpowers/specs/2026-04-20-onboarding-frontend-design.md) — frontend canonical (v3 tokens, 7 stages, pixel-perfect target)
+- [`2026-04-19-onboarding-redesign-design.md`](docs/superpowers/specs/2026-04-19-onboarding-redesign-design.md) — original UX flow (still authoritative for copy/UX)
+- [`2026-04-19-onboarding-backend-design.md`](docs/superpowers/specs/2026-04-19-onboarding-backend-design.md) — **partially superseded** (see banner in file)
 
-### Replace `git clone` in code-scanner with GitHub API
-- **What:** Rewrite `cloneRepo()` in `src/services/code-scanner.ts` to fetch repo contents via GitHub's REST API (`GET /repos/{owner}/{repo}/tarball/{ref}` for bulk extraction, or `GET /repos/{owner}/{repo}/git/trees/{sha}?recursive=1` + `GET /repos/{owner}/{repo}/contents/{path}` for selective reads). Remove the `git` dependency from `nixpacks.toml`.
-- **Why:** Eliminates the system-level `git` dependency (smaller container, smaller attack surface). Removes the token-in-URL anti-pattern (`https://x-access-token:${token}@github.com/...`) in favor of `Authorization: Bearer` headers. Tarball download avoids cloning `.git/` history and lets us stream-filter by path before unpacking large repos.
-- **Context:** Current implementation at `src/services/code-scanner.ts:37-53` shell-outs to `git clone --depth 1 --single-branch`, which required shipping `git` in the Railway Nixpacks image (`nixpacks.toml` added 2026-04-19 as a hotfix). The scanner only reads a few manifest + key files (see `MAX_KEY_FILES = 10`), so a full git clone is already overkill. Swap to GitHub API using the existing token from `getGitHubToken()`. Keep the `cleanupClone()` contract so callers don't change.
-- **Depends on:** None — self-contained refactor in `code-scanner.ts`.
-- **Source:** Follow-up from the onboarding `Executable not found in $PATH: "git"` fix, 2026-04-19.
+**Agent team:** `shipflare-v3` (PM + data-engineer + frontend-engineer + backend-engineer + qa-engineer). Config at `~/.claude/teams/shipflare-v3/config.json`. Task list at `~/.claude/tasks/shipflare-v3/`.
+
+### Phase roadmap (15 phases)
+
+| # | Phase | Status | Owner | Gate |
+|---|---|---|---|---|
+| 1 | Schema foundations (migration + derivePhase) | ✅ `919c459` | data-engineer | migration `0001_planner_refresh.sql`, 160-line tests, kill-list for Phase 2: 20+ files |
+| 2 | lifecyclePhase → state caller refactor (29 files) | ✅ `bbe429a..7df0d6a` | backend-engineer | build green, 173/174 tests (1 flake needs Redis), 0 kill-list hits |
+| 3 | Verify schema cleanup (residual import sweep) | ✅ absorbed into #2 | backend-engineer | rolled up into Phase 2's 6 commits |
+| 4 | Atomic skills — rename survivors + skill catalog | ✅ `3868dcd` | backend-engineer | 6 catalog entries; 12/12 tests; reply-scan→draft-single-reply, slot-body→draft-single-post; Reddit content deferred to #5 |
+| 5 | Atomic skills — ~15 new (email, launch assets, research) | ✅ `74c4ff8..9357f72` (5 commits, 4 batches) | backend-engineer | 16 new skills, 22 catalog entries, 92/92 skill tests green |
+| 6 | Strategic + tactical planner agents | ✅ `4ed93cb`+`3a5c694`+`db5aee4` | backend-engineer | 2 agent prompts + 6 reference docs + 2 Zod schemas + 2 dogfood scripts; 18/18 agent tests green |
+| 7 | plan-execute queue + workers + state machine | ✅ `133c5f3`+`4d4d290`+`c1565e1` | backend-engineer | SM + dispatcher + 4 workers + 3 crons; 53/53 unit + 9/9 integration tests green |
+| 8 | API endpoints (plan, commit, draft, replan, plan-item/*) | ✅ `e7df1d2..44bc36d` (5 commits) | backend-engineer | 61/61 endpoint tests; rate-limit + onboarding-draft + launch-date-rules helpers; `/onboarding/profile` kept alive for Phase 12 rewrite |
+| 9 | `scripts/seed-user.ts` for dogfooding | ✅ `7f82b89` | backend-engineer | 603-line script, idempotent, mints Auth.js session cookie, fixture voice from Phase 6 playbooks |
+| 10 | v3 brand token refresh (Apple Blue) | ✅ `cc196e6`+`2876db7` | frontend-engineer | 0 v2-token hits, 19 UI primitives retinted |
+| 11 | Onboarding chrome (shell + primitives + copy) | ✅ `d529d5d`+`8397997` | frontend-engineer-2 | 15 chrome components + `_shared` primitives + icons + copy; dev server 200 |
+| 12 | Onboarding stages (7 sub-stages, order 1→3→4→5→7→2→6) | ✅ `2cde7b2..5b8124c` (8 commits) | frontend-engineer-3 | 7 stages + 10 new shared primitives + V1 cleanup; all wired to Phase 8 APIs |
+| 13 | Today Landed (hero + welcome ribbon) | ✅ `f0641ce`+`4fe9941` | frontend-engineer-3 | full-bleed hero + 24h dismissible ribbon + agent-pipeline-card |
+| 14 | QA + E2E (happy paths + 4 edge cases + mobile) | ✅ `a709ebd`+`1333f78` | qa-engineer | 7 E2E cases + 10 visual-regression screenshots + Lighthouse baseline; 2 findings deferred |
+| 15 | Cleanup (docs, README, CLAUDE.md, dead code) | ✅ | main-thread | 2026-04-17-onboarding-back-button doc marked superseded; design-system zip removed |
+
+**Actual session throughput:** All 15 phases closed in a single run (~3h total agent time). Backend (Phases 1-9) completed in ~2h; frontend chrome + stages + today (Phases 10-13) in ~1h; QA + cleanup in ~30min. Coordinated via `shipflare-v3` team: data-engineer, backend-engineer, frontend-engineer (×2 generations), qa-engineer, product-lead PM.
+
+**Total commits landed:** `919c459..1333f78` (~40 commits on `dev`), single-branch clean linear history.
+
+---
+
+## Recently Shipped — v2 Frontend Migration (2026-04-19)
+
+All 7 phases landed on `dev` (unpushed). Design handoff at `public/ShipFlare Design System.zip`.
+
+| Phase | Commit | What landed |
+|---|---|---|
+| 1 — Tokens | `66845f7`, `f37460b` | Single canonical `@theme` block from `tokens.css`; cheat-sheet at `/tokens` |
+| 2 — Primitives | `963c01f` | 12 components in `src/components/ui/`; showcase at `/tokens/primitives` |
+| 3 — App Shell | `06bca0f` | Sidebar 232px, TopNav 56px glass, HeaderBar, custom ThemeProvider with pre-paint script |
+| 4 — Today | `eb6e982` | Boss/employee approval inbox, ScanDrawer wired to real BullMQ + SSE `/api/events?channel=agents` |
+| 5 — Pages | `433e927` | `/product /growth /calendar /settings`; new `HealthMeter` dial, `FieldRow`, `SectionBar`, `Switch`, `PlatformTag` |
+| 6 — Office | `75a4498` | `/team` isometric scene; `/automation` → 307 redirect to `/team`; sidebar label switched |
+| 7 — Landing | `b4de275` | `/` dark-only marketing; hero typing demo on transform/opacity only |
+
+### Post-ship polish
+
+| Commit | What |
+|---|---|
+| `454a3f3` | `/api/today/[id]/undo` endpoint — cancels delayed BullMQ posting jobs, reverts drafts+todos status |
+| `d634614` | ReplyCard platform-native header (r/foo · @author · ↑score) + hover-liftable content link to original post |
+| `8aa2f41` | Discovery agent no longer writes `X - {topic}` community; schema refine + DB backfill |
+| `b597e41` | Stopped "1935d" hallucinated timestamps on X threads; fallback to discoveredAt |
+| `82d8bea` | Settings Account: Delete account moved to dedicated Danger zone with red border + filled button |
+| `9204bec` | SignInModal rewritten on v2 canonical tokens (was rendering invisible due to dropped v1 `bg-sf-bg-*` classes) |
+
+---
+
+# P0 — Ship blockers (behavioural bugs)
+
+Things the user can directly see going wrong. Fix before any public launch push.
+
+### Today: posting delay (0–30min) contradicts UI's "5s undo"
+- **Symptom:** `ReplyCard` renders a `PostingProgressBar` with `durationMs={5000}`, toast copy implies 5s, but `enqueuePosting` uses `Math.random() * 30 * 60 * 1000` as the BullMQ delay. After the 5s bar completes the card looks committed, yet the post won't actually go out for anywhere from 0 to 30 minutes. Undo works for that whole window, but the UI lies about when to act.
+- **Fix options (pick one):**
+  - **A.** Make posting strictly `5s` delay. Tight but matches UI. Lose the "spread out" anti-detection window.
+  - **B.** Keep 0–30m randomisation; rewrite UI to show `"scheduled to post at 11:42"` + `Undo` button that stays active until the job fires. Drop the 5s progress bar.
+- **Where:** `src/workers/processors/posting.ts` (delay source) · `src/app/(app)/today/_components/reply-card.tsx:179` (progress bar) · `src/app/(app)/today/today-content.tsx:252` (toast copy).
+- **Source:** 2026-04-19 audit.
+
+### V1 design-token residue audit
+- **Symptom:** SignInModal rendered blank because it used `bg-sf-bg-secondary` / `bg-sf-bg-dark-surface` / `rounded-[var(--radius-sf-md)]` etc. — all v1 names that Phase 1 cleanup removed. Tailwind v4 **silently drops unknown utilities**, so the failure is invisible until the component is rendered in-browser. Any other corner of the codebase still on v1 tokens will render just as broken the first time it's exercised.
+- **Fix:**
+  1. `grep -rnE 'bg-sf-bg-|text-sf-text-|rounded-\[var\(--radius-sf-|shadow-\[var\(--shadow-sf-|border-sf-accent' src/` → produces the kill list
+  2. Map each hit to its v2 equivalent (`--sf-paper-raised`, `--sf-fg-1/2/3`, `--sf-radius-md`, `--sf-shadow-sm/md/lg`, `--sf-signal`, etc.) or delete if stale
+  3. Add an ESLint rule (or a CI grep check) that fails on those v1 patterns so they can't sneak back
+- **Source:** 2026-04-19, SignInModal regression (commit `9204bec`).
+
+---
+
+# P1 — Dashboard data & schema gaps
+
+UI slots are reserved; backend isn't there yet. Grouped by route. Exact `file:line` citations included so the next session can pick any one up directly.
+
+### `/today`
+
+- **`today-content.tsx:698` "Auto-scans every 4h"** — hardcoded cadence string. Real cron cadence is a worker-side constant. If someone tunes the cron to 6h, this copy keeps lying. Read from a shared `DISCOVERY_CRON_MINUTES` constant or hide the fragment when cadence is undefined.
+- **X reply cards have no `↑` score and no `💬` count** — `xAI x_search` tool only returns `{id, url, author, text}`. Same upstream gap as the `postedAt` hallucination fix. Either (a) make a `x_get_tweet` follow-up call on each candidate to enrich `threadUpvotes` + `threadCommentCount` (costs an API call per candidate, adds latency), or (b) accept that X cards are intentionally lean and drop the score affordance for X in the UI.
+
+### `/product` — full schema extension needed
+
+- **Biggest single gap on the dashboard.** Add columns to `products` + Drizzle schema + `/api/onboarding/profile`:
+  - `tagline: text`
+  - `corePositioning: text`
+  - `primaryIcp: text`
+  - `competitors: text[]`
+  - `approvedLinks: text[]`
+  - `tone: jsonb` (`{warmth, wit, formality, brevity}` 0–100)
+  - `bannedPhrases: text[]`
+  - `signaturePhrases: text[]` (voice-extraction output, read-only to user)
+- **Reserved UI**: `product-content.tsx:58` `PLACEHOLDER_FIELDS` (5 rows) · `VoiceDnaCard` sliders (`product-content.tsx:646`) · banned-phrases textarea (`:105`) · "Signature phrases" block (`:653`). All `useState`-only today; changes are lost on reload.
+- **`product-content.tsx:105` banned-phrases seeds** `['crushing it', 'game-changer', 'unlock', '10x']` — hardcoded starter list. Once persisted, either remove seeds or move to an onboarding step.
+- **`product-content.tsx:653` signature-phrase examples** — 4 hardcoded phrases (`'Moved from Jira → Linear 8 months ago'` etc.). Should come from the voice-extraction pipeline output.
+- **"Re-run voice scan" action** → currently redirects to `/onboarding` since no dedicated endpoint exists. Either build `POST /api/voice-profile/rescan` or rename the affordance to "Redo voice onboarding" and keep the redirect.
+
+### `/growth`
+
+- **`growth-content.tsx:50-58` `COMMUNITIES[]`** — 7 fixture rows (r/ExperiencedDevs, r/SaaS, r/startups, r/webdev, @founders, #buildinpublic, Ask HN). Fake `handle` / `members` / `health` / `fit` / `lastHit`. Wire to `GET /api/growth/communities` aggregating `threads` by `(platform, community)` with counts + `avg(relevance_score)` + `max(discovered_at)`.
+- **`growth-content.tsx:67-72` `KEYWORDS[]`** — 4 fixture keyword triggers. Wire to `discoveryConfigs.customPainPhrases` or a new `keyword_triggers` table.
+- **`growth-content.tsx:74-90` `ICP_LIST[]`** — 3 fixture ICP cards. Blocked by the `/product` schema extension above (`primaryIcp` column).
+- **`growth-content.tsx:171-172` KPI magic numbers** — `THREADS / DAY AVG = '38'`, `GATE PASS RATE = '86%'`. Derive from `pipeline_events` or `threads` rows over last 7d.
+
+### `/calendar`
+
+- **`calendar-content.tsx:305` `MONTHLY BUDGET = "43 / 120"`** — hardcoded. Blocked by Stripe integration (budget = plan-tier limit; 43 = MTD sent count). Until Stripe ships, render `—` or hide.
+- **Clock-format user preference** — `src/lib/format-hour.ts` uses an IANA timezone heuristic (`Europe/*` → 24h) that fails for Asia / Africa / South America. Add `clockFormat: '12h' | '24h' | 'auto'` to `userPreferences`, surface in Settings › Account.
+
+### `/settings`
+
+- **Billing tab — full placeholder** ("Beta — free" plan, disabled actions). Blocked by Stripe integration.
+- Account / Appearance / Integrations / Safety are all real (delete account, GitHub OAuth, channel connect/disconnect, `/api/preferences`).
+
+### `/team` — scene is real; animations dormant
+
+- **Worker-handoff SSE events** — emit `handoff:start` / `handoff:end` on `/api/events?channel=agents` when a job transitions agents. Frontend (`team-content.tsx` `walkingAgentId` state) is wired and waiting. See `DATA_CONTRACT.md §2.3`.
+- **Scheduler worker SSE** — Kit (scheduler) always idle because no processor emits on the `scheduler` stream key. Wire `publishPipelineEvent({ agent: 'scheduler', status: ... })` from the scheduler processor.
+
+---
+
+# P1 — Experience consistency
+
+### `/onboarding` is still on v1 visual language
+- **Problem:** Phase 5 rebuilt the 6 app routes but `/onboarding` was out of scope. New users go `landing (v2 marketing) → onboarding (v1 Apple-era styling) → /today (v2 app shell)` — three distinct looks in one flow.
+- **Fix:** Port `/onboarding` to the v2 app shell (Sidebar-less variant is fine, just keep the TopNav / tokens / Card primitives). Reuse `Button`, `PillCta`, `FieldRow`, `Ops`, `Card`.
+- **Bonus:** Onboarding's voice-extraction completion also unblocks the `voiceScannedAt` VERIFIED badge on `/product` and the schema items above.
+
+### `/dashboard` is an orphan route
+- **Problem:** `src/app/(app)/dashboard/page.tsx` still renders `PipelineFunnel` but the Phase 3 sidebar no longer links to it, and the Phase 3 P0 regex fix dropped the `Metrics → /dashboard` TopNav label too. Route is reachable by URL only.
+- **Fix (pick one):**
+  - **A.** Add "Dashboard" back to sidebar as the Analytics/Metrics surface.
+  - **B.** Merge `PipelineFunnel` into `/growth` (it's basically the same audience) and `redirect('/growth')` from `/dashboard`.
+  - **C.** Delete the route if PipelineFunnel is redundant with the office scene.
+
+---
+
+# P2 — Quality baseline
+
+### Per-route `loading.tsx` / `error.tsx` / empty states
+- **Current:** `/today/loading.tsx` + `FirstRun` empty state exist. `/product` has initial skeleton. Other routes — mostly missing.
+- **Audit:** Add `loading.tsx` (Skeleton-based) + `error.tsx` (fall-back with retry) + meaningful empty state (using `<EmptyState>` primitive) for `/product`, `/growth`, `/calendar`, `/settings`, `/team`. Empty states should hint at next action ("Connect an X account" / "Run voice scan" / "No scans yet — click Scan now").
+
+### Full dark-mode QA sweep
+- **Current:** ThemeProvider + toggle ship across the app but no page-by-page verification after Phase 5/6. Certain inline-style colour literals may render wrong in `.app-dark`.
+- **Audit:** Walk each app route in both light and dark, record defects. Particular suspects: HealthMeter dial colours, `/team` isometric scene palette, Calendar hour labels, PostingProgressBar, Danger zone card.
+
+### ⌘K command palette is a scaffold
+- **Current:** ⌘K opens a modal but shows "Coming soon". Shipping the hint without the handler was called out in the Phase 3 audit as a "visible lie".
+- **Minimum viable:** Wire three command classes:
+  1. Route jumps (`Today`, `Growth`, `Calendar`, `Team`, `Product`, `Settings`)
+  2. Today actions (`Approve active card`, `Skip active card`, `Open scan drawer`)
+  3. Search: fuzzy-match across current Today items' titles / thread bodies
+- Keyboard handler already exists in AppShell. Just needs a `useCommands()` hook + a list renderer.
+
+---
+
+# P3 — Infrastructure (long-term)
+
+### Front-end error observability
+- No Sentry / PostHog / comparable capture layer. When `/api/today` fails the user gets a silent blank. Should surface a degraded-state UI with a reason + retry.
+
+### Accessibility pass
+- Focus rings on nav items (sidebar + top-nav): verify visible in both themes.
+- Tab order through Today's card stack beyond the j/k/a/e/s keyboard shortcuts.
+- ARIA labels on the `/team` isometric office SVG characters (currently none → screen readers see a blob).
+- `aria-live` regions for scan progress / toast announcements.
+
+---
+
+# Product Backlog (scope / strategy)
 
 ### Stripe Payment Integration
 - **What:** Add Stripe checkout to enable paid subscriptions.
 - **Why:** Can't validate willingness-to-pay without the ability to charge. Competitors charge $3/comment (ReplyAgent) or monthly subscriptions.
-- **Context:** Pricing undefined. Needs user feedback from free beta first. Include pricing research and competitor analysis before implementing.
-- **Depends on:** Working product with beta users, defined pricing tiers.
+- **Unblocks:** Settings › Billing tab, Calendar `MONTHLY BUDGET` KPI.
+- **Depends on:** Beta user feedback, defined pricing tiers.
 - **Source:** /plan-eng-review outside voice, 2026-04-11.
 
 ### Adaptive Health Score Engagement Baseline
-- **What:** Replace hardcoded engagement baseline (20) in Health Score S3 normalization with per-subreddit adaptive baselines derived from user's own posting history.
-- **Why:** Different subreddits have wildly different engagement norms. r/programming avg 20 upvotes is normal, r/SideProject avg 20 is exceptional.
-- **Context:** Phase 1 uses hardcoded 20 (known-wrong but measurable). Adaptive version calculates median engagement after 10+ posts per subreddit, falls back to global default (20) below threshold.
-- **Depends on:** 10+ posts to multiple subreddits per user (~2-3 weeks of active use).
+- **What:** Replace hardcoded engagement baseline (20) in Health Score S3 normalization with per-subreddit adaptive baselines from the user's own posting history.
+- **Why:** Engagement norms vary wildly per community (r/programming avg 20 = normal; r/SideProject avg 20 = exceptional).
+- **Context:** Shipped `HealthMeter` consumes whatever `/api/health` returns — wire the adaptive baseline behind that endpoint.
+- **Depends on:** ~10+ posts per subreddit (2–3 weeks of active use).
 - **Source:** /plan-eng-review code quality review, 2026-04-11.
 
 ### Weekly Marketing Digest Email
-- **What:** Automated weekly email summarizing marketing performance, new drafts, engagement trends.
-- **Why:** Anti-churn mechanism. Brings users back even when they forget to check the dashboard.
-- **Context:** Deferred from CEO review. Requires email delivery infrastructure (Resend, Postmark, or similar).
-- **Depends on:** Analytics data, email service setup.
+- **What:** Automated weekly summary email (performance, drafts, trends).
+- **Why:** Anti-churn — brings users back when they forget to check the dashboard.
+- **Depends on:** Email infra (Resend / Postmark).
 - **Source:** /plan-ceo-review scope decision #3, 2026-04-11.
 
 ### MCP Server Interface
 - **What:** HTTP-transport MCP server exposing 4 tools: discover, drafts, approve, status.
-- **Why:** Developer power-user feature. Differentiator for technical users who want to integrate ShipFlare into their own workflows.
-- **Context:** Deferred from Phase 1. Build when there's demand signal from actual developers.
-- **Depends on:** Stable API layer in Phase 1 dashboard.
+- **Why:** Developer power-user differentiator for integrating ShipFlare into other workflows.
+- **Depends on:** Stable API layer.
 - **Source:** /plan-eng-review architecture review, 2026-04-11.
 
-### X/Twitter Integration
-- **What:** Add X API v2 integration for Discovery + Content + Posting agents.
-- **Why:** Second channel. Broadens reach. But costs $100/month for Basic tier write access.
-- **Context:** Validate core loop on Reddit first. Add X when revenue justifies API cost.
-- **Depends on:** Reddit validation, revenue.
-- **Source:** /plan-eng-review Step 0 scope challenge, 2026-04-11.
+### Native X API v2 (replace xAI Grok search)
+- **What:** Add X API v2 Basic tier for Discovery + Content + Posting.
+- **Why:** xAI Grok's `x_search` doesn't return `createdAt` (→ "1935d" hallucination), `likes`, `replies` (→ blank ↑/💬 on X cards). Native API would unlock real timestamps + engagement metrics.
+- **Cost:** ~$100/mo for Basic.
+- **Depends on:** Reddit validation, revenue justifying the API cost.
+- **Source:** Phase 7 audit + /plan-eng-review Step 0, 2026-04-11.
 
-## Phase 4+
-
-### Stripe/Revenue Attribution
-- **What:** Track which posts/channels drive actual revenue via Stripe payment attribution.
-- **Why:** Ultimate closed loop from marketing to money. But attribution is technically hard.
-- **Context:** Requires mature analytics pipeline and Stripe integration.
-- **Depends on:** Stripe integration, Analytics Agent (Phase 2).
+### Stripe / Revenue Attribution
+- **What:** Track which posts/channels drive revenue.
+- **Why:** Closed loop from marketing to money.
+- **Depends on:** Stripe, mature analytics pipeline.
 - **Source:** /plan-ceo-review scope decision #7, 2026-04-11.
+
+---
+
+# Landing (low-priority copy fixtures)
+
+Not part of the dashboard audit. Kept here for completeness; acceptable to leave as marketing copy indefinitely.
+
+- Hero eyebrow "Live — 1,284 threads surfaced this week" (`hero-demo.tsx:60` + `threads-section.tsx:123`)
+- `threads-section.tsx:14` `REAL_THREADS[]` — 3 curated thread+reply examples
+- `safety-section.tsx:14` `REVIEW_CASES[]` — adversarial-review log examples

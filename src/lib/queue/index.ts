@@ -1,44 +1,29 @@
-import { randomUUID, createHash } from 'crypto';
+import { randomUUID } from 'crypto';
 import { Queue, type JobsOptions } from 'bullmq';
 import { getBullMQConnection } from '@/lib/redis';
 import { createLogger } from '@/lib/logger';
 import {
-  discoveryJobSchema,
-  contentJobSchema,
   reviewJobSchema,
   postingJobSchema,
   healthScoreJobSchema,
   dreamJobSchema,
   codeScanJobSchema,
   monitorJobSchema,
-  calendarPlanJobSchema,
-  calendarSlotDraftJobSchema,
-  searchSourceJobSchema,
-  discoveryScanJobSchema,
   engagementJobSchema,
   metricsJobSchema,
   analyticsJobSchema,
-  todoSeedJobSchema,
-  calibrationJobSchema,
 } from './types';
 import type {
-  DiscoveryJobData,
-  ContentJobData,
   ReviewJobData,
   PostingJobData,
   HealthScoreJobData,
   DreamJobData,
   CodeScanJobData,
   MonitorJobData,
-  CalendarPlanJobData,
-  CalendarSlotDraftJobData,
-  SearchSourceJobData,
   DiscoveryScanJobData,
   EngagementJobData,
   MetricsJobData,
   AnalyticsJobData,
-  TodoSeedJobData,
-  CalibrationJobData,
 } from './types';
 
 const log = createLogger('lib:queue');
@@ -70,14 +55,6 @@ const defaultJobOptions: JobsOptions = {
   ...DEFAULT_RETRY,
 };
 
-export const discoveryQueue = new Queue<DiscoveryJobData>('discovery', {
-  ...connection,
-  defaultJobOptions,
-});
-export const contentQueue = new Queue<ContentJobData>('content', {
-  ...connection,
-  defaultJobOptions,
-});
 export const reviewQueue = new Queue<ReviewJobData>('review', {
   ...connection,
   defaultJobOptions,
@@ -105,50 +82,11 @@ export const monitorQueue = new Queue<MonitorJobData>('monitor', {
   ...connection,
   defaultJobOptions,
 });
-export const calendarPlanQueue = new Queue<CalendarPlanJobData>(
-  'calendar-plan',
-  { ...connection, defaultJobOptions },
-);
 
 /**
- * Per-slot body generation. One job per planner-emitted calendar slot; drives
- * the slot-body skill. `removeOnFail` bumped to 1000/7d for DLQ forensics on
- * the fan-out path — first-class retries + visible failures are the point.
- */
-export const calendarSlotDraftQueue = new Queue<CalendarSlotDraftJobData>(
-  'calendar-slot-draft',
-  {
-    ...connection,
-    defaultJobOptions: {
-      removeOnComplete: { count: 500, age: 24 * 3600 },
-      removeOnFail: { count: 1000, age: 7 * 24 * 3600 },
-      attempts: 3,
-      backoff: { type: 'exponential', delay: 5000 },
-    },
-  },
-);
-
-/**
- * Per-source reply discovery. One job per Reddit subreddit / X query. Enqueued
- * by the discovery-scan orchestrator; writes threads rows and fans out to
- * content.ts for above-gate candidates.
- */
-export const searchSourceQueue = new Queue<SearchSourceJobData>(
-  'search-source',
-  {
-    ...connection,
-    defaultJobOptions: {
-      removeOnComplete: { count: 500, age: 24 * 3600 },
-      removeOnFail: { count: 1000, age: 7 * 24 * 3600 },
-      attempts: 3,
-      backoff: { type: 'exponential', delay: 5000 },
-    },
-  },
-);
-
-/**
- * Top-level scan orchestrator. Lightweight — no LLM — just fans out into
- * search-source jobs. Lower retention because each scan logs its own events.
+ * Top-level scan orchestrator. Runs the discovery-scout agent inline;
+ * there's no per-source fan-out anymore. Lower retention because each
+ * scan logs its own events.
  */
 export const discoveryScanQueue = new Queue<DiscoveryScanJobData>(
   'discovery-scan',
@@ -214,30 +152,6 @@ function describePayload(p: unknown): string {
   if (typeof obj.platform === 'string') parts.push(`platform=${obj.platform}`);
   if (typeof obj.productId === 'string') parts.push(`product=${obj.productId}`);
   return parts.length ? parts.join(' ') : 'payload';
-}
-
-/**
- * Enqueue a discovery scan for a user's product across sources (subreddits or topics).
- */
-export async function enqueueDiscovery(data: DiscoveryJobData): Promise<void> {
-  const payload = discoveryJobSchema.parse(withEnvelope(data));
-  log.debug(`Enqueued discovery (${describePayload(payload)})`);
-  await discoveryQueue.add('scan', payload, {
-    attempts: 3,
-    backoff: { type: 'exponential', delay: 5000 },
-  });
-}
-
-/**
- * Enqueue content generation for a discovered thread.
- */
-export async function enqueueContent(data: ContentJobData): Promise<void> {
-  const payload = contentJobSchema.parse(withEnvelope(data));
-  log.debug(`Enqueued content for thread ${payload.threadId}`);
-  await contentQueue.add('draft', payload, {
-    attempts: 2,
-    backoff: { type: 'exponential', delay: 3000 },
-  });
 }
 
 /**
@@ -329,78 +243,6 @@ export async function enqueueMonitor(data: MonitorJobData): Promise<void> {
 }
 
 /**
- * Enqueue calendar plan generation. Runs the calendar-planner AI agent in a
- * background worker so the API can return 202 immediately.
- * Uses jobId dedup: one active plan job per user.
- */
-export async function enqueueCalendarPlan(
-  data: CalendarPlanJobData,
-): Promise<string> {
-  const payload = calendarPlanJobSchema.parse(withEnvelope(data));
-  const jobId = `calendar-plan-${payload.userId}`;
-  log.debug(`Enqueued calendar-plan (${describePayload(payload)})`);
-  await calendarPlanQueue.add('plan', payload, {
-    jobId,
-    attempts: 2,
-    backoff: { type: 'exponential', delay: 5000 },
-  });
-  return jobId;
-}
-
-/**
- * Enqueue body generation for one calendar slot. Deduped on the slot id so
- * a double-enqueue collapses — BullMQ drops the second add when a job with
- * the same jobId is already waiting / active / delayed.
- */
-export async function enqueueCalendarSlotDraft(
-  data: CalendarSlotDraftJobData,
-): Promise<string> {
-  const payload = calendarSlotDraftJobSchema.parse(withEnvelope(data));
-  const jobId = `cslot-${payload.calendarItemId}`;
-  log.debug(`Enqueued calendar-slot-draft (${describePayload(payload)})`);
-  const job = await calendarSlotDraftQueue.add('draft', payload, { jobId });
-  return job.id ?? jobId;
-}
-
-/**
- * Enqueue one reply-discovery source job. Deduped by `(scanRunId, platform,
- * source)`; the source portion is SHA1'd to keep jobIds bounded and
- * redis-safe for sources containing whitespace/punctuation.
- */
-export async function enqueueSearchSource(
-  data: SearchSourceJobData,
-): Promise<string> {
-  const payload = searchSourceJobSchema.parse(withEnvelope(data));
-  const sourceHash = createHash('sha1').update(payload.source).digest('hex').slice(0, 10);
-  const jobId = `ssrc-${payload.scanRunId}-${payload.platform}-${sourceHash}`;
-  log.debug(`Enqueued search-source (${describePayload(payload)} source=${payload.source})`);
-  const job = await searchSourceQueue.add('search', payload, { jobId });
-  return job.id ?? jobId;
-}
-
-/**
- * Enqueue a per-user scan orchestrator job. Deduped by `scanRunId` so a mashed
- * Scan button within the same run collapses to one fan-out. The `fanout`
- * variant of the schema is reserved for the 4h cron entry, which is scheduled
- * directly via `discoveryScanQueue.add('fanout', …)` at worker boot; callers
- * of this helper always enqueue a per-user job.
- */
-export async function enqueueDiscoveryScan(
-  data: Extract<DiscoveryScanJobData, { userId: string }>,
-): Promise<string> {
-  const payload = discoveryScanJobSchema.parse(withEnvelope(data));
-  if (payload.kind === 'fanout') {
-    throw new Error(
-      'enqueueDiscoveryScan does not accept fanout payloads; schedule via discoveryScanQueue.add directly',
-    );
-  }
-  const jobId = `scan-${payload.scanRunId}-${payload.platform}`;
-  log.debug(`Enqueued discovery-scan (${describePayload(payload)} trigger=${payload.trigger})`);
-  const job = await discoveryScanQueue.add('scan', payload, { jobId });
-  return job.id ?? jobId;
-}
-
-/**
  * Enqueue engagement monitoring for a recently posted piece of content.
  * Accepts a delay (ms) for scheduling checks at +15/30/60 minutes.
  */
@@ -452,69 +294,13 @@ export const enqueueXMetrics = enqueueMetrics;
 export const enqueueXAnalytics = enqueueAnalytics;
 
 // ----------------------------------------------------------------
-//  Voice extraction queue
+//  Plan-execute queue (Phase 7)
 // ----------------------------------------------------------------
 
-export { voiceExtractQueue, enqueueVoiceExtract } from './voice-extract';
-export type { VoiceExtractJobData } from './voice-extract';
+export {
+  planExecuteQueue,
+  enqueuePlanExecute,
+  planExecuteJobSchema,
+} from './plan-execute';
+export type { PlanExecuteJobData } from './plan-execute';
 
-// ----------------------------------------------------------------
-//  Today queue
-// ----------------------------------------------------------------
-
-export const todoSeedQueue = new Queue<TodoSeedJobData>('todo-seed', {
-  ...connection,
-  defaultJobOptions,
-});
-export const calibrationQueue = new Queue<CalibrationJobData>('calibration', {
-  ...connection,
-  defaultJobOptions: {
-    ...DEFAULT_RETENTION,
-    attempts: 1, // Calibration checkpoints progress to DB; never auto-retry
-  },
-});
-
-/**
- * Stalled-row sweep: repeatable BullMQ job that flips rows stuck in
- * `state='drafting'` for >10min to `failed`. No per-tick retention needed — we
- * want minimal redis footprint for a housekeeping job that fires every 60s.
- */
-export const stalledRowSweepQueue = new Queue<Record<string, never>>(
-  'stalled-row-sweep',
-  {
-    ...connection,
-    defaultJobOptions: {
-      removeOnComplete: { count: 10 },
-      removeOnFail: { count: 50 },
-      attempts: 1,
-    },
-  },
-);
-
-/**
- * Enqueue todo seed: populate daily todo items for a user.
- */
-export async function enqueueTodoSeed(data: TodoSeedJobData): Promise<void> {
-  const payload = todoSeedJobSchema.parse(withEnvelope(data));
-  log.debug(`Enqueued todo-seed (${describePayload(payload)})`);
-  await todoSeedQueue.add('seed', payload, {
-    attempts: 2,
-    backoff: { type: 'exponential', delay: 3000 },
-  });
-}
-
-/**
- * Enqueue discovery calibration: run the optimize loop for a user's product.
- * No retries — partial progress is checkpointed to DB after each round.
- */
-export async function enqueueCalibration(
-  data: CalibrationJobData,
-): Promise<void> {
-  const payload = calibrationJobSchema.parse(withEnvelope(data));
-  log.debug(
-    `Enqueued calibration for product ${payload.productId} (maxRounds=${payload.maxRounds ?? 10})`,
-  );
-  await calibrationQueue.add('calibrate', payload, {
-    attempts: 1,
-  });
-}

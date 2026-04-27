@@ -1,6 +1,10 @@
 # Onboarding Back Button Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **SUPERSEDED** by the v3 onboarding rewrite (2026-04-20).
+> Back-navigation is now built into `OnboardingFlow.tsx` + `TopChevron`
+> across all 7 stages per
+> [2026-04-20-onboarding-frontend-design.md](../specs/2026-04-20-onboarding-frontend-design.md) §3.3 and §5.
+> The v1 3-step surface this plan targeted no longer exists.
 
 **Goal:** Add a "Back" button to onboarding steps 1 and 2 so users who picked the wrong method (especially "or enter manually →") can return to step 0 without refreshing.
 

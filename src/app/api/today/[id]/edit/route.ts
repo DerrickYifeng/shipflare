@@ -1,61 +1,24 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
-import { db } from '@/lib/db';
-import { todoItems, drafts } from '@/lib/db/schema';
-import { eq, and } from 'drizzle-orm';
+
+// Draft-body edits happen on the draft row, not on plan_items. The
+// Today feed only surfaces plan_items in v3 so there is nothing here
+// to edit yet; once drafts land on plan_items.output this shim will
+// dispatch to the draft-edit endpoint.
 
 export async function PATCH(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> },
+  _request: Request,
+  _ctx: { params: Promise<{ id: string }> },
 ) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
-
-  const { id } = await params;
-  const userId = session.user.id;
-
-  let body: { body?: string };
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
-  }
-
-  if (!body.body || typeof body.body !== 'string') {
-    return NextResponse.json({ error: 'body is required' }, { status: 400 });
-  }
-
-  const [todo] = await db
-    .select()
-    .from(todoItems)
-    .where(and(eq(todoItems.id, id), eq(todoItems.userId, userId)))
-    .limit(1);
-
-  if (!todo) {
-    return NextResponse.json({ error: 'Todo not found' }, { status: 404 });
-  }
-
-  if (todo.status !== 'pending') {
-    return NextResponse.json(
-      { error: 'Todo already processed' },
-      { status: 400 },
-    );
-  }
-
-  if (!todo.draftId) {
-    return NextResponse.json(
-      { error: 'No draft linked to this todo' },
-      { status: 400 },
-    );
-  }
-
-  // Update the linked draft body
-  await db
-    .update(drafts)
-    .set({ replyBody: body.body, updatedAt: new Date() })
-    .where(eq(drafts.id, todo.draftId));
-
-  return NextResponse.json({ success: true });
+  return NextResponse.json(
+    {
+      error: 'not_supported',
+      detail: 'Inline draft edit is not wired for plan_items yet',
+    },
+    { status: 410 },
+  );
 }

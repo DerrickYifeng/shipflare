@@ -236,7 +236,7 @@ export function UnifiedCalendar() {
           <Button
             onClick={handleGenerate}
             disabled={isGenerating}
-            variant="secondary"
+            variant="ghost"
             title={isGenerating ? 'Planning in progress' : undefined}
           >
             {isGenerating ? 'Planning...' : 'Generate Week'}

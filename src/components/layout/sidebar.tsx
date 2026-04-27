@@ -1,138 +1,405 @@
 'use client';
 
+/**
+ * ShipFlare v2 Sidebar.
+ *
+ * Responsive behavior (INTERACTIONS.md §13):
+ *  - ≥1280px → full 232px rail with labels.
+ *  - 1024–1279px → 64px icon-only rail (labels hidden, hover tooltips via title).
+ *  - <1024px → hidden by default; exposed as a top-drawer overlay toggled
+ *    from TopNav's hamburger button. Drawer open state lives in
+ *    `ShellChromeProvider` so TopNav and Sidebar stay in sync.
+ *
+ * Design tokens (paper-sunken bg, signal-glow overlay, gradient-active nav)
+ * are preserved across all three layouts.
+ */
+
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { signOutAction } from '@/app/actions/auth';
+import { useEffect, useState, type ComponentType, type CSSProperties } from 'react';
 import { ShipFlareLogo } from '@/components/ui/shipflare-logo';
-import { usePipeline } from '@/components/ui/pipeline-provider';
+import { NAV_ITEMS } from './nav-items';
+import { useShellChrome } from './shell-chrome';
+import { SHELL_BREAKPOINTS, useMediaQuery } from './use-media-query';
 
-const navItems = [
-  { href: '/today', label: 'Today', icon: TodayIcon },
-  { href: '/product', label: 'My Product', icon: ProductIcon },
-  { href: '/growth', label: 'Growth', icon: GrowthIcon },
-  { href: '/calendar', label: 'Calendar', icon: CalendarIcon },
-  { href: '/dashboard', label: 'Metrics', icon: MetricsIcon },
-  { href: '/settings', label: 'Settings', icon: SettingsIcon },
-];
+export interface SidebarUser {
+  name: string | null;
+  email: string | null;
+  image: string | null;
+}
 
-export function Sidebar() {
-  const pathname = usePathname();
-  const { hasRunning } = usePipeline();
+export interface SidebarProps {
+  user: SidebarUser;
+}
+
+type SidebarLayout = 'full' | 'rail' | 'drawer';
+
+export function Sidebar({ user }: SidebarProps) {
+  const isFullWidth = useMediaQuery(SHELL_BREAKPOINTS.desktopFull);
+  const isAtLeastRail = useMediaQuery(SHELL_BREAKPOINTS.desktopRail);
+  const { drawerOpen, setDrawerOpen } = useShellChrome();
+
+  // Decide which layout mode to render based on viewport.
+  // `useMediaQuery` returns false on the server and on first client render —
+  // default to `full` so the SSR tree matches the desktop baseline the
+  // marketing team sees on their primary resolution. The post-mount media
+  // listener snaps to the accurate layout within one frame.
+  const layout: SidebarLayout = isFullWidth ? 'full' : isAtLeastRail ? 'rail' : 'drawer';
+
+  // Close the drawer whenever the viewport grows past the drawer threshold —
+  // prevents the drawer from persisting as a broken overlay if the user
+  // resizes past the <1024px breakpoint while it's open.
+  useEffect(() => {
+    if (layout !== 'drawer' && drawerOpen) {
+      setDrawerOpen(false);
+    }
+  }, [layout, drawerOpen, setDrawerOpen]);
+
+  // Close the drawer on Escape. Standard modal-overlay UX; parallels
+  // the native <dialog> behavior used by CommandPalette.
+  useEffect(() => {
+    if (layout !== 'drawer' || !drawerOpen) return;
+    const handler = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setDrawerOpen(false);
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [layout, drawerOpen, setDrawerOpen]);
+
+  if (layout === 'drawer') {
+    return (
+      <>
+        {drawerOpen ? (
+          <button
+            type="button"
+            aria-label="Close navigation"
+            onClick={() => setDrawerOpen(false)}
+            style={DRAWER_BACKDROP_STYLE}
+          />
+        ) : null}
+        <aside
+          aria-label="Primary navigation"
+          aria-hidden={!drawerOpen}
+          style={{
+            ...drawerStyle(drawerOpen),
+          }}
+        >
+          <SidebarInner user={user} layout="full" onNavigate={() => setDrawerOpen(false)} />
+        </aside>
+      </>
+    );
+  }
 
   return (
-    <aside className="hidden lg:flex flex-col w-[200px] bg-black/[0.03] backdrop-blur-xl h-screen sticky top-0 border-r border-sf-border">
-      <div className="px-5 py-5">
-        <Link href="/today" className="text-[17px] font-semibold text-sf-text-primary tracking-[-0.374px] inline-flex items-center gap-2 min-h-[44px]">
-          <ShipFlareLogo size={22} />
-          ShipFlare
-        </Link>
-      </div>
-
-      <nav className="flex-1 px-3" aria-label="Main navigation">
-        <ul className="flex flex-col gap-0.5">
-          {navItems.map((item) => {
-            const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
-            return (
-              <li key={item.href}>
-                <Link
-                  href={item.href}
-                  className={`
-                    flex items-center gap-3 px-3 min-h-[44px] rounded-[var(--radius-sf-md)]
-                    text-[14px] tracking-[-0.224px] transition-all duration-200
-                    ${isActive
-                      ? 'bg-black/[0.06] text-sf-text-primary font-medium'
-                      : 'text-sf-text-secondary hover:bg-black/[0.04] hover:text-sf-text-primary'
-                    }
-                  `}
-                >
-                  <item.icon active={isActive} />
-                  {item.label}
-                  {hasRunning && item.href === '/calendar' && (
-                    <span className="ml-auto w-2 h-2 rounded-full bg-sf-accent animate-pulse" aria-label="Pipeline running" />
-                  )}
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-      </nav>
-
-      <div className="px-3 pb-4 mt-auto">
-        <form action={signOutAction}>
-          <button
-            type="submit"
-            className="flex items-center gap-3 w-full px-3 min-h-[44px] rounded-[var(--radius-sf-md)] text-[14px] tracking-[-0.224px] text-sf-text-secondary hover:bg-black/[0.04] hover:text-sf-text-primary transition-all duration-200"
-          >
-            <LogOutIcon />
-            Sign out
-          </button>
-        </form>
-      </div>
+    <aside
+      aria-label="Primary navigation"
+      style={{
+        width: layout === 'rail' ? 64 : 232,
+        flexShrink: 0,
+        background: 'var(--sf-bg-tertiary)',
+        borderRight: '1px solid var(--sf-border-subtle)',
+        padding: layout === 'rail' ? '16px 8px' : '16px 12px',
+        display: 'flex',
+        flexDirection: 'column',
+        position: 'relative',
+        minHeight: '100vh',
+        transition: 'width var(--sf-dur-base) var(--sf-ease-swift), padding var(--sf-dur-base) var(--sf-ease-swift)',
+      }}
+    >
+      <SidebarInner user={user} layout={layout} />
     </aside>
   );
 }
 
-function TodayIcon({ active }: { active: boolean }) {
+const DRAWER_BACKDROP_STYLE: CSSProperties = {
+  position: 'fixed',
+  inset: 0,
+  background: 'oklch(14% 0.020 265 / 0.48)',
+  backdropFilter: 'blur(4px)',
+  WebkitBackdropFilter: 'blur(4px)',
+  border: 'none',
+  padding: 0,
+  cursor: 'pointer',
+  zIndex: 99,
+  animation: 'sf-fade-in var(--sf-dur-base) var(--sf-ease-swift)',
+};
+
+function drawerStyle(open: boolean): CSSProperties {
+  return {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    bottom: 0,
+    width: 'min(280px, 80vw)',
+    zIndex: 100,
+    background: 'var(--sf-bg-tertiary)',
+    borderRight: '1px solid var(--sf-border-subtle)',
+    padding: '16px 12px',
+    display: 'flex',
+    flexDirection: 'column',
+    transform: open ? 'translateX(0)' : 'translateX(-100%)',
+    transition: 'transform var(--sf-dur-base) var(--sf-ease-swift)',
+    boxShadow: open ? '0 20px 60px oklch(14% 0.020 265 / 0.35)' : 'none',
+  };
+}
+
+interface SidebarInnerProps {
+  user: SidebarUser;
+  layout: SidebarLayout;
+  /** Optional: close handler invoked after a nav item is clicked (used by drawer). */
+  onNavigate?: () => void;
+}
+
+function SidebarInner({ user, layout, onNavigate }: SidebarInnerProps) {
+  const pathname = usePathname();
+  const showLabels = layout !== 'rail';
+
   return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke={active ? 'var(--color-sf-text-primary)' : 'currentColor'} strokeWidth="1.5">
-      <circle cx="8" cy="8" r="6" />
-      <path d="M8 4v4l2.5 1.5" />
-    </svg>
+    <>
+      {/* Signal glow at top — echoes landing hero vocabulary. */}
+      <div
+        aria-hidden="true"
+        style={{
+          position: 'absolute',
+          inset: 0,
+          pointerEvents: 'none',
+          background:
+            'radial-gradient(400px 260px at 0% 0%, oklch(58% 0.22 258 / 0.14), transparent 65%)',
+        }}
+      />
+
+      <Link
+        href="/today"
+        onClick={onNavigate}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: showLabels ? 'flex-start' : 'center',
+          gap: 10,
+          padding: showLabels ? '0 8px' : 0,
+          height: 44,
+          position: 'relative',
+          textDecoration: 'none',
+          color: 'inherit',
+        }}
+      >
+        <ShipFlareLogo size={24} />
+        {showLabels ? (
+          <span
+            style={{
+              fontSize: 'var(--sf-text-base)',
+              fontWeight: 600,
+              letterSpacing: 'var(--sf-track-tight)',
+              color: 'var(--sf-fg-1)',
+            }}
+          >
+            ShipFlare
+          </span>
+        ) : null}
+      </Link>
+
+      <nav
+        aria-label="Main"
+        style={{
+          marginTop: 14,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 2,
+          position: 'relative',
+        }}
+      >
+        {NAV_ITEMS.map((item) => {
+          const isActive =
+            pathname === item.href || pathname.startsWith(`${item.href}/`);
+          return (
+            <SidebarNavLink
+              key={item.href}
+              href={item.href}
+              label={item.label}
+              Icon={item.Icon}
+              isActive={isActive}
+              showLabel={showLabels}
+              onNavigate={onNavigate}
+            />
+          );
+        })}
+      </nav>
+
+      <UserCard user={user} showDetails={showLabels} onNavigate={onNavigate} />
+    </>
   );
 }
 
-function LogOutIcon() {
+function SidebarNavLink({
+  href,
+  label,
+  Icon,
+  isActive,
+  showLabel,
+  onNavigate,
+}: {
+  href: string;
+  label: string;
+  Icon: ComponentType<{ className?: string }>;
+  isActive: boolean;
+  showLabel: boolean;
+  onNavigate?: () => void;
+}) {
+  const [hover, setHover] = useState(false);
+  const isHover = hover && !isActive;
+
+  const style: CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: showLabel ? 'flex-start' : 'center',
+    gap: 10,
+    height: 36,
+    padding: showLabel ? '0 10px' : 0,
+    borderRadius: 'var(--sf-radius-md)',
+    textDecoration: 'none',
+    fontSize: 'var(--sf-text-sm)',
+    letterSpacing: 'var(--sf-track-normal)',
+    background: isActive
+      ? 'linear-gradient(135deg, var(--sf-accent) 0%, oklch(50% 0.22 268) 100%)'
+      : isHover
+        ? 'var(--sf-bg-primary)'
+        : 'transparent',
+    color: isActive
+      ? 'oklch(98% 0.004 85)'
+      : isHover
+        ? 'var(--sf-fg-1)'
+        : 'var(--sf-fg-2)',
+    fontWeight: isActive ? 600 : 500,
+    boxShadow: isActive ? '0 6px 18px oklch(58% 0.22 258 / 0.45)' : 'none',
+    transition: 'all var(--sf-dur-base) var(--sf-ease-swift)',
+  };
+
   return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-      <path d="M6 14H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1h3M11 11l3-3-3-3M14 8H6" />
-    </svg>
+    <Link
+      href={href}
+      aria-current={isActive ? 'page' : undefined}
+      aria-label={!showLabel ? label : undefined}
+      title={!showLabel ? label : undefined}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      onClick={onNavigate}
+      style={style}
+    >
+      <Icon />
+      {showLabel ? label : null}
+    </Link>
   );
 }
 
-function ProductIcon({ active }: { active: boolean }) {
+function UserCard({
+  user,
+  showDetails,
+  onNavigate,
+}: {
+  user: SidebarUser;
+  showDetails: boolean;
+  onNavigate?: () => void;
+}) {
+  const displayName = user.name ?? user.email ?? 'Signed in';
+  const initials = deriveInitials(user.name, user.email);
+  const secondary = user.email ?? 'SIGNED IN';
+
   return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke={active ? 'var(--color-sf-text-primary)' : 'currentColor'} strokeWidth="1.5">
-      <path d="M2 5l6-3 6 3-6 3-6-3z" />
-      <path d="M2 5v6l6 3V8" />
-      <path d="M14 5v6l-6 3V8" />
-    </svg>
+    <Link
+      href="/settings"
+      aria-label="Account settings"
+      title={!showDetails ? displayName : undefined}
+      onClick={onNavigate}
+      style={{
+        marginTop: 'auto',
+        padding: showDetails ? 10 : 6,
+        position: 'relative',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: showDetails ? 'flex-start' : 'center',
+        gap: 10,
+        background: 'var(--sf-bg-primary)',
+        border: '1px solid var(--sf-border-subtle)',
+        borderRadius: 'var(--sf-radius-md)',
+        textDecoration: 'none',
+        color: 'inherit',
+        transition: 'background var(--sf-dur-base) var(--sf-ease-swift)',
+      }}
+    >
+      <span
+        aria-hidden="true"
+        style={{
+          width: 28,
+          height: 28,
+          borderRadius: '50%',
+          background: 'linear-gradient(135deg, var(--sf-accent), var(--sf-accent))',
+          color: 'oklch(98% 0.004 85)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: 'var(--sf-text-xs)',
+          fontWeight: 600,
+          flexShrink: 0,
+          overflow: 'hidden',
+        }}
+      >
+        {user.image ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={user.image}
+            alt=""
+            width={28}
+            height={28}
+            style={{ width: 28, height: 28, objectFit: 'cover' }}
+          />
+        ) : (
+          initials
+        )}
+      </span>
+      {showDetails ? (
+        <span style={{ minWidth: 0, flex: 1 }}>
+          <span
+            style={{
+              display: 'block',
+              fontSize: 'var(--sf-text-xs)',
+              fontWeight: 500,
+              color: 'var(--sf-fg-1)',
+              letterSpacing: 'var(--sf-track-normal)',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {displayName}
+          </span>
+          <span
+            className="sf-mono"
+            style={{
+              display: 'block',
+              fontSize: 'var(--sf-text-2xs)',
+              color: 'var(--sf-fg-3)',
+              letterSpacing: 'var(--sf-track-mono)',
+              textTransform: 'uppercase',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {secondary}
+          </span>
+        </span>
+      ) : null}
+    </Link>
   );
 }
 
-function GrowthIcon({ active }: { active: boolean }) {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke={active ? 'var(--color-sf-text-primary)' : 'currentColor'} strokeWidth="1.5">
-      <path d="M1 14l4-5 3 3 7-9" />
-      <path d="M11 3h4v4" />
-    </svg>
-  );
-}
-
-function CalendarIcon({ active }: { active: boolean }) {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke={active ? 'var(--color-sf-text-primary)' : 'currentColor'} strokeWidth="1.5">
-      <rect x="2" y="3" width="12" height="12" rx="1" />
-      <path d="M11 1v4M5 1v4M2 7h12" />
-    </svg>
-  );
-}
-
-function MetricsIcon({ active }: { active: boolean }) {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke={active ? 'var(--color-sf-text-primary)' : 'currentColor'} strokeWidth="1.5">
-      <path d="M2 13h12" />
-      <rect x="3" y="8" width="2.5" height="4" />
-      <rect x="7" y="5" width="2.5" height="7" />
-      <rect x="11" y="3" width="2.5" height="9" />
-    </svg>
-  );
-}
-
-function SettingsIcon({ active }: { active: boolean }) {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke={active ? 'var(--color-sf-text-primary)' : 'currentColor'} strokeWidth="1.5">
-      <circle cx="8" cy="8" r="2.5" />
-      <path d="M8 1v2M8 13v2M1 8h2M13 8h2M2.93 2.93l1.41 1.41M11.66 11.66l1.41 1.41M2.93 13.07l1.41-1.41M11.66 4.34l1.41-1.41" />
-    </svg>
-  );
+function deriveInitials(name: string | null, email: string | null): string {
+  const source = (name ?? email ?? '').trim();
+  if (!source) return 'SF';
+  const parts = source.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) {
+    return `${parts[0]![0]!}${parts[1]![0]!}`.toUpperCase();
+  }
+  const token = parts[0] ?? source;
+  return token.slice(0, 2).toUpperCase();
 }

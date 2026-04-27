@@ -84,6 +84,17 @@ export interface TodoItem {
   threadUpvotes: number | null;
   threadCommentCount: number | null;
   threadPostedAt: string | null;
+  threadDiscoveredAt: string | null;
+  // Discovery conversational rewrite (2026-04-26): engagement signal +
+  // repost canonicalization joined from threads.
+  threadLikesCount: number | null;
+  threadRepostsCount: number | null;
+  threadRepliesCount: number | null;
+  threadViewsCount: number | null;
+  threadIsRepost: boolean;
+  threadOriginalUrl: string | null;
+  threadOriginalAuthorUsername: string | null;
+  threadSurfacedVia: string[] | null;
   // Joined from calendar
   calendarContentType: string | null;
   calendarScheduledAt: string | null;
@@ -102,13 +113,42 @@ type RawTodoItem = Omit<TodoItem, 'cardFormat'>;
 function deriveCardFormat(item: RawTodoItem): 'post' | 'reply' {
   if (item.draftType === 'original_post') return 'post';
   if (item.draftType === 'reply') return 'reply';
-  // Fallback when no draft is linked
+  // Fallback when no draft is linked: honor the plan_item's `kind`
+  // (surfaced as `calendarContentType`). Without this, every
+  // content_reply plan_item without a drafted body was being classed
+  // as 'post' and shown in the Scheduled posts section with a
+  // placeholder title — even though the underlying slot is a reply.
+  if (item.calendarContentType === 'content_reply') return 'reply';
   return item.source === 'calendar' ? 'post' : 'reply';
+}
+
+/**
+ * Daily reply-slot progress row (one per `content_reply` plan_item
+ * scheduled for today). Surfaced separately from the post + reply
+ * cards so the UI can render a single "Today's reply session: Y of N
+ * drafted" progress card per channel — rather than showing N empty
+ * placeholder cards before the daily cron has filled them.
+ */
+export interface ReplySlot {
+  id: string;
+  channel: string;
+  scheduledAt: string;
+  targetCount: number;
+  draftedToday: number;
+  state: 'planned' | 'drafted' | 'completed';
 }
 
 interface TodayResponse {
   items: RawTodoItem[];
   stats: TodayStats;
+  /** Today's reply-slot progress rows. Always present in the response;
+   *  empty array when the user has no `content_reply` slots scheduled
+   *  for today (channelMix.x.repliesPerDay is null/0/omitted). */
+  replySlots?: ReplySlot[];
+  /** True iff the user has at least one plan_items row (any state). Drives
+   *  the Today-level FirstRun gate — distinguishes "no plan yet" from
+   *  "plan exists, everything handled today". */
+  hasAnyPlanItems?: boolean;
 }
 
 export function useToday() {
@@ -213,7 +253,15 @@ export function useToday() {
 
   return {
     items,
+    replySlots: data?.replySlots ?? [],
     stats: data?.stats ?? { published_yesterday: 0, pending_count: 0, acted_today: 0 },
+    // Fall back to items.length > 0 before the first hydration so the
+    // hook stays honest when /api/today responds without the flag (e.g.
+    // during backend rollouts that predate the field).
+    hasAnyPlanItems:
+      typeof data?.hasAnyPlanItems === 'boolean'
+        ? data.hasAnyPlanItems
+        : items.length > 0,
     isLoading,
     error,
     approve,

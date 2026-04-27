@@ -1,50 +1,55 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, type NextRequest } from 'next/server';
 import { auth } from '@/lib/auth';
-import { db } from '@/lib/db';
-import { todoItems, drafts } from '@/lib/db/schema';
-import { eq, and } from 'drizzle-orm';
+import {
+  findOwnedPlanItem,
+  paramsSchema,
+  writePlanItemState,
+} from '@/app/api/plan-item/[id]/_helpers';
+import { createLogger, loggerForRequest } from '@/lib/logger';
 
+const baseLog = createLogger('api:today:skip');
+
+/**
+ * PATCH /api/today/:id/skip
+ *
+ * Thin shim over the plan-item SM. Transitions the plan_item to
+ * `skipped` (terminal). The SM blocks skips from executing / already-
+ * terminal states and returns 409 invalid_transition.
+ */
 export async function PATCH(
-  _request: Request,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
-) {
+): Promise<Response> {
+  const { log, traceId } = loggerForRequest(baseLog, request);
+
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const { id } = await params;
-  const userId = session.user.id;
-
-  const [todo] = await db
-    .select()
-    .from(todoItems)
-    .where(and(eq(todoItems.id, id), eq(todoItems.userId, userId)))
-    .limit(1);
-
-  if (!todo) {
-    return NextResponse.json({ error: 'Todo not found' }, { status: 404 });
-  }
-
-  if (todo.status !== 'pending') {
+  const { id: rawId } = await params;
+  const parsed = paramsSchema.safeParse({ id: rawId });
+  if (!parsed.success) {
     return NextResponse.json(
-      { error: 'Todo already processed' },
-      { status: 400 },
+      { error: 'invalid_id' },
+      { status: 400, headers: { 'x-trace-id': traceId } },
     );
   }
 
-  // Skip linked draft too
-  if (todo.draftId) {
-    await db
-      .update(drafts)
-      .set({ status: 'skipped', updatedAt: new Date() })
-      .where(eq(drafts.id, todo.draftId));
+  const row = await findOwnedPlanItem(parsed.data.id, session.user.id);
+  if (!row) {
+    return NextResponse.json(
+      { error: 'not_found' },
+      { status: 404, headers: { 'x-trace-id': traceId } },
+    );
   }
 
-  await db
-    .update(todoItems)
-    .set({ status: 'skipped', actedAt: new Date() })
-    .where(eq(todoItems.id, id));
+  const rejection = await writePlanItemState(row, 'skipped');
+  if (rejection) return rejection;
 
-  return NextResponse.json({ success: true });
+  log.info(`plan_item ${row.id} skipped via /today`);
+  return NextResponse.json(
+    { success: true },
+    { headers: { 'x-trace-id': traceId } },
+  );
 }

@@ -1,7 +1,8 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, type NextRequest } from 'next/server';
 import { auth } from '@/lib/auth';
 import { randomBytes } from 'crypto';
 import { createLogger } from '@/lib/logger';
+import { readReturnToParam, setReturnToCookie } from '@/lib/oauth-return';
 
 const log = createLogger('api:reddit');
 
@@ -10,7 +11,7 @@ const log = createLogger('api:reddit');
  * Reddit is a CONNECTED ACCOUNT, not an auth provider.
  * Scopes: identity, submit, read, history (duration=permanent).
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -39,5 +40,9 @@ export async function GET() {
     maxAge: 600, // 10 minutes
     path: '/',
   });
+
+  const returnTo = readReturnToParam(request);
+  if (returnTo) setReturnToCookie(response, returnTo);
+
   return response;
 }

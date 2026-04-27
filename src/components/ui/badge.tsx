@@ -1,34 +1,56 @@
-import type { ReactNode } from 'react';
+import type { CSSProperties, HTMLAttributes, ReactNode } from 'react';
 
-type BadgeVariant = 'default' | 'success' | 'warning' | 'error' | 'accent';
+export type BadgeVariant =
+  | 'default'
+  | 'accent'
+  | 'success'
+  | 'warning'
+  | 'error';
 
-interface BadgeProps {
-  children: ReactNode;
+export interface BadgeProps extends Omit<HTMLAttributes<HTMLSpanElement>, 'style'> {
   variant?: BadgeVariant;
   mono?: boolean;
-  className?: string;
+  children: ReactNode;
+  style?: CSSProperties;
 }
 
-const variantStyles: Record<BadgeVariant, string> = {
-  default: 'bg-black/[0.05] text-sf-text-secondary',
-  success: 'bg-sf-success-light text-[#248a3d]',
-  warning: 'bg-sf-warning-light text-[#c67a05]',
-  error: 'bg-sf-error-light text-[#d70015]',
-  accent: 'bg-sf-accent-light text-sf-accent',
+const VARIANTS: Record<BadgeVariant, { bg: string; fg: string }> = {
+  default: { bg: 'var(--sf-bg-tertiary)', fg: 'var(--sf-fg-2)' },
+  accent:  { bg: 'var(--sf-accent-light)',  fg: 'var(--sf-link)' },
+  success: { bg: 'var(--sf-success-light)', fg: 'var(--sf-success-ink)' },
+  warning: { bg: 'var(--sf-warning-light)', fg: 'var(--sf-warning-ink)' },
+  error:   { bg: 'var(--sf-error-light)',   fg: 'var(--sf-error-ink)' },
 };
 
-export function Badge({ children, variant = 'default', mono, className = '' }: BadgeProps) {
+/**
+ * 22-tall tinted pill. Use `mono` for numeric / identifier content.
+ */
+export function Badge({
+  variant = 'default',
+  mono,
+  children,
+  className = '',
+  style: styleOverride,
+  ...rest
+}: BadgeProps) {
+  const tokens = VARIANTS[variant];
+  const style: CSSProperties = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    height: 22,
+    padding: '0 8px',
+    borderRadius: 'var(--sf-radius-sm)',
+    background: tokens.bg,
+    color: tokens.fg,
+    fontSize: 'var(--sf-text-xs)',
+    fontWeight: 500,
+    letterSpacing: 'var(--sf-track-normal)',
+    fontFamily: mono ? 'var(--sf-font-mono)' : 'inherit',
+    fontVariantNumeric: mono ? 'tabular-nums' : 'normal',
+    ...styleOverride,
+  };
   return (
-    <span
-      className={`
-        inline-flex items-center px-2 py-0.5
-        rounded-[var(--radius-sf-sm)]
-        text-[12px] font-medium leading-4 tracking-[-0.12px]
-        ${mono ? 'font-mono' : ''}
-        ${variantStyles[variant]}
-        ${className}
-      `}
-    >
+    <span className={className} style={style} {...rest}>
       {children}
     </span>
   );

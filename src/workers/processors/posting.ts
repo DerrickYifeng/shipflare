@@ -6,8 +6,9 @@ import { RedditClient } from '@/lib/reddit-client';
 import { XClient } from '@/lib/x-client';
 import { createClientFromChannelById } from '@/lib/platform-deps';
 import { PLATFORMS } from '@/lib/platform-config';
-import { loadSkill } from '@/core/skill-loader';
-import { runSkill } from '@/core/skill-runner';
+import { runAgent, createToolContext } from '@/bridge/agent-runner';
+import { loadAgentFromFile } from '@/bridge/load-agent';
+import { registry } from '@/tools/registry';
 import { isCircuitBreakerTripped, tripCircuitBreaker } from '@/lib/circuit-breaker';
 import { canPostToSubreddit } from '@/lib/rate-limiter';
 import { enqueueEngagement } from '@/lib/queue';
@@ -16,15 +17,17 @@ import { join } from 'path';
 import type { PostingJobData } from '@/lib/queue/types';
 import { getTraceId } from '@/lib/queue/types';
 import { postingOutputSchema } from '@/agents/schemas';
-import type { PostingOutput } from '@/agents/schemas';
 import { createLogger, loggerForJob } from '@/lib/logger';
-import { getCostForRun } from '@/lib/cost-bucket';
+import { addCost, getCostForRun } from '@/lib/cost-bucket';
 import { recordPipelineEvent, recordThreadFeedback } from '@/lib/pipeline-events';
 
 const MAX_ENGAGEMENT_DEPTH = 2;
 const baseLog = createLogger('worker:posting');
 
-const postingSkill = loadSkill(join(process.cwd(), 'src/skills/posting'));
+const POSTING_AGENT_PATH = join(
+  process.cwd(),
+  'src/tools/AgentTool/agents/posting/AGENT.md',
+);
 
 export async function processPosting(job: Job<PostingJobData>) {
   const traceId = getTraceId(job.data, job.id);
@@ -107,16 +110,15 @@ export async function processPosting(job: Job<PostingJobData>) {
       ? { redditClient: client }
       : {};
 
-  const { results, usage } = await runSkill<PostingOutput>({
-    skill: postingSkill,
-    input,
-    deps,
-    outputSchema: postingOutputSchema,
-    runId: traceId,
-  });
-
-  const result = results[0];
-  if (!result) throw new Error(`Posting skill returned no results for draft ${draftId}`);
+  const agentConfig = loadAgentFromFile(POSTING_AGENT_PATH, registry.toMap());
+  const context = createToolContext(deps);
+  const { result, usage } = await runAgent(
+    agentConfig,
+    JSON.stringify(input),
+    context,
+    postingOutputSchema,
+  );
+  await addCost(traceId, usage);
 
   const externalId = result.commentId ?? result.postId ?? null;
   const externalUrl = isX

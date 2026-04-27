@@ -67,7 +67,7 @@ export function ReplyQueue() {
             {pendingTweets.length} tweet{pendingTweets.length !== 1 ? 's' : ''} awaiting reply
           </p>
         </div>
-        <Button onClick={handleScan} disabled={scanning} variant="secondary">
+        <Button onClick={handleScan} disabled={scanning} variant="ghost">
           {scanning ? 'Scanning...' : 'Scan Now'}
         </Button>
       </div>

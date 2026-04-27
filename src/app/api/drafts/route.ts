@@ -1,9 +1,9 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { drafts, threads, channels, products, xMonitoredTweets, xContentCalendar } from '@/lib/db/schema';
+import { drafts, threads, channels, xMonitoredTweets } from '@/lib/db/schema';
 import { eq, and, inArray } from 'drizzle-orm';
-import { enqueuePosting, enqueueContent } from '@/lib/queue';
+import { enqueuePosting } from '@/lib/queue';
 import { createLogger, loggerForRequest } from '@/lib/logger';
 import { PLATFORMS } from '@/lib/platform-config';
 import { recordPipelineEvent, recordThreadFeedback } from '@/lib/pipeline-events';
@@ -41,8 +41,6 @@ export async function GET() {
       // Monitor context
       monitorReplyDeadline: xMonitoredTweets.replyDeadline,
       monitorStatus: xMonitoredTweets.status,
-      // Calendar context
-      calendarContentType: xContentCalendar.contentType,
     })
     .from(drafts)
     .innerJoin(threads, eq(drafts.threadId, threads.id))
@@ -53,7 +51,6 @@ export async function GET() {
         eq(xMonitoredTweets.userId, session.user.id),
       ),
     )
-    .leftJoin(xContentCalendar, eq(xContentCalendar.draftId, drafts.id))
     .where(
       and(
         eq(drafts.userId, session.user.id),
@@ -70,8 +67,6 @@ export async function GET() {
       let source: 'monitor' | 'calendar' | 'engagement' | 'discovery' = 'discovery';
       if (r.monitorReplyDeadline) {
         source = 'monitor';
-      } else if (r.calendarContentType) {
-        source = 'calendar';
       } else if (r.engagementDepth > 0) {
         source = 'engagement';
       } else if (
@@ -224,39 +219,13 @@ export async function POST(request: NextRequest) {
       userAction: 'skip',
     });
   } else if (action === 'retry') {
-    // Re-enqueue content generation for flagged/needs_revision drafts
-    if (!['flagged', 'needs_revision'].includes(draft.status)) {
-      return NextResponse.json(
-        { error: 'Can only retry flagged or needs_revision drafts' },
-        { status: 400 },
-      );
-    }
-
-    // Get user's product for re-generation
-    const [product] = await db
-      .select({ id: products.id })
-      .from(products)
-      .where(eq(products.userId, session.user.id))
-      .limit(1);
-
-    if (!product) {
-      return NextResponse.json({ error: 'Product not found' }, { status: 404 });
-    }
-
-    await db
-      .update(drafts)
-      .set({ status: 'skipped', updatedAt: new Date() })
-      .where(eq(drafts.id, draftId));
-
-    await enqueueContent({
-      userId: session.user.id,
-      threadId: draft.threadId,
-      productId: product.id,
-      draftType: (draft.draftType as 'reply' | 'original_post') ?? 'reply',
-      traceId,
-    });
-
-    log.info(`Draft ${draftId} retried, new content generation enqueued`);
+    // Draft retry goes through the plan-execute dispatcher in Phase 7 once
+    // plan_items carry the skill route. For now, surface a clear 410 instead
+    // of silently doing nothing.
+    return NextResponse.json(
+      { error: 'Draft retry is temporarily disabled — lands with plan-execute in Phase 7' },
+      { status: 410, headers: { 'x-trace-id': traceId } },
+    );
   }
 
   return NextResponse.json(

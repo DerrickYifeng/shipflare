@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, jsonb, index } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, jsonb, uniqueIndex } from 'drizzle-orm/pg-core';
 import { users } from './users';
 
 export const products = pgTable(
@@ -15,10 +15,15 @@ export const products = pgTable(
     description: text('description').notNull(),
     keywords: text('keywords').array().notNull().default([]),
     valueProp: text('value_prop'),
-    lifecyclePhase: text('lifecycle_phase').notNull().default('pre_launch'),
+    state: text('state').notNull().default('mvp'),
+    launchDate: timestamp('launch_date', { mode: 'date' }),
+    launchedAt: timestamp('launched_at', { mode: 'date' }),
+    targetAudience: text('target_audience'),
+    category: text('category'),
+    onboardingCompletedAt: timestamp('onboarding_completed_at', { mode: 'date' }),
     seoAuditJson: jsonb('seo_audit_json'),
     createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
   },
-  (t) => [index('products_user_idx').on(t.userId)],
+  (t) => [uniqueIndex('products_user_uq').on(t.userId)],
 );

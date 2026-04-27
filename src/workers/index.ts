@@ -1,7 +1,5 @@
-import { Worker } from 'bullmq';
+import { Queue, Worker } from 'bullmq';
 import { getBullMQConnection } from '@/lib/redis';
-import { processDiscovery } from './processors/discovery';
-import { processContent } from './processors/content';
 import { processReview } from './processors/review';
 import { processPosting } from './processors/posting';
 import { processHealthScore } from './processors/health-score';
@@ -11,18 +9,66 @@ import { processXMonitor } from './processors/monitor';
 import { processXEngagement } from './processors/engagement';
 import { processXMetrics } from './processors/metrics';
 import { processXAnalytics } from './processors/analytics';
-import { processTodoSeed } from './processors/todo-seed';
-import { processCalibration } from './processors/calibrate-discovery';
-import { processCalendarPlan } from './processors/calendar-plan';
-import { processCalendarSlotDraft } from './processors/calendar-slot-draft';
-import { processSearchSource } from './processors/search-source';
-import { processDiscoveryScan } from './processors/discovery-scan';
-import { processStalledRowSweep } from './processors/stalled-row-sweep';
-import { processVoiceExtract } from './processors/voice-extract';
-import { dreamQueue, discoveryQueue, discoveryScanQueue, monitorQueue, metricsQueue, analyticsQueue, todoSeedQueue, codeScanQueue, stalledRowSweepQueue, voiceExtractQueue } from '@/lib/queue';
+import { processDiscoveryCronFanout } from './processors/discovery-cron-fanout';
+import { processPlanExecute } from './processors/plan-execute';
+import { processPlanExecuteSweeper } from './processors/plan-execute-sweeper';
+import { processStaleSweeper } from './processors/stale-sweeper';
+import { processWeeklyReplan } from './processors/weekly-replan';
+import { processTeamRun, getTeamRunConcurrency } from './processors/team-run';
+import { processReplySweepCron } from './processors/reply-sweep-cron';
+import { TEAM_RUN_QUEUE_NAME, type TeamRunJobData } from '@/lib/queue/team-run';
+import {
+  REPLY_SWEEP_CRON_QUEUE_NAME,
+  scheduleReplySweepCron,
+  type ReplySweepCronJobData,
+} from '@/lib/queue/reply-sweep-cron';
+import { dreamQueue, discoveryScanQueue, monitorQueue, metricsQueue, analyticsQueue, codeScanQueue } from '@/lib/queue';
+import type { PlanExecuteJobData } from '@/lib/queue';
 import { createLogger, loggerForJob } from '@/lib/logger';
-import type { DiscoveryJobData, ContentJobData, ReviewJobData, PostingJobData, HealthScoreJobData, DreamJobData, CodeScanJobData, MonitorJobData, CalendarPlanJobData, CalendarSlotDraftJobData, SearchSourceJobData, DiscoveryScanJobData, EngagementJobData, MetricsJobData, AnalyticsJobData, TodoSeedJobData, CalibrationJobData } from '@/lib/queue/types';
-import type { VoiceExtractJobData } from '@/lib/queue/voice-extract';
+import type { ReviewJobData, PostingJobData, HealthScoreJobData, DreamJobData, CodeScanJobData, MonitorJobData, DiscoveryScanJobData, EngagementJobData, MetricsJobData, AnalyticsJobData } from '@/lib/queue/types';
+
+// ----------------------------------------------------------------
+//  Phase 7 cron-only queues (no enqueue helpers — scheduled below)
+// ----------------------------------------------------------------
+
+const planExecuteSweeperQueue = new Queue<Record<string, never>>(
+  'plan-execute-sweeper',
+  {
+    connection: getBullMQConnection(),
+    defaultJobOptions: {
+      removeOnComplete: { count: 10 },
+      removeOnFail: { count: 50 },
+      attempts: 1,
+    },
+  },
+);
+
+const staleSweeperQueue = new Queue<Record<string, never>>(
+  'stale-sweeper',
+  {
+    connection: getBullMQConnection(),
+    defaultJobOptions: {
+      removeOnComplete: { count: 10 },
+      removeOnFail: { count: 50 },
+      attempts: 1,
+    },
+  },
+);
+
+const weeklyReplanQueue = new Queue<Record<string, never>>(
+  'weekly-replan',
+  {
+    connection: getBullMQConnection(),
+    defaultJobOptions: {
+      removeOnComplete: { count: 10 },
+      removeOnFail: { count: 50 },
+      // Idempotent via Redis lock inside the processor; allow 1 retry
+      // in case of a transient DB hiccup reading strategic_paths.
+      attempts: 2,
+      backoff: { type: 'exponential', delay: 30_000 },
+    },
+  },
+);
 
 const log = createLogger('workers');
 
@@ -42,18 +88,6 @@ const BASE_OPTS = {
   lockDuration: 300_000,
   lockRenewTime: 30_000,
 };
-
-const discoveryWorker = new Worker<DiscoveryJobData>(
-  'discovery',
-  async (job) => processDiscovery(job),
-  { ...BASE_OPTS, concurrency: 2 },
-);
-
-const contentWorker = new Worker<ContentJobData>(
-  'content',
-  async (job) => processContent(job),
-  { ...BASE_OPTS, concurrency: 3 },
-);
 
 const reviewWorker = new Worker<ReviewJobData>(
   'review',
@@ -110,66 +144,76 @@ const analyticsWorker = new Worker<AnalyticsJobData>(
   { ...BASE_OPTS, concurrency: 1 },
 );
 
-const todoSeedWorker = new Worker<TodoSeedJobData>(
-  'todo-seed',
-  async (job) => processTodoSeed(job),
-  { ...BASE_OPTS, concurrency: 1 },
-);
-
-const calendarPlanWorker = new Worker<CalendarPlanJobData>(
-  'calendar-plan',
-  async (job) => processCalendarPlan(job),
-  { ...BASE_OPTS, concurrency: 1 },
-);
-
-const calendarSlotDraftWorker = new Worker<CalendarSlotDraftJobData>(
-  'calendar-slot-draft',
-  async (job) => processCalendarSlotDraft(job),
-  { ...BASE_OPTS, concurrency: 3 },
-);
-
-const searchSourceWorker = new Worker<SearchSourceJobData>(
-  'search-source',
-  async (job) => processSearchSource(job),
-  { ...BASE_OPTS, concurrency: 6, lockDuration: 45_000 },
-);
-
 const discoveryScanWorker = new Worker<DiscoveryScanJobData>(
   'discovery-scan',
-  async (job) => processDiscoveryScan(job),
+  async (job) => processDiscoveryCronFanout(job),
   { ...BASE_OPTS, concurrency: 2, lockDuration: 15_000 },
 );
 
-const calibrationWorker = new Worker<CalibrationJobData>(
-  'calibration',
-  async (job) => processCalibration(job),
-  {
-    ...BASE_OPTS,
-    concurrency: 1,
-    lockDuration: 30 * 60_000, // 30 min — calibration can run up to 25 min
-  },
+// --- Phase 7: plan-execute workers ---
+
+const planExecuteWorker = new Worker<PlanExecuteJobData>(
+  'plan-execute',
+  async (job) => processPlanExecute(job),
+  { ...BASE_OPTS, concurrency: 3 },
 );
 
-const stalledRowSweepWorker = new Worker<Record<string, never>>(
-  'stalled-row-sweep',
-  async (job) => processStalledRowSweep(job),
+const planExecuteSweeperWorker = new Worker<Record<string, never>>(
+  'plan-execute-sweeper',
+  async (job) => processPlanExecuteSweeper(job),
   { ...BASE_OPTS, concurrency: 1 },
 );
 
-const voiceExtractWorker = new Worker<VoiceExtractJobData>(
-  'voice-extract',
-  async (job) => processVoiceExtract(job),
+const staleSweeperWorker = new Worker<Record<string, never>>(
+  'stale-sweeper',
+  async (job) => processStaleSweeper(job),
+  { ...BASE_OPTS, concurrency: 1 },
+);
+
+const weeklyReplanWorker = new Worker<Record<string, never>>(
+  'weekly-replan',
+  async (job) => processWeeklyReplan(job),
+  { ...BASE_OPTS, concurrency: 1 },
+);
+
+// AI Team Platform — coordinator main-loop runner.
+// Lock duration accommodates a multi-turn coordinator run with delegated
+// subagents; each subagent is synchronous from the worker's POV and the full
+// chain ceiling is ~10 minutes (spec §15.3 alert threshold).
+const teamRunWorker = new Worker<TeamRunJobData>(
+  TEAM_RUN_QUEUE_NAME,
+  async (job) => processTeamRun(job),
+  { ...BASE_OPTS, concurrency: getTeamRunConcurrency(), lockDuration: 15 * 60_000 },
+);
+
+// Reply-sweep fan-out — runs ONCE per day. The processor walks teams
+// (cadence defined in src/lib/queue/reply-sweep-cron.ts) and calls
+// `maybeEnqueueReplySweep(userId)` for each owner. The helper finds
+// today's `content_reply` plan_item slots, throttles against any
+// reply_sweep that already started today, and enqueues a team_run with
+// each slot's planItemId + targetCount baked into the goal. The
+// coordinator inside the run drives the discovery → community-manager
+// retry loop until each slot is filled (or 3 attempts exhausted) and
+// transitions the plan_item to state='drafted'.
+const replySweepCronWorker = new Worker<ReplySweepCronJobData>(
+  REPLY_SWEEP_CRON_QUEUE_NAME,
+  async (job) => processReplySweepCron(job),
   { ...BASE_OPTS, concurrency: 1 },
 );
 
 const workers = [
-  discoveryWorker, contentWorker, reviewWorker, postingWorker,
+  reviewWorker, postingWorker,
   healthScoreWorker, dreamWorker, codeScanWorker,
-  monitorWorker, calendarPlanWorker, calendarSlotDraftWorker,
-  searchSourceWorker, discoveryScanWorker,
+  monitorWorker,
+  discoveryScanWorker,
   engagementWorker,
-  metricsWorker, analyticsWorker, todoSeedWorker, calibrationWorker,
-  stalledRowSweepWorker, voiceExtractWorker,
+  metricsWorker, analyticsWorker,
+  // Phase 7
+  planExecuteWorker, planExecuteSweeperWorker,
+  staleSweeperWorker, weeklyReplanWorker,
+  // AI Team Platform
+  teamRunWorker,
+  replySweepCronWorker,
 ];
 
 // Log events — bind traceId / jobId / queue into the child logger so lifecycle
@@ -240,18 +284,6 @@ async function scheduleAnalytics() {
   );
 }
 
-// Schedule todo seed: hourly check — seeds each user when their local time is 8 AM
-async function scheduleTodoSeed() {
-  await todoSeedQueue.add(
-    'scheduled-seed',
-    { kind: 'fanout', schemaVersion: 1 },
-    {
-      repeat: { pattern: '0 * * * *' },
-      jobId: 'todo-seed-cron',
-    },
-  );
-}
-
 // Schedule daily code diff: 2am UTC (before metrics at 3am)
 async function scheduleCodeDiff() {
   await codeScanQueue.add(
@@ -264,45 +296,62 @@ async function scheduleCodeDiff() {
   );
 }
 
-// Schedule discovery: 3x daily (8am, 2pm, 8pm UTC)
-async function scheduleDiscovery() {
-  await discoveryQueue.add(
-    'scheduled-scan',
-    { kind: 'fanout', schemaVersion: 1 },
-    {
-      repeat: { pattern: '0 8,14,20 * * *' },
-      jobId: 'discovery-cron',
-    },
-  );
-}
-
-// Schedule stalled-row sweep: every 60s. Housekeeping — flips rows stuck in
-// state='drafting' for >10min to 'failed'. Idempotent: BullMQ dedupes the
-// repeatable on `jobId`.
-async function scheduleStalledRowSweep() {
-  await stalledRowSweepQueue.add(
-    'sweep',
-    {},
-    {
-      repeat: { every: 60_000 },
-      jobId: 'stalled-row-sweep-repeat',
-    },
-  );
-}
-
-// Schedule discovery-scan cron baseline: every 4h. Fan-out entry — the
-// processor iterates all users with a channel + product and enqueues a
-// per-user scan with trigger='cron'. This guarantees fresh threads land
-// even for users who haven't opened the app today, without depending on
-// the existing 8/14/20 UTC `discovery` cron (which is the legacy path the
-// slim `discovery.ts` shim still covers for back-compat).
+// Schedule discovery cron baseline: daily at 13:00 UTC. Fan-out entry —
+// the processor iterates all users with a channel + product and enqueues
+// one coordinator-rooted team-run per user (trigger='discovery_cron'),
+// rooted in a per-team rolling 'Discovery' conversation. Replaces the
+// pre-team-run scout-only worker that used to fan out per-platform scan
+// jobs every 4h.
 async function scheduleDiscoveryScan() {
   await discoveryScanQueue.add(
     'fanout',
     { kind: 'fanout', schemaVersion: 1, traceId: 'cron-discovery-scan-fanout' },
     {
-      repeat: { every: 4 * 60 * 60 * 1000 },
+      repeat: { pattern: '0 13 * * *', tz: 'UTC' },
       jobId: 'discovery-scan-fanout-repeat',
+    },
+  );
+}
+
+// Schedule plan-execute-sweeper: every 60s. Finds plan_items ready
+// for their next phase transition and enqueues plan-execute jobs.
+// Idempotent — plan-execute uses (planItemId, phase) jobId dedup so
+// re-sweeping an in-flight item is a no-op at the Redis layer.
+async function schedulePlanExecuteSweeper() {
+  await planExecuteSweeperQueue.add(
+    'sweep',
+    {},
+    {
+      repeat: { every: 60 * 1000 },
+      jobId: 'plan-execute-sweeper-repeat',
+    },
+  );
+}
+
+// Schedule stale-sweeper: every hour. Marks planned / approved rows
+// past scheduledAt + 24h as stale.
+async function scheduleStaleSweeper() {
+  await staleSweeperQueue.add(
+    'sweep',
+    {},
+    {
+      repeat: { every: 60 * 60 * 1000 },
+      jobId: 'stale-sweeper-repeat',
+    },
+  );
+}
+
+// Schedule weekly-replan: Monday 00:00 UTC. For every user with an
+// active strategic_path, enqueue a tactical-planner run for the
+// coming week. The processor acquires a per-(user, week) Redis lock
+// so double-fires from cron overlap collapse to one run.
+async function scheduleWeeklyReplan() {
+  await weeklyReplanQueue.add(
+    'replan',
+    {},
+    {
+      repeat: { pattern: '0 0 * * 1' }, // Monday 00:00 UTC
+      jobId: 'weekly-replan-cron',
     },
   );
 }
@@ -310,18 +359,19 @@ async function scheduleDiscoveryScan() {
 Promise.all([
   scheduleNightlyDream(),
   scheduleCodeDiff(),
-  scheduleDiscovery(),
   scheduleDiscoveryScan(),
   scheduleMonitor(),
   scheduleMetrics(),
   scheduleAnalytics(),
-  scheduleTodoSeed(),
-  scheduleStalledRowSweep(),
+  schedulePlanExecuteSweeper(),
+  scheduleStaleSweeper(),
+  scheduleWeeklyReplan(),
+  scheduleReplySweepCron(),
 ]).catch((err) => {
   log.error('Failed to schedule cron jobs:', err.message);
 });
 
-log.info('All workers started: discovery, content, review, posting, health-score, dream, code-scan, monitor, calendar-plan, calendar-slot-draft, search-source, discovery-scan, engagement, metrics, analytics, todo-seed, calibration, stalled-row-sweep, voice-extract. Discovery 3x/day, discovery-scan every 4h, stalled sweep every 60s, all others daily.');
+log.info('All workers started: review, posting, health-score, dream, code-scan, monitor, discovery-scan, engagement, metrics, analytics, plan-execute, plan-execute-sweeper, stale-sweeper, weekly-replan, team-run. discovery-scan daily 13:00 UTC, plan-execute-sweeper every 1m, stale-sweeper every 1h, weekly-replan Monday 00:00 UTC, all others daily.');
 
 // Graceful shutdown
 async function shutdown() {

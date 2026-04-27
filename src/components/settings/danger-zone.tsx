@@ -37,7 +37,7 @@ export function DangerZone() {
         <p className="text-[14px] tracking-[-0.224px] text-sf-text-secondary mb-3 leading-[1.47]">
           Permanently delete your account and all associated data. This action cannot be undone.
         </p>
-        <Button variant="danger" onClick={() => setShowDialog(true)}>
+        <Button variant="error" onClick={() => setShowDialog(true)}>
           Delete account
         </Button>
       </div>
@@ -64,7 +64,7 @@ export function DangerZone() {
             Cancel
           </Button>
           <Button
-            variant="danger"
+            variant="error"
             disabled={confirmation !== 'DELETE' || loading}
             onClick={handleDelete}
           >

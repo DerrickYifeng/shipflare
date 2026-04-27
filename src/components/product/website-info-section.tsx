@@ -39,8 +39,8 @@ export function WebsiteInfoSection({ url, seoAudit }: WebsiteInfoSectionProps) {
 
     const extracted = await extractRes.json();
 
-    const saveRes = await fetch('/api/onboarding/profile', {
-      method: 'PUT',
+    const saveRes = await fetch('/api/product', {
+      method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         url: extracted.url || targetUrl,

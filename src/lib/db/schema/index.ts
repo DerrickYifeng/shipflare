@@ -11,32 +11,23 @@ export {
 } from './drafts';
 export { agentMemories, agentMemoryLogs } from './memories';
 export { codeSnapshots } from './code-snapshots';
-export * from './weekly-themes';
 export {
   xTargetAccounts,
   xMonitoredTweets,
-  xContentCalendar,
   xTweetMetrics,
   xFollowerSnapshots,
   xAnalyticsSummary,
   xMonitoredTweetStatusEnum,
-  xContentCalendarStatusEnum,
-  xContentCalendarItemStateEnum,
   // Platform-generic aliases
-  contentCalendar,
   analyticsSummary,
   targetAccounts,
   monitoredContent,
 } from './x-growth';
-export {
-  todoItems,
-  todoTypeEnum,
-  todoSourceEnum,
-  todoPriorityEnum,
-  todoStatusEnum,
-} from './todos';
-export { discoveryConfigs } from './discovery-configs';
-export * from './voice-profiles';
+// Note: xContentCalendarItemStateEnum is intentionally NOT re-exported.
+// It still exists in x-growth.ts as an internal dependency of
+// threads.state (channels.ts imports it directly). Renaming the enum
+// requires an ALTER TYPE migration with live-data risk — deferred
+// until the audit's "option b" rename is green-lit.
 export {
   pipelineEvents,
   threadFeedback,
@@ -45,3 +36,37 @@ export {
   type ThreadFeedback,
   type NewThreadFeedback,
 } from './pipeline-events';
+export {
+  strategicPaths,
+  launchPhaseEnum,
+} from './strategic-paths';
+export {
+  plans,
+  planTriggerEnum,
+} from './plans';
+export {
+  planItems,
+  planItemKindEnum,
+  planItemStateEnum,
+  planItemUserActionEnum,
+} from './plan-items';
+export {
+  teams,
+  teamMembers,
+  teamConversations,
+  teamRuns,
+  teamMessages,
+  teamTasks,
+  type Team,
+  type NewTeam,
+  type TeamMember,
+  type NewTeamMember,
+  type TeamConversation,
+  type NewTeamConversation,
+  type TeamRun,
+  type NewTeamRun,
+  type TeamMessage,
+  type NewTeamMessage,
+  type TeamTask,
+  type NewTeamTask,
+} from './team';

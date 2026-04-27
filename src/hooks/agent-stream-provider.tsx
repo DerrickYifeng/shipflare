@@ -52,7 +52,9 @@ let nextErrorId = 1;
 // Event types (duplicated from use-agent-stream to keep the provider standalone)
 // ---------------------------------------------------------------------------
 
-type AgentName = 'scout' | 'discovery' | 'content' | 'review' | 'posting';
+// v3 agent identifiers — duplicated from use-agent-stream to keep the
+// provider standalone. 'scout' is retired; discovery is its v3 replacement.
+type AgentName = 'discovery' | 'content' | 'review' | 'posting';
 
 type SSEEvent =
   | { type: 'agent_start'; agentName: AgentName; currentTask?: string }

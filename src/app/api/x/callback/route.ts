@@ -1,11 +1,13 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { channels } from '@/lib/db/schema';
+import { channels, products } from '@/lib/db/schema';
 import { channelPosts } from '@/lib/db/schema/channels';
 import { encrypt } from '@/lib/encryption';
 import { eq, and } from 'drizzle-orm';
 import { createLogger } from '@/lib/logger';
+import { provisionTeamForProduct } from '@/lib/team-provisioner';
+import { readReturnToCookie, clearReturnToCookie } from '@/lib/oauth-return';
 
 const log = createLogger('api:x');
 
@@ -141,6 +143,30 @@ export async function GET(request: NextRequest) {
 
   log.info(`X account connected: @${username}`);
 
+  // Silently reconcile the team roster — a newly-connected X channel may
+  // upgrade the preset (e.g. default-squad → dev-squad), which adds
+  // community-manager. Best-effort; channel connection succeeds either way.
+  try {
+    const [productRow] = await db
+      .select({ id: products.id })
+      .from(products)
+      .where(eq(products.userId, session.user.id))
+      .limit(1);
+    if (productRow?.id) {
+      const provision = await provisionTeamForProduct(
+        session.user.id,
+        productRow.id,
+      );
+      log.info(
+        `provisionTeamForProduct post-x-connect: team=${provision.teamId} preset=${provision.preset}`,
+      );
+    }
+  } catch (err) {
+    log.warn(
+      `provisionTeamForProduct post-x-connect failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
   // Fetch recent post history for content deduplication (best-effort)
   try {
     const meResp = await fetch('https://api.x.com/2/users/me', {
@@ -196,9 +222,12 @@ export async function GET(request: NextRequest) {
     log.warn(`Failed to fetch X post history: ${err instanceof Error ? err.message : err}`);
   }
 
-  // Clear PKCE cookies and redirect
-  const response = NextResponse.redirect(new URL('/today', request.url));
+  // Clear PKCE cookies and redirect to wherever the connect flow was
+  // initiated from (set via `?returnTo=` on /api/x/connect). Defaults
+  // to /today when no return path was supplied.
+  const returnTo = readReturnToCookie(request);
+  const response = NextResponse.redirect(new URL(returnTo, request.url));
   response.cookies.delete('x_code_verifier');
   response.cookies.delete('x_oauth_state');
-  return response;
+  return clearReturnToCookie(response);
 }

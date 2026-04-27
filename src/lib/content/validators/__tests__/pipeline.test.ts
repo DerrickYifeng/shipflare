@@ -4,7 +4,7 @@ import { runContentValidators } from '../pipeline';
 describe('runContentValidators', () => {
   it('passes a clean X reply', () => {
     const r = runContentValidators({
-      text: 'shipping is the only validation.',
+      text: 'shipped 5 days ago. still tweaking the onboarding.',
       platform: 'x',
       kind: 'reply',
     });
@@ -13,9 +13,9 @@ describe('runContentValidators', () => {
   });
 
   it('aggregates all three failure types without short-circuiting', () => {
-    // Over 240 chars, mentions reddit with no contrast, contains an unsourced stat.
+    // Over 280 chars, mentions reddit with no contrast, contains an unsourced stat.
     const text =
-      'saw this on reddit: conversion up 40% last month. ' + 'a'.repeat(210);
+      'saw this on reddit: conversion up 40% last month. ' + 'a'.repeat(260);
     const r = runContentValidators({
       text,
       platform: 'x',
@@ -28,7 +28,7 @@ describe('runContentValidators', () => {
 
   it('only reports length failure when that is the only issue', () => {
     const r = runContentValidators({
-      text: 'a'.repeat(241),
+      text: 'a'.repeat(281),
       platform: 'x',
       kind: 'reply',
     });
@@ -54,4 +54,74 @@ describe('runContentValidators', () => {
     });
     expect(r.ok).toBe(true);
   });
+
+  describe('warnings (severity: warning — do not affect ok)', () => {
+    it('flags anchor-token absence on X replies as a warning, not a failure', () => {
+      const r = runContentValidators({
+        text: 'agreed completely.',
+        platform: 'x',
+        kind: 'reply',
+      });
+      expect(r.ok).toBe(true);
+      const anchor = r.warnings.find((w) => w.validator === 'anchor_token');
+      expect(anchor).toBeDefined();
+    });
+
+    it('does not run anchor-token check on posts', () => {
+      const r = runContentValidators({
+        text: 'just a generic post body without any concrete signal.',
+        platform: 'x',
+        kind: 'post',
+      });
+      const anchor = r.warnings.find((w) => w.validator === 'anchor_token');
+      expect(anchor).toBeUndefined();
+    });
+
+    it('flags too many hashtags on an X post as a warning', () => {
+      const r = runContentValidators({
+        text: 'shipping #buildinpublic #saas #startup #indiehackers #devs',
+        platform: 'x',
+        kind: 'post',
+      });
+      expect(r.ok).toBe(true);
+      const tag = r.warnings.find((w) => w.validator === 'hashtag_count');
+      expect(tag).toBeDefined();
+      if (tag && tag.validator === 'hashtag_count') {
+        expect(tag.count).toBeGreaterThan(tag.max);
+      }
+    });
+
+    it('flags any hashtag on an X reply as a warning', () => {
+      const r = runContentValidators({
+        text: 'agreed last week #buildinpublic',
+        platform: 'x',
+        kind: 'reply',
+      });
+      const tag = r.warnings.find((w) => w.validator === 'hashtag_count');
+      expect(tag).toBeDefined();
+    });
+
+    it('flags links inside a reply body as a warning', () => {
+      const r = runContentValidators({
+        text: 'check out https://example.com last week',
+        platform: 'x',
+        kind: 'reply',
+      });
+      const link = r.warnings.find((w) => w.validator === 'links_in_reply');
+      expect(link).toBeDefined();
+    });
+
+    it('flags links inside a post body as a warning (use first-reply)', () => {
+      const r = runContentValidators({
+        text: 'try our beta at https://example.com',
+        platform: 'x',
+        kind: 'post',
+      });
+      const link = r.warnings.find(
+        (w) => w.validator === 'links_in_post_body',
+      );
+      expect(link).toBeDefined();
+    });
+  });
+
 });

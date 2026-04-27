@@ -1,11 +1,7 @@
 import type { ReactNode } from 'react';
 
+// Full-bleed layout — onboarding is its own world (no app shell).
+// Spec: 2026-04-20-onboarding-frontend-design.md §3.1.
 export default function OnboardingLayout({ children }: { children: ReactNode }) {
-  return (
-    <main className="flex min-h-screen items-center justify-center bg-sf-bg-primary p-4">
-      <div className="w-full max-w-xl bg-sf-bg-secondary rounded-[var(--radius-sf-lg)] shadow-[var(--shadow-sf-elevated)] p-8">
-        {children}
-      </div>
-    </main>
-  );
+  return <div className="min-h-screen bg-sf-bg-primary">{children}</div>;
 }

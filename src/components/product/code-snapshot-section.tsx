@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { AlertDialog } from '@/components/ui/alert-dialog';
-import { GitHubRepoSelector } from '@/components/onboarding/github-repo-selector';
+import { GitHubRepoSelector } from '@/components/product/github-repo-selector';
 import { useToast } from '@/components/ui/toast';
 import type { TechStack } from '@/types/code-scanner';
 import type { ExtractedProfile } from '@/types/onboarding';
@@ -37,8 +37,8 @@ export function CodeSnapshotSection({ snapshot, hasGitHub }: CodeSnapshotSection
   const { toast } = useToast();
 
   const saveExtracted = async (data: ExtractedProfile) => {
-    const res = await fetch('/api/onboarding/profile', {
-      method: 'PUT',
+    const res = await fetch('/api/product', {
+      method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         name: data.name,
@@ -169,7 +169,7 @@ export function CodeSnapshotSection({ snapshot, hasGitHub }: CodeSnapshotSection
             Import from your GitHub repository to extract tech stack and product details.
           </p>
           <Button
-            variant="secondary"
+            variant="ghost"
             className="mt-3 !min-h-[36px] !text-[14px] !tracking-[-0.224px]"
             onClick={() => setShowRepoSelector(true)}
           >
@@ -251,7 +251,7 @@ export function CodeSnapshotSection({ snapshot, hasGitHub }: CodeSnapshotSection
         {/* Actions */}
         <div className="flex gap-2 mt-4 pt-4 border-t border-[rgba(0,0,0,0.08)]">
           <Button
-            variant="secondary"
+            variant="ghost"
             className="!min-h-[36px] !text-[14px] !tracking-[-0.224px] !px-3"
             onClick={handleRescan}
             disabled={scanState !== 'idle'}

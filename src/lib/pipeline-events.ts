@@ -72,8 +72,14 @@ export type PipelineStage =
   | 'thread_drafting'
   | 'thread_ready'
   | 'thread_failed'
-  // Voice extraction lifecycle
-  | 'voice_extracted';
+  // Launch-plan lifecycle (Phase 8 planner chain via POST /api/onboarding/plan)
+  | 'launch_plan_started'
+  | 'launch_plan_completed'
+  | 'launch_plan_failed'
+  // Cron sweepers (plan-execute + stale). Per-user aggregate rows emitted
+  // at the end of each sweep so we can observe whether the crons actually
+  // ran and how many rows they touched per user per tick.
+  | 'sweeper_run';
 
 export type RecordPipelineEventInput = Omit<
   NewPipelineEvent,

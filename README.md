@@ -6,16 +6,37 @@ ShipFlare deploys a pipeline of AI agents that find where your users hang out, j
 
 ## How it works
 
-```
-Connect Product → AI Scan → Community Discovery → Thread Scoring → Draft Generation → Review → Post
-```
+Onboarding runs in 4 steps:
 
-1. **Onboarding** — Connect your product via GitHub repo or website URL. GitHub import scans your codebase for tech stack, key files, and context. Website import scrapes your homepage and runs an SEO audit. Both feed into a unified product profile that agents reference for every piece of content they generate.
-2. **Discovery** — AI agents crawl Reddit, X, and Hacker News to find communities and conversations where your product is relevant.
-3. **Scoring** — Threads are scored across five dimensions: relevance, intent, exposure, freshness, and engagement.
-4. **Drafting** — A content agent writes contextual replies that lead with genuine help, not promotion. Every draft includes FTC disclosure.
-5. **Review** — An adversarial reviewer checks relevance, tone, authenticity, compliance, and risk. Only `PASS` drafts reach your queue.
-6. **Posting** — Approved drafts are posted to Reddit/X with rate limiting, shadowban detection, and circuit breaker protection.
+1. **Add your product** — Scan a GitHub repo or website URL. The extractor pulls name, description, keywords, target audience, voice, and product category. You confirm and edit on a staggered review screen before anything persists.
+2. **Connect your accounts** — OAuth into Reddit and X. At least one channel unlocks the agent pipeline; you can skip to try the product first and connect later.
+3. **Where's your product at?** — MVP, launching this week, or already live. Each state picks a different playbook shape (pre-launch · launch sprint · compound growth) and captures the dates that drive cadence decisions.
+4. **Your launch plan** — A two-tier planner runs in parallel with a 6-agent animation (~5s). The output is a tactile plan you can edit before committing: About (product profile), Timeline (multi-week thesis arc + milestones), First week (concrete `plan_items`).
+
+After the commit, you land at `/today` with a live pipeline overlay. First drafts arrive in ~1 hour. Nothing posts until you approve.
+
+### Planner architecture
+
+The planner is **two-tier**:
+
+- **Strategic Planner** (low frequency, Sonnet 4.6) — Runs at onboarding and when you change state / launch date. Produces a `strategic_paths` row: a 6-week narrative, milestones, a per-week thesis arc, content pillars, channel mix, and phase goals. This is the long arc the tactical layer anchors against.
+- **Tactical Planner** (high frequency, Haiku 4.5) — Runs at onboarding (after strategic), every Monday cron, and on manual re-plan. Reads the active strategic path + the week's signals, produces concrete `plan_items` rows for the next 7 days.
+
+`plan_items` is the only todo source. Each row is either auto-executed (`userAction='auto'`), queued for your approval (`'approve'`), or surfaced as manual work (`'manual'`). Terminal states: `completed`, `skipped`, `failed`, `superseded`, `stale`.
+
+Execution is a dumb dispatcher: the Plan Execute worker reads `plan_items`, calls the atomic skill named in `skillName` with the row's `params`, advances the state machine. Skills are composable building blocks — `draft-single-post-x`, `draft-single-reply`, `send-email`, `discovery`, `posting`, `draft-review`, etc. — each runnable in isolation.
+
+### Runtime pipeline
+
+```
+Onboarding → Strategic Planner → Tactical Planner → plan_items → Plan Executor → Atomic Skills → Tools
+                                                         ↑                             ↓
+                                                  Weekly Replan Cron            Draft Review
+                                                                                      ↓
+                                                                                /today approval
+                                                                                      ↓
+                                                                                   Posting
+```
 
 Agents learn over time. A memory system distills insights from every run — which communities yield results, what tone works where, which approaches get engagement.
 
@@ -51,14 +72,18 @@ No changes to the core runtime (`query-loop`, `swarm`, `skill-runner`) or the sc
 
 ## Agents
 
+v3 ships 6 brand-locked agents visible throughout the UI (`SCOUT / DISCOVERY / ANALYST / CONTENT / REVIEW / POSTING`):
+
 | Agent | Model | Role |
 |-------|-------|------|
-| Scout | Haiku 4.5 | Discovers communities and reads subreddit rules |
-| Discovery | Haiku 4.5 | Generates search queries, finds threads, scores relevance |
-| Analyst | Haiku 4.5 | Deep-dives threads, classifies intent, decides engagement strategy |
-| Content | Sonnet 4.6 | Drafts contextual, value-first replies |
-| Draft Review | Haiku 4.5 | Adversarial quality gate (6 mandatory checks) |
-| Posting | Haiku 4.5 | Posts to Reddit/X, verifies visibility, detects shadowbans |
+| Scout | Haiku 4.5 | Discovery source survey — which subreddits, handles, threads to watch |
+| Discovery | Haiku 4.5 | Per-source thread fetch + 5-dimension scoring (relevance · intent · exposure · freshness · engagement) |
+| Analyst | Sonnet 4.6 | Strategic + Tactical planners — narrative, milestones, thesis arc, weekly plan_items |
+| Content | Sonnet 4.6 | Atomic drafters: `draft-single-post-x`, `draft-single-reply`, `send-email`, etc. |
+| Review | Haiku 4.5 | Adversarial quality gate (6 mandatory checks: relevance · tone · authenticity · FTC · risk · truth) |
+| Posting | Haiku 4.5 | Posts to Reddit/X, verifies visibility, detects shadowbans, runs circuit breaker |
+
+Under the hood each agent is a set of atomic skills (SKILL.md + agent.md pairs) that the Plan Executor dispatches per-item. See `src/skills/_catalog.ts` for the full catalog and `docs/superpowers/specs/2026-04-20-planner-and-skills-redesign-design.md` for the architecture.
 
 ## Getting started
 
@@ -121,7 +146,7 @@ pnpm db:studio        # open Drizzle Studio GUI
 src/
 ├── agents/           # Agent definitions (.md with YAML frontmatter)
 ├── skills/           # Skill compositions (fan-out configs for agents)
-├── tools/            # 19 tools (Reddit, X, HN, web, scoring, SEO)
+├── tools/            # 24 tools (Reddit, X, HN, web, scoring, SEO, email)
 ├── core/             # Runtime: query loop, swarm coordinator, pipelines
 ├── memory/           # Agent memory system (log + distill pattern)
 ├── workers/          # BullMQ processors (discovery, content, review, posting, ...)

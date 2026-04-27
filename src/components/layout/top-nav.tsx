@@ -1,50 +1,162 @@
 'use client';
 
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import { signOutAction } from '@/app/actions/auth';
-import { ShipFlareLogo } from '@/components/ui/shipflare-logo';
+/**
+ * ShipFlare v2 TopNav.
+ *
+ * - 56px tall, sticky at top, glass `--sf-glass-light` + `--sf-glass-blur`.
+ * - Left: hamburger (drawer trigger, <1024px only) + current route label.
+ * - Right: theme toggle, ⌘K hint (wired to command palette), avatar.
+ *
+ * Route labels are resolved via `resolveNavLabel` from `./nav-items` so the
+ * set never drifts from the Sidebar's NAV_ITEMS.
+ *
+ * See INTERACTIONS.md §2 and §11.
+ */
 
-export function TopNav() {
+import { usePathname } from 'next/navigation';
+import type { CSSProperties } from 'react';
+import { Ops } from '@/components/ui/ops';
+import { resolveNavLabel } from './nav-items';
+import { useShellChrome } from './shell-chrome';
+import { SHELL_BREAKPOINTS, useMediaQuery } from './use-media-query';
+import { ThemeToggleButton } from './theme-toggle-button';
+
+interface TopNavProps {
+  /** Fallback label when the route isn't in the route map. */
+  fallbackLabel?: string;
+  /** User initials for avatar placeholder (unused yet but accepted for forward compat). */
+  userInitials?: string;
+  /** User image URL to render in avatar; falls back to the signal→flare gradient. */
+  userImage?: string | null;
+}
+
+const WRAPPER_STYLE: CSSProperties = {
+  height: 56,
+  borderBottom: '1px solid var(--sf-border-subtle)',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  padding: '0 24px',
+  background: 'var(--sf-glass-light)',
+  backdropFilter: 'var(--sf-glass-blur)',
+  WebkitBackdropFilter: 'var(--sf-glass-blur)',
+  position: 'sticky',
+  top: 0,
+  zIndex: 50,
+};
+
+export function TopNav({
+  fallbackLabel = 'ShipFlare',
+  userImage = null,
+}: TopNavProps = {}) {
   const pathname = usePathname();
+  const label = resolveNavLabel(pathname, fallbackLabel);
+  const isAtLeastRail = useMediaQuery(SHELL_BREAKPOINTS.desktopRail);
+  const { toggleDrawer, togglePalette } = useShellChrome();
+
+  // Hamburger only renders when the sidebar is in drawer mode (<1024px).
+  const showHamburger = !isAtLeastRail;
 
   return (
-    <header className="lg:hidden flex items-center justify-between px-4 h-12 bg-black/[0.8] backdrop-blur-[20px] backdrop-saturate-[180%] sticky top-0 z-30">
-      <Link href="/today" className="text-[14px] font-semibold text-white tracking-[-0.224px] inline-flex items-center gap-2">
-        <ShipFlareLogo size={20} />
-        ShipFlare
-      </Link>
-
-      <nav className="flex items-center gap-0.5" aria-label="Mobile navigation">
-        <NavLink href="/today" current={pathname === '/today'}>Today</NavLink>
-        <NavLink href="/product" current={pathname.startsWith('/product')}>Product</NavLink>
-        <NavLink href="/growth" current={pathname.startsWith('/growth')}>Growth</NavLink>
-        <NavLink href="/calendar" current={pathname.startsWith('/calendar')}>Calendar</NavLink>
-        <NavLink href="/settings" current={pathname.startsWith('/settings')}>Settings</NavLink>
-        <form action={signOutAction}>
-          <button
-            type="submit"
-            className="px-2.5 min-h-[44px] inline-flex items-center text-[12px] text-white/60 hover:text-white transition-colors duration-200"
-          >
-            Sign out
-          </button>
-        </form>
-      </nav>
+    <header style={WRAPPER_STYLE}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+        {showHamburger ? (
+          <HamburgerButton onClick={toggleDrawer} />
+        ) : null}
+        <Ops>{label}</Ops>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <ThemeToggleButton />
+        <CommandPaletteHintButton onClick={togglePalette} />
+        <span
+          aria-hidden="true"
+          style={{
+            width: 28,
+            height: 28,
+            borderRadius: '50%',
+            background: 'linear-gradient(135deg, var(--sf-accent), var(--sf-accent))',
+            overflow: 'hidden',
+            display: 'inline-block',
+          }}
+        >
+          {userImage ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={userImage}
+              alt=""
+              width={28}
+              height={28}
+              style={{ width: 28, height: 28, objectFit: 'cover', display: 'block' }}
+            />
+          ) : null}
+        </span>
+      </div>
     </header>
   );
 }
 
-function NavLink({ href, current, children }: { href: string; current: boolean; children: React.ReactNode }) {
+function HamburgerButton({ onClick }: { onClick: () => void }) {
   return (
-    <Link
-      href={href}
-      className={`px-2.5 min-h-[44px] inline-flex items-center text-[12px] transition-colors duration-200 ${
-        current
-          ? 'text-white font-medium'
-          : 'text-white/60 hover:text-white'
-      }`}
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label="Open navigation"
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 32,
+        height: 32,
+        borderRadius: 'var(--sf-radius-md)',
+        border: '1px solid var(--sf-border-subtle)',
+        background: 'transparent',
+        color: 'var(--sf-fg-2)',
+        cursor: 'pointer',
+        fontFamily: 'inherit',
+        transition: 'all var(--sf-dur-base) var(--sf-ease-swift)',
+      }}
     >
-      {children}
-    </Link>
+      <svg
+        width="16"
+        height="16"
+        viewBox="0 0 16 16"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        aria-hidden="true"
+      >
+        <path d="M2 4h12M2 8h12M2 12h12" />
+      </svg>
+    </button>
+  );
+}
+
+function CommandPaletteHintButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label="Open command palette"
+      className="sf-mono"
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: 24,
+        padding: '0 8px',
+        borderRadius: 'var(--sf-radius-sm)',
+        border: '1px solid var(--sf-border-subtle)',
+        background: 'transparent',
+        color: 'var(--sf-fg-3)',
+        fontSize: 'var(--sf-text-xs)',
+        letterSpacing: 'var(--sf-track-mono)',
+        cursor: 'pointer',
+        fontFamily: 'inherit',
+        transition: 'all var(--sf-dur-base) var(--sf-ease-swift)',
+      }}
+    >
+      ⌘K
+    </button>
   );
 }

@@ -44,6 +44,20 @@ export type AnyToolDefinition = ToolDefinition<any, any>;
  */
 export interface ToolContext {
   abortSignal: AbortSignal;
+  /**
+   * Emit a live progress update for a slow tool. Optional — tools that
+   * are fast enough not to need a status line just don't call it.
+   *
+   * `toolName` is passed explicitly so a tool can attribute progress
+   * events to the outer tool name visible to the user. The transport
+   * (publishToolProgress) takes care of userId binding and Redis fan-out;
+   * failures inside `emitProgress` MUST NOT throw.
+   */
+  emitProgress?: (
+    toolName: string,
+    message: string,
+    metadata?: Record<string, unknown>,
+  ) => void;
   get<T>(key: string): T;
 }
 
@@ -61,10 +75,103 @@ export interface ToolResult {
 // Stream event types (ported from engine/query.ts)
 // ---------------------------------------------------------------------------
 
+/**
+ * Provenance tag attached to `tool_start` / `tool_done` events when the
+ * emitting agent is a subagent spawned via the Task tool. The Task tool
+ * augments its child's events with this field so the top-level event
+ * handler (the team-run worker) can attribute each nested tool call to
+ * the specialist that ran it AND link it to the `team_tasks.id` row that
+ * started the spawn — giving the activity-log UI a complete delegation
+ * tree. Only the innermost spawn tags the event; outer spawns preserve
+ * the existing tag so leaf events carry their immediate parent.
+ */
+export interface StreamEventSpawnMeta {
+  /** `team_tasks.id` of the spawn that produced this event. */
+  parentTaskId: string;
+  /**
+   * Anthropic-issued `tool_use_id` of the coordinator's Task call that
+   * spawned this subagent. Gives the UI a stable anchor to nest every
+   * child event under the parent's dispatch card — the reducer's
+   * `progressByParentToolUse` map is keyed by it. Borrowed from Claude
+   * Code's `parentToolUseID` pattern (engine/utils/messages.ts:603).
+   */
+  parentToolUseId: string;
+  /** `team_members.id` of the subagent that emitted the event, if resolvable. */
+  fromMemberId: string | null;
+  /** AGENT.md `name` of the subagent — always present, cheap fallback. */
+  agentName: string;
+}
+
 export type StreamEvent =
-  | { type: 'tool_start'; toolName: string; toolUseId: string; input: unknown }
-  | { type: 'tool_done'; toolName: string; toolUseId: string; result: ToolResult; durationMs: number }
+  | {
+      type: 'tool_start';
+      toolName: string;
+      toolUseId: string;
+      input: unknown;
+      spawnMeta?: StreamEventSpawnMeta;
+    }
+  | {
+      type: 'tool_done';
+      toolName: string;
+      toolUseId: string;
+      result: ToolResult;
+      durationMs: number;
+      spawnMeta?: StreamEventSpawnMeta;
+    }
   | { type: 'text_delta'; text: string }
+  /**
+   * Fired when the assistant begins a text content block. The `messageId`
+   * is stable across the whole block and its deltas/stop — downstream
+   * consumers use it to key partial-message state. `turn` reflects the
+   * query-loop turn that produced this assistant message; a single
+   * assistant response may contain multiple text blocks interleaved with
+   * tool_use blocks, so `blockIndex` disambiguates.
+   */
+  | {
+      type: 'assistant_text_start';
+      messageId: string;
+      turn: number;
+      blockIndex: number;
+      /**
+       * Present when the assistant text comes from a subagent spawn;
+       * carries `parentToolUseId` so the client can nest the text under
+       * the parent's dispatch card. Absent on the coordinator's own
+       * top-level text.
+       */
+      spawnMeta?: StreamEventSpawnMeta;
+    }
+  | {
+      type: 'assistant_text_delta';
+      messageId: string;
+      turn: number;
+      blockIndex: number;
+      delta: string;
+      spawnMeta?: StreamEventSpawnMeta;
+    }
+  | {
+      type: 'assistant_text_stop';
+      messageId: string;
+      turn: number;
+      blockIndex: number;
+      /** Full accumulated text for the block — convenience for callers. */
+      text: string;
+      spawnMeta?: StreamEventSpawnMeta;
+    }
+  /**
+   * Streamed partial JSON for a tool_use content block. The Anthropic SDK
+   * emits one `input_json_delta` per token as the LLM writes tool args,
+   * so the UI can show "generating task description…" before the full
+   * call lands on team_messages. `toolUseId` ties each delta to its
+   * eventual `tool_start` event; ephemeral — never persisted.
+   */
+  | {
+      type: 'tool_input_delta';
+      toolUseId: string;
+      turn: number;
+      blockIndex: number;
+      /** Raw JSON fragment appended to the tool's input string. */
+      jsonDelta: string;
+    }
   | { type: 'turn_start'; turn: number }
   | { type: 'turn_complete'; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }
   | { type: 'error'; error: string; recoverable: boolean };

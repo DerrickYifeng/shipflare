@@ -8,7 +8,6 @@ import {
   activityEvents,
   xTargetAccounts,
   xMonitoredTweets,
-  todoItems,
 } from '@/lib/db/schema';
 import { eq, and, inArray, lt } from 'drizzle-orm';
 import { XClient, XForbiddenError } from '@/lib/x-client';
@@ -23,7 +22,6 @@ import { createLogger, loggerForJob, type Logger } from '@/lib/logger';
 import { buildContentUrl } from '@/lib/platform-config';
 import { MemoryStore } from '@/memory/store';
 import { AgentDream } from '@/memory/dream';
-import { buildMemoryPrompt } from '@/memory/prompt-builder';
 
 const baseLog = createLogger('worker:x-monitor');
 
@@ -319,17 +317,16 @@ async function processXMonitorForUser(
       ),
     );
 
-  // Run reply-scan skill for tweets within reply window
+  // Run hardened reply pipeline for tweets within reply window
   if (tweetsForReply.length > 0) {
     const memoryStore = new MemoryStore(userId, productId);
     const dream = new AgentDream(memoryStore);
-    const memoryPrompt = await buildMemoryPrompt(memoryStore);
 
-    // Run hardened reply pipeline: per-tweet parallel execution.
-    // Each tweet goes through: product-opportunity-judge → reply-drafter → ai-slop + anchor validators.
-    // TODO: memoryPrompt and xClient deps were previously injected at the batch runSkill level.
-    // Memory injection now happens inside reply-scan's own skill mechanism via skill-runner deps.
-    // If quality regression is observed, thread memoryPrompt into HardenedReplyInput and forward it.
+    // Per-tweet parallel execution. Each tweet goes through:
+    //   product-opportunity-judge → x-reply-writer → ai-slop + anchor validators.
+    // Both LLM stages run via direct `runAgent(loadAgentFromFile(...))`
+    // against the unified registry.
+    // If quality regression is observed, thread buildMemoryPrompt(memoryStore) into HardenedReplyInput and forward it.
     const hardenedResults = await Promise.all(
       tweetsForReply.map((t) =>
         draftReplyWithHardening({
@@ -379,7 +376,8 @@ async function processXMonitorForUser(
           community: `@${tweetInput.authorUsername}`,
           title: tweetInput.tweetText.slice(0, 200),
           url: buildContentUrl('x', tweetInput.authorUsername, tweetInput.tweetId),
-          relevanceScore: replyOutput.confidence,
+          scoutConfidence: replyOutput.confidence,
+          scoutReason: 'monitor-drafted',
         })
         .onConflictDoNothing()
         .returning();
@@ -420,28 +418,9 @@ async function processXMonitorForUser(
         traceId,
       });
 
-      // Inject time-sensitive todo item for the Today page
-      await db
-        .insert(todoItems)
-        .values({
-          userId,
-          draftId: draft.id,
-          todoType: 'reply_thread',
-          source: 'discovery',
-          priority: 'time_sensitive',
-          title: `Reply to @${tweetInput.authorUsername}: ${tweetInput.tweetText.slice(0, 80)}...`,
-          platform: 'x',
-          community: `@${tweetInput.authorUsername}`,
-          externalUrl: buildContentUrl('x', tweetInput.authorUsername, tweetInput.tweetId),
-          confidence: replyOutput.confidence,
-          expiresAt: new Date(Date.now() + 4 * 60 * 60 * 1000),
-        })
-        .onConflictDoNothing();
-
-      await publishUserEvent(userId, 'tweets', {
-        type: 'todo_added',
-        todoType: 'reply_thread',
-      });
+      // (Phase 2 migration: todo_items table dropped. plan_items injection for
+      // monitor-triggered replies lands with the plan-execute dispatcher in
+      // Phase 7.)
     }
 
     log.info(
@@ -451,7 +430,7 @@ async function processXMonitorForUser(
     // Publish SSE event
     await publishUserEvent(userId, 'tweets', {
       type: 'agent_complete',
-      agentName: 'reply-drafter',
+      agentName: 'x-reply-writer',
       stats: {
         tweetsScanned: totalNewTweets,
         withinWindow: tweetsForReply.length,

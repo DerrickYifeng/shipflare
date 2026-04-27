@@ -14,9 +14,6 @@ import {
 } from 'drizzle-orm/pg-core';
 import { desc } from 'drizzle-orm';
 import { users } from './users';
-import { products } from './products';
-import { drafts } from './drafts';
-import { weeklyThemes } from './weekly-themes';
 
 /**
  * Target accounts to monitor for the Reply Guy Engine.
@@ -49,10 +46,14 @@ export const xMonitoredTweetStatusEnum = pgEnum('x_monitored_tweet_status', [
   'pending', 'draft_created', 'replied', 'skipped', 'expired',
 ]);
 
-export const xContentCalendarStatusEnum = pgEnum('x_content_calendar_status', [
-  'scheduled', 'draft_created', 'approved', 'posted', 'skipped',
-]);
-
+/**
+ * Historical enum name — the x_content_calendar table is gone but the
+ * enum survives as the type backing `threads.state` (channels.ts).
+ * Intentionally NOT re-exported from src/lib/db/schema/index.ts so new
+ * code doesn't accept it as public API. Rename requires ALTER TYPE on
+ * a live column and is deferred until we have a reason to spend the
+ * migration.
+ */
 export const xContentCalendarItemStateEnum = pgEnum('x_content_calendar_item_state', [
   'queued',
   'drafting',
@@ -94,50 +95,6 @@ export const xMonitoredTweets = pgTable(
       table.status,
       table.replyDeadline,
     ),
-  ],
-);
-
-/**
- * Content calendar for scheduled original X posts.
- * Enforces content mix: 40% metric, 30% educational, 20% engagement, 10% product.
- */
-export const xContentCalendar = pgTable(
-  'x_content_calendar',
-  {
-    id: text('id')
-      .primaryKey()
-      .$defaultFn(() => crypto.randomUUID()),
-    userId: text('user_id')
-      .notNull()
-      .references(() => users.id, { onDelete: 'cascade' }),
-    productId: text('product_id')
-      .notNull()
-      .references(() => products.id, { onDelete: 'cascade' }),
-    channel: text('channel').notNull().default('x'), // 'x' | 'reddit' | 'linkedin' | ...
-    scheduledAt: timestamp('scheduled_at', { mode: 'date' }).notNull(),
-    contentType: text('content_type').notNull(), // 'metric' | 'educational' | 'engagement' | 'product' | 'thread'
-    status: xContentCalendarStatusEnum('status').notNull().default('scheduled'),
-    topic: text('topic'),
-    draftId: text('draft_id').references(() => drafts.id),
-    postedExternalId: text('posted_external_id'),
-    state: xContentCalendarItemStateEnum('state').notNull().default('queued'),
-    failureReason: text('failure_reason'),
-    retryCount: integer('retry_count').notNull().default(0),
-    lastAttemptAt: timestamp('last_attempt_at', { mode: 'date' }),
-    angle: text('angle'),
-    themeId: text('theme_id').references(() => weeklyThemes.id, { onDelete: 'set null' }),
-    isWhiteSpace: boolean('is_white_space').notNull().default(false),
-    createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
-  },
-  (t) => [
-    index('xcc_user_channel_status_scheduled_idx').on(
-      t.userId,
-      t.channel,
-      t.status,
-      t.scheduledAt,
-    ),
-    index('xcc_theme_idx').on(t.themeId),
   ],
 );
 
@@ -234,7 +191,6 @@ export const xAnalyticsSummary = pgTable(
  * Platform-generic aliases for code that doesn't need to be X-specific.
  * The underlying DB tables keep their x_* names until a manual migration renames them.
  */
-export const contentCalendar = xContentCalendar;
 export const analyticsSummary = xAnalyticsSummary;
 export const targetAccounts = xTargetAccounts;
 export const monitoredContent = xMonitoredTweets;

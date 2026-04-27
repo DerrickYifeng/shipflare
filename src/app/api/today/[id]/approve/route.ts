@@ -1,106 +1,70 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { auth } from '@/lib/auth';
-import { db } from '@/lib/db';
-import { todoItems, drafts, threads, channels } from '@/lib/db/schema';
-import { eq, and } from 'drizzle-orm';
-import { enqueuePosting } from '@/lib/queue';
+import { enqueuePlanExecute } from '@/lib/queue';
+import {
+  findOwnedPlanItem,
+  paramsSchema,
+  writePlanItemState,
+} from '@/app/api/plan-item/[id]/_helpers';
 import { createLogger, loggerForRequest } from '@/lib/logger';
 
 const baseLog = createLogger('api:today:approve');
 
+/**
+ * PATCH /api/today/:id/approve
+ *
+ * Thin shim over POST /api/plan-item/:id/approve so the existing
+ * `useToday()` hook can keep its PATCH signature. Ids are plan_item UUIDs
+ * now — Today v3 renders plan_items directly.
+ *
+ *   200 { success: true }
+ *   400 invalid_id
+ *   401 unauthorized
+ *   404 not_found
+ *   409 invalid_transition
+ */
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
-) {
+): Promise<Response> {
   const { log, traceId } = loggerForRequest(baseLog, request);
+
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const { id } = await params;
-  const userId = session.user.id;
-
-  // Single-round-trip ownership + draft + thread + channel resolution.
-  // LEFT JOINs handle the legitimate "todo with no draft" case (after H6b
-  // the draft_id FK ON DELETE SET NULL means a todo can outlive its draft);
-  // INNER would silently drop those valid rows.
-  const [row] = await db
-    .select({
-      todoStatus: todoItems.status,
-      draftId: drafts.id,
-      threadPlatform: threads.platform,
-      channelId: channels.id,
-    })
-    .from(todoItems)
-    .leftJoin(drafts, eq(todoItems.draftId, drafts.id))
-    .leftJoin(threads, eq(drafts.threadId, threads.id))
-    .leftJoin(
-      channels,
-      and(eq(channels.userId, userId), eq(channels.platform, threads.platform)),
-    )
-    .where(and(eq(todoItems.id, id), eq(todoItems.userId, userId)))
-    .limit(1);
-
-  if (!row) {
-    return NextResponse.json({ error: 'Todo not found' }, { status: 404 });
-  }
-
-  if (row.todoStatus !== 'pending') {
+  const { id: rawId } = await params;
+  const parsed = paramsSchema.safeParse({ id: rawId });
+  if (!parsed.success) {
     return NextResponse.json(
-      { error: 'Todo already processed' },
-      { status: 400 },
+      { error: 'invalid_id' },
+      { status: 400, headers: { 'x-trace-id': traceId } },
     );
   }
 
-  // If linked to a draft, approve the draft and enqueue posting.
-  // drafts.threadId is NOT NULL and threads.platform is NOT NULL, so when
-  // row.draftId is present row.threadPlatform is guaranteed non-null.
-  if (row.draftId) {
-    const draftId = row.draftId;
-    const platform = row.threadPlatform ?? 'reddit';
-
-    await db
-      .update(drafts)
-      .set({ status: 'approved', updatedAt: new Date() })
-      .where(eq(drafts.id, draftId));
-
-    if (row.channelId) {
-      await enqueuePosting({
-        userId,
-        draftId,
-        channelId: row.channelId,
-        traceId,
-      });
-      log.info(`Todo ${id} approved, posting enqueued for draft ${draftId}`);
-    } else {
-      // Don't silently swallow — the user needs to know their approval won't
-      // result in a post. Roll back the draft-status change so they can
-      // retry after connecting the account.
-      log.warn(`Todo ${id} approve blocked: no ${platform} channel for user ${userId}`);
-      await db
-        .update(drafts)
-        .set({ status: 'pending', updatedAt: new Date() })
-        .where(eq(drafts.id, draftId));
-      return NextResponse.json(
-        {
-          error: `Connect your ${platform === 'x' ? 'X' : platform} account to publish this post.`,
-          code: 'NO_CHANNEL',
-          platform,
-        },
-        { status: 409 },
-      );
-    }
+  const row = await findOwnedPlanItem(parsed.data.id, session.user.id);
+  if (!row) {
+    return NextResponse.json(
+      { error: 'not_found' },
+      { status: 404, headers: { 'x-trace-id': traceId } },
+    );
   }
 
-  // Mark todo as approved
-  await db
-    .update(todoItems)
-    .set({ status: 'approved', actedAt: new Date() })
-    .where(eq(todoItems.id, id));
+  const rejection = await writePlanItemState(row, 'approved');
+  if (rejection) return rejection;
 
+  await enqueuePlanExecute({
+    schemaVersion: 1,
+    planItemId: row.id,
+    userId: row.userId,
+    phase: 'execute',
+    traceId,
+  });
+
+  log.info(`plan_item ${row.id} approved via /today`);
   return NextResponse.json(
-    { success: true, traceId },
+    { success: true },
     { headers: { 'x-trace-id': traceId } },
   );
 }

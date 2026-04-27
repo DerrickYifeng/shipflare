@@ -1,5 +1,8 @@
 import { getPlatformCharLimits } from '@/lib/platform-config';
-import type { ContentValidatorFailure } from './pipeline';
+import type {
+  ContentValidatorFailure,
+  ContentValidatorWarning,
+} from './pipeline';
 
 /**
  * Build a short, targeted repair prompt from a list of validator failures.
@@ -12,6 +15,7 @@ import type { ContentValidatorFailure } from './pipeline';
 export function buildRepairPrompt(
   failures: ContentValidatorFailure[],
   platform: string,
+  warnings: ContentValidatorWarning[] = [],
 ): string {
   const instructions: string[] = [];
 
@@ -49,6 +53,43 @@ export function buildRepairPrompt(
     }
   }
 
+  for (const w of warnings) {
+    switch (w.validator) {
+      case 'hashtag_count': {
+        instructions.push(
+          `Hashtag count is ${w.count} (${w.hashtags.join(' ')}); the ` +
+            `target range for ${platform} is ${w.min}-${w.max}. ` +
+            (w.count > w.max
+              ? 'Drop the surplus.'
+              : 'Add #buildinpublic plus 1 topical tag.'),
+        );
+        break;
+      }
+      case 'links_in_reply': {
+        instructions.push(
+          `Replies should not contain links (${w.urls.join(', ')}). Remove ` +
+            `the URL — answer the OP without driving them off the platform.`,
+        );
+        break;
+      }
+      case 'links_in_post_body': {
+        instructions.push(
+          `Don't put links inside the post body (${w.urls.join(', ')}). ` +
+            `Move the URL to the first-reply field; X penalizes reach on ` +
+            `tweets that contain links.`,
+        );
+        break;
+      }
+      case 'anchor_token': {
+        instructions.push(
+          `The reply has no concrete anchor (number, proper noun, named ` +
+            `tool, or timestamp). Add one specific detail or skip the reply.`,
+        );
+        break;
+      }
+    }
+  }
+
   return instructions.join('\n\n');
 }
 
@@ -74,7 +115,7 @@ export function summarizeFailures(
 }
 
 /**
- * Convenience: expose the two X caps together for UI that needs to echo
+ * Convenience: expose the two caps together for UI that needs to echo
  * the limit back to the user before sending a retry. Platform-agnostic
  * despite the name — just two char-limit lookups in one call.
  */
