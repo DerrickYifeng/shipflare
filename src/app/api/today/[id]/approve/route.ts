@@ -178,7 +178,7 @@ async function findDraftForPlanItem(planItemId: string): Promise<string | null> 
   const [row] = await db
     .select({ id: drafts.id })
     .from(drafts)
-    .where(eq(drafts.planItemId, planItemId))
+    .where(and(eq(drafts.planItemId, planItemId), eq(drafts.status, 'pending')))
     .limit(1);
   return row?.id ?? null;
 }
