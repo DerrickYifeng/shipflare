@@ -1,6 +1,6 @@
 import type { Job } from 'bullmq';
 import { db } from '@/lib/db';
-import { drafts, posts, threads, activityEvents } from '@/lib/db/schema';
+import { drafts, posts, threads, activityEvents, planItems } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { RedditClient } from '@/lib/reddit-client';
 import { XClient } from '@/lib/x-client';
@@ -303,6 +303,15 @@ export async function processPosting(job: Job<PostingJobData>) {
       .set({ status: 'posted', updatedAt: new Date() })
       .where(eq(drafts.id, draftId));
 
+    // If this draft was created from a plan_item, mark the plan_item completed
+    // so Today and the calendar reflect the terminal state immediately.
+    if (draft.planItemId) {
+      await db
+        .update(planItems)
+        .set({ state: 'completed', updatedAt: new Date(), completedAt: new Date() })
+        .where(eq(planItems.id, draft.planItemId));
+    }
+
     // Shadowban detection: trip circuit breaker (Reddit replies only)
     if (!isX && result.shadowbanned && draftType === 'reply') {
       log.error(`SHADOWBAN detected: ${externalId} in r/${thread.community}`);
@@ -348,6 +357,15 @@ export async function processPosting(job: Job<PostingJobData>) {
       .update(drafts)
       .set({ status: 'failed', updatedAt: new Date() })
       .where(eq(drafts.id, draftId));
+
+    // If this draft was created from a plan_item, mark the plan_item failed
+    // so Today and the calendar reflect the terminal state immediately.
+    if (draft.planItemId) {
+      await db
+        .update(planItems)
+        .set({ state: 'failed', updatedAt: new Date() })
+        .where(eq(planItems.id, draft.planItemId));
+    }
 
     // Telemetry: terminal failure at the posting stage. Keep metadata
     // minimal to avoid leaking provider error bodies into the funnel.
