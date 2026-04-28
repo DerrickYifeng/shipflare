@@ -210,6 +210,10 @@ export function ReplyCard({
 }: ReplyCardProps) {
   const [localEditing, setLocalEditing] = useState(false);
   const [editBody, setEditBody] = useState(item.draftBody ?? '');
+  // Tracks whether the user has already opened the X compose tab. Drives
+  // the "Send reply" → "Open X again" label swap. Local-only — resets on
+  // hard refresh; the card stays in the feed regardless.
+  const [hasOpenedX, setHasOpenedX] = useState(false);
   const rootRef = useRef<HTMLElement>(null);
 
   const isEditing = localEditing || forceEditing;
@@ -558,11 +562,30 @@ export function ReplyCard({
             background: 'var(--sf-bg-tertiary)',
           }}
         >
-          {item.status === 'handed_off' ? (
+          {item.xIntentUrl ? (
             <>
-              <Button size="sm" disabled>
-                Opened in X
+              <Button
+                size="sm"
+                disabled={over || !item.draftBody}
+                onClick={() => {
+                  if (typeof window !== 'undefined') {
+                    window.open(
+                      item.xIntentUrl!,
+                      '_blank',
+                      'noopener,noreferrer',
+                    );
+                  }
+                  setHasOpenedX(true);
+                }}
+                title={
+                  over
+                    ? `Reply is ${len - cap} chars over the ${cap} cap`
+                    : undefined
+                }
+              >
+                {hasOpenedX ? 'Open X again' : 'Send reply'}
               </Button>
+              <TextAction onClick={() => setLocalEditing(true)}>Edit</TextAction>
               <TextAction onClick={() => onSkip(item.id)}>Skip</TextAction>
             </>
           ) : item.status === 'queued' && onPostNow ? (

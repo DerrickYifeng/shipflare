@@ -4,6 +4,8 @@ import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { drafts, planItems, threads } from '@/lib/db/schema';
 import type { PlanItemState } from '@/lib/plan-state';
+import { PLATFORMS } from '@/lib/platform-config';
+import { buildXIntentUrl } from '@/lib/x-intent-url';
 
 // V3 Today feed — merges two sources:
 //
@@ -82,6 +84,13 @@ interface TodoItemRow {
    * the user's first click". Null for reply-card rows (drafts table only).
    */
   planState: PlanItemState | null;
+  /**
+   * Pre-built X compose intent URL. Set for X drafts only (replies and
+   * original posts). When non-null the UI bypasses the API/queue path
+   * entirely — the user clicks once to open X compose pre-filled, posts
+   * manually, and the card stays in the feed until they Skip it.
+   */
+  xIntentUrl: string | null;
   title: string;
   platform: string;
   community: string | null;
@@ -202,6 +211,7 @@ export async function GET() {
       draftCreatedAt: drafts.createdAt,
       threadId: threads.id,
       threadPlatform: threads.platform,
+      threadExternalId: threads.externalId,
       threadCommunity: threads.community,
       threadTitle: threads.title,
       threadBody: threads.body,
@@ -343,6 +353,12 @@ export async function GET() {
       priority: derivePriority(row.scheduledAt, now),
       status: 'pending' as const,
       planState: row.state as PlanItemState,
+      // X original posts → browser handoff via intent URL. No in_reply_to.
+      // Reddit / other channels keep `xIntentUrl: null` and use the API path.
+      xIntentUrl:
+        row.channel === PLATFORMS.x.id && draftBody
+          ? buildXIntentUrl({ text: draftBody })
+          : null,
       title: row.title,
       platform: row.channel ?? 'x',
       community: null,
@@ -407,6 +423,17 @@ export async function GET() {
       priority: 'time_sensitive',
       status: 'pending',
       planState: null,
+      // X reply → browser handoff with in_reply_to pointing at the thread.
+      // Reddit drafts keep xIntentUrl null and flow through the API.
+      xIntentUrl:
+        row.threadPlatform === PLATFORMS.x.id &&
+        row.replyBody &&
+        row.threadExternalId
+          ? buildXIntentUrl({
+              text: row.replyBody,
+              inReplyToTweetId: row.threadExternalId,
+            })
+          : null,
       title: row.threadTitle ?? 'Reply opportunity',
       platform: row.threadPlatform,
       community: row.threadCommunity,

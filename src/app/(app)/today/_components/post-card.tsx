@@ -78,6 +78,10 @@ export function PostCard({
 }: PostCardProps) {
   const [localEditing, setLocalEditing] = useState(false);
   const [editBody, setEditBody] = useState(item.draftBody ?? '');
+  // Tracks whether the user has already opened the X compose tab once.
+  // Drives the button label swap from "Schedule" → "Post now". Local-only
+  // so it resets on a hard refresh — the card itself stays in the feed.
+  const [hasOpenedX, setHasOpenedX] = useState(false);
   const rootRef = useRef<HTMLElement>(null);
 
   const isEditing = localEditing || forceEditing;
@@ -304,33 +308,49 @@ export function PostCard({
         }}
       >
         {!isEditing ? (() => {
-          // Card is in one of three render modes based on lifecycle:
-          //   queued       — server confirmed it's in the posting queue;
-          //                  show "Post now" + ETA, plus Skip.
-          //   handed_off   — X intent URL was opened in a new tab; show
-          //                  "Opened in X" disabled badge.
-          //   pending(*)   — pre-click or in-flight; show "Schedule" /
-          //                  "Approve" + edit/skip/tomorrow.
-          // pending_approval (in-flight) reuses the pending render so the
-          // Button can show its native loading state via `disabled`.
-          const isQueued =
+          // Three render modes by lifecycle:
+          //   X handoff     — has xIntentUrl: open X compose pre-filled.
+          //                   Card stays in feed; user clicks Skip when done.
+          //                   Button toggles "Schedule" → "Post now" after
+          //                   the first click.
+          //   Queued (API)  — Reddit (or future API platforms) where the
+          //                   server queued via BullMQ; show "Post now" + ETA.
+          //   Default       — pre-click; show "Schedule" / "Approve".
+          const isInFlight = item.status === 'pending_approval';
+          const isQueuedApi =
             item.status === 'queued' ||
             (item.planState === 'approved' && !!item.draftBody);
-          const isHandedOff = item.status === 'handed_off';
-          const isInFlight = item.status === 'pending_approval';
 
-          if (isHandedOff) {
+          if (item.xIntentUrl) {
+            const intentUrl = item.xIntentUrl;
             return (
               <>
-                <Button size="sm" disabled>
-                  Opened in X
+                <Button
+                  size="sm"
+                  disabled={over || !item.draftBody}
+                  onClick={() => {
+                    if (typeof window !== 'undefined') {
+                      window.open(intentUrl, '_blank', 'noopener,noreferrer');
+                    }
+                    setHasOpenedX(true);
+                  }}
+                  title={
+                    over
+                      ? `Post is ${len - cap} chars over the ${cap} cap`
+                      : undefined
+                  }
+                >
+                  {hasOpenedX ? 'Post now' : 'Schedule'}
                 </Button>
+                {item.draftBody ? (
+                  <TextAction onClick={() => setLocalEditing(true)}>Edit</TextAction>
+                ) : null}
                 <TextAction onClick={() => onSkip(item.id)}>Skip</TextAction>
               </>
             );
           }
 
-          if (isQueued && onPostNow) {
+          if (isQueuedApi && onPostNow) {
             return (
               <>
                 <Button size="sm" onClick={() => onPostNow(item.id)}>

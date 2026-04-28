@@ -118,6 +118,13 @@ export interface TodoItem {
   planState: PlanState | null;
   /** When `status === 'queued'`, ms until the BullMQ job fires (best-effort). */
   queuedDelayMs?: number;
+  /**
+   * Pre-built X compose intent URL. Non-null only for X drafts (replies and
+   * original posts). When set, the card uses browser handoff instead of the
+   * API/queue path: clicking opens X compose pre-filled, the card stays in
+   * Today until the user Skips it.
+   */
+  xIntentUrl: string | null;
   title: string;
   platform: string;
   community: string | null;
