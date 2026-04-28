@@ -17,6 +17,11 @@ import {
 import { ensureTeamExists } from '@/lib/team-provisioner';
 import { enqueueTeamRun } from '@/lib/queue/team-run';
 import { createAutomationConversation } from '@/lib/team-conversation-helpers';
+import { dispatchApprove } from '@/lib/approve-dispatch';
+import {
+  loadDispatchInputForDraft,
+  findDraftIdForPlanItem,
+} from '@/lib/approve-loaders';
 
 const baseLog = createLogger('worker:plan-execute');
 
@@ -196,21 +201,67 @@ export async function processPlanExecute(
       return;
     }
 
-    const skillName = route.executeSkill ?? row.skillName;
-    if (!skillName) {
+    // For content_post / content_reply with a known channel, route via the
+    // dispatcher (same code path as the manual approve API). Anything else
+    // (email_send, runsheet_beat, etc.) keeps the legacy state-only stub
+    // until a future phase wires its execute path.
+    const isContent =
+      (row.kind === 'content_post' || row.kind === 'content_reply') &&
+      (row.channel === 'x' || row.channel === 'reddit');
+
+    if (!isContent) {
       log.info(
-        `plan_item ${planItemId}: execute phase for kind=${row.kind} has no skill registered — treating as manual-completion`,
+        `plan_item ${planItemId}: execute phase for kind=${row.kind} has no dispatcher route — manual completion`,
       );
       const afterExecuting = await writeState(current, 'executing');
       await writeState(afterExecuting, 'completed');
       return;
     }
 
-    log.info(
-      `plan_item ${planItemId}: execute phase → skill=${skillName} (legacy stub: state transition only)`,
-    );
-    const afterExecuting = await writeState(current, 'executing');
-    await writeState(afterExecuting, 'completed');
+    const draftId = await findDraftIdForPlanItem(planItemId);
+    if (!draftId) {
+      log.warn(
+        `plan_item ${planItemId}: no linked pending draft found — leaving in current state for manual retry`,
+      );
+      return;
+    }
+
+    const dispatchInput = await loadDispatchInputForDraft(draftId, row.userId);
+    if (!dispatchInput) {
+      log.warn(
+        `plan_item ${planItemId}: draft ${draftId} could not load (channel missing?) — leaving in current state`,
+      );
+      return;
+    }
+
+    // Dispatch FIRST so we only advance to 'executing' for outcomes that
+    // actually start posting. Handoff and deferred outcomes leave the row
+    // in 'approved' — both 'executing → approved' would be an illegal SM
+    // transition (only 'completed'/'failed' exit 'executing').
+    const decision = await dispatchApprove(dispatchInput);
+
+    if (decision.kind === 'handoff') {
+      // Auto-execute can't open a browser. X replies stay in 'approved'
+      // until the user manually clicks the card to trigger the handoff.
+      log.info(
+        `plan_item ${planItemId}: X reply requires manual handoff — leaving state at 'approved' for user action`,
+      );
+      return;
+    }
+
+    if (decision.kind === 'deferred') {
+      log.info(
+        `plan_item ${planItemId}: pacer deferred (${decision.reason}) — leaving state at 'approved'; sweeper will retry`,
+      );
+      return;
+    }
+
+    // queued — only NOW advance to 'executing'. The posting worker will
+    // write 'completed' or 'failed' (per Task 9) when the job finishes.
+    await writeState(current, 'executing');
+    // queued — posting worker will set plan_item.state = completed on success
+    // (per Task 9, posting.ts now writes back to plan_items).
+    log.info(`plan_item ${planItemId}: queued for posting (delay ${decision.delayMs}ms)`);
     return;
   }
 

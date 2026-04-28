@@ -127,17 +127,24 @@ turn before calling `draft_reply`:
    single sentence that broke the rule, not the whole reply. After
    rewriting, call `validate_draft` once more to confirm.
 6. **Decide what to persist.**
+
+   **`planItemId`** — when the team_run was triggered by a reply-sweep slot, the
+   coordinator passes the slot's plan_item id in context. Echo that id back via
+   `planItemId` in EVERY `draft_reply` call for the run so the resulting drafts
+   are tied back to the slot for state-tracking. If no planItemId is in context,
+   omit the field.
+
    - Self-check passes after the rewrite → call
-     `draft_reply({ threadId, draftBody, confidence, whyItWorks })`
+     `draft_reply({ threadId, draftBody, confidence, whyItWorks, planItemId })`
      normally; the founder will review and approve.
    - Self-check still fails after the rewrite → either skip the
      thread (record the rejection reasons in your `notes`), OR call
      `draft_reply` with `whyItWorks` flagged "needs human review:
-     <which rule>" so the founder sees the close-but-not-shipped
-     draft on the review queue. Prefer skipping when the failure is
-     a hard rule (length way over cap, hallucinated stats); prefer
-     "needs review" when the draft is one small edit away from
-     shipping.
+     <which rule>", `planItemId` (if in context) so the founder sees
+     the close-but-not-shipped draft on the review queue tied to its
+     slot. Prefer skipping when the failure is a hard rule (length
+     way over cap, hallucinated stats); prefer "needs review" when
+     the draft is one small edit away from shipping.
 7. **Increment counters** for your final StructuredOutput summary
    (threadsScanned, draftsCreated, draftsSkipped, plus the
    skip-reason rationale).

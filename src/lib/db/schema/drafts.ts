@@ -12,6 +12,7 @@ import {
 import { desc, sql } from 'drizzle-orm';
 import { users } from './users';
 import { threads } from './channels';
+import { planItems } from './plan-items';
 
 export const draftStatusEnum = pgEnum('draft_status', [
   'pending',
@@ -21,6 +22,7 @@ export const draftStatusEnum = pgEnum('draft_status', [
   'failed',
   'flagged',
   'needs_revision',
+  'handed_off',
 ]);
 
 export const postStatusEnum = pgEnum('post_status', [
@@ -52,6 +54,9 @@ export const drafts = pgTable(
     reviewScore: real('review_score'),
     reviewJson: jsonb('review_json'), // { checks, issues, suggestions }
     engagementDepth: integer('engagement_depth').notNull().default(0),
+    planItemId: text('plan_item_id').references(() => planItems.id, {
+      onDelete: 'set null',
+    }),
     media: jsonb('media')
       .default([])
       .$type<Array<{ url: string; type: 'image' | 'gif' | 'video'; alt?: string }>>(),
@@ -64,6 +69,7 @@ export const drafts = pgTable(
       t.status,
       desc(t.createdAt),
     ),
+    index('drafts_plan_item_idx').on(t.planItemId),
   ],
 );
 

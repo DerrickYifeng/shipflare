@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Job } from 'bullmq';
 import type { PlanExecuteJobData } from '@/lib/queue/plan-execute';
 import type { PlanItemState, PlanItemUserAction } from '@/lib/plan-state';
+import type { DispatchResult } from '@/lib/approve-dispatch';
 
 // ---------------------------------------------------------------------------
 // In-memory plan_items fixture. Each test primes one row's initial state
@@ -122,6 +123,32 @@ vi.mock('@/lib/queue/team-run', () => ({
   enqueueTeamRun: (input: Record<string, unknown>) => enqueueTeamRunMock(input),
 }));
 
+// ---------------------------------------------------------------------------
+// Approve-loaders + dispatcher mocks for the execute phase dispatcher path.
+// ---------------------------------------------------------------------------
+
+// Default: no linked draft. Individual tests override via mockResolvedValueOnce.
+const findDraftIdForPlanItemMock = vi.fn(
+  async (_planItemId: string): Promise<string | null> => null,
+);
+const loadDispatchInputForDraftMock = vi.fn(
+  async (_draftId: string, _userId: string): Promise<unknown> => null,
+);
+vi.mock('@/lib/approve-loaders', () => ({
+  findDraftIdForPlanItem: (planItemId: string) =>
+    findDraftIdForPlanItemMock(planItemId),
+  loadDispatchInputForDraft: (draftId: string, userId: string) =>
+    loadDispatchInputForDraftMock(draftId, userId),
+}));
+
+// Default: returns 'queued'. Individual tests override as needed.
+const dispatchApproveMock = vi.fn(
+  async (_input: unknown): Promise<DispatchResult> => ({ kind: 'queued', delayMs: 0 }),
+);
+vi.mock('@/lib/approve-dispatch', () => ({
+  dispatchApprove: (input: unknown) => dispatchApproveMock(input),
+}));
+
 // Avoid the logger touching real stdout noise in test output.
 vi.mock('@/lib/logger', () => ({
   createLogger: () => ({
@@ -150,6 +177,13 @@ beforeEach(() => {
   rows.clear();
   ensureTeamExistsMock.mockClear();
   enqueueTeamRunMock.mockClear();
+  findDraftIdForPlanItemMock.mockClear();
+  loadDispatchInputForDraftMock.mockClear();
+  dispatchApproveMock.mockClear();
+  // Reset to default: no linked draft, dispatcher returns queued.
+  findDraftIdForPlanItemMock.mockResolvedValue(null);
+  loadDispatchInputForDraftMock.mockResolvedValue(null);
+  dispatchApproveMock.mockResolvedValue({ kind: 'queued', delayMs: 0 });
 });
 
 describe('processPlanExecute — draft phase', () => {
@@ -249,7 +283,7 @@ describe('processPlanExecute — draft phase', () => {
 });
 
 describe('processPlanExecute — execute phase', () => {
-  it('drives approved → executing → completed for content_post', async () => {
+  it('drives approved → executing and queues for posting (content_post + x)', async () => {
     const { processPlanExecute } = await import('../plan-execute');
     seedItem({
       id: 'item-4',
@@ -259,11 +293,24 @@ describe('processPlanExecute — execute phase', () => {
       state: 'approved',
     });
 
+    // Wire up a linked draft + successful dispatch.
+    findDraftIdForPlanItemMock.mockResolvedValueOnce('draft-4');
+    loadDispatchInputForDraftMock.mockResolvedValueOnce({
+      draft: { id: 'draft-4', userId: 'u-1', threadId: 'th-1', draftType: 'original_post', replyBody: 'hi', planItemId: 'item-4' },
+      thread: { id: 'th-1', platform: 'x', externalId: '123' },
+      channelId: 'ch-1',
+      connectedAgeDays: 10,
+    });
+    dispatchApproveMock.mockResolvedValueOnce({ kind: 'queued', delayMs: 500 });
+
     await processPlanExecute(
       makeJob({ schemaVersion: 1, planItemId: 'item-4', userId: 'u-1', phase: 'execute' }),
     );
 
-    expect(rows.get('item-4')!.state).toBe('completed');
+    // State advances to 'executing'; the posting worker completes it to
+    // 'completed' async (Task 9). Plan-execute only queues the job.
+    expect(rows.get('item-4')!.state).toBe('executing');
+    expect(dispatchApproveMock).toHaveBeenCalledTimes(1);
   });
 
   it('drives planned+auto → executing → completed for metrics_compute', async () => {
@@ -342,11 +389,24 @@ describe('processPlanExecute — integration: full SM walk', () => {
     const ready = rows.get('item-sm')!;
     rows.set('item-sm', { ...ready, state: 'approved' });
 
-    // Step 5: sweeper picks up approved + fires execute phase
+    // Step 5: sweeper picks up approved + fires execute phase.
+    // Wire up a linked draft + successful dispatch so the path progresses.
+    findDraftIdForPlanItemMock.mockResolvedValueOnce('draft-sm');
+    loadDispatchInputForDraftMock.mockResolvedValueOnce({
+      draft: { id: 'draft-sm', userId: 'u-1', threadId: 'th-sm', draftType: 'original_post', replyBody: 'body', planItemId: 'item-sm' },
+      thread: { id: 'th-sm', platform: 'x', externalId: '999' },
+      channelId: 'ch-1',
+      connectedAgeDays: 5,
+    });
+    dispatchApproveMock.mockResolvedValueOnce({ kind: 'queued', delayMs: 0 });
+
     await processPlanExecute(
       makeJob({ schemaVersion: 1, planItemId: 'item-sm', userId: 'u-1', phase: 'execute' }),
     );
-    expect(rows.get('item-sm')!.state).toBe('completed');
+    // State is 'executing' — the posting worker (Task 9) will flip it to
+    // 'completed' async. Plan-execute's job ends after dispatching.
+    expect(rows.get('item-sm')!.state).toBe('executing');
+    expect(dispatchApproveMock).toHaveBeenCalledTimes(1);
   });
 });
 

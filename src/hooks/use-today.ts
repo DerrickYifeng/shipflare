@@ -40,6 +40,37 @@ async function postJson(url: string, init?: RequestInit): Promise<void> {
   );
 }
 
+interface ApproveResponseBody {
+  success?: boolean;
+  error?: string;
+  code?: string;
+  platform?: string;
+  browserHandoff?: { intentUrl: string };
+  queued?: { delayMs: number };
+  deferred?: boolean;
+  reason?: string;
+  retryAfterMs?: number;
+}
+
+/**
+ * Build a terse, spec-like deferred message in the ShipFlare voice.
+ * Examples:
+ *   "Daily cap reached — queued for tomorrow"
+ *   "Pacer not configured for this platform"
+ */
+function formatDeferredMessage(reason: string, retryAfterMs: number): string {
+  if (reason === 'over_daily_cap') {
+    const hours = Math.round(retryAfterMs / (60 * 60 * 1000));
+    if (hours <= 1) return 'Daily cap reached — queued for the next slot';
+    if (hours < 24) return `Daily cap reached — queued in ${hours}h`;
+    return 'Daily cap reached — queued for tomorrow';
+  }
+  if (reason === 'no_pacer_config') {
+    return 'Pacer not configured for this platform';
+  }
+  return `Posting deferred (${reason})`;
+}
+
 /**
  * Optimistic status markers layered on top of the server-side `'pending'`
  * status. The server only ever returns `'pending'` for todos; these extra
@@ -184,10 +215,49 @@ export function useToday() {
 
       mutate(markPending(id, 'pending_approval'), { revalidate: false });
       try {
-        await postJson(`/api/today/${id}/approve`, { method: 'PATCH' });
+        const res = await fetch(`/api/today/${id}/approve`, { method: 'PATCH' });
+        let body: ApproveResponseBody = {};
+        try {
+          body = (await res.json()) as ApproveResponseBody;
+        } catch {
+          // Non-JSON response — leave body empty.
+        }
+
+        // 202 deferred: pacer pushed the post to a later slot. Restore the
+        // card and surface a terse toast so the user knows what happened.
+        if (res.status === 202 && body.deferred) {
+          mutate(snapshot, { revalidate: false });
+          throw new TodayActionError(
+            formatDeferredMessage(body.reason ?? 'pacer', body.retryAfterMs ?? 0),
+            'deferred',
+            undefined,
+            202,
+          );
+        }
+
+        if (!res.ok) {
+          mutate(snapshot, { revalidate: false });
+          throw new TodayActionError(
+            body.error ?? `Request failed (${res.status})`,
+            body.code,
+            body.platform,
+            res.status,
+          );
+        }
+
+        // X reply handoff: pop the X compose tab pre-filled. The card is
+        // marked 'handed_off' on the server; the next revalidate drops it
+        // from the feed.
+        if (body.browserHandoff?.intentUrl) {
+          if (typeof window !== 'undefined') {
+            window.open(body.browserHandoff.intentUrl, '_blank', 'noopener,noreferrer');
+          }
+        }
       } catch (err) {
-        // Restore the exact state the user saw before the click.
-        mutate(snapshot, { revalidate: false });
+        // For non-deferred errors restore state; deferred path already did so.
+        if (!(err instanceof TodayActionError && err.code === 'deferred')) {
+          mutate(snapshot, { revalidate: false });
+        }
         throw err;
       }
       mutate();

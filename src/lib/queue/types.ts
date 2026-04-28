@@ -41,6 +41,16 @@ export const postingJobSchema = z.object({
   userId: z.string().min(1),
   draftId: z.string().min(1),
   channelId: z.string().min(1),
+  /**
+   * 'direct' = posting processor calls platform clients straight (manual
+   *            user approve, plan-execute auto-approve, reply-sweep when
+   *            we trust the draft as-is).
+   * 'agent'  = posting processor runs the posting agent (legacy autonomous
+   *            path; agent decides what to call + verifies).
+   * Default 'agent' for back-compat with any in-flight jobs whose payload
+   * was enqueued before this field existed.
+   */
+  mode: z.enum(['direct', 'agent']).default('agent'),
 });
 export type PostingJobData = z.input<typeof postingJobSchema>;
 

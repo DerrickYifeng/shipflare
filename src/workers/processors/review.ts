@@ -228,7 +228,9 @@ export async function processReview(job: Job<ReviewJobData>) {
         .limit(1);
 
       if (channel) {
-        await enqueuePosting({ userId, draftId, channelId: channel.id, traceId });
+        // delayMs: 0 is intentional during the dispatcher migration window —
+        // the pacer (Task 11) will replace this call with a paced enqueue.
+        await enqueuePosting({ userId, draftId, channelId: channel.id, traceId }, { delayMs: 0 });
       }
     }
 
