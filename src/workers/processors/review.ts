@@ -228,7 +228,7 @@ export async function processReview(job: Job<ReviewJobData>) {
         .limit(1);
 
       if (channel) {
-        await enqueuePosting({ userId, draftId, channelId: channel.id, traceId });
+        await enqueuePosting({ userId, draftId, channelId: channel.id, traceId }, { delayMs: 0 });
       }
     }
 

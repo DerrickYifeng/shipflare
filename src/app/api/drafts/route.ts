@@ -184,7 +184,7 @@ export async function POST(request: NextRequest) {
         draftId,
         channelId: channel.id,
         traceId,
-      });
+      }, { delayMs: 0 });
 
       // Telemetry: stage='approved' + thread_feedback ground-truth label.
       await recordPipelineEvent({
