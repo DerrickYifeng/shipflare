@@ -16,6 +16,7 @@ import { publishUserEvent } from '@/lib/redis';
 import { join } from 'path';
 import type { PostingJobData } from '@/lib/queue/types';
 import { getTraceId } from '@/lib/queue/types';
+import type { UsageSummary } from '@/core/types';
 import { postingOutputSchema } from '@/agents/schemas';
 import { createLogger, loggerForJob } from '@/lib/logger';
 import { addCost, getCostForRun } from '@/lib/cost-bucket';
@@ -28,6 +29,90 @@ const POSTING_AGENT_PATH = join(
   process.cwd(),
   'src/tools/AgentTool/agents/posting/AGENT.md',
 );
+
+// ---------------------------------------------------------------------------
+// Direct-mode posting (no agent, straight platform-client calls)
+// ---------------------------------------------------------------------------
+
+interface DirectModeArgs {
+  platform: string;
+  draftType: 'reply' | 'original_post';
+  draftText: string;
+  threadExternalId: string | null;
+  threadCommunity: string;
+  postTitle: string | null;
+  client: XClient | RedditClient;
+}
+
+export interface DirectModeResult {
+  success: boolean;
+  externalId: string | null;
+  externalUrl: string | null;
+  shadowbanned: boolean;
+  error?: string;
+}
+
+/**
+ * Direct-mode posting: skip the agent, call the platform client straight.
+ * Used by manual user approve and plan-execute auto-approve. Caller is
+ * responsible for circuit-breaker / rate-limit checks BEFORE calling this.
+ */
+export async function postViaDirectMode(
+  args: DirectModeArgs,
+): Promise<DirectModeResult> {
+  const isX = args.platform === PLATFORMS.x.id;
+  try {
+    if (isX) {
+      if (!(args.client instanceof XClient)) {
+        throw new Error('postViaDirectMode: X platform requires an XClient instance');
+      }
+      if (args.draftType === 'reply') {
+        if (!args.threadExternalId) {
+          throw new Error('X reply requires threadExternalId');
+        }
+        const r = await args.client.replyToTweet(args.threadExternalId, args.draftText);
+        return { success: true, externalId: r.tweetId, externalUrl: r.url, shadowbanned: false };
+      }
+      const r = await args.client.postTweet(args.draftText);
+      return { success: true, externalId: r.tweetId, externalUrl: r.url, shadowbanned: false };
+    }
+
+    // Reddit
+    if (!(args.client instanceof RedditClient)) {
+      throw new Error('postViaDirectMode: Reddit platform requires a RedditClient instance');
+    }
+    if (args.draftType === 'reply') {
+      if (!args.threadExternalId) {
+        throw new Error('Reddit reply requires threadExternalId');
+      }
+      const r = await args.client.postComment(`t3_${args.threadExternalId}`, args.draftText);
+      return {
+        success: true,
+        externalId: r.id,
+        externalUrl: `https://reddit.com${r.permalink}`,
+        shadowbanned: false,
+      };
+    }
+    if (!args.postTitle) {
+      throw new Error('Reddit original_post requires postTitle');
+    }
+    const r = await args.client.submitPost(args.threadCommunity, args.postTitle, args.draftText);
+    return {
+      success: true,
+      externalId: r.id,
+      externalUrl: r.url,
+      shadowbanned: false,
+    };
+  } catch (err) {
+    return {
+      success: false,
+      externalId: null,
+      externalUrl: null,
+      shadowbanned: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
 
 export async function processPosting(job: Job<PostingJobData>) {
   const traceId = getTraceId(job.data, job.id);
@@ -110,17 +195,68 @@ export async function processPosting(job: Job<PostingJobData>) {
       ? { redditClient: client }
       : {};
 
-  const agentConfig = loadAgentFromFile(POSTING_AGENT_PATH, registry.toMap());
-  const context = createToolContext(deps);
-  const { result, usage } = await runAgent(
-    agentConfig,
-    JSON.stringify(input),
-    context,
-    postingOutputSchema,
-  );
+  let result: {
+    success: boolean;
+    externalId?: string | null;
+    externalUrl?: string | null;
+    shadowbanned: boolean;
+    commentId?: string | null;
+    postId?: string | null;
+    permalink?: string | null;
+    url?: string | null;
+    error?: string;
+    verified?: boolean;
+    draftType?: string;
+  };
+  const zeroUsage: UsageSummary = {
+    costUsd: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    model: '',
+    turns: 0,
+  };
+  let usage: UsageSummary = zeroUsage;
+
+  const mode = job.data.mode ?? 'agent';
+  if (mode === 'direct') {
+    const direct = await postViaDirectMode({
+      platform,
+      draftType: draftType as 'reply' | 'original_post',
+      draftText: draft.replyBody,
+      threadExternalId: thread.externalId,
+      threadCommunity: thread.community,
+      postTitle: draft.postTitle ?? null,
+      client,
+    });
+    result = {
+      success: direct.success,
+      externalId: direct.externalId,
+      externalUrl: direct.externalUrl,
+      shadowbanned: direct.shadowbanned,
+      commentId: direct.externalId,
+      postId: direct.externalId,
+      permalink: null,
+      url: direct.externalUrl,
+      verified: false,
+      error: direct.error,
+    };
+  } else {
+    const agentConfig = loadAgentFromFile(POSTING_AGENT_PATH, registry.toMap());
+    const context = createToolContext(deps);
+    const agentRun = await runAgent(
+      agentConfig,
+      JSON.stringify(input),
+      context,
+      postingOutputSchema,
+    );
+    result = agentRun.result;
+    usage = agentRun.usage;
+  }
   await addCost(traceId, usage);
 
-  const externalId = result.commentId ?? result.postId ?? null;
+  const externalId = result.externalId ?? result.commentId ?? result.postId ?? null;
   const externalUrl = isX
     ? result.url ?? null
     : result.permalink
