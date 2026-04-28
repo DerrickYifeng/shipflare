@@ -6,7 +6,9 @@ import { drafts, channels, threads, planItems, activityEvents } from '@/lib/db/s
 import { enqueuePosting } from '@/lib/queue';
 import { paramsSchema, findOwnedPlanItem, type OwnedRow } from '@/app/api/plan-item/[id]/_helpers';
 import { createClientFromChannelById } from '@/lib/platform-deps';
-import { postViaDirectMode } from '@/workers/processors/posting';
+import { XClient } from '@/lib/x-client';
+import { RedditClient } from '@/lib/reddit-client';
+import { PLATFORMS } from '@/lib/platform-config';
 import { createLogger, loggerForRequest } from '@/lib/logger';
 
 const baseLog = createLogger('api:today:post-now');
@@ -216,18 +218,13 @@ async function postContentPostInline(
     );
   }
 
-  // Direct-mode synchronous post. No drafts/posts row written — content_post
-  // pre-dates the drafts.planItemId linkage and skipping is the pragmatic
-  // path until the post-writer is updated to insert drafts rows.
-  const result = await postViaDirectMode({
-    platform: resolved.platform,
-    draftType: 'original_post',
-    draftText,
-    threadExternalId: null,
-    threadCommunity: '',
-    postTitle: null,
-    client: resolved.client,
-  });
+  // Direct synchronous post. We avoid importing postViaDirectMode from the
+  // worker module — that drags the full agent/tool registry into the Next
+  // App Router build, which Turbopack chokes on (twitter-text ESM interop).
+  // No drafts/posts row written — content_post pre-dates the drafts
+  // .planItemId linkage and skipping is pragmatic until the post-writer
+  // is updated to insert drafts rows.
+  const result = await postOriginalDirect(resolved.client, resolved.platform, draftText);
 
   if (!result.success) {
     log.error(`post-now inline post failed: ${result.error ?? 'unknown'}`);
@@ -280,4 +277,54 @@ function readDraftBody(output: unknown): string | null {
   if (output === null || typeof output !== 'object') return null;
   const value = (output as Record<string, unknown>).draft_body;
   return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+interface DirectPostResult {
+  success: boolean;
+  externalId: string | null;
+  externalUrl: string | null;
+  error?: string;
+}
+
+/**
+ * Inline copy of the worker's direct-post path for ORIGINAL POSTS only
+ * (the Post-now inline branch never handles replies). Lives here instead
+ * of being imported from `@/workers/processors/posting` so the App Router
+ * build doesn't pull the agent registry / twitter-text validators.
+ */
+async function postOriginalDirect(
+  client: XClient | RedditClient,
+  platform: string,
+  text: string,
+): Promise<DirectPostResult> {
+  try {
+    if (platform === PLATFORMS.x.id) {
+      if (!(client instanceof XClient)) {
+        throw new Error('postOriginalDirect: X platform requires XClient');
+      }
+      const r = await client.postTweet(text);
+      return { success: true, externalId: r.tweetId, externalUrl: r.url };
+    }
+    // Reddit original post path. Currently unreachable because Reddit is
+    // gated off in MVP, but kept symmetric so flipping enabled=true Just
+    // Works. Reddit submitPost needs subreddit + title — content_post
+    // plan_items don't carry those today (they live in plan_items.output
+    // for posts, but not at this granularity), so reject loudly.
+    if (!(client instanceof RedditClient)) {
+      throw new Error('postOriginalDirect: Reddit platform requires RedditClient');
+    }
+    return {
+      success: false,
+      externalId: null,
+      externalUrl: null,
+      error: 'reddit_inline_post_not_supported_yet',
+    };
+  } catch (err) {
+    return {
+      success: false,
+      externalId: null,
+      externalUrl: null,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
 }
