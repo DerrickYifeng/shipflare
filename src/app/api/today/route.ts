@@ -76,6 +76,12 @@ interface TodoItemRow {
   source: 'calendar' | 'discovery' | 'engagement';
   priority: 'time_sensitive' | 'scheduled' | 'optional';
   status: 'pending';
+  /**
+   * For calendar / plan_item rows: the underlying plan_items.state. Lets the
+   * UI distinguish "approved & queued for posting" from "drafted / awaiting
+   * the user's first click". Null for reply-card rows (drafts table only).
+   */
+  planState: PlanItemState | null;
   title: string;
   platform: string;
   community: string | null;
@@ -336,6 +342,7 @@ export async function GET() {
       source: 'calendar' as const,
       priority: derivePriority(row.scheduledAt, now),
       status: 'pending' as const,
+      planState: row.state as PlanItemState,
       title: row.title,
       platform: row.channel ?? 'x',
       community: null,
@@ -399,6 +406,7 @@ export async function GET() {
       // reply-guy loop is to respond while the thread is fresh.
       priority: 'time_sensitive',
       status: 'pending',
+      planState: null,
       title: row.threadTitle ?? 'Reply opportunity',
       platform: row.threadPlatform,
       community: row.threadCommunity,

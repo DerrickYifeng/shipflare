@@ -108,6 +108,7 @@ function TodayContentInner({
     stats,
     isLoading,
     approve: rawApprove,
+    postNow: rawPostNow,
     skip: rawSkip,
     edit: rawEdit,
     reschedule: rawReschedule,
@@ -201,6 +202,18 @@ function TodayContentInner({
       }
     },
     [rawSkip, toast, surfaceError],
+  );
+
+  const postNow = useCallback(
+    async (id: string) => {
+      try {
+        await rawPostNow(id);
+        toast('Posting now', 'success');
+      } catch (err) {
+        surfaceError(err, 'Failed to post');
+      }
+    },
+    [rawPostNow, toast, surfaceError],
   );
 
   const edit = useCallback(
@@ -405,6 +418,7 @@ function TodayContentInner({
                   key={item.id}
                   item={item}
                   onApprove={approve}
+                  onPostNow={postNow}
                   onSkip={skip}
                   onEdit={edit}
                   isActive={item.id === activeId}
@@ -431,6 +445,7 @@ function TodayContentInner({
                   key={item.id}
                   item={item}
                   onApprove={approve}
+                  onPostNow={postNow}
                   onSkip={skip}
                   onEdit={edit}
                   onReschedule={reschedule}
