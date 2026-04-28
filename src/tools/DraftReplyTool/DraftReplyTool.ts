@@ -36,6 +36,14 @@ export const draftReplyInputSchema = z
       .max(40_000, 'draftBody exceeds the Reddit-post ceiling'),
     confidence: z.number().min(0).max(1),
     whyItWorks: z.string().max(500).optional(),
+    /**
+     * Optional plan_item.id this draft was authored against. When set, the
+     * approve flow uses this to transition the plan_item state on terminal
+     * post success/failure and to surface the reply in the slot's
+     * "drafted Y of N" progress card. Reply-guy drafts authored outside a
+     * plan_item slot leave this null.
+     */
+    planItemId: z.string().min(1).optional(),
   })
   .strict();
 
@@ -113,6 +121,7 @@ export const draftReplyTool: ToolDefinition<DraftReplyInput, DraftReplyResult> =
         replyBody: input.draftBody,
         confidenceScore: input.confidence,
         whyItWorks: input.whyItWorks ?? null,
+        planItemId: input.planItemId ?? null,
         engagementDepth: 0,
       });
 
