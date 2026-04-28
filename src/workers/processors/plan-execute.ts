@@ -234,34 +234,31 @@ export async function processPlanExecute(
       return;
     }
 
-    await writeState(current, 'executing');
+    // Dispatch FIRST so we only advance to 'executing' for outcomes that
+    // actually start posting. Handoff and deferred outcomes leave the row
+    // in 'approved' — both 'executing → approved' would be an illegal SM
+    // transition (only 'completed'/'failed' exit 'executing').
     const decision = await dispatchApprove(dispatchInput);
 
     if (decision.kind === 'handoff') {
-      // Auto-execute can't open a browser. X replies stay in 'approved' until
-      // the user manually clicks the card to trigger the handoff.
+      // Auto-execute can't open a browser. X replies stay in 'approved'
+      // until the user manually clicks the card to trigger the handoff.
       log.info(
-        `plan_item ${planItemId}: X reply requires manual handoff — reverting state for user action`,
+        `plan_item ${planItemId}: X reply requires manual handoff — leaving state at 'approved' for user action`,
       );
-      await db
-        .update(planItems)
-        .set({ state: 'approved' })
-        .where(eq(planItems.id, planItemId));
       return;
     }
 
     if (decision.kind === 'deferred') {
       log.info(
-        `plan_item ${planItemId}: pacer deferred (${decision.reason}) — sweeper will retry`,
+        `plan_item ${planItemId}: pacer deferred (${decision.reason}) — leaving state at 'approved'; sweeper will retry`,
       );
-      // Revert to approved so the sweeper re-fires on its 60s tick.
-      await db
-        .update(planItems)
-        .set({ state: 'approved' })
-        .where(eq(planItems.id, planItemId));
       return;
     }
 
+    // queued — only NOW advance to 'executing'. The posting worker will
+    // write 'completed' or 'failed' (per Task 9) when the job finishes.
+    await writeState(current, 'executing');
     // queued — posting worker will set plan_item.state = completed on success
     // (per Task 9, posting.ts now writes back to plan_items).
     log.info(`plan_item ${planItemId}: queued for posting (delay ${decision.delayMs}ms)`);
