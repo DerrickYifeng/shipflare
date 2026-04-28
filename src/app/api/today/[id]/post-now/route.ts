@@ -2,9 +2,11 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { and, eq } from 'drizzle-orm';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { drafts, channels, threads } from '@/lib/db/schema';
+import { drafts, channels, threads, planItems, activityEvents } from '@/lib/db/schema';
 import { enqueuePosting } from '@/lib/queue';
-import { paramsSchema, findOwnedPlanItem } from '@/app/api/plan-item/[id]/_helpers';
+import { paramsSchema, findOwnedPlanItem, type OwnedRow } from '@/app/api/plan-item/[id]/_helpers';
+import { createClientFromChannelById } from '@/lib/platform-deps';
+import { postViaDirectMode } from '@/workers/processors/posting';
 import { createLogger, loggerForRequest } from '@/lib/logger';
 
 const baseLog = createLogger('api:today:post-now');
@@ -12,20 +14,24 @@ const baseLog = createLogger('api:today:post-now');
 /**
  * POST /api/today/:id/post-now
  *
- * Re-enqueue an already-approved draft with delayMs=0, bypassing the
- * pacer's spacing/quiet-hours delay. The original delayed BullMQ job
- * stays in the queue but is harmless: when it eventually fires, the
- * worker checks `drafts.status` and aborts because the draft will have
- * already moved to `'posted'`.
+ * Publishes a draft RIGHT NOW, bypassing the pacer's spacing/quiet-hours
+ * delay. Three flows:
  *
- * Resolves both id types (plan_item.id or drafts.id), same as the
- * approve endpoint.
+ *   A. plan_item with linked draft   → enqueue with delayMs=0 (worker posts).
+ *   B. plan_item, kind=content_post,
+ *      no linked draft (legacy)     → post inline via xClient.postTweet,
+ *                                     update plan_items state, log to
+ *                                     activity_events. Skips the drafts/
+ *                                     posts FK chain because content_post
+ *                                     bodies live in plan_items.output.
+ *   C. drafts.id direct (reply card) → enqueue with delayMs=0.
  *
  *   200 { success: true }
  *   400 invalid_id
  *   401 unauthorized
- *   404 not_found
- *   409 not_approved (draft must be in 'approved' status)
+ *   404 not_found / channel_not_found
+ *   409 not_postable (draft is in a terminal state)
+ *   502 post_failed (platform API error)
  */
 export async function POST(
   request: NextRequest,
@@ -47,12 +53,16 @@ export async function POST(
     );
   }
 
-  // Resolve to a draft id. Try plan_item lookup first; fall back to direct
-  // draft id (reply-card path).
-  let draftId: string | null = null;
   const planRow = await findOwnedPlanItem(parsed.data.id, session.user.id);
+  let draftId: string | null = null;
   if (planRow) {
     draftId = await findDraftIdForPlanItemAnyStatus(planRow.id);
+    // Flow B: plan_item without a linked draft. Original posts (content_post)
+    // currently live in plan_items.output.draft_body — not the drafts table —
+    // so the dispatcher / queue path can't reach them. Post inline.
+    if (!draftId && planRow.kind === 'content_post') {
+      return postContentPostInline(planRow, session.user.id, traceId, log);
+    }
   } else {
     draftId = parsed.data.id;
   }
@@ -86,8 +96,7 @@ export async function POST(
 
   // Accept both 'approved' (already went through dispatcher / queue) and
   // 'pending' (X handoff path — drafts.status stays pending until user
-  // explicitly clicks Post now). Anything terminal (posted / failed /
-  // skipped / handed_off) is rejected — the worker would refuse them too.
+  // explicitly clicks Post now). Anything terminal is rejected.
   if (
     draftRow.draftStatus !== 'approved' &&
     draftRow.draftStatus !== 'pending'
@@ -158,3 +167,117 @@ async function findDraftIdForPlanItemAnyStatus(
   return row?.id ?? null;
 }
 
+/**
+ * Synchronously post a content_post plan_item that has no linked drafts row.
+ * Legacy gap from the post-writer not creating drafts rows for original
+ * posts. Bypasses the worker queue entirely.
+ */
+async function postContentPostInline(
+  planRow: OwnedRow,
+  userId: string,
+  traceId: string,
+  log: ReturnType<typeof createLogger>,
+): Promise<Response> {
+  // Pull the draft body + channel off the plan_item row.
+  const [full] = await db
+    .select({ output: planItems.output, channel: planItems.channel })
+    .from(planItems)
+    .where(eq(planItems.id, planRow.id))
+    .limit(1);
+
+  const draftText = readDraftBody(full?.output);
+  const channelKey = full?.channel ?? null;
+  if (!draftText || !channelKey) {
+    return NextResponse.json(
+      { error: 'no_draft_body' },
+      { status: 409, headers: { 'x-trace-id': traceId } },
+    );
+  }
+
+  // Resolve the user's channel + platform client.
+  const [channelRow] = await db
+    .select({ id: channels.id })
+    .from(channels)
+    .where(and(eq(channels.userId, userId), eq(channels.platform, channelKey)))
+    .limit(1);
+
+  if (!channelRow) {
+    return NextResponse.json(
+      { error: 'channel_not_found' },
+      { status: 404, headers: { 'x-trace-id': traceId } },
+    );
+  }
+
+  const resolved = await createClientFromChannelById(channelRow.id);
+  if (!resolved) {
+    return NextResponse.json(
+      { error: 'client_unavailable' },
+      { status: 502, headers: { 'x-trace-id': traceId } },
+    );
+  }
+
+  // Direct-mode synchronous post. No drafts/posts row written — content_post
+  // pre-dates the drafts.planItemId linkage and skipping is the pragmatic
+  // path until the post-writer is updated to insert drafts rows.
+  const result = await postViaDirectMode({
+    platform: resolved.platform,
+    draftType: 'original_post',
+    draftText,
+    threadExternalId: null,
+    threadCommunity: '',
+    postTitle: null,
+    client: resolved.client,
+  });
+
+  if (!result.success) {
+    log.error(`post-now inline post failed: ${result.error ?? 'unknown'}`);
+    await db.insert(activityEvents).values({
+      userId,
+      eventType: 'post_failed',
+      metadataJson: {
+        planItemId: planRow.id,
+        platform: resolved.platform,
+        error: result.error,
+        source: 'post_now_inline',
+      },
+    });
+    return NextResponse.json(
+      { error: 'post_failed', detail: result.error ?? 'unknown' },
+      { status: 502, headers: { 'x-trace-id': traceId } },
+    );
+  }
+
+  // Mark plan_item completed. Direct UPDATE matches the existing pattern in
+  // posting.ts:307 (worker also writes plan_items.state directly).
+  await db
+    .update(planItems)
+    .set({ state: 'completed', completedAt: new Date(), updatedAt: new Date() })
+    .where(eq(planItems.id, planRow.id));
+
+  await db.insert(activityEvents).values({
+    userId,
+    eventType: 'post_published',
+    metadataJson: {
+      planItemId: planRow.id,
+      platform: resolved.platform,
+      externalId: result.externalId,
+      externalUrl: result.externalUrl,
+      source: 'post_now_inline',
+    },
+  });
+
+  log.info(
+    `post-now inline posted ${result.externalId} for plan_item ${planRow.id}`,
+  );
+  return NextResponse.json(
+    { success: true, externalUrl: result.externalUrl },
+    { headers: { 'x-trace-id': traceId } },
+  );
+}
+
+/** Same shape as today/route.ts — pull draft_body string off plan_items.output. */
+function readDraftBody(output: unknown): string | null {
+  if (output === null || typeof output !== 'object') return null;
+  const value = (output as Record<string, unknown>).draft_body;
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
