@@ -63,6 +63,15 @@ export async function PATCH(
   // (reply cards from the discovery feed).
   const planRow = await findOwnedPlanItem(parsed.data.id, session.user.id);
   if (planRow) {
+    // SM only allows `ready_for_review → approved`. Today UI surfaces rows
+    // in `drafted | ready_for_review | approved`, so step through review
+    // when the source state is `drafted`. (We have no automated review
+    // gate; the user click IS the review.)
+    if (planRow.state === 'drafted') {
+      const stepped = await writePlanItemState(planRow, 'ready_for_review');
+      if (stepped) return stepped;
+      planRow.state = 'ready_for_review';
+    }
     const rejection = await writePlanItemState(planRow, 'approved');
     if (rejection) return rejection;
 
