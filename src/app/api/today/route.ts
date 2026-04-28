@@ -353,12 +353,11 @@ export async function GET() {
       priority: derivePriority(row.scheduledAt, now),
       status: 'pending' as const,
       planState: row.state as PlanItemState,
-      // X original posts → browser handoff via intent URL. No in_reply_to.
-      // Reddit / other channels keep `xIntentUrl: null` and use the API path.
-      xIntentUrl:
-        row.channel === PLATFORMS.x.id && draftBody
-          ? buildXIntentUrl({ text: draftBody })
-          : null,
+      // Original posts always use the API queue path (Schedule → enqueue at
+      // scheduledAt → "Post now" button when queued). The X programmatic-
+      // post restriction from Feb 2026 only blocks REPLIES on non-Enterprise
+      // tiers — original tweets can still be posted via POST /2/tweets.
+      xIntentUrl: null,
       title: row.title,
       platform: row.channel ?? 'x',
       community: null,
