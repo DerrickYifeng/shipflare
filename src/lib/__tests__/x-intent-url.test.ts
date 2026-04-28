@@ -12,13 +12,14 @@ describe('buildXIntentUrl', () => {
     expect(url).toContain('a%26b%3Dc%3Fd');
   });
 
-  it('includes in_reply_to_tweet_id when replying', () => {
+  it('includes in_reply_to when replying (web intent param, not the API field name)', () => {
     const url = buildXIntentUrl({
       text: 'reply',
       inReplyToTweetId: '1234567890',
     });
     expect(url).toContain('text=reply');
-    expect(url).toContain('in_reply_to_tweet_id=1234567890');
+    expect(url).toContain('in_reply_to=1234567890');
+    expect(url).not.toContain('in_reply_to_tweet_id');
   });
 
   it('rejects empty text', () => {

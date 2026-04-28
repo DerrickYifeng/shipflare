@@ -21,7 +21,9 @@ export function buildXIntentUrl({
   }
   const params = new URLSearchParams({ text });
   if (inReplyToTweetId) {
-    params.set('in_reply_to_tweet_id', inReplyToTweetId);
+    // Web Intent uses `in_reply_to` (NOT `in_reply_to_tweet_id` — that's the
+    // POST /2/tweets API field name; the URL parameter is different).
+    params.set('in_reply_to', inReplyToTweetId);
   }
   return `https://x.com/intent/post?${params.toString()}`;
 }
