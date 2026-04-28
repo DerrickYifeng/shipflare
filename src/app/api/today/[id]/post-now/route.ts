@@ -84,11 +84,26 @@ export async function POST(
     );
   }
 
-  if (draftRow.draftStatus !== 'approved') {
+  // Accept both 'approved' (already went through dispatcher / queue) and
+  // 'pending' (X handoff path — drafts.status stays pending until user
+  // explicitly clicks Post now). Anything terminal (posted / failed /
+  // skipped / handed_off) is rejected — the worker would refuse them too.
+  if (
+    draftRow.draftStatus !== 'approved' &&
+    draftRow.draftStatus !== 'pending'
+  ) {
     return NextResponse.json(
-      { error: 'not_approved', current: draftRow.draftStatus },
+      { error: 'not_postable', current: draftRow.draftStatus },
       { status: 409, headers: { 'x-trace-id': traceId } },
     );
+  }
+
+  // Promote pending → approved so the posting worker accepts the job.
+  if (draftRow.draftStatus === 'pending') {
+    await db
+      .update(drafts)
+      .set({ status: 'approved', updatedAt: new Date() })
+      .where(eq(drafts.id, draftId));
   }
 
   const [channelRow] = await db

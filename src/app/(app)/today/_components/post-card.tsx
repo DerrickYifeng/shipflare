@@ -323,17 +323,26 @@ export function PostCard({
 
           if (item.xIntentUrl) {
             const intentUrl = item.xIntentUrl;
+            // First click ("Schedule") opens X compose pre-filled so the user
+            // can preview the post in X. Second click ("Post now") fires the
+            // X API directly via /api/today/:id/post-now. Two-step to give the
+            // user a visual safety check before publishing.
+            const handleClick = () => {
+              if (hasOpenedX) {
+                onPostNow?.(item.id);
+              } else {
+                if (typeof window !== 'undefined') {
+                  window.open(intentUrl, '_blank', 'noopener,noreferrer');
+                }
+                setHasOpenedX(true);
+              }
+            };
             return (
               <>
                 <Button
                   size="sm"
                   disabled={over || !item.draftBody}
-                  onClick={() => {
-                    if (typeof window !== 'undefined') {
-                      window.open(intentUrl, '_blank', 'noopener,noreferrer');
-                    }
-                    setHasOpenedX(true);
-                  }}
+                  onClick={handleClick}
                   title={
                     over
                       ? `Post is ${len - cap} chars over the ${cap} cap`
