@@ -231,9 +231,15 @@ plan_items.output updated, state -> 'drafted'
    - NEW: banned-opener rewrite (Excited to share -> compressed alt)
 ```
 
-**Source-of-truth principle:** every template's verbatim example cites a
-real X post URL from the Grok dataset. When sonnet hits a template it
-has a real exemplar, not invented copy.
+**Source-of-truth principle:** templates cite a real X post URL from the
+Grok dataset *where one exists for the lifecycle stage*. The Grok dataset
+shipped with verbatim posts from ~5 accounts (levelsio, dvassallo,
+tibo_maker, ryanashcraft, andrewzacker), which yielded real exemplars for
+~3 templates (5.1.A, 5.5.A, 5.6.b.A). Templates without a Grok-source
+exemplar use a clearly-labelled synthetic example or an instructional
+shape only — the writer still has a concrete pattern to anchor on. A
+follow-up pass over additional X accounts can backfill URLs for the
+remaining templates.
 
 **Token budget:** ~600 lines / ~4K words / ~5K tokens for the guide.
 Combined post-writer reference set lands ~12K tokens, well within
@@ -345,11 +351,15 @@ Watch for:
 7. Auto-detect voice from past posts.
 8. Strategic / tactical planner passing `voice` in `plan_items.params`
    for campaign consistency.
+9. Backfill verbatim X-post URLs for the 11 templates that currently lack
+   a Grok-source exemplar — needs additional dataset collection beyond
+   the original 5-account pull.
 
 ## Acceptance
 
-- [ ] `x-content-guide.md` restructured per the section above; every
-      template cites a real X post URL.
+- [ ] `x-content-guide.md` restructured per the section above; templates
+      cite a real X post URL where the Grok dataset has one, otherwise
+      use a clearly-labelled synthetic example.
 - [ ] `AGENT.md` model bumped, workflow step 3 updated, voice hint
       vocabulary defined, `whyItWorks` enrichment instructed.
 - [ ] Structural guide tests pass.
