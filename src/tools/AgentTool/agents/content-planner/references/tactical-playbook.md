@@ -252,6 +252,96 @@ Report the count in your StructuredOutput `stalledCarriedOver`.
   a SendMessage back to the coordinator explaining the gap and call
   StructuredOutput with `status: 'partial'` and `itemsAdded: 0`.
 
+## Pillar mix and metaphor ban
+
+The planner balances the week's `content_post` items across a closed
+**5-pillar vocabulary** AND derives a per-item `metaphor_ban` from the
+founder's recent X timeline so consecutive posts don't recycle the
+same idea wearing different hats.
+
+### The 5 pillars
+
+| Pillar | What it is | When to pick |
+|---|---|---|
+| `milestone` | Concrete shipped thing or revenue/user number with proof. | Real numbers exist this week (revenue update, user count, feature shipped, fundraise). |
+| `lesson` | One specific takeaway from a recent failure / win, generalizable to other founders. | Founder hit something that generalizes. |
+| `hot_take` | Contrarian opinion on the indie meta with a defensible position. | Founder has a strong view and the audience is mature enough. |
+| `behind_the_scenes` | Process / workflow / decision the audience doesn't normally see. | Build state, kill decisions, hiring, tooling choices. |
+| `question` | Genuine ask the founder needs answered, audience can reply usefully. | Real choice in front of the founder. |
+
+**Hard rule — pillar cap:** at most **≤ 2 of any pillar per channel**
+in a 7-day window. X and Reddit are independent audiences, so running
+`milestone` twice on each is fine. The cap is `≤ 2 per pillar`, NOT
+`≥ 1 of each` — empty pillars are fine when input is missing.
+
+**Naming note:** plan_item `pillar` (this 5-cluster vocabulary, drives
+post shape) is distinct from `strategic_paths.contentPillars` (3-4
+free-form narrative themes set during onboarding, drives `theme`
+selection). Both can coexist on a plan_item.
+
+### Workflow step 2.5 — Read X timeline and derive diversity inputs
+
+After step 2 (`query_strategic_path`), before scheduling items:
+
+**a. Call `query_recent_x_posts({ days: 14 })`.**
+
+If `tweets[].length > 0`:
+- Read every `body`. Identify 3–5 dominant metaphors / opening
+  phrases / closing phrases used in the last 14 days.
+- Note which metaphors correlated with high engagement
+  (`metrics.likes + metrics.retweets * 3 > median across the
+  returned set`). Lean into those when picking pillars/themes for
+  the week. Flag the rest for the ban.
+
+If the tool returns `error: 'no_channel'` or `error: 'token_invalid'`:
+- Proceed without metaphor_ban. Surface the error in your `notes`
+  output.
+
+**b. For each plan_item to be added this week:**
+
+- Pick `pillar` from `{milestone | lesson | hot_take |
+  behind_the_scenes | question}`. **Hard cap: max 2 of any pillar per
+  channel** across the week's content_post items. Use the
+  strategic-path's `contentPillars` library as a HINT for `theme`
+  selection, NOT as a substitute for `pillar` selection.
+- Pick `theme`: a concrete topic phrase (e.g. "first paying customer
+  story", "killing feature X", "Stripe webhook gotcha"). Each item
+  this week gets a distinct theme.
+- Compute `metaphor_ban`: union of (metaphors extracted in step a) +
+  (themes/key phrases of sibling plan_items already added in this
+  turn). Cap at 20 phrases per item.
+- Set `arc_position` to `{index, of}` reflecting placement in the
+  week.
+- Optional `cross_refs`: include only when the arc calls for an
+  explicit callback (e.g. "Mon: shipped X. Wed: lesson from X." →
+  Wed item cross_refs Mon's id).
+
+**c. Persist via `add_plan_item`** with the enriched `params`. The
+tool validates the new fields against `contentPostParamsSchema` —
+out-of-vocab pillars and oversized arrays are hard rejects.
+
+### What to ban specifically
+
+Examples of phrases that get into `metaphor_ban` after the user has
+posted them recently:
+- Concrete metaphors: `"debt"`, `"compound"`, `"owe"`, `"interest"`
+  (when used metaphorically not literally)
+- Stock openers: `"shipped X on a"`, `"told nobody for"`,
+  `"daily posting isn't a"`
+- Stock closers: `"ship first, tell second"`, `"that's the gap"`
+
+The planner LLM extracts these from the bodies — no n-gram counter,
+no embedding model. Trust the read.
+
+### When the timeline is empty
+
+- New user, zero recent tweets → `metaphor_ban: []` for every item.
+  Pillar mix still applies.
+- User connected X but hasn't posted → same. Pillar mix only.
+
+The smarter planner gets MORE valuable as the founder's history
+grows, but it works on day 1 with empty input.
+
 ## Step 6 — Optionally fan out to writers
 
 After every `add_plan_item` call has returned and your `update_plan_item`

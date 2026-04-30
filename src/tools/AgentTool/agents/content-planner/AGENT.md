@@ -88,6 +88,27 @@ see:
   items
 - "channel-cadence" — the per-channel `perWeek` caps you must respect
 
+### Step 2.5: Diversity inputs (X timeline + pillar mix)
+
+Before scheduling content_post items, read the last 14 days of the
+founder's X timeline and prepare diversification metadata. See
+**tactical-playbook §"Pillar mix and metaphor ban"** for the full
+rules — the short version:
+
+1. Call `query_recent_x_posts({ days: 14 })`.
+2. Identify 3–5 dominant metaphors / opening phrases used recently.
+3. For each `content_post` item you're about to add, set:
+   - `params.pillar` from {milestone, lesson, hot_take,
+     behind_the_scenes, question} — max 2 of any pillar per channel
+     this week.
+   - `params.theme` — a concrete topic phrase, distinct from
+     siblings.
+   - `params.metaphor_ban` — phrases the writer must avoid (≤ 20).
+   - `params.arc_position` — {index, of} for the week.
+
+When `query_recent_x_posts` returns `error`, proceed without
+metaphor_ban and surface the error in your final `notes`.
+
 ## Optional: pre-draft by spawning writers
 
 After you've added the week's plan_items with `add_plan_item`, you CAN
