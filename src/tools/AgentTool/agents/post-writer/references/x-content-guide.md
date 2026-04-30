@@ -205,3 +205,62 @@ copy lands harder".]
 
 Pair the tweet with an actual screenshot. The screenshot does the
 heavy lifting; the caption sets up the ask.
+
+### 5.2 audience
+
+Launch date is set. Founder is 8–28 days from going live. MVP is coming
+together; the work shifts from "can I build this" to "will anyone use
+this". This is demand-building.
+
+**Default voice:** `daily_vlogger`
+
+**Objective:** Validate demand and grow the waitlist / signup list before
+the launch. Every post should make at least one person closer to "yes".
+
+**Post types to use:** `screenshot-only` (mockups + UI WIP), `question`,
+`poll`, `behind-the-scenes`, `milestone` (waitlist count)
+
+**Hook patterns:** `screenshot+caption`, `ask`, `curiosity-gap`,
+`day-N-log`
+
+**Number anchors:** waitlist signups, days to launch, mockup version,
+poll responses, "X people said Y in interviews".
+*Not yet:* revenue, paying customers.
+
+**Length target:** 100–220 chars. Media: prefer mockup or poll.
+
+**Phase-specific bans:**
+- Detailed technical stack debates (audience doesn't care yet)
+- Feature lists without context — show ONE flow, not the menu
+- Overpromising launch dates that haven't been committed to in code
+
+**Templates**
+
+**Template 5.2.A — Mockup feedback request**
+
+```
+[Screenshot of mockup.]
+
+Would you use this for [specific use case]?
+
+[Optional: one specific question — "is the CTA obvious?", "does this
+copy land?".]
+```
+
+The ask must be concrete enough that a one-line reply is useful.
+"Thoughts?" is a banned ending.
+
+**Template 5.2.B — Waitlist milestone**
+
+```
+[N] on the waitlist for [product].
+
+The most-asked question so far: [specific quote or paraphrase from
+real signups].
+
+Launching [date].
+```
+
+This works because it does three things at once: number anchor,
+social proof, and a specific demand signal. The "most-asked
+question" is what turns a generic waitlist count into a story.
