@@ -15,7 +15,11 @@ import { and, desc, eq } from 'drizzle-orm';
 import { buildTool } from '@/core/tool-system';
 import type { ToolDefinition } from '@/core/types';
 import { planItems, plans } from '@/lib/db/schema';
-import { planItemInputSchema, type PlanItemInput } from '@/tools/schemas';
+import {
+  planItemInputSchema,
+  contentPostParamsSchema,
+  type PlanItemInput,
+} from '@/tools/schemas';
 import { readDomainDeps, tryGet } from '@/tools/context-helpers';
 
 export const ADD_PLAN_ITEM_TOOL_NAME = 'add_plan_item';
@@ -77,6 +81,24 @@ export const addPlanItemTool: ToolDefinition<PlanItemInput, AddPlanItemResult> =
     isReadOnly: false,
     async execute(input, ctx): Promise<AddPlanItemResult> {
       const { db, userId, productId } = readDomainDeps(ctx);
+
+      // Content-post items get a stricter params shape (pillar enum,
+      // length-capped metaphor_ban, etc.). All fields are optional, so
+      // legacy callers passing { angle, theme } continue to validate.
+      // Other kinds keep the permissive `z.record` shape from the input
+      // schema — only content_post carries diversification metadata.
+      if (input.kind === 'content_post') {
+        const parsed = contentPostParamsSchema.safeParse(input.params);
+        if (!parsed.success) {
+          const message = parsed.error.issues
+            .map((i) => `${i.path.join('.')}: ${i.message}`)
+            .join('; ');
+          throw new Error(
+            `add_plan_item: content_post params failed validation — ${message}`,
+          );
+        }
+      }
+
       const planId = await resolvePlanId(ctx, userId, productId);
 
       const planItemId = crypto.randomUUID();
