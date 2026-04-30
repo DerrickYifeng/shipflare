@@ -182,15 +182,6 @@ Day N of building [product].
 [Optional: question or ask.]
 ```
 
-Verbatim example (andrewzacker, 2026-04-04):
-> Day 9 of daily build in public video updates.
->
-> - How we plan to hit $1k MRR with Content Copilot
-> - New project that will help indie hackers with marketing
-> - Got first feedback on our SaaS 👀
-
-Source: https://x.com/andrewzacker/status/2040548207697035741
-
 **Template 5.1.B — WIP screenshot + ask**
 
 ```
@@ -423,20 +414,8 @@ strongly preferred (78% of breakouts at this stage have media).
 [Optional: one-line lesson or "what's next".]
 ```
 
-Verbatim exemplar (ryanashcraft, 2026-04-06):
-> Foodnoms has officially hit $50K MRR.
->
-> Bootstrapped with no full-time employees. Took 6 and a half years
-> to get here.
->
-> The grind never stops. Still working to make the product better
-> every day. I love this little app. Glad others do too!
-
-Source: https://x.com/ryanashcraft/status/2041244172775301254
-
-That post is technically a `steady`-phase post (>30 days post-launch)
-but the structure transfers cleanly to compound: exact number,
-context, screenshot, one-line attitude.
+The shape that consistently breaks out: exact number (never rounded),
+one specific context detail, a real screenshot, one line of attitude.
 
 **Template 5.5.B — First churn / first failure**
 
@@ -513,12 +492,8 @@ customers served, hiring count.
 [Strong opinion that contradicts a common indie take, in <15 words.]
 ```
 
-Verbatim exemplar (dvassallo, 2026-04-25):
-> You only need to define revenue when you've been faking it.
-
-Source: https://x.com/dvassallo/status/2048167053148959135
-
-That's the entire post. 60 chars, contrarian, lands.
+That's the entire post. ~60 chars, contrarian, lands. No setup, no
+follow-up, no hashtags.
 
 **Template 5.6.b.B — Teacher reflection**
 
