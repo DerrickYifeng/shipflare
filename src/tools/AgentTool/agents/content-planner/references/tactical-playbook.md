@@ -136,6 +136,29 @@ interview, not fewer. Exception: only skip if
 insensitive title overlap), or if `query_stalled_items` / `query_last_week_completions`
 already contains a matching title.
 
+### Foundation & audience phases: pillar mix clamp (HARD)
+
+In any 7-day window at `foundation` or `audience` phase:
+
+- At most **ONE** `hot_take` `content_post` plan_item.
+- At most **ONE** `lesson` `content_post` plan_item that frames the
+  takeaway as a generalized claim (vs. a first-person observation
+  from the founder's own week).
+- Remaining `content_post` items must come from `behind_the_scenes`,
+  `question`, or `milestone`.
+
+Reason: founders pre-launch / early-launch haven't earned the
+meta-take pose. A `hot_take` from a 100-follower account reads as
+posturing; a `behind_the_scenes` from the same account reads as
+build-in-public. The post-writer's `humility-tells` validator will
+flag the symptoms (`the real X is Y`, `winners do X`,
+`most solo devs Y`) at draft time — but it's cheaper to not schedule
+the slot than to repair the draft after.
+
+If the founder explicitly requests more, still emit only one
+`hot_take` and one claim-style `lesson`, and note the override in
+your `notes` output so the next planner run can revisit.
+
 ## Step 4 — Schedule emails per phase
 
 Use the `email` cadence from `channelMix.email` if present. Per phase:

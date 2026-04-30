@@ -4,8 +4,10 @@ import { validateReplyLength } from './length';
 import { validatePlatformLeak } from './platform-leak';
 import {
   validateHashtagCount,
+  validateHumilityTells,
   validateLinksInPostBody,
   validateLinksInReply,
+  type HumilityTellHit,
 } from './editorial';
 import { validateAnchorToken } from '@/lib/reply/anchor-token-validator';
 
@@ -73,6 +75,11 @@ export type ContentValidatorWarning =
   | {
       validator: 'anchor_token';
       reason: 'no_anchor';
+    }
+  | {
+      validator: 'humility_tells';
+      reason: 'sermon_patterns';
+      hits: HumilityTellHit[];
     };
 
 export interface ContentValidatorResult {
@@ -179,6 +186,17 @@ export function runContentValidators(
     if (!anchor.pass) {
       warnings.push({ validator: 'anchor_token', reason: 'no_anchor' });
     }
+  }
+
+  // Humility tells run on every post + reply across all platforms — the
+  // patterns are content-shape specific, not platform-specific.
+  const humility = validateHumilityTells(input.text);
+  if (!humility.ok) {
+    warnings.push({
+      validator: 'humility_tells',
+      reason: 'sermon_patterns',
+      hits: humility.hits,
+    });
   }
 
   return {

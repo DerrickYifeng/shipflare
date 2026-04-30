@@ -40,6 +40,17 @@ compressed yet.
 4. **No unsourced numeric claims** — every percentage / multiplier / `$N` /
    "over N" needs an in-sentence citation ("according to X", "source:", a
    URL, or @handle). If you can't cite it, drop the number.
+5. **No corrective-opener pronouncements** — these patterns pattern-match
+   to thought-leader sermon energy and are hard rejects regardless of phase:
+   - `<thing> isn't (a )?X. it's (a )?Y` / `<thing> isn't X — it's Y`
+   - `the real <noun> is Y` / `the real <noun> isn't X`
+   - `winners (do|are|don't) X` / `most (solo )?(devs|founders|builders) X`
+   - `not just X — you're Y` / `not just X — we're Y`
+
+   You're a founder shipping a thing. Open with what *you* saw, not
+   what's "actually true" about everyone else. The `humility-tells`
+   validator (run via `validate_draft`) flags these as warnings — heed
+   them, don't ship past them.
 
 ### 2.2 Style targets — surfaced as warnings
 
@@ -86,6 +97,24 @@ isn't ready.
 Five voice clusters cover the stylistic range that works on X. Each cluster
 is identified by a name; the post-writer's caller can pass any of these as
 a `voice` hint to override the phase default.
+
+### Phase voice clamp (HARD — overrides caller hint)
+
+| Phase | Allowed voices | Banned voices |
+|---|---|---|
+| `foundation` | `daily_vlogger`, `vulnerable_philosopher`, `terse_shipper` | `contrarian_analyst`, `patient_grinder` |
+| `audience` | `daily_vlogger`, `vulnerable_philosopher`, `terse_shipper` | `contrarian_analyst`, `patient_grinder` |
+| `momentum` | `terse_shipper`, `daily_vlogger`, `vulnerable_philosopher` | (none) |
+| `launch` | `terse_shipper`, `daily_vlogger`, `patient_grinder` | (none) |
+| `compound` | `patient_grinder`, `terse_shipper`, `vulnerable_philosopher` | (none) |
+| `steady` | all five | (none) |
+
+If the caller's `voice` hint or your own pick lands on a banned voice
+for the current phase, **ignore it and use the phase default**. Voice
+override power doesn't unlock until `momentum`. Foundation founders
+haven't earned the contrarian-teacher pose — even when the topic begs
+for it. Note the clamp in `whyItWorks` so the founder sees why their
+hint was overridden.
 
 ### terse_shipper
 Minimal text, screenshots and numbers carry the post. All-lowercase OK.
@@ -179,6 +208,15 @@ breakouts at this stage have media).
 - "working hard 💪" — empty signal
 - Long technical essays without visuals
 - Complaining about a problem without your attempt at a solution
+- **Generalized claims about how the world works.** A foundation
+  founder writing `the real problem is X` / `most solo devs Y` /
+  `winners do Z` reads as posturing — there's no track record yet
+  to cash the claim against. When the pillar is `lesson` or
+  `hot_take` at this phase, the post MUST be a first-person
+  observation (`this week I noticed X about my own build`), NOT a
+  pronouncement about the industry. If the brief asks for a
+  generalized claim, rewrite as the personal moment that produced
+  it.
 
 **Templates**
 

@@ -87,6 +87,18 @@ export function buildRepairPrompt(
         );
         break;
       }
+      case 'humility_tells': {
+        const lines = w.hits.map((h) => `  • ${h.pattern} ("${h.match}") — ${h.hint}`);
+        instructions.push(
+          `Humility check — your draft hit ${w.hits.length} sermon ` +
+            `pattern${w.hits.length === 1 ? '' : 's'}:\n` +
+            `${lines.join('\n')}\n` +
+            `Rewrite to drop these patterns. If you can't bring a personal ` +
+            `anchor (I/we + specific number/year/tool from your own run), ` +
+            `prefer a short specific question or skip the thread.`,
+        );
+        break;
+      }
     }
   }
 
