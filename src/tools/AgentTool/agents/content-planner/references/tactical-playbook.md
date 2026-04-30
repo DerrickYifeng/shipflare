@@ -150,10 +150,10 @@ In any 7-day window at `foundation` or `audience` phase:
 Reason: founders pre-launch / early-launch haven't earned the
 meta-take pose. A `hot_take` from a 100-follower account reads as
 posturing; a `behind_the_scenes` from the same account reads as
-build-in-public. The post-writer's `humility-tells` validator will
-flag the symptoms (`the real X is Y`, `winners do X`,
-`most solo devs Y`) at draft time — but it's cheaper to not schedule
-the slot than to repair the draft after.
+build-in-public. Symptoms downstream — `the real X is Y`,
+`winners do X`, `most solo devs Y` — are banned in
+`x-content-guide.md` hard rule §2.1.5, but it's cheaper to not
+schedule the slot than to repair the draft after.
 
 If the founder explicitly requests more, still emit only one
 `hot_take` and one claim-style `lesson`, and note the override in

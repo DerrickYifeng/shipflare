@@ -48,9 +48,7 @@ compressed yet.
    - `not just X — you're Y` / `not just X — we're Y`
 
    You're a founder shipping a thing. Open with what *you* saw, not
-   what's "actually true" about everyone else. The `humility-tells`
-   validator (run via `validate_draft`) flags these as warnings — heed
-   them, don't ship past them.
+   what's "actually true" about everyone else.
 
 ### 2.2 Style targets — surfaced as warnings
 

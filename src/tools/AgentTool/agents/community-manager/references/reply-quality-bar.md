@@ -169,8 +169,7 @@ Reject drafts that exhibit any of:
   - `not just X — you're Y` / `not just X — we're Y`
 
   These are tells of someone explaining the world from above. Hard
-  reject — the `humility-tells` validator flags them at self-check
-  time.
+  reject — rewrite to lead with what you actually saw or did.
 - **Triple-grouping** — `fast, efficient, reliable` /
   `clean, simple, fast` rhythm (three comma-separated 3+-letter
   words in a row, optionally with "and")
@@ -235,10 +234,10 @@ specific to the X reply register:
 - Declarative, not hedged — but every claim must be anchored to your
   own run. `we tried X for 6 months and Y broke` beats both
   `I think maybe X could be Y` AND `the real X is Y`. Without your
-  own receipt, drop the claim and ask a question instead. The
-  `humility-tells` validator (run via `validate_draft`) flags
-  "the real X is Y" / "winners do X" / "most solo devs Y" patterns
-  as sermon energy — heed the warning, don't ship past it.
+  own receipt, drop the claim and ask a question instead. Patterns
+  like "the real X is Y" / "winners do X" / "most solo devs Y" read
+  as sermon from accounts that haven't earned it — see the
+  Personal-anchor rule below.
 - First person, present tense. No exclamation points. No emoji
   by default (≤ 1 only if it replaces a word).
 - Zero hashtags in replies. Zero links in X replies.
