@@ -165,10 +165,13 @@ export async function POST(
     );
   }
 
-  // Enqueue the coordinator run scoped to THIS conversation.
+  // Enqueue the coordinator run scoped to THIS conversation. Inline
+  // chat messages share the `daily` playbook entry (coordinator falls
+  // back to "review state + propose actions" when the goal text doesn't
+  // match a known trigger pattern).
   const enqueued = await enqueueTeamRun({
     teamId: body.teamId,
-    trigger: 'manual',
+    trigger: 'daily',
     goal: body.message,
     rootMemberId,
     conversationId,

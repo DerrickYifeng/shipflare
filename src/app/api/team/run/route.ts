@@ -17,13 +17,12 @@ const requestSchema = z.object({
   /**
    * Human-readable goal. The UI's "+ New session" button POSTs `goal: ''`
    * so the route can derive a neutral template via `deriveGoalFromTrigger`
-   * (see logic below); only `reply_sweep` truly requires a non-empty goal,
-   * and that case is enforced below with a tailored 400. We accept empty
-   * and absent here and let the fallback do the work.
+   * (see logic below). Empty / absent is accepted and handled by the
+   * fallback path.
    */
   goal: z.string().max(4000).optional(),
   trigger: z
-    .enum(['manual', 'onboarding', 'weekly', 'phase_transition', 'reply_sweep'])
+    .enum(['daily', 'onboarding', 'weekly', 'phase_transition'])
     .optional(),
   /**
    * Extra context for triggers whose goal template needs it beyond the
@@ -81,13 +80,17 @@ export function deriveGoalFromTrigger(
       return `Plan this week for ${productName}. Current state: ${state}. Carry over stalled items.`;
     case 'phase_transition':
       return `Phase changed from ${extra?.oldPhase ?? '(unknown)'} to ${extra?.newPhase ?? state}. Review and update the strategic path for ${productName}.`;
-    case 'reply_sweep':
-      return `Check for new high-signal threads on connected channels (${channelList}) for ${productName}.`;
-    case 'manual':
+    case 'daily':
     default:
-      // Manual with no caller-provided goal falls through to a neutral
-      // prompt so runAgent has something to send.
-      return `Review team state and propose next actions for ${productName}.`;
+      // Daily / no-trigger fall through to the canonical daily-run goal.
+      return (
+        `Daily automation run for ${productName}. ` +
+        `Connected platforms: ${channelList}. ` +
+        `Trigger: daily. Source: manual. ` +
+        `Follow your daily playbook: load today's content_reply plan_items ` +
+        `and run the per-slot discovery → community-manager loop, falling ` +
+        `back to default top-3 drafting if no slots exist.`
+      );
   }
 }
 
@@ -133,20 +136,13 @@ export async function POST(request: NextRequest): Promise<Response> {
     return NextResponse.json({ error: 'team_not_found' }, { status: 404 });
   }
 
-  const trigger: TeamRunTrigger = body.trigger ?? 'manual';
+  const trigger: TeamRunTrigger = body.trigger ?? 'daily';
 
-  // Derive a goal when the caller didn't supply one. `reply_sweep` still
-  // requires an explicit goal; for `manual` we fall through to the neutral
-  // default template in `deriveGoalFromTrigger` so the UI's "+ New session"
-  // button can POST `{trigger:'manual', goal:''}` without 400-ing.
+  // Derive a goal when the caller didn't supply one. `deriveGoalFromTrigger`
+  // covers all triggers; the UI's "+ New session" button can POST
+  // `{trigger:'daily', goal:''}` without 400-ing.
   let goal = body.goal ?? '';
   if (goal === '') {
-    if (trigger === 'reply_sweep') {
-      return NextResponse.json(
-        { error: 'invalid_body', detail: 'goal required for reply_sweep trigger' },
-        { status: 400 },
-      );
-    }
     const productRows = teamRow[0].productId
       ? await db
           .select({ name: products.name, state: products.state })

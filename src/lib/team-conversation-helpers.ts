@@ -3,7 +3,7 @@
  * team_run but don't have a user-facing conversation to attach it to.
  *
  * The chat refactor made `conversationId` required on every run. Cron
- * triggers (weekly replan, onboarding, reply sweep, phase transition)
+ * triggers (weekly replan, onboarding, daily run, phase transition)
  * still need to spawn runs — so we mint a fresh conversation per
  * trigger invocation, titled with the trigger name so ops can recognize
  * it in the sidebar. These conversations are first-class; the user can
@@ -17,19 +17,17 @@ export type AutomationTrigger =
   | 'onboarding'
   | 'kickoff'
   | 'weekly'
+  | 'daily'
   | 'phase_transition'
-  | 'reply_sweep'
-  | 'draft_post'
-  | 'discovery_cron';
+  | 'draft_post';
 
 const TITLE_PREFIX: Record<AutomationTrigger, string> = {
   onboarding: 'Onboarding',
   kickoff: 'Kickoff',
   weekly: 'Weekly plan',
+  daily: 'Daily run',
   phase_transition: 'Phase transition',
-  reply_sweep: 'Reply sweep',
   draft_post: 'Draft post',
-  discovery_cron: 'Discovery',
 };
 
 /**

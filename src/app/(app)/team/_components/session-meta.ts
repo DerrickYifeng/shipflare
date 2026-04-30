@@ -2,9 +2,9 @@ export type StatusTone = 'accent' | 'success' | 'error' | 'muted' | 'warning';
 
 export const TRIGGER_LABELS: Record<string, string> = {
   onboarding: 'Onboarding',
+  kickoff: 'Kickoff',
   weekly: 'Weekly plan',
-  manual: 'Manual run',
-  reply_sweep: 'Reply sweep',
+  daily: 'Daily run',
   draft_post: 'Draft post',
   phase_transition: 'Phase transition',
 };

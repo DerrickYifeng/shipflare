@@ -92,32 +92,6 @@ export const codeScanJobSchema = z.object({
 export type CodeScanJobData = z.input<typeof codeScanJobSchema>;
 
 // ---------------------------------------------------------------------------
-// Monitor
-// ---------------------------------------------------------------------------
-
-const monitorUserJobSchema = z.object({
-  kind: z.literal('user').optional(),
-  schemaVersion: SCHEMA_VERSION,
-  traceId: TRACE_ID,
-  userId: z.string().min(1),
-  productId: z.string().min(1),
-  platform: z.string().min(1),
-});
-
-const monitorFanoutJobSchema = z.object({
-  kind: z.literal('fanout'),
-  schemaVersion: SCHEMA_VERSION,
-  traceId: TRACE_ID,
-  platform: z.string().min(1),
-});
-
-export const monitorJobSchema = z.union([
-  monitorFanoutJobSchema,
-  monitorUserJobSchema,
-]);
-export type MonitorJobData = z.input<typeof monitorJobSchema>;
-
-// ---------------------------------------------------------------------------
 // Engagement
 // ---------------------------------------------------------------------------
 
@@ -216,7 +190,6 @@ export type DiscoveryScanJobData = z.input<typeof discoveryScanJobSchema>;
 // Back-compat aliases (will be removed after full migration)
 // ---------------------------------------------------------------------------
 
-export type XMonitorJobData = MonitorJobData;
 export type XEngagementJobData = EngagementJobData;
 export type XMetricsJobData = MetricsJobData;
 export type XAnalyticsJobData = AnalyticsJobData;
@@ -227,7 +200,6 @@ export type JobData =
   | HealthScoreJobData
   | DreamJobData
   | CodeScanJobData
-  | MonitorJobData
   | DiscoveryScanJobData
   | EngagementJobData
   | MetricsJobData

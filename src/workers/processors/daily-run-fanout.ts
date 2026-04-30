@@ -1,15 +1,16 @@
 // Daily 13:00 UTC fanout. For each user with at least one connected
 // channel AND a product, enqueue one coordinator-rooted team-run with
-// `trigger='discovery_cron'`. The coordinator's playbook handles calling
-// `Task('discovery-agent')` + dispatching community-manager via Task
-// for the queued threads — the scan no longer runs as a standalone
-// BullMQ job, and there is no separate reply-drafter teammate (Phase 6
-// of the agent-cleanup migration absorbed it into community-manager).
+// `trigger='daily'`. The coordinator's `daily` playbook handles the
+// per-slot discovery → community-manager loop (driven by today's
+// `content_reply` plan_items emitted by content-planner) and falls back
+// to default top-3 drafting when no slots exist.
 //
-// Replaces the prior `discovery-scan.ts` processor. The
-// `discovery-scan` BullMQ queue is preserved (the cron schedule still
-// drops a fanout job onto it) so this processor stays bound to that
-// queue name; per-user `kind: 'user'` payloads no longer exist on it.
+// /api/automation/run uses the same trigger so manual kickoffs and cron
+// runs share one playbook — there is no separate `manual` /
+// `discovery_cron` / `reply_sweep` trigger anymore.
+//
+// The BullMQ queue name stays `discovery-scan` for Redis stability with
+// the existing repeat schedule; only the processor name changed.
 
 import type { Job } from 'bullmq';
 import { eq } from 'drizzle-orm';
@@ -23,9 +24,9 @@ import { createLogger, loggerForJob } from '@/lib/logger';
 import type { DiscoveryScanJobData } from '@/lib/queue/types';
 import { isFanoutJob, getTraceId } from '@/lib/queue/types';
 
-const baseLog = createLogger('worker:discovery-cron-fanout');
+const baseLog = createLogger('worker:daily-run-fanout');
 
-export async function processDiscoveryCronFanout(
+export async function processDailyRunFanout(
   job: Job<DiscoveryScanJobData>,
 ): Promise<void> {
   const log = loggerForJob(baseLog, job);
@@ -33,7 +34,7 @@ export async function processDiscoveryCronFanout(
 
   if (!isFanoutJob(job.data)) {
     log.warn(
-      'discovery-cron-fanout received a non-fanout job; refusing to process',
+      'daily-run-fanout received a non-fanout job; refusing to process',
     );
     return;
   }
@@ -83,15 +84,18 @@ export async function processDiscoveryCronFanout(
       );
       const platforms = Array.from(platformSet).join(', ');
       const goal =
-        `Daily discovery scan for ${product.name}. ` +
+        `Daily automation run for ${product.name}. ` +
         `Connected platforms: ${platforms}. ` +
-        `Trigger: discovery_cron. ` +
-        `Follow your discovery_cron playbook: dispatch discovery-agent ` +
-        `per platform via Task, then dispatch community-manager on the top-3.`;
+        `Trigger: daily. Source: cron. ` +
+        `Follow your daily playbook: load today's content_reply plan_items ` +
+        `for this user, run the per-slot discovery → community-manager loop ` +
+        `(max 3 inner attempts per slot), and update_plan_item state='drafted' ` +
+        `when each slot terminates. If no slots are found, fall back to ` +
+        `default top-3 drafting from a single discovery-agent dispatch.`;
 
       await enqueueTeamRun({
         teamId,
-        trigger: 'discovery_cron',
+        trigger: 'daily',
         goal,
         rootMemberId: coordinator.id,
         conversationId,
@@ -99,7 +103,7 @@ export async function processDiscoveryCronFanout(
       enqueued++;
     } catch (err) {
       log.warn(
-        `discovery-cron-fanout: failed to enqueue for user=${userId}: ${
+        `daily-run-fanout: failed to enqueue for user=${userId}: ${
           err instanceof Error ? err.message : String(err)
         }`,
       );
@@ -107,6 +111,6 @@ export async function processDiscoveryCronFanout(
   }
 
   log.info(
-    `discovery-cron-fanout (trace=${traceId}): enqueued ${enqueued} team-runs`,
+    `daily-run-fanout (trace=${traceId}): enqueued ${enqueued} team-runs`,
   );
 }

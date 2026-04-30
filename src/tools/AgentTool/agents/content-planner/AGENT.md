@@ -50,7 +50,7 @@ emails across the week, and persist them as plan_items.
   remaining-window when `now > weekStart` (mid-week or weekend planning).
   See the tactical-playbook's "Never schedule in the past" rule.
 - **`pathId`** — the active strategic path (used by `query_strategic_path`).
-- Optional `trigger` — `kickoff` / `weekly` / `phase_transition` / `manual`.
+- Optional `trigger` — `kickoff` / `weekly` / `phase_transition`.
   When `kickoff`, you SHOULD fan out post-writer (Step 6) so the founder
   sees draft bodies on /today immediately rather than empty cards.
 

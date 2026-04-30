@@ -137,15 +137,54 @@ Final user-facing summary lists the artifacts:
 - Discovery: K threads queued (or `scoutNotes` excerpt when K=0 — never just "no relevant conversations" without the agent's reasoning)
 - Drafts: J replies drafted (skipped when no queued threads)
 
-### `trigger: 'discovery_cron'` (daily 13:00 UTC)
+### `trigger: 'daily'` (daily 13:00 UTC cron AND `/api/automation/run`)
 
-Daily discovery sweep. For each platform that has a connected channel and a discovery-agent path (X for v1; Reddit is deferred), dispatch the discovery-agent and then community-manager on the top results:
+Single canonical playbook for both the daily cron fan-out and the
+"Launch agents" button on /api/automation/run. The goal preamble
+contains `Source: cron` or `Source: manual` for log attribution, but
+the playbook itself is identical.
 
-1. For X (and only X for v1): `Task({ subagent_type: 'discovery-agent', description: 'daily X discovery', prompt: 'trigger: discovery_cron\nmaxResults: 10' })`. The agent returns a StructuredOutput with `queued`, `topQueued`, and `scoutNotes`.
-2. If `queued > 0`, look up today's `content_reply` slot for the platform via `query_plan_items({ status: ['planned'] })` (filter to `kind === 'content_reply'` AND today's UTC scheduledAt) and read `params.targetCount`. Compute `N = min(targetCount ?? 3, topQueued.length)`. Dispatch community-manager on the top N: `Task({ subagent_type: 'community-manager', description: 'draft top-N replies', prompt: <serialize the top N> + 'targetCount=<N>' })`.
-3. If `queued === 0`, your final reply quotes the agent's `scoutNotes` — "Today's scan: <scoutNotes>". Do NOT just say "no relevant conversations" without the reasoning.
+Two paths inside this playbook depending on whether content-planner
+has scheduled `content_reply` slots for today:
 
-Do NOT dispatch content-planner on a `discovery_cron` trigger — weekly planning is owned by a separate weekly cron.
+**Path A — slot-driven (default expected case).** Onboarding +
+weekly-replan pre-fill `content_reply` plan_items, so on every
+properly onboarded user there will be 1+ slots:
+
+1. `query_plan_items({ status: ['planned'] })` and filter to rows
+   where `kind === 'content_reply'` AND `scheduledAt` falls in
+   today's UTC window. Group by `channel`.
+2. For EACH slot, drive this loop until it terminates, then move on
+   to the next slot:
+   - **Inner attempt 1.**
+     - `Task({ subagent_type: 'discovery-agent', description: 'fill reply slot <planItemId>', prompt: 'trigger: daily\nmaxResults: <slot.targetCount>\nintent: (none — use rubric defaults)' })`. The agent persists its `topQueued` and returns StructuredOutput with `queued`, `topQueued`, and `scoutNotes`.
+     - If `queued > 0`, dispatch community-manager on the top items:
+       `Task({ subagent_type: 'community-manager', description: 'fill reply slot <planItemId>', prompt: '<serialize topQueued> + targetCount=<N>' })`. community-manager drafts up to `targetCount` replies from the queued threads.
+     - After the dispatch, query draft count for today on this channel via `query_team_status` (drafts created this UTC date for `kind='reply'` on the slot's platform). If count >= targetCount, the slot is filled — go to step 3.
+   - **Inner attempts 2 and 3 (if still short).** Repeat. Stop early if discovery-agent returns `queued === 0` two attempts in a row — there are no fresh threads today, re-running discovery will burn API budget without producing more drafts.
+   - **Hard cap: 3 inner attempts per slot.** Partial fills are valid; the slot still transitions to `drafted`.
+3. `update_plan_item({ id: <planItemId>, state: 'drafted' })` to close out the slot.
+
+Multiple slots in one run: handle them sequentially. Don't parallelize — they share the discovery pipeline + draft inbox, and serial execution makes the retry counting unambiguous.
+
+**Path B — fallback (no slots — should not happen post-onboarding).**
+If `query_plan_items` returns zero `content_reply` slots for today,
+fall back to a single discovery+draft pass, mirroring the kickoff
+shape:
+
+1. `Task({ subagent_type: 'discovery-agent', description: 'daily fallback discovery', prompt: 'trigger: daily\nmaxResults: 10' })`.
+2. If `queued > 0`, dispatch community-manager on the top **3** (no slot to read targetCount from): `Task({ subagent_type: 'community-manager', description: 'fallback top-3 replies', prompt: '<serialize top 3> + targetCount=3' })`.
+
+Path B is a safety net for edge cases (user just onboarded, planner failed, manual API call before plan_items exist). When you land on Path B for a user with `productState === 'launched'`, surface a warning in your final summary — onboarding is supposed to pre-fill slots and the user shouldn't be hitting the fallback path.
+
+**User hints in goal text.** When `Source: manual`, respect any hints
+the user typed (e.g. "draft 5 replies, not 3", "scan reddit only") —
+override `targetCount` or filter slot channels accordingly. When
+`Source: cron`, ignore everything past the `Trigger:` line.
+
+Do NOT dispatch content-planner on a `daily` trigger — weekly planning is owned by a separate weekly cron.
+
+Final user-facing summary lists per-slot results: drafted count vs target, plus `scoutNotes` excerpts for any slots that came up empty. Never just say "no replies today" without the scout's reasoning.
 
 ### `trigger: 'weekly'` / `'phase_transition'` (replan)
 
@@ -158,54 +197,9 @@ week"). Strategic path goals carry `weekStart` so growth-strategist
 anchors `thesisArc[0].weekStart` correctly — see growth-strategist's
 strategic-path-playbook.
 
-### `trigger: 'reply_sweep'` (daily reply automation)
-
-The reply-sweep cron fires once per UTC day per user when the
-content-planner has allocated `content_reply` slots for today. The
-goal preamble lists each slot with this exact shape:
-
-```
-Slots:
-- planItemId=<uuid> channel=<x|reddit> targetCount=<int>
-- planItemId=<uuid> channel=<x|reddit> targetCount=<int>
-```
-
-For EACH slot, drive this loop until it terminates, then move on to
-the next slot:
-
-1. **Inner attempt 1.**
-   a. `Task({ subagent_type: 'discovery-agent', description: 'fill reply slot <planItemId>', prompt: 'trigger: reply_sweep\nmaxResults: <slot.targetCount>\nintent: (none — use rubric defaults)' })` to surface candidate threads. The agent persists its `topQueued` and returns a StructuredOutput with `queued`, `topQueued`, and `scoutNotes`.
-   b. If `queued > 0`, dispatch community-manager on the top items:
-      `Task({ subagent_type: 'community-manager', description: 'fill reply slot <planItemId>', prompt: '<serialize topQueued> + targetCount=<N>' })`.
-      community-manager drafts up to `targetCount` replies from the
-      queued threads.
-   c. After the dispatch, query draft count for today on this channel
-      via `query_team_status` (drafts created this UTC date for
-      kind='reply' on the slot's platform). If count >= targetCount,
-      the slot is filled — go to step 4.
-2. **Inner attempts 2 and 3 (if still short).** Repeat step 1. Stop
-   early if discovery-agent returns `queued === 0` two attempts in a
-   row — there are simply no fresh threads today, re-running discovery
-   will burn API budget without producing more drafts.
-3. **Hard cap: 3 inner attempts per slot.** If you hit attempt 3
-   without filling, that's fine — partial fills are valid. The slot
-   still transitions to `drafted` (the founder will see whatever
-   drafts landed).
-4. `update_plan_item({ id: <planItemId>, state: 'drafted' })` to
-   close out the slot. This is what makes it disappear from "today's
-   pending reply slots" on the founder's calendar.
-
-Multiple slots in one run: handle them sequentially. Don't
-parallelize — they share the discovery pipeline + draft inbox, and
-serial execution makes the retry counting unambiguous.
-
-Final user-facing summary lists per-slot results: drafted count vs
-target, plus `scoutNotes` excerpts for any slots that came up empty.
-Never just say "no replies today" without the scout's reasoning.
-
-### `trigger: 'manual'` (user said "scan X again")
-
-Same as `discovery_cron` — dispatch `discovery-agent`, then community-manager on the top results — except respect any user hints in the goal text (e.g. "draft 5 replies, not 3", "scan reddit only").
+This trigger also covers user-initiated replan (`POST /api/plan/replan`)
+— the goal text starts with "Manual replan" vs "Monday cron replan" so
+you can distinguish, but the dispatch is identical.
 
 ## Finishing
 

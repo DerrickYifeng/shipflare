@@ -8,7 +8,6 @@ import {
   healthScoreJobSchema,
   dreamJobSchema,
   codeScanJobSchema,
-  monitorJobSchema,
   engagementJobSchema,
   metricsJobSchema,
   analyticsJobSchema,
@@ -19,7 +18,6 @@ import type {
   HealthScoreJobData,
   DreamJobData,
   CodeScanJobData,
-  MonitorJobData,
   DiscoveryScanJobData,
   EngagementJobData,
   MetricsJobData,
@@ -78,11 +76,6 @@ export const codeScanQueue = new Queue<CodeScanJobData>('code-scan', {
   ...connection,
   defaultJobOptions,
 });
-export const monitorQueue = new Queue<MonitorJobData>('monitor', {
-  ...connection,
-  defaultJobOptions,
-});
-
 /**
  * Top-level scan orchestrator. Runs the discovery-scout agent inline;
  * there's no per-source fan-out anymore. Lower retention because each
@@ -115,7 +108,6 @@ export const analyticsQueue = new Queue<AnalyticsJobData>('analytics', {
 });
 
 // Backward-compat aliases (will be removed after full migration)
-export const xMonitorQueue = monitorQueue;
 export const xEngagementQueue = engagementQueue;
 export const xMetricsQueue = metricsQueue;
 export const xAnalyticsQueue = analyticsQueue;
@@ -235,18 +227,6 @@ export async function enqueueCodeScan(data: CodeScanJobData): Promise<string> {
 // ----------------------------------------------------------------
 
 /**
- * Enqueue monitor scan: poll target accounts for new posts.
- */
-export async function enqueueMonitor(data: MonitorJobData): Promise<void> {
-  const payload = monitorJobSchema.parse(withEnvelope(data));
-  log.debug(`Enqueued monitor (${describePayload(payload)})`);
-  await monitorQueue.add('scan', payload, {
-    attempts: 2,
-    backoff: { type: 'exponential', delay: 5000 },
-  });
-}
-
-/**
  * Enqueue engagement monitoring for a recently posted piece of content.
  * Accepts a delay (ms) for scheduling checks at +15/30/60 minutes.
  */
@@ -292,7 +272,6 @@ export async function enqueueAnalytics(data: AnalyticsJobData): Promise<void> {
 }
 
 // Backward-compat function aliases (will be removed after full migration)
-export const enqueueXMonitor = enqueueMonitor;
 export const enqueueXEngagement = enqueueEngagement;
 export const enqueueXMetrics = enqueueMetrics;
 export const enqueueXAnalytics = enqueueAnalytics;

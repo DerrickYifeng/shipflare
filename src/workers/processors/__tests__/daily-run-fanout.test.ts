@@ -3,7 +3,7 @@ import type { Job } from 'bullmq';
 import type { DiscoveryScanJobData } from '@/lib/queue/types';
 
 /**
- * Verifies the discovery-cron-fanout worker. Mirrors the shape used by
+ * Verifies the daily-run-fanout worker. Mirrors the shape used by
  * `discovery-scan-fanout.test.ts` but exercises the team-run-based fanout
  * shipped in T12 of the unified discovery pipeline plan.
  */
@@ -149,28 +149,28 @@ function nonFanoutJob(): Job<DiscoveryScanJobData> {
   } as unknown as Job<DiscoveryScanJobData>;
 }
 
-describe('processDiscoveryCronFanout', () => {
+describe('processDailyRunFanout', () => {
   it('refuses non-fanout jobs without enqueueing anything', async () => {
-    const { processDiscoveryCronFanout } = await import(
-      '../discovery-cron-fanout'
+    const { processDailyRunFanout } = await import(
+      '../daily-run-fanout'
     );
     const { enqueueTeamRun } = await import('@/lib/queue/team-run');
 
-    await processDiscoveryCronFanout(nonFanoutJob());
+    await processDailyRunFanout(nonFanoutJob());
 
     expect(enqueueTeamRun).not.toHaveBeenCalled();
   });
 
   it('enqueues exactly one team-run per user with channels + product', async () => {
-    const { processDiscoveryCronFanout } = await import(
-      '../discovery-cron-fanout'
+    const { processDailyRunFanout } = await import(
+      '../daily-run-fanout'
     );
     const { enqueueTeamRun } = await import('@/lib/queue/team-run');
     const { resolveRollingConversation } = await import(
       '@/lib/team-rolling-conversation'
     );
 
-    await processDiscoveryCronFanout(fanoutJob());
+    await processDailyRunFanout(fanoutJob());
 
     // u-1: has channels + product → 1 run
     // u-2: has channels + product → 1 run
@@ -200,19 +200,19 @@ describe('processDiscoveryCronFanout', () => {
       expect.arrayContaining([
         {
           teamId: 'team-u-1',
-          trigger: 'discovery_cron',
+          trigger: 'daily',
           rootMemberId: 'm-coord-1',
           conversationId: 'conv-team-u-1-Discovery',
         },
         {
           teamId: 'team-u-2',
-          trigger: 'discovery_cron',
+          trigger: 'daily',
           rootMemberId: 'm-coord-2',
           conversationId: 'conv-team-u-2-Discovery',
         },
         {
           teamId: 'team-u-4',
-          trigger: 'discovery_cron',
+          trigger: 'daily',
           rootMemberId: 'm-coord-4',
           conversationId: 'conv-team-u-4-Discovery',
         },
@@ -234,12 +234,12 @@ describe('processDiscoveryCronFanout', () => {
   it('skips users with isStopRequested=true', async () => {
     stopFlags['u-1'] = true;
 
-    const { processDiscoveryCronFanout } = await import(
-      '../discovery-cron-fanout'
+    const { processDailyRunFanout } = await import(
+      '../daily-run-fanout'
     );
     const { enqueueTeamRun } = await import('@/lib/queue/team-run');
 
-    await processDiscoveryCronFanout(fanoutJob());
+    await processDailyRunFanout(fanoutJob());
 
     // u-1 stopped, u-3 no product → only u-2 + u-4 get runs
     expect(enqueueTeamRun).toHaveBeenCalledTimes(2);
@@ -254,12 +254,12 @@ describe('processDiscoveryCronFanout', () => {
   });
 
   it('skips users with channels but no product', async () => {
-    const { processDiscoveryCronFanout } = await import(
-      '../discovery-cron-fanout'
+    const { processDailyRunFanout } = await import(
+      '../daily-run-fanout'
     );
     const { enqueueTeamRun } = await import('@/lib/queue/team-run');
 
-    await processDiscoveryCronFanout(fanoutJob());
+    await processDailyRunFanout(fanoutJob());
 
     const calls = (
       enqueueTeamRun as unknown as { mock: { calls: unknown[][] } }

@@ -38,9 +38,9 @@ them inline as you draft, and self-check your output before you call
 Three invocation shapes — all delivered as free-form text in the
 spawn prompt by the coordinator:
 
-### Daily reply slot (most common — driven by reply_sweep team_run)
+### Daily reply slot (most common — driven by the `daily` team_run)
 
-The coordinator's `reply_sweep` playbook spawns you to fill a single
+The coordinator's `daily` playbook spawns you to fill a single
 reply slot. The prompt looks like:
 
 ```
@@ -70,14 +70,14 @@ context: <optional notes>
 
 Run the per-thread workflow on that single threadId.
 
-### Legacy: open scan (no slot, no specific threadId)
+### Fallback: open scan (no slot, no specific threadId)
 
-Older `reply_sweep` runs (pre-daily-cron) fired without slot info.
-If the prompt has no `planItemId` and no `threadId`, fall back to:
-call `find_threads` once per connected platform, run the per-thread
-workflow on whatever the inbox returns, drafting 3-5 max per the
-quality bar. This path is being phased out — the daily-cron
-+ planItemId path is the primary entry now.
+If the coordinator's `daily` playbook lands on Path B (no
+`content_reply` slots for today — should not happen post-onboarding),
+it spawns you with neither `planItemId` nor `threadId` and a default
+`targetCount=3`. Fall back to: call `find_threads` once per connected
+platform, run the per-thread workflow on whatever the inbox returns,
+drafting up to `targetCount` per the quality bar.
 
 ## Your per-thread workflow (one LLM turn per thread)
 
