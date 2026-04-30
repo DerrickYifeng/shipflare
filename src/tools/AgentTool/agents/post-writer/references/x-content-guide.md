@@ -464,6 +464,8 @@ one that matches the input.
 
 **Default voice:** `contrarian_analyst`
 
+**Objective:** Share expertise, document traction milestones, and teach from authority. Match the post shape to the context: revenue celebrations in `revenue_flex`, strategic lessons in `contrarian_teacher`, honest retrospectives in `sunset`.
+
 **Sub-mode selection (read the spawn prompt):**
 
 | Caller signal | Sub-mode |
@@ -471,6 +473,8 @@ one that matches the input.
 | Concrete revenue / user-count / years numbers passed in | `revenue_flex` |
 | `sunsetting: true` or `pivoting: true` flag | `sunset` |
 | Otherwise (default) | `contrarian_teacher` |
+
+**Templates** appear in each sub-mode below.
 
 ---
 
@@ -554,3 +558,85 @@ core of it.]
 NEVER use this template to soft-launch a hard sell on a new thing.
 Sunset posts that immediately pivot to "anyway, here's my new
 project" lose trust. Wait at least a week.
+
+## 6. Bad vs good examples
+
+### 6.1 Multi-tweet output (BAD) vs single compressed tweet (GOOD)
+
+**BAD — paragraph-broken multi-tweet output**
+
+```
+I shipped a feature on Tuesday I was proud of. Took 3 days.
+
+By Wednesday morning I realized: no one knew about it.
+
+So I spent the next 6 hours:
+- Writing the same update in 3 voices
+- Searching for communities
+- Rewriting it for each platform's norms
+
+That's why we're building ShipFlare.
+
+#buildinpublic #indiehackers
+```
+
+Why this fails: it's split into multiple tweets via blank lines. The
+platform only sends one tweet — extra paragraphs get dropped on the
+floor.
+
+**GOOD — single compressed tweet**
+
+```
+Tuesday: 3 days to ship a feature I was proud of.
+Wednesday: 6 hours figuring out which voice, which community, which
+platform's norms.
+The build took 3 days. The hustle took 6 hours.
+That's the gap we're building ShipFlare to close. #buildinpublic
+```
+
+Same idea, one tweet, ~245 chars, every clause earns its space.
+
+### 6.2 Phase-mismatch example
+
+**BAD — Day-N log written from `steady` phase**
+
+```
+Day 47 of building ShipFlare 💪
+Today: refactored the validators.
+Long way to go but excited!
+```
+
+Why this fails: the founder is at $50K MRR and three years post-launch.
+"Day 47" reads as either tone-deaf or fake. The audience expects scale-
+phase content (reflection, contrarian take, system-level lesson).
+
+**GOOD — same founder, `steady.contrarian_teacher` post**
+
+```
+3 years in, the validators we shipped on day 47 still catch 90% of
+bad drafts. The other 10% is what 3 years of editing taught me to
+write into the prompt.
+```
+
+Same product, same engineer, same fact — completely different shape
+because the phase changed.
+
+### 6.3 Banned-opener rewrite
+
+**BAD**
+
+```
+Excited to announce that we just shipped revenue analytics for
+ShipFlare! 🎉
+```
+
+**GOOD**
+
+```
+Revenue analytics shipped for ShipFlare.
+First user to try it: spotted a $1,247/mo retention leak inside 4
+minutes. That's what this was for.
+```
+
+The banned opener is replaced with the specific number + the user
+story that proves the feature mattered.
