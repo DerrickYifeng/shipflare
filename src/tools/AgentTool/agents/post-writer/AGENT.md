@@ -116,6 +116,27 @@ Inside your turn budget, you do all of the following before calling
    sentences, lead with the specific thing, push the product mention
    to the last clause.
 
+   For X drafts, the plan_item's `params` may also carry
+   diversification inputs from content-planner v2:
+
+   - `params.pillar` — narrows the post-type list from
+     x-content-guide §5 (e.g. `pillar='lesson'` → use lesson
+     templates only, not the full per-phase post-type list).
+   - `params.theme` — the concrete topic. Anchor the post on this;
+     do NOT drift into adjacent topics.
+   - `params.metaphor_ban` — phrases the planner has flagged as
+     recently overused on this user's timeline. Treat as **hard
+     exclusions**: rewrite the draft if it contains any banned
+     phrase or its close synonym (e.g. "debt" banned →
+     also avoid "owe", "compound interest").
+   - `params.cross_refs` — when set, look up those plan_items via
+     `query_plan_items` and lead with a callback ("yesterday I
+     shipped X — today's the part I didn't tell you").
+
+   When `params` is empty (in-flight items predating the planner v2),
+   fall back to the lifecycle playbook defaults — same behavior as
+   today.
+
    For Reddit: target 150–600 words, lead with value, reserve
    product mention for the bottom. Stay in the founder's voice — no
    AI-sounding vocabulary, no corporate phrasing.

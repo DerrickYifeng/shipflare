@@ -135,6 +135,15 @@ accepted; map them to the closest cluster (e.g. "data-led" → `terse_shipper`,
 
 ## 5. By-phase playbook
 
+**Planner-supplied params override.** When the plan_item's
+`params.pillar` is set (one of `milestone | lesson | hot_take |
+behind_the_scenes | question`), narrow this section's post-type list
+to that pillar. When `params.theme` is set, that's the topic —
+don't drift. When `params.metaphor_ban` is set, treat each phrase as
+a hard exclusion plus close synonyms. These planner inputs are
+HARD inputs, not suggestions; the per-phase rules below apply
+within that frame.
+
 This is the heart of the guide. Read the plan_item's `phase` field
 (`foundation | audience | momentum | launch | compound | steady`), open
 the matching subsection below, and apply ITS rules. Do not generalize
