@@ -16,7 +16,8 @@ import { buildTool } from '@/core/tool-system';
 import type { ToolDefinition } from '@/core/types';
 import { channels } from '@/lib/db/schema';
 import { readDomainDeps } from '@/tools/context-helpers';
-import { XClient } from '@/lib/x-client';
+import { XClient, XRateLimitError } from '@/lib/x-client';
+import { createClientFromChannelById } from '@/lib/platform-deps';
 
 export const QUERY_RECENT_X_POSTS_TOOL_NAME = 'query_recent_x_posts';
 
@@ -63,6 +64,7 @@ export interface QueryRecentXPostsResult {
 }
 
 function classifyError(err: unknown): QueryRecentXPostsError {
+  if (err instanceof XRateLimitError) return 'rate_limited';
   const message =
     err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
   if (message.includes('unauthorized') || message.includes('token')) {
@@ -94,13 +96,16 @@ export const queryRecentXPostsTool: ToolDefinition<
     const windowDays = input.days;
 
     // 1. Find the user's X channel.
-    const channelRows = await db
-      .select()
+    // Projection limited to `id` so we never pull encrypted token columns
+    // into a plain object. Token decryption + client instantiation happens
+    // inside the sanctioned helper `createClientFromChannelById`.
+    const [channelMeta] = await db
+      .select({ id: channels.id })
       .from(channels)
       .where(and(eq(channels.userId, userId), eq(channels.platform, 'x')))
       .limit(1);
 
-    if (channelRows.length === 0) {
+    if (!channelMeta) {
       return {
         source: 'x_api',
         windowDays,
@@ -109,12 +114,19 @@ export const queryRecentXPostsTool: ToolDefinition<
       };
     }
 
-    // 2. Instantiate XClient from the channel row.
-    let xClient;
+    // 2. Instantiate XClient via the sanctioned helper.
+    let xClient: XClient;
     try {
-      xClient = XClient.fromChannel(
-        channelRows[0] as Parameters<typeof XClient.fromChannel>[0],
-      );
+      const resolved = await createClientFromChannelById(channelMeta.id);
+      if (!resolved) {
+        return {
+          source: 'x_api',
+          windowDays,
+          tweets: [],
+          error: 'no_channel',
+        };
+      }
+      xClient = resolved.client as XClient;
     } catch (err) {
       return {
         source: 'x_api',

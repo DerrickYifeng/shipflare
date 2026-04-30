@@ -88,7 +88,7 @@ see:
   items
 - "channel-cadence" — the per-channel `perWeek` caps you must respect
 
-### Step 2.5: Diversity inputs (X timeline + pillar mix)
+### Step 2.4: Diversity inputs (X timeline + pillar mix)
 
 Before scheduling content_post items, read the last 14 days of the
 founder's X timeline and prepare diversification metadata. See

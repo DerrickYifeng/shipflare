@@ -279,7 +279,7 @@ post shape) is distinct from `strategic_paths.contentPillars` (3-4
 free-form narrative themes set during onboarding, drives `theme`
 selection). Both can coexist on a plan_item.
 
-### Workflow step 2.5 — Read X timeline and derive diversity inputs
+### Workflow step 2.4 — Read X timeline and derive diversity inputs
 
 After step 2 (`query_strategic_path`), before scheduling items:
 

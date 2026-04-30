@@ -1,7 +1,7 @@
 /**
- * query_recent_x_posts unit tests. Stubs XClient and the channels DB
- * lookup; asserts the tool's contract: shape, window filtering, and
- * the four error-fallback paths.
+ * query_recent_x_posts unit tests. Stubs createClientFromChannelById and
+ * the channels DB lookup; asserts the tool's contract: shape, window filtering,
+ * and the four error-fallback paths.
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { ToolContext } from '@/core/types';
@@ -26,8 +26,8 @@ vi.mock('@/lib/logger', () => ({
   }),
 }));
 
-// XClient.fromChannel + ensureValidToken + getMe + getUserTweets are
-// stubbed via a factory so each test installs the behavior it needs.
+// getMe + getUserTweets are stubbed via a factory so each test installs
+// the behavior it needs. createClientFromChannelById returns a stub client.
 let stubGetMe: () => Promise<{ id: string; username: string }>;
 let stubGetUserTweets: (
   userId: string,
@@ -48,14 +48,15 @@ interface TweetStub {
   referencedTweets?: Array<{ type: string; id: string }>;
 }
 
-vi.mock('@/lib/x-client', () => ({
-  XClient: {
-    fromChannel: () => ({
+vi.mock('@/lib/platform-deps', () => ({
+  createClientFromChannelById: async () => ({
+    client: {
       getMe: () => stubGetMe(),
       getUserTweets: (id: string, o: { maxResults?: number }) =>
         stubGetUserTweets(id, o),
-    }),
-  },
+    },
+    platform: 'x',
+  }),
 }));
 
 import { queryRecentXPostsTool } from '../QueryRecentXPostsTool';
@@ -249,6 +250,52 @@ describe('queryRecentXPostsTool', () => {
 
     expect(result.tweets).toEqual([]);
     expect(result.error).toBe('token_invalid');
+  });
+
+  it('returns error="rate_limited" when XClient throws a rate-limit error', async () => {
+    store.register<ChannelRow>(channels, [
+      {
+        id: 'ch-1',
+        userId: 'user-1',
+        platform: 'x',
+        username: 'founder',
+        oauthTokenEncrypted: 'enc',
+        refreshTokenEncrypted: 'enc',
+        tokenExpiresAt: null,
+      },
+    ]);
+    stubGetMe = async () => {
+      throw new Error('X rate limit get_me reached, resets in 30s');
+    };
+
+    const ctx = makeCtx(store, { userId: 'user-1', productId: 'prod-1' });
+    const result = await queryRecentXPostsTool.execute({ days: 14 }, ctx);
+
+    expect(result.tweets).toEqual([]);
+    expect(result.error).toBe('rate_limited');
+  });
+
+  it('returns error="api_error" for an uncategorized X API failure', async () => {
+    store.register<ChannelRow>(channels, [
+      {
+        id: 'ch-1',
+        userId: 'user-1',
+        platform: 'x',
+        username: 'founder',
+        oauthTokenEncrypted: 'enc',
+        refreshTokenEncrypted: 'enc',
+        tokenExpiresAt: null,
+      },
+    ]);
+    stubGetUserTweets = async () => {
+      throw new Error('Internal Server Error from upstream');
+    };
+
+    const ctx = makeCtx(store, { userId: 'user-1', productId: 'prod-1' });
+    const result = await queryRecentXPostsTool.execute({ days: 14 }, ctx);
+
+    expect(result.tweets).toEqual([]);
+    expect(result.error).toBe('api_error');
   });
 
   it('rejects out-of-range `days` via the schema', () => {
