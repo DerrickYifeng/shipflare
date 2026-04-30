@@ -380,3 +380,77 @@ Verbatim exemplar (synthetic from S3-launch dataset):
 
 Single tweet, specific number, specific quote, specific timeframe.
 That's the breakout shape.
+
+### 5.5 compound
+
+First 30 days post-launch. The most breakout-prone phase. First $0 → $1K
+MRR, first paying customers, first churn, "I can't believe people are
+actually paying for this" — only if true.
+
+**Default voice:** `patient_grinder`
+
+**Objective:** Convert launch attention into durable proof. Every post
+should anchor a real number to a real story.
+
+**Post types to use:** `revenue-update`, `milestone`, `lesson`,
+`failure`, `behind-the-scenes` (first-customer story)
+
+**Hook patterns:** `number-led` (used in 45% of breakouts at this
+stage), `revenue-flex`, `milestone-pop`, `transformation`
+
+**Number anchors:** $MRR (exact, not rounded — `$1,247` not `~$1K`),
+paying customers, signups, churn %, conversion %, time since launch.
+
+**Length target:** 120–280 chars. Media: dashboard / Stripe screenshot
+strongly preferred (78% of breakouts at this stage have media).
+
+**Phase-specific bans:**
+- Vanity metrics divorced from revenue ("we hit 10K page views!" with
+  no conversion)
+- Generic gratitude posts ("thank you all for the support 🙏")
+- Radio silence after launch — the worst move
+- Rounded vague numbers ("hit ~$1K MRR" — give the exact figure)
+
+**Templates**
+
+**Template 5.5.A — Revenue update**
+
+```
+[product] hit $[exact_number] MRR.
+
+[Bootstrapped? Time to here? One specific context detail.]
+
+[Stripe / dashboard screenshot.]
+
+[Optional: one-line lesson or "what's next".]
+```
+
+Verbatim exemplar (ryanashcraft, 2026-04-06):
+> Foodnoms has officially hit $50K MRR.
+>
+> Bootstrapped with no full-time employees. Took 6 and a half years
+> to get here.
+>
+> The grind never stops. Still working to make the product better
+> every day. I love this little app. Glad others do too!
+
+Source: https://x.com/ryanashcraft/status/2041244172775301254
+
+That post is technically a `steady`-phase post (>30 days post-launch)
+but the structure transfers cleanly to compound: exact number,
+context, screenshot, one-line attitude.
+
+**Template 5.5.B — First churn / first failure**
+
+```
+First [churn / refund / killed feature] for [product].
+
+[One sentence: what happened.]
+
+[One sentence: why it happened, with data if you have it.]
+
+[One sentence: what you're doing about it.]
+```
+
+Failure posts in compound consistently outperform vanity success
+posts. The audience is rooting for the underdog story.
