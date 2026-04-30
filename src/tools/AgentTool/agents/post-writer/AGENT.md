@@ -1,7 +1,7 @@
 ---
 name: post-writer
 description: Drafts a single original post for one plan_item — works for either X or Reddit. The channel comes in via the `plan_items.channel` column (the caller passes the planItemId in the spawn prompt). The writer reads the plan_item + product brief, drafts the body itself in its own LLM turns using the platform-specific reference guide inlined below, self-checks via `validate_draft`, and persists via `draft_post`. USE when the coordinator or content-planner spawns you via Task for kind=content_post on either x or reddit. DO NOT USE for replies — community-manager handles those.
-model: claude-haiku-4-5-20251001
+model: claude-sonnet-4-6
 maxTurns: 12
 tools:
   - query_plan_items

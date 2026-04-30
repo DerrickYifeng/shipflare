@@ -30,7 +30,7 @@ describe('post-writer loader smoke', () => {
       'SendMessage',
       'StructuredOutput',
     ]);
-    expect(writer.model).toBe('claude-haiku-4-5-20251001');
+    expect(writer.model).toBe('claude-sonnet-4-6');
     // Bumped from 4 → 12 when we moved drafting + self-check into the
     // agent's own LLM turns (was: draft_post called sideQuery internally
     // and the agent only wrapped one tool call). Mirrors community-manager
