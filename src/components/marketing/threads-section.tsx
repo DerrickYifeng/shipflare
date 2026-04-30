@@ -54,29 +54,22 @@ export function ThreadsSection() {
       id="threads"
       aria-labelledby="threads-heading"
       style={{
-        background: 'var(--sf-bg-dark)',
-        color: 'var(--sf-fg-on-dark-1)',
+        background: 'var(--sf-bg-primary)',
+        color: 'var(--sf-fg-1)',
         padding: '120px 24px',
       }}
     >
       <div style={{ maxWidth: 'var(--sf-max-width)', margin: '0 auto' }}>
         <div style={{ maxWidth: 680, marginBottom: 56 }}>
-          <span
-            className="sf-ops"
-            style={{
-              color: 'var(--sf-link-dark)',
-              marginBottom: 12,
-              display: 'block',
-            }}
-          >
-            Real threads, real replies
-          </span>
+          <Ops tone="signal" style={{ marginBottom: 12, display: 'block' }}>
+            ▸ Social Agent in action
+          </Ops>
           <h2
             id="threads-heading"
             className="sf-h1"
             style={{
               margin: 0,
-              color: 'var(--sf-fg-on-dark-1)',
+              color: 'var(--sf-fg-1)',
               textWrap: 'balance',
             }}
           >
@@ -86,11 +79,10 @@ export function ThreadsSection() {
             className="sf-lede"
             style={{
               marginTop: 16,
-              color: 'var(--sf-fg-on-dark-2)',
               maxWidth: 560,
             }}
           >
-            A cross-section of threads ShipFlare surfaces for developer-tool products — matched on intent, drafted in voice, reviewed before you see them.
+            A cross-section of threads the Social Agent surfaces for developer-tool products — matched on intent, drafted in voice, reviewed before you see them.
           </p>
         </div>
 
@@ -116,11 +108,11 @@ export function ThreadsSection() {
           className="flex items-center justify-center flex-wrap"
           style={{ marginTop: 48, gap: 20 }}
         >
-          <Ops tone="onDark">customer logos coming soon</Ops>
-          <Ops tone="onDark">·</Ops>
-          <Ops tone="onDark">beta · 40+ indie devs</Ops>
-          <Ops tone="onDark">·</Ops>
-          <Ops tone="onDark">1,284 threads surfaced this week</Ops>
+          <Ops>customer logos coming soon</Ops>
+          <Ops>·</Ops>
+          <Ops>beta · 40+ indie devs</Ops>
+          <Ops>·</Ops>
+          <Ops>1,284 threads surfaced this week</Ops>
         </div>
       </div>
 
@@ -150,20 +142,20 @@ interface ThreadCardProps {
 
 function ThreadCard({ thread }: ThreadCardProps) {
   const cardStyle: CSSProperties = {
-    background: 'var(--sf-bg-dark-surface)',
-    border: '1px solid var(--sf-border-on-dark)',
+    background: 'var(--sf-bg-secondary)',
     borderRadius: 'var(--sf-radius-lg)',
     padding: 22,
     display: 'flex',
     flexDirection: 'column',
     gap: 16,
     height: '100%',
+    boxShadow: 'var(--sf-shadow-card)',
   };
   return (
     <article style={cardStyle}>
       <div>
         <div className="flex items-center flex-wrap" style={{ gap: 8, marginBottom: 10 }}>
-          <Ops tone="onDark">{thread.source === 'x' ? '𝕏' : thread.source}</Ops>
+          <Ops>{thread.source === 'x' ? '𝕏' : thread.source}</Ops>
           <span
             style={{
               padding: '2px 7px',
@@ -194,7 +186,7 @@ function ThreadCard({ thread }: ThreadCardProps) {
             style={{
               marginLeft: 'auto',
               fontSize: 'var(--sf-text-2xs)',
-              color: 'var(--sf-fg-on-dark-4)',
+              color: 'var(--sf-fg-4)',
             }}
           >
             {thread.when}
@@ -204,7 +196,7 @@ function ThreadCard({ thread }: ThreadCardProps) {
           style={{
             fontSize: 'var(--sf-text-base)',
             fontWeight: 500,
-            color: 'var(--sf-fg-on-dark-1)',
+            color: 'var(--sf-fg-1)',
             letterSpacing: 'var(--sf-track-tight)',
             lineHeight: 'var(--sf-lh-snug)',
           }}
@@ -212,14 +204,14 @@ function ThreadCard({ thread }: ThreadCardProps) {
           {thread.title}
         </div>
         <div style={{ marginTop: 8 }}>
-          <Ops tone="onDark">{thread.meta}</Ops>
+          <Ops>{thread.meta}</Ops>
         </div>
       </div>
 
       <div
         style={{
-          background: 'oklch(22% 0.04 255 / 0.24)',
-          border: '1px solid oklch(62% 0.19 255 / 0.28)',
+          background: 'var(--sf-accent-light)',
+          border: '1px solid oklch(62% 0.19 255 / 0.20)',
           borderRadius: 'var(--sf-radius-md)',
           padding: '14px 16px',
         }}
@@ -227,7 +219,7 @@ function ThreadCard({ thread }: ThreadCardProps) {
         <div className="flex items-center" style={{ gap: 8, marginBottom: 8 }}>
           <span
             className="sf-ops"
-            style={{ color: 'var(--sf-link-dark)', fontWeight: 600 }}
+            style={{ color: 'var(--sf-link)', fontWeight: 600 }}
           >
             draft · content agent
           </span>
@@ -236,7 +228,7 @@ function ThreadCard({ thread }: ThreadCardProps) {
             style={{
               marginLeft: 'auto',
               fontSize: 'var(--sf-text-2xs)',
-              color: 'var(--sf-fg-on-dark-4)',
+              color: 'var(--sf-fg-4)',
             }}
           >
             {thread.reply.length}/280
@@ -245,7 +237,7 @@ function ThreadCard({ thread }: ThreadCardProps) {
         <div
           style={{
             fontSize: 'var(--sf-text-sm)',
-            color: 'var(--sf-fg-on-dark-1)',
+            color: 'var(--sf-fg-1)',
             letterSpacing: 'var(--sf-track-normal)',
             lineHeight: 'var(--sf-lh-normal)',
           }}

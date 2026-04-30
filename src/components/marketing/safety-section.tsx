@@ -39,20 +39,20 @@ const SAFETY_ITEMS: { title: string; detail: string }[] = [
   {
     title: 'Adversarial review',
     detail:
-      'A second model tries to find reasons to reject every draft. Two-agent consensus required to pass.',
+      'A second model grades every artifact on relevance, value-first, tone, authenticity, compliance, and risk. Two-agent consensus to pass.',
   },
   {
-    title: 'Rate limits & cooldowns',
-    detail: 'Per-subreddit, per-account caps. Never more than 1 reply / thread / day.',
+    title: 'Conservative rate limits',
+    detail: 'Per-account caps for posting, per-domain caps for outreach, per-budget caps for ads. Always well below platform thresholds.',
   },
   {
     title: 'Shadowban detection',
     detail:
-      'We watch for silent drops and back off automatically. Pipeline pauses, you get notified.',
+      'We watch for silent drops and back off automatically. The agent pauses, you get notified.',
   },
   {
-    title: 'You approve everything',
-    detail: 'Nothing posts without an explicit tap. No autopilot "ship all", ever.',
+    title: 'Human approval, by default',
+    detail: 'Outbound, outreach, paid spend, public content — all gated by an explicit tap from you. No "ship all" autopilot.',
   },
 ];
 
@@ -72,7 +72,11 @@ export function SafetySection() {
     <section
       id="safety"
       aria-labelledby="safety-heading"
-      style={{ background: 'var(--sf-bg-primary)', padding: '120px 24px' }}
+      style={{
+        background: 'var(--sf-bg-dark)',
+        color: 'var(--sf-fg-on-dark-1)',
+        padding: '120px 24px',
+      }}
     >
       <div style={{ maxWidth: 'var(--sf-max-width)', margin: '0 auto' }}>
         <div
@@ -83,18 +87,32 @@ export function SafetySection() {
           }}
         >
           <div>
-            <Ops tone="flare" style={{ marginBottom: 12, display: 'block' }}>
-              Safety by default
-            </Ops>
+            <span
+              className="sf-ops"
+              style={{
+                color: 'var(--sf-link-dark)',
+                marginBottom: 12,
+                display: 'block',
+              }}
+            >
+              The authenticity question
+            </span>
             <h2
               id="safety-heading"
               className="sf-h1"
-              style={{ margin: 0, color: 'var(--sf-fg-1)', textWrap: 'balance' }}
+              style={{
+                margin: 0,
+                color: 'var(--sf-fg-on-dark-1)',
+                textWrap: 'balance',
+              }}
             >
-              Every draft fights for its life before you see it.
+              Real accounts. Adversarial review. You approve every artifact.
             </h2>
-            <p className="sf-lede" style={{ marginTop: 16 }}>
-              An adversarial review agent grades every draft on tone, factual accuracy, and spam risk. Roughly one in three drafts is revised or dropped before it enters your queue.
+            <p
+              className="sf-lede"
+              style={{ marginTop: 16, color: 'var(--sf-fg-on-dark-2)' }}
+            >
+              Spam networks create fake accounts to deceive at scale. ShipFlare operates your real accounts under your real identity. Every agent&rsquo;s output is graded by a second model and gated by your approval before anything ships.
             </p>
 
             <ul
@@ -165,7 +183,7 @@ function SafetyItem({ title, detail }: SafetyItemProps) {
           style={{
             fontSize: 'var(--sf-text-base)',
             fontWeight: 600,
-            color: 'var(--sf-fg-1)',
+            color: 'var(--sf-fg-on-dark-1)',
             letterSpacing: 'var(--sf-track-tight)',
           }}
         >
@@ -174,7 +192,7 @@ function SafetyItem({ title, detail }: SafetyItemProps) {
         <div
           style={{
             fontSize: 'var(--sf-text-sm)',
-            color: 'var(--sf-fg-2)',
+            color: 'var(--sf-fg-on-dark-2)',
             marginTop: 2,
             lineHeight: 'var(--sf-lh-normal)',
           }}

@@ -4,28 +4,48 @@ interface AgentEntry {
   name: string;
   role: string;
   detail: string;
-  accent?: 'signal' | 'flare' | 'success';
+  live?: boolean;
 }
 
 const AGENTS: AgentEntry[] = [
-  { name: 'SCOUT', role: 'Reads your product', detail: 'meta · docs · changelog · GitHub' },
-  { name: 'DISCOVERY', role: 'Finds conversations', detail: 'reddit · x · hn search + crawl' },
-  { name: 'ANALYST', role: 'Scores intent', detail: 'asking · venting · discussing' },
-  { name: 'CONTENT', role: 'Drafts replies', detail: 'in your voice · with citations' },
-  { name: 'REVIEW', role: 'Adversarial pass', detail: 'tone · accuracy · spam risk', accent: 'flare' },
-  { name: 'POSTING', role: 'You approve, we post', detail: 'rate-limited · shadowban aware', accent: 'success' },
+  {
+    name: 'CMO',
+    role: 'Strategy & coordination',
+    detail: 'plans · briefs · approvals · weekly review',
+    live: true,
+  },
+  {
+    name: 'SOCIAL',
+    role: 'Cadence & community',
+    detail: 'x · linkedin · reddit · hn · discord',
+    live: true,
+  },
+  {
+    name: 'SEARCH',
+    role: 'SEO + GEO unified',
+    detail: 'keywords · on-page · llms.txt · citations',
+  },
+  {
+    name: 'PERFORMANCE',
+    role: 'Paid media',
+    detail: 'meta · google · tiktok · x · reddit ads',
+  },
+  {
+    name: 'CONTENT',
+    role: 'Long-form & lifecycle',
+    detail: 'blogs · newsletters · changelogs · copy',
+  },
+  {
+    name: 'ANALYTICS',
+    role: 'Funnel & attribution',
+    detail: 'posthog · stripe · ga4 · experiments',
+  },
 ];
 
-function dotColor(accent?: AgentEntry['accent']): string {
-  if (accent === 'flare') return 'var(--sf-accent)';
-  if (accent === 'success') return 'var(--sf-success)';
-  return 'var(--sf-accent)';
-}
-
 /**
- * How it works — paper section, 6-agent grid + bottom Metric row.
- * Uses `.app-dark` inheritance, so this re-themes automatically if a
- * parent flips dark (marketing page sits on an `.app-dark` root).
+ * The team — paper section, 6-role grid mirroring a real startup marketing org.
+ * Cards show role name, one-line job, and the operational surfaces each agent
+ * has direct access to.
  */
 export function HowItWorks() {
   return (
@@ -37,17 +57,17 @@ export function HowItWorks() {
       <div style={{ maxWidth: 'var(--sf-max-width)', margin: '0 auto' }}>
         <div style={{ maxWidth: 680, marginBottom: 56 }}>
           <Ops tone="signal" style={{ marginBottom: 12, display: 'block' }}>
-            How it works
+            The team
           </Ops>
           <h2
             id="how-heading"
             className="sf-h1"
             style={{ margin: 0, color: 'var(--sf-fg-1)', textWrap: 'balance' }}
           >
-            Six agents. One pipeline. Runs while you sleep.
+            Six agents. One marketing org.
           </h2>
           <p className="sf-lede" style={{ marginTop: 16, maxWidth: 560 }}>
-            Each agent has one job and hands off to the next. Every draft is reviewed by an adversarial pass before it ever hits your queue.
+            Each agent owns one role with direct operational access to the surfaces of its function. The CMO orchestrates the team and reports up to you.
           </p>
         </div>
 
@@ -70,14 +90,16 @@ export function HowItWorks() {
                 borderBottom: '1px solid var(--sf-border-subtle)',
                 position: 'relative',
               }}
+              aria-label={a.live ? `${a.name} agent — live` : `${a.name} agent — on the roadmap`}
             >
               <div className="flex items-center" style={{ gap: 10, marginBottom: 14 }}>
                 <span
+                  aria-label={a.live ? 'live' : 'on the roadmap'}
                   style={{
                     width: 6,
                     height: 6,
                     borderRadius: '50%',
-                    background: dotColor(a.accent),
+                    background: a.live ? 'var(--sf-success)' : 'var(--sf-fg-4)',
                   }}
                 />
                 <span
@@ -114,41 +136,38 @@ export function HowItWorks() {
         </div>
 
         <div
-          className="flex items-center justify-center flex-wrap"
-          style={{ marginTop: 40, gap: 28 }}
+          aria-hidden="true"
+          className="flex items-center flex-wrap"
+          style={{
+            marginTop: 20,
+            justifyContent: 'flex-end',
+            gap: 20,
+          }}
         >
-          <Metric label="avg time to first draft" value="8.4s" />
-          <Divider />
-          <Metric label="drafts rejected by review" value="31%" />
-          <Divider />
-          <Metric label="replies you approve" value="< 10s each" />
+          <span className="inline-flex items-center" style={{ gap: 6 }}>
+            <span
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: '50%',
+                background: 'var(--sf-success)',
+              }}
+            />
+            <Ops>live</Ops>
+          </span>
+          <span className="inline-flex items-center" style={{ gap: 6 }}>
+            <span
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: '50%',
+                background: 'var(--sf-fg-4)',
+              }}
+            />
+            <Ops>on the roadmap</Ops>
+          </span>
         </div>
       </div>
     </section>
-  );
-}
-
-interface MetricProps {
-  label: string;
-  value: string;
-}
-
-function Metric({ label, value }: MetricProps) {
-  return (
-    <div style={{ textAlign: 'center' }}>
-      <div className="sf-h2" style={{ color: 'var(--sf-fg-1)' }}>
-        {value}
-      </div>
-      <Ops style={{ marginTop: 4, display: 'block' }}>{label}</Ops>
-    </div>
-  );
-}
-
-function Divider() {
-  return (
-    <span
-      aria-hidden="true"
-      style={{ width: 1, height: 28, background: 'var(--sf-border)' }}
-    />
   );
 }

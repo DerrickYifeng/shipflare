@@ -2,6 +2,7 @@ import { auth } from '@/lib/auth';
 import { GlassNav } from '@/components/marketing/glass-nav';
 import { HeroDemo } from '@/components/marketing/hero-demo';
 import { HowItWorks } from '@/components/marketing/how-it-works';
+import { PhaseSection } from '@/components/marketing/phase-section';
 import { ThreadsSection } from '@/components/marketing/threads-section';
 import { SafetySection } from '@/components/marketing/safety-section';
 import { CTASection } from '@/components/marketing/cta-section';
@@ -34,6 +35,7 @@ export default async function HomePage() {
       <GlassNav isAuthenticated={isAuthenticated} />
       <HeroDemo isAuthenticated={isAuthenticated} />
       <HowItWorks />
+      <PhaseSection />
       <ThreadsSection />
       <SafetySection />
       <CTASection isAuthenticated={isAuthenticated} />

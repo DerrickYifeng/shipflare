@@ -32,8 +32,8 @@ export function CTASection({ isAuthenticated }: CTASectionProps) {
         // linear slab. Keeps the alternating rhythm's final dark beat
         // (ink → paper → ink → paper → ink+glow → ink) while marking the
         // CTA as the signature moment.
-        background: 'var(--sf-bg-dark)',
-        color: 'var(--sf-fg-on-dark-1)',
+        background: 'var(--sf-bg-primary)',
+        color: 'var(--sf-fg-1)',
         padding: '140px 24px',
         position: 'relative',
         overflow: 'hidden',
@@ -45,7 +45,7 @@ export function CTASection({ isAuthenticated }: CTASectionProps) {
           position: 'absolute',
           inset: 0,
           background:
-            'radial-gradient(ellipse 60% 50% at 50% 40%, oklch(62% 0.19 255 / 0.20), transparent 60%)',
+            'radial-gradient(ellipse 60% 50% at 50% 40%, oklch(62% 0.19 255 / 0.14), transparent 65%)',
           pointerEvents: 'none',
         }}
       />
@@ -62,20 +62,19 @@ export function CTASection({ isAuthenticated }: CTASectionProps) {
           className="sf-hero"
           style={{
             margin: 0,
-            color: 'var(--sf-fg-on-dark-1)',
+            color: 'var(--sf-fg-1)',
             fontSize: 'clamp(40px, 5.5vw, var(--sf-text-hero))',
             textWrap: 'balance',
           }}
         >
-          Start shipping where
+          Hire your
           <br />
-          your users already are.
+          marketing team.
         </h2>
         <p
           className="sf-lede"
           style={{
             marginTop: 20,
-            color: 'var(--sf-fg-on-dark-2)',
             fontSize: 'var(--sf-text-lg)',
           }}
         >
@@ -106,39 +105,39 @@ export function CTASection({ isAuthenticated }: CTASectionProps) {
             className="flex flex-wrap items-center justify-center"
             style={{ marginTop: 24, gap: 20 }}
           >
-            <Ops tone="onDark">coming soon</Ops>
+            <Ops>coming soon</Ops>
             <span
               style={{
-                color: 'var(--sf-fg-on-dark-4)',
+                color: 'var(--sf-fg-4)',
                 fontSize: 'var(--sf-text-xs)',
                 fontFamily: 'var(--sf-font-mono)',
                 textTransform: 'uppercase',
                 letterSpacing: 'var(--sf-track-mono)',
-                opacity: 0.55,
+                opacity: 0.7,
               }}
             >
               Google
             </span>
             <span
               style={{
-                color: 'var(--sf-fg-on-dark-4)',
+                color: 'var(--sf-fg-4)',
                 fontSize: 'var(--sf-text-xs)',
                 fontFamily: 'var(--sf-font-mono)',
                 textTransform: 'uppercase',
                 letterSpacing: 'var(--sf-track-mono)',
-                opacity: 0.55,
+                opacity: 0.7,
               }}
             >
               𝕏
             </span>
             <span
               style={{
-                color: 'var(--sf-fg-on-dark-4)',
+                color: 'var(--sf-fg-4)',
                 fontSize: 'var(--sf-text-xs)',
                 fontFamily: 'var(--sf-font-mono)',
                 textTransform: 'uppercase',
                 letterSpacing: 'var(--sf-track-mono)',
-                opacity: 0.55,
+                opacity: 0.7,
               }}
             >
               Email

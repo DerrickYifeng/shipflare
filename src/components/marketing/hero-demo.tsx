@@ -13,7 +13,7 @@ export interface HeroDemoProps {
   isAuthenticated: boolean;
 }
 
-const DEFAULT_HEADLINE = 'Marketing autopilot for indie developers.';
+const DEFAULT_HEADLINE = 'The AI marketing team for solo founders.';
 
 /**
  * Hero section — dark `--sf-bg-dark` bg, centered eyebrow badge, hero headline,
@@ -84,7 +84,7 @@ export function HeroDemo({ headline = DEFAULT_HEADLINE, isAuthenticated }: HeroD
               marginInline: 'auto',
             }}
           >
-            A pipeline of agents finds where your users actually hang out, drafts replies in your voice, and passes each one through an adversarial review before you approve.
+            AI made building trivial. Marketing is the new bottleneck. We ship the six roles a real startup marketing org has — CMO, Search, Performance, Content, Social, Analytics.
           </p>
           <div
             className="flex flex-wrap"
@@ -116,12 +116,23 @@ export function HeroDemo({ headline = DEFAULT_HEADLINE, isAuthenticated }: HeroD
                 textDecoration: 'none',
               }}
             >
-              See how it works ›
+              Meet the team ↓
             </a>
           </div>
         </div>
 
         <div style={{ marginTop: 24 }}>
+          <Ops
+            tone="onDark"
+            style={{
+              display: 'block',
+              textAlign: 'center',
+              marginBottom: 12,
+              color: 'var(--sf-fg-on-dark-3)',
+            }}
+          >
+            ▸ Social Agent · live
+          </Ops>
           <DemoWindow />
         </div>
       </div>
