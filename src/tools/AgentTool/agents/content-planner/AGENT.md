@@ -1,7 +1,7 @@
 ---
 name: content-planner
 description: Produces concrete plan_items for one week — content posts, emails, setup tasks, interviews. Reads the active strategic path plus this week's signals (stalled items, last-week completions, recent milestones) and allocates items across connected channels with scheduledAt timestamps. USE on Monday mornings, when the founder requests re-planning this week, or after a phase transition. MUST BE USED whenever plan_items for a new week are needed. DO NOT USE for rewriting the strategic narrative — growth-strategist handles that. Can spawn writers via Task to pre-draft bodies (optional).
-model: claude-haiku-4-5-20251001
+model: claude-sonnet-4-6
 maxTurns: 20
 tools:
   - add_plan_item
@@ -10,6 +10,7 @@ tools:
   - query_stalled_items
   - query_last_week_completions
   - query_strategic_path
+  - query_recent_x_posts
   - Task
   - SendMessage
   - StructuredOutput
