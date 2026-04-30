@@ -319,3 +319,64 @@ Why [pricing decision]: [one sentence — the customer-facing reason].
 
 The "why" line is what makes this work. A naked pricing card is a
 billboard; a pricing card with the customer reason is a story.
+
+### 5.4 launch
+
+Launch day. The product is live. This phase only lasts a few days but it
+produces the most attention per post in the entire lifecycle.
+
+**Default voice:** `terse_shipper`
+
+**Objective:** Maximize first-week traction and prove legitimacy. Make
+it easy for people to sign up and easy for early users to share.
+
+**Post types to use:** `launch`, `milestone`, `revenue-update` (first $),
+`screenshot-only` (live dashboard / first signups), `behind-the-scenes`
+
+**Hook patterns:** `milestone-pop`, `number-led`, `screenshot+caption`
+
+**Number anchors:** launch-day signups, hour-by-hour traffic, first $,
+first paying customer count, Product Hunt rank if applicable.
+
+**Length target:** 100–250 chars for the headline launch tweet. Media
+**required** — link in `linkReply`, never in the body.
+
+**Phase-specific bans:**
+- "Please RT if you like it ❤️" (banned begging)
+- Launch tweet without a screenshot or demo media
+- Overhyped claims with no proof ("the best X ever")
+- Apologizing pre-emptively ("sorry for the spam, but...")
+
+**Templates**
+
+**Template 5.4.A — "It's live" launch tweet**
+
+```
+[product] is live.
+
+[One sentence: what it does for whom.]
+
+[Demo media — 15s screen recording or hero screenshot.]
+
+[Optional: launch-week offer — "first 100 users get [thing]".]
+```
+
+The link goes in `linkReply`, NOT in the body. X penalizes body
+links by ~50% reach.
+
+**Template 5.4.B — First revenue post**
+
+```
+First $[N] for [product].
+
+[One sentence story — who paid, why, how they found it.]
+
+[Stripe / dashboard screenshot.]
+```
+
+Verbatim exemplar (synthetic from S3-launch dataset):
+> First $127 today. The user who signed up tweeted "finally" — that's
+> 7 months of building reduced to one word.
+
+Single tweet, specific number, specific quote, specific timeframe.
+That's the breakout shape.
