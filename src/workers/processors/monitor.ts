@@ -1,9 +1,9 @@
+import { join } from 'path';
 import type { Job } from 'bullmq';
 import { db } from '@/lib/db';
 import {
   products,
   channels,
-  drafts,
   threads,
   activityEvents,
   xTargetAccounts,
@@ -13,11 +13,14 @@ import { eq, and, inArray, lt } from 'drizzle-orm';
 import { XClient, XForbiddenError } from '@/lib/x-client';
 import { XAIClient } from '@/lib/xai-client';
 import { createPlatformDeps, createPublicPlatformDeps } from '@/lib/platform-deps';
-import { draftReplyWithHardening } from './reply-hardening';
-import { enqueueReview, enqueueDream, enqueueMonitor } from '@/lib/queue';
+import { runAgent, createToolContext } from '@/bridge/agent-runner';
+import { loadAgentFromFile } from '@/bridge/load-agent';
+import { registry } from '@/tools/registry';
+import { communityManagerOutputSchema } from '@/tools/AgentTool/agents/community-manager/schema';
+import { enqueueDream, enqueueMonitor } from '@/lib/queue';
 import { publishUserEvent, getKeyValueClient } from '@/lib/redis';
 import type { MonitorJobData } from '@/lib/queue/types';
-import { isFanoutJob, getTraceId } from '@/lib/queue/types';
+import { isFanoutJob } from '@/lib/queue/types';
 import { createLogger, loggerForJob, type Logger } from '@/lib/logger';
 import { buildContentUrl } from '@/lib/platform-config';
 import { MemoryStore } from '@/memory/store';
@@ -28,10 +31,14 @@ const baseLog = createLogger('worker:x-monitor');
 const REPLY_WINDOW_MINUTES = 15;
 const TWEET_MAX_AGE_MINUTES = 60;
 
+const COMMUNITY_MANAGER_AGENT_PATH = join(
+  process.cwd(),
+  'src/tools/AgentTool/agents/community-manager/AGENT.md',
+);
+
 async function processXMonitorForUser(
   userId: string,
   productId: string,
-  traceId: string,
   log: Logger,
 ) {
   log.info(`Starting X monitor scan for user ${userId}`);
@@ -317,126 +324,112 @@ async function processXMonitorForUser(
       ),
     );
 
-  // Run hardened reply pipeline for tweets within reply window
+  // Run unified reply pipeline for tweets within the reply window. Same
+  // agent (community-manager) the coordinator-driven /api/automation/run
+  // path uses — single rule set, single INSERT entry point.
   if (tweetsForReply.length > 0) {
     const memoryStore = new MemoryStore(userId, productId);
     const dream = new AgentDream(memoryStore);
 
-    // Per-tweet parallel execution. Each tweet goes through:
-    //   product-opportunity-judge → x-reply-writer → ai-slop + anchor validators.
-    // Both LLM stages run via direct `runAgent(loadAgentFromFile(...))`
-    // against the unified registry.
-    // If quality regression is observed, thread buildMemoryPrompt(memoryStore) into HardenedReplyInput and forward it.
-    const hardenedResults = await Promise.all(
-      tweetsForReply.map((t) =>
-        draftReplyWithHardening({
-          tweetId: t.tweetId,
-          tweetText: t.tweetText,
-          authorUsername: t.authorUsername,
-          quotedText: t.quotedText,
-          quotedAuthorUsername: t.quotedAuthorUsername,
-          quotedTweetId: t.quotedTweetId,
-          product: {
-            name: t.productName,
-            description: t.productDescription,
-            valueProp: t.valueProp,
-            keywords: t.keywords,
-          },
-          userId,
-        }),
-      ),
+    // Insert a thread row per tweet up front so community-manager can
+    // resolve `threadId` and call `draft_reply` against it. Persist the
+    // full tweet body so the agent can read it without an extra fetch.
+    const insertedThreads = await Promise.all(
+      tweetsForReply.map(async (t) => {
+        const [row] = await db
+          .insert(threads)
+          .values({
+            userId,
+            externalId: t.tweetId,
+            platform: 'x',
+            community: `@${t.authorUsername}`,
+            title: t.tweetText.slice(0, 200),
+            body: t.tweetText,
+            author: t.authorUsername,
+            url: buildContentUrl('x', t.authorUsername, t.tweetId),
+            scoutReason: 'monitor-window',
+          })
+          .onConflictDoNothing()
+          .returning();
+        return { tweet: t, threadRow: row };
+      }),
     );
 
-    let draftsCreated = 0;
-    const totalCostUsd = 0;
-
-    for (let i = 0; i < hardenedResults.length; i++) {
-      const replyOutput = hardenedResults[i]!;
-      const tweetInput = tweetsForReply[i]!;
-
-      if (replyOutput.strategy === 'skip') {
-        log.debug(
-          `Skipping reply for tweet ${tweetInput.tweetId} — reasons: ${replyOutput.rejectionReasons.join(', ') || 'drafter chose skip'}`,
-        );
-        continue;
-      }
-
-      if (replyOutput.confidence < 0.5) {
-        log.debug(`Skipping low-confidence reply for tweet ${tweetInput.tweetId}`);
-        continue;
-      }
-
-      // Create a thread record for this monitored tweet (reuses existing draft pipeline)
-      const [threadRecord] = await db
-        .insert(threads)
-        .values({
-          userId,
-          externalId: tweetInput.tweetId,
-          platform: 'x',
-          community: `@${tweetInput.authorUsername}`,
-          title: tweetInput.tweetText.slice(0, 200),
-          url: buildContentUrl('x', tweetInput.authorUsername, tweetInput.tweetId),
-          scoutConfidence: replyOutput.confidence,
-          scoutReason: 'monitor-drafted',
-        })
-        .onConflictDoNothing()
-        .returning();
-
-      if (!threadRecord) continue;
-
-      // Create draft
-      const [draft] = await db
-        .insert(drafts)
-        .values({
-          userId,
-          threadId: threadRecord.id,
-          draftType: 'reply',
-          replyBody: replyOutput.replyText,
-          confidenceScore: replyOutput.confidence,
-          whyItWorks: replyOutput.whyItWorks,
-        })
-        .returning();
-
-      draftsCreated++;
-
-      // Update monitored tweet status
-      await db
-        .update(xMonitoredTweets)
-        .set({ status: 'draft_created' })
-        .where(
-          and(
-            eq(xMonitoredTweets.userId, userId),
-            eq(xMonitoredTweets.tweetId, tweetInput.tweetId),
-          ),
-        );
-
-      // Auto-enqueue review
-      await enqueueReview({
-        userId,
-        draftId: draft.id,
-        productId,
-        traceId,
-      });
-
-      // (Phase 2 migration: todo_items table dropped. plan_items injection for
-      // monitor-triggered replies lands with the plan-execute dispatcher in
-      // Phase 7.)
-    }
-
-    log.info(
-      `Created ${draftsCreated} reply drafts, cost $${totalCostUsd.toFixed(4)}`,
+    const agentConfig = loadAgentFromFile(
+      COMMUNITY_MANAGER_AGENT_PATH,
+      registry.toMap(),
     );
+
+    const perTweetResults = await Promise.all(
+      insertedThreads.map(async ({ tweet, threadRow }) => {
+        if (!threadRow) {
+          // Thread already existed (duplicate tweetId) — nothing to do.
+          return { drafted: false, skipped: true };
+        }
+
+        const quotedBlock =
+          tweet.quotedText && tweet.quotedAuthorUsername
+            ? `\n\nQuote tweet — author is reacting to:\n- quoted author: @${tweet.quotedAuthorUsername}\n- quoted text: ${tweet.quotedText}`
+            : '';
+
+        const spawnPrompt =
+          `Ad-hoc reply slot from X monitor sweep.\n\n` +
+          `Thread:\n` +
+          `- threadId: ${threadRow.id}\n` +
+          `- platform: x\n` +
+          `- url: ${threadRow.url}\n` +
+          `- author: @${tweet.authorUsername}\n` +
+          `- text: ${tweet.tweetText}` +
+          quotedBlock +
+          `\n\nProduct context:\n` +
+          `- name: ${tweet.productName}\n` +
+          `- description: ${tweet.productDescription}\n` +
+          `- valueProp: ${tweet.valueProp}\n\n` +
+          `Apply the three-gate test in reply-quality-bar.md. If the ` +
+          `thread passes, draft one reply via draft_reply against this ` +
+          `threadId. If it fails any gate, skip and emit StructuredOutput ` +
+          `with draftsCreated=0.`;
+
+        try {
+          const { result } = await runAgent(
+            agentConfig,
+            spawnPrompt,
+            createToolContext({ userId, productId }),
+            communityManagerOutputSchema,
+          );
+          const drafted = (result?.draftsCreated ?? 0) > 0;
+          await db
+            .update(xMonitoredTweets)
+            .set({ status: drafted ? 'draft_created' : 'skipped' })
+            .where(
+              and(
+                eq(xMonitoredTweets.userId, userId),
+                eq(xMonitoredTweets.tweetId, tweet.tweetId),
+              ),
+            );
+          return { drafted, skipped: !drafted };
+        } catch (err) {
+          log.warn(
+            `community-manager failed for tweet ${tweet.tweetId}: ${(err as Error).message}`,
+          );
+          return { drafted: false, skipped: true };
+        }
+      }),
+    );
+
+    const draftsCreated = perTweetResults.filter((r) => r.drafted).length;
+
+    log.info(`Created ${draftsCreated} reply drafts via community-manager`);
 
     // Publish SSE event
     await publishUserEvent(userId, 'tweets', {
       type: 'agent_complete',
-      agentName: 'x-reply-writer',
+      agentName: 'community-manager',
       stats: {
         tweetsScanned: totalNewTweets,
         withinWindow: tweetsForReply.length,
         draftsCreated,
       },
-      cost: totalCostUsd,
     });
 
     // Memory
@@ -463,7 +456,6 @@ async function processXMonitorForUser(
 }
 
 export async function processXMonitor(job: Job<MonitorJobData>) {
-  const traceId = getTraceId(job.data, job.id);
   const log = loggerForJob(baseLog, job);
   if (isFanoutJob(job.data)) {
     const platform = (job.data as { platform?: string }).platform ?? 'x';
@@ -504,5 +496,5 @@ export async function processXMonitor(job: Job<MonitorJobData>) {
 
   const data = job.data as Extract<MonitorJobData, { userId: string }>;
   const { userId, productId } = data;
-  await processXMonitorForUser(userId, productId, traceId, log);
+  await processXMonitorForUser(userId, productId, log);
 }

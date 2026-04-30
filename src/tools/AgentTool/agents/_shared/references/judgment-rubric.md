@@ -78,8 +78,8 @@ bad reply targets for ANY product:
   whose audience IS the user's ICP. If the user's product *serves* them,
   they're a valuable reach, not a competitor — even if they sell a course.
 - **Ambiguous bios.** When you cannot unambiguously categorize the bio
-  against THIS product, pass. The community-manager / x-reply-writer has
-  downstream safeguards for bait content (R8 register check).
+  against THIS product, pass. The community-manager has downstream
+  safeguards for bait content (R8 register check).
 
 ### Calibration
 

@@ -110,13 +110,13 @@ export const draftReplyTool: ToolDefinition<DraftReplyInput, DraftReplyResult> =
       }
 
       // Idempotency on (userId, threadId, status='pending'). A re-spawn
-      // or retry of community-manager / x-reply-writer against the same
-      // thread used to land a second pending row, which surfaced as a
-      // duplicate tweet card in /today. Now the second call replaces
-      // the first body in place and returns the same draftId. A partial
-      // unique index (userId, threadId) WHERE status='pending' enforces
-      // this at the DB level too — the SELECT-then-UPDATE here is the
-      // happy-path version that avoids triggering the index error.
+      // or retry of community-manager against the same thread used to
+      // land a second pending row, which surfaced as a duplicate tweet
+      // card in /today. Now the second call replaces the first body in
+      // place and returns the same draftId. A partial unique index
+      // (userId, threadId) WHERE status='pending' enforces this at the
+      // DB level too — the SELECT-then-UPDATE here is the happy-path
+      // version that avoids triggering the index error.
       const existingPending = await db
         .select({ id: drafts.id })
         .from(drafts)

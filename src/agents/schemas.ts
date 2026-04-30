@@ -71,31 +71,6 @@ export const runSummaryOutputSchema = z.object({
 });
 
 /**
- * Output schema for the x-reply-writer agent — the per-tweet leaf the
- * monitor.ts → reply-hardening pipeline runs against each in-window
- * monitored tweet. Generates a high-value reply with confidence score
- * and chosen archetype, or `strategy: 'skip'` to bail out.
- *
- * (Historically named after the `reply-drafter` Task teammate that was
- * deleted in the agent-cleanup Phase 6 migration. The shape stayed
- * because the programmatic monitor.ts pipeline still consumes it.)
- */
-export const replyDrafterOutputSchema = z.object({
-  replyText: z.string(),
-  confidence: z.number(),
-  strategy: z.enum([
-    'supportive_peer',
-    'data_add',
-    'contrarian',
-    'question_extender',
-    'anecdote',
-    'dry_wit',
-    'skip',
-  ]),
-  whyItWorks: z.string().optional(),
-});
-
-/**
  * Output schema for the engagement monitor agent.
  * Assesses mentions and drafts responses for the engagement window.
  */
@@ -112,36 +87,6 @@ export const engagementMonitorOutputSchema = z.object({
   ),
 });
 
-/**
- * Output schema for the product-opportunity-judge agent.
- * Decides whether a reply draft may organically mention the user's product.
- *
- * Green-light signals are narrow: the OP must explicitly invite a tool/product
- * recommendation, be debugging a problem this product solves, complain about a
- * direct competitor's failure mode, ask for a case study, or invite a review.
- *
- * Hard mutes: milestone, vulnerable, grief, political, career-layoff.
- */
-export const productOpportunityJudgeOutputSchema = z.object({
-  allowMention: z.boolean(),
-  signal: z.enum([
-    'tool_question',
-    'debug_problem_fit',
-    'competitor_complaint',
-    'case_study_request',
-    'review_invitation',
-    'milestone_celebration',
-    'vulnerable_post',
-    'grief_or_layoff',
-    'political',
-    'no_fit',
-  ]),
-  confidence: z.number().min(0).max(1),
-  reason: z.string().min(1).max(200),
-});
-
 export type PostingOutput = z.infer<typeof postingOutputSchema>;
 export type RunSummaryOutput = z.infer<typeof runSummaryOutputSchema>;
-export type ReplyDrafterOutput = z.infer<typeof replyDrafterOutputSchema>;
 export type EngagementMonitorOutput = z.infer<typeof engagementMonitorOutputSchema>;
-export type ProductOpportunityJudgeOutput = z.infer<typeof productOpportunityJudgeOutputSchema>;
