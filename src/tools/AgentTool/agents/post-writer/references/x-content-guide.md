@@ -264,3 +264,58 @@ Launching [date].
 This works because it does three things at once: number anchor,
 social proof, and a specific demand signal. The "most-asked
 question" is what turns a generic waitlist count into a story.
+
+### 5.3 momentum
+
+Final week before launch. Last-mile polish, hype building, audience priming.
+Cadence climbs to 7–10 posts/week.
+
+**Default voice:** `terse_shipper`
+
+**Objective:** Convert waitlist warmth into launch-day attention. Every
+post is a tee-up for the launch tweet.
+
+**Post types to use:** `behind-the-scenes` (countdown), `screenshot-only`
+(final UI), `milestone` (e.g. "pricing locked"), `question` (last-call
+input)
+
+**Hook patterns:** `screenshot+caption`, `number-led` (countdown),
+`milestone-pop`
+
+**Number anchors:** days to launch, hours of sleep lost, finalized
+features, signed-up beta testers, pricing tiers.
+
+**Length target:** 80–180 chars. Media required when announcing
+finalized assets.
+
+**Phase-specific bans:**
+- Walking back launch date publicly (do it privately if you must;
+  publicly it kills hype)
+- Generic "almost there!" tweets without a specific number or asset
+- New feature scope creep announced as a hype post
+
+**Templates**
+
+**Template 5.3.A — Countdown + asset reveal**
+
+```
+[N] days until [product] launches.
+
+[One concrete asset reveal — pricing card screenshot, hero copy,
+landing page snapshot.]
+
+[Optional: ask for last-mile feedback on this specific asset.]
+```
+
+**Template 5.3.B — Pricing reveal with reasoning**
+
+```
+Pricing locked for [product]:
+[$X] [tier 1 — one-line value]
+[$Y] [tier 2 — one-line value]
+
+Why [pricing decision]: [one sentence — the customer-facing reason].
+```
+
+The "why" line is what makes this work. A naked pricing card is a
+billboard; a pricing card with the customer reason is a story.
