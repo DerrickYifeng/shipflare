@@ -151,4 +151,82 @@ describe('draftReplyTool', () => {
     );
     expect(store.get<DraftRow>(drafts)[0]!.whyItWorks).toBeNull();
   });
+
+  it('updates the existing pending draft instead of inserting a duplicate on the same thread', async () => {
+    // Two community-manager invocations against the same thread used to
+    // produce two pending drafts joined to the same threads row, which
+    // surfaced as a duplicate tweet card in /today. The tool is now
+    // idempotent on (userId, threadId, status='pending'): the second call
+    // updates the existing row in place, returns the same draftId, and the
+    // store ends up with exactly one row carrying the second call's body.
+    const ctx = makeCtx(store, { userId: 'user-1', productId: 'prod-1' });
+
+    const first = await draftReplyTool.execute(
+      {
+        threadId: 't-1',
+        draftBody: 'first take',
+        confidence: 0.6,
+        whyItWorks: 'first reasoning',
+      },
+      ctx,
+    );
+    expect(store.get<DraftRow>(drafts)).toHaveLength(1);
+
+    const second = await draftReplyTool.execute(
+      {
+        threadId: 't-1',
+        draftBody: 'second take, sharper',
+        confidence: 0.78,
+        whyItWorks: 'tightened',
+      },
+      ctx,
+    );
+
+    // Same draftId — the second call updated the first row in place.
+    expect(second.draftId).toBe(first.draftId);
+
+    // Exactly one row with the second call's body and confidence.
+    const rows = store.get<DraftRow>(drafts);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.replyBody).toBe('second take, sharper');
+    expect(rows[0]!.confidenceScore).toBe(0.78);
+    expect(rows[0]!.whyItWorks).toBe('tightened');
+  });
+
+  it('does NOT update a non-pending draft — terminal drafts on the same thread are immutable', async () => {
+    // If the existing draft is `posted` / `skipped` / `approved`, treat
+    // the new call as a fresh draft (insert a new pending row). The
+    // idempotency check is scoped to status='pending' only.
+    store.register<DraftRow>(drafts, [
+      {
+        id: 'd-old-posted',
+        userId: 'user-1',
+        threadId: 't-1',
+        status: 'posted',
+        draftType: 'reply',
+        replyBody: 'shipped already',
+        confidenceScore: 0.9,
+        whyItWorks: null,
+        engagementDepth: 0,
+      },
+    ]);
+    const ctx = makeCtx(store, { userId: 'user-1', productId: 'prod-1' });
+
+    const result = await draftReplyTool.execute(
+      {
+        threadId: 't-1',
+        draftBody: 'a fresh draft for the same thread',
+        confidence: 0.7,
+      },
+      ctx,
+    );
+
+    expect(result.draftId).not.toBe('d-old-posted');
+    const rows = store.get<DraftRow>(drafts);
+    expect(rows).toHaveLength(2);
+    const posted = rows.find((r) => r.id === 'd-old-posted')!;
+    const fresh = rows.find((r) => r.status === 'pending')!;
+    expect(posted.replyBody).toBe('shipped already');
+    expect(fresh.replyBody).toBe('a fresh draft for the same thread');
+  });
 });

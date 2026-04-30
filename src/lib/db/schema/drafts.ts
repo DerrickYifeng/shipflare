@@ -70,6 +70,14 @@ export const drafts = pgTable(
       desc(t.createdAt),
     ),
     index('drafts_plan_item_idx').on(t.planItemId),
+    // At most one pending draft per (user, thread). Backs the
+    // idempotency contract in DraftReplyTool — any code path that
+    // bypasses the SELECT-then-UPDATE there fails fast at the DB layer
+    // instead of accumulating duplicates that surface as duplicate
+    // tweet cards in /today.
+    uniqueIndex('drafts_user_thread_pending_uq')
+      .on(t.userId, t.threadId)
+      .where(sql`"status" = 'pending'`),
   ],
 );
 

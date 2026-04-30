@@ -198,7 +198,7 @@ export async function GET() {
   // ------------------------------------------------------------------
   // 2) Pending reply drafts (community-manager output) + joined thread
   // ------------------------------------------------------------------
-  const pendingDrafts = await db
+  const pendingDraftRows = await db
     .select({
       draftId: drafts.id,
       draftStatus: drafts.status,
@@ -236,6 +236,19 @@ export async function GET() {
       and(eq(drafts.userId, userId), eq(drafts.status, 'pending')),
     )
     .orderBy(desc(drafts.createdAt));
+
+  // Dedupe by threadId. `DraftReplyTool` is now idempotent on
+  // (userId, threadId, status='pending'), and a partial unique index
+  // backs that at the DB level — but legacy rows that pre-date the
+  // fix can still live in `drafts`, and the dedupe here keeps the
+  // feed clean until those age out. Rows are sorted newest-first by
+  // `desc(drafts.createdAt)`, so the first occurrence wins.
+  const seenThreadIds = new Set<string>();
+  const pendingDrafts = pendingDraftRows.filter((row) => {
+    if (seenThreadIds.has(row.threadId)) return false;
+    seenThreadIds.add(row.threadId);
+    return true;
+  });
 
   // ------------------------------------------------------------------
   // 3) Today's reply slots (`content_reply` plan_items with a positive
