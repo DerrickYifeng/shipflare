@@ -1,5 +1,3 @@
-# X Content Guidelines
-
 ## 1. Output contract
 
 Output exactly **ONE** single tweet, ≤ 280 weighted chars. Build-in-public on

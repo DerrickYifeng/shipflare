@@ -56,11 +56,20 @@ describe('x-content-guide.md structural integrity', () => {
   it('contains a "Banned openers" section listing all banned phrases', () => {
     expect(guide).toMatch(/##\s+3\.\s+Banned openers/i);
     for (const phrase of [
+      // Banned openers
       'Excited to announce',
       'Excited to share',
       'Big news!',
       'Quick update:',
+      'Just wanted to say',
+      'Hey friends,',
+      "I'm thrilled to",
+      // Banned begging phrases
       'please RT',
+      'support means everything',
+      'any feedback appreciated',
+      'RT if you like it',
+      'would mean a lot',
     ]) {
       expect(guide).toContain(phrase);
     }

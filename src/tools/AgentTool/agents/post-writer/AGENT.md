@@ -142,7 +142,7 @@ Inside your turn budget, you do all of the following before calling
      For X drafts, `whyItWorks` MUST identify the resolved phase, voice
      cluster, and template ID, e.g.:
        "compound-phase first-revenue update in patient_grinder voice,
-        leads with $1,247 MRR per template 5.5.A"
+        leads with the post's $MRR figure per template 5.5.A"
      Reviewers use this to see which playbook section produced each
      draft. For Reddit drafts, the existing one-sentence angle
      justification is fine.
