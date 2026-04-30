@@ -454,3 +454,103 @@ First [churn / refund / killed feature] for [product].
 
 Failure posts in compound consistently outperform vanity success
 posts. The audience is rooting for the underdog story.
+
+### 5.6 steady
+
+30+ days post-launch. The phase covers everything from "$1K MRR
+post-launch traction" through "$300K MRR thought-leader" through
+"sunsetting after six years". It carries three sub-modes — pick the
+one that matches the input.
+
+**Default voice:** `contrarian_analyst`
+
+**Sub-mode selection (read the spawn prompt):**
+
+| Caller signal | Sub-mode |
+|---|---|
+| Concrete revenue / user-count / years numbers passed in | `revenue_flex` |
+| `sunsetting: true` or `pivoting: true` flag | `sunset` |
+| Otherwise (default) | `contrarian_teacher` |
+
+---
+
+#### Sub-mode 5.6.a — `revenue_flex`
+
+Annual reflection or major-milestone post. The number is the lede; the
+story is the proof.
+
+**Suggested voice:** `patient_grinder` or `terse_shipper` (override the
+phase default when in revenue_flex).
+
+**Number anchors:** total MRR / ARR, years to here, total customers,
+team size, runway.
+
+**Template 5.6.a.A — Annual reflection**
+
+```
+[N] years to $[X] [MRR | ARR | total revenue].
+
+[One specific lesson — narrowest, most concrete.]
+[One thing that surprised you.]
+[Optional: advice to your earlier self.]
+```
+
+#### Sub-mode 5.6.b — `contrarian_teacher`
+
+Default mode. Hot takes on the indie meta, "what I wish I knew at $0",
+systems and playbooks, observations from N years of building.
+
+**Suggested voice:** `contrarian_analyst` or `vulnerable_philosopher`.
+
+**Number anchors:** years building, products shipped, products killed,
+customers served, hiring count.
+
+**Template 5.6.b.A — Contrarian one-liner**
+
+```
+[Strong opinion that contradicts a common indie take, in <15 words.]
+```
+
+Verbatim exemplar (dvassallo, 2026-04-25):
+> You only need to define revenue when you've been faking it.
+
+Source: https://x.com/dvassallo/status/2048167053148959135
+
+That's the entire post. 60 chars, contrarian, lands.
+
+**Template 5.6.b.B — Teacher reflection**
+
+```
+[The thing most people get wrong about X.]
+
+[Your concrete counter-experience — specific number, specific year,
+specific company.]
+
+[Implication for the reader.]
+```
+
+#### Sub-mode 5.6.c — `sunset`
+
+Sunset, pivot, or sale announcement. Honesty wins; blame loses.
+
+**Suggested voice:** `vulnerable_philosopher`.
+
+**Number anchors:** peak MRR / ARR, total revenue earned, total
+customers, years of operation.
+
+**Template 5.6.c.A — Sunset announcement**
+
+```
+[Headline: "We're sunsetting [product]" or "Pivoting to [Y]".]
+
+[Peak number — peak MRR, total customers, years.]
+
+[One-sentence reason — the real one, not "market wasn't ready".]
+
+[Optional: what's next, or thank-you to customers if they were the
+core of it.]
+```
+
+NEVER use this template to soft-launch a hard sell on a new thing.
+Sunset posts that immediately pivot to "anyway, here's my new
+project" lose trust. Wait at least a week.
