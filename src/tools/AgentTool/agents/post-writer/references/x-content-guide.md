@@ -134,3 +134,74 @@ When the caller does not pass a `voice` hint, use this default:
 Caller's hint always wins. Free-form strings outside this vocabulary are
 accepted; map them to the closest cluster (e.g. "data-led" → `terse_shipper`,
 "reflective" → `vulnerable_philosopher`).
+
+## 5. By-phase playbook
+
+This is the heart of the guide. Read the plan_item's `phase` field
+(`foundation | audience | momentum | launch | compound | steady`), open
+the matching subsection below, and apply ITS rules. Do not generalize
+across phases — a `foundation` post and a `compound` post are different
+shapes even on the same product.
+
+### 5.1 foundation
+
+The founder has no launch date set yet. They're building niche audience
+credibility, validating the idea, doing early MVP work. Audience is small
+(<2K) but compounding fast if they post consistently.
+
+**Default voice:** `daily_vlogger`
+
+**Objective:** Build credibility through visible, daily work. Attract
+early users and validators. Show the build, not the hype.
+
+**Post types to use:** `behind-the-scenes`, `screenshot-only`,
+`question`, `poll`, `lesson`, `hot-take` (carefully)
+
+**Hook patterns:** `day-N-log`, `screenshot+caption`, `curiosity-gap`,
+`ask`, `contrarian` (sparingly)
+
+**Number anchors:** days building, hours spent, commits, lines shipped,
+features-shipped count, waitlist signups, mockup version number.
+*Not yet:* MRR, paying customers — those don't exist yet.
+
+**Length target:** 80–200 chars. **Media strongly preferred** (≥78% of
+breakouts at this stage have media).
+
+**Phase-specific bans:**
+- "making good progress" / "more updates soon" — vague
+- "working hard 💪" — empty signal
+- Long technical essays without visuals
+- Complaining about a problem without your attempt at a solution
+
+**Templates**
+
+**Template 5.1.A — Day-N log**
+
+```
+Day N of building [product].
+[One specific thing shipped today.]
+[Optional: number — hours, commits, signups.]
+[Optional: question or ask.]
+```
+
+Verbatim example (andrewzacker, 2026-04-04):
+> Day 9 of daily build in public video updates.
+>
+> - How we plan to hit $1k MRR with Content Copilot
+> - New project that will help indie hackers with marketing
+> - Got first feedback on our SaaS 👀
+
+Source: https://x.com/andrewzacker/status/2040548207697035741
+
+**Template 5.1.B — WIP screenshot + ask**
+
+```
+[One sentence describing what's in the screenshot — UI element, flow,
+state.]
+
+[Specific feedback ask: "rate 1-10", "would you click this", "which
+copy lands harder".]
+```
+
+Pair the tweet with an actual screenshot. The screenshot does the
+heavy lifting; the caption sets up the ask.
