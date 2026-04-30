@@ -153,3 +153,38 @@ export const planItemInputSchema = z.object({
 });
 
 export type PlanItemInput = z.infer<typeof planItemInputSchema>;
+
+// ---------------------------------------------------------------------------
+// Content-post diversification (content-planner v2 writes via `add_plan_item`)
+// ---------------------------------------------------------------------------
+
+/**
+ * Content-post diversification params written by content-planner v2.
+ * All fields are optional — in-flight items predating the planner v2
+ * keep working unchanged. `passthrough` preserves existing keys
+ * (e.g. `targetCount`, `theme` in old shape) so legacy params survive.
+ */
+export const contentPostParamsSchema = z
+  .object({
+    pillar: z
+      .enum([
+        'milestone',
+        'lesson',
+        'hot_take',
+        'behind_the_scenes',
+        'question',
+      ])
+      .optional(),
+    theme: z.string().min(1).max(120).optional(),
+    arc_position: z
+      .object({
+        index: z.number().int().min(1),
+        of: z.number().int().min(1),
+      })
+      .optional(),
+    metaphor_ban: z.array(z.string().min(1).max(40)).max(20).optional(),
+    cross_refs: z.array(z.string().uuid()).max(5).optional(),
+  })
+  .passthrough();
+
+export type ContentPostParams = z.infer<typeof contentPostParamsSchema>;
