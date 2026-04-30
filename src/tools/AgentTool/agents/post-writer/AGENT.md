@@ -56,7 +56,11 @@ free-form prompt that includes:
   - `theme` — overarching theme of the post
   - `angle` — story / claim / contrarian / how-to
   - `pillar` — strategic-path pillar this post anchors to
-  - `voice` — voice override (e.g. "terse", "data-led")
+  - `voice` — voice cluster: one of `terse_shipper |
+    vulnerable_philosopher | daily_vlogger | patient_grinder |
+    contrarian_analyst`. Free-form strings still accepted but the
+    cluster names map cleanly to x-content-guide §4. When omitted,
+    the writer uses the phase default.
   - `topic` — single concrete topic phrase
   - `targetSubreddit` — only when channel=reddit
 
@@ -85,12 +89,32 @@ Inside your turn budget, you do all of the following before calling
    guide (x or reddit) plus content-safety inline.
 
    For X: **output is exactly ONE single tweet ≤280 weighted chars.**
-   Pick a content type for voice + structure (metric / educational /
-   engagement / product) and write one compressed tweet. Multi-tweet
-   threads are not supported — if the brief feels too rich for one
-   tweet, compress: cut the warm-up, drop transitional sentences,
-   lead with the specific thing, push the product mention to the
-   last clause.
+
+   Read `phase` from the plan_item row you just loaded — it is one of
+   `foundation | audience | momentum | launch | compound | steady`.
+   Open the matching subsection of x-content-guide §5 ("By-phase
+   playbook") and apply the rules from THAT subsection: post types,
+   hook patterns, number anchors, banned moves, length target, and
+   the verbatim templates for that phase. Do NOT generalize across
+   phases — a `foundation` post and a `compound` post are different
+   shapes even on the same product.
+
+   For voice: if the caller's spawn prompt passed a `voice` hint (one
+   of `terse_shipper | vulnerable_philosopher | daily_vlogger |
+   patient_grinder | contrarian_analyst`), use it. Otherwise use the
+   phase default from x-content-guide §4. Free-form voice strings
+   (e.g. "data-led", "reflective") are still accepted — map them to
+   the closest cluster.
+
+   For phase=steady: pick a sub-mode based on what the caller
+   supplied. Concrete revenue / user-count / years numbers in the
+   spawn prompt → `revenue_flex`. `sunsetting` or `pivoting` flag →
+   `sunset`. Otherwise → `contrarian_teacher` (default).
+
+   Multi-tweet threads are not supported — if the brief feels too
+   rich for one tweet, compress: cut the warm-up, drop transitional
+   sentences, lead with the specific thing, push the product mention
+   to the last clause.
 
    For Reddit: target 150–600 words, lead with value, reserve
    product mention for the bottom. Stay in the founder's voice — no
@@ -114,6 +138,15 @@ Inside your turn budget, you do all of the following before calling
      the body into `plan_items.output` and flips state to `'drafted'`.
      Pass a one-sentence `whyItWorks` so the founder sees the angle
      justification in the review UI.
+
+     For X drafts, `whyItWorks` MUST identify the resolved phase, voice
+     cluster, and template ID, e.g.:
+       "compound-phase first-revenue update in patient_grinder voice,
+        leads with $1,247 MRR per template 5.5.A"
+     Reviewers use this to see which playbook section produced each
+     draft. For Reddit drafts, the existing one-sentence angle
+     justification is fine.
+
    - Self-check still fails after the rewrite → either fail the spawn
      (`StructuredOutput.status='failed'`, explain the reason) OR call
      `draft_post` with `whyItWorks` flagged "needs human review:
