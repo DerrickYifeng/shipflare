@@ -1,10 +1,10 @@
 import { z } from 'zod';
 
 /**
- * Output schema for the draft-review agent.
+ * Output schema for the reviewing-drafts skill.
  * Adversarial quality check with per-dimension pass/fail.
  */
-export const draftReviewOutputSchema = z.object({
+export const reviewingDraftsOutputSchema = z.object({
   verdict: z.enum(['PASS', 'FAIL', 'REVISE']),
   score: z.number(),
   checks: z.array(
@@ -18,4 +18,4 @@ export const draftReviewOutputSchema = z.object({
   suggestions: z.array(z.string()),
 });
 
-export type DraftReviewOutput = z.infer<typeof draftReviewOutputSchema>;
+export type ReviewingDraftsOutput = z.infer<typeof reviewingDraftsOutputSchema>;

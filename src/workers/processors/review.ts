@@ -2,13 +2,10 @@ import type { Job } from 'bullmq';
 import { db } from '@/lib/db';
 import { drafts, threads, products, channels, userPreferences } from '@/lib/db/schema';
 import { eq, and, gte, sql } from 'drizzle-orm';
-import { runAgent, createToolContext } from '@/bridge/agent-runner';
-import { loadAgentFromFile } from '@/bridge/load-agent';
-import { registry } from '@/tools/registry';
-import { draftReviewOutputSchema } from '@/tools/AgentTool/agents/draft-review/schema';
+import { runForkSkill } from '@/skills/run-fork-skill';
+import { reviewingDraftsOutputSchema } from '@/skills/reviewing-drafts/schema';
 import { publishUserEvent } from '@/lib/redis';
 import { enqueueDream, enqueuePosting } from '@/lib/queue';
-import { join } from 'path';
 import type { ReviewJobData } from '@/lib/queue/types';
 import { getTraceId } from '@/lib/queue/types';
 import { createLogger, loggerForJob } from '@/lib/logger';
@@ -19,11 +16,6 @@ import { recordPipelineEvent } from '@/lib/pipeline-events';
 import { addCost } from '@/lib/cost-bucket';
 
 const baseLog = createLogger('worker:review');
-
-const DRAFT_REVIEW_AGENT_PATH = join(
-  process.cwd(),
-  'src/tools/AgentTool/agents/draft-review/AGENT.md',
-);
 
 export async function processReview(job: Job<ReviewJobData>) {
   const traceId = getTraceId(job.data, job.id);
@@ -62,38 +54,30 @@ export async function processReview(job: Job<ReviewJobData>) {
   const dream = new AgentDream(memoryStore);
   const memoryPrompt = await buildMemoryPrompt(memoryStore);
 
-  // Run draft-review agent. Shallow-clone the cached config so memory
-  // injection doesn't accumulate across review jobs.
-  const baseConfig = loadAgentFromFile(
-    DRAFT_REVIEW_AGENT_PATH,
-    registry.toMap(),
-  );
-  const agentConfig = memoryPrompt
-    ? {
-        ...baseConfig,
-        systemPrompt: `${baseConfig.systemPrompt}\n\n## Memory\n\n${memoryPrompt}`,
-      }
-    : baseConfig;
-
   try {
-    const { result, usage } = await runAgent(
-      agentConfig,
-      JSON.stringify({
-        drafts: [
-          {
-            replyBody: draft.replyBody,
-            threadTitle: thread.title,
-            threadBody: thread.body ?? '',
-            subreddit: thread.community,
-            productName: product.name,
-            productDescription: product.description,
-            confidence: draft.confidenceScore,
-            whyItWorks: draft.whyItWorks ?? '',
-          },
-        ],
-      }),
-      createToolContext({}),
-      draftReviewOutputSchema,
+    const args = JSON.stringify({
+      drafts: [
+        {
+          replyBody: draft.replyBody,
+          threadTitle: thread.title,
+          threadBody: thread.body ?? '',
+          subreddit: thread.community,
+          productName: product.name,
+          productDescription: product.description,
+          confidence: draft.confidenceScore,
+          whyItWorks: draft.whyItWorks ?? '',
+        },
+      ],
+      // Memory context appended for the model — the SKILL.md body reads this
+      // explicitly under "Memory context". Replaces the prior pattern of
+      // mutating the loaded agent's systemPrompt at call time.
+      memoryContext: memoryPrompt ?? '',
+    });
+
+    const { result, usage } = await runForkSkill(
+      'reviewing-drafts',
+      args,
+      reviewingDraftsOutputSchema,
     );
     await addCost(traceId, usage);
 

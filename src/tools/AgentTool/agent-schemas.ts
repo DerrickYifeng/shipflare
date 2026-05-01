@@ -16,7 +16,6 @@ import { growthStrategistOutputSchema } from './agents/growth-strategist/schema'
 import { contentPlannerOutputSchema } from './agents/content-planner/schema';
 import { postWriterOutputSchema } from './agents/post-writer/schema';
 import { communityManagerOutputSchema } from './agents/community-manager/schema';
-import { draftReviewOutputSchema } from './agents/draft-review/schema';
 import { postingOutputSchema } from './agents/posting/schema';
 import { engagementMonitorOutputSchema } from './agents/engagement-monitor/schema';
 import { discoveryAgentOutputSchema } from './agents/discovery-agent/schema';
@@ -27,7 +26,6 @@ const registry: Record<string, ZodType<unknown>> = {
   'content-planner': contentPlannerOutputSchema as ZodType<unknown>,
   'post-writer': postWriterOutputSchema as ZodType<unknown>,
   'community-manager': communityManagerOutputSchema as ZodType<unknown>,
-  'draft-review': draftReviewOutputSchema as ZodType<unknown>,
   posting: postingOutputSchema as ZodType<unknown>,
   'engagement-monitor': engagementMonitorOutputSchema as ZodType<unknown>,
   'discovery-agent': discoveryAgentOutputSchema as ZodType<unknown>,
@@ -49,7 +47,6 @@ export {
   contentPlannerOutputSchema,
   postWriterOutputSchema,
   communityManagerOutputSchema,
-  draftReviewOutputSchema,
   postingOutputSchema,
   engagementMonitorOutputSchema,
   discoveryAgentOutputSchema,
