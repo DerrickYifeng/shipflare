@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as path from 'node:path';
 import { promises as fs } from 'node:fs';
 import * as os from 'node:os';
@@ -104,5 +104,71 @@ description: Second version.
 
     const second = await getAllSkills();
     expect(second.find((s) => s.name === 'a-skill')?.description).toBe('Second version.');
+  });
+});
+
+describe('FS watcher disabled', () => {
+  let tmpRoot: string;
+
+  beforeEach(async () => {
+    __resetRegistryForTesting();
+    // Force the no-watcher fallback path before any getAllSkills() call.
+    // Linux's fs.watch recursive option is unreliable per Node docs, so the
+    // registry's ensureWatcher() catches the throw and degrades silently —
+    // SHIPFLARE_DISABLE_SKILL_WATCHER=1 simulates that fallback deterministically.
+    vi.stubEnv('SHIPFLARE_DISABLE_SKILL_WATCHER', '1');
+
+    tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-watcher-disabled-'));
+    await fs.mkdir(path.join(tmpRoot, 'a-skill'), { recursive: true });
+    await fs.writeFile(
+      path.join(tmpRoot, 'a-skill', 'SKILL.md'),
+      `---
+name: a-skill
+description: First version.
+---
+
+# Body v1
+`,
+      'utf8',
+    );
+  });
+
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  });
+
+  it('still loads skills without a watcher and does not invalidate on file changes', async () => {
+    __setSkillsRootForTesting(tmpRoot);
+
+    // Loading still works — the env var only disables the watcher, not the loader.
+    const first = await getAllSkills();
+    expect(first.find((s) => s.name === 'a-skill')?.description).toBe('First version.');
+
+    // Edit the skill file on disk.
+    await fs.writeFile(
+      path.join(tmpRoot, 'a-skill', 'SKILL.md'),
+      `---
+name: a-skill
+description: Second version.
+---
+
+# Body v2
+`,
+      'utf8',
+    );
+
+    // Wait long enough that a watcher (if it existed) would have debounced + invalidated.
+    await new Promise((r) => setTimeout(r, 350));
+
+    // No watcher → no invalidation → cache still serves the old description.
+    const second = await getAllSkills();
+    expect(second.find((s) => s.name === 'a-skill')?.description).toBe('First version.');
+
+    // Manual reset is the only way to see fresh content when the watcher is disabled.
+    __resetRegistryForTesting();
+    __setSkillsRootForTesting(tmpRoot);
+    const third = await getAllSkills();
+    expect(third.find((s) => s.name === 'a-skill')?.description).toBe('Second version.');
   });
 });
