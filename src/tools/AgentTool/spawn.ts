@@ -184,17 +184,32 @@ async function buildSkillPreloadMessages(
 ): Promise<Anthropic.Messages.MessageParam[]> {
   if (skillNames.length === 0) return [];
   const allSkills = await getAllSkills();
-  const messages: Anthropic.Messages.MessageParam[] = [];
-  for (const name of skillNames) {
-    const skill = allSkills.find((s) => s.name === name);
-    if (!skill) {
-      log.warn(
-        `spawn: agent declared skill "${name}" but it is not registered`,
-      );
-      continue;
-    }
-    const content = await Promise.resolve(skill.getPromptForCommand('', ctx));
-    messages.push({
+  const byName = new Map(allSkills.map((s) => [s.name, s]));
+
+  // Resolve all skill bodies in parallel; preserve declaration order so
+  // test #1 in spawn.test.ts (forkContextMessages[0] === first declared
+  // skill) keeps holding. Sequential awaits would serialize per-skill I/O
+  // (e.g. file-skill `getPromptForCommand` reads from disk) for no reason.
+  const resolved = await Promise.all(
+    skillNames.map(async (name) => {
+      const skill = byName.get(name);
+      if (!skill) {
+        log.warn(
+          `spawn: agent declared skill "${name}" but it is not registered`,
+        );
+        return null;
+      }
+      const content = await Promise.resolve(skill.getPromptForCommand('', ctx));
+      return { name, content };
+    }),
+  );
+
+  // Skill names are constrained by SkillFrontmatterSchema's regex
+  // (/^[a-z][a-z0-9_-]*$/) and AGENT_NAME_PATTERN, so XML attribute
+  // escaping is unnecessary in Phase 1.
+  return resolved
+    .filter((r): r is { name: string; content: string } => r !== null)
+    .map(({ name, content }) => ({
       role: 'user',
       content: [
         {
@@ -202,9 +217,7 @@ async function buildSkillPreloadMessages(
           text: `<system-skill name="${name}">\n${content}\n</system-skill>`,
         },
       ],
-    });
-  }
-  return messages;
+    }));
 }
 
 // ---------------------------------------------------------------------------
