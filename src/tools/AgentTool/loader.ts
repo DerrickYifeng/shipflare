@@ -1,7 +1,8 @@
 // Ported from engine/tools/AgentTool/loadAgentsDir.ts parseAgent() (Claude Code);
-// validators for skills/hooks/mcpServers/permissionMode/isolation/initialPrompt/memory/
+// validators for hooks/mcpServers/permissionMode/isolation/initialPrompt/memory/
 // omitClaudeMd/requiredMcpServers/background are intentionally dropped — ShipFlare
 // agents live in-process under our own BullMQ worker, not CC's CLI runtime.
+// `skills` is parsed as a first-class field (see AgentDefinition.skills).
 
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
