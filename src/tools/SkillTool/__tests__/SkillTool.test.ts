@@ -66,7 +66,7 @@ describe('SkillTool inline mode', () => {
     expect(result.success).toBe(true);
   });
 
-  it('appends ARGUMENTS line when args provided but no placeholder', async () => {
+  it("forwards args to a bundled skill's getPromptForCommand closure", async () => {
     registerBundledSkill({
       name: 'no-placeholder',
       description: 'No $ARGUMENTS in body.',
