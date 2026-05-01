@@ -77,7 +77,7 @@ export const codeScanQueue = new Queue<CodeScanJobData>('code-scan', {
   defaultJobOptions,
 });
 /**
- * Top-level scan orchestrator. Runs the discovery-scout agent inline;
+ * Top-level scan orchestrator. Runs the discovery-agent inline;
  * there's no per-source fan-out anymore. Lower retention because each
  * scan logs its own events.
  */

@@ -489,7 +489,7 @@ export async function processTeamRunInternal(
   // override, Task ships with a static "launch a specialist subagent"
   // string that names ZERO specialists — the delegator then has to
   // infer subagent_type from its own AGENT.md references, misses
-  // recently-added agents (e.g. discovery-scout), and hallucinates
+  // recently-added agents (e.g. discovery-agent), and hallucinates
   // type names ("x-reply-finder"). `buildTaskDescription` was
   // dead code before this wiring.
   if (agentConfig.tools.some((t) => t.name === TASK_TOOL_NAME)) {

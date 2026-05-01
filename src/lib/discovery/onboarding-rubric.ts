@@ -3,7 +3,7 @@
  *
  * Runs once per product during onboarding. Takes the product context and
  * produces a structured "who is the target customer" rubric that the
- * discovery-scout agent will read out of MemoryStore on every run.
+ * discovery-agent will read out of MemoryStore on every run.
  *
  * This replaces the cold-start problem the legacy calibration loop was
  * trying to solve: without labels, scout has no taste. With a rubric in

@@ -170,7 +170,7 @@ export type AnalyticsJobData = z.input<typeof analyticsJobSchema>;
 // ---------------------------------------------------------------------------
 
 /**
- * Top-level scan orchestrator job. Runs the discovery-scout agent
+ * Top-level scan orchestrator job. Runs the discovery-agent
  * The discovery-scan queue is now fanout-only: a daily cron drops one
  * fanout job and the processor (`discovery-cron-fanout.ts`) iterates
  * every user with at least one channel + product and enqueues a

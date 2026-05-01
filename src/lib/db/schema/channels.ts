@@ -57,7 +57,7 @@ export const threads = pgTable(
     /**
      * Discovery v3: scout agent's confidence (0..1) and 1-2 sentence
      * rationale. Populated by the `discovery-scan` path running the
-     * discovery-scout agent.
+     * discovery-agent.
      */
     scoutConfidence: real('scout_confidence'),
     scoutReason: text('scout_reason'),
