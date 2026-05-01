@@ -24,12 +24,26 @@ import { PlatformGlyph } from './platform-glyph';
 interface PostCardProps {
   item: TodoItem;
   onApprove: (id: string) => void;
+  /** Re-enqueue an already-queued draft with delayMs=0. */
+  onPostNow?: (id: string) => void;
   onSkip: (id: string) => void;
   onEdit: (id: string, body: string) => void;
   onReschedule?: (id: string, scheduledFor: string) => void;
   isActive?: boolean;
   forceEditing?: boolean;
   onEditDone?: () => void;
+}
+
+/**
+ * Format a delay window into a terse, mono-friendly label.
+ * "Posting now" / "Posting in 2m" / "Posting at 3:14 PM"
+ */
+function formatQueuedEta(delayMs: number | undefined): string {
+  if (delayMs === undefined || delayMs <= 30_000) return 'Posting now';
+  const minutes = Math.round(delayMs / 60_000);
+  if (minutes < 60) return `Posting in ${minutes}m`;
+  const fireAt = new Date(Date.now() + delayMs);
+  return `Posting at ${fireAt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}`;
 }
 
 function getPostCap(platform: string): number {
@@ -54,6 +68,7 @@ function formatScheduledTime(iso: string | null): string | null {
 export function PostCard({
   item,
   onApprove,
+  onPostNow,
   onSkip,
   onEdit,
   onReschedule,
@@ -63,6 +78,10 @@ export function PostCard({
 }: PostCardProps) {
   const [localEditing, setLocalEditing] = useState(false);
   const [editBody, setEditBody] = useState(item.draftBody ?? '');
+  // Tracks whether the user has already opened the X compose tab once.
+  // Drives the button label swap from "Schedule" → "Post now". Local-only
+  // so it resets on a hard refresh — the card itself stays in the feed.
+  const [hasOpenedX, setHasOpenedX] = useState(false);
   const rootRef = useRef<HTMLElement>(null);
 
   const isEditing = localEditing || forceEditing;
@@ -288,35 +307,116 @@ export function PostCard({
           background: 'var(--sf-bg-tertiary)',
         }}
       >
-        {!isEditing ? (
-          <>
-            <Button
-              size="sm"
-              onClick={() => onApprove(item.id)}
-              disabled={over}
-              title={
-                over ? `Post is ${len - cap} chars over the ${cap} cap` : undefined
+        {!isEditing ? (() => {
+          // Three render modes by lifecycle:
+          //   X handoff     — has xIntentUrl: open X compose pre-filled.
+          //                   Card stays in feed; user clicks Skip when done.
+          //                   Button toggles "Schedule" → "Post now" after
+          //                   the first click.
+          //   Queued (API)  — Reddit (or future API platforms) where the
+          //                   server queued via BullMQ; show "Post now" + ETA.
+          //   Default       — pre-click; show "Schedule" / "Approve".
+          const isInFlight = item.status === 'pending_approval';
+          const isQueuedApi =
+            item.status === 'queued' ||
+            (item.planState === 'approved' && !!item.draftBody);
+
+          if (item.xIntentUrl) {
+            const intentUrl = item.xIntentUrl;
+            // First click ("Schedule") opens X compose pre-filled so the user
+            // can preview the post in X. Second click ("Post now") fires the
+            // X API directly via /api/today/:id/post-now. Two-step to give the
+            // user a visual safety check before publishing.
+            const handleClick = () => {
+              if (hasOpenedX) {
+                onPostNow?.(item.id);
+              } else {
+                if (typeof window !== 'undefined') {
+                  window.open(intentUrl, '_blank', 'noopener,noreferrer');
+                }
+                setHasOpenedX(true);
               }
-            >
-              {item.draftBody ? 'Schedule' : 'Approve'}
-            </Button>
-            {item.draftBody ? (
-              <TextAction onClick={() => setLocalEditing(true)}>Edit</TextAction>
-            ) : null}
-            <TextAction onClick={() => onSkip(item.id)}>Skip</TextAction>
-            {item.source === 'calendar' && onReschedule ? (
-              <TextAction
-                onClick={() => {
-                  const next = new Date();
-                  next.setDate(next.getDate() + 1);
-                  onReschedule(item.id, next.toISOString());
-                }}
+            };
+            return (
+              <>
+                <Button
+                  size="sm"
+                  disabled={over || !item.draftBody}
+                  onClick={handleClick}
+                  title={
+                    over
+                      ? `Post is ${len - cap} chars over the ${cap} cap`
+                      : undefined
+                  }
+                >
+                  {hasOpenedX ? 'Post now' : 'Schedule'}
+                </Button>
+                {item.draftBody ? (
+                  <TextAction onClick={() => setLocalEditing(true)}>Edit</TextAction>
+                ) : null}
+                <TextAction onClick={() => onSkip(item.id)}>Skip</TextAction>
+              </>
+            );
+          }
+
+          if (isQueuedApi && onPostNow) {
+            return (
+              <>
+                <Button size="sm" onClick={() => onPostNow(item.id)}>
+                  Post now
+                </Button>
+                <span
+                  className="sf-mono"
+                  style={{
+                    fontSize: 'var(--sf-text-xs)',
+                    color: 'var(--sf-fg-3)',
+                    letterSpacing: 'var(--sf-track-mono)',
+                    marginLeft: 4,
+                  }}
+                >
+                  {formatQueuedEta(item.queuedDelayMs)}
+                </span>
+                <TextAction onClick={() => onSkip(item.id)}>Skip</TextAction>
+              </>
+            );
+          }
+
+          return (
+            <>
+              <Button
+                size="sm"
+                onClick={() => onApprove(item.id)}
+                disabled={over || isInFlight}
+                title={
+                  over
+                    ? `Post is ${len - cap} chars over the ${cap} cap`
+                    : undefined
+                }
               >
-                Tomorrow
-              </TextAction>
-            ) : null}
-          </>
-        ) : (
+                {isInFlight
+                  ? 'Scheduling…'
+                  : item.draftBody
+                  ? 'Schedule'
+                  : 'Approve'}
+              </Button>
+              {item.draftBody ? (
+                <TextAction onClick={() => setLocalEditing(true)}>Edit</TextAction>
+              ) : null}
+              <TextAction onClick={() => onSkip(item.id)}>Skip</TextAction>
+              {item.source === 'calendar' && onReschedule ? (
+                <TextAction
+                  onClick={() => {
+                    const next = new Date();
+                    next.setDate(next.getDate() + 1);
+                    onReschedule(item.id, next.toISOString());
+                  }}
+                >
+                  Tomorrow
+                </TextAction>
+              ) : null}
+            </>
+          );
+        })() : (
           <>
             <Button size="sm" onClick={handleSaveEdit}>
               Save

@@ -93,11 +93,12 @@ export function displayTitle(conv: ConversationMeta): string {
  * used in the sidebar.
  */
 const TRIGGER_LABELS: Record<string, string> = {
-  manual: 'Manual run',
+  daily: 'Daily run',
   onboarding: 'Onboarding',
+  kickoff: 'Kickoff',
   weekly: 'Weekly plan',
   phase_transition: 'Phase transition',
-  reply_sweep: 'Reply sweep',
+  draft_post: 'Draft post',
 };
 
 export function triggerLabel(trigger: string): string {

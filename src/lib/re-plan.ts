@@ -248,9 +248,11 @@ export async function runTacticalReplan(
         : 'Manual replan — previous week items have been superseded; produce fresh plan_items for the coming 7 days.');
 
     const replanConvId = await createAutomationConversation(teamId, 'weekly');
+    // Both manual and cron replan share the coordinator's `weekly` playbook;
+    // the goal text already distinguishes the source for observability.
     const enqueued = await enqueueTeamRun({
       teamId,
-      trigger: trigger === 'weekly' ? 'weekly' : 'manual',
+      trigger: 'weekly',
       goal,
       rootMemberId: memberIds.coordinator,
       conversationId: replanConvId,

@@ -63,6 +63,12 @@ const eslintConfig = defineConfig([
     // Vendored Claude Code internals. Not covered by our lint policy;
     // lint rules there reflect upstream conventions we don't own.
     "engine/**",
+    // Local Claude tooling artifacts (gitignored — never reach CI). Stale
+    // agent worktrees and installed-skill prototypes would otherwise flood
+    // `bun run lint` with hundreds of false positives that the Claude Code
+    // pre-push hook can't distinguish from real failures.
+    ".claude/worktrees/**",
+    ".claude/skills/**",
   ]),
 ]);
 

@@ -68,7 +68,7 @@ platform's reply cap:
 
 | Platform | Reply cap | Notes                                    |
 |----------|-----------|------------------------------------------|
-| X        | 240 chars | Target 40-140 (≈ 7-28 words)             |
+| X        | 240 chars | Target 40-140 (≈ 7-28 words). Stretch to 180 ONLY when the reply carries a personal anchor (`I/we` + specific). 180-240 requires an explicit personal anchor justified in `whyItWorks`. Two-sentence replies where the second is a generalized claim ("most founders X") almost always belong in the 40-140 band — cut the second sentence. |
 | Reddit   | 10,000    | Aim for one paragraph; 300-800 ideal     |
 
 Count grapheme-friendly characters (emoji + astral chars count as
@@ -95,6 +95,34 @@ starts with one). The anchor must be earned mid-sentence.
 
 If your draft has no anchor → rewrite to add ONE concrete detail.
 If you can't honestly add one → skip the thread.
+
+### Personal-anchor rule (replies that make claims)
+
+If your draft makes a generalized claim about how things work
+(`the real cost is X`, `winners do Y`, `most founders Z`,
+`builders optimize for X`), the anchor MUST be a first-person
+specific from the writer's own run — not a brand name in the
+abstract:
+
+- **Required**: `I/we + specific number/year/tool/event` —
+  `we tried Stripe Tax for 14 days, broke at one edge case`,
+  `our first churn was at month 8`,
+  `shipped revenue analytics yesterday — first user spotted a
+  $1,247 leak in 4 minutes`.
+- **Forbidden**: `the real X is Y` / `winners do X` /
+  `most solo devs Y` / `not just X — it's Y` delivered without
+  an `I/we` first-person receipt in the same reply.
+
+If you can't bring a personal anchor for the claim, you have two
+clean exits:
+
+- Ask one short specific question (`question_extender` archetype)
+  instead of asserting.
+- Skip the thread (return `strategy: 'skip'` with confidence ≤
+  0.4).
+
+Silence beats unearned authority. The "Could this be a Like?"
+rule at the end of this doc overrides when in doubt.
 
 ### Banned preamble openers (kill on sight)
 
@@ -133,8 +161,15 @@ Reject drafts that exhibit any of:
 
 - **Em-dash overuse** — two or more em-dashes (`—`, `---`, ` -- `)
   in a single reply
-- **Binary "not X, it's Y"** — `it's not just X — it's Y` /
-  `this is not X, it's Y` rhythm
+- **Binary "not X, it's Y" / "the real X is Y" pronouncements** —
+  all of these patterns:
+  - `it's not (just )?X — it's Y` / `this is not X, it's Y`
+  - `the real <noun> (is|isn't) Y`
+  - `<noun> isn't (a )?X. it's a Y` / `<noun> isn't X — it's Y`
+  - `not just X — you're Y` / `not just X — we're Y`
+
+  These are tells of someone explaining the world from above. Hard
+  reject — rewrite to lead with what you actually saw or did.
 - **Triple-grouping** — `fast, efficient, reliable` /
   `clean, simple, fast` rhythm (three comma-separated 3+-letter
   words in a row, optionally with "and")
@@ -196,8 +231,13 @@ specific to the X reply register:
   preferred (chat register).
 - Sentence fragments are fine ("hard disagree." is a complete
   reply).
-- Declarative, not hedged. "the real X is Y" beats "I think maybe
-  X could be Y".
+- Declarative, not hedged — but every claim must be anchored to your
+  own run. `we tried X for 6 months and Y broke` beats both
+  `I think maybe X could be Y` AND `the real X is Y`. Without your
+  own receipt, drop the claim and ask a question instead. Patterns
+  like "the real X is Y" / "winners do X" / "most solo devs Y" read
+  as sermon from accounts that haven't earned it — see the
+  Personal-anchor rule below.
 - First person, present tense. No exclamation points. No emoji
   by default (≤ 1 only if it replaces a word).
 - Zero hashtags in replies. Zero links in X replies.

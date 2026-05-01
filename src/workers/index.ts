@@ -5,27 +5,20 @@ import { processPosting } from './processors/posting';
 import { processHealthScore } from './processors/health-score';
 import { processDream } from './processors/dream';
 import { processCodeScan } from './processors/code-scan';
-import { processXMonitor } from './processors/monitor';
 import { processXEngagement } from './processors/engagement';
 import { processXMetrics } from './processors/metrics';
 import { processXAnalytics } from './processors/analytics';
-import { processDiscoveryCronFanout } from './processors/discovery-cron-fanout';
+import { processDailyRunFanout } from './processors/daily-run-fanout';
 import { processPlanExecute } from './processors/plan-execute';
 import { processPlanExecuteSweeper } from './processors/plan-execute-sweeper';
 import { processStaleSweeper } from './processors/stale-sweeper';
 import { processWeeklyReplan } from './processors/weekly-replan';
 import { processTeamRun, getTeamRunConcurrency } from './processors/team-run';
-import { processReplySweepCron } from './processors/reply-sweep-cron';
 import { TEAM_RUN_QUEUE_NAME, type TeamRunJobData } from '@/lib/queue/team-run';
-import {
-  REPLY_SWEEP_CRON_QUEUE_NAME,
-  scheduleReplySweepCron,
-  type ReplySweepCronJobData,
-} from '@/lib/queue/reply-sweep-cron';
-import { dreamQueue, discoveryScanQueue, monitorQueue, metricsQueue, analyticsQueue, codeScanQueue } from '@/lib/queue';
+import { dreamQueue, discoveryScanQueue, metricsQueue, analyticsQueue, codeScanQueue } from '@/lib/queue';
 import type { PlanExecuteJobData } from '@/lib/queue';
 import { createLogger, loggerForJob } from '@/lib/logger';
-import type { ReviewJobData, PostingJobData, HealthScoreJobData, DreamJobData, CodeScanJobData, MonitorJobData, DiscoveryScanJobData, EngagementJobData, MetricsJobData, AnalyticsJobData } from '@/lib/queue/types';
+import type { ReviewJobData, PostingJobData, HealthScoreJobData, DreamJobData, CodeScanJobData, DiscoveryScanJobData, EngagementJobData, MetricsJobData, AnalyticsJobData } from '@/lib/queue/types';
 
 // ----------------------------------------------------------------
 //  Phase 7 cron-only queues (no enqueue helpers — scheduled below)
@@ -120,12 +113,6 @@ const codeScanWorker = new Worker<CodeScanJobData>(
 );
 
 // Growth workers (currently X-only, platform-aware for future expansion)
-const monitorWorker = new Worker<MonitorJobData>(
-  'monitor',
-  async (job) => processXMonitor(job),
-  { ...BASE_OPTS, concurrency: 2 },
-);
-
 const engagementWorker = new Worker<EngagementJobData>(
   'engagement',
   async (job) => processXEngagement(job),
@@ -144,9 +131,18 @@ const analyticsWorker = new Worker<AnalyticsJobData>(
   { ...BASE_OPTS, concurrency: 1 },
 );
 
-const discoveryScanWorker = new Worker<DiscoveryScanJobData>(
+// Daily-run fan-out — single canonical entry that mirrors
+// /api/automation/run. Walks every user with a team + product and
+// enqueues one coordinator-rooted team-run with trigger='daily',
+// rooted in the per-team rolling 'Discovery' conversation. The
+// coordinator's `daily` playbook handles the per-slot
+// discovery → community-manager loop and falls back to default
+// drafting when no slots exist (shouldn't happen in practice — onboarding
+// pre-fills plan_items). The BullMQ queue name stays 'discovery-scan'
+// for Redis stability with the live repeat schedule.
+const dailyRunWorker = new Worker<DiscoveryScanJobData>(
   'discovery-scan',
-  async (job) => processDiscoveryCronFanout(job),
+  async (job) => processDailyRunFanout(job),
   { ...BASE_OPTS, concurrency: 2, lockDuration: 15_000 },
 );
 
@@ -186,26 +182,10 @@ const teamRunWorker = new Worker<TeamRunJobData>(
   { ...BASE_OPTS, concurrency: getTeamRunConcurrency(), lockDuration: 15 * 60_000 },
 );
 
-// Reply-sweep fan-out — runs ONCE per day. The processor walks teams
-// (cadence defined in src/lib/queue/reply-sweep-cron.ts) and calls
-// `maybeEnqueueReplySweep(userId)` for each owner. The helper finds
-// today's `content_reply` plan_item slots, throttles against any
-// reply_sweep that already started today, and enqueues a team_run with
-// each slot's planItemId + targetCount baked into the goal. The
-// coordinator inside the run drives the discovery → community-manager
-// retry loop until each slot is filled (or 3 attempts exhausted) and
-// transitions the plan_item to state='drafted'.
-const replySweepCronWorker = new Worker<ReplySweepCronJobData>(
-  REPLY_SWEEP_CRON_QUEUE_NAME,
-  async (job) => processReplySweepCron(job),
-  { ...BASE_OPTS, concurrency: 1 },
-);
-
 const workers = [
   reviewWorker, postingWorker,
   healthScoreWorker, dreamWorker, codeScanWorker,
-  monitorWorker,
-  discoveryScanWorker,
+  dailyRunWorker,
   engagementWorker,
   metricsWorker, analyticsWorker,
   // Phase 7
@@ -213,7 +193,6 @@ const workers = [
   staleSweeperWorker, weeklyReplanWorker,
   // AI Team Platform
   teamRunWorker,
-  replySweepCronWorker,
 ];
 
 // Log events — bind traceId / jobId / queue into the child logger so lifecycle
@@ -244,18 +223,6 @@ async function scheduleNightlyDream() {
     {
       repeat: { pattern: '0 4 * * *' },
       jobId: 'nightly-distill',
-    },
-  );
-}
-
-// Schedule monitor: daily at 7am UTC
-async function scheduleMonitor() {
-  await monitorQueue.add(
-    'scheduled-scan',
-    { kind: 'fanout', schemaVersion: 1, platform: 'x' },
-    {
-      repeat: { pattern: '0 7 * * *' },
-      jobId: 'monitor-cron',
     },
   );
 }
@@ -296,16 +263,17 @@ async function scheduleCodeDiff() {
   );
 }
 
-// Schedule discovery cron baseline: daily at 13:00 UTC. Fan-out entry —
-// the processor iterates all users with a channel + product and enqueues
-// one coordinator-rooted team-run per user (trigger='discovery_cron'),
-// rooted in a per-team rolling 'Discovery' conversation. Replaces the
-// pre-team-run scout-only worker that used to fan out per-platform scan
-// jobs every 4h.
-async function scheduleDiscoveryScan() {
+// Schedule daily-run cron: daily at 13:00 UTC. Single canonical
+// fan-out — the processor iterates all users with a channel + product
+// and enqueues one coordinator-rooted team-run per user
+// (trigger='daily'), rooted in a per-team rolling 'Discovery'
+// conversation. /api/automation/run uses the same trigger so manual
+// kickoffs and cron runs share one playbook. Queue name stays
+// 'discovery-scan' for Redis stability with existing repeat job.
+async function scheduleDailyRun() {
   await discoveryScanQueue.add(
     'fanout',
-    { kind: 'fanout', schemaVersion: 1, traceId: 'cron-discovery-scan-fanout' },
+    { kind: 'fanout', schemaVersion: 1, traceId: 'cron-daily-run-fanout' },
     {
       repeat: { pattern: '0 13 * * *', tz: 'UTC' },
       jobId: 'discovery-scan-fanout-repeat',
@@ -359,19 +327,17 @@ async function scheduleWeeklyReplan() {
 Promise.all([
   scheduleNightlyDream(),
   scheduleCodeDiff(),
-  scheduleDiscoveryScan(),
-  scheduleMonitor(),
+  scheduleDailyRun(),
   scheduleMetrics(),
   scheduleAnalytics(),
   schedulePlanExecuteSweeper(),
   scheduleStaleSweeper(),
   scheduleWeeklyReplan(),
-  scheduleReplySweepCron(),
 ]).catch((err) => {
   log.error('Failed to schedule cron jobs:', err.message);
 });
 
-log.info('All workers started: review, posting, health-score, dream, code-scan, monitor, discovery-scan, engagement, metrics, analytics, plan-execute, plan-execute-sweeper, stale-sweeper, weekly-replan, team-run. discovery-scan daily 13:00 UTC, plan-execute-sweeper every 1m, stale-sweeper every 1h, weekly-replan Monday 00:00 UTC, all others daily.');
+log.info('All workers started: review, posting, health-score, dream, code-scan, daily-run, engagement, metrics, analytics, plan-execute, plan-execute-sweeper, stale-sweeper, weekly-replan, team-run. daily-run daily 13:00 UTC, plan-execute-sweeper every 1m, stale-sweeper every 1h, weekly-replan Monday 00:00 UTC, all others daily.');
 
 // Graceful shutdown
 async function shutdown() {

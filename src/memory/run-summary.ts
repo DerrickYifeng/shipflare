@@ -1,6 +1,5 @@
 import { sideQuery } from '@/core/api-client';
-import { runSummaryOutputSchema } from '@/agents/schemas';
-import type { RunSummaryOutput } from '@/agents/schemas';
+import { runSummaryOutputSchema, type RunSummaryOutput } from './run-summary-schema';
 
 const SUMMARY_MODEL = 'claude-haiku-4-5-20251001';
 

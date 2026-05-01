@@ -132,7 +132,7 @@ export async function POST(
 
   const { runId, traceId, alreadyRunning } = await enqueueTeamRun({
     teamId: task.teamId,
-    trigger: 'manual',
+    trigger: 'daily',
     goal,
     rootMemberId,
     conversationId,

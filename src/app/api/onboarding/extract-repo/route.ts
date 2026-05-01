@@ -52,52 +52,78 @@ export async function POST(request: Request) {
     githubToken: token,
   });
 
-  // Return SSE stream — subscribe to Redis pub/sub for progress updates
+  // Return SSE stream — subscribe to Redis pub/sub for progress updates.
+  //
+  // Lifecycle is closure-scoped so cancel() can clean up too. Without that,
+  // a client disconnect closes the controller while the redis subscription
+  // is still live; the next pub/sub message hits controller.enqueue on a
+  // closed controller and crashes the process with ERR_INVALID_STATE.
   const channel = `code-scan:${userId}`;
   const encoder = new TextEncoder();
+  const redis = getKeyValueClient().duplicate();
+  let closed = false;
+  let timeoutHandle: NodeJS.Timeout | null = null;
+
+  const cleanup = () => {
+    if (closed) return;
+    closed = true;
+    if (timeoutHandle) clearTimeout(timeoutHandle);
+    redis.unsubscribe(channel).catch(() => {});
+    redis.disconnect();
+  };
 
   const stream = new ReadableStream({
-    async start(controller) {
-      // pub/sub subscriber — needs its own connection separate from the
-      // shared key/value client (Redis pub/sub is stateful per socket).
-      const redis = getKeyValueClient().duplicate();
-
-      const cleanup = () => {
-        redis.unsubscribe(channel).catch(() => {});
-        redis.disconnect();
+    start(controller) {
+      const safeEnqueue = (data: string) => {
+        if (closed) return;
+        try {
+          controller.enqueue(encoder.encode(data));
+        } catch {
+          // Controller closed by client disconnect — release the
+          // subscription so subsequent messages don't hit this path.
+          cleanup();
+        }
       };
 
-      // Set a timeout to prevent hanging connections
-      const timeout = setTimeout(() => {
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', error: 'Scan timed out' })}\n\n`));
-        controller.close();
+      const safeClose = () => {
+        try {
+          controller.close();
+        } catch {
+          // Already closed.
+        }
         cleanup();
+      };
+
+      timeoutHandle = setTimeout(() => {
+        safeEnqueue(`data: ${JSON.stringify({ type: 'error', error: 'Scan timed out' })}\n\n`);
+        safeClose();
       }, 90_000);
 
       redis.subscribe(channel, (err) => {
         if (err) {
           log.error(`Redis subscribe error: ${err.message}`);
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', error: 'Stream error' })}\n\n`));
-          controller.close();
-          clearTimeout(timeout);
-          cleanup();
+          safeEnqueue(`data: ${JSON.stringify({ type: 'error', error: 'Stream error' })}\n\n`);
+          safeClose();
         }
       });
 
       redis.on('message', (_ch: string, message: string) => {
-        controller.enqueue(encoder.encode(`data: ${message}\n\n`));
+        safeEnqueue(`data: ${message}\n\n`);
 
         try {
           const parsed = JSON.parse(message);
           if (parsed.type === 'complete' || parsed.type === 'error') {
-            clearTimeout(timeout);
-            controller.close();
-            cleanup();
+            safeClose();
           }
         } catch {
           // Ignore parse errors
         }
       });
+    },
+    cancel() {
+      // Client disconnected — release the redis subscription so the next
+      // pub/sub message doesn't hit a closed controller.
+      cleanup();
     },
   });
 

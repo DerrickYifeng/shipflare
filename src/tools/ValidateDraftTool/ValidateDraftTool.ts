@@ -1,9 +1,8 @@
 // validate_draft — verify a draft against platform + ShipFlare-style rules.
 //
-// Called by: post-writer, community-manager, x-reply-writer, draft-review.
+// Called by: post-writer, community-manager, draft-review.
 // Pure, read-only, no DB writes — agents call it BEFORE persisting (e.g.
-// before draft_reply or as part of draft-review). The programmatic
-// reply-hardening pipeline uses the same underlying validators directly.
+// before draft_reply or as part of draft-review).
 //
 // What it checks:
 //

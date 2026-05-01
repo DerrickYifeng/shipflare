@@ -16,10 +16,12 @@ const baseLog = createLogger('api:automation:run');
 /**
  * POST /api/automation/run
  *
- * Manual "launch the agents" entry point. Enqueues one coordinator-rooted
- * team-run (trigger='manual') against the team's rolling 'Discovery'
- * conversation; the coordinator dispatches discovery-agent per platform
- * and community-manager (and content-planner where appropriate) per its playbook.
+ * Manual "launch the agents" entry point — the same single coordinator
+ * playbook the daily-run cron uses. Enqueues one coordinator-rooted
+ * team-run (trigger='daily') against the team's rolling 'Discovery'
+ * conversation. The goal text encodes "Source: manual" so logs can
+ * distinguish user-initiated runs from cron fan-out, but the
+ * coordinator's playbook is identical either way.
  */
 export async function POST(request: NextRequest) {
   const { log, traceId } = loggerForRequest(baseLog, request);
@@ -89,13 +91,18 @@ export async function POST(request: NextRequest) {
 
   const conversationId = await resolveRollingConversation(teamId, 'Discovery');
   const goal =
-    `Manual automation kickoff for ${product.name}. ` +
-    `Platforms: ${activePlatforms.join(', ')}. ` +
-    `Trigger: manual.`;
+    `Daily automation run for ${product.name}. ` +
+    `Connected platforms: ${activePlatforms.join(', ')}. ` +
+    `Trigger: daily. Source: manual. ` +
+    `Follow your daily playbook: load today's content_reply plan_items ` +
+    `for this user, run the per-slot discovery → community-manager loop ` +
+    `(max 3 inner attempts per slot), and update_plan_item state='drafted' ` +
+    `when each slot terminates. If no slots are found, fall back to ` +
+    `default top-3 drafting from a single discovery-agent dispatch.`;
 
   const { runId, alreadyRunning } = await enqueueTeamRun({
     teamId,
-    trigger: 'manual',
+    trigger: 'daily',
     goal,
     rootMemberId: coordinator.id,
     conversationId,

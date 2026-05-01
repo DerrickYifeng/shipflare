@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { Geist, Geist_Mono } from 'next/font/google';
 import './globals.css';
-import { ThemeScript } from '@/components/layout/theme-provider';
+import { ThemeScript } from '@/components/layout/theme-script';
 
 const geist = Geist({
   subsets: ['latin'],

@@ -196,6 +196,7 @@ vi.mock('@/tools/AgentTool/registry', async () => {
       name: 'coordinator',
       description: 'test coord',
       tools: ['Task'],
+      skills: [],
       model: 'm',
       maxTurns: 5,
       systemPrompt: 's',

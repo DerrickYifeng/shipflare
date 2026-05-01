@@ -72,3 +72,20 @@ describe('loadAgentsDir', () => {
     ).rejects.toThrow();
   });
 });
+
+describe('skills frontmatter', () => {
+  it('parses skills array into AgentDefinition.skills', async () => {
+    const agent = await loadAgent(
+      path.join(FIXTURES, 'agent-with-skills'),
+      { sharedReferencesDir: SHARED_REFS },
+    );
+    expect(agent.skills).toEqual(['some-skill', 'another-skill']);
+  });
+
+  it('defaults skills to empty array when frontmatter omits it', async () => {
+    const agent = await loadAgent(path.join(FIXTURES, 'valid-agent'), {
+      sharedReferencesDir: SHARED_REFS,
+    });
+    expect(agent.skills).toEqual([]);
+  });
+});

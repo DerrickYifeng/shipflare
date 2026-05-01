@@ -15,8 +15,6 @@ export interface CTASectionProps {
  * Auth is GitHub-only during beta (no email/password, no Google, no X).
  * Unauthenticated: primary pill triggers SignInModal → GitHub OAuth.
  * Authenticated: pill links to /today.
- * Google / X are shown as "coming soon" affordances so visitors know
- * they're planned, but the only working path is GitHub.
  */
 export function CTASection({ isAuthenticated }: CTASectionProps) {
   const [signInOpen, setSignInOpen] = useState(false);
@@ -26,15 +24,9 @@ export function CTASection({ isAuthenticated }: CTASectionProps) {
       id="signup"
       aria-labelledby="cta-heading"
       style={{
-        // Prototype source/landing/cta_footer.jsx:5 — dark ink base with a
-        // soft signal-coloured radial glow centred above the headline. The
-        // README's "signal gradient" label refers to this halo, not a full
-        // linear slab. Keeps the alternating rhythm's final dark beat
-        // (ink → paper → ink → paper → ink+glow → ink) while marking the
-        // CTA as the signature moment.
         background: 'var(--sf-bg-dark)',
         color: 'var(--sf-fg-on-dark-1)',
-        padding: '140px 24px',
+        padding: '120px 24px',
         position: 'relative',
         overflow: 'hidden',
       }}
@@ -45,7 +37,7 @@ export function CTASection({ isAuthenticated }: CTASectionProps) {
           position: 'absolute',
           inset: 0,
           background:
-            'radial-gradient(ellipse 60% 50% at 50% 40%, oklch(62% 0.19 255 / 0.20), transparent 60%)',
+            'radial-gradient(ellipse 60% 50% at 50% 40%, oklch(62% 0.19 255 / 0.22), transparent 65%)',
           pointerEvents: 'none',
         }}
       />
@@ -67,16 +59,16 @@ export function CTASection({ isAuthenticated }: CTASectionProps) {
             textWrap: 'balance',
           }}
         >
-          Start shipping where
+          Hire your
           <br />
-          your users already are.
+          marketing team.
         </h2>
         <p
           className="sf-lede"
           style={{
             marginTop: 20,
-            color: 'var(--sf-fg-on-dark-2)',
             fontSize: 'var(--sf-text-lg)',
+            color: 'var(--sf-fg-on-dark-2)',
           }}
         >
           Free while in beta. Set up in under a minute. No credit card.
@@ -107,42 +99,21 @@ export function CTASection({ isAuthenticated }: CTASectionProps) {
             style={{ marginTop: 24, gap: 20 }}
           >
             <Ops tone="onDark">coming soon</Ops>
-            <span
-              style={{
-                color: 'var(--sf-fg-on-dark-4)',
-                fontSize: 'var(--sf-text-xs)',
-                fontFamily: 'var(--sf-font-mono)',
-                textTransform: 'uppercase',
-                letterSpacing: 'var(--sf-track-mono)',
-                opacity: 0.55,
-              }}
-            >
-              Google
-            </span>
-            <span
-              style={{
-                color: 'var(--sf-fg-on-dark-4)',
-                fontSize: 'var(--sf-text-xs)',
-                fontFamily: 'var(--sf-font-mono)',
-                textTransform: 'uppercase',
-                letterSpacing: 'var(--sf-track-mono)',
-                opacity: 0.55,
-              }}
-            >
-              𝕏
-            </span>
-            <span
-              style={{
-                color: 'var(--sf-fg-on-dark-4)',
-                fontSize: 'var(--sf-text-xs)',
-                fontFamily: 'var(--sf-font-mono)',
-                textTransform: 'uppercase',
-                letterSpacing: 'var(--sf-track-mono)',
-                opacity: 0.55,
-              }}
-            >
-              Email
-            </span>
+            {['Google', '𝕏', 'Email'].map((label) => (
+              <span
+                key={label}
+                style={{
+                  color: 'var(--sf-fg-on-dark-4)',
+                  fontSize: 'var(--sf-text-xs)',
+                  fontFamily: 'var(--sf-font-mono)',
+                  textTransform: 'uppercase',
+                  letterSpacing: 'var(--sf-track-mono)',
+                  opacity: 0.7,
+                }}
+              >
+                {label}
+              </span>
+            ))}
           </div>
         )}
       </div>

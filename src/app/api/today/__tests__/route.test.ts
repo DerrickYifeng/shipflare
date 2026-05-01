@@ -542,4 +542,76 @@ describe('GET /api/today', () => {
     const body = (await res.json()) as { replySlots: unknown[] };
     expect(body.replySlots).toEqual([]);
   });
+
+  it('deduplicates pendingDrafts on the same thread, keeping the newest', async () => {
+    // DraftReplyTool used to insert a new pending draft on every call;
+    // re-spawn / retry created multiple pending drafts for one thread.
+    // The today route now dedupes by threadId, taking the newest.
+    const olderTs = new Date('2026-04-29T10:00:00Z');
+    const newerTs = new Date('2026-04-29T11:00:00Z');
+    draftRows = [
+      // Newest first — matches the route's `desc(drafts.createdAt)` order.
+      {
+        draftId: 'd-newer',
+        draftStatus: 'pending',
+        draftType: 'reply',
+        postTitle: null,
+        replyBody: 'second take, sharper',
+        confidenceScore: 0.78,
+        whyItWorks: null,
+        media: null,
+        draftCreatedAt: newerTs,
+        threadId: 't-dup',
+        threadPlatform: 'x',
+        threadCommunity: '',
+        threadTitle: 'Dup thread',
+        threadBody: 'Some body',
+        threadAuthor: '@someone',
+        threadUrl: 'https://x.com/someone/status/1',
+        threadUpvotes: null,
+        threadCommentCount: null,
+        threadPostedAt: null,
+        threadDiscoveredAt: olderTs,
+      },
+      {
+        draftId: 'd-older',
+        draftStatus: 'pending',
+        draftType: 'reply',
+        postTitle: null,
+        replyBody: 'first take',
+        confidenceScore: 0.6,
+        whyItWorks: null,
+        media: null,
+        draftCreatedAt: olderTs,
+        threadId: 't-dup',
+        threadPlatform: 'x',
+        threadCommunity: '',
+        threadTitle: 'Dup thread',
+        threadBody: 'Some body',
+        threadAuthor: '@someone',
+        threadUrl: 'https://x.com/someone/status/1',
+        threadUpvotes: null,
+        threadCommentCount: null,
+        threadPostedAt: null,
+        threadDiscoveredAt: olderTs,
+      },
+    ];
+    statsRow = {
+      publishedYesterday: 0,
+      actedToday: 0,
+      planPending: 0,
+      anyItems: 0,
+    };
+    const { GET } = await import('../route');
+    const res = await GET();
+    const body = (await res.json()) as {
+      items: Array<{ id: string; draftBody: string | null }>;
+      stats: { pending_count: number };
+    };
+    expect(body.items).toHaveLength(1);
+    expect(body.items[0].id).toBe('d-newer');
+    expect(body.items[0].draftBody).toBe('second take, sharper');
+    // pending_count reflects deduped rows, not raw row count.
+    expect(body.stats.pending_count).toBe(1);
+  });
 });

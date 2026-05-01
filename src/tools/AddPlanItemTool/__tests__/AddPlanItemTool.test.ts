@@ -129,4 +129,112 @@ describe('addPlanItemTool', () => {
     const parse = addPlanItemTool.inputSchema.safeParse(bad);
     expect(parse.success).toBe(false);
   });
+
+  it('rejects content_post params with an invalid pillar enum value', async () => {
+    const ctx = makeCtx(store, { userId: 'user-1', productId: 'prod-1' });
+    await expect(
+      addPlanItemTool.execute(
+        {
+          kind: 'content_post',
+          userAction: 'approve',
+          phase: 'audience',
+          channel: 'x',
+          scheduledAt: '2026-05-01T09:00:00Z',
+          skillName: 'draft-single-post',
+          params: { pillar: 'definitely_not_a_pillar' },
+          title: 'Test',
+          description: null,
+        },
+        ctx,
+      ),
+    ).rejects.toThrow(/pillar|invalid/i);
+  });
+
+  it('rejects content_post params with metaphor_ban over the 20-item cap', async () => {
+    const ctx = makeCtx(store, { userId: 'user-1', productId: 'prod-1' });
+    await expect(
+      addPlanItemTool.execute(
+        {
+          kind: 'content_post',
+          userAction: 'approve',
+          phase: 'audience',
+          channel: 'x',
+          scheduledAt: '2026-05-01T09:00:00Z',
+          skillName: 'draft-single-post',
+          params: {
+            metaphor_ban: Array.from({ length: 21 }, (_, i) => `phrase${i}`),
+          },
+          title: 'Test',
+          description: null,
+        },
+        ctx,
+      ),
+    ).rejects.toThrow();
+  });
+
+  it('accepts content_post params with valid pillar + theme + metaphor_ban', async () => {
+    // Pre-seed a plan row so resolvePlanId succeeds.
+    store.register<PlanRow>(plans, [
+      {
+        id: 'plan-1',
+        userId: 'user-1',
+        productId: 'prod-1',
+        generatedAt: new Date(),
+      },
+    ]);
+    const ctx = makeCtx(store, { userId: 'user-1', productId: 'prod-1' });
+    const result = await addPlanItemTool.execute(
+      {
+        kind: 'content_post',
+        userAction: 'approve',
+        phase: 'audience',
+        channel: 'x',
+        scheduledAt: '2026-05-01T09:00:00Z',
+        skillName: 'draft-single-post',
+        params: {
+          pillar: 'lesson',
+          theme: 'first paying customer story',
+          metaphor_ban: ['debt', 'compound', 'owe'],
+        },
+        title: 'Lesson: first paying customer',
+        description: null,
+      },
+      ctx,
+    );
+    expect(result.planItemId).toBeTruthy();
+    const rows = store.get<PlanItemRow>(planItems);
+    expect(rows[0]!.params).toMatchObject({
+      pillar: 'lesson',
+      theme: 'first paying customer story',
+      metaphor_ban: ['debt', 'compound', 'owe'],
+    });
+  });
+
+  it('passes through legacy params unchanged for non-content_post kinds', async () => {
+    store.register<PlanRow>(plans, [
+      {
+        id: 'plan-1',
+        userId: 'user-1',
+        productId: 'prod-1',
+        generatedAt: new Date(),
+      },
+    ]);
+    const ctx = makeCtx(store, { userId: 'user-1', productId: 'prod-1' });
+    // setup_task with arbitrary params — pillar enum should NOT be enforced.
+    const result = await addPlanItemTool.execute(
+      {
+        kind: 'setup_task',
+        userAction: 'manual',
+        phase: 'foundation',
+        channel: null,
+        scheduledAt: '2026-05-01T09:00:00Z',
+        skillName: null,
+        params: { foo: 'bar', pillar: 'definitely_not_a_pillar' },
+        title: 'Setup',
+        description: null,
+      },
+      ctx,
+    );
+    expect(result.planItemId).toBeTruthy();
+  });
 });

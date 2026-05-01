@@ -35,11 +35,21 @@ import { PlatformGlyph } from './platform-glyph';
 interface ReplyCardProps {
   item: TodoItem;
   onApprove: (id: string) => void;
+  /** Re-enqueue an already-queued draft with delayMs=0. */
+  onPostNow?: (id: string) => void;
   onSkip: (id: string) => void;
   onEdit: (id: string, body: string) => void;
   isActive?: boolean;
   forceEditing?: boolean;
   onEditDone?: () => void;
+}
+
+function formatQueuedEta(delayMs: number | undefined): string {
+  if (delayMs === undefined || delayMs <= 30_000) return 'Posting now';
+  const minutes = Math.round(delayMs / 60_000);
+  if (minutes < 60) return `Posting in ${minutes}m`;
+  const fireAt = new Date(Date.now() + delayMs);
+  return `Posting at ${fireAt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}`;
 }
 
 function getReplyCap(platform: string): number {
@@ -191,6 +201,7 @@ function threadTimestamp(
 export function ReplyCard({
   item,
   onApprove,
+  onPostNow,
   onSkip,
   onEdit,
   isActive = false,
@@ -199,6 +210,10 @@ export function ReplyCard({
 }: ReplyCardProps) {
   const [localEditing, setLocalEditing] = useState(false);
   const [editBody, setEditBody] = useState(item.draftBody ?? '');
+  // Tracks whether the user has already opened the X compose tab. Drives
+  // the "Send reply" → "Open X again" label swap. Local-only — resets on
+  // hard refresh; the card stays in the feed regardless.
+  const [hasOpenedX, setHasOpenedX] = useState(false);
   const rootRef = useRef<HTMLElement>(null);
 
   const isEditing = localEditing || forceEditing;
@@ -547,20 +562,68 @@ export function ReplyCard({
             background: 'var(--sf-bg-tertiary)',
           }}
         >
-          <Button
-            size="sm"
-            onClick={() => onApprove(item.id)}
-            disabled={over || !item.draftBody}
-            title={
-              over
-                ? `Reply is ${len - cap} chars over the ${cap} cap`
-                : undefined
-            }
-          >
-            Send reply
-          </Button>
-          <TextAction onClick={() => setLocalEditing(true)}>Edit</TextAction>
-          <TextAction onClick={() => onSkip(item.id)}>Skip</TextAction>
+          {item.xIntentUrl ? (
+            <>
+              <Button
+                size="sm"
+                disabled={over || !item.draftBody}
+                onClick={() => {
+                  if (typeof window !== 'undefined') {
+                    window.open(
+                      item.xIntentUrl!,
+                      '_blank',
+                      'noopener,noreferrer',
+                    );
+                  }
+                  setHasOpenedX(true);
+                }}
+                title={
+                  over
+                    ? `Reply is ${len - cap} chars over the ${cap} cap`
+                    : undefined
+                }
+              >
+                {hasOpenedX ? 'Open X again' : 'Send reply'}
+              </Button>
+              <TextAction onClick={() => setLocalEditing(true)}>Edit</TextAction>
+              <TextAction onClick={() => onSkip(item.id)}>Skip</TextAction>
+            </>
+          ) : item.status === 'queued' && onPostNow ? (
+            <>
+              <Button size="sm" onClick={() => onPostNow(item.id)}>
+                Post now
+              </Button>
+              <span
+                className="sf-mono"
+                style={{
+                  fontSize: 'var(--sf-text-xs)',
+                  color: 'var(--sf-fg-3)',
+                  letterSpacing: 'var(--sf-track-mono)',
+                  marginLeft: 4,
+                }}
+              >
+                {formatQueuedEta(item.queuedDelayMs)}
+              </span>
+              <TextAction onClick={() => onSkip(item.id)}>Skip</TextAction>
+            </>
+          ) : (
+            <>
+              <Button
+                size="sm"
+                onClick={() => onApprove(item.id)}
+                disabled={over || !item.draftBody || item.status === 'pending_approval'}
+                title={
+                  over
+                    ? `Reply is ${len - cap} chars over the ${cap} cap`
+                    : undefined
+                }
+              >
+                {item.status === 'pending_approval' ? 'Sending…' : 'Send reply'}
+              </Button>
+              <TextAction onClick={() => setLocalEditing(true)}>Edit</TextAction>
+              <TextAction onClick={() => onSkip(item.id)}>Skip</TextAction>
+            </>
+          )}
         </div>
       ) : null}
     </article>

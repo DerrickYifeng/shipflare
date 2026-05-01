@@ -32,6 +32,36 @@ vi.mock('@/lib/logger', () => ({
   }),
 }));
 
+// dbSelectMock is called once per chained .select() query in the route.
+// Each call must return the value for that particular query in sequence.
+const dbSelectMock = vi.fn();
+vi.mock('@/lib/db', () => ({
+  db: {
+    select: () => ({
+      from: () => ({
+        innerJoin: () => ({
+          where: () => ({
+            limit: () => dbSelectMock(),
+          }),
+        }),
+        where: () => ({
+          limit: () => dbSelectMock(),
+        }),
+      }),
+    }),
+    update: () => ({
+      set: () => ({
+        where: () => Promise.resolve(),
+      }),
+    }),
+  },
+}));
+
+const dispatchMock = vi.fn();
+vi.mock('@/lib/approve-dispatch', () => ({
+  dispatchApprove: (input: unknown) => dispatchMock(input),
+}));
+
 function makeReq(): NextRequest {
   return new NextRequest('http://localhost/api/today/11111111-1111-1111-1111-111111111111/approve', {
     method: 'PATCH',
@@ -43,6 +73,8 @@ beforeEach(() => {
   findMock.mockReset();
   writeMock.mockReset();
   enqueueMock.mockReset();
+  dbSelectMock.mockReset();
+  dispatchMock.mockReset();
 });
 
 describe('PATCH /api/today/[id]/approve', () => {
@@ -63,8 +95,10 @@ describe('PATCH /api/today/[id]/approve', () => {
     expect(res.status).toBe(400);
   });
 
-  it('returns 404 when the item is not owned', async () => {
+  it('returns 404 when the item is not owned and no draft exists', async () => {
+    // plan_item not found; draft fallback also returns nothing
     findMock.mockResolvedValueOnce(null);
+    dbSelectMock.mockResolvedValueOnce([]); // loadDispatchInputForDraft: drafts join threads → no row
     const { PATCH } = await import('../route');
     const res = await PATCH(makeReq(), {
       params: Promise.resolve({ id: '11111111-1111-1111-1111-111111111111' }),
@@ -72,7 +106,7 @@ describe('PATCH /api/today/[id]/approve', () => {
     expect(res.status).toBe(404);
   });
 
-  it('enqueues execute and returns 200 on success', async () => {
+  it('falls back to legacy enqueue when plan_item has no linked draft', async () => {
     findMock.mockResolvedValueOnce({
       id: '11111111-1111-1111-1111-111111111111',
       userId: 'user-1',
@@ -83,11 +117,15 @@ describe('PATCH /api/today/[id]/approve', () => {
       skillName: null,
     });
     writeMock.mockResolvedValueOnce(null);
+    // findDraftForPlanItem returns no row → legacy enqueue path
+    dbSelectMock.mockResolvedValueOnce([]);
     const { PATCH } = await import('../route');
     const res = await PATCH(makeReq(), {
       params: Promise.resolve({ id: '11111111-1111-1111-1111-111111111111' }),
     });
     expect(res.status).toBe(200);
     expect(enqueueMock).toHaveBeenCalledTimes(1);
+    const body = await res.json();
+    expect(body).toEqual({ success: true });
   });
 });

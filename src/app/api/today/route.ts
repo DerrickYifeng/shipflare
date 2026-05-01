@@ -4,6 +4,8 @@ import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { drafts, planItems, threads } from '@/lib/db/schema';
 import type { PlanItemState } from '@/lib/plan-state';
+import { PLATFORMS } from '@/lib/platform-config';
+import { buildXIntentUrl } from '@/lib/x-intent-url';
 
 // V3 Today feed — merges two sources:
 //
@@ -76,6 +78,19 @@ interface TodoItemRow {
   source: 'calendar' | 'discovery' | 'engagement';
   priority: 'time_sensitive' | 'scheduled' | 'optional';
   status: 'pending';
+  /**
+   * For calendar / plan_item rows: the underlying plan_items.state. Lets the
+   * UI distinguish "approved & queued for posting" from "drafted / awaiting
+   * the user's first click". Null for reply-card rows (drafts table only).
+   */
+  planState: PlanItemState | null;
+  /**
+   * Pre-built X compose intent URL. Set for X drafts only (replies and
+   * original posts). When non-null the UI bypasses the API/queue path
+   * entirely — the user clicks once to open X compose pre-filled, posts
+   * manually, and the card stays in the feed until they Skip it.
+   */
+  xIntentUrl: string | null;
   title: string;
   platform: string;
   community: string | null;
@@ -183,7 +198,7 @@ export async function GET() {
   // ------------------------------------------------------------------
   // 2) Pending reply drafts (community-manager output) + joined thread
   // ------------------------------------------------------------------
-  const pendingDrafts = await db
+  const pendingDraftRows = await db
     .select({
       draftId: drafts.id,
       draftStatus: drafts.status,
@@ -196,6 +211,7 @@ export async function GET() {
       draftCreatedAt: drafts.createdAt,
       threadId: threads.id,
       threadPlatform: threads.platform,
+      threadExternalId: threads.externalId,
       threadCommunity: threads.community,
       threadTitle: threads.title,
       threadBody: threads.body,
@@ -220,6 +236,19 @@ export async function GET() {
       and(eq(drafts.userId, userId), eq(drafts.status, 'pending')),
     )
     .orderBy(desc(drafts.createdAt));
+
+  // Dedupe by threadId. `DraftReplyTool` is now idempotent on
+  // (userId, threadId, status='pending'), and a partial unique index
+  // backs that at the DB level — but legacy rows that pre-date the
+  // fix can still live in `drafts`, and the dedupe here keeps the
+  // feed clean until those age out. Rows are sorted newest-first by
+  // `desc(drafts.createdAt)`, so the first occurrence wins.
+  const seenThreadIds = new Set<string>();
+  const pendingDrafts = pendingDraftRows.filter((row) => {
+    if (seenThreadIds.has(row.threadId)) return false;
+    seenThreadIds.add(row.threadId);
+    return true;
+  });
 
   // ------------------------------------------------------------------
   // 3) Today's reply slots (`content_reply` plan_items with a positive
@@ -336,6 +365,12 @@ export async function GET() {
       source: 'calendar' as const,
       priority: derivePriority(row.scheduledAt, now),
       status: 'pending' as const,
+      planState: row.state as PlanItemState,
+      // Original posts always use the API queue path (Schedule → enqueue at
+      // scheduledAt → "Post now" button when queued). The X programmatic-
+      // post restriction from Feb 2026 only blocks REPLIES on non-Enterprise
+      // tiers — original tweets can still be posted via POST /2/tweets.
+      xIntentUrl: null,
       title: row.title,
       platform: row.channel ?? 'x',
       community: null,
@@ -399,6 +434,18 @@ export async function GET() {
       // reply-guy loop is to respond while the thread is fresh.
       priority: 'time_sensitive',
       status: 'pending',
+      planState: null,
+      // X reply → browser handoff with in_reply_to pointing at the thread.
+      // Reddit drafts keep xIntentUrl null and flow through the API.
+      xIntentUrl:
+        row.threadPlatform === PLATFORMS.x.id &&
+        row.replyBody &&
+        row.threadExternalId
+          ? buildXIntentUrl({
+              text: row.replyBody,
+              inReplyToTweetId: row.threadExternalId,
+            })
+          : null,
       title: row.threadTitle ?? 'Reply opportunity',
       platform: row.threadPlatform,
       community: row.threadCommunity,

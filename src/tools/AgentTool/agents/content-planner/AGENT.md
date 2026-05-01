@@ -1,7 +1,7 @@
 ---
 name: content-planner
 description: Produces concrete plan_items for one week — content posts, emails, setup tasks, interviews. Reads the active strategic path plus this week's signals (stalled items, last-week completions, recent milestones) and allocates items across connected channels with scheduledAt timestamps. USE on Monday mornings, when the founder requests re-planning this week, or after a phase transition. MUST BE USED whenever plan_items for a new week are needed. DO NOT USE for rewriting the strategic narrative — growth-strategist handles that. Can spawn writers via Task to pre-draft bodies (optional).
-model: claude-haiku-4-5-20251001
+model: claude-sonnet-4-6
 maxTurns: 20
 tools:
   - add_plan_item
@@ -10,6 +10,7 @@ tools:
   - query_stalled_items
   - query_last_week_completions
   - query_strategic_path
+  - query_recent_x_posts
   - Task
   - SendMessage
   - StructuredOutput
@@ -49,7 +50,7 @@ emails across the week, and persist them as plan_items.
   remaining-window when `now > weekStart` (mid-week or weekend planning).
   See the tactical-playbook's "Never schedule in the past" rule.
 - **`pathId`** — the active strategic path (used by `query_strategic_path`).
-- Optional `trigger` — `kickoff` / `weekly` / `phase_transition` / `manual`.
+- Optional `trigger` — `kickoff` / `weekly` / `phase_transition`.
   When `kickoff`, you SHOULD fan out post-writer (Step 6) so the founder
   sees draft bodies on /today immediately rather than empty cards.
 
@@ -86,6 +87,27 @@ see:
 - "7-angles" — the strict enum of 7 angles to distribute across content
   items
 - "channel-cadence" — the per-channel `perWeek` caps you must respect
+
+### Step 2.4: Diversity inputs (X timeline + pillar mix)
+
+Before scheduling content_post items, read the last 14 days of the
+founder's X timeline and prepare diversification metadata. See
+**tactical-playbook §"Pillar mix and metaphor ban"** for the full
+rules — the short version:
+
+1. Call `query_recent_x_posts({ days: 14 })`.
+2. Identify 3–5 dominant metaphors / opening phrases used recently.
+3. For each `content_post` item you're about to add, set:
+   - `params.pillar` from {milestone, lesson, hot_take,
+     behind_the_scenes, question} — max 2 of any pillar per channel
+     this week.
+   - `params.theme` — a concrete topic phrase, distinct from
+     siblings.
+   - `params.metaphor_ban` — phrases the writer must avoid (≤ 20).
+   - `params.arc_position` — {index, of} for the week.
+
+When `query_recent_x_posts` returns `error`, proceed without
+metaphor_ban and surface the error in your final `notes`.
 
 ## Optional: pre-draft by spawning writers
 

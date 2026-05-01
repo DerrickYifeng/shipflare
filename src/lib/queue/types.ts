@@ -41,6 +41,16 @@ export const postingJobSchema = z.object({
   userId: z.string().min(1),
   draftId: z.string().min(1),
   channelId: z.string().min(1),
+  /**
+   * 'direct' = posting processor calls platform clients straight (manual
+   *            user approve, plan-execute auto-approve, reply-sweep when
+   *            we trust the draft as-is).
+   * 'agent'  = posting processor runs the posting agent (legacy autonomous
+   *            path; agent decides what to call + verifies).
+   * Default 'agent' for back-compat with any in-flight jobs whose payload
+   * was enqueued before this field existed.
+   */
+  mode: z.enum(['direct', 'agent']).default('agent'),
 });
 export type PostingJobData = z.input<typeof postingJobSchema>;
 
@@ -80,32 +90,6 @@ export const codeScanJobSchema = z.object({
   isDailyDiff: z.boolean().optional(),
 });
 export type CodeScanJobData = z.input<typeof codeScanJobSchema>;
-
-// ---------------------------------------------------------------------------
-// Monitor
-// ---------------------------------------------------------------------------
-
-const monitorUserJobSchema = z.object({
-  kind: z.literal('user').optional(),
-  schemaVersion: SCHEMA_VERSION,
-  traceId: TRACE_ID,
-  userId: z.string().min(1),
-  productId: z.string().min(1),
-  platform: z.string().min(1),
-});
-
-const monitorFanoutJobSchema = z.object({
-  kind: z.literal('fanout'),
-  schemaVersion: SCHEMA_VERSION,
-  traceId: TRACE_ID,
-  platform: z.string().min(1),
-});
-
-export const monitorJobSchema = z.union([
-  monitorFanoutJobSchema,
-  monitorUserJobSchema,
-]);
-export type MonitorJobData = z.input<typeof monitorJobSchema>;
 
 // ---------------------------------------------------------------------------
 // Engagement
@@ -186,7 +170,7 @@ export type AnalyticsJobData = z.input<typeof analyticsJobSchema>;
 // ---------------------------------------------------------------------------
 
 /**
- * Top-level scan orchestrator job. Runs the discovery-scout agent
+ * Top-level scan orchestrator job. Runs the discovery-agent
  * The discovery-scan queue is now fanout-only: a daily cron drops one
  * fanout job and the processor (`discovery-cron-fanout.ts`) iterates
  * every user with at least one channel + product and enqueues a
@@ -206,7 +190,6 @@ export type DiscoveryScanJobData = z.input<typeof discoveryScanJobSchema>;
 // Back-compat aliases (will be removed after full migration)
 // ---------------------------------------------------------------------------
 
-export type XMonitorJobData = MonitorJobData;
 export type XEngagementJobData = EngagementJobData;
 export type XMetricsJobData = MetricsJobData;
 export type XAnalyticsJobData = AnalyticsJobData;
@@ -217,7 +200,6 @@ export type JobData =
   | HealthScoreJobData
   | DreamJobData
   | CodeScanJobData
-  | MonitorJobData
   | DiscoveryScanJobData
   | EngagementJobData
   | MetricsJobData

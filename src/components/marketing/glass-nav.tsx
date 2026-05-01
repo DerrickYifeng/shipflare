@@ -51,11 +51,11 @@ export function GlassNav({ isAuthenticated }: GlassNavProps) {
           style={{ textDecoration: 'none' }}
           aria-label="ShipFlare home"
         >
-          <ShipFlareLogo size={22} />
+          <ShipFlareLogo size={32} />
           <span
             style={{
-              fontSize: 'var(--sf-text-sm)',
-              fontWeight: 500,
+              fontSize: 'var(--sf-text-base)',
+              fontWeight: 600,
               color: 'var(--sf-fg-on-dark-1)',
               letterSpacing: 'var(--sf-track-tight)',
             }}

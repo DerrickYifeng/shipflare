@@ -45,11 +45,9 @@ export type TeamRunTrigger =
   | 'onboarding'
   | 'kickoff'
   | 'weekly'
-  | 'manual'
+  | 'daily'
   | 'phase_transition'
-  | 'reply_sweep'
-  | 'draft_post'
-  | 'discovery_cron';
+  | 'draft_post';
 
 export interface EnqueueTeamRunInput {
   teamId: string;

@@ -19,7 +19,7 @@ You find X/Twitter threads worth the founder's reply attention by talking to xAI
 ## Input (passed by caller as prompt)
 
 ```
-trigger:   'kickoff' | 'discovery_cron' | 'manual'
+trigger:   'kickoff' | 'daily'
 intent?:   string   // optional free-form ICP nudge from the coordinator
                     // (e.g. "focus on indie hackers asking about deploys today")
 maxResults?: number // soft target for how many to queue (default 10)

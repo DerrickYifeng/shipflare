@@ -40,6 +40,37 @@ async function postJson(url: string, init?: RequestInit): Promise<void> {
   );
 }
 
+interface ApproveResponseBody {
+  success?: boolean;
+  error?: string;
+  code?: string;
+  platform?: string;
+  browserHandoff?: { intentUrl: string };
+  queued?: { delayMs: number };
+  deferred?: boolean;
+  reason?: string;
+  retryAfterMs?: number;
+}
+
+/**
+ * Build a terse, spec-like deferred message in the ShipFlare voice.
+ * Examples:
+ *   "Daily cap reached — queued for tomorrow"
+ *   "Pacer not configured for this platform"
+ */
+function formatDeferredMessage(reason: string, retryAfterMs: number): string {
+  if (reason === 'over_daily_cap') {
+    const hours = Math.round(retryAfterMs / (60 * 60 * 1000));
+    if (hours <= 1) return 'Daily cap reached — queued for the next slot';
+    if (hours < 24) return `Daily cap reached — queued in ${hours}h`;
+    return 'Daily cap reached — queued for tomorrow';
+  }
+  if (reason === 'no_pacer_config') {
+    return 'Pacer not configured for this platform';
+  }
+  return `Posting deferred (${reason})`;
+}
+
 /**
  * Optimistic status markers layered on top of the server-side `'pending'`
  * status. The server only ever returns `'pending'` for todos; these extra
@@ -52,7 +83,29 @@ export type TodoOptimisticStatus =
   | 'pending'
   | 'pending_approval'
   | 'pending_skip'
-  | 'pending_reschedule';
+  | 'pending_reschedule'
+  /** Server confirmed the post is queued for posting. UI shows "Post now". */
+  | 'queued'
+  /** X reply intent URL was opened in a new tab. UI shows "Opened in X". */
+  | 'handed_off';
+
+/**
+ * Mirror of `PlanItemState` from the SM. We don't import the worker-side
+ * type here so the hook stays free of server-only deps; the only values
+ * the UI actually distinguishes are `'drafted'`, `'ready_for_review'`, and
+ * `'approved'` (the three states the Today feed surfaces).
+ */
+export type PlanState =
+  | 'planned'
+  | 'drafted'
+  | 'ready_for_review'
+  | 'approved'
+  | 'executing'
+  | 'completed'
+  | 'skipped'
+  | 'failed'
+  | 'superseded'
+  | 'stale';
 
 export interface TodoItem {
   id: string;
@@ -61,6 +114,17 @@ export interface TodoItem {
   source: 'calendar' | 'discovery' | 'engagement';
   priority: 'time_sensitive' | 'scheduled' | 'optional';
   status: TodoOptimisticStatus;
+  /** plan_items.state for calendar rows; null for reply drafts. */
+  planState: PlanState | null;
+  /** When `status === 'queued'`, ms until the BullMQ job fires (best-effort). */
+  queuedDelayMs?: number;
+  /**
+   * Pre-built X compose intent URL. Non-null only for X drafts (replies and
+   * original posts). When set, the card uses browser handoff instead of the
+   * API/queue path: clicking opens X compose pre-filled, the card stays in
+   * Today until the user Skips it.
+   */
+  xIntentUrl: string | null;
   title: string;
   platform: string;
   community: string | null;
@@ -163,13 +227,13 @@ export function useToday() {
   // being removed). Keeps the list order stable so the card doesn't jump
   // out from under the user while the request is in flight.
   const markPending = useCallback(
-    (id: string, status: TodoOptimisticStatus) =>
+    (id: string, status: TodoOptimisticStatus, queuedDelayMs?: number) =>
       (prev: TodayResponse | undefined): TodayResponse | undefined => {
         if (!prev) return prev;
         return {
           ...prev,
           items: prev.items.map((i) =>
-            i.id === id ? { ...i, status } : i,
+            i.id === id ? { ...i, status, queuedDelayMs } : i,
           ),
         };
       },
@@ -184,9 +248,99 @@ export function useToday() {
 
       mutate(markPending(id, 'pending_approval'), { revalidate: false });
       try {
-        await postJson(`/api/today/${id}/approve`, { method: 'PATCH' });
+        const res = await fetch(`/api/today/${id}/approve`, { method: 'PATCH' });
+        let body: ApproveResponseBody = {};
+        try {
+          body = (await res.json()) as ApproveResponseBody;
+        } catch {
+          // Non-JSON response — leave body empty.
+        }
+
+        // 202 deferred: pacer pushed the post to a later slot. Restore the
+        // card and surface a terse toast so the user knows what happened.
+        if (res.status === 202 && body.deferred) {
+          mutate(snapshot, { revalidate: false });
+          throw new TodayActionError(
+            formatDeferredMessage(body.reason ?? 'pacer', body.retryAfterMs ?? 0),
+            'deferred',
+            undefined,
+            202,
+          );
+        }
+
+        if (!res.ok) {
+          mutate(snapshot, { revalidate: false });
+          throw new TodayActionError(
+            body.error ?? `Request failed (${res.status})`,
+            body.code,
+            body.platform,
+            res.status,
+          );
+        }
+
+        // X reply handoff: pop the X compose tab pre-filled, then mark the
+        // card as 'handed_off' so the UI swaps the button to "Opened in X".
+        // The server has already set drafts.status='handed_off' so the next
+        // revalidate drops it from the feed entirely.
+        if (body.browserHandoff?.intentUrl) {
+          if (typeof window !== 'undefined') {
+            window.open(body.browserHandoff.intentUrl, '_blank', 'noopener,noreferrer');
+          }
+          mutate(markPending(id, 'handed_off'), { revalidate: false });
+          // Skip the trailing mutate() — keep the optimistic state until
+          // the next polling tick (refreshInterval: 30s) picks up the
+          // server-side feed exclusion.
+          return;
+        }
+
+        // Queued: server confirmed the post is in BullMQ. Mark the card
+        // 'queued' so the button swaps to "Post now" + ETA.
+        if (body.queued) {
+          mutate(markPending(id, 'queued', body.queued.delayMs), {
+            revalidate: false,
+          });
+          return;
+        }
       } catch (err) {
-        // Restore the exact state the user saw before the click.
+        // For non-deferred errors restore state; deferred path already did so.
+        if (!(err instanceof TodayActionError && err.code === 'deferred')) {
+          mutate(snapshot, { revalidate: false });
+        }
+        throw err;
+      }
+      mutate();
+    },
+    [data, markPending, mutate],
+  );
+
+  /**
+   * "Post now" — re-enqueue an already-approved draft with delayMs=0,
+   * bypassing the pacer's spacing/quiet-hours delay. Server keeps the
+   * worker idempotent (draft.status check) so even if the original
+   * delayed job later fires, it aborts cleanly.
+   */
+  const postNow = useCallback(
+    async (id: string) => {
+      const snapshot = data;
+      mutate(markPending(id, 'pending_approval'), { revalidate: false });
+      try {
+        const res = await fetch(`/api/today/${id}/post-now`, { method: 'POST' });
+        let body: { error?: string; code?: string } = {};
+        try {
+          body = await res.json();
+        } catch {
+          // ignore non-JSON
+        }
+        if (!res.ok) {
+          mutate(snapshot, { revalidate: false });
+          throw new TodayActionError(
+            body.error ?? `Request failed (${res.status})`,
+            body.code,
+            undefined,
+            res.status,
+          );
+        }
+      } catch (err) {
         mutate(snapshot, { revalidate: false });
         throw err;
       }
@@ -265,6 +419,7 @@ export function useToday() {
     isLoading,
     error,
     approve,
+    postNow,
     skip,
     edit,
     reschedule,

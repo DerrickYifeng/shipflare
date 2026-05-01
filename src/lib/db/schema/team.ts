@@ -151,7 +151,7 @@ export const teamRuns = pgTable(
       () => teamConversations.id,
       { onDelete: 'set null' },
     ),
-    // 'onboarding' | 'weekly' | 'manual' | 'phase_transition' | 'reply_sweep' | 'draft_post'
+    // 'onboarding' | 'kickoff' | 'weekly' | 'daily' | 'phase_transition' | 'draft_post'
     trigger: text('trigger').notNull(),
     goal: text('goal').notNull(),
     rootAgentId: text('root_agent_id')

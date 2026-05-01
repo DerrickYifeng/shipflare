@@ -14,11 +14,12 @@ const FOOTER_LINKS: FooterLink[] = [
 ];
 
 /**
- * Compact footer strip — dark ink bg, wordmark left, link cluster right.
+ * Compact footer strip — paper bg (light), wordmark left, link cluster right.
+ * Closes the alternation rhythm: `…CTA (dark) → Footer (paper)`.
  */
 export function FooterStrip() {
   const linkStyle: CSSProperties = {
-    color: 'var(--sf-fg-on-dark-4)',
+    color: 'var(--sf-fg-3)',
     textDecoration: 'none',
     fontFamily: 'var(--sf-font-mono)',
     textTransform: 'uppercase',
@@ -29,10 +30,10 @@ export function FooterStrip() {
   return (
     <footer
       style={{
-        background: 'var(--sf-bg-dark)',
-        color: 'var(--sf-fg-on-dark-4)',
+        background: 'var(--sf-bg-primary)',
+        color: 'var(--sf-fg-3)',
         padding: 24,
-        borderTop: '1px solid var(--sf-border-on-dark)',
+        borderTop: '1px solid var(--sf-border)',
       }}
     >
       <div
@@ -44,12 +45,13 @@ export function FooterStrip() {
         }}
       >
         <div className="flex items-center" style={{ gap: 10 }}>
-          <ShipFlareLogo size={18} />
+          <ShipFlareLogo size={32} />
           <span
             style={{
-              fontSize: 'var(--sf-text-xs)',
-              color: 'var(--sf-fg-on-dark-4)',
+              fontSize: 'var(--sf-text-sm)',
+              color: 'var(--sf-fg-2)',
               letterSpacing: 'var(--sf-track-normal)',
+              fontWeight: 500,
             }}
           >
             ShipFlare · AI marketing autopilot for indie devs
