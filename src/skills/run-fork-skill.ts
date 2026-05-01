@@ -27,6 +27,10 @@ import type { AgentResult } from '@/core/types';
  * @param outputSchema  Optional Zod schema; runAgent synthesizes the
  *                      StructuredOutput tool on the skill's tool list when
  *                      provided.
+ * @param deps          Optional dependency map for the spawned tool context.
+ *                      Mirrors `createToolContext`'s deps argument so skills
+ *                      whose tools require platform clients (e.g. `xClient`,
+ *                      `redditClient`) can receive them. Defaults to `{}`.
  *
  * @returns AgentResult<T> — { result, usage }, identical shape to runAgent
  *          so callers can `const { result, usage } = await runForkSkill(...)`.
@@ -35,6 +39,7 @@ export async function runForkSkill<T = unknown>(
   skillName: string,
   args: string,
   outputSchema?: ZodType<T>,
+  deps: Record<string, unknown> = {},
 ): Promise<AgentResult<T>> {
   const all = await getAllSkills();
   const skill = all.find((s) => s.name === skillName);
@@ -45,7 +50,7 @@ export async function runForkSkill<T = unknown>(
     );
   }
 
-  const ctx = createToolContext({});
+  const ctx = createToolContext(deps);
   const systemPrompt = await Promise.resolve(
     skill.getPromptForCommand(args, ctx),
   );

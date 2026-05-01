@@ -10,13 +10,10 @@ import {
 import { eq } from 'drizzle-orm';
 import { XClient, XForbiddenError } from '@/lib/x-client';
 import { createPlatformDeps } from '@/lib/platform-deps';
-import { runAgent, createToolContext } from '@/bridge/agent-runner';
-import { loadAgentFromFile } from '@/bridge/load-agent';
-import { registry } from '@/tools/registry';
-import { engagementMonitorOutputSchema } from '@/tools/AgentTool/agents/engagement-monitor/schema';
+import { runForkSkill } from '@/skills/run-fork-skill';
+import { monitoringEngagementOutputSchema } from '@/skills/monitoring-engagement/schema';
 import { enqueueReview } from '@/lib/queue';
 import { publishUserEvent } from '@/lib/redis';
-import { join } from 'path';
 import type { EngagementJobData } from '@/lib/queue/types';
 import { getTraceId } from '@/lib/queue/types';
 import { createLogger, loggerForJob } from '@/lib/logger';
@@ -102,17 +99,11 @@ export async function processXEngagement(job: Job<EngagementJobData>) {
 
   const productName = product?.name ?? 'ShipFlare';
 
-  // Load and run engagement monitor agent
-  const toolMap = registry.toMap();
-  const cwd = process.cwd();
-  const agentConfig = loadAgentFromFile(
-    join(cwd, 'src/tools/AgentTool/agents/engagement-monitor/AGENT.md'),
-    toolMap,
-  );
-
-  const context = createToolContext({ xClient });
-
-  const userMessage = JSON.stringify({
+  // Run the monitoring-engagement skill (fork-mode). Preserve the JSON
+  // input shape character-for-character — the SKILL.md prompt expects
+  // these exact fields. xClient is forwarded via deps so the
+  // x_get_mentions / x_get_tweet tools can resolve their platform client.
+  const args = JSON.stringify({
     platform: 'x',
     tweetId,
     originalText,
@@ -121,11 +112,11 @@ export async function processXEngagement(job: Job<EngagementJobData>) {
   });
 
   try {
-    const { result, usage } = await runAgent(
-      agentConfig,
-      userMessage,
-      context,
-      engagementMonitorOutputSchema,
+    const { result, usage } = await runForkSkill(
+      'monitoring-engagement',
+      args,
+      monitoringEngagementOutputSchema,
+      { xClient },
     );
 
     const actionableMentions = result.mentions.filter((m) => m.shouldReply);

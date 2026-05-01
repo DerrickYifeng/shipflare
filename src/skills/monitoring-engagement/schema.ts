@@ -1,10 +1,10 @@
 import { z } from 'zod';
 
 /**
- * Output schema for the engagement monitor agent.
+ * Output schema for the monitoring-engagement skill.
  * Assesses mentions and drafts responses for the engagement window.
  */
-export const engagementMonitorOutputSchema = z.object({
+export const monitoringEngagementOutputSchema = z.object({
   mentions: z.array(
     z.object({
       mentionId: z.string(),
@@ -17,4 +17,4 @@ export const engagementMonitorOutputSchema = z.object({
   ),
 });
 
-export type EngagementMonitorOutput = z.infer<typeof engagementMonitorOutputSchema>;
+export type MonitoringEngagementOutput = z.infer<typeof monitoringEngagementOutputSchema>;
