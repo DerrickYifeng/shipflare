@@ -40,13 +40,13 @@ export function clearAgentConfigCache(): void {
 function getReactPreamble(agentsDir: string): string {
   if (reactPreambleCache !== null) return reactPreambleCache;
   // Try sibling first (legacy `src/agents/<name>.md` layout). Then fall
-  // back to the canonical legacy location for the new
+  // back to the canonical location next to the agent loader for the
   // `src/tools/AgentTool/agents/<name>/AGENT.md` layout — the preamble
-  // file still lives at `src/agents/react-preamble.md` per the cleanup
-  // plan ("keep schemas.ts and react-preamble.md").
+  // file lives at `src/tools/AgentTool/react-preamble.md` because it is
+  // loader infrastructure that belongs next to the agent loader itself.
   const candidates = [
     join(agentsDir, 'react-preamble.md'),
-    join(process.cwd(), 'src', 'agents', 'react-preamble.md'),
+    join(process.cwd(), 'src', 'tools', 'AgentTool', 'react-preamble.md'),
   ];
   for (const candidate of candidates) {
     if (existsSync(candidate)) {
