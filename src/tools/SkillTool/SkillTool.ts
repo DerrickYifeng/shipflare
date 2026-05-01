@@ -13,7 +13,9 @@ import { z } from 'zod';
 import { buildTool } from '@/core/tool-system';
 import type { ToolDefinition } from '@/core/types';
 import { createLogger } from '@/lib/logger';
-import { SKILL_TOOL_NAME } from './constants';
+import { spawnSubagent } from '@/tools/AgentTool/spawn';
+import type { AgentDefinition } from '@/tools/AgentTool/loader';
+import { DEFAULT_SKILL_FORK_MAX_TURNS, SKILL_TOOL_NAME } from './constants';
 import { getAllSkills } from './registry';
 
 const log = createLogger('tools:skill');
@@ -70,6 +72,43 @@ export const skillTool: ToolDefinition<SkillToolInput, SkillToolOutput> = buildT
         content,
       };
     }
-    throw new Error('NOT_IMPLEMENTED: fork mode lands in Task 9');
+
+    // Fork mode — spawn an isolated sub-agent whose system prompt is the
+    // skill body and whose user message is the args. Tools, model, and
+    // turn budget come from the SKILL.md frontmatter.
+    const systemPrompt = await Promise.resolve(
+      cmd.getPromptForCommand(input.args ?? '', ctx),
+    );
+
+    const subAgentDef: AgentDefinition = {
+      name: `skill:${cmd.name}`,
+      description: cmd.description,
+      tools: cmd.allowedTools,
+      skills: [],  // skills cannot recursively preload skills (Phase 1)
+      model: cmd.model,
+      maxTurns: cmd.maxTurns ?? DEFAULT_SKILL_FORK_MAX_TURNS,
+      systemPrompt,
+      sourcePath: cmd.sourcePath ?? `<bundled:${cmd.name}>`,
+    };
+
+    const result = await spawnSubagent<unknown>(
+      subAgentDef,
+      input.args ?? '',
+      ctx,
+      undefined,  // no callbacks at the SkillTool layer
+      undefined,  // no outputSchema
+    );
+
+    const resultText =
+      typeof result.result === 'string'
+        ? result.result
+        : JSON.stringify(result.result);
+
+    return {
+      success: true,
+      commandName: cmd.name,
+      status: 'forked',
+      content: resultText,
+    };
   },
 });
