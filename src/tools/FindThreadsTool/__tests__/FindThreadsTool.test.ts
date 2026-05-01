@@ -126,8 +126,11 @@ describe('findThreadsTool', () => {
   });
 
   it('serializes Date fields as ISO strings', async () => {
-    const posted = new Date('2026-04-20T10:00:00Z');
-    const discovered = new Date('2026-04-20T11:00:00Z');
+    // Use relative timestamps so the test stays inside any reasonable
+    // windowMinutes filter regardless of when it runs.
+    const now = Date.now();
+    const posted = new Date(now - 60 * 60_000);     // 1h ago
+    const discovered = new Date(now - 30 * 60_000); // 30min ago
     seed(store, [
       { id: 't-dates', postedAt: posted, discoveredAt: discovered },
     ]);
