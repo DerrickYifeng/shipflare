@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "pkill -f 'redis-server' 2>/dev/null; lsof -ti:3000 | xargs kill -9 2>/dev/null; exit 0",
     "dev": "concurrently --kill-others -n next,redis,worker -c blue,red,magenta \"next dev\" \"redis-server --save '' --appendonly no\" \"bun --watch src/workers/index.ts\"",
     "dev:next": "next dev",
     "dev:worker": "bun --watch src/workers/index.ts",
