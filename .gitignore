@@ -59,3 +59,8 @@ next-env.d.ts
 # of the repo so each contributor can install or upgrade independently)
 .agents/
 skills-lock.json
+
+# Remotion source for marketing hero video — the rendered .mp4 lives in
+# public/, which is what the site actually serves. The source project
+# has its own package.json + node_modules and shouldn't be tracked.
+marketing-video/
