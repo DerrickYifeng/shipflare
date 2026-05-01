@@ -6,29 +6,21 @@ import { RedditClient } from '@/lib/reddit-client';
 import { XClient } from '@/lib/x-client';
 import { createClientFromChannelById } from '@/lib/platform-deps';
 import { PLATFORMS } from '@/lib/platform-config';
-import { runAgent, createToolContext } from '@/bridge/agent-runner';
-import { loadAgentFromFile } from '@/bridge/load-agent';
-import { registry } from '@/tools/registry';
+import { runForkSkill } from '@/skills/run-fork-skill';
 import { isCircuitBreakerTripped, tripCircuitBreaker } from '@/lib/circuit-breaker';
 import { canPostToSubreddit } from '@/lib/rate-limiter';
 import { enqueueEngagement } from '@/lib/queue';
 import { publishUserEvent } from '@/lib/redis';
-import { join } from 'path';
 import type { PostingJobData } from '@/lib/queue/types';
 import { getTraceId } from '@/lib/queue/types';
 import type { UsageSummary } from '@/core/types';
-import { postingOutputSchema } from '@/tools/AgentTool/agents/posting/schema';
+import { postingToPlatformOutputSchema } from '@/skills/posting-to-platform/schema';
 import { createLogger, loggerForJob } from '@/lib/logger';
 import { addCost, getCostForRun } from '@/lib/cost-bucket';
 import { recordPipelineEvent, recordThreadFeedback } from '@/lib/pipeline-events';
 
 const MAX_ENGAGEMENT_DEPTH = 2;
 const baseLog = createLogger('worker:posting');
-
-const POSTING_AGENT_PATH = join(
-  process.cwd(),
-  'src/tools/AgentTool/agents/posting/AGENT.md',
-);
 
 // ---------------------------------------------------------------------------
 // Direct-mode posting (no agent, straight platform-client calls)
@@ -243,13 +235,11 @@ export async function processPosting(job: Job<PostingJobData>) {
       error: direct.error,
     };
   } else {
-    const agentConfig = loadAgentFromFile(POSTING_AGENT_PATH, registry.toMap());
-    const context = createToolContext(deps);
-    const agentRun = await runAgent(
-      agentConfig,
+    const agentRun = await runForkSkill(
+      'posting-to-platform',
       JSON.stringify(input),
-      context,
-      postingOutputSchema,
+      postingToPlatformOutputSchema,
+      deps,
     );
     result = agentRun.result;
     usage = agentRun.usage;

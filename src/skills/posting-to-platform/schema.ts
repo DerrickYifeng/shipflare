@@ -1,10 +1,10 @@
 import { z } from 'zod';
 
 /**
- * Output schema for the posting agent.
+ * Output schema for the posting-to-platform skill.
  * Reports whether a draft was successfully posted and verified.
  */
-export const postingOutputSchema = z.object({
+export const postingToPlatformOutputSchema = z.object({
   success: z.boolean(),
   draftType: z.enum(['reply', 'original_post']).optional(),
   commentId: z.string().nullable(),
@@ -16,4 +16,4 @@ export const postingOutputSchema = z.object({
   error: z.string().optional(),
 });
 
-export type PostingOutput = z.infer<typeof postingOutputSchema>;
+export type PostingToPlatformOutput = z.infer<typeof postingToPlatformOutputSchema>;
