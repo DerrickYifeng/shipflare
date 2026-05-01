@@ -8,9 +8,10 @@
  * so the marketing surface (which currently always renders light) is not
  * accidentally retinted when an authenticated user has selected dark.
  *
- * The pre-paint script in <ThemeScript> runs before React hydrates and seeds
- * `document.documentElement.dataset.sfTheme`. The provider reads that seed on
- * mount to avoid a hydration mismatch on the container className.
+ * The pre-paint script in <ThemeScript> (see `./theme-script.tsx`) runs
+ * before React hydrates and seeds `document.documentElement.dataset.sfTheme`.
+ * The provider reads that seed on mount to avoid a hydration mismatch on the
+ * container className.
  */
 
 import {
@@ -29,6 +30,7 @@ interface ThemeContextValue {
   theme: Theme;
   setTheme: (next: Theme) => void;
   toggle: () => void;
+  hydrated: boolean;
 }
 
 const STORAGE_KEY = 'sf-theme';
@@ -38,84 +40,69 @@ const ThemeContext = createContext<ThemeContextValue>({
   theme: DEFAULT_THEME,
   setTheme: () => {},
   toggle: () => {},
+  hydrated: false,
 });
 
 export function useTheme(): ThemeContextValue {
   return useContext(ThemeContext);
 }
 
-/**
- * Inline script rendered in <head> via <ThemeScript />. Runs before paint so
- * the container can pick up the right class without flicker or hydration
- * mismatch. Sets `document.documentElement.dataset.sfTheme = 'dark' | 'light'`.
- *
- * NOTE: intentionally does NOT add `.app-dark` to <html>. The `.app-dark`
- * class is scoped to the `AppShell` container (authenticated app) so the
- * marketing surface at `/` — which renders its own `.app-dark` wrapper
- * when it wants dark, and stays untinted otherwise — is not accidentally
- * retinted by a cross-surface dark preference. The dataset seed is the
- * only thing React reads on mount to avoid hydration mismatches.
- */
-export function ThemeScript() {
-  const script = `
-(function () {
-  try {
-    var stored = localStorage.getItem('${STORAGE_KEY}');
-    var theme = stored === 'dark' || stored === 'light' ? stored : 'light';
-    document.documentElement.dataset.sfTheme = theme;
-  } catch (e) {
-    document.documentElement.dataset.sfTheme = 'light';
-  }
-})();`.trim();
-  return <script dangerouslySetInnerHTML={{ __html: script }} />;
-}
-
-function readInitialTheme(): Theme {
+function readClientTheme(): Theme {
   if (typeof document === 'undefined') return DEFAULT_THEME;
+  // Prefer the dataset seeded by the pre-paint script. Fall back to
+  // localStorage so a stale dataset (e.g. cleared by a 3rd-party script)
+  // can still recover the user's preference.
   const seeded = document.documentElement.dataset.sfTheme;
   if (seeded === 'dark' || seeded === 'light') return seeded;
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored === 'dark' || stored === 'light') return stored;
+  } catch {
+    /* ignore — localStorage may be disabled */
+  }
   return DEFAULT_THEME;
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  // Lazy init so we pick up the pre-paint script value on the first render.
-  // On the server this resolves to DEFAULT_THEME; on the client it resolves
-  // from the dataset seeded by ThemeScript.
-  const [theme, setThemeState] = useState<Theme>(readInitialTheme);
+  // Both SSR and the client's first render start at DEFAULT_THEME so the
+  // hydrated tree matches the server output exactly. The pre-paint script
+  // already set `document.documentElement.dataset.sfTheme`, so style
+  // selectors on `[data-sf-theme="dark"]` paint correctly during this
+  // initial frame even when our React-tracked theme is still 'light'.
+  // After hydration, the effect below promotes the real theme into state
+  // and flips `hydrated` so theme-dependent UI (toggles, icons) can render.
+  const [theme, setThemeState] = useState<Theme>(DEFAULT_THEME);
+  const [hydrated, setHydrated] = useState(false);
 
-  // Safety net: if the client mounts with a value that diverges from
-  // localStorage (e.g. theme changed in another tab before mount), reconcile.
+  // Promote the real theme into state once we're on the client. This runs
+  // after the initial render commits, so it cannot cause a hydration
+  // mismatch.
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored === 'dark' || stored === 'light') {
-        if (stored !== theme) setThemeState(stored);
-      }
-    } catch {
-      /* ignore — localStorage may be disabled */
-    }
+    const real = readClientTheme();
+    if (real !== theme) setThemeState(real);
+    setHydrated(true);
     // Only on mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Persist and sync dataset whenever theme changes. `.app-dark` is
-  // applied ONLY to the AppShell container (see `app-shell.tsx`) so
-  // marketing routes in the same document are never retinted.
+  // Persist and sync dataset whenever theme changes (after hydration).
+  // `.app-dark` is applied ONLY to the AppShell container (see
+  // `app-shell.tsx`) so marketing routes in the same document are never
+  // retinted.
   useEffect(() => {
+    if (!hydrated) return;
     try {
       localStorage.setItem(STORAGE_KEY, theme);
     } catch {
       /* ignore */
     }
-    if (typeof document !== 'undefined') {
-      const root = document.documentElement;
-      root.dataset.sfTheme = theme;
-      // Defensive cleanup: remove any legacy `.app-dark` / `.app-light`
-      // classes that older scripts may have written to <html>.
-      root.classList.remove('app-dark');
-      root.classList.remove('app-light');
-    }
-  }, [theme]);
+    const root = document.documentElement;
+    root.dataset.sfTheme = theme;
+    // Defensive cleanup: remove any legacy `.app-dark` / `.app-light`
+    // classes that older scripts may have written to <html>.
+    root.classList.remove('app-dark');
+    root.classList.remove('app-light');
+  }, [theme, hydrated]);
 
   // Cross-tab sync.
   useEffect(() => {
@@ -138,8 +125,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<ThemeContextValue>(
-    () => ({ theme, setTheme, toggle }),
-    [theme, setTheme, toggle],
+    () => ({ theme, setTheme, toggle, hydrated }),
+    [theme, setTheme, toggle, hydrated],
   );
 
   return <ThemeContext value={value}>{children}</ThemeContext>;

@@ -10,11 +10,19 @@ import { useState } from 'react';
 import { useTheme } from './theme-provider';
 
 export function ThemeToggleButton() {
-  const { theme, toggle } = useTheme();
+  const { theme, toggle, hydrated } = useTheme();
   const isDark = theme === 'dark';
   const [hover, setHover] = useState(false);
 
-  const label = isDark ? 'Switch to light theme' : 'Switch to dark theme';
+  // Until the provider has read the real theme on the client, render a
+  // stable, icon-less button so the SSR'd HTML and the first client paint
+  // match. Both server and first client render produce the same markup;
+  // the icon and label appear after hydration.
+  const label = hydrated
+    ? isDark
+      ? 'Switch to light theme'
+      : 'Switch to dark theme'
+    : 'Toggle theme';
 
   return (
     <button
@@ -24,6 +32,7 @@ export function ThemeToggleButton() {
       onMouseLeave={() => setHover(false)}
       title={label}
       aria-label={label}
+      suppressHydrationWarning
       style={{
         display: 'inline-flex',
         alignItems: 'center',
@@ -39,7 +48,11 @@ export function ThemeToggleButton() {
         transition: 'all var(--sf-dur-base) var(--sf-ease-swift)',
       }}
     >
-      {isDark ? (
+      {!hydrated ? (
+        // Placeholder reserves the 15×15 icon slot so layout doesn't shift
+        // when the real icon mounts.
+        <span aria-hidden="true" style={{ width: 15, height: 15 }} />
+      ) : isDark ? (
         <svg
           width="15"
           height="15"
