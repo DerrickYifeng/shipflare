@@ -160,9 +160,18 @@ export async function POST(request: NextRequest): Promise<Response> {
   });
 
   const encoder = new TextEncoder();
+
+  // Lifted to outer closure so cancel() can release these on client abort.
+  // Previously the `cancel()` callback was empty and the inner
+  // runViaTeamRun generator kept consuming Redis events for up to
+  // PLAN_TIMEOUT_MS (~180s) after the client gave up.
+  let closed = false;
+  let heartbeat: ReturnType<typeof setInterval> | null = null;
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const abortController = new AbortController();
+
   const stream = new ReadableStream({
     async start(controller) {
-      let closed = false;
       const enqueue = (payload: Record<string, unknown>) => {
         if (closed) return;
         try {
@@ -172,13 +181,12 @@ export async function POST(request: NextRequest): Promise<Response> {
         }
       };
 
-      const heartbeat = setInterval(
+      heartbeat = setInterval(
         () => enqueue({ type: 'heartbeat' }),
         HEARTBEAT_INTERVAL_MS,
       );
 
-      const abortController = new AbortController();
-      const timeoutId = setTimeout(
+      timeoutId = setTimeout(
         () => abortController.abort(),
         PLAN_TIMEOUT_MS,
       );
@@ -189,8 +197,8 @@ export async function POST(request: NextRequest): Promise<Response> {
         // `enqueue` short-circuits and we lose the final frame.
         enqueue(finalEvent);
         closed = true;
-        clearInterval(heartbeat);
-        clearTimeout(timeoutId);
+        if (heartbeat) clearInterval(heartbeat);
+        if (timeoutId) clearTimeout(timeoutId);
         try {
           controller.close();
         } catch {
@@ -268,8 +276,17 @@ export async function POST(request: NextRequest): Promise<Response> {
       }
     },
     cancel() {
-      // Client aborted; the runStrategic promise will settle on its own.
-      // Nothing actionable here — cleanup already ran or will shortly.
+      // Client aborted (tab closed, navigation, etc.). Release resources
+      // so the inner runViaTeamRun generator stops consuming Redis events
+      // and the heartbeat timer doesn't fire on a dead controller.
+      // Aborting the AbortController is what actually terminates the
+      // for-await loop in runViaTeamRun (it checks abortSignal.aborted on
+      // each iteration and throws PlannerTimeoutError).
+      if (closed) return;
+      closed = true;
+      if (heartbeat) clearInterval(heartbeat);
+      if (timeoutId) clearTimeout(timeoutId);
+      abortController.abort();
     },
   });
 
