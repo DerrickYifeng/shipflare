@@ -54,3 +54,8 @@ next-env.d.ts
 
 # claude code
 .claude/
+
+# locally-installed agent skills (managed by skills-lock.json; kept out
+# of the repo so each contributor can install or upgrade independently)
+.agents/
+skills-lock.json
