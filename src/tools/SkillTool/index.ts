@@ -3,3 +3,4 @@ export type { SkillCommand } from './types';
 export { SkillFrontmatterSchema } from './schema';
 export type { SkillFrontmatter } from './schema';
 export { loadSkill, loadSkillsDir } from './loadSkillsDir';
+export type { BundledSkillInput } from './registry';

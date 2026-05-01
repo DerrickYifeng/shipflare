@@ -13,7 +13,7 @@ const log = createLogger('tools:skill-registry');
 
 const WATCHER_DEBOUNCE_MS = 200;
 
-interface BundledSkillInput {
+export interface BundledSkillInput {
   name: string;
   description: string;
   whenToUse?: string;
