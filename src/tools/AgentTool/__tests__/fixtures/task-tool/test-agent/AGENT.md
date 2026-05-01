@@ -5,7 +5,7 @@ model: claude-sonnet-4-6
 maxTurns: 3
 tools:
   - reddit_search
-  - web_search
+  - find_threads
 ---
 
 # Test agent

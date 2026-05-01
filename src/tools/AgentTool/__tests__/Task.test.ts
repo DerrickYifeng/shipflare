@@ -269,7 +269,7 @@ describe('Task tool — allowlist enforcement', () => {
     const capturedToolNames = capturedConfig.tools.map((t) => t.name).sort();
 
     // test-agent declares exactly these two in its AGENT.md frontmatter.
-    expect(capturedToolNames).toEqual(['reddit_search', 'web_search']);
+    expect(capturedToolNames).toEqual(['find_threads', 'reddit_search']);
 
     // And NOT any of the other tools we know are registered centrally.
     expect(capturedToolNames).not.toContain('x_post');
