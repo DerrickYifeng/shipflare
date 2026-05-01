@@ -5,7 +5,7 @@ import { eq, and, gte, sql } from 'drizzle-orm';
 import { runAgent, createToolContext } from '@/bridge/agent-runner';
 import { loadAgentFromFile } from '@/bridge/load-agent';
 import { registry } from '@/tools/registry';
-import { draftReviewOutputSchema } from '@/agents/schemas';
+import { draftReviewOutputSchema } from '@/tools/AgentTool/agents/draft-review/schema';
 import { publishUserEvent } from '@/lib/redis';
 import { enqueueDream, enqueuePosting } from '@/lib/queue';
 import { join } from 'path';

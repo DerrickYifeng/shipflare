@@ -13,7 +13,7 @@ import { createPlatformDeps } from '@/lib/platform-deps';
 import { runAgent, createToolContext } from '@/bridge/agent-runner';
 import { loadAgentFromFile } from '@/bridge/load-agent';
 import { registry } from '@/tools/registry';
-import { engagementMonitorOutputSchema } from '@/agents/schemas';
+import { engagementMonitorOutputSchema } from '@/tools/AgentTool/agents/engagement-monitor/schema';
 import { enqueueReview } from '@/lib/queue';
 import { publishUserEvent } from '@/lib/redis';
 import { join } from 'path';

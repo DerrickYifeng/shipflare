@@ -17,7 +17,7 @@ import { join } from 'path';
 import type { PostingJobData } from '@/lib/queue/types';
 import { getTraceId } from '@/lib/queue/types';
 import type { UsageSummary } from '@/core/types';
-import { postingOutputSchema } from '@/agents/schemas';
+import { postingOutputSchema } from '@/tools/AgentTool/agents/posting/schema';
 import { createLogger, loggerForJob } from '@/lib/logger';
 import { addCost, getCostForRun } from '@/lib/cost-bucket';
 import { recordPipelineEvent, recordThreadFeedback } from '@/lib/pipeline-events';
