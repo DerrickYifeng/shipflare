@@ -56,13 +56,19 @@ export const skillTool: ToolDefinition<SkillToolInput, SkillToolOutput> = buildT
 
     log.info(`SkillTool: invoking "${cmd.name}" (context=${cmd.context})`);
 
-    // Inline mode (Task 8) and fork mode (Task 9) implementations land in
-    // separate tasks. Phase 1 skeleton throws so the test for unknown skill
-    // passes while we wire each mode incrementally.
+    // Inline mode (Task 8) injects the skill's prompt into the caller's
+    // conversation as the tool's text result. Fork mode (Task 9) spawns a
+    // sub-agent.
     if (cmd.context === 'inline') {
-      throw new Error(
-        'NOT_IMPLEMENTED: inline mode lands in Task 8',
+      const content = await Promise.resolve(
+        cmd.getPromptForCommand(input.args ?? '', ctx),
       );
+      return {
+        success: true,
+        commandName: cmd.name,
+        status: 'inline',
+        content,
+      };
     }
     throw new Error('NOT_IMPLEMENTED: fork mode lands in Task 9');
   },
