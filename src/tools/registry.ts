@@ -2,22 +2,12 @@ import { ToolRegistry } from '@/core/tool-system';
 import { redditSearchTool } from './RedditSearchTool/RedditSearchTool';
 import { redditPostTool } from './RedditPostTool/RedditPostTool';
 import { redditVerifyTool } from './RedditVerifyTool/RedditVerifyTool';
-import { redditDiscoverSubsTool } from './RedditDiscoverSubsTool/RedditDiscoverSubsTool';
-import { redditGetThreadTool } from './RedditGetThreadTool/RedditGetThreadTool';
-import { redditGetRulesTool } from './RedditGetRulesTool/RedditGetRulesTool';
-import { redditHotPostsTool } from './RedditHotPostsTool/RedditHotPostsTool';
 import { redditSubmitPostTool } from './RedditSubmitPostTool/RedditSubmitPostTool';
-import { classifyIntentTool } from './ClassifyIntentTool/ClassifyIntentTool';
-import { hnSearchTool } from './HnSearchTool/HnSearchTool';
-import { hnGetThreadTool } from './HnGetThreadTool/HnGetThreadTool';
-import { webSearchTool } from './WebSearchTool/WebSearchTool';
 import { xPostTool } from './XPostTool/XPostTool';
 import { xaiFindCustomersTool } from './XaiFindCustomersTool/XaiFindCustomersTool';
 import { persistQueueThreadsTool } from './PersistQueueThreadsTool/PersistQueueThreadsTool';
-import { xGetUserTweetsTool } from './XGetUserTweetsTool/XGetUserTweetsTool';
 import { xGetTweetTool } from './XGetTweetTool/XGetTweetTool';
 import { xGetMentionsTool } from './XGetMentionsTool/XGetMentionsTool';
-import { xGetMetricsTool } from './XGetMetricsTool/XGetMetricsTool';
 // Phase B domain tools — one folder per tool (Claude Code convention).
 // Registering them here makes them discoverable by AGENT.md `tools: [...]`
 // allowlists via the central registry.
@@ -49,28 +39,14 @@ const registry = new ToolRegistry();
 registry.register(redditSearchTool);
 registry.register(redditPostTool);
 registry.register(redditVerifyTool);
-registry.register(redditDiscoverSubsTool);
-registry.register(redditGetThreadTool);
-registry.register(redditGetRulesTool);
-registry.register(redditHotPostsTool);
 registry.register(redditSubmitPostTool);
-
-// HackerNews tools
-registry.register(hnSearchTool);
-registry.register(hnGetThreadTool);
 
 // X tools
 registry.register(xPostTool);
 registry.register(xaiFindCustomersTool);
 registry.register(persistQueueThreadsTool);
-registry.register(xGetUserTweetsTool);
 registry.register(xGetTweetTool);
 registry.register(xGetMentionsTool);
-registry.register(xGetMetricsTool);
-
-// Generic tools
-registry.register(classifyIntentTool);
-registry.register(webSearchTool);
 
 // ---------------------------------------------------------------------------
 // Phase B domain tools (spec §9 + §11 Phase B Day 1-2). Flat snake_case
