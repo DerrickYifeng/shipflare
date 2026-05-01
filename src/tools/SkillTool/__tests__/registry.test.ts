@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as path from 'node:path';
 import { promises as fs } from 'node:fs';
 import * as os from 'node:os';
@@ -75,6 +75,10 @@ description: First version.
 `,
       'utf8',
     );
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
   });
 
   it('reflects file edits after debounce', async () => {
