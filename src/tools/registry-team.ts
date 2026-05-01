@@ -14,11 +14,11 @@
 //
 // This module is imported AFTER both sides have finished initializing, so
 // `taskTool`, `sendMessageTool`, and `skillTool` are fully constructed
-// before we hand them to `registerTeamRuntimeTools`.
+// before we hand them to `registerDeferredTools`.
 
-import { registerTeamRuntimeTools } from './registry';
+import { registerDeferredTools } from './registry';
 import { taskTool } from './AgentTool/AgentTool';
 import { sendMessageTool } from './SendMessageTool/SendMessageTool';
 import { skillTool } from './SkillTool/SkillTool';
 
-registerTeamRuntimeTools({ taskTool, sendMessageTool, skillTool });
+registerDeferredTools({ taskTool, sendMessageTool, skillTool });

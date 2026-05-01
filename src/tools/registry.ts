@@ -135,7 +135,7 @@ export { registry };
  * Skill primitive — see src/skills/ + src/tools/SkillTool/.
  * Agents that want skill access add `skill` to their AGENT.md tools: list.
  */
-export function registerTeamRuntimeTools(tools: {
+export function registerDeferredTools(tools: {
   taskTool: typeof import('./AgentTool/AgentTool').taskTool;
   sendMessageTool: typeof import('./SendMessageTool/SendMessageTool').sendMessageTool;
   skillTool: typeof import('./SkillTool/SkillTool').skillTool;
