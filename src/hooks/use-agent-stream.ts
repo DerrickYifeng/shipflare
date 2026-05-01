@@ -11,6 +11,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 // agent_start event with the new name; v1's 'content-batch' is gone (the
 // draft-single-* skills stream under 'content' via monitor.ts /
 // plan-execute.ts).
+// SSE feed labels for the user-visible activity stream. NOT agent registry
+// names — 'review' and 'posting' map to the reviewing-drafts and
+// posting-to-platform fork-skills (post-migration 2026-04-30). Kept stable
+// to preserve activity-history UI continuity.
 type AgentName = 'discovery' | 'content' | 'review' | 'posting';
 
 export interface AgentState {
