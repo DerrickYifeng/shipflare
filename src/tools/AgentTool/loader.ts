@@ -1,7 +1,8 @@
 // Ported from engine/tools/AgentTool/loadAgentsDir.ts parseAgent() (Claude Code);
-// validators for skills/hooks/mcpServers/permissionMode/isolation/initialPrompt/memory/
+// validators for hooks/mcpServers/permissionMode/isolation/initialPrompt/memory/
 // omitClaudeMd/requiredMcpServers/background are intentionally dropped — ShipFlare
 // agents live in-process under our own BullMQ worker, not CC's CLI runtime.
+// `skills` is parsed as a first-class field (see AgentDefinition.skills).
 
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
@@ -18,6 +19,7 @@ export interface AgentDefinition {
   name: string;
   description: string;
   tools: string[];
+  skills: string[];
   model?: string;
   maxTurns: number;
   color?: string;
@@ -53,6 +55,7 @@ const frontmatterSchema = z
       .string({ required_error: 'description is required' })
       .min(1, 'description cannot be empty'),
     tools: z.array(z.string()).optional(),
+    skills: z.array(z.string()).optional(),
     model: z.string().min(1).optional(),
     maxTurns: z.number().int().positive().optional(),
     color: z.string().min(1).optional(),
@@ -65,7 +68,6 @@ type ParsedFrontmatter = z.infer<typeof frontmatterSchema>;
 
 // CC-only fields we explicitly strip (and warn about) so ports don't rot.
 const DROPPED_FIELDS = [
-  'skills',
   'hooks',
   'mcpServers',
   'permissionMode',
@@ -425,6 +427,7 @@ export async function loadAgent(
     name: parsed.name,
     description: parsed.description,
     tools: parsed.tools ?? [],
+    skills: parsed.skills ?? [],
     ...(parsed.model !== undefined ? { model: parsed.model } : {}),
     maxTurns: parsed.maxTurns ?? DEFAULT_MAX_TURNS,
     ...(parsed.color !== undefined ? { color: parsed.color } : {}),
