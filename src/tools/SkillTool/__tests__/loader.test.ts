@@ -49,7 +49,15 @@ describe('loadSkillsDir (aggregate)', () => {
     expect(names).toEqual([...names].sort());
   });
 
-  it('skips directories starting with "." (e.g. .git)', async () => {
-    await expect(loadSkillsDir(FIXTURES)).resolves.toBeDefined();
+  it('skips malformed siblings while keeping valid ones (per-skill failure isolation)', async () => {
+    const skills = await loadSkillsDir(FIXTURES);
+    const names = skills.map((s) => s.name);
+    // valid-skill loaded successfully alongside malformed-skill in the same root.
+    expect(names).toContain('valid-skill');
+    // malformed-skill is silently skipped, not present in the result.
+    expect(names).not.toContain('malformed-skill');
+    // grouped-skill (nested fixture) also survives — guards against an empty
+    // result silently passing the assertions above.
+    expect(names).toContain('grouped-skill');
   });
 });

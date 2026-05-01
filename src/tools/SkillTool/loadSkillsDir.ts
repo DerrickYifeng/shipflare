@@ -21,13 +21,18 @@ const log = createLogger('tools:skill-loader');
 const FRONTMATTER_REGEX = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/;
 
 /**
- * Minimal YAML frontmatter parser for SKILL.md. Handles the subset of YAML
- * we use: scalars, arrays-as-bullets, multi-line `|` block scalars, simple
- * key:value pairs. Unknown keys pass through as strings.
+ * Skill-scoped YAML frontmatter parser for SKILL.md. Handles the subset of
+ * YAML we use here: scalars, arrays-as-bullets, multi-line `|` / `|-` / `>`
+ * block scalars, simple key:value pairs. Unknown keys pass through as strings.
  *
- * Mirrors the same lightweight parser ShipFlare's AgentTool uses
- * (src/tools/AgentTool/loader.ts) — keeps zero new dependencies and matches
- * existing behaviour exactly.
+ * Deliberately separate from AgentTool's parser
+ * (src/tools/AgentTool/loader.ts → splitFrontmatter + parseYamlFrontmatter).
+ * That one is broader (strips unquoted trailing `#` comments, parses inline
+ * `[a, b]` arrays, recognizes `null`/`~`, throws on unexpected indentation,
+ * uses folded scalars) but doesn't support the `|` block scalars SKILL.md
+ * uses. This one is narrower — line-leading `#` comments only, no inline
+ * arrays, lenient on bad lines — but sufficient for the SKILL.md fields we
+ * care about. Zero new deps; not extracted to a shared util on purpose.
  */
 function parseFrontmatter(raw: string): {
   frontmatter: Record<string, unknown>;
