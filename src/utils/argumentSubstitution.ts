@@ -4,6 +4,9 @@
 // - Named-args mapping ($foo → argumentNames lookup): not used by Phase 1 skills
 // - Shell-quote parsing (try-parse-shell-command): args arrive already split
 //   by SkillTool's caller, so plain whitespace split is sufficient
+// - $ARGUMENTS[N] indexed form: use $0/$1 instead. A skill author who writes
+//   $ARGUMENTS[0] will get "<args>[0]" because $ARGUMENTS substitutes first
+//   and the trailing "[0]" is left untouched — document this if it ever bites.
 //
 // Keeps:
 // - $ARGUMENTS full-string replacement
@@ -29,23 +32,16 @@ function parseArguments(args: string): string[] {
  */
 export function substituteArguments(body: string, args: string): string {
   const parsed = parseArguments(args);
-  let result = body;
-  let placeholderFound = false;
+  const original = body;
 
-  if (ARGUMENTS_PLACEHOLDER.test(result)) {
-    placeholderFound = true;
-    result = result.replace(ARGUMENTS_PLACEHOLDER, args);
-  }
+  let result = body.replace(ARGUMENTS_PLACEHOLDER, args);
 
-  if (POSITIONAL_PLACEHOLDER.test(result)) {
-    placeholderFound = true;
-    result = result.replace(POSITIONAL_PLACEHOLDER, (_match, idx: string) => {
-      const i = Number(idx);
-      return parsed[i] ?? '';
-    });
-  }
+  result = result.replace(POSITIONAL_PLACEHOLDER, (_match, idx: string) => {
+    const i = Number(idx);
+    return parsed[i] ?? '';
+  });
 
-  if (!placeholderFound && args.trim() !== '') {
+  if (result === original && args.trim() !== '') {
     return `${result}\n\nARGUMENTS: ${args}`;
   }
   return result;

@@ -35,4 +35,29 @@ describe('substituteArguments', () => {
       'first=only second=',
     );
   });
+
+  it('is pure across consecutive calls (no global regex state leaks)', () => {
+    // Call once with body that ends in $ARGUMENTS — would advance lastIndex
+    // if the regex were stateful.
+    const first = substituteArguments('prefix here $ARGUMENTS', 'A');
+    // Call again with body where $ARGUMENTS is at index 0 — would fail
+    // if lastIndex from the first call is still > 0.
+    const second = substituteArguments('$ARGUMENTS suffix', 'B');
+    expect(first).toBe('prefix here A');
+    expect(second).toBe('B suffix');
+  });
+
+  it('handles empty args with placeholder by substituting empty string', () => {
+    expect(substituteArguments('hi $ARGUMENTS', '')).toBe('hi ');
+    expect(substituteArguments('first=$0', '')).toBe('first=');
+  });
+
+  it('preserves $ARGUMENTS_FOO style identifiers (\\b boundary)', () => {
+    // Word-boundary regex must NOT replace $ARGUMENTS when followed by
+    // word chars. Skill authors writing $ARGUMENTS_FOO must get literal
+    // $ARGUMENTS_FOO, not <args>_FOO.
+    expect(substituteArguments('use $ARGUMENTS_FOO directly', 'x')).toBe(
+      'use $ARGUMENTS_FOO directly\n\nARGUMENTS: x',
+    );
+  });
 });
