@@ -303,11 +303,46 @@ describe('queryRecentXPostsTool', () => {
     expect(parse.success).toBe(false);
   });
 
-  it('defaults `days` to 14 when omitted', () => {
+  it('defaults to a 14-day window when `days` is omitted', async () => {
     const parse = queryRecentXPostsTool.inputSchema.safeParse({});
     expect(parse.success).toBe(true);
-    if (parse.success) {
-      expect(parse.data.days).toBe(14);
-    }
+
+    store.register<ChannelRow>(channels, [
+      {
+        id: 'ch-1',
+        userId: 'user-1',
+        platform: 'x',
+        username: 'founder',
+        oauthTokenEncrypted: 'enc',
+        refreshTokenEncrypted: 'enc',
+        tokenExpiresAt: null,
+      },
+    ]);
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+    stubGetUserTweets = async () => ({
+      tweets: [
+        {
+          id: 'in-default-window',
+          text: 'recent',
+          authorUsername: 'founder',
+          createdAt: dayAgoIso(10),
+          metrics: { likes: 0, retweets: 0, replies: 0, impressions: 0 },
+        },
+        {
+          id: 'past-default-window',
+          text: 'ancient',
+          authorUsername: 'founder',
+          createdAt: dayAgoIso(20),
+          metrics: { likes: 0, retweets: 0, replies: 0, impressions: 0 },
+        },
+      ],
+    });
+
+    const ctx = makeCtx(store, { userId: 'user-1', productId: 'prod-1' });
+    const result = await queryRecentXPostsTool.execute({}, ctx);
+
+    expect(result.tweets.map((t) => t.tweetId)).toEqual(['in-default-window']);
+    vi.useRealTimers();
   });
 });
