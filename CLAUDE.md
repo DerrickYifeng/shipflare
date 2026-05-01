@@ -114,6 +114,41 @@ one atomic skill.
   The `PlatformConfig.externalIdPattern` field only exists for legacy records that predate
   the `platform` column; new code must not depend on it.
 
+## Skill Primitive
+
+ShipFlare's multi-agent system has three primitives: **Tool**, **Agent**, **Skill**.
+Skills live under `src/skills/<name>/SKILL.md`. The Skill primitive was restored in
+Phase 1 of the architecture refactor (see
+`docs/superpowers/specs/2026-04-30-skill-primitive-restoration-design.md`).
+
+### Adding a new markdown skill
+
+1. Create `src/skills/<gerund-name>/SKILL.md` (gerund preferred, e.g.
+   `drafting-encouraging-replies`).
+2. Required frontmatter: `name`, `description`. Optional: `context`
+   (`inline` | `fork`), `allowed-tools`, `model`, `maxTurns`,
+   `when-to-use`, `argument-hint`, `paths`. **YAML parser note:** the
+   frontmatter parser does NOT accept inline `[]` empty arrays — write
+   `allowed-tools:` (empty value) rather than `allowed-tools: []`.
+3. Body uses `$ARGUMENTS` or `$0` / `$1` for arg substitution. Long
+   reference content goes under `references/<name>.md` and is linked
+   from the body — Claude reads them progressively, on demand.
+4. Add a per-skill `__tests__/<name>.test.ts` mirroring
+   `src/skills/_demo-echo-inline/__tests__/_demo-echo-inline.test.ts`.
+
+### Adding a new bundled (TS) skill
+
+Programmatic skills live in `src/skills/_bundled/<name>.ts` and call
+`registerBundledSkill({ ... })` at module load. The `src/skills/_bundled/index.ts`
+barrel must `import './<name>'` so the side-effect runs.
+
+### Letting an agent invoke skills
+
+Add `skill` to the agent's `AGENT.md` `tools:` list. Optionally declare
+`skills: [name1, name2]` to preload specific skills' content into the
+agent's initial conversation (useful for agents that always need the
+same playbook).
+
 ## Security TODO
 
 Tracking pending security hardening beyond what `feat/security-hardening` already shipped.
