@@ -1,5 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import * as path from 'node:path';
+import * as os from 'node:os';
+import { promises as fs } from 'node:fs';
 import { loadSkill, loadSkillsDir } from '@/tools/SkillTool/loadSkillsDir';
 
 const FIXTURES = path.resolve(__dirname, 'fixtures');
@@ -37,6 +39,80 @@ describe('loadSkill (single)', () => {
     const skill = await loadSkill(path.join(FIXTURES, 'nested', 'grouped-skill'));
     expect(skill!.context).toBe('inline');
     expect(skill!.allowedTools).toEqual([]);
+  });
+});
+
+describe('loadSkill references inlining', () => {
+  const tmpDirs: string[] = [];
+
+  afterEach(async () => {
+    while (tmpDirs.length > 0) {
+      const dir = tmpDirs.pop();
+      if (dir) {
+        await fs.rm(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
+  it('inlines `references:` entries as `## <name>` sections', async () => {
+    const skillDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'skill-refs-'),
+    );
+    tmpDirs.push(skillDir);
+    await fs.mkdir(path.join(skillDir, 'references'), { recursive: true });
+    await fs.writeFile(
+      path.join(skillDir, 'SKILL.md'),
+      `---
+name: refs-skill
+description: Skill that pulls in a reference file.
+references:
+  - check
+---
+
+# Body
+
+Echo: $ARGUMENTS
+`,
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(skillDir, 'references', 'check.md'),
+      'Check content',
+      'utf8',
+    );
+
+    const skill = await loadSkill(skillDir);
+    expect(skill).not.toBeNull();
+    const fakeCtx = {
+      abortSignal: new AbortController().signal,
+      get: () => null,
+    } as never;
+    const rendered = await skill!.getPromptForCommand('args', fakeCtx);
+    expect(rendered).toContain('# Body');
+    expect(rendered).toContain('Echo: args');
+    expect(rendered).toContain('## check\n\nCheck content');
+  });
+
+  it('throws a clear error when a referenced file is missing', async () => {
+    const skillDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'skill-refs-missing-'),
+    );
+    tmpDirs.push(skillDir);
+    await fs.writeFile(
+      path.join(skillDir, 'SKILL.md'),
+      `---
+name: missing-ref-skill
+description: References a file that does not exist.
+references:
+  - nope
+---
+
+# Body
+`,
+      'utf8',
+    );
+
+    await expect(loadSkill(skillDir)).rejects.toThrow(/missing file "nope"/);
   });
 });
 

@@ -15,6 +15,7 @@ import { substituteArguments } from '@/utils/argumentSubstitution';
 import { SkillFrontmatterSchema } from './schema';
 import type { SkillCommand } from './types';
 import type { ToolContext } from '@/core/types';
+import { resolveReferenceFile, inlineReference } from '@/tools/AgentTool/loader';
 
 const log = createLogger('tools:skill-loader');
 
@@ -130,6 +131,23 @@ export async function loadSkill(skillDir: string): Promise<SkillCommand | null> 
   const { frontmatter, body } = parseFrontmatter(raw);
   const validated = SkillFrontmatterSchema.parse(frontmatter);
 
+  let inlinedBody = body;
+  const refs = validated.references ?? [];
+  for (const entry of refs) {
+    let content: string;
+    try {
+      content = await resolveReferenceFile(skillDir, entry);
+    } catch (err) {
+      throw new Error(
+        `Skill "${validated.name}" references missing file "${entry}" under ${path.join(
+          skillDir,
+          'references',
+        )}: ${(err as Error).message}`,
+      );
+    }
+    inlinedBody = inlineReference(inlinedBody, entry, content);
+  }
+
   const cmd: SkillCommand = {
     type: 'prompt',
     name: validated.name,
@@ -145,7 +163,7 @@ export async function loadSkill(skillDir: string): Promise<SkillCommand | null> 
     sourcePath: skillMdPath,
     skillRoot: skillDir,
     async getPromptForCommand(args: string, _ctx: ToolContext) {
-      return substituteArguments(body, args);
+      return substituteArguments(inlinedBody, args);
     },
   };
   return cmd;

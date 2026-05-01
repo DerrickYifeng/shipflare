@@ -339,7 +339,7 @@ async function resolveSharedReference(
   }
 }
 
-async function resolveAgentReference(
+export async function resolveReferenceFile(
   agentDir: string,
   entry: string,
 ): Promise<string> {
@@ -348,7 +348,7 @@ async function resolveAgentReference(
   return fs.readFile(full, 'utf8');
 }
 
-function inlineReference(
+export function inlineReference(
   body: string,
   entry: string,
   content: string,
@@ -396,7 +396,7 @@ export async function loadAgent(
   for (const entry of perAgentRefs) {
     let content: string;
     try {
-      content = await resolveAgentReference(agentDirPath, entry);
+      content = await resolveReferenceFile(agentDirPath, entry);
     } catch (err) {
       throw new Error(
         `Agent "${parsed.name}" references missing file "${entry}" under ${path.join(
