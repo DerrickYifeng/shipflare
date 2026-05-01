@@ -1,19 +1,17 @@
 // Skill registry — programmatic registration for bundled skills + cached
-// filesystem load. Mirrors src/tools/AgentTool/registry.ts pattern.
-//
-// Two sources merged:
-// - Bundled skills (this module): registered via registerBundledSkill() at
-//   import time, lives in process memory until process exit.
-// - File skills (loadSkillsDir): scanned from disk, cached after first load,
-//   invalidated by FS watcher on SKILL.md changes (Task 6).
+// filesystem load with FS watcher invalidation. Mirrors
+// src/tools/AgentTool/registry.ts pattern.
 
 import { createLogger } from '@/lib/logger';
+import { watch, type FSWatcher } from 'node:fs';
 import { loadSkillsDir } from './loadSkillsDir';
 import type { SkillCommand } from './types';
 import type { ToolContext } from '@/core/types';
 import { SKILLS_ROOT } from './constants';
 
 const log = createLogger('tools:skill-registry');
+
+const WATCHER_DEBOUNCE_MS = 200;
 
 interface BundledSkillInput {
   name: string;
@@ -33,19 +31,79 @@ const bundledRegistry: SkillCommand[] = [];
 interface RegistryState {
   root: string;
   promise: Promise<SkillCommand[]> | null;
+  watcher: FSWatcher | null;
+  watcherDebounce: NodeJS.Timeout | null;
 }
 
 const state: RegistryState = {
   root: SKILLS_ROOT,
   promise: null,
+  watcher: null,
+  watcherDebounce: null,
 };
 
-/**
- * Register a bundled (TS-defined) skill. Call from module side-effect imports
- * inside src/skills/_bundled/*.ts. Throws on duplicate name (within bundled
- * registry only — bundled-vs-file collisions resolve in getAllSkills with
- * bundled winning).
- */
+function isWatcherDisabled(): boolean {
+  return (process.env.SHIPFLARE_DISABLE_SKILL_WATCHER ?? '').trim() === '1';
+}
+
+function tearDownWatcher(): void {
+  if (state.watcher) {
+    try {
+      state.watcher.close();
+    } catch {
+      // Closing an already-closed watcher throws on some Node versions.
+    }
+    state.watcher = null;
+  }
+  if (state.watcherDebounce) {
+    clearTimeout(state.watcherDebounce);
+    state.watcherDebounce = null;
+  }
+}
+
+function invalidateRegistry(): void {
+  state.promise = null;
+}
+
+function ensureWatcher(): void {
+  if (state.watcher) return;
+  if (isWatcherDisabled()) return;
+
+  try {
+    const watcher = watch(
+      state.root,
+      { recursive: true, persistent: false },
+      (_eventType, filename) => {
+        if (filename && !filename.endsWith('.md')) return;
+        if (state.watcherDebounce) clearTimeout(state.watcherDebounce);
+        state.watcherDebounce = setTimeout(() => {
+          state.watcherDebounce = null;
+          log.info(
+            `skill-registry: detected change (${filename ?? 'unknown'}) — invalidating cache`,
+          );
+          invalidateRegistry();
+        }, WATCHER_DEBOUNCE_MS);
+      },
+    );
+    watcher.on('error', (err) => {
+      log.warn(
+        `skill-registry: watcher error — disabling. ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      tearDownWatcher();
+    });
+    state.watcher = watcher;
+    log.debug(`skill-registry: watching ${state.root} for SKILL.md changes`);
+  } catch (err) {
+    log.warn(
+      `skill-registry: failed to start watcher: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+}
+
 export function registerBundledSkill(input: BundledSkillInput): void {
   const existing = bundledRegistry.find((s) => s.name === input.name);
   if (existing) {
@@ -71,24 +129,16 @@ export function registerBundledSkill(input: BundledSkillInput): void {
   log.debug(`registered bundled skill "${input.name}"`);
 }
 
-/**
- * Return every loaded skill — bundled first, then file skills minus any
- * names that collide with bundled. Loaders are concurrent-safe; second
- * caller awaits the first caller's promise.
- */
 export async function getAllSkills(): Promise<SkillCommand[]> {
-  // Trigger bundled barrel side-effect import. Empty in Phase 1 but the
-  // import itself ensures registerBundledSkill calls run before we read.
   await import('@/skills/_bundled');
-
+  ensureWatcher();
   if (state.promise === null) {
     state.promise = loadSkillsDir(state.root).catch((err) => {
-      state.promise = null;  // allow retry on next call
+      state.promise = null;
       throw err;
     });
   }
   const fileSkills = await state.promise;
-
   const bundledNames = new Set(bundledRegistry.map((s) => s.name));
   return [
     ...bundledRegistry,
@@ -96,18 +146,14 @@ export async function getAllSkills(): Promise<SkillCommand[]> {
   ];
 }
 
-// ---------------------------------------------------------------------------
-// Test-only helpers
-// ---------------------------------------------------------------------------
-
-/** Reset both bundled registry and file cache. Vitest-only. */
 export function __resetRegistryForTesting(): void {
+  tearDownWatcher();
   bundledRegistry.length = 0;
   state.promise = null;
 }
 
-/** Point the registry at a test fixtures dir. Must be called before getAllSkills. */
 export function __setSkillsRootForTesting(root: string): void {
+  tearDownWatcher();
   state.root = root;
   state.promise = null;
 }

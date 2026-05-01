@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import * as path from 'node:path';
+import { promises as fs } from 'node:fs';
+import * as os from 'node:os';
 import {
   registerBundledSkill,
   getAllSkills,
@@ -52,5 +54,51 @@ describe('registerBundledSkill', () => {
     const skill = all.find((s) => s.name === 'bundled-default');
     expect(skill?.context).toBe('inline');
     expect(skill?.allowedTools).toEqual([]);
+  });
+});
+
+describe('FS watcher', () => {
+  let tmpRoot: string;
+
+  beforeEach(async () => {
+    __resetRegistryForTesting();
+    tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-watcher-'));
+    await fs.mkdir(path.join(tmpRoot, 'a-skill'), { recursive: true });
+    await fs.writeFile(
+      path.join(tmpRoot, 'a-skill', 'SKILL.md'),
+      `---
+name: a-skill
+description: First version.
+---
+
+# Body v1
+`,
+      'utf8',
+    );
+  });
+
+  it('reflects file edits after debounce', async () => {
+    __setSkillsRootForTesting(tmpRoot);
+    const first = await getAllSkills();
+    expect(first.find((s) => s.name === 'a-skill')?.description).toBe('First version.');
+
+    // Edit the skill file.
+    await fs.writeFile(
+      path.join(tmpRoot, 'a-skill', 'SKILL.md'),
+      `---
+name: a-skill
+description: Second version.
+---
+
+# Body v2
+`,
+      'utf8',
+    );
+
+    // Wait past the watcher debounce (200ms) + a small buffer.
+    await new Promise((r) => setTimeout(r, 350));
+
+    const second = await getAllSkills();
+    expect(second.find((s) => s.name === 'a-skill')?.description).toBe('Second version.');
   });
 });
