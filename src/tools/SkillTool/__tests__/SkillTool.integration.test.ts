@@ -39,6 +39,10 @@ function fakeCtx() {
 // `beforeEach` resets we must re-register manually — but only after the
 // first time, otherwise we'd race the side-effect's own
 // `registerBundledSkill` call and double-register.
+//
+// NOTE: This latch assumes vitest runs tests in source order (the default).
+// If `--shuffle` ever becomes default, replace this with an unconditional
+// `getAllSkills()` once before any test, and drop the manual re-register.
 let bundledSideEffectFired = false;
 
 describe('SkillTool integration — end-to-end', () => {
@@ -125,11 +129,9 @@ describe('SkillTool integration — end-to-end', () => {
     ).rejects.toThrow(/Unknown skill/);
   });
 
-  it('agent loader rejects skills field with non-string array', async () => {
-    // Sanity check that Task 10's schema is wired up — already covered in
-    // loader.test.ts but kept here to cement the integration.
-    expect(true).toBe(true);  // placeholder: deeper agent-spawn-with-skill
-                              // integration would require a full LLM loop
-                              // which is out of scope for Phase 1.
-  });
+  // Phase 2 TODO: real agent-spawn-with-skill integration test that runs an
+  // agent declaring `skills: [...]` through spawnSubagent and asserts the
+  // preloaded body lands in the sub-agent's first turn. Requires either a
+  // mocked LLM transcript or a full runAgent harness — out of Phase 1 scope.
+  // Schema validation of the skills field is covered in loader.test.ts.
 });
