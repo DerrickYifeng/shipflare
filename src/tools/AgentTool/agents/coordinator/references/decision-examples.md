@@ -114,41 +114,7 @@ tied to specific plan_items. The founder will review and content-planner
 will slot them in after approval.`
 })
 
-## Example 4 — Serial chain (one Task depends on another)
-
-user: "Write a draft based on whatever angle is working best this month"
-
-assistant: <thinking>
-I don't know which angle is working until I ask — analytics-analyst needs to
-surface that from metrics. Then post-writer drafts using that angle. Strictly
-serial: the writer's prompt depends on the analyst's output.
-</thinking>
-
-Task({
-  subagent_type: "analytics-analyst",
-  description: "Identify top angle",
-  prompt: `From the last 4 weeks of post metrics, return the angle (from the
-7: claim, story, contrarian, howto, data, case, synthesis) with the highest
-engagement per impression. Return { angle, evidence }.`
-})
-
-[waits for tool_result]
-
-<thinking>
-Analytics returned "contrarian" with 2.3x baseline engagement. Now I can brief
-the writer with that specific angle.
-</thinking>
-
-Task({
-  subagent_type: "post-writer",
-  description: "Draft contrarian post",
-  prompt: `channel: x
-Draft one X post using the contrarian angle. Last 4 weeks of
-winners: {evidence from analytics}. Aim for the same shape: an anti-conventional
-wisdom claim backed by a concrete observation from {productName}.`
-})
-
-## Example 5 — Live platform search for reply targets (discovery-scout)
+## Example 4 — Live platform search for reply targets (discovery-agent)
 
 user: "Find 3 X posts I should reply to today"
 
@@ -157,7 +123,7 @@ The founder wants FRESH posts from X/Twitter right now — there's no way to
 answer this from the DB (the `threads` table only holds rows the discovery
 pipeline has already ingested, and may be empty or stale).
 
-This is exactly what discovery-scout exists for. It's the ONLY specialist
+This is exactly what discovery-agent exists for. It's the ONLY specialist
 with live platform search (`x_search_batch`, `reddit_search`). post-writer
 can't do this — it has no search tools, and asking it to "find posts"
 will produce fabricated placeholders that look like reply drafts but are
@@ -171,7 +137,7 @@ output (which includes per-thread reasoning) is usually sufficient.
 </thinking>
 
 Task({
-  subagent_type: "discovery-scout",
+  subagent_type: "discovery-agent",
   description: "Find 3 X reply targets matching today's thesis",
   prompt: `Platform: x
 Intent: Find 3 posts from today or yesterday where {productName}'s founder
@@ -190,9 +156,9 @@ Surface the 3 top queued candidates to the founder with the URL, author,
 text, and scout's `reason`. Ask whether to chain community-manager per
 thread to draft the replies.
 
-## When to pick discovery-scout vs community-manager vs post-writer
+## When to pick discovery-agent vs community-manager vs post-writer
 
-- `discovery-scout` — the founder wants posts that EXIST RIGHT NOW on a
+- `discovery-agent` — the founder wants posts that EXIST RIGHT NOW on a
   public platform ("find me 3 posts to reply to", "scan X for <topic>",
   "show me today's reply opportunities"). Live API search.
 - `community-manager` — the `threads` table already has rows (the
@@ -203,7 +169,7 @@ thread to draft the replies.
   posts. Pass the channel through in the prompt or via the plan_item.
 
 If the founder's phrasing is "find posts to reply to" and the inbox is
-empty or stale, the chain is `discovery-scout` THEN `community-manager`.
+empty or stale, the chain is `discovery-agent` THEN `community-manager`.
 Never start with community-manager when the intent is live discovery.
 
 ## When to pick discovery-reviewer

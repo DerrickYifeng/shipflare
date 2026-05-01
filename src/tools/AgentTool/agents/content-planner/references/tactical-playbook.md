@@ -198,7 +198,7 @@ For every scheduled item:
     (`x` or `reddit`) and consults the matching guide at draft time.
   - `content_reply` → **leave `skillName: null`**. Reply drafting is
     owned end-to-end by the daily reply-sweep cron — it reads each
-    `content_reply` row's `params.targetCount`, runs discovery-scout +
+    `content_reply` row's `params.targetCount`, runs discovery-agent +
     community-manager up to 3 inner attempts until the target is
     drafted, then transitions the row to `state='drafted'` (drafts
     surface on the Today page for the founder to approve).

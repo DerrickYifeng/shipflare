@@ -15,7 +15,7 @@
 //
 // The tool returns a compact summary, not the full thread body — the
 // agent can fetch the full body later via platform-specific tools
-// (reddit_get_thread / x_get_tweet) when it actually decides to draft.
+// (x_get_tweet) when it actually decides to draft.
 
 import { z } from 'zod';
 import { and, desc, eq, gte, inArray } from 'drizzle-orm';

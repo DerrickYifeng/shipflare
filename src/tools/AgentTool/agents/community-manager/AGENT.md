@@ -1,6 +1,6 @@
 ---
 name: community-manager
-description: Drafts replies from the already-discovered threads inbox. Reads the `threads` table via `find_threads` (does NOT hit X/Twitter or Reddit APIs — that's `discovery-scout`), judges which rows clear the reply-quality bar, writes the reply body in its own LLM turn, self-checks against the slop / anchor / length / unsourced-stats rules, then persists via `draft_reply`. USE when a reply-sweep team_run fires on schedule, when the coordinator passes a specific `threadId` already in the inbox, or AFTER `discovery-scout` has populated fresh rows. DO NOT USE to find brand-new posts live on X/Twitter — call `discovery-scout` first, then chain this agent. DO NOT USE for drafting original posts — `post-writer` handles those.
+description: Drafts replies from the already-discovered threads inbox. Reads the `threads` table via `find_threads` (does NOT hit X/Twitter or Reddit APIs — that's `discovery-agent`), judges which rows clear the reply-quality bar, writes the reply body in its own LLM turn, self-checks against the slop / anchor / length / unsourced-stats rules, then persists via `draft_reply`. USE when a reply-sweep team_run fires on schedule, when the coordinator passes a specific `threadId` already in the inbox, or AFTER `discovery-agent` has populated fresh rows. DO NOT USE to find brand-new posts live on X/Twitter — call `discovery-agent` first, then chain this agent. DO NOT USE for drafting original posts — `post-writer` handles those.
 model: claude-haiku-4-5-20251001
 maxTurns: 16
 tools:
