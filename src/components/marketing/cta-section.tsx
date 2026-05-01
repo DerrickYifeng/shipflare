@@ -15,8 +15,6 @@ export interface CTASectionProps {
  * Auth is GitHub-only during beta (no email/password, no Google, no X).
  * Unauthenticated: primary pill triggers SignInModal → GitHub OAuth.
  * Authenticated: pill links to /today.
- * Google / X are shown as "coming soon" affordances so visitors know
- * they're planned, but the only working path is GitHub.
  */
 export function CTASection({ isAuthenticated }: CTASectionProps) {
   const [signInOpen, setSignInOpen] = useState(false);
@@ -26,15 +24,9 @@ export function CTASection({ isAuthenticated }: CTASectionProps) {
       id="signup"
       aria-labelledby="cta-heading"
       style={{
-        // Prototype source/landing/cta_footer.jsx:5 — dark ink base with a
-        // soft signal-coloured radial glow centred above the headline. The
-        // README's "signal gradient" label refers to this halo, not a full
-        // linear slab. Keeps the alternating rhythm's final dark beat
-        // (ink → paper → ink → paper → ink+glow → ink) while marking the
-        // CTA as the signature moment.
-        background: 'var(--sf-bg-primary)',
-        color: 'var(--sf-fg-1)',
-        padding: '140px 24px',
+        background: 'var(--sf-bg-dark)',
+        color: 'var(--sf-fg-on-dark-1)',
+        padding: '120px 24px',
         position: 'relative',
         overflow: 'hidden',
       }}
@@ -45,7 +37,7 @@ export function CTASection({ isAuthenticated }: CTASectionProps) {
           position: 'absolute',
           inset: 0,
           background:
-            'radial-gradient(ellipse 60% 50% at 50% 40%, oklch(62% 0.19 255 / 0.14), transparent 65%)',
+            'radial-gradient(ellipse 60% 50% at 50% 40%, oklch(62% 0.19 255 / 0.22), transparent 65%)',
           pointerEvents: 'none',
         }}
       />
@@ -62,7 +54,7 @@ export function CTASection({ isAuthenticated }: CTASectionProps) {
           className="sf-hero"
           style={{
             margin: 0,
-            color: 'var(--sf-fg-1)',
+            color: 'var(--sf-fg-on-dark-1)',
             fontSize: 'clamp(40px, 5.5vw, var(--sf-text-hero))',
             textWrap: 'balance',
           }}
@@ -76,6 +68,7 @@ export function CTASection({ isAuthenticated }: CTASectionProps) {
           style={{
             marginTop: 20,
             fontSize: 'var(--sf-text-lg)',
+            color: 'var(--sf-fg-on-dark-2)',
           }}
         >
           Free while in beta. Set up in under a minute. No credit card.
@@ -105,43 +98,22 @@ export function CTASection({ isAuthenticated }: CTASectionProps) {
             className="flex flex-wrap items-center justify-center"
             style={{ marginTop: 24, gap: 20 }}
           >
-            <Ops>coming soon</Ops>
-            <span
-              style={{
-                color: 'var(--sf-fg-4)',
-                fontSize: 'var(--sf-text-xs)',
-                fontFamily: 'var(--sf-font-mono)',
-                textTransform: 'uppercase',
-                letterSpacing: 'var(--sf-track-mono)',
-                opacity: 0.7,
-              }}
-            >
-              Google
-            </span>
-            <span
-              style={{
-                color: 'var(--sf-fg-4)',
-                fontSize: 'var(--sf-text-xs)',
-                fontFamily: 'var(--sf-font-mono)',
-                textTransform: 'uppercase',
-                letterSpacing: 'var(--sf-track-mono)',
-                opacity: 0.7,
-              }}
-            >
-              𝕏
-            </span>
-            <span
-              style={{
-                color: 'var(--sf-fg-4)',
-                fontSize: 'var(--sf-text-xs)',
-                fontFamily: 'var(--sf-font-mono)',
-                textTransform: 'uppercase',
-                letterSpacing: 'var(--sf-track-mono)',
-                opacity: 0.7,
-              }}
-            >
-              Email
-            </span>
+            <Ops tone="onDark">coming soon</Ops>
+            {['Google', '𝕏', 'Email'].map((label) => (
+              <span
+                key={label}
+                style={{
+                  color: 'var(--sf-fg-on-dark-4)',
+                  fontSize: 'var(--sf-text-xs)',
+                  fontFamily: 'var(--sf-font-mono)',
+                  textTransform: 'uppercase',
+                  letterSpacing: 'var(--sf-track-mono)',
+                  opacity: 0.7,
+                }}
+              >
+                {label}
+              </span>
+            ))}
           </div>
         )}
       </div>

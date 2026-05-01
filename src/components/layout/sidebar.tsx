@@ -177,17 +177,17 @@ function SidebarInner({ user, layout, onNavigate }: SidebarInnerProps) {
           justifyContent: showLabels ? 'flex-start' : 'center',
           gap: 10,
           padding: showLabels ? '0 8px' : 0,
-          height: 44,
+          height: 52,
           position: 'relative',
           textDecoration: 'none',
           color: 'inherit',
         }}
       >
-        <ShipFlareLogo size={24} />
+        <ShipFlareLogo size={36} />
         {showLabels ? (
           <span
             style={{
-              fontSize: 'var(--sf-text-base)',
+              fontSize: 'var(--sf-text-lg)',
               fontWeight: 600,
               letterSpacing: 'var(--sf-track-tight)',
               color: 'var(--sf-fg-1)',

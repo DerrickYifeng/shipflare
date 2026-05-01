@@ -73,8 +73,8 @@ export function SafetySection() {
       id="safety"
       aria-labelledby="safety-heading"
       style={{
-        background: 'var(--sf-bg-dark)',
-        color: 'var(--sf-fg-on-dark-1)',
+        background: 'var(--sf-bg-primary)',
+        color: 'var(--sf-fg-1)',
         padding: '120px 24px',
       }}
     >
@@ -90,7 +90,7 @@ export function SafetySection() {
             <span
               className="sf-ops"
               style={{
-                color: 'var(--sf-link-dark)',
+                color: 'var(--sf-link)',
                 marginBottom: 12,
                 display: 'block',
               }}
@@ -102,7 +102,7 @@ export function SafetySection() {
               className="sf-h1"
               style={{
                 margin: 0,
-                color: 'var(--sf-fg-on-dark-1)',
+                color: 'var(--sf-fg-1)',
                 textWrap: 'balance',
               }}
             >
@@ -110,7 +110,7 @@ export function SafetySection() {
             </h2>
             <p
               className="sf-lede"
-              style={{ marginTop: 16, color: 'var(--sf-fg-on-dark-2)' }}
+              style={{ marginTop: 16, color: 'var(--sf-fg-2)' }}
             >
               Spam networks create fake accounts to deceive at scale. ShipFlare operates your real accounts under your real identity. Every agent&rsquo;s output is graded by a second model and gated by your approval before anything ships.
             </p>
@@ -183,7 +183,7 @@ function SafetyItem({ title, detail }: SafetyItemProps) {
           style={{
             fontSize: 'var(--sf-text-base)',
             fontWeight: 600,
-            color: 'var(--sf-fg-on-dark-1)',
+            color: 'var(--sf-fg-1)',
             letterSpacing: 'var(--sf-track-tight)',
           }}
         >
@@ -192,7 +192,7 @@ function SafetyItem({ title, detail }: SafetyItemProps) {
         <div
           style={{
             fontSize: 'var(--sf-text-sm)',
-            color: 'var(--sf-fg-on-dark-2)',
+            color: 'var(--sf-fg-2)',
             marginTop: 2,
             lineHeight: 'var(--sf-lh-normal)',
           }}
@@ -206,10 +206,10 @@ function SafetyItem({ title, detail }: SafetyItemProps) {
 
 function ReviewLogCard() {
   const cardStyle: CSSProperties = {
-    background: 'var(--sf-bg-dark-surface)',
+    background: 'var(--sf-bg-secondary)',
     borderRadius: 'var(--sf-radius-lg)',
     padding: 24,
-    boxShadow: 'var(--sf-shadow-elevated)',
+    boxShadow: 'var(--sf-shadow-card)',
   };
   return (
     <div style={cardStyle}>
@@ -217,7 +217,7 @@ function ReviewLogCard() {
         <StatusDot state="warning" />
         <span
           className="sf-ops"
-          style={{ color: 'var(--sf-fg-on-dark-1)', fontWeight: 600 }}
+          style={{ color: 'var(--sf-fg-1)', fontWeight: 600 }}
         >
           REVIEW · adversarial pass
         </span>
@@ -226,7 +226,7 @@ function ReviewLogCard() {
           style={{
             marginLeft: 'auto',
             fontSize: 'var(--sf-text-2xs)',
-            color: 'var(--sf-fg-on-dark-4)',
+            color: 'var(--sf-fg-4)',
           }}
         >
           log (31,204)
@@ -239,14 +239,14 @@ function ReviewLogCard() {
           gridTemplateColumns: GRID_COLS,
           gap: 12,
           paddingBottom: 10,
-          borderBottom: '1px solid var(--sf-border-on-dark)',
+          borderBottom: '1px solid var(--sf-border)',
         }}
       >
-        <Ops tone="onDark">verdict</Ops>
-        <Ops tone="onDark">tone</Ops>
-        <Ops tone="onDark">acc</Ops>
-        <Ops tone="onDark">spam</Ops>
-        <Ops tone="onDark">note</Ops>
+        <Ops>verdict</Ops>
+        <Ops>tone</Ops>
+        <Ops>acc</Ops>
+        <Ops>spam</Ops>
+        <Ops>note</Ops>
       </div>
 
       {REVIEW_CASES.map((c, i) => {
@@ -260,7 +260,7 @@ function ReviewLogCard() {
               gridTemplateColumns: GRID_COLS,
               gap: 12,
               padding: '14px 0',
-              borderBottom: last ? 'none' : '1px solid var(--sf-border-on-dark)',
+              borderBottom: last ? 'none' : '1px solid var(--sf-border)',
             }}
           >
             <Badge variant={verdictVariant(c.verdict)} mono>
@@ -268,7 +268,7 @@ function ReviewLogCard() {
             </Badge>
             <span
               className="sf-mono"
-              style={{ fontSize: 'var(--sf-text-sm)', color: 'var(--sf-fg-on-dark-2)' }}
+              style={{ fontSize: 'var(--sf-text-sm)', color: 'var(--sf-fg-2)' }}
             >
               {c.tone}
             </span>
@@ -276,21 +276,21 @@ function ReviewLogCard() {
               className="sf-mono"
               style={{
                 fontSize: 'var(--sf-text-sm)',
-                color: c.accuracy === '✓' ? 'var(--sf-success)' : 'var(--sf-error)',
+                color: c.accuracy === '✓' ? 'var(--sf-success-ink)' : 'var(--sf-error-ink)',
               }}
             >
               {c.accuracy}
             </span>
             <span
               className="sf-mono"
-              style={{ fontSize: 'var(--sf-text-sm)', color: 'var(--sf-fg-on-dark-2)' }}
+              style={{ fontSize: 'var(--sf-text-sm)', color: 'var(--sf-fg-2)' }}
             >
               {c.spam}
             </span>
             <span
               style={{
                 fontSize: 'var(--sf-text-sm)',
-                color: 'var(--sf-fg-on-dark-2)',
+                color: 'var(--sf-fg-2)',
                 lineHeight: 'var(--sf-lh-normal)',
               }}
             >
@@ -301,7 +301,7 @@ function ReviewLogCard() {
       })}
 
       <div style={{ marginTop: 16, textAlign: 'right' }}>
-        <Ops tone="onDark">showing 3 of 31,204 · live</Ops>
+        <Ops>showing 3 of 31,204 · live</Ops>
       </div>
     </div>
   );

@@ -52,8 +52,8 @@ export function PhaseSection() {
       id="lifecycle"
       aria-labelledby="lifecycle-heading"
       style={{
-        background: 'var(--sf-bg-dark)',
-        color: 'var(--sf-fg-on-dark-1)',
+        background: 'var(--sf-bg-primary)',
+        color: 'var(--sf-fg-1)',
         padding: '120px 24px',
       }}
     >
@@ -62,7 +62,7 @@ export function PhaseSection() {
           <span
             className="sf-ops"
             style={{
-              color: 'var(--sf-link-dark)',
+              color: 'var(--sf-link)',
               marginBottom: 12,
               display: 'block',
             }}
@@ -74,7 +74,7 @@ export function PhaseSection() {
             className="sf-h1"
             style={{
               margin: 0,
-              color: 'var(--sf-fg-on-dark-1)',
+              color: 'var(--sf-fg-1)',
               textWrap: 'balance',
             }}
           >
@@ -85,7 +85,7 @@ export function PhaseSection() {
             style={{
               marginTop: 16,
               maxWidth: 640,
-              color: 'var(--sf-fg-on-dark-2)',
+              color: 'var(--sf-fg-2)',
             }}
           >
             A launch isn&rsquo;t a single event. It&rsquo;s a six-phase lifecycle, and the team&rsquo;s intensity shifts with each. The CMO recognizes which phase you&rsquo;re in and adjusts agent priorities accordingly.
@@ -137,7 +137,7 @@ function PhaseColumn({ phase }: PhaseColumnProps) {
   const dotSize = phase.peak ? 12 : 8;
   return (
     <div>
-      <Ops tone="onDark" style={{ display: 'block', marginBottom: 14 }}>
+      <Ops style={{ display: 'block', marginBottom: 14 }}>
         {phase.window}
       </Ops>
       <div style={{ marginBottom: 16, height: 12, display: 'flex', alignItems: 'center' }}>
@@ -148,7 +148,7 @@ function PhaseColumn({ phase }: PhaseColumnProps) {
             width: dotSize,
             height: dotSize,
             borderRadius: '50%',
-            background: phase.peak ? 'var(--sf-accent)' : 'var(--sf-fg-on-dark-1)',
+            background: phase.peak ? 'var(--sf-accent)' : 'var(--sf-fg-1)',
           }}
         />
       </div>
@@ -156,7 +156,7 @@ function PhaseColumn({ phase }: PhaseColumnProps) {
         style={{
           fontSize: 'var(--sf-text-base)',
           fontWeight: 700,
-          color: 'var(--sf-fg-on-dark-1)',
+          color: 'var(--sf-fg-1)',
           letterSpacing: 'var(--sf-track-tight)',
           marginBottom: 6,
         }}
@@ -166,7 +166,7 @@ function PhaseColumn({ phase }: PhaseColumnProps) {
       <div
         style={{
           fontSize: 'var(--sf-text-sm)',
-          color: 'var(--sf-fg-on-dark-2)',
+          color: 'var(--sf-fg-2)',
           lineHeight: 'var(--sf-lh-normal)',
         }}
       >
