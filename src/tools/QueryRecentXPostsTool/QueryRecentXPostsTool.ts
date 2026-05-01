@@ -21,17 +21,17 @@ import { createClientFromChannelById } from '@/lib/platform-deps';
 
 export const QUERY_RECENT_X_POSTS_TOOL_NAME = 'query_recent_x_posts';
 
-const rawSchema = z
+// Default for `days` is applied inside `execute` rather than via
+// `.transform()` so the schema's input/output stay structurally identical
+// — `buildTool` accepts `z.ZodType<TInput>` (one generic), and a transform
+// schema's input/output diverge, which previously forced an `as any` cast.
+export const queryRecentXPostsInputSchema = z
   .object({
     days: z.number().int().min(1).max(60).optional(),
   })
   .strict();
 
-export const queryRecentXPostsInputSchema = rawSchema.transform(
-  (data) => ({
-    days: data.days ?? 14,
-  }),
-) as z.ZodType<{ days: number }, z.ZodTypeDef, { days?: number | undefined }>;
+const DEFAULT_WINDOW_DAYS = 14;
 
 export type QueryRecentXPostsInput = z.infer<
   typeof queryRecentXPostsInputSchema
@@ -88,12 +88,12 @@ export const queryRecentXPostsTool: ToolDefinition<
     'pillar mix for the upcoming week. Returns { tweets: [], error } ' +
     'when the user has no X channel or the token is invalid; the ' +
     'planner should proceed without metaphor_ban in that case.',
-  inputSchema: queryRecentXPostsInputSchema as any,
+  inputSchema: queryRecentXPostsInputSchema,
   isConcurrencySafe: true,
   isReadOnly: true,
   async execute(input: QueryRecentXPostsInput, ctx): Promise<QueryRecentXPostsResult> {
     const { db, userId } = readDomainDeps(ctx);
-    const windowDays = input.days;
+    const windowDays = input.days ?? DEFAULT_WINDOW_DAYS;
 
     // 1. Find the user's X channel.
     // Projection limited to `id` so we never pull encrypted token columns
