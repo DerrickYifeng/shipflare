@@ -4,9 +4,12 @@
 // CacheSafeParams concept (engine/utils/forkedAgent.ts) is preserved via shared
 // system prompt + tools between spawns of the same agent type (future optimization).
 
+import type Anthropic from '@anthropic-ai/sdk';
 import type { z } from 'zod';
 import { runAgent } from '@/core/query-loop';
+import { createLogger } from '@/lib/logger';
 import { registry } from '@/tools/registry';
+import { getAllSkills } from '@/tools/SkillTool/registry';
 import { STRUCTURED_OUTPUT_TOOL_NAME } from '@/tools/StructuredOutputTool/StructuredOutputTool';
 import type {
   AgentConfig,
@@ -18,6 +21,8 @@ import type {
 } from '@/core/types';
 import type { AgentDefinition } from './loader';
 import { renderRuntimePreamble } from './runtime-preamble';
+
+const log = createLogger('agent:spawn');
 
 /**
  * Default model for subagents that don't declare one in AGENT.md frontmatter.
@@ -161,6 +166,48 @@ export function createChildContext(
 }
 
 // ---------------------------------------------------------------------------
+// Skill preload — declare-time hoist of skill bodies into the child's context
+// ---------------------------------------------------------------------------
+
+/**
+ * Build cache-safe initial messages for skill preload. Empty array when
+ * agent declares no skills (caller passes `undefined` to runAgent instead
+ * of `{ forkContextMessages: [] }` so systemPrompt cache stays clean).
+ *
+ * Messages shape: each declared skill becomes one user message containing
+ * the skill body. The model reads them as additional context before
+ * reaching the user prompt.
+ */
+async function buildSkillPreloadMessages(
+  skillNames: string[],
+  ctx: ToolContext,
+): Promise<Anthropic.Messages.MessageParam[]> {
+  if (skillNames.length === 0) return [];
+  const allSkills = await getAllSkills();
+  const messages: Anthropic.Messages.MessageParam[] = [];
+  for (const name of skillNames) {
+    const skill = allSkills.find((s) => s.name === name);
+    if (!skill) {
+      log.warn(
+        `spawn: agent declared skill "${name}" but it is not registered`,
+      );
+      continue;
+    }
+    const content = await Promise.resolve(skill.getPromptForCommand('', ctx));
+    messages.push({
+      role: 'user',
+      content: [
+        {
+          type: 'text',
+          text: `<system-skill name="${name}">\n${content}\n</system-skill>`,
+        },
+      ],
+    });
+  }
+  return messages;
+}
+
+// ---------------------------------------------------------------------------
 // spawnSubagent — the public entry point
 // ---------------------------------------------------------------------------
 
@@ -189,13 +236,19 @@ export async function spawnSubagent<T = unknown>(
   const config = buildAgentConfigFromDefinition(def);
   const childCtx = createChildContext(parentCtx, parentTaskId);
 
+  const skillPreload = await buildSkillPreloadMessages(def.skills, childCtx);
+  const prebuilt =
+    skillPreload.length > 0
+      ? { systemBlocks: [], forkContextMessages: skillPreload }
+      : undefined;
+
   return runAgent<T>(
     config,
     prompt,
     childCtx,
     outputSchema,
     callbacks?.onProgress,
-    undefined, // prebuilt
+    prebuilt,
     undefined, // onIdleReset
     callbacks?.onEvent,
   );
