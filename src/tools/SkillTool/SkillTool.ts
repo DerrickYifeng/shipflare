@@ -81,7 +81,7 @@ export const skillTool: ToolDefinition<SkillToolInput, SkillToolOutput> = buildT
     );
 
     const subAgentDef: AgentDefinition = {
-      name: `skill:${cmd.name}`,
+      name: `skill_${cmd.name}`,
       description: cmd.description,
       tools: cmd.allowedTools,
       skills: [],  // skills cannot recursively preload skills (Phase 1)
