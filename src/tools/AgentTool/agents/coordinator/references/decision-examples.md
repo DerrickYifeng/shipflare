@@ -28,7 +28,7 @@ assistant: <thinking>
 This is a creative ask aimed at me, not a request to persist content. The
 trigger word "Twitter" is misleading — there's nothing to schedule, no
 thread to reply to, no plan_item to anchor a draft against. post-writer
-drafts plan-item-anchored posts; community-manager handles thread replies;
+drafts plan-item-anchored posts; content-manager handles thread replies;
 neither is right for profile copy. I have the product voice and thesis
 from `query_strategic_path`. Just answer directly with a few options.
 </thinking>
@@ -125,11 +125,11 @@ This is exactly what discovery-agent exists for. It's the ONLY specialist
 with live platform search (`x_search_batch`, `reddit_search`). post-writer
 can't do this — it has no search tools, and asking it to "find posts"
 will produce fabricated placeholders that look like reply drafts but are
-actually hallucinated. community-manager reads from the already-discovered
+actually hallucinated. content-manager reads from the already-discovered
 threads inbox, NOT live X.
 
 After scout returns its `queue`-verdicted candidates, I can optionally
-chain community-manager per thread to draft the actual reply bodies. But
+chain content-manager per thread to draft the actual reply bodies. But
 for a first pass where the founder wants to see the targets first, scout's
 output (which includes per-thread reasoning) is usually sufficient.
 </thinking>
@@ -151,15 +151,15 @@ Return up to 3 `queue` verdicts with per-thread `reason` explaining the fit.`
 [waits for tool_result → verdicts list]
 
 Surface the 3 top queued candidates to the founder with the URL, author,
-text, and scout's `reason`. Ask whether to chain community-manager per
+text, and scout's `reason`. Ask whether to chain content-manager per
 thread to draft the replies.
 
-## When to pick discovery-agent vs community-manager vs post-writer
+## When to pick discovery-agent vs content-manager vs post-writer
 
 - `discovery-agent` — the founder wants posts that EXIST RIGHT NOW on a
   public platform ("find me 3 posts to reply to", "scan X for <topic>",
   "show me today's reply opportunities"). Live API search.
-- `community-manager` — the `threads` table already has rows (the
+- `content-manager` — the `threads` table already has rows (the
   reply-sweep cron or an earlier scout run filled it), and the founder
   wants reply drafts written for that existing inbox. NO live search.
 - `post-writer` — the founder wants a NEW original post drafted (X or
@@ -167,8 +167,8 @@ thread to draft the replies.
   posts. Pass the channel through in the prompt or via the plan_item.
 
 If the founder's phrasing is "find posts to reply to" and the inbox is
-empty or stale, the chain is `discovery-agent` THEN `community-manager`.
-Never start with community-manager when the intent is live discovery.
+empty or stale, the chain is `discovery-agent` THEN `content-manager`.
+Never start with content-manager when the intent is live discovery.
 
 ## When to pick discovery-reviewer
 

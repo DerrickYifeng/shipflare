@@ -158,7 +158,7 @@ describe('draftReplyTool', () => {
   });
 
   it('updates the existing pending draft instead of inserting a duplicate on the same thread', async () => {
-    // Two community-manager invocations against the same thread used to
+    // Two content-manager invocations against the same thread used to
     // produce two pending drafts joined to the same threads row, which
     // surfaced as a duplicate tweet card in /today. The tool is now
     // idempotent on (userId, threadId, status='pending'): the second call

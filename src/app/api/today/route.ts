@@ -15,7 +15,7 @@ import { buildXIntentUrl } from '@/lib/x-intent-url';
 //     `plan_items.output.draft_body` (written by DraftPostTool).
 //
 //  2. `drafts` in `status='pending'` joined to `threads`. These are
-//     reply drafts the community-manager agent drafted against scanned
+//     reply drafts the content-manager agent drafted against scanned
 //     threads (discovery / reply-guy flow).
 //
 // Both shapes get projected into the same `TodoItem`-looking row so the
@@ -196,7 +196,7 @@ export async function GET() {
     .orderBy(planItems.scheduledAt);
 
   // ------------------------------------------------------------------
-  // 2) Pending reply drafts (community-manager output) + joined thread
+  // 2) Pending reply drafts (content-manager output) + joined thread
   // ------------------------------------------------------------------
   const pendingDraftRows = await db
     .select({
@@ -347,7 +347,7 @@ export async function GET() {
   // Today's slots surface separately via the `replySlots` field so the
   // UI can render a single "Today's reply session: Y of N drafted"
   // progress card instead of empty placeholder cards. The actual reply
-  // bodies (community-manager output) flow through the `pendingDrafts`
+  // bodies (content-manager output) flow through the `pendingDrafts`
   // path below with full thread context.
   const planRows: TodoItemRow[] = pendingPlan
     .map((row) => {

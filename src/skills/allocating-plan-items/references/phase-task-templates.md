@@ -22,7 +22,7 @@ content-planner:
   to pick the right platform guide).
 - `content_reply` rows MUST set `skillName: null`. Reply drafting is
   owned end-to-end by the daily reply-sweep cron, which reads each
-  row's `params.targetCount`, runs discovery-agent + community-manager
+  row's `params.targetCount`, runs discovery-agent + content-manager
   in a retry loop until the target is filled (max 3 inner attempts),
   and transitions the row to `state='drafted'` so the drafts surface
   on the Today page.
@@ -155,7 +155,7 @@ Goal: build launch-ready audience. Weekly rhythm matters most here.
 - `title`: "Reply session: ${targetCount} replies"  # use the
   channelMix[channel].repliesPerDay value verbatim
 - `description`: "Daily reply automation runs at this hour:
-  discovery-agent finds candidate threads, community-manager drafts up
+  discovery-agent finds candidate threads, content-manager drafts up
   to ${targetCount} replies for your review. The session retries up to
   3 times within the day if the first scan comes up short."
 - `channel`: 'x'  # X only at this stage; reddit repliesPerDay stays null
@@ -406,7 +406,7 @@ Goal: durable rhythm. No panic moves.
 - `description`: "5 high-signal replies within the 15-min window."
 - `channel`: 'x'
 - `userAction`: 'approve'
-- `skillName`: null  # community-manager owns reply drafting end-to-end
+- `skillName`: null  # content-manager owns reply drafting end-to-end
 - `params`: `{ targetCount: 5 }`
 
 ### 3. email_send — Weekly digest

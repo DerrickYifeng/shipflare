@@ -159,7 +159,7 @@ export async function GET(request: NextRequest) {
 
   // Silently reconcile the team roster — a newly-connected Reddit channel
   // may upgrade the preset (e.g. default-squad → consumer-squad), which
-  // adds community-manager. Best-effort; channel connection succeeds
+  // adds content-manager. Best-effort; channel connection succeeds
   // either way.
   try {
     const [productRow] = await db

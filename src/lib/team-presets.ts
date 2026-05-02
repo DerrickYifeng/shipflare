@@ -19,9 +19,11 @@
  * without reading the config.
  *
  * Phase 6 (agent-cleanup) dropped `reply-drafter` from the baseline —
- * community-manager now owns reply drafting end-to-end (drafts the body
- * inline + self-checks against the slop / anchor / length / stats rules
- * in its references), so the standalone reply-drafter teammate is gone.
+ * the unified content-drafting agent (content-manager, formerly
+ * community-manager) now owns reply drafting end-to-end (drafts the
+ * body inline + self-checks against the slop / anchor / length / stats
+ * rules in its references), so the standalone reply-drafter teammate
+ * is gone.
  *
  * Phase F (agent-skill-tool-decomposition) dropped `growth-strategist` —
  * the strategic-path generator was converted to the `generating-strategy`
@@ -38,11 +40,13 @@ export type BaseAgentType =
  * `post-writer` is a single channel-aware writer — `plan_items.channel`
  * (`x` or `reddit`) decides the platform tone via the writer's reference
  * docs at draft time, so we no longer split the roster by platform.
- * `community-manager` owns the entire reply pipeline post-Phase-6.
+ * `content-manager` owns the entire reply pipeline post-Phase-6 (and
+ * post_batch original-post drafting from Phase J onward); it was
+ * renamed from `community-manager` in Phase J.
  */
 export type WriterAgentType =
   | 'post-writer'
-  | 'community-manager';
+  | 'content-manager';
 
 /**
  * Full agent type set. Must match AGENT.md `name` under
@@ -82,7 +86,7 @@ export interface DisplayNameMap {
   coordinator: string;
   'content-planner': string;
   'post-writer': string;
-  'community-manager': string;
+  'content-manager': string;
 }
 
 /**
@@ -94,7 +98,7 @@ export const DEFAULT_DISPLAY_NAMES: DisplayNameMap = {
   coordinator: 'Chief of Staff',
   'content-planner': 'Head of Content',
   'post-writer': 'Post Writer',
-  'community-manager': 'Community Manager',
+  'content-manager': 'Community Manager',
 };
 
 /**
@@ -131,11 +135,11 @@ export function getTeamCompositionForPreset(preset: TeamPreset): AgentType[] {
   ];
   switch (preset) {
     case 'dev-squad':
-      return [...base, 'post-writer', 'community-manager'];
+      return [...base, 'post-writer', 'content-manager'];
     case 'saas-squad':
-      return [...base, 'post-writer', 'community-manager'];
+      return [...base, 'post-writer', 'content-manager'];
     case 'consumer-squad':
-      return [...base, 'post-writer', 'community-manager'];
+      return [...base, 'post-writer', 'content-manager'];
     case 'default-squad':
       return [...base, 'post-writer'];
   }

@@ -1,6 +1,6 @@
 ---
 name: discovery-agent
-description: Find X/Twitter threads where this product's potential customers are publicly expressing problems the product solves, asking for tools in the category, or describing relevant workflows. Talks to xAI Grok conversationally, refining instructions across turns until results meet quality. Persists final list to the threads table for /today review. USE for any "find me X reply targets", "scan X for customers", or "find tweets I should reply to" intent. DO NOT USE for Reddit (separate path) or for drafting reply bodies (community-manager owns that).
+description: Find X/Twitter threads where this product's potential customers are publicly expressing problems the product solves, asking for tools in the category, or describing relevant workflows. Talks to xAI Grok conversationally, refining instructions across turns until results meet quality. Persists final list to the threads table for /today review. USE for any "find me X reply targets", "scan X for customers", or "find tweets I should reply to" intent. DO NOT USE for Reddit (separate path) or for drafting reply bodies (content-manager owns that).
 model: claude-sonnet-4-6
 maxTurns: 60
 tools:
@@ -148,7 +148,7 @@ Call `StructuredOutput` with this shape:
                           // from token counts is fine; the team-run worker
                           // captures Anthropic costs separately)
   topQueued: Array<{      // top N (≤10) by engagement-weighted score for
-                          // the coordinator to dispatch community-manager
+                          // the coordinator to dispatch content-manager
     externalId: string,
     url: string,
     authorUsername: string,
@@ -160,6 +160,6 @@ Call `StructuredOutput` with this shape:
 }
 ```
 
-The `topQueued` array lets the coordinator hand the top-3 directly to community-manager without a second DB round-trip. Set `confidence` from the skill's `score`, then order by engagement-weighted score (same formula `persist_queue_threads` uses: `confidence * log10(1 + likes + 5*reposts)`) so the strongest reply targets are first.
+The `topQueued` array lets the coordinator hand the top-3 directly to content-manager without a second DB round-trip. Set `confidence` from the skill's `score`, then order by engagement-weighted score (same formula `persist_queue_threads` uses: `confidence * log10(1 + likes + 5*reposts)`) so the strongest reply targets are first.
 
 If `queued: 0`, your `scoutNotes` MUST explain WHY (no relevant ICP matches found, or the queries returned all promotional accounts, or…). The founder needs the reasoning, not just the empty count.

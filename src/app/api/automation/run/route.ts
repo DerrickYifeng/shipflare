@@ -95,7 +95,7 @@ export async function POST(request: NextRequest) {
     `Connected platforms: ${activePlatforms.join(', ')}. ` +
     `Trigger: daily. Source: manual. ` +
     `Follow your daily playbook: load today's content_reply plan_items ` +
-    `for this user, run the per-slot discovery → community-manager loop ` +
+    `for this user, run the per-slot discovery → content-manager loop ` +
     `(max 3 inner attempts per slot), and update_plan_item state='drafted' ` +
     `when each slot terminates. If no slots are found, fall back to ` +
     `default top-3 drafting from a single discovery-agent dispatch.`;

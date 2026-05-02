@@ -5,7 +5,7 @@
  * sees on their first visit to /team:
  *   1. plan draft (content-planner)
  *   2. reply-target discovery (discovery-agent via Task dispatch)
- *   3. draft replies (community-manager on top queued targets)
+ *   3. draft replies (content-manager on top queued targets)
  *
  * Called from `app/(app)/team/page.tsx` server component on every render —
  * the first call schedules the run, subsequent calls are cheap no-ops.
@@ -140,7 +140,7 @@ export async function ensureKickoffEnqueued(args: {
     `Follow your kickoff playbook end-to-end (plan → discovery → drafts): ` +
     `(1) Task content-planner for week-1 plan items — pass weekStart + now in its prompt verbatim. ` +
     `(2) Task({ subagent_type: 'discovery-agent', description: 'find X reply targets for kickoff', prompt: '...' }) — the agent talks to xAI Grok conversationally and persists the queue itself; read its StructuredOutput.topQueued for step 3. ` +
-    `(3) Look up today's content_reply slot for the primary channel via query_plan_items (kind=content_reply, today's UTC scheduledAt) and read params.targetCount. Compute N = min(targetCount ?? 3, topQueued.length). Task community-manager on the top N from step 2's topQueued (skip if step 2 reported queued: 0). ` +
+    `(3) Look up today's content_reply slot for the primary channel via query_plan_items (kind=content_reply, today's UTC scheduledAt) and read params.targetCount. Compute N = min(targetCount ?? 3, topQueued.length). Task content-manager on the top N from step 2's topQueued (skip if step 2 reported queued: 0). ` +
     `Skip steps 2-3 if no channels are connected.`;
 
   let conversationId: string;

@@ -21,7 +21,7 @@ describe('SkillFrontmatterSchema', () => {
       maxTurns: 4,
       'when-to-use': 'When discovery returns a thread.',
       'argument-hint': '<threadId>',
-      paths: ['**/community-manager/**'],
+      paths: ['**/content-manager/**'],
     });
     expect(parsed.context).toBe('fork');
     expect(parsed['allowed-tools']).toEqual(['validate_draft']);

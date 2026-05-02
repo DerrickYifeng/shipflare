@@ -142,8 +142,8 @@ with a one-line "why" each. Do NOT dispatch:
 
 - NOT to `post-writer` — that agent drafts plan_item-anchored posts, not
   profile copy or off-the-cuff suggestions.
-- NOT to `community-manager` — that agent only handles thread replies
-  from the `threads` inbox.
+- NOT to `content-manager` — that agent only handles thread replies
+  from the `threads` inbox and original-post drafts via post_batch.
 - NOT to the `generating-strategy` skill — only when the founder asks
   to *rewrite* the strategic path.
 

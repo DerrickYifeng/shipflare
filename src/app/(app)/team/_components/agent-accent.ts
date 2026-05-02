@@ -74,7 +74,10 @@ const ACCENTS: Record<string, AgentAccent> = {
   coordinator: COORDINATOR,
   'content-planner': CONTENT,
   'post-writer': POST_WRITER,
-  'community-manager': COMMUNITY,
+  // Phase J renamed `community-manager` → `content-manager`. The UI
+  // accent (purple "M" monogram, "COMMUNITY" code) is preserved so the
+  // teammate keeps its identity in the founder-facing roster.
+  'content-manager': COMMUNITY,
 };
 
 export function accentForAgentType(agentType: string): AgentAccent | null {

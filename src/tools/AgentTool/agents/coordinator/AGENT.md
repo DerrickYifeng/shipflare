@@ -114,24 +114,24 @@ If no channels are connected, skip steps 2-3 and tell the user "Connect X to see
 
 The discovery-agent returns a StructuredOutput with `topQueued` (top-N by engagement-weighted score). Read it directly; do not re-query the threads table.
 
-**Step 3 — Drafts.** If the discovery-agent's `queued > 0`, dispatch community-manager on the top **N** from `topQueued`, where **N comes from today's `content_reply` slot's `targetCount`** (the founder's strategic-path-declared `repliesPerDay` for the primary channel). Falling back to a hardcoded 3 leaves the founder's stated reply target unmet on day one.
+**Step 3 — Drafts.** If the discovery-agent's `queued > 0`, dispatch content-manager on the top **N** from `topQueued`, where **N comes from today's `content_reply` slot's `targetCount`** (the founder's strategic-path-declared `repliesPerDay` for the primary channel). Falling back to a hardcoded 3 leaves the founder's stated reply target unmet on day one.
 
 Procedure:
 
 1. Call `query_plan_items({ status: ['planned'] })` and find today's slot — the row whose `kind === 'content_reply'`, `channel === '<primary>'`, and `scheduledAt` falls in today's UTC window.
 2. Read `params.targetCount` (an integer). If the slot is missing or `targetCount` isn't an integer, default `N = 3`.
 3. Compute `N = min(targetCount, topQueued.length)` — never request more drafts than candidates the agent surfaced.
-4. Dispatch community-manager:
+4. Dispatch content-manager:
 
 ```
 Task({
-  subagent_type: 'community-manager',
+  subagent_type: 'content-manager',
   description: 'draft top-N kickoff replies',
   prompt: <serialize the top N entries from topQueued as a thread list> + 'targetCount=<N>'
 })
 ```
 
-community-manager owns reply drafting end-to-end. Skip step 3 if `queued === 0`.
+content-manager owns reply drafting end-to-end. Skip step 3 if `queued === 0`.
 
 Final user-facing summary lists the artifacts:
 - Plan: N items scheduled
@@ -159,8 +159,8 @@ properly onboarded user there will be 1+ slots:
    to the next slot:
    - **Inner attempt 1.**
      - `Task({ subagent_type: 'discovery-agent', description: 'fill reply slot <planItemId>', prompt: 'trigger: daily\nmaxResults: <slot.targetCount>\nintent: (none — use rubric defaults)' })`. The agent persists its `topQueued` and returns StructuredOutput with `queued`, `topQueued`, and `scoutNotes`.
-     - If `queued > 0`, dispatch community-manager on the top items:
-       `Task({ subagent_type: 'community-manager', description: 'fill reply slot <planItemId>', prompt: '<serialize topQueued> + targetCount=<N>' })`. community-manager drafts up to `targetCount` replies from the queued threads.
+     - If `queued > 0`, dispatch content-manager on the top items:
+       `Task({ subagent_type: 'content-manager', description: 'fill reply slot <planItemId>', prompt: '<serialize topQueued> + targetCount=<N>' })`. content-manager drafts up to `targetCount` replies from the queued threads.
      - After the dispatch, query draft count for today on this channel via `query_team_status` (drafts created this UTC date for `kind='reply'` on the slot's platform). If count >= targetCount, the slot is filled — go to step 3.
    - **Inner attempts 2 and 3 (if still short).** Repeat. Stop early if discovery-agent returns `queued === 0` two attempts in a row — there are no fresh threads today, re-running discovery will burn API budget without producing more drafts.
    - **Hard cap: 3 inner attempts per slot.** Partial fills are valid; the slot still transitions to `drafted`.
@@ -174,7 +174,7 @@ fall back to a single discovery+draft pass, mirroring the kickoff
 shape:
 
 1. `Task({ subagent_type: 'discovery-agent', description: 'daily fallback discovery', prompt: 'trigger: daily\nmaxResults: 10' })`.
-2. If `queued > 0`, dispatch community-manager on the top **3** (no slot to read targetCount from): `Task({ subagent_type: 'community-manager', description: 'fallback top-3 replies', prompt: '<serialize top 3> + targetCount=3' })`.
+2. If `queued > 0`, dispatch content-manager on the top **3** (no slot to read targetCount from): `Task({ subagent_type: 'content-manager', description: 'fallback top-3 replies', prompt: '<serialize top 3> + targetCount=3' })`.
 
 Path B is a safety net for edge cases (user just onboarded, planner failed, manual API call before plan_items exist). When you land on Path B for a user with `productState === 'launched'`, surface a warning in your final summary — onboarding is supposed to pre-fill slots and the user shouldn't be hitting the fallback path.
 

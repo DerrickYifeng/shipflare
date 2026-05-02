@@ -76,12 +76,14 @@ const ROUTES: ReadonlyArray<
     },
   },
   // --- content_reply ---
-  // Reply drafting is owned end-to-end by the community-manager team-run
+  // Reply drafting is owned end-to-end by the content-manager team-run
   // agent (Phase 6 of the agent-cleanup migration absorbed the
-  // `draft-single-reply` skill + the `reply-drafter` Task teammate). The
-  // dispatch route stays so plan_items still flow through the state
-  // machine — but `draftSkill` is null because the actual draft comes
-  // from the discovery → community-manager Task fan-out, not from a
+  // `draft-single-reply` skill + the `reply-drafter` Task teammate;
+  // Phase J renamed the agent from `community-manager` to
+  // `content-manager` and added the post_batch flow). The dispatch
+  // route stays so plan_items still flow through the state machine —
+  // but `draftSkill` is null because the actual draft comes from the
+  // discovery → content-manager Task fan-out, not from a
   // dispatcher-routed skill.
   {
     kind: 'content_reply',

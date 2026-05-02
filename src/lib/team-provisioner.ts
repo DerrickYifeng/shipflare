@@ -2,14 +2,16 @@
 //
 // Baseline roster: coordinator + content-planner.
 // Phase F layers category presets on top — dev_tool / saas / consumer pick
-// up a post-writer + community-manager, default-squad picks up just the
+// up a post-writer + content-manager, default-squad picks up just the
 // post-writer. The baseline stays as the floor so legacy callers of
 // `ensureTeamExists` keep working and older teams keep rendering.
 // (`post-writer` is one channel-aware writer; the platform comes in via
 // `plan_items.channel`, so we no longer split the roster by platform.
-// `community-manager` owns reply drafting end-to-end since Phase 6 of
+// `content-manager` owns reply drafting end-to-end since Phase 6 of
 // the agent-cleanup migration — there is no separate reply-drafter
-// teammate.)
+// teammate. It was renamed from `community-manager` in Phase J when
+// it gained the post_batch original-post drafting flow alongside the
+// existing reply_sweep flow.)
 //
 // Idempotent: re-running against an existing team returns the existing ids
 // without mutating rows. The unique index on `team_members (team_id,
@@ -197,7 +199,7 @@ export interface ProvisionResult {
  * Safe to call repeatedly:
  *   - First call creates the team + all members.
  *   - Subsequent calls after a new channel connects insert only the
- *     delta (e.g. adding `community-manager` when a category is upgraded).
+ *     delta (e.g. adding `content-manager` when a category is upgraded).
  *   - Existing members are never renamed, re-statused, or removed.
  *
  * When `productId` is null or the product doesn't exist, falls back to
@@ -255,7 +257,7 @@ export async function provisionTeamForProduct(
   const basePreset = pickPresetByCategory(category);
 
   // Channel-aware adjustment: if no platform channel is connected at all,
-  // fall back to default-squad — the community-manager has no inbox to
+  // fall back to default-squad — the content-manager has no inbox to
   // monitor. The post-writer is channel-agnostic at the agent layer
   // (`plan_items.channel` decides which guide it consults at draft time),
   // so we no longer split writers by platform — any of x / reddit being

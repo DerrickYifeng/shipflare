@@ -278,6 +278,6 @@ describe('processTeamRun — Task roster injection', () => {
     // discovery specialist — assert it by name.
     expect(taskTool?.description).toContain('- discovery-agent:');
     expect(taskTool?.description).toContain('- post-writer:');
-    expect(taskTool?.description).toContain('- community-manager:');
+    expect(taskTool?.description).toContain('- content-manager:');
   });
 });

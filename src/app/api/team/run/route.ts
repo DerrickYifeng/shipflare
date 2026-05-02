@@ -88,7 +88,7 @@ export function deriveGoalFromTrigger(
         `Connected platforms: ${channelList}. ` +
         `Trigger: daily. Source: manual. ` +
         `Follow your daily playbook: load today's content_reply plan_items ` +
-        `and run the per-slot discovery → community-manager loop, falling ` +
+        `and run the per-slot discovery → content-manager loop, falling ` +
         `back to default top-3 drafting if no slots exist.`
       );
   }

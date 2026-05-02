@@ -1,6 +1,6 @@
 ---
 name: drafting-reply
-description: Draft ONE reply body for a single thread. Receives the thread + product context + (optional) voice hint, returns a single draftBody + whyItWorks + confidence. Does not gate, does not validate, does not persist — pure transformation. Caller (community-manager or engagement worker) handles judging-opportunity, validating-draft, and draft_reply persistence.
+description: Draft ONE reply body for a single thread. Receives the thread + product context + (optional) voice hint, returns a single draftBody + whyItWorks + confidence. Does not gate, does not validate, does not persist — pure transformation. Caller (content-manager or engagement worker) handles judging-opportunity, validating-draft, and draft_reply persistence.
 context: fork
 model: claude-sonnet-4-6
 maxTurns: 1

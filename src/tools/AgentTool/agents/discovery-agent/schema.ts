@@ -2,10 +2,10 @@ import { z } from 'zod';
 
 /**
  * StructuredOutput shape the discovery-agent emits at the end of its run.
- * The coordinator reads `topQueued` to dispatch community-manager without
+ * The coordinator reads `topQueued` to dispatch content-manager without
  * re-querying the threads table. Cap is 20 (was 10) so the coordinator
  * can serve a high `repliesPerDay` strategic-path setting in one batch
- * — kickoff dispatches community-manager on the top-N where N comes from
+ * — kickoff dispatches content-manager on the top-N where N comes from
  * today's content_reply slot's `targetCount` (capped at topQueued.length).
  */
 export const discoveryAgentOutputSchema = z.object({

@@ -136,7 +136,7 @@ const analyticsWorker = new Worker<AnalyticsJobData>(
 // enqueues one coordinator-rooted team-run with trigger='daily',
 // rooted in the per-team rolling 'Discovery' conversation. The
 // coordinator's `daily` playbook handles the per-slot
-// discovery → community-manager loop and falls back to default
+// discovery → content-manager loop and falls back to default
 // drafting when no slots exist (shouldn't happen in practice — onboarding
 // pre-fills plan_items). The BullMQ queue name stays 'discovery-scan'
 // for Redis stability with the live repeat schedule.

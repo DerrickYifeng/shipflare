@@ -1,7 +1,7 @@
 // Daily 13:00 UTC fanout. For each user with at least one connected
 // channel AND a product, enqueue one coordinator-rooted team-run with
 // `trigger='daily'`. The coordinator's `daily` playbook handles the
-// per-slot discovery → community-manager loop (driven by today's
+// per-slot discovery → content-manager loop (driven by today's
 // `content_reply` plan_items emitted by content-planner) and falls back
 // to default top-3 drafting when no slots exist.
 //
@@ -88,7 +88,7 @@ export async function processDailyRunFanout(
         `Connected platforms: ${platforms}. ` +
         `Trigger: daily. Source: cron. ` +
         `Follow your daily playbook: load today's content_reply plan_items ` +
-        `for this user, run the per-slot discovery → community-manager loop ` +
+        `for this user, run the per-slot discovery → content-manager loop ` +
         `(max 3 inner attempts per slot), and update_plan_item state='drafted' ` +
         `when each slot terminates. If no slots are found, fall back to ` +
         `default top-3 drafting from a single discovery-agent dispatch.`;

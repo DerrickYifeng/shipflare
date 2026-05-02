@@ -76,7 +76,7 @@ registry.register(queryProductContextTool);
 // an existing plan_item — the plan_item row is the source of truth for
 // channel + context, the tool is the side-effect gate.
 //
-// Day 2: community-manager calls `find_threads` (read-only inbox scan) +
+// Day 2: content-manager calls `find_threads` (read-only inbox scan) +
 // `draft_reply` (INSERT drafts with status='pending') for the reply-guy
 // workflow. find_threads is concurrency-safe read-only; draft_reply is
 // concurrency-safe writes (each draft is its own row).

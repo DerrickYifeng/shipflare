@@ -111,7 +111,7 @@ describe('ensureKickoffEnqueued', () => {
     // New playbook: plan → discovery → drafts.
     expect(callArg.goal).toContain('content-planner');
     expect(callArg.goal).toContain("subagent_type: 'discovery-agent'");
-    expect(callArg.goal).toContain('community-manager');
+    expect(callArg.goal).toContain('content-manager');
     // Calibration / scout / reviewer / inline-mode references are gone.
     expect(callArg.goal).not.toContain('calibrate_search_strategy');
     expect(callArg.goal).not.toContain('run_discovery_scan');
@@ -119,10 +119,10 @@ describe('ensureKickoffEnqueued', () => {
     expect(callArg.goal).not.toContain('discovery-scout');
     // No-channels skip preserved.
     expect(callArg.goal).toContain('Skip steps 2-3 if no channels');
-    // Order: discovery-agent appears before community-manager.
+    // Order: discovery-agent appears before content-manager.
     const goal: string = callArg.goal;
     const discoveryIdx = goal.indexOf("subagent_type: 'discovery-agent'");
-    const draftsIdx = goal.indexOf('community-manager');
+    const draftsIdx = goal.indexOf('content-manager');
     expect(discoveryIdx).toBeGreaterThan(0);
     expect(draftsIdx).toBeGreaterThan(discoveryIdx);
   });

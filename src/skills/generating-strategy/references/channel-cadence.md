@@ -16,7 +16,7 @@ channel:
   this; content-planner emits ONE `kind: 'content_reply'` plan_item per
   day per channel with `params.targetCount = repliesPerDay`. The
   daily reply-sweep cron walks those slots and runs
-  `discovery-agent` + `community-manager` until `targetCount` drafts
+  `discovery-agent` + `content-manager` until `targetCount` drafts
   exist (max 3 inner attempts per session). Nullish/0 disables reply
   automation for the channel — used for Reddit, where high reply volume
   invites shadowbans.

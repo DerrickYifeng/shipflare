@@ -87,7 +87,7 @@ For each channel where `channelMix[channel].repliesPerDay > 0`:
     `repliesPerDay` is null/omitted by the strategist, so this loop
     naturally skips reddit.)
   - `userAction: 'approve'`
-  - `skillName: null` (the daily reply-sweep cron + community-manager
+  - `skillName: null` (the daily reply-sweep cron + content-manager
     own this end-to-end)
   - `params: { targetCount: <channelMix[channel].repliesPerDay> }`
   - `scheduledAt`: pick the FIRST UTC hour from
@@ -196,7 +196,7 @@ For every scheduled item:
   - `content_reply` → **leave `skillName: null`**. Reply drafting is
     owned end-to-end by the daily reply-sweep cron — it reads each
     `content_reply` row's `params.targetCount`, runs discovery-agent +
-    community-manager up to 3 inner attempts until the target is
+    content-manager up to 3 inner attempts until the target is
     drafted, then transitions the row to `state='drafted'` (drafts
     surface on the Today page for the founder to approve).
   - `email_send` → `skillName: null`. Manual-completion until a future

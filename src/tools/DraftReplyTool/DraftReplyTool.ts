@@ -1,7 +1,7 @@
-// draft_reply — persist a reply draft authored by community-manager.
+// draft_reply — persist a reply draft authored by content-manager.
 //
 // Unlike draft_post (which calls sideQuery to generate the body), this
-// tool takes the body as input. The community-manager agent uses its
+// tool takes the body as input. The content-manager agent uses its
 // own turn budget to draft the reply text before calling the tool, so
 // the agent's reasoning and the final body stay tightly coupled.
 //
@@ -121,7 +121,7 @@ export const draftReplyTool: ToolDefinition<DraftReplyInput, DraftReplyResult> =
       }
 
       // Idempotency on (userId, threadId, status='pending'). A re-spawn
-      // or retry of community-manager against the same thread used to
+      // or retry of content-manager against the same thread used to
       // land a second pending row, which surfaced as a duplicate tweet
       // card in /today. Now the second call replaces the first body in
       // place and returns the same draftId. A partial unique index

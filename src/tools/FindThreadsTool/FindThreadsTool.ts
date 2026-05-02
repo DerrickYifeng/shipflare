@@ -1,7 +1,7 @@
 // find_threads — query the discovered-threads inbox for engagement
 // candidates.
 //
-// Called by: community-manager (during a reply sweep). Reads from the
+// Called by: content-manager (during a reply sweep). Reads from the
 // `threads` table — the discovery pipeline (reply-guy discovery worker)
 // fills that table; this tool just filters, ranks, and returns.
 //
