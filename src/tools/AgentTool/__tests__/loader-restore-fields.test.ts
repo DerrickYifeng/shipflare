@@ -58,4 +58,19 @@ describe('loader — Phase A restored fields', () => {
       }),
     ).rejects.toThrow(/role/i);
   });
+
+  it('parses requires as a string array', async () => {
+    const agent = await loadAgent(
+      path.join(FIXTURES, 'full-frontmatter-agent'),
+      { sharedReferencesDir: path.join(FIXTURES, '_shared', 'references') },
+    );
+    expect(agent.requires).toEqual(['channel:x', 'product:has_description']);
+  });
+
+  it('defaults requires to [] when absent', async () => {
+    const agent = await loadAgent(path.join(FIXTURES, 'valid-agent'), {
+      sharedReferencesDir: path.join(FIXTURES, '_shared', 'references'),
+    });
+    expect(agent.requires).toEqual([]);
+  });
 });

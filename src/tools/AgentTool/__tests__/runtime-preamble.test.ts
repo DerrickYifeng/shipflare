@@ -57,6 +57,7 @@ describe('buildAgentConfigFromDefinition', () => {
     disallowedTools: [],
     background: false,
     role: 'member',
+    requires: [],
     skills: [],
     model: 'claude-haiku-4-5-20251001',
     maxTurns: 20,

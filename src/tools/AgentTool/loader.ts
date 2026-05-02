@@ -25,6 +25,7 @@ export interface AgentDefinition {
   disallowedTools: string[];   // restored Phase A — see Agent Teams spec §5
   background: boolean;         // restored Phase A — semantics adapted, see Agent Teams spec §5
   role: AgentRole;             // Phase A — primary input to four-layer tool filter (Agent Teams spec §5)
+  requires: string[];          // NEW — Phase A; DSL: 'channel:x', 'product:has_description'
   skills: string[];
   model?: string;
   maxTurns: number;
@@ -67,6 +68,7 @@ const frontmatterSchema = z
     disallowedTools: z.array(z.string()).optional(),
     background: z.boolean().optional(),
     role: z.enum(['lead', 'member']).optional(),
+    requires: z.array(z.string()).optional(),
     skills: z.array(z.string()).optional(),
     model: z.string().min(1).optional(),
     maxTurns: z.number().int().positive().optional(),
@@ -442,6 +444,7 @@ export async function loadAgent(
     disallowedTools: parsed.disallowedTools ?? [],
     background: parsed.background ?? false,
     role: parsed.role ?? 'member',
+    requires: parsed.requires ?? [],
     skills: parsed.skills ?? [],
     ...(parsed.model !== undefined ? { model: parsed.model } : {}),
     maxTurns: parsed.maxTurns ?? DEFAULT_MAX_TURNS,
