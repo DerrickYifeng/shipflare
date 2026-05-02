@@ -61,7 +61,18 @@ export function WebsiteInfoSection({ url, seoAudit }: WebsiteInfoSectionProps) {
     setScanning(true);
 
     try {
-      await scanAndSave(inputUrl);
+      const trimmed = inputUrl.trim();
+      // Accept bare domains (e.g. `shipflare.ai`); the scraper's
+      // `new URL()` requires a scheme, so default to https://.
+      const withScheme = /^https?:\/\//i.test(trimmed)
+        ? trimmed
+        : `https://${trimmed}`;
+      try {
+        new URL(withScheme);
+      } catch {
+        throw new Error('Please enter a valid URL.');
+      }
+      await scanAndSave(withScheme);
       toast('Website added and product info updated');
       setInputUrl('');
       router.refresh();
@@ -134,11 +145,15 @@ export function WebsiteInfoSection({ url, seoAudit }: WebsiteInfoSectionProps) {
             >
               <Input
                 label="Product URL"
-                placeholder="https://your-product.com"
-                type="url"
+                placeholder="shipflare.ai or https://your-product.com"
+                type="text"
+                inputMode="url"
+                autoComplete="url"
+                spellCheck={false}
+                autoCapitalize="off"
                 value={inputUrl}
                 onChange={(e) => setInputUrl(e.target.value)}
-                helper="We'll scan your page and update product details automatically."
+                helper="We'll scan your page and update product details automatically. https:// added automatically if you skip it."
                 required
               />
               {error && (
