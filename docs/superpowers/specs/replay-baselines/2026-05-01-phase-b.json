@@ -1,0 +1,239 @@
+[
+  {
+    "draftId": "a04ac2c8-f9cc-4251-aed5-e2e42e1a2660",
+    "threadId": "fc6893c9-3a08-47d1-aeb2-a0ebd3f3b218",
+    "platform": "x",
+    "community": "x",
+    "draftType": "reply",
+    "replyBody": "you're playing 4 roles. the one that breaks first when the product gets real traction? always marketing — it's the only one nobody told you was critical until you're scrambling.",
+    "verdict": "FAIL",
+    "score": 0.22,
+    "issues": [
+      "diagnostic_from_above: 'you're playing 4 roles' opens with a second-person diagnosis; 'always marketing' is a universal claim about what 'always' breaks; 'the only one nobody told you was critical until you're scrambling' tells the OP what their reality really is — all three sub-triggers of this hard-fail rule fire.",
+      "no_first_person: The draft contains zero I/we/my/our/me/us tokens while making sweeping generalized claims ('always marketing'). Generalized claim + no first-person grounding = hard fail per the rule.",
+      "naked_number_unsourced: '4 roles' is a bare count noun paired with no first-person grounding or citation. Reads as authoritative data, not personal experience."
+    ],
+    "slopFingerprint": [
+      "diagnostic_from_above",
+      "no_first_person",
+      "naked_number_unsourced"
+    ]
+  },
+  {
+    "draftId": "9968a4c5-c924-450f-8bb5-d471c9995cb1",
+    "threadId": "44f41f8b-5f35-4c79-a170-1cea22f16afe",
+    "platform": "x",
+    "community": "x",
+    "draftType": "reply",
+    "replyBody": "week 1–8 you ship. week 9–16 you learn distribution alone. two full learning curves stacked with no energy left for the second one.",
+    "verdict": "FAIL",
+    "score": 0.21,
+    "issues": [
+      "diagnostic_from_above: Draft diagnoses the OP's journey from a bird's-eye view ('week 1–8 you ship. week 9–16 you learn distribution alone') — classic colon-wisdom / universal-claim structure with no first-person grounding.",
+      "no_first_person: Generalised world-model claim ('two full learning curves stacked…') with zero I/we/my/our/me/us tokens. Per slop rules, generalised claims must carry first-person specifics.",
+      "naked_number_unsourced: 'week 1–8' and 'week 9–16' are bare time-range units presented as authoritative structure with no citation and no first-person experience tying them to the writer's actual run.",
+      "Relevance failure: Draft mirrors the OP's frustration back at them rather than adding anything new. A commenter would feel 'you just said what I said.'"
+    ],
+    "slopFingerprint": [
+      "diagnostic_from_above",
+      "no_first_person",
+      "naked_number_unsourced"
+    ]
+  },
+  {
+    "draftId": "fe365367-c688-4d2f-baf8-29e2c40c4299",
+    "threadId": "6e180e45-4d2b-4e2e-811c-f3a04efc2a89",
+    "platform": "x",
+    "community": "x",
+    "draftType": "reply",
+    "replyBody": "the context-switch cost is brutal. builder-mode and marketer-mode use different parts of your brain — switching between them 10 times a day leaves you half-finished at both.",
+    "verdict": "FAIL",
+    "score": 0.52,
+    "issues": [
+      "no_first_person: The draft makes a universal claim — 'builder-mode and marketer-mode use different parts of your brain' — with zero first-person tokens (I/we/my/our/me/us). Per the slop rules, generalized pronouncements require first-person grounding; without it, the reply reads as authoritative lecture rather than peer experience.",
+      "naked_number_unsourced: '10 times a day' is a bare numeric claim attached to a time unit with no citation and no first-person context. It reads like a made-up statistic used to lend false authority, not a personal observation."
+    ],
+    "slopFingerprint": [
+      "no_first_person",
+      "naked_number_unsourced"
+    ]
+  },
+  {
+    "draftId": "f136de83-6ee0-413d-b65b-63f09741f22c",
+    "threadId": "f1f76ad8-22bb-4232-ba6e-aac34120f2df",
+    "platform": "x",
+    "community": "x",
+    "draftType": "reply",
+    "replyBody": "the insight: 3 impressions day one wasn't the problem. it was shipping without an audience lined up. visibility isn't phase 2 — it's phase 1.",
+    "verdict": "FAIL",
+    "score": 0.18,
+    "issues": [
+      "colon_aphorism_opener: Draft opens with 'the insight:' — matches the banned wisdom-as-colon opener pattern exactly.",
+      "binary_not_x_its_y: 'visibility isn't phase 2 — it's phase 1' is the canonical X/Y aphorism template and a hard-fail slop rule.",
+      "no_first_person: Draft makes generalized claims about how shipping and visibility work, but contains zero first-person tokens (I/we/my/our/me/us). Generalized claims require first-person grounding.",
+      "diagnostic_from_above: Entire draft diagnoses the OP's problem from an authoritative vantage ('it was shipping without an audience lined up') with no personal experience offered — reads as wisdom-delivery, not conversation.",
+      "naked_number_unsourced: '3 impressions day one' borrows OP's own number and presents it as a data anchor without any first-person citation context."
+    ],
+    "slopFingerprint": [
+      "colon_aphorism_opener",
+      "binary_not_x_its_y",
+      "no_first_person",
+      "diagnostic_from_above",
+      "naked_number_unsourced"
+    ]
+  },
+  {
+    "draftId": "7d7e888b-984e-4e4c-949c-a2035583db58",
+    "threadId": "9d980b97-f0cd-487c-9e4a-4e36947c0dde",
+    "platform": "x",
+    "community": "x",
+    "draftType": "reply",
+    "replyBody": "distribution scales what you built. the gap between shipping and people knowing is where solos spend 6 months figuring out they lost.",
+    "verdict": "FAIL",
+    "score": 0.28,
+    "issues": [
+      "no_first_person: Draft makes a generalized claim about 'solos' ('where solos spend 6 months figuring out they lost') with zero first-person tokens. Hard-fail rule triggered.",
+      "naked_number_unsourced: '6 months' is asserted as authoritative data with no citation and no first-person grounding ('I spent 6 months...'). Revise-level rule triggered.",
+      "Relevance failure: Draft re-states the OP's premise verbatim — 'distribution is the gap nobody warned you about' is exactly what OP said. The reply adds no new angle.",
+      "Value failure: If the product mention is intentionally absent (no_fit), the reply still needs to earn its place with a specific insight or experience. This draft delivers neither."
+    ],
+    "slopFingerprint": [
+      "no_first_person",
+      "naked_number_unsourced"
+    ]
+  },
+  {
+    "draftId": "249f4260-2772-4195-83fd-ed5f85e7a8e2",
+    "threadId": "5c341570-0d51-4b05-9941-c9a3bc7542bf",
+    "platform": "x",
+    "community": "x",
+    "draftType": "reply",
+    "replyBody": "ship it first, then market it second — but you've already learned that's backwards. the real trap is thinking about the next app while Glitches still needs distribution help. that's the sunk-cost regret talking.",
+    "verdict": "FAIL",
+    "score": 0.28,
+    "issues": [
+      "diagnostic_from_above: 'the real trap is thinking about the next app' — this is a direct second-person diagnosis of what the OP's situation 'really' is, matching the 'the real X is Y' trigger pattern. Hard fail.",
+      "no_first_person: Draft makes two generalized claims ('the real trap is...', 'that's the sunk-cost regret talking') with zero first-person tokens (I/we/my/our/me/us). Generalized pronouncements require first-person grounding per slop rules. Hard fail.",
+      "value_first: The entire draft is reframing/diagnosis. There is no actionable advice, no concrete suggestion, and no experience shared. The OP explicitly said they need to get good at marketing/distribution — the reply doesn't touch that at all.",
+      "authenticity: No 'I' voice anywhere. Reads like a therapist narrating the OP's psychology from above, not a peer who lived through the same distraction loop."
+    ],
+    "slopFingerprint": [
+      "diagnostic_from_above",
+      "no_first_person"
+    ]
+  },
+  {
+    "draftId": "5faea65a-2635-4df4-b59b-513512289489",
+    "threadId": "7a8d4a6a-0f82-4651-9000-ea2a2b354832",
+    "platform": "x",
+    "community": "x",
+    "draftType": "reply",
+    "replyBody": "the algorithm compounds early replies. your 1st post gets 0 distribution because it's cold-start. by day 3 it's useless — the algorithm's already moved on. you're not competing against 300 posts; you're competing against the distribution tax that kills new voices.",
+    "verdict": "FAIL",
+    "score": 0.18,
+    "issues": [
+      "diagnostic_from_above: Entire draft diagnoses OP from above — 'you're not competing against 300 posts; you're competing against the distribution tax that kills new voices' names the 'real' failure mode without any first-person grounding.",
+      "no_first_person: Zero I/we/my/our/me/us tokens across a draft making multiple generalized claims about how the algorithm works. Per slop rules, generalized claims must carry first-person specifics.",
+      "binary_not_x_its_y: 'you're not competing against 300 posts; you're competing against the distribution tax' is a direct instance of the banned X-isn't-Y-it's-Z aphorism template (semicolon variant).",
+      "naked_number_unsourced: 'your 1st post', 'by day 3', '300 posts' — bare time/count numbers presented as authoritative with no citation and no first-person grounding.",
+      "Relevance gap: OP's core point is about becoming the person people want to follow (audience-building mindset). The draft redirects entirely to algorithm mechanics the OP didn't raise.",
+      "No actionable advice: The draft reframes the problem but offers zero path forward. A skeptical reader would think 'okay, so what do I do about it?'"
+    ],
+    "slopFingerprint": [
+      "diagnostic_from_above",
+      "no_first_person",
+      "binary_not_x_its_y",
+      "naked_number_unsourced"
+    ]
+  },
+  {
+    "draftId": "31aca8f5-c950-47d4-8b39-ccc83917ddbb",
+    "threadId": "f2ef978b-580c-4c8f-ad8d-58d415a93b1b",
+    "platform": "x",
+    "community": "x",
+    "draftType": "reply",
+    "replyBody": "you're naming the real thing: marketing asks you to bet on yourself before anyone else has. the product is just the excuse. that's why month 1 feels like homework.",
+    "verdict": "FAIL",
+    "score": 0.22,
+    "issues": [
+      "diagnostic_from_above: opens with 'you're naming the real thing:' — this is a verbatim BAD example in the slop rules, a second-person diagnosis that tells the OP what their situation 'really' is instead of joining from the writer's own experience.",
+      "no_first_person: the draft makes two generalized claims ('marketing asks you to bet on yourself before anyone else has', 'the product is just the excuse') with zero first-person tokens (I/we/my/our/me/us). Generalized claims require first-person grounding per the reply quality bar.",
+      "colon_aphorism_opener: 'you're naming the real thing:' is the canonical colon-wisdom-opener structure — wisdom delivered as a colon-separated pronouncement rather than a grounded observation.",
+      "The reply literally echoes what the OP already said, repackaged as insight. The OP wrote 'posting feels like submitting homework you wrote about yourself.' The draft closes with 'that's why month 1 feels like homework.' This is a paraphrase of the OP's own words presented as a new observation — the OP would likely feel talked at, not understood."
+    ],
+    "slopFingerprint": [
+      "diagnostic_from_above",
+      "no_first_person",
+      "colon_aphorism_opener"
+    ]
+  },
+  {
+    "draftId": "6581e4ec-55aa-43ac-82ec-a56619740817",
+    "threadId": "81291467-762a-4c4a-a2c8-520ba9dd27f2",
+    "platform": "x",
+    "community": "x",
+    "draftType": "reply",
+    "replyBody": "code gives you a feedback loop in 2 seconds. marketing gives you silence for 2 weeks. that's the mismatch — you're waiting for a signal that takes 14 days to show up.",
+    "verdict": "FAIL",
+    "score": 0.31,
+    "issues": [
+      "no_first_person: Draft makes sweeping generalized claims ('code gives you...', 'marketing gives you...', 'you're waiting...') with zero I/we/my/our tokens. Hard-fail per slop rules.",
+      "diagnostic_from_above: Second-person diagnosis throughout — 'you're waiting for a signal that takes 14 days to show up' — the writer positions themselves above the OP explaining their situation rather than joining from lived experience. Hard-fail per slop rules.",
+      "naked_number_unsourced: '2 seconds', '2 weeks', '14 days' are presented as authoritative data with no first-person grounding or source. These read as confident claims but have no receipt behind them."
+    ],
+    "slopFingerprint": [
+      "no_first_person",
+      "diagnostic_from_above",
+      "naked_number_unsourced"
+    ]
+  },
+  {
+    "draftId": "1e194e8c-dace-482f-b058-659eb1af000c",
+    "threadId": "a09d268b-fd1e-4a85-8c11-d0ffe8abfa97",
+    "platform": "x",
+    "community": "x",
+    "draftType": "reply",
+    "replyBody": "validated problem, zero audience after 3 months — that's the real failure point for most indies. it's not the product.",
+    "verdict": "FAIL",
+    "score": 0.15,
+    "issues": [
+      "diagnostic_from_above: 'that's the real failure point for most indies' is a universal diagnosis naming the OP's 'real' failure — classic diagnostic-from-above pattern. Hard fail.",
+      "binary_not_x_its_y: 'it's not the product' is the conclusion half of the X-isn't-Y-it's-Z aphorism template (implied Z = audience). Hard fail.",
+      "no_first_person: Draft makes generalized claims ('most indies', 'the real failure point') with zero first-person tokens (I/we/my/our/me/us). Hard fail.",
+      "fortune_cookie_closer: 'that's the real failure point for most indies' is a tagline-style terminal aphorism. Revise trigger.",
+      "naked_number_unsourced: '3 months' is a bare number + time unit with no first-person grounding or citation. Revise trigger.",
+      "Relevance gap: OP already knows their problem is distribution — the draft diagnoses them with the thing they just told you, adding zero new information or actionable help."
+    ],
+    "slopFingerprint": [
+      "diagnostic_from_above",
+      "binary_not_x_its_y",
+      "no_first_person",
+      "fortune_cookie_closer",
+      "naked_number_unsourced"
+    ]
+  },
+  {
+    "draftId": "9091bddb-79f7-4c6f-b42f-1ca7cb4ce88c",
+    "threadId": "58e3d8e9-8257-418e-b225-e32ec7dfca27",
+    "platform": "x",
+    "community": "x",
+    "draftType": "reply",
+    "replyBody": "the cruel part: you don't control which work gets seen. the weekend feature was better and lived in the void. the typo was nothing and made 3 people feel heard. that's the moat.",
+    "verdict": "FAIL",
+    "score": 0.28,
+    "issues": [
+      "colon_aphorism_opener: 'the cruel part:' — first token of the reply matches the banned wisdom-colon opener pattern.",
+      "diagnostic_from_above: 'the cruel part:' is a colon-as-wisdom opener that diagnoses the OP's situation from above rather than joining from personal experience. 'that's the moat' is explicitly listed as a diagnostic_from_above trigger.",
+      "fortune_cookie_closer: 'that's the moat.' — terminal sentence matches the banned fortune-cookie closer pattern (that's the moat|game|trick|...).",
+      "no_first_person: The draft contains generalized claims ('you don't control which work gets seen', 'that's the moat') but has zero first-person tokens (I/we/my/our/me/us). Generalized claims without first-person grounding are a hard fail.",
+      "naked_number_unsourced: '3 people' appears without first-person grounding — it's borrowed from OP's post, not from the writer's own run, which makes it feel like a re-narration of someone else's data."
+    ],
+    "slopFingerprint": [
+      "colon_aphorism_opener",
+      "diagnostic_from_above",
+      "fortune_cookie_closer",
+      "no_first_person",
+      "naked_number_unsourced"
+    ]
+  }
+]

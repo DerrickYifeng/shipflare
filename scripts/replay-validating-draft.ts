@@ -27,6 +27,7 @@ interface ReplayRow {
   verdict: string;
   score: number;
   issues: unknown[];
+  slopFingerprint: string[];
 }
 
 const LIMIT = Number(
@@ -111,6 +112,7 @@ async function main(): Promise<void> {
         verdict: result.verdict,
         score: result.score,
         issues: result.issues,
+        slopFingerprint: result.slopFingerprint ?? [],
       });
       if (usage) {
         totalCostUsd += usage.costUsd ?? 0;
