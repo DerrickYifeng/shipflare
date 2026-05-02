@@ -9,7 +9,7 @@ Seven named angles used across the generating-strategy skill (when shaping
 angles to individual `plan_items`). Each angle has a definition, two
 worked examples, and a "when to use" note.
 
-The downstream `post-writer` agent (spawned via team-run; reads
+The downstream `content-manager(post_batch)` agent (the plan-execute-sweeper batches due rows; reads
 `plan_items.channel` to pick the X or Reddit guide at draft time) reads
 the angle when writing the body, so mis-labelling an item's angle
 changes what eventually ships.

@@ -1,17 +1,18 @@
-// draft_post — persist a post body that the post-writer agent has
-// already drafted (and validated via `validate_draft`) for one
-// `plan_items` row.
+// draft_post — persist a post body that the caller has already drafted
+// (and validated via `validate_draft`) for one `plan_items` row. The
+// canonical caller is content-manager(post_batch); the legacy
+// post-writer agent was retired in Phase J Task 2.
 //
 // This used to call `sideQuery` itself with an inline X / Reddit system
 // prompt. That meant the platform reference docs (x-post-voice,
 // reddit-post-voice, content-safety — now under the drafting-post
-// skill) lived on the post-writer agent but never reached the actual
-// body generator — `sideQuery` ran in its
-// own isolated turn with only the short inline prompt. The result was
-// posts that ignored content-type rules, hashtag style, voice, etc.
-// We now mirror the reply flow: the agent owns drafting + self-checking
-// (with full references in its system prompt + `validate_draft`), and
-// this tool's only job is to persist the row.
+// skill) lived on the writer agent but never reached the actual body
+// generator — `sideQuery` ran in its own isolated turn with only the
+// short inline prompt. The result was posts that ignored content-type
+// rules, hashtag style, voice, etc. We now mirror the reply flow: the
+// agent owns drafting + self-checking (with full references in its
+// system prompt + `validate_draft`), and this tool's only job is to
+// persist the row.
 //
 // Side effects:
 //   1. Verifies the plan_item is owned by (userId, productId) and has
@@ -45,8 +46,8 @@ export const draftPostInputSchema = z
       .max(DRAFT_BODY_MAX, 'draftBody exceeds the Reddit-post ceiling'),
     /**
      * Optional rationale shown next to the draft in the founder's review
-     * UI. The post-writer fills this with a one-sentence summary of why
-     * the angle / hook works for the planned theme.
+     * UI. The drafting agent fills this with a one-sentence summary of
+     * why the angle / hook works for the planned theme.
      */
     whyItWorks: z.string().max(500).optional(),
   })

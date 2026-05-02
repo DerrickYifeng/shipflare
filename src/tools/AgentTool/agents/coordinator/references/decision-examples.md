@@ -27,10 +27,11 @@ user: "What could I write for my Twitter bio?"
 assistant: <thinking>
 This is a creative ask aimed at me, not a request to persist content. The
 trigger word "Twitter" is misleading — there's nothing to schedule, no
-thread to reply to, no plan_item to anchor a draft against. post-writer
-drafts plan-item-anchored posts; content-manager handles thread replies;
-neither is right for profile copy. I have the product voice and thesis
-from `query_strategic_path`. Just answer directly with a few options.
+thread to reply to, no plan_item to anchor a draft against.
+content-manager handles thread replies and post_batch drafting against
+existing plan_items; neither flow fits profile copy. I have the
+product voice and thesis from `query_strategic_path`. Just answer
+directly with a few options.
 </thinking>
 
 query_strategic_path({})
@@ -76,24 +77,27 @@ how X founders use ShipFlare in week 1". New pillars: case-studies,
 retention-math, community-voices. Want me to have content-planner schedule
 the first week?
 
-## Example 3 — Parallel delegation
+## Example 3 — Single delegation; drafting auto-batches
 
 user: "Set up next week and pre-draft the X posts"
 
 assistant: <thinking>
-Two independent subtasks:
-1. Plan next week — content-planner
-2. Draft X posts — post-writer (with channel='x' in the prompt)
+Two asks but only one of them needs me to spawn an agent:
 
-These can start in parallel. But wait: post-writer needs plan_item context
-(theme, angle, pillar), which doesn't exist until content-planner runs. So
-actually: serial, not parallel.
+1. Plan next week — Task content-planner.
+2. "Pre-draft the X posts" — I do NOT spawn a writer for this. Since
+   Phase J Task 2 the every-minute plan-execute-sweeper batches due
+   content_post rows into ONE content-manager(post_batch) team-run
+   per user. Anything content-planner allocates with a near-future
+   `scheduledAt` will be drafted automatically without me firing a
+   second Task here.
 
-UNLESS I tell post-writer to draft "backlog" posts using the current pillars
-without waiting for specific plan_items. That's a valid pattern — it creates
-a backlog content-planner can slot into this week's items after approval.
+If the founder wants drafting NOW (not when scheduledAt fires), I
+could shift the rows' scheduledAt forward in a follow-up — but the
+founder asked for "next week" so the natural cadence works.
 
-Decision: parallel with independent scopes.
+Decision: one Task to content-planner. Confirm to the founder that
+drafts will flow in automatically.
 </thinking>
 
 Task({
@@ -102,15 +106,13 @@ Task({
   prompt: `Generate plan_items for the week starting Monday {nextMondayISO}.
 Use active path pathId={pathId}. Respect connected channels: {channels}.`
 })
-Task({
-  subagent_type: "post-writer",
-  description: "Pre-draft X backlog",
-  prompt: `channel: x
-Draft 5 X posts on the pillars from path pathId={pathId}, using a
-mix of angles (data, story, contrarian). Write them as stand-alone — not
-tied to specific plan_items. The founder will review and content-planner
-will slot them in after approval.`
-})
+
+[after content-planner returns]
+
+content-planner allocated {N} content_post items for next week. The
+sweeper will batch the X posts into a content-manager(post_batch)
+team-run as each row's scheduledAt arrives — drafts will land in
+/today automatically.
 
 ## Example 4 — Live platform search for reply targets (discovery-agent)
 
@@ -122,11 +124,10 @@ answer this from the DB (the `threads` table only holds rows the discovery
 pipeline has already ingested, and may be empty or stale).
 
 This is exactly what discovery-agent exists for. It's the ONLY specialist
-with live platform search (`x_search_batch`, `reddit_search`). post-writer
-can't do this — it has no search tools, and asking it to "find posts"
-will produce fabricated placeholders that look like reply drafts but are
-actually hallucinated. content-manager reads from the already-discovered
-threads inbox, NOT live X.
+with live platform search (`x_search_batch`, `reddit_search`).
+content-manager reads from the already-discovered threads inbox, NOT
+live X — asking it to "find posts" would just return whatever is
+already in the table.
 
 After scout returns its `queue`-verdicted candidates, I can optionally
 chain content-manager per thread to draft the actual reply bodies. But
@@ -154,7 +155,7 @@ Surface the 3 top queued candidates to the founder with the URL, author,
 text, and scout's `reason`. Ask whether to chain content-manager per
 thread to draft the replies.
 
-## When to pick discovery-agent vs content-manager vs post-writer
+## When to pick discovery-agent vs content-manager
 
 - `discovery-agent` — the founder wants posts that EXIST RIGHT NOW on a
   public platform ("find me 3 posts to reply to", "scan X for <topic>",
@@ -162,13 +163,19 @@ thread to draft the replies.
 - `content-manager` — the `threads` table already has rows (the
   reply-sweep cron or an earlier scout run filled it), and the founder
   wants reply drafts written for that existing inbox. NO live search.
-- `post-writer` — the founder wants a NEW original post drafted (X or
-  Reddit), for a specific plan_item. NOT for replies. NOT for finding
-  posts. Pass the channel through in the prompt or via the plan_item.
+  ALSO drafts original posts in `post_batch` mode, but you don't spawn
+  it for that — the plan-execute-sweeper batches due content_post rows
+  automatically.
 
 If the founder's phrasing is "find posts to reply to" and the inbox is
 empty or stale, the chain is `discovery-agent` THEN `content-manager`.
 Never start with content-manager when the intent is live discovery.
+
+If the founder asks you to draft an original post for a specific
+plan_item, you can either (a) Task content-manager directly with a
+`Mode: post_batch / planItemIds: [<id>]` prompt for a one-off, or
+(b) trust the sweeper to pick it up at scheduledAt. Prefer (b) unless
+the founder wants it drafted RIGHT NOW.
 
 ## When to pick discovery-reviewer
 

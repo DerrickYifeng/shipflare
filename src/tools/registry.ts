@@ -72,9 +72,10 @@ registry.register(queryProductContextTool);
 // Phase E drafting tools (spec §9.1 + §11 Phase E). Flat snake_case
 // identifiers; agents opt in via AGENT.md `tools: [...]`.
 //
-// Day 1: post-writer calls `draft_post` to generate + persist body text on
-// an existing plan_item — the plan_item row is the source of truth for
-// channel + context, the tool is the side-effect gate.
+// Day 1: content-manager calls `draft_post` (in post_batch mode) to
+// persist body text on an existing plan_item — the plan_item row is the
+// source of truth for channel + context, the tool is the side-effect
+// gate. Pre-Phase-J the caller was the now-retired post-writer agent.
 //
 // Day 2: content-manager calls `find_threads` (read-only inbox scan) +
 // `draft_reply` (INSERT drafts with status='pending') for the reply-guy

@@ -1,6 +1,6 @@
 // validate_draft — verify a draft against platform + ShipFlare-style rules.
 //
-// Called by: post-writer, content-manager, draft-review.
+// Called by: content-manager (reply_sweep + post_batch), draft-review.
 // Pure, read-only, no DB writes — agents call it BEFORE persisting (e.g.
 // before draft_reply or as part of draft-review).
 //

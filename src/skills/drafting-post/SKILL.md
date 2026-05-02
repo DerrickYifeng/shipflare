@@ -1,6 +1,6 @@
 ---
 name: drafting-post
-description: Draft ONE original post for a single plan_item. Receives the plan_item + product + phase + (optional) voice / pillar / theme inputs, returns a single draftBody + whyItWorks + confidence. Does not validate, does not persist — pure transformation. Caller (post-writer agent or content-planner) handles validate_draft and draft_post persistence. NOTE post review (LLM-based) is not yet wired for posts (DraftPostTool persists to plan_items.output, not drafts table); this skill outputs valid drafts that go through validate_draft mechanical checks only.
+description: Draft ONE original post for a single plan_item. Receives the plan_item + product + phase + (optional) voice / pillar / theme inputs, returns a single draftBody + whyItWorks + confidence. Does not validate, does not persist — pure transformation. Caller (content-manager in post_batch mode) handles validate_draft and draft_post persistence. NOTE post review (LLM-based) is not yet wired for posts (DraftPostTool persists to plan_items.output, not drafts table); this skill outputs valid drafts that go through validate_draft mechanical checks only.
 context: fork
 model: claude-sonnet-4-6
 maxTurns: 1

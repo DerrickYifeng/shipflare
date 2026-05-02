@@ -140,10 +140,10 @@ context (`query_strategic_path` + `query_team_status` give you the
 voice + thesis); just write the answer yourself in 2–5 short options
 with a one-line "why" each. Do NOT dispatch:
 
-- NOT to `post-writer` — that agent drafts plan_item-anchored posts, not
-  profile copy or off-the-cuff suggestions.
 - NOT to `content-manager` — that agent only handles thread replies
-  from the `threads` inbox and original-post drafts via post_batch.
+  from the `threads` inbox and plan_item-anchored original-post drafts
+  via post_batch. Profile copy and off-the-cuff suggestions don't fit
+  either flow.
 - NOT to the `generating-strategy` skill — only when the founder asks
   to *rewrite* the strategic path.
 

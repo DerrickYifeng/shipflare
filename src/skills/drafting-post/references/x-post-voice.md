@@ -93,8 +93,9 @@ isn't ready.
 ## 4. Voice clusters
 
 Five voice clusters cover the stylistic range that works on X. Each cluster
-is identified by a name; the post-writer's caller can pass any of these as
-a `voice` hint to override the phase default.
+is identified by a name; the drafting-post caller (content-manager in
+post_batch mode) can pass any of these as a `voice` hint to override
+the phase default.
 
 ### Phase voice clamp (HARD — overrides caller hint)
 

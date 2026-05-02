@@ -37,16 +37,14 @@ export type BaseAgentType =
 
 /**
  * Writer + community agents layered on top of the baseline by preset.
- * `post-writer` is a single channel-aware writer — `plan_items.channel`
- * (`x` or `reddit`) decides the platform tone via the writer's reference
- * docs at draft time, so we no longer split the roster by platform.
- * `content-manager` owns the entire reply pipeline post-Phase-6 (and
- * post_batch original-post drafting from Phase J onward); it was
- * renamed from `community-manager` in Phase J.
+ * `content-manager` owns BOTH original-post drafting (`post_batch` mode,
+ * dispatched by the plan-execute-sweeper since Phase J Task 2) and the
+ * reply pipeline (`reply_sweep` mode). It was renamed from
+ * `community-manager` in Phase J. The legacy `post-writer` teammate
+ * was retired alongside the batching change since per-row drafting is
+ * no longer fired from plan-execute.
  */
-export type WriterAgentType =
-  | 'post-writer'
-  | 'content-manager';
+export type WriterAgentType = 'content-manager';
 
 /**
  * Full agent type set. Must match AGENT.md `name` under
@@ -85,19 +83,17 @@ export type ProductCategory =
 export interface DisplayNameMap {
   coordinator: string;
   'content-planner': string;
-  'post-writer': string;
   'content-manager': string;
 }
 
 /**
  * Default display names used by the provisioner and the "Meet your team"
  * onboarding card. Role labels (not personal names) so copy reads honestly —
- * "Post Writer" instead of "Jordan".
+ * "Community Manager" instead of "Jordan".
  */
 export const DEFAULT_DISPLAY_NAMES: DisplayNameMap = {
   coordinator: 'Chief of Staff',
   'content-planner': 'Head of Content',
-  'post-writer': 'Post Writer',
   'content-manager': 'Community Manager',
 };
 
@@ -126,7 +122,12 @@ export function pickPresetByCategory(
 
 /**
  * The roster for a preset. Order matters for deterministic insertion +
- * the Meet-your-team card. The 3-role baseline always comes first.
+ * the Meet-your-team card. The baseline always comes first.
+ *
+ * Phase J Task 2 retired `post-writer` from every preset — content-manager
+ * now drafts original posts in batches via the post_batch flow, so the
+ * single-channel writer is no longer needed. Default-squad is now just
+ * the baseline; consumer/dev/saas-squad layer content-manager on top.
  */
 export function getTeamCompositionForPreset(preset: TeamPreset): AgentType[] {
   const base: AgentType[] = [
@@ -135,12 +136,12 @@ export function getTeamCompositionForPreset(preset: TeamPreset): AgentType[] {
   ];
   switch (preset) {
     case 'dev-squad':
-      return [...base, 'post-writer', 'content-manager'];
+      return [...base, 'content-manager'];
     case 'saas-squad':
-      return [...base, 'post-writer', 'content-manager'];
+      return [...base, 'content-manager'];
     case 'consumer-squad':
-      return [...base, 'post-writer', 'content-manager'];
+      return [...base, 'content-manager'];
     case 'default-squad':
-      return [...base, 'post-writer'];
+      return [...base];
   }
 }

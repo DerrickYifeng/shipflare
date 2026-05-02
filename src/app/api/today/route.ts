@@ -10,8 +10,9 @@ import { buildXIntentUrl } from '@/lib/x-intent-url';
 // V3 Today feed — merges two sources:
 //
 //  1. `plan_items` in `drafted | ready_for_review | approved`. These are
-//     scheduled original posts drafted by the post-writer agent (channel
-//     comes in via plan_items.channel). The draft body lives in
+//     scheduled original posts drafted by content-manager(post_batch),
+//     dispatched once per user per sweep tick by the plan-execute-sweeper
+//     (channel comes in via plan_items.channel). The draft body lives in
 //     `plan_items.output.draft_body` (written by DraftPostTool).
 //
 //  2. `drafts` in `status='pending'` joined to `threads`. These are

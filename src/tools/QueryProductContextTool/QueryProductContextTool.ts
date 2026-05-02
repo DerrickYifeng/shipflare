@@ -1,16 +1,18 @@
 // query_product_context — read the founder's product brief
 // (name + description + valueProp) for the current (userId, productId).
 //
-// Called by: post-writer (and any other agent that needs to ground a
-// draft in the founder's product). Mirrors the `find_threads` /
-// `query_strategic_path` pattern: zero-arg, scoped to ctx, read-only.
+// Called by: content-manager (post_batch mode) and any other agent that
+// needs to ground a draft in the founder's product. Mirrors the
+// `find_threads` / `query_strategic_path` pattern: zero-arg, scoped to
+// ctx, read-only.
 //
-// This exists because the post-writer now drafts the body itself in its
-// own LLM turn (see post-writer/AGENT.md). Earlier the body was generated
-// inside `draft_post` via a sideQuery call that read the product row
-// directly. Splitting the read out of the persist tool lets the agent
-// see the same brief the rules in x-post-voice / reddit-post-voice
-// reference (product name, what it does, the value prop).
+// This exists because content-manager (and historically the
+// now-retired post-writer agent) drafts the body itself in its own LLM
+// turn. Earlier the body was generated inside `draft_post` via a
+// sideQuery call that read the product row directly. Splitting the
+// read out of the persist tool lets the agent see the same brief the
+// rules in x-post-voice / reddit-post-voice reference (product name,
+// what it does, the value prop).
 //
 // Returns `null` when the product row is missing — this should not
 // happen in practice (every authenticated user has a product) but the

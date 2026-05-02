@@ -171,8 +171,10 @@ async function findDraftIdForPlanItemAnyStatus(
 
 /**
  * Synchronously post a content_post plan_item that has no linked drafts row.
- * Legacy gap from the post-writer not creating drafts rows for original
- * posts. Bypasses the worker queue entirely.
+ * Legacy gap: content-manager(post_batch) (and the now-retired post-writer
+ * before it) only persists into `plan_items.output.draft_body`, never into
+ * the `drafts` table that backs the dispatch-approve flow. Bypasses the
+ * worker queue entirely.
  */
 async function postContentPostInline(
   planRow: OwnedRow,
@@ -222,7 +224,7 @@ async function postContentPostInline(
   // worker module — that drags the full agent/tool registry into the Next
   // App Router build, which Turbopack chokes on (twitter-text ESM interop).
   // No drafts/posts row written — content_post pre-dates the drafts
-  // .planItemId linkage and skipping is pragmatic until the post-writer
+  // .planItemId linkage and skipping is pragmatic until content-manager
   // is updated to insert drafts rows.
   const result = await postOriginalDirect(resolved.client, resolved.platform, draftText);
 

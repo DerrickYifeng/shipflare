@@ -7,10 +7,10 @@ import type { BadgeVariant } from '@/components/ui/badge';
  * color, monogram, and role code for an agent.
  *
  * The base pair (coordinator / content-planner) maps onto existing
- * `--sf-*` tokens. The writer + community pair adopts
- * iOS system hues by literal hex — they have no matching semantic token in
- * globals.css, and the plan calls out that we keep the inline hex
- * values right here rather than inventing new CSS variables.
+ * `--sf-*` tokens. The community accent adopts an iOS system hue by
+ * literal hex — there's no matching semantic token in globals.css,
+ * and the plan calls out that we keep the inline hex value right here
+ * rather than inventing a new CSS variable.
  *
  * Unknown agent types fall back to a deterministic hash-based gradient
  * so new AGENT.md entries still render reasonably.
@@ -51,15 +51,6 @@ const CONTENT: AgentAccent = {
   initial: 'P',
   colorHex: '#c67a05',
 };
-const POST_WRITER: AgentAccent = {
-  solid: '#5e5ce6',
-  soft: '#ecebfb',
-  ink: '#3f3dc0',
-  badgeVariant: 'accent',
-  code: 'POST WRITER',
-  initial: 'W',
-  colorHex: '#5e5ce6',
-};
 const COMMUNITY: AgentAccent = {
   solid: '#af52de',
   soft: '#f3e5fa',
@@ -73,10 +64,11 @@ const COMMUNITY: AgentAccent = {
 const ACCENTS: Record<string, AgentAccent> = {
   coordinator: COORDINATOR,
   'content-planner': CONTENT,
-  'post-writer': POST_WRITER,
   // Phase J renamed `community-manager` → `content-manager`. The UI
   // accent (purple "M" monogram, "COMMUNITY" code) is preserved so the
-  // teammate keeps its identity in the founder-facing roster.
+  // teammate keeps its identity in the founder-facing roster. Phase J
+  // Task 2 retired the separate `post-writer` accent — content-manager
+  // now drafts original posts in batches via post_batch as well.
   'content-manager': COMMUNITY,
 };
 

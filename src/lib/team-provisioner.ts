@@ -1,17 +1,17 @@
 // Team provisioner.
 //
-// Baseline roster: coordinator + content-planner.
-// Phase F layers category presets on top — dev_tool / saas / consumer pick
-// up a post-writer + content-manager, default-squad picks up just the
-// post-writer. The baseline stays as the floor so legacy callers of
-// `ensureTeamExists` keep working and older teams keep rendering.
-// (`post-writer` is one channel-aware writer; the platform comes in via
-// `plan_items.channel`, so we no longer split the roster by platform.
-// `content-manager` owns reply drafting end-to-end since Phase 6 of
-// the agent-cleanup migration — there is no separate reply-drafter
-// teammate. It was renamed from `community-manager` in Phase J when
-// it gained the post_batch original-post drafting flow alongside the
-// existing reply_sweep flow.)
+// Baseline roster: coordinator + content-planner. Phase F layers category
+// presets on top — dev_tool / saas / consumer pick up a content-manager,
+// default-squad stays at the baseline. The baseline stays as the floor
+// so legacy callers of `ensureTeamExists` keep working and older teams
+// keep rendering.
+//
+// `content-manager` owns BOTH the reply pipeline (`reply_sweep` mode)
+// and original-post drafting (`post_batch` mode). It was renamed from
+// `community-manager` in Phase J. The legacy `post-writer` teammate
+// was retired in Phase J Task 2 — the plan-execute-sweeper now batches
+// content_post drafts directly into a content-manager(post_batch)
+// team-run instead of firing one writer team-run per row.
 //
 // Idempotent: re-running against an existing team returns the existing ids
 // without mutating rows. The unique index on `team_members (team_id,
@@ -257,11 +257,11 @@ export async function provisionTeamForProduct(
   const basePreset = pickPresetByCategory(category);
 
   // Channel-aware adjustment: if no platform channel is connected at all,
-  // fall back to default-squad — the content-manager has no inbox to
-  // monitor. The post-writer is channel-agnostic at the agent layer
-  // (`plan_items.channel` decides which guide it consults at draft time),
-  // so we no longer split writers by platform — any of x / reddit being
-  // connected is enough to seed the full preset.
+  // fall back to default-squad — without an inbox to monitor or a
+  // platform to post to, content-manager has nothing to do. Any of
+  // x / reddit being connected is enough to seed the full preset
+  // (content-manager is channel-agnostic at the agent layer:
+  // `plan_items.channel` decides which guide it consults at draft time).
   const userChannels = await db
     .select({ platform: channels.platform })
     .from(channels)

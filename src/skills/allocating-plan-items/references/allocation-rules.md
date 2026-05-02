@@ -191,8 +191,10 @@ For every scheduled item:
   entries below; for any other kind, leave `skillName: null` and the
   dispatcher will route via (kind, channel) or manual-complete the row:
   - `content_post` → **leave `skillName: null`**. Content posts route
-    through the post-writer team-run; the agent reads `plan_items.channel`
-    (`x` or `reddit`) and consults the matching guide at draft time.
+    through the plan-execute-sweeper batch path, which dispatches one
+    `content-manager(post_batch)` team-run per user per tick; the agent
+    reads `plan_items.channel` (`x` or `reddit`) and consults the
+    matching guide at draft time.
   - `content_reply` → **leave `skillName: null`**. Reply drafting is
     owned end-to-end by the daily reply-sweep cron — it reads each
     `content_reply` row's `params.targetCount`, runs discovery-agent +
