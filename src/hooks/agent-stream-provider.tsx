@@ -54,7 +54,7 @@ let nextErrorId = 1;
 
 // SSE feed labels — duplicated from use-agent-stream to keep the provider
 // standalone. NOT agent registry names — 'review' and 'posting' map to the
-// reviewing-drafts and posting-to-platform fork-skills (post-migration
+// validating-draft and posting-to-platform fork-skills (post-migration
 // 2026-04-30). 'scout' was retired; 'discovery' is its v3 replacement.
 type AgentName = 'discovery' | 'content' | 'review' | 'posting';
 

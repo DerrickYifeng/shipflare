@@ -1,7 +1,7 @@
 /**
  * One-shot replay: take every pending draft in the database, push it
- * through the current `reviewing-drafts` (later `validating-draft`)
- * skill, and emit a JSON report of verdicts. Used to capture the
+ * through the current `validating-draft` skill, and emit a JSON
+ * report of verdicts. Used to capture the
  * pre-migration baseline (Phase A) and the post-migration outcome
  * (Phase B) for direct comparison.
  *
@@ -15,7 +15,7 @@ import { dirname } from 'node:path';
 import { db } from '@/lib/db';
 import { drafts, threads, products } from '@/lib/db/schema';
 import { runForkSkill } from '@/skills/run-fork-skill';
-import { reviewingDraftsOutputSchema } from '@/skills/reviewing-drafts/schema';
+import { reviewingDraftsOutputSchema } from '@/skills/validating-draft/schema';
 
 interface ReplayRow {
   draftId: string;
@@ -97,7 +97,7 @@ async function main(): Promise<void> {
 
     try {
       const { result, usage } = await runForkSkill(
-        'reviewing-drafts',
+        'validating-draft',
         args,
         reviewingDraftsOutputSchema,
       );

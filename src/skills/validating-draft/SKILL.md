@@ -1,5 +1,5 @@
 ---
-name: reviewing-drafts
+name: validating-draft
 description: Adversarial quality reviewer for content drafts. Receives a draft + context, runs a 6-check rubric, returns PASS/FAIL/REVISE with per-check detail.
 context: fork
 model: claude-haiku-4-5-20251001

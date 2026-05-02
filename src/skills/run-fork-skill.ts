@@ -20,7 +20,7 @@ import type { AgentResult } from '@/core/types';
  * Spawn a fork-mode skill as a one-shot subagent and return its parsed
  * structured output.
  *
- * @param skillName     Registered skill name (e.g. 'reviewing-drafts')
+ * @param skillName     Registered skill name (e.g. 'validating-draft')
  * @param args          JSON-serialized input passed to the skill — becomes both
  *                      the $ARGUMENTS substitution token in the system prompt
  *                      and the user message.
