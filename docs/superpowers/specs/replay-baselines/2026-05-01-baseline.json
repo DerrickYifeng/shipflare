@@ -1,0 +1,161 @@
+[
+  {
+    "draftId": "5a786230-09e3-4dd4-b7e8-2cd626bfcc36",
+    "threadId": "1f453923-028b-491c-be2b-8140f42f000d",
+    "platform": "reddit",
+    "community": "test",
+    "draftType": "reply",
+    "replyBody": "Test reply",
+    "verdict": "FAIL",
+    "score": 0.05,
+    "issues": [
+      "Draft is incomplete — only two words of content",
+      "No substantive information, advice, or value provided",
+      "No attempt to address the thread or provide context",
+      "Reads like a test submission, not a finished reply",
+      "Product mention is absent (ShipFlare is not mentioned at all)"
+    ]
+  },
+  {
+    "draftId": "a04ac2c8-f9cc-4251-aed5-e2e42e1a2660",
+    "threadId": "fc6893c9-3a08-47d1-aeb2-a0ebd3f3b218",
+    "platform": "x",
+    "community": "x",
+    "draftType": "reply",
+    "replyBody": "you're playing 4 roles. the one that breaks first when the product gets real traction? always marketing — it's the only one nobody told you was critical until you're scrambling.",
+    "verdict": "PASS",
+    "score": 0.78,
+    "issues": [
+      "Draft contains NO product mention despite ShipFlare being the stated product to review. Content agent flagged 'canMentionProduct: false' — this is strategically correct (OP is venting, not seeking tools) but means the reply does not function as marketing content.",
+      "Score reflects quality of peer response but not effectiveness as a marketing move. The reply builds no awareness of ShipFlare."
+    ]
+  },
+  {
+    "draftId": "9968a4c5-c924-450f-8bb5-d471c9995cb1",
+    "threadId": "44f41f8b-5f35-4c79-a170-1cea22f16afe",
+    "platform": "x",
+    "community": "x",
+    "draftType": "reply",
+    "replyBody": "week 1–8 you ship. week 9–16 you learn distribution alone. two full learning curves stacked with no energy left for the second one.",
+    "verdict": "PASS",
+    "score": 0.88,
+    "issues": []
+  },
+  {
+    "draftId": "fe365367-c688-4d2f-baf8-29e2c40c4299",
+    "threadId": "6e180e45-4d2b-4e2e-811c-f3a04efc2a89",
+    "platform": "x",
+    "community": "x",
+    "draftType": "reply",
+    "replyBody": "the context-switch cost is brutal. builder-mode and marketer-mode use different parts of your brain — switching between them 10 times a day leaves you half-finished at both.",
+    "verdict": "REVISE",
+    "score": 0.72,
+    "issues": [
+      "No bridge from pain to solution — draft validates the problem but doesn't position ShipFlare as the answer, leaving the post strategically incomplete.",
+      "Content agent flagged 'no_fit' (OP describing pain, not seeking solution) but then produced a reply anyway, creating unclear intent: is this empathy-building or product positioning?"
+    ]
+  },
+  {
+    "draftId": "f136de83-6ee0-413d-b65b-63f09741f22c",
+    "threadId": "f1f76ad8-22bb-4232-ba6e-aac34120f2df",
+    "platform": "x",
+    "community": "x",
+    "draftType": "reply",
+    "replyBody": "the insight: 3 impressions day one wasn't the problem. it was shipping without an audience lined up. visibility isn't phase 2 — it's phase 1.",
+    "verdict": "PASS",
+    "score": 0.92,
+    "issues": []
+  },
+  {
+    "draftId": "7d7e888b-984e-4e4c-949c-a2035583db58",
+    "threadId": "9d980b97-f0cd-487c-9e4a-4e36947c0dde",
+    "platform": "x",
+    "community": "x",
+    "draftType": "reply",
+    "replyBody": "distribution scales what you built. the gap between shipping and people knowing is where solos spend 6 months figuring out they lost.",
+    "verdict": "REVISE",
+    "score": 0.45,
+    "issues": [
+      "No ShipFlare mention despite the OP's problem being exactly what ShipFlare solves",
+      "Content agent flagged 'no_fit' but published anyway — misalignment between review signal and posting decision",
+      "Draft validates pain but offers no path to solution, making it community noise rather than helpful marketing"
+    ]
+  },
+  {
+    "draftId": "249f4260-2772-4195-83fd-ed5f85e7a8e2",
+    "threadId": "5c341570-0d51-4b05-9941-c9a3bc7542bf",
+    "platform": "x",
+    "community": "x",
+    "draftType": "reply",
+    "replyBody": "ship it first, then market it second — but you've already learned that's backwards. the real trap is thinking about the next app while Glitches still needs distribution help. that's the sunk-cost regret talking.",
+    "verdict": "REVISE",
+    "score": 0.62,
+    "issues": [
+      "Product is not mentioned, despite `canMentionProduct: false` being a strategic error. The OP explicitly asked for help with marketing/distribution — ShipFlare directly solves this.",
+      "The draft provides psychological reframing (good) but no actionable solution (the product itself). Incomplete value delivery.",
+      "Content agent instruction `canMentionProduct: false` appears incorrect for this use case. This is a natural fit moment, not an overstep."
+    ]
+  },
+  {
+    "draftId": "5faea65a-2635-4df4-b59b-513512289489",
+    "threadId": "7a8d4a6a-0f82-4651-9000-ea2a2b354832",
+    "platform": "x",
+    "community": "x",
+    "draftType": "reply",
+    "replyBody": "the algorithm compounds early replies. your 1st post gets 0 distribution because it's cold-start. by day 3 it's useless — the algorithm's already moved on. you're not competing against 300 posts; you're competing against the distribution tax that kills new voices.",
+    "verdict": "PASS",
+    "score": 0.92,
+    "issues": []
+  },
+  {
+    "draftId": "31aca8f5-c950-47d4-8b39-ccc83917ddbb",
+    "threadId": "f2ef978b-580c-4c8f-ad8d-58d415a93b1b",
+    "platform": "x",
+    "community": "x",
+    "draftType": "reply",
+    "replyBody": "you're naming the real thing: marketing asks you to bet on yourself before anyone else has. the product is just the excuse. that's why month 1 feels like homework.",
+    "verdict": "PASS",
+    "score": 0.92,
+    "issues": []
+  },
+  {
+    "draftId": "6581e4ec-55aa-43ac-82ec-a56619740817",
+    "threadId": "81291467-762a-4c4a-a2c8-520ba9dd27f2",
+    "platform": "x",
+    "community": "x",
+    "draftType": "reply",
+    "replyBody": "code gives you a feedback loop in 2 seconds. marketing gives you silence for 2 weeks. that's the mismatch — you're waiting for a signal that takes 14 days to show up.",
+    "verdict": "REVISE",
+    "score": 0.72,
+    "issues": [
+      "No product mention — reply does not serve marketing/awareness intent. Will be valuable to OP but invisible to ShipFlare.",
+      "Content agent's confidence (0.87) masks a strategic misalignment: this is a great *community* reply, not a great *product* reply."
+    ]
+  },
+  {
+    "draftId": "1e194e8c-dace-482f-b058-659eb1af000c",
+    "threadId": "a09d268b-fd1e-4a85-8c11-d0ffe8abfa97",
+    "platform": "x",
+    "community": "x",
+    "draftType": "reply",
+    "replyBody": "validated problem, zero audience after 3 months — that's the real failure point for most indies. it's not the product.",
+    "verdict": "PASS",
+    "score": 0.88,
+    "issues": []
+  },
+  {
+    "draftId": "9091bddb-79f7-4c6f-b42f-1ca7cb4ce88c",
+    "threadId": "58e3d8e9-8257-418e-b225-e32ec7dfca27",
+    "platform": "x",
+    "community": "x",
+    "draftType": "reply",
+    "replyBody": "the cruel part: you don't control which work gets seen. the weekend feature was better and lived in the void. the typo was nothing and made 3 people feel heard. that's the moat.",
+    "verdict": "FAIL",
+    "score": 0.52,
+    "issues": [
+      "No product mention at all — draft appears incomplete. Content agent themselves flagged 'no_fit', yet draft was submitted without ShipFlare angle.",
+      "Zero bridge to the product solution. While the insight is valuable, there's no positioning of how ShipFlare addresses the visibility problem named in the draft.",
+      "Marketing objective unmet: a community member would upvote this; ShipFlare gains no visibility or positioning from it."
+    ]
+  }
+]
