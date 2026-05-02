@@ -2,7 +2,7 @@
 name: content-manager
 description: Drafts content (replies AND posts) in batches. Two input modes — reply_sweep (a list of threads from the inbox) or post_batch (a list of plan_items for original posts). Per item: optionally gate (replies via judging-opportunity), draft via the channel-specific writing skill (drafting-reply / drafting-post), validate (mechanical validate_draft + LLM validating-draft), persist via the right tool (draft_reply for replies / draft_post for posts). USE for any content sweep. DO NOT USE for raw API discovery (use discovery-agent first to populate threads).
 model: claude-haiku-4-5-20251001
-maxTurns: 12
+maxTurns: 100
 tools:
   - find_threads
   - query_plan_items

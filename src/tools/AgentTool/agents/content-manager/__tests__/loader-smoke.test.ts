@@ -37,7 +37,10 @@ describe('content-manager loader smoke', () => {
       'StructuredOutput',
     ]);
     expect(cm.model).toBe('claude-haiku-4-5-20251001');
-    expect(cm.maxTurns).toBe(12);
+    // Phase J Day 6 raised this from 12 — batch post_batch with N items
+    // and per-item retry can exceed 12 turns; 100 is a circuit-breaker
+    // ceiling, agents should StructuredOutput long before.
+    expect(cm.maxTurns).toBe(100);
 
     // Per-agent references are gone after Phase D — gate logic lives
     // in the `judging-opportunity` skill, voice/slop logic lives in

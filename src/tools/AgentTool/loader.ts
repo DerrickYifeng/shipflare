@@ -38,7 +38,10 @@ export interface AgentDefinition {
 // file listing the dropped keys so ported AGENT.md files don't silently carry
 // CC-runtime config that has no effect.
 
-const DEFAULT_MAX_TURNS = 25;
+// Match Claude Code's FORK_AGENT.maxTurns (engine/tools/AgentTool/forkSubagent.ts:65).
+// This is a circuit breaker for runaway loops, NOT a natural-termination
+// bound — agents should hit StructuredOutput / end_turn long before this.
+const DEFAULT_MAX_TURNS = 200;
 
 const AGENT_NAME_PATTERN = /^[a-z][a-z0-9_-]*$/;
 

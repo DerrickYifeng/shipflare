@@ -33,10 +33,15 @@ export const DEFAULT_SUBAGENT_MODEL = 'claude-sonnet-4-6';
 
 /**
  * Default turn budget when an AGENT.md omits `maxTurns`. Mirrors the loader's
- * DEFAULT_MAX_TURNS (25) for a single-source-of-truth feel, but we redeclare
+ * DEFAULT_MAX_TURNS (200) for a single-source-of-truth feel, but we redeclare
  * here so spawn() is self-contained for callers that hand-build AgentDefinitions.
+ *
+ * 200 matches Claude Code's FORK_AGENT.maxTurns
+ * (engine/tools/AgentTool/forkSubagent.ts:65). This is a circuit breaker
+ * for runaway loops, not a natural-termination bound — agents should hit
+ * StructuredOutput / end_turn long before this.
  */
-export const DEFAULT_SUBAGENT_MAX_TURNS = 25;
+export const DEFAULT_SUBAGENT_MAX_TURNS = 200;
 
 /**
  * Extended ToolContext carried by subagents. `depth` enforces the spawn-depth
