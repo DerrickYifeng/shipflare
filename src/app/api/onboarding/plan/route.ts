@@ -3,26 +3,29 @@ import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { auth } from '@/lib/auth';
 import type { StrategicPath } from '@/tools/schemas';
+import { strategicPathSchema } from '@/tools/schemas';
 import { db } from '@/lib/db';
-import { products } from '@/lib/db/schema';
+import { products, strategicPaths } from '@/lib/db/schema';
 import { derivePhase } from '@/lib/launch-phase';
 import { acquireRateLimit } from '@/lib/rate-limit';
 import { recordPipelineEvent } from '@/lib/pipeline-events';
 import { createLogger, loggerForRequest } from '@/lib/logger';
-import { ensureTeamExists } from '@/lib/team-provisioner';
-import { enqueueTeamRun } from '@/lib/queue/team-run';
-import { createAutomationConversation } from '@/lib/team-conversation-helpers';
-import { subscribeToStrategicPathEvents } from '@/lib/onboarding-team-run';
+import { runForkSkill } from '@/skills/run-fork-skill';
+import {
+  generatingStrategyOutputSchema,
+  type GeneratingStrategyOutput,
+} from '@/skills/generating-strategy/schema';
+import type { StreamEvent } from '@/core/types';
 
 const baseLog = createLogger('api:onboarding:plan');
 
-// 180 second ceiling. Strategic-planner alone runs ~30–40s on a good day;
-// the ceiling is the slow-Anthropic-API fallback. Tactical-planner no
-// longer runs here — it's enqueued post-commit as a background job.
+// 180 second ceiling. The generating-strategy skill alone runs ~20–30s on a
+// good day; the ceiling is the slow-Anthropic-API fallback. Tactical-planner
+// no longer runs here — it's enqueued post-commit as a background job.
 const PLAN_TIMEOUT_MS = 180_000;
 
 // Heartbeat every 15s so intermediate proxies (Vercel/CF) don't reap the
-// connection as idle while strategic-planner is mid-turn.
+// connection as idle while the skill is mid-turn.
 const HEARTBEAT_INTERVAL_MS = 15_000;
 
 // One plan generation per 10 seconds per user. Prevents the founder
@@ -86,11 +89,18 @@ function jsonError(status: number, body: Record<string, unknown>, traceId: strin
 /**
  * POST /api/onboarding/plan
  *
- * Streams strategic-planner output over SSE. Emits exactly one terminal
- * event (`strategic_done` on success, `error` on failure) and closes. The
- * tactical-planner no longer runs here — it's enqueued post-commit from
- * `/api/onboarding/commit` as a background `tactical-generate` job so Stage 6
- * advances in ~30s instead of the previous 60–90s.
+ * Streams the strategic-path generation directly via the
+ * `generating-strategy` fork-mode skill — NO team-run row, NO coordinator
+ * agent. Skill tool events (`tool_start` / `tool_done`) are translated
+ * inline into `tool_progress` SSE frames so the UI can light up per-tool
+ * step labels (query → write → done) as the skill runs.
+ *
+ * SSE channel naming: events are emitted on the route's own response
+ * stream (per-request, not via Redis pub/sub). The route's `traceId` is
+ * the conceptual channel id — every event on this stream belongs to one
+ * onboarding plan invocation and the consumer is the same client that
+ * issued the POST. This avoids the cross-process Redis hop the previous
+ * team-run-routed implementation needed.
  *
  * Pre-stream responses (still JSON):
  *   401 — unauthorized
@@ -99,8 +109,14 @@ function jsonError(status: number, body: Record<string, unknown>, traceId: strin
  *
  * Stream (200, text/event-stream) events:
  *   data: { "type": "heartbeat" }
+ *   data: { "type": "tool_progress", "phase": "start"|"done"|"error",
+ *           "toolName": string, "toolUseId": string,
+ *           "durationMs"?: number, "errorMessage"?: string }
  *   data: { "type": "strategic_done", "path": StrategicPath }
  *   data: { "type": "error", "error": string }
+ *
+ * The existing UI consumes only `strategic_done` / `error` / `heartbeat`,
+ * so `tool_progress` is additive — current callers ignore unknown types.
  */
 export async function POST(request: NextRequest): Promise<Response> {
   const { log, traceId } = loggerForRequest(baseLog, request);
@@ -162,9 +178,6 @@ export async function POST(request: NextRequest): Promise<Response> {
   const encoder = new TextEncoder();
 
   // Lifted to outer closure so cancel() can release these on client abort.
-  // Previously the `cancel()` callback was empty and the inner
-  // runViaTeamRun generator kept consuming Redis events for up to
-  // PLAN_TIMEOUT_MS (~180s) after the client gave up.
   let closed = false;
   let heartbeat: ReturnType<typeof setInterval> | null = null;
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -207,24 +220,23 @@ export async function POST(request: NextRequest): Promise<Response> {
       };
 
       try {
-        // Phase C: team-run is the only path. When the user hasn't
-        // committed a product row yet (fresh onboarding), pass
-        // productId=null — ensureTeamExists accepts that and creates a
-        // product-less team. The commit route later binds the team
-        // to the real productId via its own upsert.
+        // When the user hasn't committed a product row yet (fresh
+        // onboarding), pass productId=null — the skill's tools tolerate
+        // a null productId for the duration of the plan call. The commit
+        // route later persists the product and binds the strategic path.
         const existingProduct = await db
           .select({ id: products.id })
           .from(products)
           .where(eq(products.userId, userId))
           .limit(1);
 
-        const path: StrategicPath = await runViaTeamRun({
+        const path: StrategicPath = await runStrategicPathSkill({
           userId,
           productId: existingProduct[0]?.id ?? null,
           body,
           currentPhase,
           abortSignal: abortController.signal,
-          onHeartbeat: () => enqueue({ type: 'heartbeat' }),
+          onToolEvent: (event) => enqueue(event as unknown as Record<string, unknown>),
         });
 
         await recordPipelineEvent({
@@ -235,12 +247,12 @@ export async function POST(request: NextRequest): Promise<Response> {
             pillars: path.contentPillars.length,
             thesisWeeks: path.thesisArc.length,
             scope: 'strategic_only',
-            runner: 'team_run',
+            runner: 'direct_skill',
           },
         });
 
         log.info(
-          `strategic plan done user=${userId} pillars=${path.contentPillars.length} runner=team_run`,
+          `strategic plan done user=${userId} pillars=${path.contentPillars.length} runner=direct_skill`,
         );
 
         cleanup({ type: 'strategic_done', path });
@@ -277,11 +289,8 @@ export async function POST(request: NextRequest): Promise<Response> {
     },
     cancel() {
       // Client aborted (tab closed, navigation, etc.). Release resources
-      // so the inner runViaTeamRun generator stops consuming Redis events
+      // so the inner skill invocation stops consuming Anthropic tokens
       // and the heartbeat timer doesn't fire on a dead controller.
-      // Aborting the AbortController is what actually terminates the
-      // for-await loop in runViaTeamRun (it checks abortSignal.aborted on
-      // each iteration and throws PlannerTimeoutError).
       if (closed) return;
       closed = true;
       if (heartbeat) clearInterval(heartbeat);
@@ -307,121 +316,208 @@ class PlannerTimeoutError extends Error {
   }
 }
 
-interface RunViaTeamRunArgs {
+/* ------------------------------------------------------------------------ */
+/* Tool-progress event shape                                                */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * Per-tool progress event surfaced on the SSE stream. Mirrors the shape
+ * the future onboarding step UI consumes — `phase` distinguishes the
+ * lifecycle moment, `toolUseId` lets the UI dedupe across reconnects.
+ *
+ * `start` lands when the skill's agent emits a `tool_use` block;
+ * `done` lands when the tool returns (with `durationMs`); `error` lands
+ * when the tool itself throws (rather than returning is_error=true,
+ * which the agent loop handles internally as a recoverable retry).
+ */
+export interface ToolProgressEvent {
+  type: 'tool_progress';
+  phase: 'start' | 'done' | 'error';
+  toolName: string;
+  toolUseId: string;
+  durationMs?: number;
+  errorMessage?: string;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Direct skill invocation                                                  */
+/* ------------------------------------------------------------------------ */
+
+interface RunStrategicPathSkillArgs {
   userId: string;
   /**
    * Null on fresh onboarding (user hasn't called /api/onboarding/commit
-   * yet). ensureTeamExists accepts null and creates a product-less team;
-   * the commit route later binds it to the real productId via upsert.
+   * yet). The skill's tools accept null productId and the commit route
+   * later binds the persisted strategic_paths row to the real productId.
    */
   productId: string | null;
   body: RequestBody;
   currentPhase: ReturnType<typeof derivePhase>;
   abortSignal: AbortSignal;
-  onHeartbeat?: () => void;
+  /** Called for every tool_progress event the route should forward to the SSE stream. */
+  onToolEvent: (event: ToolProgressEvent) => void;
 }
 
-async function runViaTeamRun(
-  args: RunViaTeamRunArgs,
+/**
+ * Translate a runAgent StreamEvent into a `tool_progress` SSE frame.
+ * Returns null for events the onboarding stream doesn't surface
+ * (turn_start / text_delta / etc.) so the route doesn't leak internal
+ * agent-loop chatter into the UI.
+ */
+function streamEventToProgress(event: StreamEvent): ToolProgressEvent | null {
+  if (event.type === 'tool_start') {
+    return {
+      type: 'tool_progress',
+      phase: 'start',
+      toolName: event.toolName,
+      toolUseId: event.toolUseId,
+    };
+  }
+  if (event.type === 'tool_done') {
+    const isError = event.result?.is_error === true;
+    return {
+      type: 'tool_progress',
+      phase: isError ? 'error' : 'done',
+      toolName: event.toolName,
+      toolUseId: event.toolUseId,
+      durationMs: event.durationMs,
+      ...(isError
+        ? {
+            errorMessage:
+              typeof event.result?.content === 'string'
+                ? event.result.content.slice(0, 500)
+                : undefined,
+          }
+        : {}),
+    };
+  }
+  return null;
+}
+
+/**
+ * Build the skill's input payload from the route request body and run
+ * the `generating-strategy` fork skill directly. Returns the persisted
+ * StrategicPath (loaded back from `strategic_paths` by `pathId` so the
+ * SSE consumer gets a canonical-from-storage payload).
+ */
+async function runStrategicPathSkill(
+  args: RunStrategicPathSkillArgs,
 ): Promise<StrategicPath> {
-  const { userId, productId, body, currentPhase, abortSignal } = args;
+  const { userId, productId, body, currentPhase, abortSignal, onToolEvent } =
+    args;
 
-  // 1) Ensure a team + base roster exists for this (userId, productId).
-  const { teamId, memberIds } = await ensureTeamExists(userId, productId);
-
-  // 2) Enqueue the team-run rooted at coordinator.
-  //
-  //    Phase F (agent-skill-tool-decomposition) deleted the
-  //    `growth-strategist` agent; the strategic-path generator is now
-  //    the `generating-strategy` fork-mode skill
-  //    (src/skills/generating-strategy/). The coordinator's onboarding
-  //    playbook dispatches the skill via the `skill` tool, the spawned
-  //    skill subagent calls `write_strategic_path`, and the existing
-  //    SSE subscriber catches the tool_call event the same way it did
-  //    when growth-strategist was the root.
-  //
-  //    Content-planner runs as a separate team_run from
-  //    /api/onboarding/commit after the founder reviews the path.
-  const milestoneNote =
-    body.recentMilestones && body.recentMilestones.length > 0
-      ? ` Recent shipping: ${body.recentMilestones.map((m) => m.title).join('; ')}.`
-      : '';
-  const launchDateNote = body.launchDate
-    ? ` Launch date: ${body.launchDate.slice(0, 10)}.`
-    : body.launchedAt
-      ? ` Launched: ${body.launchedAt.slice(0, 10)}.`
-      : '';
-  // Coordinator-rooted goal: the trigger=onboarding branch in
-  // coordinator/AGENT.md dispatches the `generating-strategy` skill via
-  // the `skill` tool. The skill's spawned subagent calls
-  // write_strategic_path; SSE subscribes to that tool_call and emits
-  // the path back to the founder.
-  //
-  // We pass `today` and `weekStart` (Monday 00:00 UTC of the ISO week
-  // containing today) so the LLM doesn't have to infer the calendar
-  // anchor — `thesisArc[0].weekStart` MUST equal this value, even when
-  // onboarding fires on a Saturday or Sunday. Anchoring to current week
-  // (vs. next Monday) means the founder sees plan items for the current
-  // week immediately rather than a 1-7 day empty window.
+  // Calendar anchor — `thesisArc[0].weekStart` MUST equal Monday 00:00 UTC
+  // of the ISO week containing today, even when onboarding fires on a
+  // weekend. Pre-computed here so the LLM doesn't have to derive it.
   const { currentWeekStart } = await import('@/lib/week-bounds');
   const now = new Date();
   const todayIso = now.toISOString().slice(0, 10);
   const week1Start = currentWeekStart(now).toISOString().slice(0, 10);
-  const goal =
-    `Write the 30-day strategic path for ${body.product.name} by ` +
-    `dispatching the generating-strategy skill (skill tool). ` +
-    `Today (UTC): ${todayIso}. ` +
-    `weekStart: ${week1Start}. ` +
-    `thesisArc[0].weekStart MUST equal ${week1Start} (Monday of the ISO ` +
-    `week containing today — NOT next Monday). Subsequent thesisArc entries ` +
-    `are consecutive Mondays after that. ` +
-    `Category: ${body.product.category}. ` +
-    `State: ${body.state}. Phase: ${currentPhase}. ` +
-    `Channels: ${body.channels.join(', ')}.` +
-    launchDateNote +
-    milestoneNote +
-    ` Pass the product + state + channels + today + weekStart to the ` +
-    `skill so it persists via write_strategic_path. Do not emit the ` +
-    `terminal StructuredOutput until the skill has finished.`;
 
-  const conversationId = await createAutomationConversation(teamId, 'onboarding');
-  const { runId } = await enqueueTeamRun({
-    teamId,
-    trigger: 'onboarding',
-    goal,
-    rootMemberId: memberIds.coordinator,
-    conversationId,
-  });
+  const skillInput = {
+    product: {
+      name: body.product.name,
+      description: body.product.description,
+      category: body.product.category,
+      valueProp: body.product.valueProp ?? null,
+      targetAudience: body.product.targetAudience ?? null,
+      keywords: body.product.keywords,
+    },
+    state: body.state,
+    currentPhase,
+    channels: body.channels,
+    launchDate: body.launchDate ?? null,
+    launchedAt: body.launchedAt ?? null,
+    recentMilestones: body.recentMilestones ?? [],
+    today: todayIso,
+    weekStart: week1Start,
+  };
 
-  // 3) Subscribe to the team's Redis channel, translate events to the
-  //    onboarding UI's event shape, and return the first strategic_done.
-  const generator = subscribeToStrategicPathEvents(teamId, runId, {
-    timeoutMs: PLAN_TIMEOUT_MS,
-  });
+  // Forward parent abort into the skill's child agent so a client cancel
+  // cascades through the runAgent loop. The deps record carries everything
+  // the skill's tools need (write_strategic_path, query_recent_milestones,
+  // query_strategic_path) plus an `onEvent` hook that runForkSkill reads
+  // off the synthesized ToolContext.
+  const aborted = (): boolean => abortSignal.aborted;
 
-  try {
-    for await (const event of generator) {
-      if (abortSignal.aborted) {
-        throw new PlannerTimeoutError();
-      }
-      if (event.type === 'heartbeat') {
-        args.onHeartbeat?.();
-        continue;
-      }
-      if (event.type === 'error') {
-        throw new Error(event.error);
-      }
-      if (event.type === 'strategic_done') {
-        return event.path;
+  const onEvent = (event: StreamEvent): void => {
+    if (aborted()) return;
+    const progress = streamEventToProgress(event);
+    if (progress) {
+      try {
+        onToolEvent(progress);
+      } catch {
+        // UI decoration only — never crash the agent loop on a stream
+        // controller hiccup.
       }
     }
-  } finally {
-    try {
-      await generator.return();
-    } catch {
-      // Generator already completed.
-    }
+  };
+
+  const deps: Record<string, unknown> = {
+    userId,
+    productId,
+    db,
+    onEvent,
+  };
+
+  // runForkSkill: when given a deps record (no parent ToolContext), it
+  // synthesizes a fresh ToolContext via createToolContext(). The skill's
+  // tools resolve `userId / productId / db / onEvent` through that ctx.
+  const skillResultPromise = runForkSkill(
+    'generating-strategy',
+    JSON.stringify(skillInput),
+    generatingStrategyOutputSchema,
+    deps,
+  );
+
+  // Race the skill against the parent abort signal so a client cancel
+  // unblocks the route immediately rather than waiting for runAgent to
+  // notice. The skill's child ctx inherits abort propagation via
+  // createChildContext when runForkSkill builds it from `ctx`.
+  const skillResult: { result: GeneratingStrategyOutput } = await Promise.race([
+    skillResultPromise,
+    new Promise<{ result: GeneratingStrategyOutput }>((_, reject) => {
+      abortSignal.addEventListener(
+        'abort',
+        () => reject(new PlannerTimeoutError()),
+        { once: true },
+      );
+    }),
+  ]);
+
+  if (skillResult.result.status !== 'completed') {
+    throw new Error(
+      `generating-strategy skill returned status=${skillResult.result.status}`,
+    );
   }
 
-  throw new Error('team-run ended without a strategic path');
+  const pathId = skillResult.result.pathId;
+  const [row] = await db
+    .select()
+    .from(strategicPaths)
+    .where(eq(strategicPaths.id, pathId))
+    .limit(1);
+  if (!row) {
+    throw new Error(`strategic_paths row not found for pathId=${pathId}`);
+  }
+
+  // Re-validate so the SSE consumer gets a typed StrategicPath (the
+  // jsonb columns mirror strategicPathSchema's shape).
+  const candidate = {
+    narrative: row.narrative,
+    milestones: row.milestones,
+    thesisArc: row.thesisArc,
+    contentPillars: row.contentPillars,
+    channelMix: row.channelMix,
+    phaseGoals: row.phaseGoals,
+  };
+  const parsed = strategicPathSchema.safeParse(candidate);
+  if (!parsed.success) {
+    throw new Error(
+      `strategic_paths row failed schema validation: ${parsed.error.issues
+        .map((i) => `${i.path.join('.')}: ${i.message}`)
+        .join('; ')}`,
+    );
+  }
+  return parsed.data;
 }

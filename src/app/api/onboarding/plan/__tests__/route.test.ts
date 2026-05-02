@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
+import type { StreamEvent } from '@/core/types';
 
 // ---------------------------------------------------------------------------
 // Shared mocks
@@ -38,25 +39,31 @@ vi.mock('@/lib/logger', () => ({
   }),
 }));
 
-// Phase C: the route always routes through team-run. The DB mock returns
-// one product row so the route passes productId to ensureTeamExists; the
-// productId=null path is exercised by changing `productRows` to [].
+// The route's product lookup runs through db.select() — return a single
+// row by default; tests flip productRows = [] to exercise the
+// fresh-onboarding (productId=null) path. The strategic_paths lookup
+// reuses the same db.select() chain (Drizzle wraps every select the same
+// way), so we route by call sequence: first call → products, second
+// call → strategic_paths. Tests that need only one call (error paths)
+// just preload one fixture.
 let productRows: Array<{ id: string }> = [{ id: 'prod-1' }];
+let strategicPathRow: Record<string, unknown> | null = null;
+let dbSelectCallCount = 0;
+
 vi.mock('@/lib/db', () => ({
   db: {
     select: () => ({
       from: () => ({
         where: () => ({
-          limit: async () => productRows,
+          limit: async () => {
+            dbSelectCallCount += 1;
+            // Heuristic: the route hits products first (call 1), then
+            // strategic_paths after the skill resolves (call 2). This
+            // matches the sequential ordering in route.ts.
+            if (dbSelectCallCount === 1) return productRows;
+            return strategicPathRow ? [strategicPathRow] : [];
+          },
         }),
-      }),
-    }),
-    // Chat refactor: onboarding route mints a fresh conversation via
-    // createAutomationConversation so the team-run has somewhere to
-    // hang messages. Mock just returns a fixed id.
-    insert: () => ({
-      values: () => ({
-        returning: () => [{ id: 'conv-onboarding-test' }],
       }),
     }),
   },
@@ -68,44 +75,62 @@ vi.mock('drizzle-orm', async () => {
   return { ...actual, eq: () => ({}) };
 });
 
-const ensureTeamExistsMock = vi.fn(
-  async (_userId: string, _productId: string | null) => ({
-    teamId: 'team-1',
-    memberIds: {
-      coordinator: 'mem-coord',
-      'content-planner': 'mem-cp',
-    },
-    created: false,
-  }),
-);
-vi.mock('@/lib/team-provisioner', () => ({
-  ensureTeamExists: (userId: string, productId: string | null) =>
-    ensureTeamExistsMock(userId, productId),
-}));
+// runForkSkill is the central seam. Tests configure its behavior via
+// `forkSkillBehavior` — fire onEvent callbacks (to test tool_progress
+// passthrough), then resolve / reject.
+type ForkSkillResult = {
+  result: { status: 'completed' | 'failed'; pathId: string; summary: string; notes: string };
+};
 
-const enqueueTeamRunMock = vi.fn(async (_input: Record<string, unknown>) => ({
-  runId: 'run-1',
-  traceId: 'trace-1',
-  alreadyRunning: false,
-}));
-vi.mock('@/lib/queue/team-run', () => ({
-  enqueueTeamRun: (input: Record<string, unknown>) => enqueueTeamRunMock(input),
-}));
+interface ForkSkillBehavior {
+  emitEvents?: StreamEvent[];
+  resolve?: ForkSkillResult;
+  reject?: Error;
+}
 
-// subscribeToStrategicPathEvents yields whatever events we push. Tests
-// seed the event queue via `pushEvent`.
-type OnboardingEvent =
-  | { type: 'heartbeat' }
-  | { type: 'error'; error: string }
-  | { type: 'strategic_done'; path: Record<string, unknown> };
-let pendingEvents: OnboardingEvent[] = [];
-vi.mock('@/lib/onboarding-team-run', () => ({
-  subscribeToStrategicPathEvents: async function* (
-    _teamId: string,
-    _runId: string,
-  ): AsyncGenerator<OnboardingEvent, void, void> {
-    for (const e of pendingEvents) yield e;
+let forkSkillBehavior: ForkSkillBehavior = {};
+
+const runForkSkillMock = vi.fn(
+  async (
+    _skillName: string,
+    _args: string,
+    _outputSchema: unknown,
+    deps: Record<string, unknown>,
+  ): Promise<ForkSkillResult> => {
+    const onEvent = deps.onEvent as
+      | ((event: StreamEvent) => void)
+      | undefined;
+    if (onEvent && forkSkillBehavior.emitEvents) {
+      for (const ev of forkSkillBehavior.emitEvents) {
+        onEvent(ev);
+      }
+    }
+    if (forkSkillBehavior.reject) throw forkSkillBehavior.reject;
+    return (
+      forkSkillBehavior.resolve ?? {
+        result: {
+          status: 'completed',
+          pathId: 'path-1',
+          summary: 's',
+          notes: 'n',
+        },
+      }
+    );
   },
+);
+vi.mock('@/skills/run-fork-skill', () => ({
+  runForkSkill: (
+    skillName: string,
+    args: string,
+    outputSchema: unknown,
+    deps: Record<string, unknown>,
+  ) => runForkSkillMock(skillName, args, outputSchema, deps),
+}));
+
+// week-bounds is dynamically imported inside the route — mock its module
+// path so the import resolves to a deterministic Monday.
+vi.mock('@/lib/week-bounds', () => ({
+  currentWeekStart: () => new Date('2026-04-27T00:00:00.000Z'),
 }));
 
 // ---------------------------------------------------------------------------
@@ -184,13 +209,21 @@ beforeEach(() => {
   allowedRL = true;
   authUserId = 'user-1';
   productRows = [{ id: 'prod-1' }];
-  pendingEvents = [];
+  strategicPathRow = {
+    narrative: validPath.narrative,
+    milestones: validPath.milestones,
+    thesisArc: validPath.thesisArc,
+    contentPillars: validPath.contentPillars,
+    channelMix: validPath.channelMix,
+    phaseGoals: validPath.phaseGoals,
+  };
+  dbSelectCallCount = 0;
+  forkSkillBehavior = {};
   recordPipelineEventMock.mockClear();
-  ensureTeamExistsMock.mockClear();
-  enqueueTeamRunMock.mockClear();
+  runForkSkillMock.mockClear();
 });
 
-describe('POST /api/onboarding/plan (SSE, team-run only)', () => {
+describe('POST /api/onboarding/plan (SSE, direct skill)', () => {
   it('returns 401 when unauthenticated (not SSE)', async () => {
     authUserId = null;
     const { POST } = await import('../route');
@@ -214,7 +247,16 @@ describe('POST /api/onboarding/plan (SSE, team-run only)', () => {
   });
 
   it('streams strategic_done on success', async () => {
-    pendingEvents = [{ type: 'strategic_done', path: validPath }];
+    forkSkillBehavior = {
+      resolve: {
+        result: {
+          status: 'completed',
+          pathId: 'path-1',
+          summary: 'all good',
+          notes: 'lean data week 1',
+        },
+      },
+    };
 
     const { POST } = await import('../route');
     const res = await POST(makeRequest(validBody));
@@ -226,16 +268,14 @@ describe('POST /api/onboarding/plan (SSE, team-run only)', () => {
     expect(terminal).toBeTruthy();
     expect(terminal?.path).toEqual(validPath);
 
-    expect(ensureTeamExistsMock).toHaveBeenCalledWith('user-1', 'prod-1');
-    expect(enqueueTeamRunMock).toHaveBeenCalledTimes(1);
-    expect(enqueueTeamRunMock.mock.calls[0]?.[0]).toMatchObject({
-      teamId: 'team-1',
-      trigger: 'onboarding',
-      // Phase F roots onboarding at coordinator; the coordinator's
-      // trigger=onboarding playbook dispatches the generating-strategy
-      // skill via the `skill` tool.
-      rootMemberId: 'mem-coord',
-    });
+    expect(runForkSkillMock).toHaveBeenCalledTimes(1);
+    const [skillName, , , deps] = runForkSkillMock.mock.calls[0]!;
+    expect(skillName).toBe('generating-strategy');
+    // deps must carry userId / productId / db / onEvent so the fork
+    // skill's tools (write_strategic_path etc.) can resolve them.
+    expect((deps as Record<string, unknown>).userId).toBe('user-1');
+    expect((deps as Record<string, unknown>).productId).toBe('prod-1');
+    expect(typeof (deps as Record<string, unknown>).onEvent).toBe('function');
 
     expect(recordPipelineEventMock).toHaveBeenCalledWith(
       expect.objectContaining({ stage: 'launch_plan_started' }),
@@ -247,18 +287,170 @@ describe('POST /api/onboarding/plan (SSE, team-run only)', () => {
 
   it('passes productId=null when no product row exists (fresh onboarding)', async () => {
     productRows = [];
-    pendingEvents = [{ type: 'strategic_done', path: validPath }];
+    forkSkillBehavior = {
+      resolve: {
+        result: {
+          status: 'completed',
+          pathId: 'path-1',
+          summary: 's',
+          notes: 'n',
+        },
+      },
+    };
 
     const { POST } = await import('../route');
     const res = await POST(makeRequest(validBody));
     expect(res.status).toBe(200);
     await readSSEEvents(res);
 
-    expect(ensureTeamExistsMock).toHaveBeenCalledWith('user-1', null);
+    const [, , , deps] = runForkSkillMock.mock.calls[0]!;
+    expect((deps as Record<string, unknown>).productId).toBeNull();
   });
 
-  it('streams error event when the team-run reports an error', async () => {
-    pendingEvents = [{ type: 'error', error: 'coordinator crashed' }];
+  it('streams tool_progress events for each tool the skill calls', async () => {
+    // Mirror what runAgent emits: a `tool_start` followed by a
+    // `tool_done` for each tool the skill invokes. The route should
+    // translate them into `tool_progress` SSE frames before the
+    // terminal `strategic_done`.
+    forkSkillBehavior = {
+      emitEvents: [
+        {
+          type: 'tool_start',
+          toolName: 'query_recent_milestones',
+          toolUseId: 'use-1',
+          input: {},
+        },
+        {
+          type: 'tool_done',
+          toolName: 'query_recent_milestones',
+          toolUseId: 'use-1',
+          result: {
+            tool_use_id: 'use-1',
+            content: '[]',
+          },
+          durationMs: 42,
+        },
+        {
+          type: 'tool_start',
+          toolName: 'write_strategic_path',
+          toolUseId: 'use-2',
+          input: {},
+        },
+        {
+          type: 'tool_done',
+          toolName: 'write_strategic_path',
+          toolUseId: 'use-2',
+          result: {
+            tool_use_id: 'use-2',
+            content: JSON.stringify({ pathId: 'path-1', persisted: true }),
+          },
+          durationMs: 117,
+        },
+      ],
+      resolve: {
+        result: {
+          status: 'completed',
+          pathId: 'path-1',
+          summary: 's',
+          notes: 'n',
+        },
+      },
+    };
+
+    const { POST } = await import('../route');
+    const res = await POST(makeRequest(validBody));
+    expect(res.status).toBe(200);
+
+    const events = await readSSEEvents(res);
+    const progressEvents = events.filter((e) => e.type === 'tool_progress');
+
+    // At least one tool_progress event lands BEFORE the terminal
+    // strategic_done — that's the acceptance criterion.
+    expect(progressEvents.length).toBeGreaterThanOrEqual(1);
+    const terminalIdx = events.findIndex((e) => e.type === 'strategic_done');
+    const firstProgressIdx = events.findIndex((e) => e.type === 'tool_progress');
+    expect(firstProgressIdx).toBeGreaterThanOrEqual(0);
+    expect(firstProgressIdx).toBeLessThan(terminalIdx);
+
+    // tool_start translates to phase=start; tool_done to phase=done.
+    expect(progressEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'tool_progress',
+          phase: 'start',
+          toolName: 'query_recent_milestones',
+          toolUseId: 'use-1',
+        }),
+        expect.objectContaining({
+          type: 'tool_progress',
+          phase: 'done',
+          toolName: 'query_recent_milestones',
+          toolUseId: 'use-1',
+          durationMs: 42,
+        }),
+        expect.objectContaining({
+          type: 'tool_progress',
+          phase: 'start',
+          toolName: 'write_strategic_path',
+          toolUseId: 'use-2',
+        }),
+        expect.objectContaining({
+          type: 'tool_progress',
+          phase: 'done',
+          toolName: 'write_strategic_path',
+          toolUseId: 'use-2',
+          durationMs: 117,
+        }),
+      ]),
+    );
+  });
+
+  it('emits tool_progress with phase=error when the agent reports an is_error tool result', async () => {
+    forkSkillBehavior = {
+      emitEvents: [
+        {
+          type: 'tool_start',
+          toolName: 'write_strategic_path',
+          toolUseId: 'use-1',
+          input: {},
+        },
+        {
+          type: 'tool_done',
+          toolName: 'write_strategic_path',
+          toolUseId: 'use-1',
+          result: {
+            tool_use_id: 'use-1',
+            content: 'thesisArc length must be >= 4',
+            is_error: true,
+          },
+          durationMs: 12,
+        },
+      ],
+      resolve: {
+        result: {
+          status: 'completed',
+          pathId: 'path-1',
+          summary: 's',
+          notes: 'n',
+        },
+      },
+    };
+
+    const { POST } = await import('../route');
+    const res = await POST(makeRequest(validBody));
+    const events = await readSSEEvents(res);
+    const errorProgress = events.find(
+      (e) => e.type === 'tool_progress' && e.phase === 'error',
+    );
+    expect(errorProgress).toBeTruthy();
+    expect(errorProgress?.toolName).toBe('write_strategic_path');
+    expect(String(errorProgress?.errorMessage)).toContain('thesisArc');
+  });
+
+  it('streams an error event when the skill rejects', async () => {
+    forkSkillBehavior = {
+      reject: new Error('skill exploded'),
+    };
     const { POST } = await import('../route');
     const res = await POST(makeRequest(validBody));
     expect(res.status).toBe(200);
@@ -266,15 +458,24 @@ describe('POST /api/onboarding/plan (SSE, team-run only)', () => {
     const events = await readSSEEvents(res);
     const terminal = events.find((e) => e.type === 'error');
     expect(terminal).toBeTruthy();
-    expect(String(terminal?.error)).toContain('coordinator crashed');
+    expect(String(terminal?.error)).toContain('skill exploded');
 
     expect(recordPipelineEventMock).toHaveBeenCalledWith(
       expect.objectContaining({ stage: 'launch_plan_failed' }),
     );
   });
 
-  it('streams error when the team-run ends without a strategic path', async () => {
-    pendingEvents = [];
+  it('streams an error when the skill reports status=failed', async () => {
+    forkSkillBehavior = {
+      resolve: {
+        result: {
+          status: 'failed',
+          pathId: '',
+          summary: '',
+          notes: '',
+        },
+      },
+    };
     const { POST } = await import('../route');
     const res = await POST(makeRequest(validBody));
     expect(res.status).toBe(200);
@@ -282,7 +483,29 @@ describe('POST /api/onboarding/plan (SSE, team-run only)', () => {
     const events = await readSSEEvents(res);
     const terminal = events.find((e) => e.type === 'error');
     expect(terminal).toBeTruthy();
-    expect(String(terminal?.error)).toContain('team-run ended without a strategic path');
+    expect(String(terminal?.error)).toContain('status=failed');
+  });
+
+  it('streams an error when the persisted strategic_paths row is missing', async () => {
+    strategicPathRow = null;
+    forkSkillBehavior = {
+      resolve: {
+        result: {
+          status: 'completed',
+          pathId: 'path-orphan',
+          summary: 's',
+          notes: 'n',
+        },
+      },
+    };
+    const { POST } = await import('../route');
+    const res = await POST(makeRequest(validBody));
+    expect(res.status).toBe(200);
+
+    const events = await readSSEEvents(res);
+    const terminal = events.find((e) => e.type === 'error');
+    expect(terminal).toBeTruthy();
+    expect(String(terminal?.error)).toContain('strategic_paths row not found');
   });
 
   it('rejects an unknown launchChannel value', async () => {
@@ -291,31 +514,5 @@ describe('POST /api/onboarding/plan (SSE, team-run only)', () => {
       makeRequest({ ...validBody, launchChannel: 'tiktok' }),
     );
     expect(res.status).toBe(400);
-  });
-
-  it('includes product category + phase + milestones in the coordinator goal', async () => {
-    pendingEvents = [{ type: 'strategic_done', path: validPath }];
-    const body = {
-      ...validBody,
-      recentMilestones: [
-        {
-          title: 'reply engine shipped',
-          summary: 'reply window tightened to 15 minutes',
-          source: 'pr',
-          atISO: '2026-04-19T21:30:00Z',
-        },
-      ],
-    };
-    const { POST } = await import('../route');
-    const res = await POST(makeRequest(body));
-    expect(res.status).toBe(200);
-    await readSSEEvents(res);
-
-    const goal = enqueueTeamRunMock.mock.calls[0]?.[0]?.goal as string;
-    expect(goal).toContain('ShipFlare');
-    expect(goal).toContain('dev_tool');
-    expect(goal).toContain('launching');
-    expect(goal).toContain('audience'); // phase derived from launchDate
-    expect(goal).toContain('reply engine shipped');
   });
 });
