@@ -36,8 +36,22 @@ interface SixStepAnimatorProps {
   realCallError?: string | null;
   /** Fires once after both animation + real call are done. */
   onComplete: () => void;
-  /** Show elapsed + cost estimate in the header. */
+  /**
+   * Show the timer line in the header. When `true` (default) the header
+   * shows "{elapsed}s". The legacy random cost field has been removed —
+   * it was decorative and not honest.
+   */
   showCost?: boolean;
+  /**
+   * Optional floor on the active step driven by real backend events
+   * (e.g. `tool_progress` SSE frames mapped through `applyToolProgress`).
+   * When provided, the animator's active step is `Math.max(internalTimer,
+   * eventActiveIndex)`. Steps strictly less than `eventActiveIndex` are
+   * marked done immediately; the timer still runs as a fallback for any
+   * gaps where no event has arrived. Pass `undefined` (default) to keep
+   * pure-timer behavior — Stage 2 scanning relies on this.
+   */
+  eventActiveIndex?: number;
 }
 
 // Pace each decorative step at ~5s so the 6-step cycle spans ~30s and
@@ -63,11 +77,17 @@ export function SixStepAnimator({
   realCallError,
   onComplete,
   showCost = true,
+  eventActiveIndex,
 }: SixStepAnimatorProps) {
-  const [active, setActive] = useState(0);
+  const [timerActive, setTimerActive] = useState(0);
   const [elapsed, setElapsed] = useState(0); // in 100ms ticks
-  const [cost, setCost] = useState(0);
   const completedRef = useRef(false);
+
+  // Real active step = max(internal timer, event-driven floor). When the
+  // caller doesn't pass `eventActiveIndex` (Stage 2 scanning), this collapses
+  // to the legacy timer-only behavior.
+  const eventFloor = eventActiveIndex ?? 0;
+  const active = Math.max(timerActive, eventFloor);
 
   // Step advancer — paces with the real backend call:
   //   - Normal: ~5s per step, so the 6-step cycle spans ~30s and matches
@@ -77,10 +97,13 @@ export function SixStepAnimator({
   //   - When the animation reaches the LAST step before the real call
   //     arrives, hold there (the ScanDot pulses) until realCallComplete
   //     so the user sees "still working" honesty instead of 6/6 done idle.
+  // The internal timer is now a FLOOR FALLBACK — when `eventActiveIndex`
+  // already advanced past `timerActive`, the visible `active` jumps ahead
+  // and the timer effect just keeps ticking in the background.
   useEffect(() => {
     if (realCallError) return;
-    if (active >= steps.length) return;
-    const isLast = active === steps.length - 1;
+    if (timerActive >= steps.length) return;
+    const isLast = timerActive === steps.length - 1;
     if (isLast && !realCallComplete) return; // hold + pulse until network catches up
     const reducedMotion = prefersReducedMotion();
     const duration = reducedMotion
@@ -89,11 +112,10 @@ export function SixStepAnimator({
         ? STEP_DURATION_FAST_MS
         : STEP_DURATION_MS + Math.random() * STEP_JITTER_MS;
     const t = setTimeout(() => {
-      setActive((a) => a + 1);
-      setCost((c) => c + 0.003 + Math.random() * 0.01);
+      setTimerActive((a) => a + 1);
     }, duration);
     return () => clearTimeout(t);
-  }, [active, steps.length, realCallError, realCallComplete]);
+  }, [timerActive, steps.length, realCallError, realCallComplete]);
 
   // Elapsed timer — ticks every 100ms for the header cost/time display.
   useEffect(() => {
@@ -155,7 +177,7 @@ export function SixStepAnimator({
         </div>
         {showCost && (
           <OnbMono color="var(--sf-fg-on-dark-4)">
-            ${cost.toFixed(3)} / {(elapsed / 10).toFixed(1)}s
+            {(elapsed / 10).toFixed(1)}s
           </OnbMono>
         )}
       </div>

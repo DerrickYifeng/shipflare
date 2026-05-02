@@ -9,6 +9,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { OnbMono } from './_shared/onb-mono';
 import { SixStepAnimator } from './_shared/six-step-animator';
+import { applyToolProgress } from './_shared/six-step-anchor';
 import { OnbButton } from './_shared/onb-button';
 import { COPY } from './_copy';
 import type { StrategicPath } from '@/tools/schemas';
@@ -60,11 +61,21 @@ interface PlanEventError {
   error: string;
 }
 
+interface PlanEventToolProgress {
+  type: 'tool_progress';
+  phase: 'start' | 'done' | 'error';
+  toolName: string;
+  toolUseId: string;
+  durationMs?: number;
+  errorMessage?: string;
+}
+
 // Tolerant shape — backend may emit progress pings, keepalives, or events we
 // don't care about. We switch on `type` and ignore anything else.
 type PlanEvent =
   | PlanEventStrategicDone
   | PlanEventError
+  | PlanEventToolProgress
   | { type: string; [key: string]: unknown };
 
 interface StagePlanBuildingProps {
@@ -94,6 +105,13 @@ export function StagePlanBuilding({
 }: StagePlanBuildingProps) {
   const [realCallComplete, setRealCallComplete] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Real-progress floor for SixStepAnimator, driven by `tool_progress`
+  // SSE events emitted by /api/onboarding/plan. The internal step timer
+  // still runs as a fallback for any gaps where no event has arrived yet
+  // (e.g. first ~1s before the skill warms up). Older backends that don't
+  // emit `tool_progress` keep working — `eventActiveIndex` stays 0 and
+  // the timer drives the UI exactly as before.
+  const [eventActiveIndex, setEventActiveIndex] = useState(0);
   const responseRef = useRef<PlanStrategicResult | null>(null);
   const stateLabel = draft.productState ?? 'launching';
 
@@ -190,9 +208,23 @@ export function StagePlanBuilding({
               const ev = parsed as PlanEventError;
               throw new Error(ev.error || 'Plan generation failed');
             }
+            if (parsed.type === 'tool_progress') {
+              const ev = parsed as PlanEventToolProgress;
+              setEventActiveIndex((prev) =>
+                applyToolProgress(prev, {
+                  toolName: ev.toolName,
+                  phase: ev.phase,
+                }),
+              );
+              continue;
+            }
             if (parsed.type === 'strategic_done') {
               const ev = parsed as PlanEventStrategicDone;
               responseRef.current = { path: ev.path, plan: null };
+              // Strategic skill is fully done — collapse any remaining
+              // steps to the terminal index immediately so the UI shows
+              // 6/6 done without waiting for the timer to catch up.
+              setEventActiveIndex(COPY.stage6.steps.length);
               setRealCallComplete(true);
               resolved = true;
               // Keep the connection open so the server can finish flushing
@@ -305,6 +337,7 @@ export function StagePlanBuilding({
         realCallComplete={realCallComplete}
         realCallError={error}
         onComplete={handleComplete}
+        eventActiveIndex={eventActiveIndex}
       />
 
       {error && (
