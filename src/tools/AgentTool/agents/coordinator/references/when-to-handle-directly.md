@@ -41,10 +41,9 @@ Use directly for:
 - "What pillars did we pick?"
 - "What's the phase goal for momentum?"
 
-Returns the active `StrategicPath` for the product (or `null` if the
-generating-strategy skill hasn't run yet). Only dispatch the skill
-(via `skill('generating-strategy', …)`) when the thesis needs to be
-*rewritten* — reading it is a direct call.
+Returns the active `StrategicPath` for the product (or `null` if no
+path has been generated yet). Only call `generate_strategic_path` when
+the thesis needs to be *rewritten* — reading it is a direct call.
 
 ## add_plan_item — "schedule one specific item"
 
@@ -144,8 +143,8 @@ with a one-line "why" each. Do NOT dispatch:
   from the `threads` inbox and plan_item-anchored original-post drafts
   via post_batch. Profile copy and off-the-cuff suggestions don't fit
   either flow.
-- NOT to the `generating-strategy` skill — only when the founder asks
-  to *rewrite* the strategic path.
+- NOT to `generate_strategic_path` — only call that tool when the
+  founder asks to *rewrite* the strategic path (or on phase transition).
 
 Trigger words like "twitter", "bio", "post", "reply", "draft" are NOT
 auto-dispatch signals. Read the actual ask: is it a question about
