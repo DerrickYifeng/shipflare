@@ -523,12 +523,19 @@ Create or extend `src/skills/validating-draft/__tests__/validating-draft.test.ts
 import { describe, it, expect } from 'vitest';
 import { validatingDraftOutputSchema } from '../schema';
 
+const sampleChecks = [
+  { name: 'relevance', result: 'PASS' as const, detail: 'addresses the OP' },
+  { name: 'value_first', result: 'PASS' as const, detail: 'concrete anchor present' },
+];
+
 describe('validating-draft output schema', () => {
   it('accepts a verdict with slopFingerprint listing matched patterns', () => {
     const valid = validatingDraftOutputSchema.parse({
       verdict: 'FAIL',
       score: 0.2,
-      checks: { relevance: 0.5, valueFirst: 0.3, tone: 0.2, authenticity: 0.1, compliance: 1.0, risk: 0.4 },
+      checks: [
+        { name: 'authenticity', result: 'FAIL' as const, detail: 'no first-person token' },
+      ],
       issues: ['diagnostic-from-above frame'],
       suggestions: ['rewrite with first-person receipt'],
       slopFingerprint: ['diagnostic_from_above', 'no_first_person', 'fortune_cookie_closer'],
@@ -544,7 +551,7 @@ describe('validating-draft output schema', () => {
     const valid = validatingDraftOutputSchema.parse({
       verdict: 'PASS',
       score: 0.9,
-      checks: { relevance: 0.9, valueFirst: 0.9, tone: 0.9, authenticity: 0.9, compliance: 1.0, risk: 0.1 },
+      checks: sampleChecks,
       issues: [],
       suggestions: [],
     });
@@ -560,7 +567,7 @@ Expected: FAIL — `slopFingerprint` is not on the schema.
 
 - [ ] **Step 3: Add the field to the schema**
 
-Read `src/skills/validating-draft/schema.ts`, then update the output schema to include:
+Read `src/skills/validating-draft/schema.ts` first. The existing schema uses an **array** form for `checks` (each entry is `{ name, result: 'PASS' | 'FAIL', detail }`). Keep that shape — the slop fix doesn't depend on restructuring the rubric. Only add the new `slopFingerprint` field and the renamed export + backwards-compat alias.
 
 ```typescript
 import { z } from 'zod';
@@ -582,15 +589,14 @@ const slopPatternId = z.enum([
 
 export const validatingDraftOutputSchema = z.object({
   verdict: z.enum(['PASS', 'FAIL', 'REVISE']),
-  score: z.number().min(0).max(1),
-  checks: z.object({
-    relevance: z.number().min(0).max(1),
-    valueFirst: z.number().min(0).max(1),
-    tone: z.number().min(0).max(1),
-    authenticity: z.number().min(0).max(1),
-    compliance: z.number().min(0).max(1),
-    risk: z.number().min(0).max(1),
-  }),
+  score: z.number(),
+  checks: z.array(
+    z.object({
+      name: z.string(),
+      result: z.enum(['PASS', 'FAIL']),
+      detail: z.string(),
+    }),
+  ),
   issues: z.array(z.string()),
   suggestions: z.array(z.string()),
   slopFingerprint: z.array(slopPatternId).default([]),
@@ -602,6 +608,8 @@ export type ValidatingDraftOutput = z.infer<typeof validatingDraftOutputSchema>;
 // renaming PR. Remove in the cleanup commit at end of Phase B.
 export const reviewingDraftsOutputSchema = validatingDraftOutputSchema;
 ```
+
+**Why preserve the array shape:** The Phase A baseline run found that the rubric's 6 checks are doing fine — it's the slop pattern detection that's missing. Restructuring `checks` from array→object would force updates across `output-format.md`, `review.ts:90`, and any UI consumer for no catch-rate gain. Defer that refactor unless a later phase needs it.
 
 - [ ] **Step 4: Run test to verify it passes**
 
