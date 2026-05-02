@@ -188,10 +188,17 @@ Ordered by reuse footprint (skills used by multiple call sites first):
   `validating-draft` skill. Regex patterns from
   `ai-slop-validator.ts` may stay here as a fast pre-filter, but the
   authoritative judgment is the skill's.
-- `DraftReplyTool` and `DraftPostTool` gain a single line that calls
-  `enqueueReview()` after successful persistence. Closes the
-  independently-found gap where the existing review skill never ran on
-  community-manager / post-writer output.
+- `DraftReplyTool` gains an `enqueueReview()` call after successful
+  persistence. Closes the gap where the existing review skill never
+  ran on community-manager output.
+- `DraftPostTool` is **not** changed in this migration. Discovered
+  during Phase A execution that posts persist to
+  `plan_items.output.draft_body` (not the `drafts` table), and the
+  review queue requires a `draftId`. Wiring posts into the review
+  pipeline is a separate architectural decision tracked as a
+  follow-up (see plan §A "Post-review-pipeline follow-up"). For
+  this migration, posts continue to rely on the `validate_draft`
+  tool's mechanical layer and skip the LLM `validating-draft` pass.
 
 ### 2.3 What does not change
 
@@ -212,10 +219,13 @@ Ordered by reuse footprint (skills used by multiple call sites first):
 Ordered for incremental verification. Each step ships independently and
 each step has a measurable verification gate.
 
-### Step 0 — Wire `enqueueReview` into draft persistence
-**Scope:** `DraftReplyTool.ts`, `DraftPostTool.ts` add one
-`enqueueReview({ userId, draftId, productId, traceId })` call after
-successful insert. The existing `engagement.ts` call site stays.
+### Step 0 — Wire `enqueueReview` into reply persistence
+**Scope:** `DraftReplyTool.ts` adds one
+`enqueueReview({ userId, draftId, productId, ...traceIdPart })` call
+after successful insert (both fresh-insert and idempotent-update
+branches). The existing `engagement.ts` call site stays. `DraftPostTool`
+is intentionally untouched — see §2.2 and the plan's "Post-review-pipeline
+follow-up" note for the architectural reason.
 
 **Verification:** Replay script reads the 12 currently-pending
 production drafts and runs them through the existing

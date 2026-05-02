@@ -241,84 +241,66 @@ git add src/tools/DraftReplyTool/DraftReplyTool.ts
 git commit -m "feat(DraftReplyTool): enqueue review after persistence on both paths"
 ```
 
-### Task A3: Test that `DraftPostTool` enqueues review on insert
+### Task A3: ~~Test that `DraftPostTool` enqueues review on insert~~ — N/A, verify-only
 
-**Files:**
-- Modify: `src/tools/DraftPostTool/__tests__/DraftPostTool.test.ts`
-- Reference: `src/tools/DraftPostTool/DraftPostTool.ts`
+**Architectural reality** (discovered during Phase A execution on 2026-05-01):
 
-- [ ] **Step 1: Read the existing test file**
+`DraftPostTool` does NOT insert into the `drafts` table. It writes to
+`plan_items.output.draft_body` and flips `plan_items.state` to
+`'drafted'` (see `src/tools/DraftPostTool/DraftPostTool.ts:130-143`).
+Only `DraftReplyTool` and `engagement.ts` ever insert rows into
+`drafts`. The schema's `drafts.draftType` enum supports
+`'original_post'`, but no code path actually writes such rows today.
 
-Run: `cat src/tools/DraftPostTool/__tests__/DraftPostTool.test.ts | head -80`
+The `reviewQueue` payload schema (`src/lib/queue/types.ts:33`)
+requires `draftId: z.string().min(1)` — there is no draftId to
+enqueue when posts only live as a JSON blob on a plan_items row.
 
-- [ ] **Step 2: Add the failing test alongside existing ones**
+So **wiring `enqueueReview` into `DraftPostTool` is not possible
+without an architectural change** (one of: making DraftPostTool
+double-write to `drafts`, relaxing `drafts.threadId NOT NULL`, or
+adding a separate review path that watches `plan_items.state`). All
+three are out of scope for Phase A.
 
-Mirror the Task A1 pattern — vi.mock `@/lib/queue` with a `enqueueReview` spy, then add tests asserting the spy is called with `{ userId, productId, draftId }` after a successful `draft_post` invocation. Cover both code paths (fresh insert vs idempotent update if the tool has one — check `DraftPostTool.ts` to confirm).
+**This task is verify-only:**
 
-- [ ] **Step 3: Run test to verify it fails**
+- [ ] **Step 1: Confirm the architectural reality**
 
-Run: `pnpm vitest run src/tools/DraftPostTool`
-Expected: FAIL — `enqueueReview` mock receives 0 calls.
+Run: `grep -rn "insert(drafts" src --include="*.ts" | grep -v __tests__`
+Expected: only `DraftReplyTool.ts` and `engagement.ts` show up.
 
-- [ ] **Step 4: Commit the failing test**
+- [ ] **Step 2: Confirm DraftPostTool's persistence target**
 
-```bash
-git add src/tools/DraftPostTool/__tests__/DraftPostTool.test.ts
-git commit -m "test(DraftPostTool): expect enqueueReview after persistence"
-```
+Run: `grep -n "update(planItems\|insert(drafts" src/tools/DraftPostTool/DraftPostTool.ts`
+Expected: only `update(planItems)` shows up.
 
-### Task A4: Implement `enqueueReview` call in `DraftPostTool`
+- [ ] **Step 3: No commit; this is a documentation task**
 
-**Files:**
-- Modify: `src/tools/DraftPostTool/DraftPostTool.ts`
+The architectural gap is documented in this plan's preamble (see "two
+corrections discovered during planning") and in the post-review-pipeline
+follow-up note below.
 
-- [ ] **Step 1: Add imports if missing**
+### Post-review-pipeline follow-up (out of scope for this plan)
 
-Ensure `enqueueReview` from `@/lib/queue` and `tryGet` from `@/tools/context-helpers` are imported.
+The `validating-draft` skill currently never runs on original-post
+output. Three design options for a follow-up phase:
 
-- [ ] **Step 2: Compute productId + traceIdPart once at the top of execute()**
+1. **Double-write** — DraftPostTool inserts a `drafts` row with
+   `draftType='original_post'` AND updates `plan_items.output`. Needs
+   `drafts.threadId NOT NULL` relaxed (or a synthetic threadId pinned
+   to the plan_item id).
+2. **Separate review path** — new worker watches `plan_items.state =
+   'drafted'`, runs `validating-draft`, persists results to a new
+   `plan_items.review_json` column. Requires migration.
+3. **Pre-persist review** — post-writer agent calls `validating-draft`
+   skill itself before invoking `draft_post`. Cleanest from the
+   skill-decomposition standpoint but reintroduces the "agent does
+   write+review in same session" risk that drafting/validating fork
+   separation was supposed to fix.
 
-Same omit-key spread pattern as Task A2 — see Task A2 Step 1.5 for the rationale (Zod `.string().min(1).optional()` rejects empty strings; the spread either includes the field or omits it). Add right after the existing `readDomainDeps` line:
-
-```typescript
-const { productId } = readDomainDeps(ctx);
-const ctxTraceId = tryGet<string>(ctx, 'traceId');
-const traceIdPart =
-  typeof ctxTraceId === 'string' && ctxTraceId.length > 0
-    ? { traceId: ctxTraceId }
-    : {};
-```
-
-- [ ] **Step 3: Wire enqueueReview after the persistence step**
-
-After `draft_post` writes to the `drafts` table (or to `plan_items.output`, depending on the tool's contract — check `DraftPostTool.ts` to find the precise line), call:
-
-```typescript
-await enqueueReview({
-  userId,
-  productId,
-  draftId,
-  ...traceIdPart,
-});
-```
-
-If `DraftPostTool` only writes a `plan_items.output` field rather than a `drafts` row, add a no-op skip with a one-line comment explaining why review isn't applicable to that path; otherwise wire it the same as Task A2.
-
-- [ ] **Step 4: Run test to verify it passes**
-
-Run: `pnpm vitest run src/tools/DraftPostTool`
-Expected: PASS.
-
-- [ ] **Step 5: Type-check**
-
-Run: `pnpm tsc --noEmit`
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add src/tools/DraftPostTool/DraftPostTool.ts
-git commit -m "feat(DraftPostTool): enqueue review after persistence"
-```
+This decision should be brainstormed separately. For now, posts go
+through `validate_draft` (mechanical) but skip the LLM `validating-draft`
+review pass.
 
 ### Task A5: Write the replay script
 
@@ -477,7 +459,7 @@ git add docs/superpowers/specs/replay-baselines/2026-05-01-baseline.json
 git commit -m "docs(baselines): capture pre-Phase-B validating-draft baseline"
 ```
 
-**Phase A verification gate:** `git log --oneline | head -6` shows commits A1–A6, the new pending drafts in production now receive a review verdict (smoke test by spawning a community-manager run), and `docs/superpowers/specs/replay-baselines/2026-05-01-baseline.json` records the pre-migration verdict distribution.
+**Phase A verification gate:** Reply drafts persisted via `DraftReplyTool` now enqueue a review job (verified by smoke-testing a community-manager run and seeing the new draft's `review_verdict` populate within ~30s of insertion); `docs/superpowers/specs/replay-baselines/2026-05-01-baseline.json` records the pre-Phase-B verdict distribution; the post-review-pipeline gap is documented as a follow-up (post-writer output skips the LLM review pass for now and continues to rely on the `validate_draft` mechanical layer).
 
 ---
 
