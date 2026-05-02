@@ -53,7 +53,8 @@ Return EXACTLY this structure:
     }
   ],
   "issues": ["Product mention in first sentence — move after helpful content"],
-  "suggestions": ["Add a specific example before mentioning the product"]
+  "suggestions": ["Add a specific example before mentioning the product"],
+  "slopFingerprint": []
 }
 ```
 
@@ -67,3 +68,26 @@ Return EXACTLY this structure:
 - **checks** (required, array): ALL 6 checks must be included, each with `name`, `result` ("PASS" or "FAIL"), and `detail`
 - **issues** (required, array of strings): Specific problems found (empty array if none)
 - **suggestions** (required, array of strings): Actionable improvement suggestions (empty array if none)
+- **slopFingerprint** (required, array of slop pattern IDs): see below
+
+## slopFingerprint
+
+Array of slop pattern IDs (see `slop-rules`) that matched this draft.
+Empty when no patterns matched. The IDs are a closed enum:
+
+- `diagnostic_from_above`
+- `no_first_person`
+- `fortune_cookie_closer`
+- `colon_aphorism_opener`
+- `naked_number_unsourced`
+- `em_dash_overuse`
+- `binary_not_x_its_y`
+- `preamble_opener`
+- `banned_vocabulary`
+- `triple_grouping`
+- `negation_cadence`
+- `engagement_bait_filler`
+
+Always include this field, even when empty. Telemetry downstream
+(per-user voice tuning, weekly retro) reads this field to track
+which patterns the drafter falls into.
