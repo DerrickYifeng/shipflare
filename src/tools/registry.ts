@@ -12,6 +12,7 @@ import { xGetMentionsTool } from './XGetMentionsTool/XGetMentionsTool';
 // Registering them here makes them discoverable by AGENT.md `tools: [...]`
 // allowlists via the central registry.
 import { writeStrategicPathTool } from './WriteStrategicPathTool/WriteStrategicPathTool';
+import { generateStrategicPathTool } from './GenerateStrategicPathTool/GenerateStrategicPathTool';
 import { queryStrategicPathTool } from './QueryStrategicPathTool/QueryStrategicPathTool';
 import { addPlanItemTool } from './AddPlanItemTool/AddPlanItemTool';
 import { updatePlanItemTool } from './UpdatePlanItemTool/UpdatePlanItemTool';
@@ -56,6 +57,7 @@ registry.register(xGetMentionsTool);
 // read + write scoped DB state only — so they register inline here.
 // ---------------------------------------------------------------------------
 registry.register(writeStrategicPathTool);
+registry.register(generateStrategicPathTool);
 registry.register(queryStrategicPathTool);
 registry.register(addPlanItemTool);
 registry.register(updatePlanItemTool);
