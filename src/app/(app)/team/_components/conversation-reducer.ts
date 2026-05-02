@@ -450,8 +450,30 @@ export function stitchLeadMessages(
     if (bucket) bucket.push(msg);
     else progressByParentToolUse.set(parentToolUseId, [msg]);
   }
+  // Two signals routes a message into a subagent's delegation card
+  // instead of the top-level thread:
+  //   1. `parentToolUseId` — the canonical anchor stamped by the Task
+  //      tool's spawnMeta wrapping. Always present in well-behaved spawns.
+  //   2. `agentName` — defensive backstop. Subagents (and only subagents)
+  //      get `agentName` written to their message metadata via spawnMeta;
+  //      coordinator never has it set. If `parentToolUseId` is missing
+  //      for any reason (worker race, legacy row, future regression),
+  //      `agentName` keeps the routing correct.
+  //
+  // Without #2, subagent text whose parentToolUseId failed to land would
+  // bubble up as a LeadNode and the UI's `node.fromMemberId ?? coordinatorId`
+  // fallback (conversation.tsx:256) would render it as the coordinator's
+  // avatar — which is exactly the "Chief of Staff SYNTHESIS pasting JSON"
+  // mis-attribution observed in production traces 2026-05-02.
+  const hasSubagentName = (metadata: Record<string, unknown> | null): boolean => {
+    const name = readString(metadata, 'agentName');
+    return (
+      typeof name === 'string' && name.length > 0 && name !== 'coordinator'
+    );
+  };
   const belongsToSubagent = (msg: TeamActivityMessage): boolean =>
-    extractParentToolUseId(msg.metadata) !== null;
+    extractParentToolUseId(msg.metadata) !== null ||
+    hasSubagentName(msg.metadata);
   const nodes: ConversationNode[] = [];
   let currentLead: LeadNode | null = null;
   let currentLeadTime = 0;
