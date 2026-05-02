@@ -72,7 +72,16 @@ export const draftReplyTool: ToolDefinition<DraftReplyInput, DraftReplyResult> =
     isReadOnly: false,
     async execute(input, ctx): Promise<DraftReplyResult> {
       const { db, userId, productId } = readDomainDeps(ctx);
-      const traceId = tryGet<string>(ctx, 'traceId') ?? '';
+      // `reviewJobSchema.traceId` is `.string().min(1).optional()` and the
+      // `withEnvelope` helper mints a fresh UUID only when the field is
+      // absent / undefined. Passing an empty string would fail Zod's
+      // min(1) check at enqueue time, so we OMIT the key when no traceId
+      // is present in the tool context rather than substituting `''`.
+      const ctxTraceId = tryGet<string>(ctx, 'traceId');
+      const traceIdPart =
+        typeof ctxTraceId === 'string' && ctxTraceId.length > 0
+          ? { traceId: ctxTraceId }
+          : {};
 
       // If the caller passed a URL (scout / coordinator sometimes do),
       // strip it to the trailing path segment so we match externalId.
@@ -147,7 +156,7 @@ export const draftReplyTool: ToolDefinition<DraftReplyInput, DraftReplyResult> =
           userId,
           productId,
           draftId: existingId,
-          traceId,
+          ...traceIdPart,
         });
         return {
           draftId: existingId,
@@ -176,7 +185,7 @@ export const draftReplyTool: ToolDefinition<DraftReplyInput, DraftReplyResult> =
         userId,
         productId,
         draftId,
-        traceId,
+        ...traceIdPart,
       });
 
       return {

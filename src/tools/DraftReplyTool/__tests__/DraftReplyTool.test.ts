@@ -257,6 +257,14 @@ describe('draft_reply enqueueReview wire-up', () => {
         draftId: result.draftId,
       }),
     );
+    // Regression guard: when no traceId is in ctx, the tool must NOT
+    // pass `traceId: ''` (or any other falsy non-undefined value) — the
+    // review job schema treats traceId as `.min(1).optional()` and
+    // `withEnvelope` mints a UUID only when the field is undefined.
+    // Passing an empty string would throw a Zod `too_small` error.
+    const callArg = (enqueueReview as unknown as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0] as Record<string, unknown>;
+    expect(callArg).not.toHaveProperty('traceId');
   });
 
   it('enqueues review on the idempotent update path too', async () => {
@@ -289,6 +297,35 @@ describe('draft_reply enqueueReview wire-up', () => {
         userId: 'user-1',
         productId: 'prod-1',
         draftId: 'existing-draft',
+      }),
+    );
+    // Same regression guard on the idempotent update path.
+    const callArg = (enqueueReview as unknown as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0] as Record<string, unknown>;
+    expect(callArg).not.toHaveProperty('traceId');
+  });
+
+  it('forwards traceId to enqueueReview when one is in the tool context', async () => {
+    const ctx = makeCtx(store, {
+      userId: 'user-1',
+      productId: 'prod-1',
+      traceId: 'trace-xyz',
+    });
+
+    await draftReplyTool.execute(
+      {
+        threadId: 't-1',
+        draftBody: 'reply with trace context',
+        confidence: 0.8,
+      },
+      ctx,
+    );
+
+    expect(enqueueReview).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'user-1',
+        productId: 'prod-1',
+        traceId: 'trace-xyz',
       }),
     );
   });
