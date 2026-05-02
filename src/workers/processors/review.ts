@@ -87,7 +87,12 @@ export async function processReview(job: Job<ReviewJobData>) {
     const updateData: Record<string, unknown> = {
       reviewVerdict: result.verdict,
       reviewScore: result.score,
-      reviewJson: { checks: result.checks, issues: result.issues, suggestions: result.suggestions },
+      reviewJson: {
+        checks: result.checks,
+        issues: result.issues,
+        suggestions: result.suggestions,
+        slopFingerprint: result.slopFingerprint ?? [],
+      },
       updatedAt: new Date(),
     };
 
