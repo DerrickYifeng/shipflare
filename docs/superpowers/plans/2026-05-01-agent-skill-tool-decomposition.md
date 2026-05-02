@@ -11,7 +11,7 @@
 **Spec:** `docs/superpowers/specs/2026-05-01-agent-skill-tool-decomposition-design.md`. Two corrections discovered during planning:
 
 1. The DraftReplyTool / DraftPostTool already pull `productId` via `readDomainDeps(ctx)` — no schema change needed for the enqueueReview wire-up.
-2. `traceId` is not exposed on the standard `ToolContext`; the wire-up uses `tryGet<string>(ctx, 'traceId') ?? ''` (the `ReviewJobData` schema tolerates empty strings, see `src/lib/queue/types.ts:17`).
+2. `traceId` is not exposed on the standard `ToolContext`; the wire-up uses an omit-key spread pattern. `reviewJobSchema.traceId` is `z.string().min(1).optional()` (see `src/lib/queue/types.ts:21`) — it rejects empty strings at runtime. The wire-up reads `tryGet<string>(ctx, 'traceId')` and spreads `{ traceId } | {}` based on whether the value is a non-empty string. `withEnvelope` then mints a UUID via its `?? randomUUID()` fallback when the key is absent. Discovered when Phase A Task 1's first review caught a `?? ''` bug; resolved at commit `c3a6353`.
 
 ---
 
@@ -123,6 +123,21 @@ import { tryGet, readDomainDeps } from '@/tools/context-helpers';
 
 (Replace the existing single-import line for `readDomainDeps` with the combined form.)
 
+- [ ] **Step 1.5: Compute productId + traceIdPart once at the top of execute()**
+
+Just after the existing `const { db, userId } = readDomainDeps(ctx);` line, add:
+
+```typescript
+const { productId } = readDomainDeps(ctx);
+const ctxTraceId = tryGet<string>(ctx, 'traceId');
+const traceIdPart =
+  typeof ctxTraceId === 'string' && ctxTraceId.length > 0
+    ? { traceId: ctxTraceId }
+    : {};
+```
+
+**Why omit-key spread, not `?? ''` or `?? undefined`:** `reviewJobSchema.traceId` is `z.string().min(1).optional()` (see `src/lib/queue/types.ts:21`). An empty string fails `.min(1)` at runtime. `undefined` passes `.optional()` but leaves the field present-but-undefined which is awkward to assert in tests. The spread `...traceIdPart` either includes a non-empty string or omits the key entirely — matching Zod `.optional()` semantics exactly. `withEnvelope` then mints a UUID via its `?? randomUUID()` fallback when the key is absent.
+
 - [ ] **Step 2: Wire enqueueReview after the insert path (line ~165)**
 
 Change the bottom of `execute()` from:
@@ -166,12 +181,11 @@ to:
         engagementDepth: 0,
       });
 
-      const { productId } = readDomainDeps(ctx);
       await enqueueReview({
         userId,
         productId,
         draftId,
-        traceId: tryGet<string>(ctx, 'traceId') ?? '',
+        ...traceIdPart,
       });
 
       return {
@@ -196,12 +210,11 @@ Change the early-return inside the `if (existingPending.length > 0)` block from:
 to:
 
 ```typescript
-        const { productId } = readDomainDeps(ctx);
         await enqueueReview({
           userId,
           productId,
           draftId: existingId,
-          traceId: tryGet<string>(ctx, 'traceId') ?? '',
+          ...traceIdPart,
         });
 
         return {
@@ -263,7 +276,20 @@ git commit -m "test(DraftPostTool): expect enqueueReview after persistence"
 
 Ensure `enqueueReview` from `@/lib/queue` and `tryGet` from `@/tools/context-helpers` are imported.
 
-- [ ] **Step 2: Wire enqueueReview after the persistence step**
+- [ ] **Step 2: Compute productId + traceIdPart once at the top of execute()**
+
+Same omit-key spread pattern as Task A2 — see Task A2 Step 1.5 for the rationale (Zod `.string().min(1).optional()` rejects empty strings; the spread either includes the field or omits it). Add right after the existing `readDomainDeps` line:
+
+```typescript
+const { productId } = readDomainDeps(ctx);
+const ctxTraceId = tryGet<string>(ctx, 'traceId');
+const traceIdPart =
+  typeof ctxTraceId === 'string' && ctxTraceId.length > 0
+    ? { traceId: ctxTraceId }
+    : {};
+```
+
+- [ ] **Step 3: Wire enqueueReview after the persistence step**
 
 After `draft_post` writes to the `drafts` table (or to `plan_items.output`, depending on the tool's contract — check `DraftPostTool.ts` to find the precise line), call:
 
@@ -272,22 +298,22 @@ await enqueueReview({
   userId,
   productId,
   draftId,
-  traceId: tryGet<string>(ctx, 'traceId') ?? '',
+  ...traceIdPart,
 });
 ```
 
 If `DraftPostTool` only writes a `plan_items.output` field rather than a `drafts` row, add a no-op skip with a one-line comment explaining why review isn't applicable to that path; otherwise wire it the same as Task A2.
 
-- [ ] **Step 3: Run test to verify it passes**
+- [ ] **Step 4: Run test to verify it passes**
 
 Run: `pnpm vitest run src/tools/DraftPostTool`
 Expected: PASS.
 
-- [ ] **Step 4: Type-check**
+- [ ] **Step 5: Type-check**
 
 Run: `pnpm tsc --noEmit`
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add src/tools/DraftPostTool/DraftPostTool.ts
