@@ -1,8 +1,8 @@
-// Structural tests for the X content guide. The post-writer relies on
-// six phase subsections (one per LaunchPhase value), five named voice
-// clusters, and three named steady-phase sub-modes. These tests catch
-// accidental section deletion / typos that would silently mismatch the
-// AGENT.md vocabulary.
+// Structural tests for the X post-voice guide. The drafting-post skill
+// relies on six phase subsections (one per LaunchPhase value), five
+// named voice clusters, and three named steady-phase sub-modes. These
+// tests catch accidental section deletion / typos that would silently
+// mismatch the SKILL.md vocabulary.
 
 import { describe, it, expect, beforeAll } from 'vitest';
 import * as fs from 'node:fs/promises';
@@ -10,7 +10,7 @@ import * as path from 'node:path';
 
 const GUIDE_PATH = path.resolve(
   process.cwd(),
-  'src/tools/AgentTool/agents/post-writer/references/x-content-guide.md',
+  'src/skills/drafting-post/references/x-post-voice.md',
 );
 
 const PHASES = [
@@ -36,7 +36,7 @@ const STEADY_SUBMODES = [
   'sunset',
 ] as const;
 
-describe('x-content-guide.md structural integrity', () => {
+describe('x-post-voice.md structural integrity', () => {
   let guide: string;
   beforeAll(async () => {
     guide = await fs.readFile(GUIDE_PATH, 'utf-8');
