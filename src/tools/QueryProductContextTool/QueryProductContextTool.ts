@@ -9,7 +9,7 @@
 // own LLM turn (see post-writer/AGENT.md). Earlier the body was generated
 // inside `draft_post` via a sideQuery call that read the product row
 // directly. Splitting the read out of the persist tool lets the agent
-// see the same brief the rules in x-content-guide / reddit-content-guide
+// see the same brief the rules in x-post-voice / reddit-post-voice
 // reference (product name, what it does, the value prop).
 //
 // Returns `null` when the product row is missing — this should not

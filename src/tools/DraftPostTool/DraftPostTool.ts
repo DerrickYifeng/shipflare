@@ -3,9 +3,10 @@
 // `plan_items` row.
 //
 // This used to call `sideQuery` itself with an inline X / Reddit system
-// prompt. That meant the platform reference docs (x-content-guide,
-// reddit-content-guide, content-safety) lived on the post-writer agent
-// but never reached the actual body generator — `sideQuery` ran in its
+// prompt. That meant the platform reference docs (x-post-voice,
+// reddit-post-voice, content-safety — now under the drafting-post
+// skill) lived on the post-writer agent but never reached the actual
+// body generator — `sideQuery` ran in its
 // own isolated turn with only the short inline prompt. The result was
 // posts that ignored content-type rules, hashtag style, voice, etc.
 // We now mirror the reply flow: the agent owns drafting + self-checking

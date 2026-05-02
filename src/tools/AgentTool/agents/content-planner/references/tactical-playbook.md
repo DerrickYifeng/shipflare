@@ -152,7 +152,7 @@ meta-take pose. A `hot_take` from a 100-follower account reads as
 posturing; a `behind_the_scenes` from the same account reads as
 build-in-public. Symptoms downstream — `the real X is Y`,
 `winners do X`, `most solo devs Y` — are banned in
-`x-content-guide.md` hard rule §2.1.5, but it's cheaper to not
+`x-post-voice.md` hard rule §2.1.5, but it's cheaper to not
 schedule the slot than to repair the draft after.
 
 If the founder explicitly requests more, still emit only one

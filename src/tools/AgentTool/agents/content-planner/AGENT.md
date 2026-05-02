@@ -118,8 +118,8 @@ handles both X and Reddit — `plan_items.channel` rides through to
 
 | plan_item.channel | Writer subagent_type | What the writer reads |
 |---|---|---|
-| `x`               | `post-writer`        | x-content-guide section          |
-| `reddit`          | `post-writer`        | reddit-content-guide section     |
+| `x`               | `post-writer`        | drafting-post skill (x-post-voice) |
+| `reddit`          | `post-writer`        | drafting-post skill (reddit-post-voice) |
 | `email` / `none`  | skip — no writer yet, plan-execute drafts later |        |
 
 Emit one `Task` call per eligible plan_item, in ONE response so the
