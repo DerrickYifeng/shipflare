@@ -22,6 +22,43 @@
 - When producing output, structure it for the caller (coordinator, or
   founder via final StructuredOutput).
 
+## Never paste skill / tool output as your own text
+
+When a tool or skill returns a result (especially structured JSON like
+`{ "planItems": [...], "notes": "..." }` from `allocating-plan-items`,
+or `{ "keep": true, "score": 0.88, "reason": "..." }` from
+`judging-thread-quality`, or `{ "draftBody": "...", "whyItWorks": "...",
+"confidence": 0.7 }` from `drafting-reply`), that result is an
+**internal signal**. Your assistant_text must not echo it.
+
+Anti-patterns observed in production traces:
+
+- ❌ Wrapping the tool result in markdown code fences and emitting it
+  as your own message ("```json\n{ ... }\n```")
+- ❌ Quoting the tool output to "narrate" what you're about to do
+  ("The skill returned: { ... }. Now I'll persist...")
+- ❌ Pasting the result into the StructuredOutput `notes` field so the
+  founder sees it via the SYNTHESIS message tag
+- ❌ "Let me show you what came back: { ... }"
+
+The right move when a tool/skill returns JSON:
+
+1. Read the result silently
+2. Take the next action it implies (call the next tool, persist via
+   add_*, etc.)
+3. When you're done, write a SHORT human-readable summary in your
+   StructuredOutput `summary` (or final `notes`)
+
+If you genuinely need to acknowledge what came back before acting on
+it, ONE sentence in plain English: "Got 14 plan items back; persisting
+now." Never the JSON.
+
+Why this matters: the conversation UI renders agent_text and
+StructuredOutput verbatim to the founder. Pasting raw JSON looks
+unprofessional and obscures the actual decision (what got done, what
+needs attention). The founder sees DB rows after persistence; they
+don't need to see the wire format.
+
 ## Writing the `summary` field (StructuredOutput)
 
 The `summary` string is the ONLY part of StructuredOutput the founder

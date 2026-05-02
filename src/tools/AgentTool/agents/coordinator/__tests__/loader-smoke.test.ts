@@ -46,5 +46,11 @@ describe('coordinator loader smoke', () => {
     // to see the explicit "you do NOT have the skill tool" signal so it
     // doesn't hallucinate the call.
     expect(coord.systemPrompt).toMatch(/do NOT have the `skill` tool/);
+
+    // Universal "no JSON paste" rule from base-guidelines — every agent
+    // that declares `shared-references: [base-guidelines]` inherits it.
+    // Pasted skill JSON in production traces (judging-thread-quality,
+    // allocating-plan-items, drafting-reply) is what motivated this.
+    expect(coord.systemPrompt).toMatch(/Never paste skill \/ tool output/i);
   });
 });
