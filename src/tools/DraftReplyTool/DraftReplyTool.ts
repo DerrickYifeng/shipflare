@@ -15,7 +15,8 @@ import { and, eq, or } from 'drizzle-orm';
 import { buildTool } from '@/core/tool-system';
 import type { ToolDefinition } from '@/core/types';
 import { drafts, threads } from '@/lib/db/schema';
-import { readDomainDeps } from '@/tools/context-helpers';
+import { enqueueReview } from '@/lib/queue';
+import { readDomainDeps, tryGet } from '@/tools/context-helpers';
 
 export const DRAFT_REPLY_TOOL_NAME = 'draft_reply';
 
@@ -70,7 +71,8 @@ export const draftReplyTool: ToolDefinition<DraftReplyInput, DraftReplyResult> =
     isConcurrencySafe: true,
     isReadOnly: false,
     async execute(input, ctx): Promise<DraftReplyResult> {
-      const { db, userId } = readDomainDeps(ctx);
+      const { db, userId, productId } = readDomainDeps(ctx);
+      const traceId = tryGet<string>(ctx, 'traceId') ?? '';
 
       // If the caller passed a URL (scout / coordinator sometimes do),
       // strip it to the trailing path segment so we match externalId.
@@ -141,6 +143,12 @@ export const draftReplyTool: ToolDefinition<DraftReplyInput, DraftReplyResult> =
             updatedAt: new Date(),
           })
           .where(eq(drafts.id, existingId));
+        await enqueueReview({
+          userId,
+          productId,
+          draftId: existingId,
+          traceId,
+        });
         return {
           draftId: existingId,
           threadId: thread.id,
@@ -162,6 +170,13 @@ export const draftReplyTool: ToolDefinition<DraftReplyInput, DraftReplyResult> =
         whyItWorks: input.whyItWorks ?? null,
         planItemId: input.planItemId ?? null,
         engagementDepth: 0,
+      });
+
+      await enqueueReview({
+        userId,
+        productId,
+        draftId,
+        traceId,
       });
 
       return {
