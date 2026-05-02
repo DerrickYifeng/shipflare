@@ -57,14 +57,6 @@ vi.mock('@/lib/db', () => ({
         }),
       }),
     }),
-    // Chat refactor: plan-execute mints a conversation for its writer
-    // team-run via createAutomationConversation. The mock returns a
-    // fixed id so enqueueTeamRun gets a valid conversationId.
-    insert: () => ({
-      values: () => ({
-        returning: () => [{ id: 'conv-plan-execute-test' }],
-      }),
-    }),
     update: () => ({
       set: (patch: Partial<Row>) => ({
         where: (cond: { id?: string }) => {
@@ -94,36 +86,15 @@ vi.mock('drizzle-orm', async () => {
   };
 });
 
-// Phase E Day 3: writer-agent enqueue path mocks. content_post + x/reddit
-// enqueues a team-run via ensureTeamExists + enqueueTeamRun. The writer's
-// draft_post tool owns the state flip; the processor returns without
-// touching state after a successful enqueue.
-const ensureTeamExistsMock = vi.fn(
-  async (_userId: string, _productId: string | null) => ({
-    teamId: 'team-1',
-    memberIds: {
-      coordinator: 'mem-coord',
-      'content-planner': 'mem-cp',
-    },
-    created: false,
-  }),
-);
-vi.mock('@/lib/team-provisioner', () => ({
-  ensureTeamExists: (userId: string, productId: string | null) =>
-    ensureTeamExistsMock(userId, productId),
-}));
-
-const enqueueTeamRunMock = vi.fn(async (_input: Record<string, unknown>) => ({
-  runId: 'run-pe-1',
-  traceId: 'trace-pe-1',
-  alreadyRunning: false,
-}));
-vi.mock('@/lib/queue/team-run', () => ({
-  enqueueTeamRun: (input: Record<string, unknown>) => enqueueTeamRunMock(input),
-}));
-
 // ---------------------------------------------------------------------------
 // Approve-loaders + dispatcher mocks for the execute phase dispatcher path.
+//
+// Phase J Task 2 deleted the writer-team-run enqueue path from
+// plan-execute (content_post drafts are now batched by the
+// plan-execute-sweeper into a single content-manager(post_batch)
+// team-run per user). The processor no longer imports `ensureTeamExists`
+// / `enqueueTeamRun` / `createAutomationConversation`, so those mocks
+// are gone too.
 // ---------------------------------------------------------------------------
 
 // Default: no linked draft. Individual tests override via mockResolvedValueOnce.
@@ -174,8 +145,6 @@ function makeJob(data: PlanExecuteJobData): Job<PlanExecuteJobData> {
 
 beforeEach(() => {
   rows.clear();
-  ensureTeamExistsMock.mockClear();
-  enqueueTeamRunMock.mockClear();
   findDraftIdForPlanItemMock.mockClear();
   loadDispatchInputForDraftMock.mockClear();
   dispatchApproveMock.mockClear();
@@ -186,7 +155,7 @@ beforeEach(() => {
 });
 
 describe('processPlanExecute — draft phase', () => {
-  it('enqueues a writer team-run for content_post + x, leaves state planned', async () => {
+  it('treats content_post + x draft as a no-op (sweeper owns the dispatch)', async () => {
     const { processPlanExecute } = await import('../plan-execute');
     seedItem({
       id: 'item-1',
@@ -200,28 +169,15 @@ describe('processPlanExecute — draft phase', () => {
       makeJob({ schemaVersion: 1, planItemId: 'item-1', userId: 'u-1', phase: 'draft' }),
     );
 
-    // Phase E Day 3: the processor enqueues a team-run; the writer's
-    // draft_post tool owns the state flip (planned → drafted) after
-    // the team-run completes. The processor itself does not touch
-    // state here.
+    // Phase J Task 2: content_post drafts are batched by the
+    // plan-execute-sweeper, NOT fired per-row from plan-execute.
+    // A residual draft job that still lands here is a silent no-op —
+    // the row stays in `planned` and the sweeper picks it up next
+    // tick (or the row was already claimed and is in `drafting`).
     expect(rows.get('item-1')!.state).toBe('planned');
-    expect(ensureTeamExistsMock).toHaveBeenCalledWith('u-1', 'p-1');
-    expect(enqueueTeamRunMock).toHaveBeenCalledTimes(1);
-    const call = enqueueTeamRunMock.mock.calls[0]?.[0] as {
-      teamId: string;
-      trigger: string;
-      rootMemberId: string;
-      goal: string;
-    };
-    expect(call.teamId).toBe('team-1');
-    expect(call.trigger).toBe('draft_post');
-    expect(call.rootMemberId).toBe('mem-coord');
-    expect(call.goal).toContain('post-writer');
-    expect(call.goal).toContain('channel=x');
-    expect(call.goal).toContain('item-1');
   });
 
-  it('enqueues a writer team-run for content_post + reddit', async () => {
+  it('treats content_post + reddit draft as a no-op (sweeper owns the dispatch)', async () => {
     const { processPlanExecute } = await import('../plan-execute');
     seedItem({
       id: 'item-r',
@@ -236,35 +192,35 @@ describe('processPlanExecute — draft phase', () => {
     );
 
     expect(rows.get('item-r')!.state).toBe('planned');
-    expect(enqueueTeamRunMock).toHaveBeenCalledTimes(1);
-    const call = enqueueTeamRunMock.mock.calls[0]?.[0] as { goal: string };
-    expect(call.goal).toContain('post-writer');
-    expect(call.goal).toContain('channel=reddit');
   });
 
-  it('no-ops when row is no longer in planned state', async () => {
+  it('leaves a content_post row in `drafting` untouched (sweeper-claimed)', async () => {
     const { processPlanExecute } = await import('../plan-execute');
+    // The sweeper flipped this row planned → drafting and dispatched a
+    // batch; if a stale per-row plan-execute draft job arrives now,
+    // the processor must NOT advance state — `draft_post` is the only
+    // path to `drafted`.
     seedItem({
-      id: 'item-2',
+      id: 'item-claimed',
       kind: 'content_post',
       channel: 'x',
       userAction: 'approve',
-      state: 'superseded',
+      state: 'drafting',
     });
 
     await processPlanExecute(
-      makeJob({ schemaVersion: 1, planItemId: 'item-2', userId: 'u-1', phase: 'draft' }),
+      makeJob({ schemaVersion: 1, planItemId: 'item-claimed', userId: 'u-1', phase: 'draft' }),
     );
 
-    expect(rows.get('item-2')!.state).toBe('superseded');
+    expect(rows.get('item-claimed')!.state).toBe('drafting');
   });
 
   it('marks row as failed when the dispatch route is missing (content_reply + reddit has no wired route)', async () => {
     const { processPlanExecute } = await import('../plan-execute');
-    // The writer-agent branch only activates on phase='draft' +
-    // content_post. content_reply + reddit has neither writer route
-    // nor a legacy dispatch entry (only content_reply + x is wired),
-    // so the processor falls through to the "no route" failure path.
+    // content_reply + reddit has no dispatch entry (only content_reply
+    // + x is wired), so the processor falls through to the "no route"
+    // failure path. content_post is short-circuited above, so this
+    // path covers the legacy dispatch table only.
     seedItem({
       id: 'item-3',
       kind: 'content_reply',
@@ -366,17 +322,18 @@ describe('processPlanExecute — integration: full SM walk', () => {
       state: 'planned',
     });
 
-    // Step 2: draft phase — processor enqueues the writer team-run;
-    // the writer's draft_post tool UPDATEs state → 'drafted' when it
-    // finishes. Here we simulate that DB update directly.
+    // Step 2: draft phase — Phase J Task 2: plan-execute is a no-op
+    // for content_post (sweeper batches it). Simulate the
+    // plan-execute-sweeper claim (planned → drafting) and the
+    // content-manager(post_batch) team-run completing draft_post
+    // (drafting → drafted) directly.
     await processPlanExecute(
       makeJob({ schemaVersion: 1, planItemId: 'item-sm', userId: 'u-1', phase: 'draft' }),
     );
-    expect(enqueueTeamRunMock).toHaveBeenCalled();
     expect(rows.get('item-sm')!.state).toBe('planned');
-    // Simulate the writer's draft_post tool completing and flipping state.
-    const afterEnqueue = rows.get('item-sm')!;
-    rows.set('item-sm', { ...afterEnqueue, state: 'drafted' });
+    // Simulate sweeper claim → content-manager → draft_post.
+    rows.set('item-sm', { ...rows.get('item-sm')!, state: 'drafting' });
+    rows.set('item-sm', { ...rows.get('item-sm')!, state: 'drafted' });
 
     // Step 3: draft-review passes — Phase 8's API or a chained
     // processor moves drafted → ready_for_review

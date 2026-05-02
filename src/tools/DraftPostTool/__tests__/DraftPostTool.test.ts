@@ -1,12 +1,13 @@
 /**
  * draft_post unit tests.
  *
- * After the post-writer refactor, draft_post is a thin persist tool:
- * the agent drafts + validates the body in its own LLM turns and hands
- * the final string to this tool, which verifies ownership / kind /
- * channel and writes the row. Tests cover the happy path (writes
- * draft_body + channel, transitions to 'drafted', merges prior output
- * keys), guard rails (ownership, kind, channel), and schema validation.
+ * After the writer-agent refactor (now content-manager(post_batch),
+ * formerly post-writer), draft_post is a thin persist tool: the agent
+ * drafts + validates the body in its own LLM turns and hands the final
+ * string to this tool, which verifies ownership / kind / channel and
+ * writes the row. Tests cover the happy path (writes draft_body +
+ * channel, transitions to 'drafted', merges prior output keys), guard
+ * rails (ownership, kind, channel), and schema validation.
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { ToolContext } from '@/core/types';

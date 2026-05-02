@@ -54,14 +54,15 @@ describe('content-manager loader smoke', () => {
     expect(cm.systemPrompt).toContain('## base-guidelines');
   });
 
-  it('loads cleanly alongside the other writer/community agents', async () => {
+  it('loads cleanly alongside the other registered agents', async () => {
     const agents = await loadAgentsDir(AGENTS_ROOT);
     const names = agents.map((a) => a.name).sort();
-    // The unified post-writer + content-manager pair (community-manager
-    // was renamed in Phase J).
-    expect(names).toContain('post-writer');
+    // content-manager (renamed from community-manager in Phase J).
     expect(names).toContain('content-manager');
     expect(names).not.toContain('community-manager');
+    // post-writer was retired in Phase J Task 2 — content-manager
+    // handles original posts via post_batch mode now.
+    expect(names).not.toContain('post-writer');
     // And the baseline planner agents. (`growth-strategist` was
     // converted to the `generating-strategy` fork-mode skill in Phase F
     // and is no longer loaded from src/tools/AgentTool/agents/.)

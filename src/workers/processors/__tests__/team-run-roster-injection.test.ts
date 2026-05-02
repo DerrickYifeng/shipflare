@@ -275,9 +275,11 @@ describe('processTeamRun — Task roster injection', () => {
 
     // Every agent present on disk (registered via AGENT.md) should
     // appear in the injected roster. discovery-agent is the canonical
-    // discovery specialist — assert it by name.
+    // discovery specialist — assert it by name. (Phase J Task 2
+    // retired post-writer; content-manager handles original posts in
+    // post_batch mode now.)
     expect(taskTool?.description).toContain('- discovery-agent:');
-    expect(taskTool?.description).toContain('- post-writer:');
     expect(taskTool?.description).toContain('- content-manager:');
+    expect(taskTool?.description).not.toContain('- post-writer:');
   });
 });

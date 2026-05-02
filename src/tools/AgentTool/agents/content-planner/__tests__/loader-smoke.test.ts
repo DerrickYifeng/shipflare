@@ -22,6 +22,9 @@ describe('content-planner loader smoke', () => {
     if (!planner) return;
 
     expect(planner.model).toBe('claude-sonnet-4-6');
+    // Phase J Task 2 dropped `Task` from the allowlist — drafting is
+    // batched downstream by the plan-execute-sweeper, so the planner
+    // no longer fans out to writers.
     expect(planner.tools).toEqual([
       'add_plan_item',
       'update_plan_item',
@@ -31,7 +34,6 @@ describe('content-planner loader smoke', () => {
       'query_strategic_path',
       'query_recent_x_posts',
       'skill',
-      'Task',
       'SendMessage',
       'StructuredOutput',
     ]);

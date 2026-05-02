@@ -215,7 +215,7 @@ describe('GET /api/today', () => {
         title: 'Ship post A',
         description: null,
         createdAt: now,
-        output: { draft_body: 'Hello world — drafted by post-writer', channel: 'x' },
+        output: { draft_body: 'Hello world — drafted by content-manager', channel: 'x' },
       },
     ];
     statsRow = {
@@ -249,7 +249,7 @@ describe('GET /api/today', () => {
     expect(body.items[0].platform).toBe('x');
     expect(body.items[0].calendarContentType).toBe('content_post');
     // The core regression: draft_body must surface from plan_items.output.
-    expect(body.items[0].draftBody).toBe('Hello world — drafted by post-writer');
+    expect(body.items[0].draftBody).toBe('Hello world — drafted by content-manager');
     expect(body.items[0].draftType).toBe('original_post');
     expect(body.stats.pending_count).toBe(1);
   });
