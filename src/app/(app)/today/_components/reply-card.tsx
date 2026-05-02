@@ -93,17 +93,22 @@ function EngagementBadge({
   reposts,
   replies,
   views,
+  postedLabel,
+  postedPrefix,
 }: {
   likes: number | null;
   reposts: number | null;
   replies: number | null;
   views: number | null;
+  postedLabel?: string | null;
+  postedPrefix?: string;
 }) {
   const parts: string[] = [];
   if (likes != null) parts.push(`${formatCount(likes)} likes`);
   if (reposts != null) parts.push(`${formatCount(reposts)} reposts`);
   if (replies != null) parts.push(`${formatCount(replies)} replies`);
   if (views != null) parts.push(`${formatCount(views)} views`);
+  if (postedLabel) parts.push(`${postedPrefix ?? ''}${postedLabel}`);
   if (parts.length === 0) return null;
   return (
     <div
@@ -402,37 +407,10 @@ export function ReplyCard({
             reposts={item.threadRepostsCount}
             replies={item.threadRepliesCount}
             views={item.threadViewsCount}
+            postedLabel={postedLabel}
+            postedPrefix={postedPrefix}
           />
           <ReposterChips handles={item.threadSurfacedVia} />
-          {/* Exposure / engagement row — sits inside the clickable block
-              so "comments" and "discovered time" share the same nav affordance
-              (click anywhere on this zone → open original post). */}
-          <div
-            style={{
-              marginTop: 10,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              fontSize: 'var(--sf-text-xs)',
-              color: 'var(--sf-fg-3)',
-              letterSpacing: 'var(--sf-track-normal)',
-              flexWrap: 'wrap',
-            }}
-          >
-            {item.threadCommentCount != null && (
-              <span style={{ whiteSpace: 'nowrap' }}>
-                💬 {item.threadCommentCount}
-                {item.platform === 'x' ? ' replies' : ' comments'}
-              </span>
-            )}
-            {item.threadCommentCount != null && postedLabel && <Dot />}
-            {postedLabel && (
-              <span style={{ whiteSpace: 'nowrap' }}>
-                {postedPrefix}
-                {postedLabel}
-              </span>
-            )}
-          </div>
         </ThreadContentLink>
       ) : null}
 
