@@ -149,6 +149,73 @@ Add `skill` to the agent's `AGENT.md` `tools:` list. Optionally declare
 agent's initial conversation (useful for agents that always need the
 same playbook).
 
+## Primitive Boundaries — Tool / Skill / Agent
+
+ShipFlare's multi-agent system has three primitives. The boundary
+between them is enforced by the rules below — code review should
+reject violations. Full rationale and the agent-by-agent migration
+plan live in `docs/superpowers/specs/2026-05-01-agent-skill-tool-decomposition-design.md`.
+
+### Decision rule
+
+When adding new functionality, answer two questions:
+
+1. **Does this require LLM judgment?**
+   - No → **Tool** (deterministic function, regex, DB write, API
+     call, or thin LLM wrapper that carries no business rules).
+2. **Does this require cross-turn decisions, branching based on
+   prior turns, SendMessage, or spawning sub-agents?**
+   - No → **Skill** (single fork call, rules in markdown references).
+   - Yes → **Agent** (multi-turn loop, orchestration only).
+
+A multi-turn agent is justified only when the loop itself is the
+work — conversational refinement, goal decomposition, cross-channel
+allocation with feedback signals. "A 12-turn agent that writes one
+artifact" is a skill in agent clothing; convert it.
+
+### Hard rules
+
+1. **AGENT.md contains no embedded business rules.** No banned
+   vocabulary lists, voice descriptions, slop pattern enumerations,
+   or "the real X is Y is forbidden" prose. AGENT.md answers
+   "*how do I orchestrate?*", not "*what is good content?*". All
+   rules live in `src/skills/<name>/references/*.md` or as regex in
+   tools.
+
+2. **Each rule has exactly one owner.** A given pattern lives in
+   exactly one place — one skill reference, or one tool's regex.
+   Cross-references between docs are fine; copies are not. Before
+   adding a rule, grep for prior art and extend the existing owner.
+
+3. **Drafting and validating run in different fork calls.** The
+   skill that drafts content does not produce the final pass/fail
+   verdict on that same content. The orchestrating agent (or the
+   review worker for post-persistence) invokes a separate
+   `validating-*` skill in a fresh fork. REVISE retry loops belong
+   to the agent, not the drafting skill.
+
+### Per-artifact cost ceiling
+
+Counted in fork-skill calls; the orchestrating agent's own loop
+turns are amortized across artifacts in a sweep.
+
+- **Default: 3 fork-skill calls** (judging + drafting + validating).
+  The judging skill may short-circuit "skip"; the per-artifact cost
+  collapses to 1 in that case.
+- **Max with one REVISE retry: 5 fork-skill calls.**
+- Pipelines without a gating skill (e.g. `drafting-post` for an
+  already-allocated plan_item) use 2 default / 4 with REVISE.
+- More retries are not allowed; tighten the drafting skill's rules
+  instead.
+
+Sweeps that produce multiple artifacts multiply per artifact.
+
+### When in doubt, default to skill
+
+If you are considering adding a new agent: first ask whether 1
+existing agent + 1-2 new skills could express the same work. The
+default answer is yes.
+
 ## Security TODO
 
 Tracking pending security hardening beyond what `feat/security-hardening` already shipped.
