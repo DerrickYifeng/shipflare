@@ -12,7 +12,7 @@ import type { ZodType } from 'zod';
 import { createToolContext } from '@/bridge/agent-runner';
 import { getAllSkills } from '@/tools/SkillTool/registry';
 import { DEFAULT_SKILL_FORK_MAX_TURNS } from '@/tools/SkillTool/constants';
-import { spawnSubagent } from '@/tools/AgentTool/spawn';
+import { spawnSubagent, type SpawnCallbacks } from '@/tools/AgentTool/spawn';
 import type { AgentDefinition } from '@/tools/AgentTool/loader';
 import type { AgentResult, ToolContext } from '@/core/types';
 
@@ -85,5 +85,21 @@ export async function runForkSkill<T = unknown>(
     sourcePath: skill.sourcePath ?? `<bundled:${skill.name}>`,
   };
 
-  return spawnSubagent<T>(def, args, ctx, undefined, outputSchema);
+  // Forward the parent's onEvent (if provided via ToolContext) to the
+  // fork so the skill's tool_start / tool_done events surface back to
+  // the caller. Mirrors the SkillTool fork branch (SkillTool.ts:106) so
+  // direct skill invocations from a route or worker can subscribe to
+  // per-tool progress without going through team-run pub/sub.
+  let onEventFn: SpawnCallbacks['onEvent'] | undefined;
+  try {
+    const fromCtx = ctx.get<SpawnCallbacks['onEvent'] | null>('onEvent');
+    if (typeof fromCtx === 'function') onEventFn = fromCtx;
+  } catch {
+    onEventFn = undefined;
+  }
+  const callbacks: SpawnCallbacks | undefined = onEventFn
+    ? { onEvent: onEventFn }
+    : undefined;
+
+  return spawnSubagent<T>(def, args, ctx, callbacks, outputSchema);
 }
