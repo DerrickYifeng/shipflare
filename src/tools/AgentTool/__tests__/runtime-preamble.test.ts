@@ -54,6 +54,7 @@ describe('buildAgentConfigFromDefinition', () => {
     name: 'content-planner',
     description: 'plans stuff',
     tools: [],
+    disallowedTools: [],
     skills: [],
     model: 'claude-haiku-4-5-20251001',
     maxTurns: 20,

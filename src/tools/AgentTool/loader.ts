@@ -19,6 +19,7 @@ export interface AgentDefinition {
   name: string;
   description: string;
   tools: string[];
+  disallowedTools: string[];   // restored Phase A — see Agent Teams spec §5
   skills: string[];
   model?: string;
   maxTurns: number;
@@ -58,6 +59,7 @@ const frontmatterSchema = z
       .string({ required_error: 'description is required' })
       .min(1, 'description cannot be empty'),
     tools: z.array(z.string()).optional(),
+    disallowedTools: z.array(z.string()).optional(),
     skills: z.array(z.string()).optional(),
     model: z.string().min(1).optional(),
     maxTurns: z.number().int().positive().optional(),
@@ -80,7 +82,7 @@ const DROPPED_FIELDS = [
   'omitClaudeMd',
   'requiredMcpServers',
   'background',
-  'disallowedTools',
+  // disallowedTools restored Phase A — see Agent Teams spec §5
   'effort',
 ] as const;
 
@@ -430,6 +432,7 @@ export async function loadAgent(
     name: parsed.name,
     description: parsed.description,
     tools: parsed.tools ?? [],
+    disallowedTools: parsed.disallowedTools ?? [],
     skills: parsed.skills ?? [],
     ...(parsed.model !== undefined ? { model: parsed.model } : {}),
     maxTurns: parsed.maxTurns ?? DEFAULT_MAX_TURNS,

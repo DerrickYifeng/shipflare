@@ -78,6 +78,7 @@ export async function runForkSkill<T = unknown>(
     name: `skill_${skill.name}`,
     description: skill.description,
     tools: skill.allowedTools,
+    disallowedTools: [],
     skills: [],
     model: skill.model,
     maxTurns: skill.maxTurns ?? DEFAULT_SKILL_FORK_MAX_TURNS,
