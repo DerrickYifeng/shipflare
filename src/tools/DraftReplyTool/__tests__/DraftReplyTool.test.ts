@@ -23,9 +23,13 @@ vi.mock('@/lib/logger', () => ({
     error: () => {},
   }),
 }));
+vi.mock('@/lib/queue', () => ({
+  enqueueReview: vi.fn(async () => undefined),
+}));
 
 import { draftReplyTool } from '../DraftReplyTool';
 import { drafts, threads } from '@/lib/db/schema';
+import { enqueueReview } from '@/lib/queue';
 
 interface ThreadRow {
   id: string;
@@ -60,6 +64,7 @@ function makeCtx(
 
 let store: InMemoryStore;
 beforeEach(() => {
+  vi.clearAllMocks();
   store = createInMemoryStore();
   store.register<ThreadRow>(threads, [
     { id: 't-1', userId: 'user-1', platform: 'x' },
@@ -228,5 +233,63 @@ describe('draftReplyTool', () => {
     const fresh = rows.find((r) => r.status === 'pending')!;
     expect(posted.replyBody).toBe('shipped already');
     expect(fresh.replyBody).toBe('a fresh draft for the same thread');
+  });
+});
+
+describe('draft_reply enqueueReview wire-up', () => {
+  it('enqueues a review job after a fresh insert', async () => {
+    const ctx = makeCtx(store, { userId: 'user-1', productId: 'prod-1' });
+
+    const result = await draftReplyTool.execute(
+      {
+        threadId: 't-1',
+        draftBody: 'a real first-person reply with concrete anchor.',
+        confidence: 0.8,
+      },
+      ctx,
+    );
+
+    expect(enqueueReview).toHaveBeenCalledTimes(1);
+    expect(enqueueReview).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'user-1',
+        productId: 'prod-1',
+        draftId: result.draftId,
+      }),
+    );
+  });
+
+  it('enqueues review on the idempotent update path too', async () => {
+    store.register<DraftRow>(drafts, [
+      {
+        id: 'existing-draft',
+        userId: 'user-1',
+        threadId: 't-1',
+        status: 'pending',
+        draftType: 'reply',
+        replyBody: 'old body',
+        confidenceScore: 0.5,
+        whyItWorks: null,
+        engagementDepth: 0,
+      },
+    ]);
+    const ctx = makeCtx(store, { userId: 'user-1', productId: 'prod-1' });
+
+    await draftReplyTool.execute(
+      {
+        threadId: 't-1',
+        draftBody: 'updated body still needs review',
+        confidence: 0.75,
+      },
+      ctx,
+    );
+
+    expect(enqueueReview).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'user-1',
+        productId: 'prod-1',
+        draftId: 'existing-draft',
+      }),
+    );
   });
 });
