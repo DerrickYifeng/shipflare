@@ -1,7 +1,6 @@
-// Smoke test: the post-writer AGENT.md (+ references) loads via the
-// canonical loader path with both platform guides + content-safety
-// inlined. This protects the cleanup phase that merged x-writer +
-// reddit-writer into a single channel-aware writer.
+// Smoke test: the post-writer AGENT.md loads via the canonical loader
+// path. Phase E thinned the agent to orchestration only — drafting
+// logic + voice references moved to the `drafting-post` skill.
 
 import { describe, it, expect } from 'vitest';
 import * as path from 'node:path';
@@ -13,7 +12,7 @@ const AGENTS_ROOT = path.resolve(
 );
 
 describe('post-writer loader smoke', () => {
-  it('loads post-writer with X + Reddit + safety references inlined', async () => {
+  it('loads post-writer with the orchestration tool list', async () => {
     const agents = await loadAgentsDir(AGENTS_ROOT);
     const names = agents.map((a) => a.name).sort();
     expect(names).toContain('post-writer');
@@ -22,31 +21,29 @@ describe('post-writer loader smoke', () => {
     expect(writer).toBeDefined();
     if (!writer) return;
 
+    // Thinned tool list — no SendMessage; `skill` replaces inline drafting.
     expect(writer.tools).toEqual([
       'query_plan_items',
       'query_product_context',
+      'skill',
       'validate_draft',
       'draft_post',
-      'SendMessage',
       'StructuredOutput',
     ]);
     expect(writer.model).toBe('claude-sonnet-4-6');
-    // Bumped from 4 → 12 when we moved drafting + self-check into the
-    // agent's own LLM turns (was: draft_post called sideQuery internally
-    // and the agent only wrapped one tool call). Mirrors community-manager
-    // (16) which runs the same draft → validate → repair → persist loop
-    // for replies.
-    expect(writer.maxTurns).toBe(12);
+    // Bumped down from 12 → 6 because the agent only orchestrates now;
+    // drafting itself happens in the forked drafting-post skill.
+    expect(writer.maxTurns).toBe(6);
 
-    // Both platform guides inlined under the loader's "## <name>" header.
-    expect(writer.systemPrompt).toContain('## x-content-guide');
-    expect(writer.systemPrompt).toContain('≤ 280 weighted chars');
-    expect(writer.systemPrompt).toContain('## reddit-content-guide');
-    expect(writer.systemPrompt).toContain('Target: 150–600 words');
-    expect(writer.systemPrompt).toContain('## content-safety');
-    expect(writer.systemPrompt).toContain(
-      'Numeric claims require a real citation',
-    );
+    // No inlined references — voice + safety guides moved to the
+    // drafting-post skill where they belong.
+    expect(writer.systemPrompt).not.toContain('## x-content-guide');
+    expect(writer.systemPrompt).not.toContain('## reddit-content-guide');
+    expect(writer.systemPrompt).not.toContain('## content-safety');
+
+    // The orchestration prompt mentions the skill name explicitly so
+    // the agent knows what to invoke.
+    expect(writer.systemPrompt).toContain('drafting-post');
   });
 
   it('the legacy x-writer + reddit-writer agents are gone', async () => {
