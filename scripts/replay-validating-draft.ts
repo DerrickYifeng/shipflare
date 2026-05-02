@@ -10,7 +10,8 @@
  */
 import 'dotenv/config';
 import { eq } from 'drizzle-orm';
-import { writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { db } from '@/lib/db';
 import { drafts, threads, products } from '@/lib/db/schema';
 import { runForkSkill } from '@/skills/run-fork-skill';
@@ -31,6 +32,10 @@ interface ReplayRow {
 const LIMIT = Number(
   process.argv.find((a) => a.startsWith('--limit='))?.split('=')[1] ?? '50',
 );
+if (!Number.isFinite(LIMIT) || LIMIT < 1) {
+  console.error('--limit must be a positive integer');
+  process.exit(1);
+}
 const OUT =
   process.argv.find((a) => a.startsWith('--out='))?.split('=')[1] ??
   `replay-${new Date().toISOString().slice(0, 10)}.json`;
@@ -67,7 +72,11 @@ async function main(): Promise<void> {
 
     // For the baseline run we don't have productId on the draft —
     // pull from the user's first product as a best-effort.
-    const [product] = await db.select().from(products).limit(1);
+    const [product] = await db
+      .select()
+      .from(products)
+      .where(eq(products.userId, row.userId))
+      .limit(1);
     if (!product) continue;
 
     const args = JSON.stringify({
@@ -118,6 +127,7 @@ async function main(): Promise<void> {
     }
   }
 
+  mkdirSync(dirname(OUT), { recursive: true });
   writeFileSync(OUT, JSON.stringify(out, null, 2));
   console.log(`\nWrote ${out.length} verdicts to ${OUT}`);
   console.log(
