@@ -36,13 +36,14 @@ describe('community-manager AGENT.md (post-Phase-C)', () => {
     expect(cm.systemPrompt).not.toContain('## reply-quality-bar');
   });
 
-  it('keeps reply-gates as a reference', async () => {
+  it('drops gate-related reference docs (now in judging-opportunity skill)', async () => {
     const cm = await loadCommunityManager();
-    expect(cm.systemPrompt).toContain('## reply-gates');
+    expect(cm.systemPrompt).not.toContain('## reply-gates');
+    expect(cm.systemPrompt).not.toContain('## opportunity-judgment');
   });
 
-  it('keeps opportunity-judgment as a reference (Phase D will move it)', async () => {
+  it('directs the agent to call judging-opportunity', async () => {
     const cm = await loadCommunityManager();
-    expect(cm.systemPrompt).toContain('## opportunity-judgment');
+    expect(cm.systemPrompt).toContain('judging-opportunity');
   });
 });

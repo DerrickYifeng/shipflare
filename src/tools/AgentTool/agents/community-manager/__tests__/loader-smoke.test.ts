@@ -33,14 +33,16 @@ describe('community-manager loader smoke', () => {
     expect(cm.model).toBe('claude-haiku-4-5-20251001');
     expect(cm.maxTurns).toBe(12);
 
-    // Per-agent references inlined under "## <name>" headers.
-    expect(cm.systemPrompt).toContain('## reply-gates');
-    expect(cm.systemPrompt).toContain('## opportunity-judgment');
-    expect(cm.systemPrompt).toContain('three-gate');
-
-    // Voice / slop reference docs are gone — they live in the skills now.
+    // Per-agent references are gone after Phase D — gate logic lives
+    // in the `judging-opportunity` skill, voice/slop logic lives in
+    // the `drafting-reply` / `validating-draft` skills.
+    expect(cm.systemPrompt).not.toContain('## reply-gates');
+    expect(cm.systemPrompt).not.toContain('## opportunity-judgment');
     expect(cm.systemPrompt).not.toContain('## engagement-playbook');
     expect(cm.systemPrompt).not.toContain('## reply-quality-bar');
+
+    // The agent now orchestrates the judging-opportunity skill instead.
+    expect(cm.systemPrompt).toContain('judging-opportunity');
 
     // Shared reference (base-guidelines) also inlined.
     expect(cm.systemPrompt).toContain('## base-guidelines');
