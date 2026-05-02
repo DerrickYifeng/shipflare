@@ -47,10 +47,12 @@ describe('coordinator loader smoke', () => {
     // doesn't hallucinate the call.
     expect(coord.systemPrompt).toMatch(/do NOT have the `skill` tool/);
 
-    // Universal "no JSON paste" rule from base-guidelines — every agent
-    // that declares `shared-references: [base-guidelines]` inherits it.
-    // Pasted skill JSON in production traces (judging-thread-quality,
-    // allocating-plan-items, drafting-reply) is what motivated this.
-    expect(coord.systemPrompt).toMatch(/Never paste skill \/ tool output/i);
+    // Universal "tool results are internal" rule from base-guidelines —
+    // every agent that declares `shared-references: [base-guidelines]`
+    // inherits it. Production traces showed agents pasting raw skill
+    // JSON output as their own assistant_text; this rule names it as
+    // a documented failure pattern.
+    expect(coord.systemPrompt).toMatch(/Tool results are internal/i);
+    expect(coord.systemPrompt).toMatch(/documented failure pattern/i);
   });
 });
