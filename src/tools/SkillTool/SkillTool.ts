@@ -13,7 +13,7 @@ import { z } from 'zod';
 import { buildTool } from '@/core/tool-system';
 import type { ToolDefinition } from '@/core/types';
 import { createLogger } from '@/lib/logger';
-import { spawnSubagent } from '@/tools/AgentTool/spawn';
+import { spawnSubagent, type SpawnCallbacks } from '@/tools/AgentTool/spawn';
 import type { AgentDefinition } from '@/tools/AgentTool/loader';
 import { DEFAULT_SKILL_FORK_MAX_TURNS, SKILL_TOOL_NAME } from './constants';
 import { getAllSkills } from './registry';
@@ -91,12 +91,35 @@ export const skillTool: ToolDefinition<SkillToolInput, SkillToolOutput> = buildT
       sourcePath: cmd.sourcePath ?? `<bundled:${cmd.name}>`,
     };
 
+    // Forward the parent's onEvent (if provided via ToolContext) to the
+    // fork so the skill's tool_start / tool_done events land on the same
+    // team_messages channel as the parent's. The team-run worker stashes
+    // its onEvent under ctx.get('onEvent'); callers that aren't
+    // team-scoped won't have it, in which case we pass undefined and the
+    // fork runs quietly. Mirrors AgentTool's wiring (AgentTool.ts:380).
+    //
+    // Without this, fork-mode tool calls (e.g. write_strategic_path
+    // inside generating-strategy) never publish to the channel that
+    // /api/onboarding/plan's SSE subscriber listens on, and the route
+    // times out with "team-run completed without a strategic path"
+    // even though the tool actually persisted the row.
+    let onEventFn: SpawnCallbacks['onEvent'] | undefined;
+    try {
+      const fromCtx = ctx.get<SpawnCallbacks['onEvent'] | null>('onEvent');
+      if (typeof fromCtx === 'function') onEventFn = fromCtx;
+    } catch {
+      onEventFn = undefined;
+    }
+    const callbacks: SpawnCallbacks | undefined = onEventFn
+      ? { onEvent: onEventFn }
+      : undefined;
+
     const result = await spawnSubagent<unknown>(
       subAgentDef,
       input.args ?? '',
       ctx,
-      undefined,  // no callbacks at the SkillTool layer
-      undefined,  // no outputSchema
+      callbacks,
+      undefined, // no outputSchema
     );
 
     const resultText =

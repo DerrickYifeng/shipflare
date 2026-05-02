@@ -120,6 +120,51 @@ describe('SkillTool integration — end-to-end', () => {
     expect(runAgentMock).toHaveBeenCalledTimes(1);
   });
 
+  it('fork mode: forwards parent onEvent from ctx to runAgent (regression — would otherwise lose tool events from inside the fork, breaking SSE subscribers like /api/onboarding/plan)', async () => {
+    runAgentMock.mockResolvedValue({
+      result: 'OK',
+      cost: 0,
+      duration: 0,
+      turns: 0,
+    });
+
+    const parentOnEvent = vi.fn();
+    const fakeCtxWithOnEvent = {
+      abortSignal: new AbortController().signal,
+      get: <V>(key: string) => {
+        if (key === 'onEvent') return parentOnEvent as unknown as V;
+        return null as unknown as V;
+      },
+    };
+
+    await skillTool.execute(
+      { skill: '_demo-echo-fork', args: 'forwarded' },
+      fakeCtxWithOnEvent as never,
+    );
+
+    // runAgent receives onEvent as its 8th positional arg (0-indexed 7) per spawn.ts.
+    const lastCall = runAgentMock.mock.calls.at(-1);
+    expect(lastCall).toBeDefined();
+    expect(lastCall?.[7]).toBe(parentOnEvent);
+  });
+
+  it('fork mode: omits onEvent when parent ctx has none (non-team-scoped callers run quietly)', async () => {
+    runAgentMock.mockResolvedValue({
+      result: 'OK',
+      cost: 0,
+      duration: 0,
+      turns: 0,
+    });
+
+    await skillTool.execute(
+      { skill: '_demo-echo-fork', args: 'no-events' },
+      fakeCtx() as never,
+    );
+
+    const lastCall = runAgentMock.mock.calls.at(-1);
+    expect(lastCall?.[7]).toBeUndefined();
+  });
+
   it('throws on unknown skill', async () => {
     await expect(
       skillTool.execute(
