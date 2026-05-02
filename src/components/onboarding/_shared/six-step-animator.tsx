@@ -43,8 +43,7 @@ interface SixStepAnimatorProps {
    */
   showCost?: boolean;
   /**
-   * Optional floor on the active step driven by real backend events
-   * (e.g. `tool_progress` SSE frames mapped through `applyToolProgress`).
+   * Optional floor on the active step driven by real backend events.
    * When provided, the animator's active step is `Math.max(internalTimer,
    * eventActiveIndex)`. Steps strictly less than `eventActiveIndex` are
    * marked done immediately; the timer still runs as a fallback for any
