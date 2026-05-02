@@ -1,20 +1,20 @@
 import { describe, it, expect } from 'vitest';
 import {
-  useSyntheticStrategyConversation,
+  synthesizeStrategyConversation,
   friendlyLabelForTool,
   type ToolProgressEvent,
-} from '../use-synthetic-strategy-conversation';
+} from '../synthesize-strategy-conversation';
 
 const FIXED_START = 1_700_000_000_000;
 const FIXED_NOW = FIXED_START + 5_000;
 
-function callHook(args: {
+function callSynthesize(args: {
   events?: readonly ToolProgressEvent[];
   done?: boolean;
   error?: string | null;
   now?: number;
 }) {
-  return useSyntheticStrategyConversation({
+  return synthesizeStrategyConversation({
     toolProgressEvents: args.events ?? [],
     done: args.done ?? false,
     error: args.error ?? null,
@@ -23,9 +23,9 @@ function callHook(args: {
   });
 }
 
-describe('useSyntheticStrategyConversation', () => {
+describe('synthesizeStrategyConversation', () => {
   it('returns DISPATCH coordinator + RUNNING subtask with no tool calls when no events have arrived', () => {
-    const state = callHook({});
+    const state = callSynthesize({});
     expect(state.coordinator.phase).toBe('DISPATCH');
     expect(state.coordinator.name).toBe('Chief of Staff');
     expect(state.coordinator.body).toMatch(/strategist/i);
@@ -37,7 +37,7 @@ describe('useSyntheticStrategyConversation', () => {
   });
 
   it('appends a tool call with friendly label when a `start` event arrives', () => {
-    const state = callHook({
+    const state = callSynthesize({
       events: [
         {
           toolName: 'query_recent_milestones',
@@ -58,7 +58,7 @@ describe('useSyntheticStrategyConversation', () => {
   });
 
   it('updates the same tool call to phase=done with durationMs on the matching `done` event', () => {
-    const state = callHook({
+    const state = callSynthesize({
       events: [
         { toolName: 'query_metrics', phase: 'start', toolUseId: 'tu_2' },
         {
@@ -79,7 +79,7 @@ describe('useSyntheticStrategyConversation', () => {
   });
 
   it('preserves insertion order across multiple distinct tool_use_ids', () => {
-    const state = callHook({
+    const state = callSynthesize({
       events: [
         { toolName: 'query_recent_milestones', phase: 'start', toolUseId: 'a' },
         { toolName: 'query_strategic_path', phase: 'start', toolUseId: 'b' },
@@ -95,7 +95,7 @@ describe('useSyntheticStrategyConversation', () => {
 
   it('falls back to a humanized tool name when no friendly label is registered', () => {
     expect(friendlyLabelForTool('some_unknown_tool')).toBe('some unknown tool');
-    const state = callHook({
+    const state = callSynthesize({
       events: [
         { toolName: 'some_unknown_tool', phase: 'start', toolUseId: 'tu_x' },
       ],
@@ -104,7 +104,7 @@ describe('useSyntheticStrategyConversation', () => {
   });
 
   it('flips coordinator → SYNTHESIS and subtask → DONE when `done=true`', () => {
-    const state = callHook({
+    const state = callSynthesize({
       done: true,
       events: [
         {
@@ -123,7 +123,7 @@ describe('useSyntheticStrategyConversation', () => {
   });
 
   it('surfaces the error on subtask + coordinator when `error` is non-null', () => {
-    const state = callHook({
+    const state = callSynthesize({
       error: 'Plan generation timed out',
     });
     expect(state.coordinator.phase).toBe('DONE');
@@ -133,9 +133,9 @@ describe('useSyntheticStrategyConversation', () => {
   });
 
   it('elapsedMs reflects (now - startedAt) and never goes negative', () => {
-    const past = callHook({ now: FIXED_START - 1_000 });
+    const past = callSynthesize({ now: FIXED_START - 1_000 });
     expect(past.elapsedMs).toBe(0);
-    const ahead = callHook({ now: FIXED_START + 12_345 });
+    const ahead = callSynthesize({ now: FIXED_START + 12_345 });
     expect(ahead.elapsedMs).toBe(12_345);
   });
 });

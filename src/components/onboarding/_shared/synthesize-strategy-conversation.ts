@@ -132,7 +132,12 @@ function foldEvents(
   return Array.from(byId.values());
 }
 
-export function useSyntheticStrategyConversation(
+/**
+ * Pure function — no React hooks. Named without the `use` prefix so
+ * eslint react-hooks/rules-of-hooks doesn't misclassify the call sites
+ * (the test wrapper especially).
+ */
+export function synthesizeStrategyConversation(
   input: SyntheticInput,
 ): SyntheticConversationState {
   const { toolProgressEvents, done, error, startedAt, now } = input;

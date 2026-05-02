@@ -27,7 +27,7 @@ import type {
   SyntheticConversationState,
   SyntheticToolCall,
   SyntheticSubtaskStatus,
-} from './use-synthetic-strategy-conversation';
+} from './synthesize-strategy-conversation';
 
 interface SyntheticChatConversationProps {
   readonly state: SyntheticConversationState;

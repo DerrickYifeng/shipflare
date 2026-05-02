@@ -12,9 +12,9 @@ import { OnbMono } from './_shared/onb-mono';
 import { OnbButton } from './_shared/onb-button';
 import { SyntheticChatConversation } from './_shared/synthetic-chat-conversation';
 import {
-  useSyntheticStrategyConversation,
+  synthesizeStrategyConversation,
   type ToolProgressEvent,
-} from './_shared/use-synthetic-strategy-conversation';
+} from './_shared/synthesize-strategy-conversation';
 import { COPY } from './_copy';
 import type { StrategicPath } from '@/tools/schemas';
 import type { DraftState, ProductState } from './OnboardingFlow';
@@ -129,7 +129,7 @@ export function StagePlanBuilding({
     return () => clearInterval(id);
   }, [done, error]);
 
-  const conversationState = useSyntheticStrategyConversation({
+  const conversationState = synthesizeStrategyConversation({
     toolProgressEvents,
     done,
     error,
