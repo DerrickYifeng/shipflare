@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { drafts, threads, products, channels, userPreferences } from '@/lib/db/schema';
 import { eq, and, gte, sql } from 'drizzle-orm';
 import { runForkSkill } from '@/skills/run-fork-skill';
-import { reviewingDraftsOutputSchema } from '@/skills/validating-draft/schema';
+import { validatingDraftOutputSchema } from '@/skills/validating-draft/schema';
 import { publishUserEvent } from '@/lib/redis';
 import { enqueueDream, enqueuePosting } from '@/lib/queue';
 import type { ReviewJobData } from '@/lib/queue/types';
@@ -77,7 +77,7 @@ export async function processReview(job: Job<ReviewJobData>) {
     const { result, usage } = await runForkSkill(
       'validating-draft',
       args,
-      reviewingDraftsOutputSchema,
+      validatingDraftOutputSchema,
     );
     await addCost(traceId, usage);
 

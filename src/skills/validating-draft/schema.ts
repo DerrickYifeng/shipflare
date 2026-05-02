@@ -38,8 +38,3 @@ export const validatingDraftOutputSchema = z.object({
 });
 
 export type ValidatingDraftOutput = z.infer<typeof validatingDraftOutputSchema>;
-
-// Backwards-compat alias for code that imported the old name during the
-// renaming PR. Remove in the cleanup commit at end of Phase B.
-export const reviewingDraftsOutputSchema = validatingDraftOutputSchema;
-export type ReviewingDraftsOutput = ValidatingDraftOutput;

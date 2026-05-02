@@ -15,7 +15,7 @@ import { dirname } from 'node:path';
 import { db } from '@/lib/db';
 import { drafts, threads, products } from '@/lib/db/schema';
 import { runForkSkill } from '@/skills/run-fork-skill';
-import { reviewingDraftsOutputSchema } from '@/skills/validating-draft/schema';
+import { validatingDraftOutputSchema } from '@/skills/validating-draft/schema';
 
 interface ReplayRow {
   draftId: string;
@@ -100,7 +100,7 @@ async function main(): Promise<void> {
       const { result, usage } = await runForkSkill(
         'validating-draft',
         args,
-        reviewingDraftsOutputSchema,
+        validatingDraftOutputSchema,
       );
       out.push({
         draftId: row.draftId,
