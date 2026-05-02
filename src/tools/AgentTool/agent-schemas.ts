@@ -20,14 +20,19 @@ import type { ZodType } from 'zod';
 import { coordinatorOutputSchema } from './agents/coordinator/schema';
 import { contentPlannerOutputSchema } from './agents/content-planner/schema';
 import { postWriterOutputSchema } from './agents/post-writer/schema';
-import { communityManagerOutputSchema } from './agents/community-manager/schema';
+import {
+  contentManagerOutputSchema,
+  // Back-compat alias — kept exported below for callers that haven't
+  // migrated their import names yet.
+  communityManagerOutputSchema,
+} from './agents/content-manager/schema';
 import { discoveryAgentOutputSchema } from './agents/discovery-agent/schema';
 
 const registry: Record<string, ZodType<unknown>> = {
   coordinator: coordinatorOutputSchema as ZodType<unknown>,
   'content-planner': contentPlannerOutputSchema as ZodType<unknown>,
   'post-writer': postWriterOutputSchema as ZodType<unknown>,
-  'community-manager': communityManagerOutputSchema as ZodType<unknown>,
+  'content-manager': contentManagerOutputSchema as ZodType<unknown>,
   'discovery-agent': discoveryAgentOutputSchema as ZodType<unknown>,
 };
 
@@ -45,6 +50,8 @@ export {
   coordinatorOutputSchema,
   contentPlannerOutputSchema,
   postWriterOutputSchema,
+  contentManagerOutputSchema,
+  // Re-exported for back-compat — points at the same Zod schema.
   communityManagerOutputSchema,
   discoveryAgentOutputSchema,
 };

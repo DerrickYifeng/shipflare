@@ -1,5 +1,6 @@
-// Phase C — verifies the post-refactor community-manager AGENT.md
-// orchestrates via the `skill` tool (calling drafting-reply +
+// Phase C — verifies the post-refactor content-manager AGENT.md
+// (renamed from `community-manager` in Phase J) orchestrates via the
+// `skill` tool (calling drafting-reply / drafting-post +
 // validating-draft) instead of doing drafting / slop review inline.
 //
 // Uses the same `loadAgentsDir` harness as `loader-smoke.test.ts`
@@ -15,21 +16,21 @@ const AGENTS_ROOT = path.resolve(
   'src/tools/AgentTool/agents',
 );
 
-async function loadCommunityManager() {
+async function loadContentManager() {
   const agents = await loadAgentsDir(AGENTS_ROOT);
-  const cm = agents.find((a) => a.name === 'community-manager');
-  if (!cm) throw new Error('community-manager not loaded');
+  const cm = agents.find((a) => a.name === 'content-manager');
+  if (!cm) throw new Error('content-manager not loaded');
   return cm;
 }
 
-describe('community-manager AGENT.md (post-Phase-C)', () => {
-  it('declares the skill tool so it can call drafting-reply / validating-draft', async () => {
-    const cm = await loadCommunityManager();
+describe('content-manager AGENT.md (post-Phase-J)', () => {
+  it('declares the skill tool so it can call drafting-reply / drafting-post / validating-draft', async () => {
+    const cm = await loadContentManager();
     expect(cm.tools).toContain('skill');
   });
 
   it('drops voice / slop reference docs (now in skills)', async () => {
-    const cm = await loadCommunityManager();
+    const cm = await loadContentManager();
     // Reference docs are inlined under "## <name>" headers — assert
     // those are absent rather than re-parsing the frontmatter.
     expect(cm.systemPrompt).not.toContain('## engagement-playbook');
@@ -37,13 +38,13 @@ describe('community-manager AGENT.md (post-Phase-C)', () => {
   });
 
   it('drops gate-related reference docs (now in judging-opportunity skill)', async () => {
-    const cm = await loadCommunityManager();
+    const cm = await loadContentManager();
     expect(cm.systemPrompt).not.toContain('## reply-gates');
     expect(cm.systemPrompt).not.toContain('## opportunity-judgment');
   });
 
   it('directs the agent to call judging-opportunity', async () => {
-    const cm = await loadCommunityManager();
+    const cm = await loadContentManager();
     expect(cm.systemPrompt).toContain('judging-opportunity');
   });
 });
