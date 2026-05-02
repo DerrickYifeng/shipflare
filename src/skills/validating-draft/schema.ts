@@ -15,6 +15,8 @@ const slopPatternId = z.enum([
   'engagement_bait_filler',
 ]);
 
+export type SlopPatternId = z.infer<typeof slopPatternId>;
+
 /**
  * Output schema for the validating-draft skill.
  * Adversarial quality check with per-dimension pass/fail plus a 12-pattern
