@@ -78,12 +78,18 @@ export const generateStrategicPathTool: ToolDefinition<
   inputSchema: generateStrategicPathInputSchema,
   isConcurrencySafe: false,
   isReadOnly: false,
-  async execute(input): Promise<GenerateStrategicPathResult> {
+  async execute(input, ctx): Promise<GenerateStrategicPathResult> {
     log.info('generate_strategic_path: invoking generating-strategy skill');
+    // Pass parent ctx through so the skill's tools (write_strategic_path,
+    // query_strategic_path, query_recent_milestones) can read userId /
+    // productId / db / teamId / runId / onEvent off the team-run ctx.
+    // Without this, runForkSkill would create an empty ctx and the
+    // skill's tools would throw "missing required dependency userId".
     const { result } = await runForkSkill(
       'generating-strategy',
       input.args,
       generatingStrategyOutputSchema,
+      ctx,
     );
     return result;
   },

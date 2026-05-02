@@ -35,6 +35,7 @@ describe('generate_strategic_path tool', () => {
       'generating-strategy',
       expect.stringContaining('"product"'),
       generatingStrategyOutputSchema,
+      expect.objectContaining({ abortSignal: expect.any(AbortSignal) }),
     );
     expect(out).toEqual({
       status: 'completed',

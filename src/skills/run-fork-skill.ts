@@ -14,7 +14,7 @@ import { getAllSkills } from '@/tools/SkillTool/registry';
 import { DEFAULT_SKILL_FORK_MAX_TURNS } from '@/tools/SkillTool/constants';
 import { spawnSubagent } from '@/tools/AgentTool/spawn';
 import type { AgentDefinition } from '@/tools/AgentTool/loader';
-import type { AgentResult } from '@/core/types';
+import type { AgentResult, ToolContext } from '@/core/types';
 
 /**
  * Spawn a fork-mode skill as a one-shot subagent and return its parsed
@@ -27,10 +27,17 @@ import type { AgentResult } from '@/core/types';
  * @param outputSchema  Optional Zod schema; runAgent synthesizes the
  *                      StructuredOutput tool on the skill's tool list when
  *                      provided.
- * @param deps          Optional dependency map for the spawned tool context.
- *                      Mirrors `createToolContext`'s deps argument so skills
- *                      whose tools require platform clients (e.g. `xClient`,
- *                      `redditClient`) can receive them. Defaults to `{}`.
+ * @param depsOrParent  Either:
+ *                      - a `ToolContext` (from inside a tool's `execute(input, ctx)`)
+ *                        → the spawn proxies parent ctx for `userId / productId /
+ *                        db / teamId / runId / onEvent`. Use this path when the
+ *                        caller is a tool wrapper and the skill's tools need
+ *                        domain deps (write_strategic_path, etc.).
+ *                      - a plain `Record<string, unknown>` (from a worker
+ *                        processor with no parent ctx) → fresh tool context is
+ *                        created with the supplied deps. Mirrors
+ *                        `createToolContext`'s deps argument.
+ *                      Defaults to `{}`.
  *
  * @returns AgentResult<T> — { result, usage }, identical shape to runAgent
  *          so callers can `const { result, usage } = await runForkSkill(...)`.
@@ -39,7 +46,7 @@ export async function runForkSkill<T = unknown>(
   skillName: string,
   args: string,
   outputSchema?: ZodType<T>,
-  deps: Record<string, unknown> = {},
+  depsOrParent: Record<string, unknown> | ToolContext = {},
 ): Promise<AgentResult<T>> {
   const all = await getAllSkills();
   const skill = all.find((s) => s.name === skillName);
@@ -50,7 +57,19 @@ export async function runForkSkill<T = unknown>(
     );
   }
 
-  const ctx = createToolContext(deps);
+  // Detect a ToolContext by its `abortSignal + get` shape — plain `deps`
+  // objects shouldn't carry both. Tool wrappers passing `ctx` straight
+  // through will hit this branch; worker processors passing a deps
+  // record fall through to `createToolContext(...)`.
+  const looksLikeCtx =
+    depsOrParent !== null &&
+    typeof depsOrParent === 'object' &&
+    'abortSignal' in depsOrParent &&
+    typeof (depsOrParent as { get?: unknown }).get === 'function';
+  const ctx = looksLikeCtx
+    ? (depsOrParent as ToolContext)
+    : createToolContext(depsOrParent as Record<string, unknown>);
+
   const systemPrompt = await Promise.resolve(
     skill.getPromptForCommand(args, ctx),
   );
