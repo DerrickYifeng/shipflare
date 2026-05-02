@@ -7,6 +7,8 @@ maxTurns: 1
 allowed-tools:
 references:
   - allocation-rules
+  - 7-angles
+  - phase-task-templates
 ---
 
 # Allocate plan_items for one week

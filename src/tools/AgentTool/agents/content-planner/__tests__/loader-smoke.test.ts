@@ -1,7 +1,9 @@
 // Smoke test: content-planner AGENT.md loads via the canonical loader
-// path with its tactical-playbook reference inlined. Pins the model
-// and the tools allowlist so accidental regression on the planner
-// upgrade is caught at CI.
+// path. Pins the model + tools allowlist so accidental regression on
+// the planner is caught at CI. Phase G moved the allocation rules
+// into the `allocating-plan-items` skill, so the agent now declares
+// the `skill` tool and no longer inlines the tactical-playbook
+// reference.
 
 import { describe, it, expect } from 'vitest';
 import * as path from 'node:path';
@@ -13,7 +15,7 @@ const AGENTS_ROOT = path.resolve(
 );
 
 describe('content-planner loader smoke', () => {
-  it('loads with sonnet-4.6 model and the new query_recent_x_posts tool', async () => {
+  it('loads with sonnet-4.6 model and the skill tool for allocation', async () => {
     const agents = await loadAgentsDir(AGENTS_ROOT);
     const planner = agents.find((a) => a.name === 'content-planner');
     expect(planner).toBeDefined();
@@ -28,11 +30,14 @@ describe('content-planner loader smoke', () => {
       'query_last_week_completions',
       'query_strategic_path',
       'query_recent_x_posts',
+      'skill',
       'Task',
       'SendMessage',
       'StructuredOutput',
     ]);
 
-    expect(planner.systemPrompt).toContain('## tactical-playbook');
+    // Allocation rules moved to the allocating-plan-items skill.
+    expect(planner.systemPrompt).not.toContain('## tactical-playbook');
+    expect(planner.systemPrompt).toContain('allocating-plan-items');
   });
 });
