@@ -34,4 +34,28 @@ describe('loader — Phase A restored fields', () => {
     });
     expect(agent.background).toBe(false);
   });
+
+  it('parses role: member from explicit frontmatter', async () => {
+    const agent = await loadAgent(
+      path.join(FIXTURES, 'full-frontmatter-agent'),
+      { sharedReferencesDir: path.join(FIXTURES, '_shared', 'references') },
+    );
+    // The fixture sets role: member — assert that explicitly
+    expect(agent.role).toBe('member');
+  });
+
+  it('defaults role to "member" when absent', async () => {
+    const agent = await loadAgent(path.join(FIXTURES, 'valid-agent'), {
+      sharedReferencesDir: path.join(FIXTURES, '_shared', 'references'),
+    });
+    expect(agent.role).toBe('member');
+  });
+
+  it('rejects an invalid role value', async () => {
+    await expect(
+      loadAgent(path.join(FIXTURES, 'invalid-role'), {
+        sharedReferencesDir: path.join(FIXTURES, '_shared', 'references'),
+      }),
+    ).rejects.toThrow(/role/i);
+  });
 });

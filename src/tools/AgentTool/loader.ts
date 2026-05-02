@@ -16,12 +16,15 @@ const log = createLogger('tools:agent-loader');
 // Public types
 // ---------------------------------------------------------------------------
 
+export type AgentRole = 'lead' | 'member';
+
 export interface AgentDefinition {
   name: string;
   description: string;
   tools: string[];
   disallowedTools: string[];   // restored Phase A — see Agent Teams spec §5
   background: boolean;         // restored Phase A — semantics adapted, see Agent Teams spec §5
+  role: AgentRole;             // Phase A — primary input to four-layer tool filter (Agent Teams spec §5)
   skills: string[];
   model?: string;
   maxTurns: number;
@@ -63,6 +66,7 @@ const frontmatterSchema = z
     tools: z.array(z.string()).optional(),
     disallowedTools: z.array(z.string()).optional(),
     background: z.boolean().optional(),
+    role: z.enum(['lead', 'member']).optional(),
     skills: z.array(z.string()).optional(),
     model: z.string().min(1).optional(),
     maxTurns: z.number().int().positive().optional(),
@@ -437,6 +441,7 @@ export async function loadAgent(
     tools: parsed.tools ?? [],
     disallowedTools: parsed.disallowedTools ?? [],
     background: parsed.background ?? false,
+    role: parsed.role ?? 'member',
     skills: parsed.skills ?? [],
     ...(parsed.model !== undefined ? { model: parsed.model } : {}),
     maxTurns: parsed.maxTurns ?? DEFAULT_MAX_TURNS,
