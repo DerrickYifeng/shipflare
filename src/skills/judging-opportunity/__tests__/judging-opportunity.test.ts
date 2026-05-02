@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
+import * as path from 'node:path';
+import { loadSkill } from '@/tools/SkillTool/loadSkillsDir';
 import { judgingOpportunityInputSchema, judgingOpportunityOutputSchema } from '../schema';
+
+const SKILL_DIR = path.resolve(__dirname, '..');
 
 describe('judging-opportunity schema', () => {
   it('accepts a thread + product + platform input', () => {
@@ -42,5 +46,22 @@ describe('judging-opportunity schema', () => {
         rationale: 'y',
       }),
     ).toThrow();
+  });
+});
+
+describe('judging-opportunity skill loader', () => {
+  it('loads from disk with correct frontmatter', async () => {
+    const skill = await loadSkill(SKILL_DIR);
+    expect(skill).not.toBeNull();
+    expect(skill!.name).toBe('judging-opportunity');
+    expect(skill!.context).toBe('fork');
+    expect(skill!.allowedTools).toEqual([]);
+  });
+
+  it('produces a body referencing gate-rules', async () => {
+    const skill = await loadSkill(SKILL_DIR);
+    const fakeCtx = { abortSignal: new AbortController().signal, get: () => null } as never;
+    const body = await skill!.getPromptForCommand(JSON.stringify({}), fakeCtx);
+    expect(body).toContain('gate-rules');
   });
 });
