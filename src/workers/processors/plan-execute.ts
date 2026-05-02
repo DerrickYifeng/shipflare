@@ -14,9 +14,6 @@ import {
   type PlanItemState,
   type PlanItemUserAction,
 } from '@/lib/plan-state';
-import { ensureTeamExists } from '@/lib/team-provisioner';
-import { enqueueTeamRun } from '@/lib/queue/team-run';
-import { createAutomationConversation } from '@/lib/team-conversation-helpers';
 import { dispatchApprove } from '@/lib/approve-dispatch';
 import {
   loadDispatchInputForDraft,
@@ -26,49 +23,26 @@ import {
 const baseLog = createLogger('worker:plan-execute');
 
 /**
- * Channels that route draft-phase content_post jobs to the post-writer
- * team-run instead of the legacy dispatch table. The writer is the same
- * agent for both platforms — `plan_items.channel` rides through to
- * `draft_post`, which picks the right platform-specific drafting prompt.
- */
-const WRITER_CHANNELS = new Set<string>(['x', 'reddit']);
-const POST_WRITER_AGENT = 'post-writer';
-
-function writerAgentFor(
-  kind: PlanItemKind,
-  channel: string | null,
-): string | null {
-  if (kind !== 'content_post') return null;
-  if (!channel) return null;
-  return WRITER_CHANNELS.has(channel) ? POST_WRITER_AGENT : null;
-}
-
-/**
  * Plan-execute dispatcher.
  *
- * Two paths:
+ * After Phase J Task 2, content_post draft-phase rows are batched at
+ * the sweeper layer (one content-manager(post_batch) team-run per user
+ * per tick), so this processor no longer fires per-row writer team-runs.
+ * The remaining cases are:
  *
- * 1) **Writer team-run (Phase E Day 3)** — for `phase='draft'` +
- *    `kind='content_post'` + `channel IN ('x','reddit')`. The processor
- *    enqueues a team-run with the matching writer AGENT.md; the writer's
- *    `draft_post` tool UPDATEs `plan_items.output.draft_body` and flips
- *    `state` to `'drafted'`. Fire-and-forget from the processor's POV:
- *    it returns as soon as the enqueue succeeds.
+ *  - **Legacy state-machine stub** for every (kind, phase) combination
+ *    that has a dispatch-table entry. Drives the row through state
+ *    transitions and, for content posts in the EXECUTE phase, hands
+ *    off to the posting dispatcher (`dispatchApprove`).
  *
- * 2) **Legacy state-machine stub** — for every other (kind, phase)
- *    combination. Runs the state transitions from the existing dispatch
- *    table without invoking a skill. The remaining keep-until-Phase-E
- *    skills (posting, draft-review, etc.) still arrive here; a future
- *    Phase E/F migration will route them through writer/reply team-runs
- *    too.
+ *    State transitions for the legacy path:
+ *     - phase='draft' + state='planned' → moves planned → drafted
+ *     - phase='execute' + state IN ('approved','planned'+auto) → moves
+ *       planned/approved → executing → completed
  *
- * State transitions for the legacy path:
- *  - phase='draft' + state='planned' → moves planned → drafted
- *  - phase='execute' + state IN ('approved','planned'+auto) → moves
- *    planned/approved → executing → completed
- *
- * Any other combination is treated as a stale job and no-ops loudly. The
- * job succeeds so BullMQ doesn't retry into a dead end.
+ *  - Any (kind, phase) without a dispatch-table entry is treated as a
+ *    stale job and the row is failed loudly. The job succeeds so
+ *    BullMQ doesn't retry into a dead end.
  *
  * All state changes route through `transition()` so invalid moves throw
  * InvalidTransitionError and surface in the DLQ.
@@ -105,50 +79,15 @@ export async function processPlanExecute(
     userAction: row.userAction as PlanItemUserAction,
   };
 
-  // ------------------------------------------------------------------
-  // Writer team-run path (content_post + x/reddit, draft phase only)
-  // ------------------------------------------------------------------
-  const writerAgent =
-    phase === 'draft'
-      ? writerAgentFor(row.kind as PlanItemKind, row.channel)
-      : null;
-
-  if (writerAgent) {
-    if (!canTransition(current.state, 'drafted')) {
-      log.warn(
-        `plan_item ${planItemId}: draft phase fired but state is ${current.state} (expected planned) — skipping`,
-      );
-      return;
-    }
-
-    try {
-      const { teamId, memberIds } = await ensureTeamExists(
-        row.userId,
-        row.productId,
-      );
-      const goal =
-        `Spawn ${writerAgent} via Task to draft plan_item ${planItemId} (channel=${row.channel}). ` +
-        `The writer reads the plan_item, calls draft_post to generate + persist the body, ` +
-        `and flips the plan_item state to 'drafted'. Don't call draft_post yourself — ` +
-        `delegate to the writer and return its summary.`;
-      const draftConvId = await createAutomationConversation(teamId, 'draft_post');
-      await enqueueTeamRun({
-        teamId,
-        trigger: 'draft_post',
-        goal,
-        rootMemberId: memberIds.coordinator,
-        conversationId: draftConvId,
-      });
-      log.info(
-        `plan_item ${planItemId}: draft phase → enqueued team-run agent=${writerAgent} channel=${row.channel}`,
-      );
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      log.error(
-        `plan_item ${planItemId}: draft phase writer enqueue failed: ${message}`,
-      );
-      await writeState(current, 'failed');
-    }
+  // Phase J: content_post draft is now batched via content-manager in
+  // plan-execute-sweeper. Any residual draft-phase job for content_post
+  // (e.g. enqueued before the rewrite landed, or against a row already
+  // claimed by the sweeper) is a no-op — the sweeper owns the dispatch
+  // and `draft_post` owns the state flip.
+  if (phase === 'draft' && row.kind === 'content_post') {
+    log.info(
+      `plan_item ${planItemId}: residual content_post draft job ignored — owned by plan-execute-sweeper batch`,
+    );
     return;
   }
 
