@@ -13,6 +13,7 @@ import { xGetMentionsTool } from './XGetMentionsTool/XGetMentionsTool';
 // allowlists via the central registry.
 import { writeStrategicPathTool } from './WriteStrategicPathTool/WriteStrategicPathTool';
 import { generateStrategicPathTool } from './GenerateStrategicPathTool/GenerateStrategicPathTool';
+import { readMemoryTool } from './ReadMemoryTool/ReadMemoryTool';
 import { queryStrategicPathTool } from './QueryStrategicPathTool/QueryStrategicPathTool';
 import { addPlanItemTool } from './AddPlanItemTool/AddPlanItemTool';
 import { updatePlanItemTool } from './UpdatePlanItemTool/UpdatePlanItemTool';
@@ -58,6 +59,7 @@ registry.register(xGetMentionsTool);
 // ---------------------------------------------------------------------------
 registry.register(writeStrategicPathTool);
 registry.register(generateStrategicPathTool);
+registry.register(readMemoryTool);
 registry.register(queryStrategicPathTool);
 registry.register(addPlanItemTool);
 registry.register(updatePlanItemTool);

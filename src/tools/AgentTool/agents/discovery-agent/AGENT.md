@@ -6,6 +6,7 @@ maxTurns: 60
 tools:
   - xai_find_customers
   - persist_queue_threads
+  - read_memory
   - skill
   - StructuredOutput
 shared-references:
@@ -27,7 +28,15 @@ maxResults?: number // soft target for how many to queue (default 10)
 
 The product context is auto-injected via the agent loader — `{productName}`, `{productDescription}`, `{productValueProp}`, `{productTargetAudience}`, `{productKeywords}` are filled at agent-load time.
 
-The ICP rubric (4-section onboarding-derived doc: ideal customer / not a fit / gray zone / key signals) is in `<agent-memory>` under `discovery-rubric`. Read it first; treat it as authoritative for who counts.
+The ICP rubric (4-section onboarding-derived doc: ideal customer / not a fit / gray zone / key signals) is stored in `<agent-memory>` under the name `discovery-rubric`. Fetch its full content with the `read_memory` tool BEFORE composing your first xAI message:
+
+```
+read_memory({ name: 'discovery-rubric' })
+```
+
+Treat the returned `content` as authoritative for who counts. If `found: false` (onboarding hasn't seeded one yet), proceed with the product context + the coordinator's `intent` field as your fallback rubric.
+
+DO NOT call `skill('read-memory', ...)` or any other invented skill name — there is no such skill. The only memory-read primitive is the `read_memory` tool above.
 
 ## Your workflow
 
