@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
+import * as path from 'node:path';
 import { draftingReplyInputSchema, draftingReplyOutputSchema } from '../schema';
+import { loadSkill } from '@/tools/SkillTool/loadSkillsDir';
+
+const SKILL_DIR = path.resolve(__dirname, '..');
 
 describe('drafting-reply schema', () => {
   it('accepts a valid input shape', () => {
@@ -35,5 +39,23 @@ describe('drafting-reply schema', () => {
       confidence: 0.85,
     });
     expect(parsed.confidence).toBeGreaterThan(0.8);
+  });
+});
+
+describe('drafting-reply skill loader', () => {
+  it('loads from disk with correct frontmatter', async () => {
+    const skill = await loadSkill(SKILL_DIR);
+    expect(skill).not.toBeNull();
+    expect(skill!.name).toBe('drafting-reply');
+    expect(skill!.context).toBe('fork');
+    expect(skill!.allowedTools).toEqual([]);
+  });
+
+  it('produces a body referencing both channel voice files', async () => {
+    const skill = await loadSkill(SKILL_DIR);
+    const fakeCtx = { abortSignal: new AbortController().signal, get: () => null } as never;
+    const body = await skill!.getPromptForCommand(JSON.stringify({}), fakeCtx);
+    expect(body).toContain('x-reply-voice');
+    expect(body).toContain('reddit-reply-voice');
   });
 });
