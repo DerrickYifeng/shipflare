@@ -54,9 +54,11 @@ describe('community-manager loader smoke', () => {
     // The unified post-writer + community-manager pair.
     expect(names).toContain('post-writer');
     expect(names).toContain('community-manager');
-    // And the baseline planner/strategist agents.
+    // And the baseline planner agents. (`growth-strategist` was
+    // converted to the `generating-strategy` fork-mode skill in Phase F
+    // and is no longer loaded from src/tools/AgentTool/agents/.)
     expect(names).toContain('coordinator');
-    expect(names).toContain('growth-strategist');
     expect(names).toContain('content-planner');
+    expect(names).not.toContain('growth-strategist');
   });
 });

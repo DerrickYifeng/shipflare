@@ -418,7 +418,7 @@ export const taskTool: ToolDefinition<TaskInput, TaskResult> = buildTool({
 
     // Resolve the subagent's terminal-output Zod schema. Agents whose
     // AGENT.md frontmatter includes `StructuredOutput` in the tool list
-    // (coordinator, growth-strategist, content-planner, …) each have a
+    // (coordinator, content-planner, …) each have a
     // schema registered under `src/tools/AgentTool/agent-schemas.ts` —
     // that schema is handed to runAgent so it synthesizes a validated
     // `StructuredOutput` tool on the subagent's Anthropic tool list. Agents

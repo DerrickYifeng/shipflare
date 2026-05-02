@@ -73,7 +73,6 @@ const ensureTeamExistsMock = vi.fn(
     teamId: 'team-1',
     memberIds: {
       coordinator: 'mem-coord',
-      'growth-strategist': 'mem-gs',
       'content-planner': 'mem-cp',
     },
     created: false,
@@ -232,9 +231,10 @@ describe('POST /api/onboarding/plan (SSE, team-run only)', () => {
     expect(enqueueTeamRunMock.mock.calls[0]?.[0]).toMatchObject({
       teamId: 'team-1',
       trigger: 'onboarding',
-      // onboarding is rooted at growth-strategist (not coordinator) so the
-      // run writes strategic_path directly without a delegation turn.
-      rootMemberId: 'mem-gs',
+      // Phase F roots onboarding at coordinator; the coordinator's
+      // trigger=onboarding playbook dispatches the generating-strategy
+      // skill via the `skill` tool.
+      rootMemberId: 'mem-coord',
     });
 
     expect(recordPipelineEventMock).toHaveBeenCalledWith(

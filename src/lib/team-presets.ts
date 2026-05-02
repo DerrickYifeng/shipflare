@@ -22,10 +22,15 @@
  * community-manager now owns reply drafting end-to-end (drafts the body
  * inline + self-checks against the slop / anchor / length / stats rules
  * in its references), so the standalone reply-drafter teammate is gone.
+ *
+ * Phase F (agent-skill-tool-decomposition) dropped `growth-strategist` —
+ * the strategic-path generator was converted to the `generating-strategy`
+ * fork-mode skill (src/skills/generating-strategy/) and is now invoked
+ * directly via `runForkSkill` from onboarding + phase-transition routes,
+ * bypassing the team-run primitive entirely.
  */
 export type BaseAgentType =
   | 'coordinator'
-  | 'growth-strategist'
   | 'content-planner';
 
 /**
@@ -75,7 +80,6 @@ export type ProductCategory =
 
 export interface DisplayNameMap {
   coordinator: string;
-  'growth-strategist': string;
   'content-planner': string;
   'post-writer': string;
   'community-manager': string;
@@ -88,7 +92,6 @@ export interface DisplayNameMap {
  */
 export const DEFAULT_DISPLAY_NAMES: DisplayNameMap = {
   coordinator: 'Chief of Staff',
-  'growth-strategist': 'Head of Growth',
   'content-planner': 'Head of Content',
   'post-writer': 'Post Writer',
   'community-manager': 'Community Manager',
@@ -124,7 +127,6 @@ export function pickPresetByCategory(
 export function getTeamCompositionForPreset(preset: TeamPreset): AgentType[] {
   const base: AgentType[] = [
     'coordinator',
-    'growth-strategist',
     'content-planner',
   ];
   switch (preset) {

@@ -505,7 +505,7 @@ export async function processTeamRunInternal(
   // Resolve the per-agent StructuredOutput schema. Tests pass
   // `rootOutputSchema` directly to override this lookup with a fixture-
   // specific shape; production callers let it fall through to the
-  // registered schema (coordinator, growth-strategist, content-planner).
+  // registered schema (coordinator, content-planner, …).
   const resolvedSchema: import('zod').ZodType<unknown> | undefined =
     rootOutputSchema ?? getAgentOutputSchema(rootMember.agentType) ?? undefined;
 

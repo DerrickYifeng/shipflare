@@ -6,8 +6,8 @@ import type { BadgeVariant } from '@/components/ui/badge';
  * TeamMemberPage (hero avatar), and any place that needs a consistent
  * color, monogram, and role code for an agent.
  *
- * The base triad (coordinator / growth-strategist / content-planner)
- * maps onto existing `--sf-*` tokens. The writer + community pair adopts
+ * The base pair (coordinator / content-planner) maps onto existing
+ * `--sf-*` tokens. The writer + community pair adopts
  * iOS system hues by literal hex — they have no matching semantic token in
  * globals.css, and the plan calls out that we keep the inline hex
  * values right here rather than inventing new CSS variables.
@@ -42,15 +42,6 @@ const COORDINATOR: AgentAccent = {
   initial: 'L',
   colorHex: '#1d1d1f',
 };
-const GROWTH: AgentAccent = {
-  solid: 'var(--sf-success)',
-  soft: 'var(--sf-success-light)',
-  ink: 'var(--sf-success-ink)',
-  badgeVariant: 'success',
-  code: 'GROWTH',
-  initial: 'G',
-  colorHex: '#248a3d',
-};
 const CONTENT: AgentAccent = {
   solid: 'var(--sf-warning)',
   soft: 'var(--sf-warning-light)',
@@ -81,7 +72,6 @@ const COMMUNITY: AgentAccent = {
 
 const ACCENTS: Record<string, AgentAccent> = {
   coordinator: COORDINATOR,
-  'growth-strategist': GROWTH,
   'content-planner': CONTENT,
   'post-writer': POST_WRITER,
   'community-manager': COMMUNITY,

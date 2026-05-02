@@ -1,10 +1,10 @@
 <!-- Ported from src/skills/tactical-planner/references/angle-playbook.md (v2).
-     Shared by growth-strategist (pillar/arc design) and content-planner
+     Shared by generating-strategy skill (pillar/arc design) and content-planner
      (per-item angle selection). Phase C deletes the v2 source. -->
 
 # Seven content angles
 
-Seven named angles used across the growth-strategist (when shaping
+Seven named angles used across the generating-strategy skill (when shaping
 `thesisArc[week].angleMix`) and the content-planner (when allocating
 angles to individual `plan_items`). Each angle has a definition, two
 worked examples, and a "when to use" note.

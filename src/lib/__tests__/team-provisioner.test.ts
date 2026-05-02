@@ -206,11 +206,14 @@ describe('pickPresetByCategory', () => {
 });
 
 describe('getTeamCompositionForPreset', () => {
-  it('always includes the 3 baseline agents', async () => {
+  it('always includes the 2 baseline agents', async () => {
     const { getTeamCompositionForPreset } = await import(
       '@/lib/team-provisioner'
     );
-    const baseline: AgentType[] = ['coordinator', 'growth-strategist', 'content-planner'];
+    // Phase F dropped `growth-strategist` from the baseline — the
+    // strategic-path generator is now the `generating-strategy`
+    // fork-mode skill, not a team member.
+    const baseline: AgentType[] = ['coordinator', 'content-planner'];
     for (const preset of [
       'dev-squad',
       'saas-squad',
@@ -228,7 +231,6 @@ describe('getTeamCompositionForPreset', () => {
     );
     expect(getTeamCompositionForPreset('dev-squad')).toEqual([
       'coordinator',
-      'growth-strategist',
       'content-planner',
       'post-writer',
       'community-manager',
@@ -241,7 +243,6 @@ describe('getTeamCompositionForPreset', () => {
     );
     expect(getTeamCompositionForPreset('saas-squad')).toEqual([
       'coordinator',
-      'growth-strategist',
       'content-planner',
       'post-writer',
       'community-manager',
@@ -254,7 +255,6 @@ describe('getTeamCompositionForPreset', () => {
     );
     expect(getTeamCompositionForPreset('consumer-squad')).toEqual([
       'coordinator',
-      'growth-strategist',
       'content-planner',
       'post-writer',
       'community-manager',
@@ -267,7 +267,6 @@ describe('getTeamCompositionForPreset', () => {
     );
     expect(getTeamCompositionForPreset('default-squad')).toEqual([
       'coordinator',
-      'growth-strategist',
       'content-planner',
       'post-writer',
     ]);
@@ -281,22 +280,20 @@ describe('getTeamCompositionForPreset', () => {
 describe('ensureTeamExists (baseline, no preset)', () => {
   beforeEach(() => resetTables());
 
-  it('creates a new team with the 3 baseline members on first call', async () => {
+  it('creates a new team with the 2 baseline members on first call', async () => {
     const { ensureTeamExists } = await import('@/lib/team-provisioner');
     const res = await ensureTeamExists('u-1', 'p-1');
     expect(res.created).toBe(true);
     expect(res.teamId).toBeTruthy();
     expect(res.memberIds.coordinator).toBeTruthy();
-    expect(res.memberIds['growth-strategist']).toBeTruthy();
     expect(res.memberIds['content-planner']).toBeTruthy();
 
     const members = getTeamMembers();
-    expect(members).toHaveLength(3);
+    expect(members).toHaveLength(2);
     const types = new Set(members.map((m) => m.agentType));
     expect(types).toEqual(
       new Set([
         'coordinator',
-        'growth-strategist',
         'content-planner',
       ]),
     );
@@ -309,23 +306,22 @@ describe('ensureTeamExists (baseline, no preset)', () => {
     expect(first.teamId).toBe(second.teamId);
     expect(first.memberIds).toEqual(second.memberIds);
     expect(second.created).toBe(false);
-    expect(getTeamMembers()).toHaveLength(3);
+    expect(getTeamMembers()).toHaveLength(2);
   });
 });
 
 describe('ensureTeamExists (with preset)', () => {
   beforeEach(() => resetTables());
 
-  it('dev-squad preset seeds 5 members on a fresh team', async () => {
+  it('dev-squad preset seeds 4 members on a fresh team', async () => {
     const { ensureTeamExists } = await import('@/lib/team-provisioner');
     const res = await ensureTeamExists('u-1', 'p-1', { preset: 'dev-squad' });
     expect(res.created).toBe(true);
-    expect(getTeamMembers()).toHaveLength(5);
+    expect(getTeamMembers()).toHaveLength(4);
     const types = new Set(getTeamMembers().map((m) => m.agentType));
     expect(types).toEqual(
       new Set([
         'coordinator',
-        'growth-strategist',
         'content-planner',
         'post-writer',
         'community-manager',
@@ -335,17 +331,16 @@ describe('ensureTeamExists (with preset)', () => {
 
   it('reconciles — adding preset on an existing baseline team inserts the delta', async () => {
     const { ensureTeamExists } = await import('@/lib/team-provisioner');
-    await ensureTeamExists('u-1', 'p-1'); // baseline: 3 members
-    expect(getTeamMembers()).toHaveLength(3);
+    await ensureTeamExists('u-1', 'p-1'); // baseline: 2 members
+    expect(getTeamMembers()).toHaveLength(2);
 
     // Now a channel connects and we re-run with the consumer-squad preset.
     await ensureTeamExists('u-1', 'p-1', { preset: 'consumer-squad' });
-    expect(getTeamMembers()).toHaveLength(5);
+    expect(getTeamMembers()).toHaveLength(4);
     const types = new Set(getTeamMembers().map((m) => m.agentType));
     expect(types).toEqual(
       new Set([
         'coordinator',
-        'growth-strategist',
         'content-planner',
         'post-writer',
         'community-manager',
@@ -360,7 +355,6 @@ describe('ensureTeamExists (with preset)', () => {
       getTeamMembers().map((m) => [m.agentType, m.displayName]),
     );
     expect(nameByType['coordinator']).toBe('Chief of Staff');
-    expect(nameByType['growth-strategist']).toBe('Head of Growth');
     expect(nameByType['content-planner']).toBe('Head of Content');
     expect(nameByType['post-writer']).toBe('Post Writer');
     expect(nameByType['community-manager']).toBe('Community Manager');
@@ -370,7 +364,7 @@ describe('ensureTeamExists (with preset)', () => {
 describe('provisionTeamForProduct', () => {
   beforeEach(() => resetTables());
 
-  it('dev_tool category + X channel connected → dev-squad with 5 members', async () => {
+  it('dev_tool category + X channel connected → dev-squad with 4 members', async () => {
     rows[productsTable].push({ id: 'p-1', userId: 'u-1', category: 'dev_tool' });
     rows[channelsTable].push({ id: 'c-1', userId: 'u-1', platform: 'x' });
     const { provisionTeamForProduct } = await import('@/lib/team-provisioner');
@@ -378,12 +372,11 @@ describe('provisionTeamForProduct', () => {
     expect(res.preset).toBe('dev-squad');
     expect(res.roster).toEqual([
       'coordinator',
-      'growth-strategist',
       'content-planner',
       'post-writer',
       'community-manager',
     ]);
-    expect(getTeamMembers()).toHaveLength(5);
+    expect(getTeamMembers()).toHaveLength(4);
   });
 
   it('consumer category + only X connected → still consumer-squad (post-writer is channel-agnostic)', async () => {
@@ -419,7 +412,6 @@ describe('provisionTeamForProduct', () => {
     expect(types).toEqual(
       new Set([
         'coordinator',
-        'growth-strategist',
         'content-planner',
         'post-writer',
       ]),

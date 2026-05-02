@@ -1,5 +1,5 @@
 <!-- Extracted from src/agents/strategic-planner.md step 5 (v2).
-     Shared by growth-strategist (sets `channelMix[ch].perWeek` +
+     Shared by generating-strategy skill (sets `channelMix[ch].perWeek` +
      `channelMix[ch].repliesPerDay`) and content-planner (allocates
      plan_items across those slots). Phase C deletes the v2 source. -->
 
@@ -9,10 +9,10 @@ Per-phase cadence guidance for each supported channel. Two knobs per
 channel:
 
 - **`perWeek`** — number of ORIGINAL POSTS to schedule across the week.
-  The growth-strategist sets this; content-planner emits exactly that
+  The generating-strategy skill sets this; content-planner emits exactly that
   many `kind: 'content_post'` plan_items, spread over the channel's
   `preferredHours` and rotated across `contentPillars`.
-- **`repliesPerDay`** — daily REPLY budget. The growth-strategist sets
+- **`repliesPerDay`** — daily REPLY budget. The generating-strategy skill sets
   this; content-planner emits ONE `kind: 'content_reply'` plan_item per
   day per channel with `params.targetCount = repliesPerDay`. The
   daily reply-sweep cron walks those slots and runs
@@ -62,7 +62,7 @@ matters most when the audience is small.
 | compound    | 4-8   | active sustained growth | maintenance mode |
 | steady      | 3-6   | active relationship maintenance | low-touch ongoing rhythm |
 
-Within each range, growth-strategist picks based on `product.usersBucket`
+Within each range, generating-strategy skill picks based on `product.usersBucket`
 (roughly: 0–500 → top of range, 500–2k → middle, 2k+ → bottom). Reply
 slots all share the channel's first `preferredHour` for the day —
 content-planner emits ONE `content_reply` plan_item per day per channel,

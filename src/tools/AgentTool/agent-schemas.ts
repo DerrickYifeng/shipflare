@@ -9,10 +9,15 @@
 // returns the schema a runAgent caller hands to `runAgent(…, outputSchema)`.
 // Agents without a declared schema return null; runAgent's schema param is
 // optional, so those agents terminate via end_turn with plain text.
+//
+// Phase F: the legacy `growth-strategist` agent was converted to the
+// `generating-strategy` fork-mode skill (src/skills/generating-strategy/);
+// its terminal output schema lives at
+// `@/skills/generating-strategy/schema.ts` and is consumed by
+// `runForkSkill` callers, not via this registry.
 
 import type { ZodType } from 'zod';
 import { coordinatorOutputSchema } from './agents/coordinator/schema';
-import { growthStrategistOutputSchema } from './agents/growth-strategist/schema';
 import { contentPlannerOutputSchema } from './agents/content-planner/schema';
 import { postWriterOutputSchema } from './agents/post-writer/schema';
 import { communityManagerOutputSchema } from './agents/community-manager/schema';
@@ -20,7 +25,6 @@ import { discoveryAgentOutputSchema } from './agents/discovery-agent/schema';
 
 const registry: Record<string, ZodType<unknown>> = {
   coordinator: coordinatorOutputSchema as ZodType<unknown>,
-  'growth-strategist': growthStrategistOutputSchema as ZodType<unknown>,
   'content-planner': contentPlannerOutputSchema as ZodType<unknown>,
   'post-writer': postWriterOutputSchema as ZodType<unknown>,
   'community-manager': communityManagerOutputSchema as ZodType<unknown>,
@@ -39,7 +43,6 @@ export function getAgentOutputSchema(agentType: string): ZodType<unknown> | null
 
 export {
   coordinatorOutputSchema,
-  growthStrategistOutputSchema,
   contentPlannerOutputSchema,
   postWriterOutputSchema,
   communityManagerOutputSchema,

@@ -116,7 +116,7 @@ export const teamMembers = pgTable(
       .references(() => teams.id, { onDelete: 'cascade' }),
     // Must match an AGENT.md `name` under src/tools/AgentTool/agents/<agent_type>.
     agentType: text('agent_type').notNull(),
-    // Product-decided presentation name ("Alex" for growth-strategist).
+    // Product-decided presentation name ("Alex" for content-planner).
     displayName: text('display_name').notNull(),
     // 'idle' | 'active' | 'waiting_approval' | 'error'
     status: text('status').notNull().default('idle'),

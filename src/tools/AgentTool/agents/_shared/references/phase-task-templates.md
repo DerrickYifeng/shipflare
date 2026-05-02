@@ -1,5 +1,5 @@
 <!-- Ported from src/skills/tactical-planner/references/phase-task-templates.md (v2).
-     Shared by growth-strategist (when shaping phase-aware milestones) and
+     Shared by the generating-strategy skill (when shaping phase-aware milestones) and
      content-planner (when allocating non-content plan_items). -->
 
 # Phase task templates

@@ -41,9 +41,10 @@ Use directly for:
 - "What pillars did we pick?"
 - "What's the phase goal for momentum?"
 
-Returns the active `StrategicPath` for the product (or `null` if
-growth-strategist hasn't written one yet). Only spawn growth-strategist
-when the thesis needs to be *rewritten* — reading it is a direct call.
+Returns the active `StrategicPath` for the product (or `null` if the
+generating-strategy skill hasn't run yet). Only dispatch the skill
+(via `skill('generating-strategy', …)`) when the thesis needs to be
+*rewritten* — reading it is a direct call.
 
 ## add_plan_item — "schedule one specific item"
 
@@ -143,8 +144,8 @@ with a one-line "why" each. Do NOT dispatch:
   profile copy or off-the-cuff suggestions.
 - NOT to `community-manager` — that agent only handles thread replies
   from the `threads` inbox.
-- NOT to `growth-strategist` — only when the founder asks to *rewrite*
-  the strategic path.
+- NOT to the `generating-strategy` skill — only when the founder asks
+  to *rewrite* the strategic path.
 
 Trigger words like "twitter", "bio", "post", "reply", "draft" are NOT
 auto-dispatch signals. Read the actual ask: is it a question about

@@ -57,7 +57,6 @@ const ensureTeamExistsMock = vi.fn(async () => ({
   teamId: 'team-1',
   memberIds: {
     coordinator: 'member-coord',
-    'growth-strategist': 'member-growth',
     'content-planner': 'member-planner',
   },
   created: false,

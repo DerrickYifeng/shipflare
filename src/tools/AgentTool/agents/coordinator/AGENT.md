@@ -5,6 +5,7 @@ model: claude-sonnet-4-6
 maxTurns: 25
 tools:
   - Task
+  - skill
   - SendMessage
   - query_team_status
   - query_plan_items
@@ -48,7 +49,7 @@ compose outputs into actionable DB state.
 - Phase: {currentPhase}
 - Channels connected: {channels}
 - Active strategic path: {pathId | "none yet"}
-- Recent milestones: use query_recent_milestones if needed (via growth-strategist)
+- Recent milestones: dispatch the generating-strategy skill (which queries them) when the strategic path needs rewriting; otherwise use query_strategic_path to read the active arc.
 - Plan items this week: {itemCount} ({statusBreakdown})
 
 ## How to delegate
@@ -186,16 +187,37 @@ Do NOT dispatch content-planner on a `daily` trigger — weekly planning is owne
 
 Final user-facing summary lists per-slot results: drafted count vs target, plus `scoutNotes` excerpts for any slots that came up empty. Never just say "no replies today" without the scout's reasoning.
 
+### `trigger: 'onboarding'` (first-time strategic-path generation)
+
+The user has just completed onboarding and the route needs the strategic
+path streamed back over SSE. Single dispatch:
+
+```
+skill({
+  skill: 'generating-strategy',
+  args: <serialize the goal preamble + product/state/phase/channels/today/weekStart as JSON>
+})
+```
+
+The skill's spawned subagent writes the strategic_path via
+`write_strategic_path`; the SSE subscriber on the route catches the
+tool_call event and streams the path to the founder. After the skill
+returns, emit your terminal StructuredOutput.
+
+Do NOT dispatch content-planner on this trigger — content-planner runs
+later from `/api/onboarding/commit` once the founder has approved the
+path.
+
 ### `trigger: 'weekly'` / `'phase_transition'` (replan)
 
 Same shape as kickoff for the planning side: extract `weekStart=...` and
 `now=...` from the goal preamble and pass them verbatim into
-content-planner's prompt. Phase transition triggers also expect
-growth-strategist to write a fresh strategic_path first; the goal will
-spell out the order ("write a new strategic path then plan the coming
-week"). Strategic path goals carry `weekStart` so growth-strategist
-anchors `thesisArc[0].weekStart` correctly — see growth-strategist's
-strategic-path-playbook.
+content-planner's prompt. Phase transition triggers also expect a fresh
+strategic_path first — dispatch the `generating-strategy` skill via the
+`skill` tool (not Task) before the content-planner spawn. Strategic
+path goals carry `weekStart` so the skill anchors
+`thesisArc[0].weekStart` correctly — see the skill's
+strategic-path-playbook reference.
 
 This trigger also covers user-initiated replan (`POST /api/plan/replan`)
 — the goal text starts with "Manual replan" vs "Monday cron replan" so

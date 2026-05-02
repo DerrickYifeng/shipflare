@@ -1,7 +1,8 @@
 // write_strategic_path — singleton INSERT or UPDATE of strategic_paths
 // for the current (userId, productId).
 //
-// Called by: growth-strategist (Phase B agent).
+// Called by: generating-strategy fork-mode skill
+// (src/skills/generating-strategy/).
 // Reads: nothing. Validates input against strategicPathSchema.
 // Writes: strategic_paths row — UPDATE if any row exists for
 // (userId, productId), else INSERT. The uniqueIndex

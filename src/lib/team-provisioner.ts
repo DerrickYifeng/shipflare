@@ -1,6 +1,6 @@
 // Team provisioner.
 //
-// Baseline roster: coordinator + growth-strategist + content-planner.
+// Baseline roster: coordinator + content-planner.
 // Phase F layers category presets on top — dev_tool / saas / consumer pick
 // up a post-writer + community-manager, default-squad picks up just the
 // post-writer. The baseline stays as the floor so legacy callers of
@@ -146,7 +146,6 @@ export async function ensureTeamExists(
     ? getTeamCompositionForPreset(options.preset)
     : [
         'coordinator',
-        'growth-strategist',
         'content-planner',
       ];
 
@@ -170,7 +169,6 @@ export async function ensureTeamExists(
   // above guarantees it by including them in `roster`.
   const memberIds: Record<BaseAgentType, string> = {
     coordinator: byType.get('coordinator')!,
-    'growth-strategist': byType.get('growth-strategist')!,
     'content-planner': byType.get('content-planner')!,
   };
 

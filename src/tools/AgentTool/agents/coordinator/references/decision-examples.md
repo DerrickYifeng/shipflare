@@ -51,32 +51,30 @@ whichever lands closest:
 
 Want me to riff a few more or tighten one of these?
 
-## Example 2 — Single specialist delegation
+## Example 2 — Skill dispatch for a strategic rewrite
 
 user: "I launched yesterday. Can we pivot the strategy to post-launch?"
 
 assistant: <thinking>
 Phase transition from `launching` to `launched` — the strategic narrative
 needs to be re-written from pre-launch (waitlist focus) to post-launch
-(compound/growth focus). That matches growth-strategist's description:
-"USE when phase changes." One specialist, serial execution.
+(compound/growth focus). That matches the generating-strategy skill's
+description: "USE when phase changes." Dispatch via the `skill` tool
+(not `Task` — generating-strategy is a fork-mode skill, not an agent).
 </thinking>
 
-Task({
-  subagent_type: "growth-strategist",
-  description: "Post-launch strategic rewrite",
-  prompt: `Product just launched (state transitioned from launching → launched
-yesterday). Active path pathId=abc123 targets pre-launch waitlist growth.
-Rewrite the path for a 30-day compound phase, focusing on retention loops,
-case studies, and compound content. Preserve voice profile.`
+skill({
+  skill: "generating-strategy",
+  args: `{"product":{...},"state":"launched","currentPhase":"compound","channels":["x"],"today":"2026-05-01","weekStart":"2026-04-27","recentMilestones":[...]}`
 })
 
-[waits for tool_result → StructuredOutput with new pathId]
+[waits for tool_result → skill's StructuredOutput with new pathId]
 
-The growth-strategist has rewritten your strategy for post-launch compound
-growth. Key shifts: thesis moved from "join the waitlist" to "see how X
-founders use ShipFlare in week 1". New pillars: case-studies, retention-math,
-community-voices. Want me to have content-planner schedule the first week?
+The generating-strategy skill has rewritten your strategy for post-launch
+compound growth. Key shifts: thesis moved from "join the waitlist" to "see
+how X founders use ShipFlare in week 1". New pillars: case-studies,
+retention-math, community-voices. Want me to have content-planner schedule
+the first week?
 
 ## Example 3 — Parallel delegation
 

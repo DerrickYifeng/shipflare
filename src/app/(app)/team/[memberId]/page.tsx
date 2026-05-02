@@ -44,8 +44,6 @@ const STATUS_LABEL: Record<string, string> = {
 const AGENT_ROLE_BLURB: Record<string, string> = {
   coordinator:
     'Chief of Staff. Receives your goals, delegates to specialists, composes final outputs.',
-  'growth-strategist':
-    'Head of Growth. Designs the 30-day narrative arc, milestones, and content pillars.',
   'content-planner':
     'Head of Content. Turns the strategic path into a weekly plan of posts and tasks.',
 };

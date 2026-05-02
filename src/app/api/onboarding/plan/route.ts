@@ -329,20 +329,19 @@ async function runViaTeamRun(
   // 1) Ensure a team + base roster exists for this (userId, productId).
   const { teamId, memberIds } = await ensureTeamExists(userId, productId);
 
-  // 2) Enqueue the team-run rooted at growth-strategist.
+  // 2) Enqueue the team-run rooted at coordinator.
   //
-  //    Pre-Phase-F we rooted onboarding at the coordinator so it could
-  //    delegate, but the coordinator kept making bad parallel-spawn
-  //    decisions (spawning content-planner + a writer before the
-  //    strategic_path existed → the writer hallucinated plan_item IDs →
-  //    wasted 15s + retries). Since onboarding is a single-responsibility
-  //    flow ("write the strategic path"), we skip the delegation turn
-  //    and root the run directly at growth-strategist. Content-planner
-  //    runs as a separate team_run from /api/onboarding/commit after
-  //    the founder reviews the path.
+  //    Phase F (agent-skill-tool-decomposition) deleted the
+  //    `growth-strategist` agent; the strategic-path generator is now
+  //    the `generating-strategy` fork-mode skill
+  //    (src/skills/generating-strategy/). The coordinator's onboarding
+  //    playbook dispatches the skill via the `skill` tool, the spawned
+  //    skill subagent calls `write_strategic_path`, and the existing
+  //    SSE subscriber catches the tool_call event the same way it did
+  //    when growth-strategist was the root.
   //
-  //    Net effect: ~30-50s faster per onboarding, no coordinator Sonnet
-  //    turn, no parallel-spawn foot-guns.
+  //    Content-planner runs as a separate team_run from
+  //    /api/onboarding/commit after the founder reviews the path.
   const milestoneNote =
     body.recentMilestones && body.recentMilestones.length > 0
       ? ` Recent shipping: ${body.recentMilestones.map((m) => m.title).join('; ')}.`
@@ -352,9 +351,11 @@ async function runViaTeamRun(
     : body.launchedAt
       ? ` Launched: ${body.launchedAt.slice(0, 10)}.`
       : '';
-  // Growth-strategist-specific goal: tell it directly to call
-  // write_strategic_path, not the generic "plan the launch" goal which
-  // the model can misread as "return a description".
+  // Coordinator-rooted goal: the trigger=onboarding branch in
+  // coordinator/AGENT.md dispatches the `generating-strategy` skill via
+  // the `skill` tool. The skill's spawned subagent calls
+  // write_strategic_path; SSE subscribes to that tool_call and emits
+  // the path back to the founder.
   //
   // We pass `today` and `weekStart` (Monday 00:00 UTC of the ISO week
   // containing today) so the LLM doesn't have to infer the calendar
@@ -367,9 +368,10 @@ async function runViaTeamRun(
   const todayIso = now.toISOString().slice(0, 10);
   const week1Start = currentWeekStart(now).toISOString().slice(0, 10);
   const goal =
-    `Write the 30-day strategic path for ${body.product.name} by calling ` +
-    `write_strategic_path. ` +
+    `Write the 30-day strategic path for ${body.product.name} by ` +
+    `dispatching the generating-strategy skill (skill tool). ` +
     `Today (UTC): ${todayIso}. ` +
+    `weekStart: ${week1Start}. ` +
     `thesisArc[0].weekStart MUST equal ${week1Start} (Monday of the ISO ` +
     `week containing today — NOT next Monday). Subsequent thesisArc entries ` +
     `are consecutive Mondays after that. ` +
@@ -378,16 +380,16 @@ async function runViaTeamRun(
     `Channels: ${body.channels.join(', ')}.` +
     launchDateNote +
     milestoneNote +
-    ` Follow your strategic-path-playbook (six ordered steps) and persist ` +
-    `via the write_strategic_path tool. Do not emit the terminal ` +
-    `StructuredOutput until write_strategic_path has succeeded.`;
+    ` Pass the product + state + channels + today + weekStart to the ` +
+    `skill so it persists via write_strategic_path. Do not emit the ` +
+    `terminal StructuredOutput until the skill has finished.`;
 
   const conversationId = await createAutomationConversation(teamId, 'onboarding');
   const { runId } = await enqueueTeamRun({
     teamId,
     trigger: 'onboarding',
     goal,
-    rootMemberId: memberIds['growth-strategist'],
+    rootMemberId: memberIds.coordinator,
     conversationId,
   });
 
