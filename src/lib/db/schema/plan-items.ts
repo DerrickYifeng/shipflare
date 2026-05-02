@@ -25,6 +25,12 @@ export const planItemKindEnum = pgEnum('plan_item_kind', [
 
 export const planItemStateEnum = pgEnum('plan_item_state', [
   'planned',
+  // `drafting` — claimed by the plan-execute-sweeper for content_post
+  // batch drafting (Phase J Task 2). The sweeper flips planned → drafting
+  // atomically so concurrent ticks don't double-dispatch a team-run, then
+  // hands the row to content-manager(post_batch); `draft_post` advances
+  // the row to `drafted` once persisted.
+  'drafting',
   'drafted',
   'ready_for_review',
   'approved',

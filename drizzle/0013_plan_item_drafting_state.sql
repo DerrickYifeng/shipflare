@@ -1,0 +1,13 @@
+-- Add a `drafting` value to plan_item_state.
+--
+-- Phase J Task 2 batches content_post drafts via the content-manager
+-- agent (post_batch mode). The sweeper claims candidate rows by
+-- atomically flipping `state` from `planned` to `drafting` before
+-- dispatching ONE team-run per user. Without an in-flight state, two
+-- sweep ticks (or a sweep tick + a manual approve) could race and
+-- spawn duplicate team-runs for the same plan_item.
+--
+-- The state machine (src/lib/plan-state.ts) sits between `planned` and
+-- `drafted`; `draft_post` continues to flip rows to `drafted` once the
+-- writer persists.
+ALTER TYPE "plan_item_state" ADD VALUE IF NOT EXISTS 'drafting' BEFORE 'drafted';

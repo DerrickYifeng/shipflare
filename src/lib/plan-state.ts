@@ -17,6 +17,7 @@
 
 export type PlanItemState =
   | 'planned'
+  | 'drafting'
   | 'drafted'
   | 'ready_for_review'
   | 'approved'
@@ -55,6 +56,7 @@ const VALID_TRANSITIONS: ReadonlyMap<
   [
     'planned',
     new Set<PlanItemState>([
+      'drafting', // sweeper claims content_post for post_batch dispatch
       'drafted',
       'executing',
       'superseded',
@@ -62,6 +64,20 @@ const VALID_TRANSITIONS: ReadonlyMap<
       'skipped',
       'completed', // userAction=manual — founder marks "done" directly
       'failed', // fan-out draft errored before we could enter `drafted`
+    ]),
+  ],
+  [
+    // `drafting` — sweeper-claimed content_post awaiting the
+    // content-manager(post_batch) team-run. The writer's `draft_post`
+    // tool moves us to `drafted`; if the team-run errors before
+    // persisting, the row drops to `failed` for retry.
+    'drafting',
+    new Set<PlanItemState>([
+      'drafted',
+      'failed',
+      'superseded',
+      'stale',
+      'skipped',
     ]),
   ],
   [

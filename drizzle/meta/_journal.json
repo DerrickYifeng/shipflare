@@ -92,6 +92,13 @@
       "when": 1779700012000,
       "tag": "0012_drafts_one_pending_per_thread",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1779700013000,
+      "tag": "0013_plan_item_drafting_state",
+      "breakpoints": true
     }
   ]
 }
