@@ -85,6 +85,7 @@ export const skillTool: ToolDefinition<SkillToolInput, SkillToolOutput> = buildT
       description: cmd.description,
       tools: cmd.allowedTools,
       disallowedTools: [],
+      background: false,
       skills: [],  // skills cannot recursively preload skills (Phase 1)
       model: cmd.model,
       maxTurns: cmd.maxTurns ?? DEFAULT_SKILL_FORK_MAX_TURNS,

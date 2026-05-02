@@ -19,4 +19,19 @@ describe('loader — Phase A restored fields', () => {
     });
     expect(agent.disallowedTools).toEqual([]);
   });
+
+  it('parses background as a boolean', async () => {
+    const agent = await loadAgent(
+      path.join(FIXTURES, 'full-frontmatter-agent'),
+      { sharedReferencesDir: path.join(FIXTURES, '_shared', 'references') },
+    );
+    expect(agent.background).toBe(true);
+  });
+
+  it('defaults background to false when absent', async () => {
+    const agent = await loadAgent(path.join(FIXTURES, 'valid-agent'), {
+      sharedReferencesDir: path.join(FIXTURES, '_shared', 'references'),
+    });
+    expect(agent.background).toBe(false);
+  });
 });

@@ -1,8 +1,9 @@
 // Ported from engine/tools/AgentTool/loadAgentsDir.ts parseAgent() (Claude Code);
 // validators for hooks/mcpServers/permissionMode/isolation/initialPrompt/memory/
-// omitClaudeMd/requiredMcpServers/background are intentionally dropped — ShipFlare
-// agents live in-process under our own BullMQ worker, not CC's CLI runtime.
+// omitClaudeMd/requiredMcpServers are intentionally dropped — ShipFlare agents
+// live in-process under our own BullMQ worker, not CC's CLI runtime.
 // `skills` is parsed as a first-class field (see AgentDefinition.skills).
+// `disallowedTools` and `background` are restored Phase A (Agent Teams spec §5).
 
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
@@ -20,6 +21,7 @@ export interface AgentDefinition {
   description: string;
   tools: string[];
   disallowedTools: string[];   // restored Phase A — see Agent Teams spec §5
+  background: boolean;         // restored Phase A — semantics adapted, see Agent Teams spec §5
   skills: string[];
   model?: string;
   maxTurns: number;
@@ -60,6 +62,7 @@ const frontmatterSchema = z
       .min(1, 'description cannot be empty'),
     tools: z.array(z.string()).optional(),
     disallowedTools: z.array(z.string()).optional(),
+    background: z.boolean().optional(),
     skills: z.array(z.string()).optional(),
     model: z.string().min(1).optional(),
     maxTurns: z.number().int().positive().optional(),
@@ -81,8 +84,8 @@ const DROPPED_FIELDS = [
   'memory',
   'omitClaudeMd',
   'requiredMcpServers',
-  'background',
   // disallowedTools restored Phase A — see Agent Teams spec §5
+  // background restored Phase A — see Agent Teams spec §5
   'effort',
 ] as const;
 
@@ -433,6 +436,7 @@ export async function loadAgent(
     description: parsed.description,
     tools: parsed.tools ?? [],
     disallowedTools: parsed.disallowedTools ?? [],
+    background: parsed.background ?? false,
     skills: parsed.skills ?? [],
     ...(parsed.model !== undefined ? { model: parsed.model } : {}),
     maxTurns: parsed.maxTurns ?? DEFAULT_MAX_TURNS,
