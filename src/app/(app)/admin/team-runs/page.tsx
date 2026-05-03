@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { desc, and, eq, gte, sql, type SQL } from 'drizzle-orm';
 import { db } from '@/lib/db';
-import { teamRuns, teams } from '@/lib/db/schema';
+import { teamRuns, teams, users } from '@/lib/db/schema';
 
 /**
  * /admin/team-runs — read-only list of recent team_runs across all teams.
@@ -44,6 +44,7 @@ export default async function AdminTeamRunsPage({
       id: teamRuns.id,
       teamId: teamRuns.teamId,
       teamName: teams.name,
+      ownerEmail: users.email,
       trigger: teamRuns.trigger,
       status: teamRuns.status,
       startedAt: teamRuns.startedAt,
@@ -54,6 +55,7 @@ export default async function AdminTeamRunsPage({
     })
     .from(teamRuns)
     .leftJoin(teams, eq(teams.id, teamRuns.teamId))
+    .leftJoin(users, eq(users.id, teams.userId))
     .where(where)
     .orderBy(desc(teamRuns.startedAt))
     .limit(100);
@@ -83,6 +85,7 @@ export default async function AdminTeamRunsPage({
             <Th>Duration</Th>
             <Th align="right">Cost</Th>
             <Th align="right">Turns</Th>
+            <Th align="right">Trace</Th>
           </tr>
         </thead>
         <tbody>
@@ -108,6 +111,17 @@ export default async function AdminTeamRunsPage({
                   >
                     {row.teamName ?? row.teamId.slice(0, 8)}
                   </Link>
+                  {row.ownerEmail ? (
+                    <div
+                      style={{
+                        fontSize: 11,
+                        color: 'var(--sf-fg-4)',
+                        marginTop: 2,
+                      }}
+                    >
+                      {row.ownerEmail}
+                    </div>
+                  ) : null}
                 </Td>
                 <Td>{row.trigger}</Td>
                 <Td>
@@ -121,13 +135,25 @@ export default async function AdminTeamRunsPage({
                     : '—'}
                 </Td>
                 <Td align="right">{row.totalTurns ?? '—'}</Td>
+                <Td align="right">
+                  <Link
+                    href={`/admin/team-runs/${row.id}`}
+                    style={{
+                      color: 'var(--sf-link)',
+                      textDecoration: 'none',
+                      fontSize: 12,
+                    }}
+                  >
+                    messages →
+                  </Link>
+                </Td>
               </tr>
             );
           })}
           {rows.length === 0 && (
             <tr>
               <td
-                colSpan={7}
+                colSpan={8}
                 style={{
                   padding: 24,
                   textAlign: 'center',
@@ -321,12 +347,13 @@ function FilterBar({
         style={{
           height: 30,
           padding: '0 14px',
-          border: '1px solid var(--sf-border-1)',
+          border: '1px solid var(--sf-fg-1)',
           borderRadius: 6,
-          background: 'var(--sf-bg-primary)',
+          background: 'var(--sf-fg-1)',
+          color: 'var(--sf-bg-1)',
           cursor: 'pointer',
           fontSize: 12,
-          color: 'var(--sf-fg-1)',
+          fontWeight: 500,
         }}
       >
         Apply

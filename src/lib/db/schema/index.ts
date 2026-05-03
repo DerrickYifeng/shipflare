@@ -1,4 +1,9 @@
 export { users, accounts, sessions, verificationTokens, userPreferences } from './users';
+export {
+  allowedEmails,
+  type AllowedEmail,
+  type NewAllowedEmail,
+} from './allowed-emails';
 export { products } from './products';
 export { channels, threads } from './channels';
 export {

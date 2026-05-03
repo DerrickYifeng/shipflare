@@ -73,8 +73,10 @@ export default async function AdminTeamRunDetailPage({
       fromMemberId: teamMessages.fromMemberId,
       toMemberId: teamMessages.toMemberId,
       type: teamMessages.type,
+      messageType: teamMessages.messageType,
       content: teamMessages.content,
       metadata: teamMessages.metadata,
+      summary: teamMessages.summary,
       createdAt: teamMessages.createdAt,
     })
     .from(teamMessages)
@@ -251,10 +253,14 @@ export default async function AdminTeamRunDetailPage({
 
       <section style={sectionStyle()}>
         <h2 style={headingStyle()}>
-          Messages ({messages.length}
+          Conversation ({messages.length}
           {messages.length === 500 ? '+' : ''})
         </h2>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <p style={{ fontSize: 11, color: 'var(--sf-fg-4)', marginTop: -8, marginBottom: 14 }}>
+          User ↔ agent turns expanded. Tool calls, thinking, and system events
+          collapsed by default — click any row to expand.
+        </p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {messages.map((msg) => {
             const fromLabel = msg.fromMemberId
               ? memberById.get(msg.fromMemberId)?.displayName ??
@@ -264,72 +270,36 @@ export default async function AdminTeamRunDetailPage({
               ? memberById.get(msg.toMemberId)?.displayName ??
                 msg.toMemberId.slice(0, 8)
               : null;
+            const category = categorizeMessage(msg.type, msg.messageType);
+            const time = msg.createdAt.toISOString().slice(11, 19);
+
+            if (category === 'conversation') {
+              return (
+                <ConversationBubble
+                  key={msg.id}
+                  fromLabel={fromLabel}
+                  toLabel={toLabel}
+                  type={msg.type}
+                  messageType={msg.messageType}
+                  content={msg.content}
+                  metadata={msg.metadata}
+                  time={time}
+                />
+              );
+            }
             return (
-              <div
+              <FoldedRow
                 key={msg.id}
-                style={{
-                  padding: '10px 12px',
-                  background: 'var(--sf-bg-secondary)',
-                  borderRadius: 6,
-                  fontSize: 12.5,
-                }}
-              >
-                <div
-                  style={{
-                    display: 'flex',
-                    gap: 8,
-                    marginBottom: 6,
-                    fontSize: 11,
-                    color: 'var(--sf-fg-4)',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.08em',
-                  }}
-                >
-                  <span>{msg.createdAt.toISOString()}</span>
-                  <span>· {msg.type}</span>
-                  <span>
-                    · {fromLabel}
-                    {toLabel ? ` → ${toLabel}` : ''}
-                  </span>
-                </div>
-                {msg.content && (
-                  <pre
-                    style={{
-                      whiteSpace: 'pre-wrap',
-                      fontFamily: 'inherit',
-                      margin: 0,
-                      color: 'var(--sf-fg-2)',
-                    }}
-                  >
-                    {msg.content}
-                  </pre>
-                )}
-                {msg.metadata != null && (
-                  <details style={{ marginTop: 6 }}>
-                    <summary
-                      style={{
-                        cursor: 'pointer',
-                        fontSize: 11,
-                        color: 'var(--sf-fg-3)',
-                      }}
-                    >
-                      metadata
-                    </summary>
-                    <pre
-                      style={{
-                        marginTop: 4,
-                        fontSize: 11.5,
-                        background: 'var(--sf-bg-primary)',
-                        padding: 8,
-                        borderRadius: 4,
-                        overflow: 'auto',
-                      }}
-                    >
-                      {JSON.stringify(msg.metadata, null, 2)}
-                    </pre>
-                  </details>
-                )}
-              </div>
+                category={category}
+                fromLabel={fromLabel}
+                toLabel={toLabel}
+                type={msg.type}
+                messageType={msg.messageType}
+                content={msg.content}
+                metadata={msg.metadata}
+                summary={msg.summary}
+                time={time}
+              />
             );
           })}
           {messages.length === 0 && (
@@ -341,6 +311,256 @@ export default async function AdminTeamRunDetailPage({
       </section>
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Message categorization + render helpers
+// ---------------------------------------------------------------------------
+
+type Category = 'conversation' | 'tool' | 'thinking' | 'system';
+
+function categorizeMessage(type: string, messageType: string): Category {
+  // task_notification rows use type='user_prompt' but represent a worker's
+  // synthesized result — still "conversation" semantically (it lands as a
+  // user-role turn in the lead's transcript).
+  if (messageType === 'task_notification') return 'conversation';
+  if (messageType === 'shutdown_request' || messageType === 'shutdown_response')
+    return 'system';
+  if (messageType === 'broadcast') return 'conversation';
+  if (messageType === 'plan_approval_response') return 'system';
+
+  if (type === 'user_prompt' || type === 'agent_text') return 'conversation';
+  if (type === 'tool_call' || type === 'tool_result') return 'tool';
+  if (type === 'thinking') return 'thinking';
+  return 'system';
+}
+
+interface BubbleProps {
+  fromLabel: string;
+  toLabel: string | null;
+  type: string;
+  messageType: string;
+  content: string | null;
+  metadata: unknown;
+  time: string;
+}
+
+function ConversationBubble({
+  fromLabel,
+  toLabel,
+  type,
+  messageType,
+  content,
+  metadata,
+  time,
+}: BubbleProps) {
+  // Visual: user input on left with subtle bg; agent response with accent stripe.
+  const isAgent = type === 'agent_text';
+  return (
+    <div
+      style={{
+        padding: '12px 14px',
+        background: 'var(--sf-bg-secondary)',
+        borderRadius: 8,
+        borderLeft: `3px solid ${isAgent ? 'var(--sf-accent, #4a90e2)' : 'var(--sf-fg-4)'}`,
+        fontSize: 13,
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          gap: 8,
+          marginBottom: 6,
+          fontSize: 11,
+          color: 'var(--sf-fg-4)',
+          alignItems: 'center',
+        }}
+      >
+        <strong style={{ color: 'var(--sf-fg-2)', fontWeight: 600 }}>
+          {fromLabel}
+        </strong>
+        {toLabel ? <span>→ {toLabel}</span> : null}
+        <span>·</span>
+        <span>{time}</span>
+        <span>·</span>
+        <span style={{ fontFamily: 'var(--sf-font-mono, monospace)' }}>
+          {messageType !== 'message' ? messageType : type}
+        </span>
+      </div>
+      {content ? (
+        <pre
+          style={{
+            whiteSpace: 'pre-wrap',
+            fontFamily: 'inherit',
+            margin: 0,
+            color: 'var(--sf-fg-1)',
+            lineHeight: 1.55,
+            wordBreak: 'break-word',
+          }}
+        >
+          {content}
+        </pre>
+      ) : (
+        <span style={{ color: 'var(--sf-fg-4)', fontSize: 12 }}>
+          (no content)
+        </span>
+      )}
+      {metadata != null && hasInterestingMetadata(metadata) ? (
+        <details style={{ marginTop: 8 }}>
+          <summary
+            style={{
+              cursor: 'pointer',
+              fontSize: 11,
+              color: 'var(--sf-fg-3)',
+            }}
+          >
+            metadata
+          </summary>
+          <pre
+            style={{
+              marginTop: 4,
+              fontSize: 11.5,
+              background: 'var(--sf-bg-primary)',
+              padding: 8,
+              borderRadius: 4,
+              overflow: 'auto',
+            }}
+          >
+            {JSON.stringify(metadata, null, 2)}
+          </pre>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
+interface FoldedRowProps extends BubbleProps {
+  category: Exclude<Category, 'conversation'>;
+  summary: string | null;
+}
+
+function FoldedRow({
+  category,
+  fromLabel,
+  toLabel,
+  type,
+  messageType,
+  content,
+  metadata,
+  summary,
+  time,
+}: FoldedRowProps) {
+  const meta = metadata as { tool_name?: string; tool_input?: unknown } | null;
+  // Inline summary pulled from the most useful field per category.
+  let inlineSummary: string;
+  if (category === 'tool') {
+    const toolName = meta?.tool_name ?? '?';
+    inlineSummary =
+      type === 'tool_call' ? `→ ${toolName}` : `← ${toolName}`;
+  } else if (category === 'thinking') {
+    inlineSummary = (content ?? '').slice(0, 80) + ((content?.length ?? 0) > 80 ? '…' : '');
+  } else {
+    inlineSummary = summary ?? content?.slice(0, 80) ?? messageType;
+  }
+
+  const accentColor =
+    category === 'tool'
+      ? 'var(--sf-fg-4)'
+      : category === 'thinking'
+        ? 'var(--sf-fg-4)'
+        : 'var(--sf-fg-3)';
+
+  return (
+    <details
+      style={{
+        background: 'var(--sf-bg-primary)',
+        border: '1px solid var(--sf-border-1)',
+        borderRadius: 6,
+        padding: '6px 10px',
+        fontSize: 12,
+      }}
+    >
+      <summary
+        style={{
+          cursor: 'pointer',
+          listStyle: 'none',
+          display: 'flex',
+          gap: 10,
+          alignItems: 'center',
+          color: accentColor,
+          fontFamily: 'var(--sf-font-mono, monospace)',
+        }}
+      >
+        <span style={{ fontSize: 10, opacity: 0.6 }}>{time}</span>
+        <span
+          style={{
+            fontSize: 10,
+            padding: '1px 6px',
+            background: 'var(--sf-bg-secondary)',
+            borderRadius: 3,
+            textTransform: 'uppercase',
+            letterSpacing: '0.06em',
+          }}
+        >
+          {category}
+        </span>
+        <span style={{ flex: 1, color: 'var(--sf-fg-2)' }}>
+          {fromLabel}
+          {toLabel ? ` → ${toLabel}` : ''}
+        </span>
+        <span style={{ color: 'var(--sf-fg-2)' }}>{inlineSummary}</span>
+      </summary>
+      <div
+        style={{
+          marginTop: 8,
+          paddingTop: 8,
+          borderTop: '1px solid var(--sf-border-1)',
+          fontFamily: 'var(--sf-font-mono, monospace)',
+          fontSize: 11.5,
+        }}
+      >
+        <div style={{ color: 'var(--sf-fg-4)', marginBottom: 4 }}>
+          type=<code>{type}</code> messageType=<code>{messageType}</code>
+        </div>
+        {content ? (
+          <pre
+            style={{
+              whiteSpace: 'pre-wrap',
+              fontFamily: 'inherit',
+              margin: 0,
+              color: 'var(--sf-fg-2)',
+            }}
+          >
+            {content}
+          </pre>
+        ) : null}
+        {metadata != null ? (
+          <pre
+            style={{
+              marginTop: 6,
+              fontSize: 11,
+              background: 'var(--sf-bg-secondary)',
+              padding: 8,
+              borderRadius: 4,
+              overflow: 'auto',
+              color: 'var(--sf-fg-2)',
+            }}
+          >
+            {JSON.stringify(metadata, null, 2)}
+          </pre>
+        ) : null}
+      </div>
+    </details>
+  );
+}
+
+function hasInterestingMetadata(meta: unknown): boolean {
+  if (meta == null) return false;
+  if (typeof meta !== 'object') return false;
+  const keys = Object.keys(meta as Record<string, unknown>);
+  // Hide trigger-only metadata (purely routing info, not useful for reading).
+  if (keys.length === 1 && keys[0] === 'trigger') return false;
+  return keys.length > 0;
 }
 
 function KeyValue({ k, v }: { k: string; v: React.ReactNode }) {
