@@ -20,6 +20,9 @@ shared-references:
 references:
   - decision-examples
   - when-to-handle-directly
+  - three-mode-decision
+  - continue-vs-spawn
+  - sendmessage-rules
 ---
 
 <!-- TODO(phase-d): the {productName}, {productState}, {currentPhase},

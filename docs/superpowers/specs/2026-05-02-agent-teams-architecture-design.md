@@ -1136,3 +1136,14 @@ unified path coexist behind flag), validated, then cut.
   - Task 9 — backfill migration script: `1cf809f`
   - Task 10 — e2e founder UI test: `ec5a294`
   - Task 11 — DELETE team-run.ts + cutover all callers: `4249236`
+- **Phase F — Team-lead prompt rewrite:** landed `2026-05-02` on `dev`.
+  Coordinator AGENT.md inlines 3 new reference docs covering the three
+  execution modes (handle directly / sync subagent / async teammate),
+  continue-vs-spawn decision logic, and SendMessage variant rules.
+  Pure prompt-engineering — no agent-run code changes. The rename
+  `coordinator` → `team-lead` is deferred to Phase G (touches DB rows,
+  AgentDefinition aliases mechanism, many code constants).
+  - Task 1 — three-mode-decision.md: `a63a1a5`
+  - Task 2 — continue-vs-spawn.md: `f69f163`
+  - Task 3 — sendmessage-rules.md: `7783173`
+  - Task 4 — AGENT.md references update + verification: <pending — this commit>
