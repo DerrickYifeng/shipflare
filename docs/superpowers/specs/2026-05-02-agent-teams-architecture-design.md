@@ -1109,4 +1109,4 @@ unified path coexist behind flag), validated, then cut.
   - Task 4 — agent-run Sleep early-exit: `9e54c88`
   - Task 5 — agent-run resume + per-turn persist: `300bf05`
   - Task 6 — SendMessage wakes sleeping recipient: `420a6c4`
-  - Task 7 — verification gate: <THIS COMMIT>
+  - Task 7 — verification gate: `71ff0ee`
