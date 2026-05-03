@@ -7,11 +7,14 @@
 // coordinator" invariant. Such removals are review-rejects.
 //
 // Phase A scope: only tools that exist today are present. Reserved
-// future blacklist entries (TaskStop, TeamCreate, TeamDelete,
-// SyntheticOutput) are added in their respective Phase B/C/D landings.
+// future blacklist entries (TaskStop, TeamCreate, TeamDelete) are added
+// in their respective Phase B/C/D landings. Phase B added SyntheticOutput
+// (architecture invariant: only the system, never an agent, may synthesize
+// a <task-notification>).
 
 import { TASK_TOOL_NAME } from './AgentTool';
 import { SEND_MESSAGE_TOOL_NAME } from '@/tools/SendMessageTool/SendMessageTool';
+import { SYNTHETIC_OUTPUT_TOOL_NAME } from '@/tools/SyntheticOutputTool/SyntheticOutputTool';
 import type { AgentRole } from './loader';
 
 const EMPTY_SET: ReadonlySet<string> = new Set();
@@ -21,10 +24,13 @@ const EMPTY_SET: ReadonlySet<string> = new Set();
  * coordination" (engine PDF §3.5.2).
  *
  * Phase A members: { Task }.
- * Phase B+ adds: TaskStop, TeamCreate, TeamDelete, SyntheticOutput.
+ * Phase B adds: { SyntheticOutput } (architecture invariant: only the
+ *   system, never an agent, may synthesize a <task-notification>).
+ * Phase B+ adds: TaskStop, TeamCreate, TeamDelete.
  */
 export const INTERNAL_TEAMMATE_TOOLS: ReadonlySet<string> = new Set([
   TASK_TOOL_NAME,
+  SYNTHETIC_OUTPUT_TOOL_NAME,
 ]);
 
 /**
