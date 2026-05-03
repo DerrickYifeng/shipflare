@@ -39,6 +39,7 @@ import type { ToolContext, ToolDefinition } from '@/core/types';
 import { db as defaultDb, type Database } from '@/lib/db';
 import { agentRuns } from '@/lib/db/schema';
 import { enqueueAgentRun } from '@/lib/queue/agent-run';
+import { cacheTeammateStatus } from '@/workers/processors/lib/team-state-writethrough';
 
 // ---------------------------------------------------------------------------
 // Public constants
@@ -121,6 +122,7 @@ export const sleepTool: ToolDefinition<SleepInput, SleepResult> = buildTool({
     const agentId = readAgentId(ctx);
     const db = readDb(ctx);
     const wakeAt = new Date(Date.now() + input.duration_ms);
+    const sleptAt = new Date();
 
     // 1. Mark sleeping. Even if the processor crashes between this UPDATE
     //    and the early-exit path in Task 4, status='sleeping' is the
@@ -131,7 +133,7 @@ export const sleepTool: ToolDefinition<SleepInput, SleepResult> = buildTool({
       .set({
         status: 'sleeping',
         sleepUntil: wakeAt,
-        lastActiveAt: new Date(),
+        lastActiveAt: sleptAt,
       })
       .where(eq(agentRuns.id, agentId));
 
@@ -146,6 +148,38 @@ export const sleepTool: ToolDefinition<SleepInput, SleepResult> = buildTool({
         delay: input.duration_ms,
       },
     );
+
+    // 3. UI-D: cache write-through. Teammate yielded its slot — patch the
+    //    cached roster so the status pill flips to "sleeping" without a
+    //    DB roundtrip on the next read. We need the teamId for the cache
+    //    key; read it back from the row we just updated. Lookup failure
+    //    is non-fatal: the writethrough is an optimization, not a
+    //    correctness requirement (60s TTL is the safety net).
+    try {
+      const rows = await db
+        .select({ teamId: agentRuns.teamId, agentDefName: agentRuns.agentDefName })
+        .from(agentRuns)
+        .where(eq(agentRuns.id, agentId))
+        .limit(1);
+      if (rows.length > 0 && rows[0].agentDefName !== 'coordinator') {
+        // Sleep is allowed for both lead + teammate, but the cached
+        // roster only tracks teammates explicitly — the lead's status
+        // is rendered via leadStatus, which the agent-run worker's
+        // writethrough handles when it observes the sleepingExit early
+        // return. Skip here for the lead to avoid double-writing.
+        await cacheTeammateStatus(
+          rows[0].teamId,
+          agentId,
+          'sleeping',
+          sleptAt,
+          wakeAt,
+        );
+      }
+    } catch {
+      // Best-effort. The agent-run worker's sleepingExit branch will
+      // also call the writethrough on its way out, so this is belt-
+      // and-suspenders.
+    }
 
     return {
       slept: true,

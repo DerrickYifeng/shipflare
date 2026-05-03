@@ -76,6 +76,16 @@ vi.mock('@/workers/processors/lib/wake', () => ({
   wake: vi.fn(async () => undefined),
 }));
 
+// UI-D: the Task tool's async branch now calls cacheTeammateSpawn after
+// the agent_runs insert. Stub it out so the test stays self-contained
+// (the real helper opens a Redis connection that the test env can't
+// reach, blocking the call indefinitely under maxRetriesPerRequest:null).
+vi.mock('@/workers/processors/lib/team-state-writethrough', () => ({
+  cacheTeammateSpawn: vi.fn(async () => undefined),
+  cacheTeammateStatus: vi.fn(async () => undefined),
+  cacheLeadStatus: vi.fn(async () => undefined),
+}));
+
 // Import *after* vi.mock so the stub is installed before the real module
 // binds runAgent via module resolution.
 import {

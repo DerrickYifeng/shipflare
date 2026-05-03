@@ -24,6 +24,7 @@ import {
 } from './spawn';
 import { teamHasBudgetRemaining } from '@/lib/team-budget';
 import { wake } from '@/workers/processors/lib/wake';
+import { cacheTeammateSpawn } from '@/workers/processors/lib/team-state-writethrough';
 
 const log = createLogger('tools:Task');
 
@@ -379,6 +380,7 @@ async function launchAsyncTeammate(
 
   // 1. Queue the agent_runs row. The agent-run worker (Task 9) drains its
   //    mailbox and drives runAgent against `agentDefName`.
+  const spawnedAt = new Date();
   await db.insert(agentRuns).values({
     id: agentId,
     teamId,
@@ -403,6 +405,36 @@ async function launchAsyncTeammate(
   // 3. Wake the agent-run worker via BullMQ. Idempotent within a 1-second
   //    bucket (see wake.ts).
   await wake(agentId);
+
+  // UI-D: cache write-through. Append the freshly-spawned teammate to the
+  // cached roster so /api/team/[teamId]/teammates and the SSE-driven
+  // roster sidebar surface the spawn without a fresh DB roundtrip. The
+  // displayName lookup is best-effort: if the team_members row hasn't
+  // been provisioned for this agent_type yet, fall back to subagent_type.
+  let displayName = input.subagent_type;
+  try {
+    const memberRows = await db
+      .select({ displayName: teamMembers.displayName })
+      .from(teamMembers)
+      .where(eq(teamMembers.id, currentMemberId))
+      .limit(1);
+    if (memberRows.length > 0 && memberRows[0].displayName.length > 0) {
+      displayName = memberRows[0].displayName;
+    }
+  } catch (err) {
+    log.warn(
+      `Task: displayName lookup failed for member=${currentMemberId}, falling back to ${input.subagent_type}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  await cacheTeammateSpawn(teamId, {
+    agentId,
+    memberId: currentMemberId,
+    agentDefName: input.subagent_type,
+    parentAgentId,
+    status: 'queued',
+    lastActiveAt: spawnedAt,
+    displayName,
+  });
 
   log.debug(
     `Task launched async teammate "${input.subagent_type}" agentId=${agentId} ` +

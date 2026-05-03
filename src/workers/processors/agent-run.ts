@@ -43,6 +43,11 @@ import { synthesizeTaskNotification } from './lib/synthesize-notification';
 import { wake } from './lib/wake';
 import { drainMailbox } from './lib/mailbox-drain';
 import { loadAgentRunHistory } from './lib/agent-run-history';
+import {
+  cacheLeadStatus,
+  cacheTeammateStatus,
+} from './lib/team-state-writethrough';
+import type { LeadStatus } from '@/lib/team/team-state-cache';
 import { loadConversationHistory } from '@/lib/team-conversation';
 import { createLogger } from '@/lib/logger';
 import { getPubSubPublisher } from '@/lib/redis';
@@ -99,15 +104,29 @@ function buildPhaseBToolContext(
   };
 }
 
-async function markFailed(agentId: string, reason: string): Promise<void> {
+async function markFailed(
+  agentId: string,
+  reason: string,
+  teamId: string,
+  isLead: boolean,
+): Promise<void> {
+  const now = new Date();
   await db
     .update(agentRuns)
     .set({
       status: 'failed',
       shutdownReason: reason,
-      lastActiveAt: new Date(),
+      lastActiveAt: now,
     })
     .where(eq(agentRuns.id, agentId));
+  // UI-D: cache write-through. Lead never reaches a terminal state in the
+  // normal flow, but if we got here with isLead=true (unknown agentDef),
+  // surface it as 'failed' so the cached snapshot agrees with the DB row.
+  if (isLead) {
+    await cacheLeadStatus(teamId, agentId, 'failed', now);
+  } else {
+    await cacheTeammateStatus(teamId, agentId, 'failed', now);
+  }
 }
 
 /**
@@ -203,7 +222,11 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
   const def = await resolveAgent(row.agentDefName);
   if (!def) {
     const reason = `unknown agent: ${row.agentDefName}`;
-    await markFailed(agentId, reason);
+    // UI-D: classify as lead via the canonical coordinator agentDefName so
+    // the writethrough hits the right cache path even when the AgentDefinition
+    // didn't resolve (e.g., stale row, registry drift).
+    const looksLikeLead = row.agentDefName === 'coordinator';
+    await markFailed(agentId, reason, row.teamId, looksLikeLead);
     await synthAndDeliverNotification({
       agentId,
       parentAgentId: row.parentAgentId,
@@ -262,14 +285,17 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
       );
     }
   } else if (row.status === 'sleeping') {
+    const resumingAt = new Date();
     await db
       .update(agentRuns)
       .set({
         status: 'resuming',
-        lastActiveAt: new Date(),
+        lastActiveAt: resumingAt,
         bullmqJobId: job.id ?? null,
       })
       .where(eq(agentRuns.id, agentId));
+    // UI-D: cache write-through. Teammate transitioning sleeping → resuming.
+    await cacheTeammateStatus(row.teamId, agentId, 'resuming', resumingAt, null);
     priorMessages = await loadAgentRunHistory(agentId, db);
     log.info(
       `agent-run ${agentId}: resuming from sleep with ${priorMessages.length} prior messages`,
@@ -279,14 +305,24 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
   // Mark running. (For a non-lead resume, this is the second update —
   // moves the row from 'resuming' to 'running'. For a fresh run or a
   // lead run, this is the only status update before runAgent starts.)
+  const runningAt = new Date();
   await db
     .update(agentRuns)
     .set({
       status: 'running',
-      lastActiveAt: new Date(),
+      lastActiveAt: runningAt,
       bullmqJobId: job.id ?? null,
     })
     .where(eq(agentRuns.id, agentId));
+  // UI-D: cache write-through. queued/resuming → running. Lead vs teammate
+  // routes to the right cache path so the roster doesn't show duplicate
+  // entries for the lead row (the lead is rendered via leadStatus, not in
+  // the teammates array — see team-state-cache.loadFromDb).
+  if (isLead) {
+    await cacheLeadStatus(row.teamId, agentId, 'running', runningAt);
+  } else {
+    await cacheTeammateStatus(row.teamId, agentId, 'running', runningAt, null);
+  }
 
   // Read initial prompt from mailbox (the Task tool inserted it before
   // calling wake()). The first drain still seeds the prompt; Phase C
@@ -583,15 +619,26 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
   // pick up where this turn left off.
   if (sleepingExit) {
     log.info(`agent-run ${agentId}: yielded for sleep, skipping notification`);
+    // UI-D: Sleep tool already updated agent_runs.status='sleeping' before
+    // the early-exit signal landed. Mirror that into the cache so the
+    // roster reflects the yield without waiting for the 60s TTL safety
+    // net. Lead vs teammate routing still applies.
+    const sleptAt = new Date();
+    if (isLead) {
+      await cacheLeadStatus(row.teamId, agentId, 'sleeping', sleptAt);
+    } else {
+      await cacheTeammateStatus(row.teamId, agentId, 'sleeping', sleptAt);
+    }
     return;
   }
 
   // Persist exit state.
+  const exitAt = new Date();
   await db
     .update(agentRuns)
     .set({
       status,
-      lastActiveAt: new Date(),
+      lastActiveAt: exitAt,
       totalTokens,
       // Tool-use counting is not yet plumbed through UsageSummary —
       // Phase D will surface it when the per-turn stream metrics land.
@@ -604,6 +651,22 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
             : null,
     })
     .where(eq(agentRuns.id, agentId));
+  // UI-D: cache write-through for the terminal exit. Teammates get removed
+  // from the cached roster on completed/failed/killed; the lead doesn't
+  // have a terminal state in the normal flow, so we surface the lead's
+  // exit as 'sleeping' (the API/page reads this as "lead is around but
+  // idle"). Lead-with-status='completed' would only happen if the
+  // coordinator agentDef itself was wired to terminate, which it isn't.
+  if (isLead) {
+    await cacheLeadStatus(
+      row.teamId,
+      agentId,
+      status === 'completed' ? 'sleeping' : (status as LeadStatus),
+      exitAt,
+    );
+  } else {
+    await cacheTeammateStatus(row.teamId, agentId, status, exitAt);
+  }
 
   await synthAndDeliverNotification({
     agentId,
