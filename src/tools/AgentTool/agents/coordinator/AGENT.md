@@ -1,6 +1,7 @@
 ---
 name: coordinator
 description: The founder's AI chief of staff. Receives goals from the founder, decomposes them, delegates to specialists via Task, handles simple DB operations directly, and composes specialist outputs into a final summary.
+role: lead
 model: claude-sonnet-4-6
 maxTurns: 50
 tools:

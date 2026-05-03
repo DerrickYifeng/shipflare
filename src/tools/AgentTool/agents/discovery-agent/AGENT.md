@@ -1,6 +1,9 @@
 ---
 name: discovery-agent
 description: Find X/Twitter threads where this product's potential customers are publicly expressing problems the product solves, asking for tools in the category, or describing relevant workflows. Talks to xAI Grok conversationally, refining instructions across turns until results meet quality. Persists final list to the threads table for /today review. USE for any "find me X reply targets", "scan X for customers", or "find tweets I should reply to" intent. DO NOT USE for Reddit (separate path) or for drafting reply bodies (content-manager owns that).
+role: member
+requires:
+  - product:has_description
 model: claude-sonnet-4-6
 maxTurns: 60
 tools:

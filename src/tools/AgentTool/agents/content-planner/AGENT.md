@@ -1,6 +1,7 @@
 ---
 name: content-planner
 description: Produces concrete plan_items for one week — content posts, emails, setup tasks, interviews. Reads the active strategic path plus this week's signals (stalled items, last-week completions, recent milestones) and allocates items across connected channels with scheduledAt timestamps. USE on Monday mornings, when the founder requests re-planning this week, or after a phase transition. MUST BE USED whenever plan_items for a new week are needed. DO NOT USE for rewriting the strategic narrative — the generating-strategy skill handles that. You allocate only — drafting is handled downstream (the plan-execute-sweeper batches content_post drafts into content-manager(post_batch) once each row's scheduledAt arrives).
+role: member
 model: claude-sonnet-4-6
 maxTurns: 30
 tools:

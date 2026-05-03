@@ -42,4 +42,14 @@ describe('four-layer filter — spawn.resolveAgentTools delegates to assembleToo
     expect(names).toContain('SendMessage');
     expect(names).toContain('Task');
   });
+
+  it('coordinator (role=lead) keeps Task; content-manager (role=member) has no Task', async () => {
+    const root = path.resolve(__dirname, '../agents');
+    const lead = await loadAgent(path.join(root, 'coordinator'));
+    const member = await loadAgent(path.join(root, 'content-manager'));
+    expect(lead.role).toBe('lead');
+    expect(member.role).toBe('member');
+    expect(resolveAgentTools(lead).map((t) => t.name)).toContain('Task');
+    expect(resolveAgentTools(member).map((t) => t.name)).not.toContain('Task');
+  });
 });
