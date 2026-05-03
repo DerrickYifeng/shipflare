@@ -1032,3 +1032,25 @@ unified path coexist behind flag), validated, then cut.
 | F | < 1 week | low |
 | G | < 1 week | low |
 | **Total** | **8–12 weeks** | — |
+
+---
+
+## Implementation status
+
+- **Phase A — Foundation:** landed `2026-05-02` on `dev`. All four-layer filter
+  infrastructure in place; behavior unchanged in production (coordinator
+  retains Task as `role: lead`; member agents already didn't declare Task
+  so the new INTERNAL_TEAMMATE_TOOLS blacklist is a no-op for them).
+  - Task 1 — disallowedTools restored: `74ea534`
+  - Task 2 — background restored: `a3ae9ec`
+  - Task 3 — role added: `7096986`
+  - Task 4 — requires added: `20f628c`
+  - Task 5 — discriminated union: `cd9ebc1`
+  - Task 6 — getAllToolNames: `727f399`
+  - Task 7 — role-tools.ts: `09130cf`
+  - Task 8 — blacklists.ts: `026a5d7`
+  - Task 9 — requires-resolver.ts: `3a96edf`
+  - Task 10 — assemble-tool-pool.ts: `823265a` (+ I-1/I-2 fix `b7a444d`)
+  - Task 11 — spawn refactor: `f1d71f8`
+  - Task 12 — AGENT.md role tagging: `de0ccb7`
+  - Task 13 — verification gate: `6d19c1b`
