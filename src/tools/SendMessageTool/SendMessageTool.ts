@@ -16,6 +16,7 @@ import { createLogger } from '@/lib/logger';
 import { db as defaultDb, type Database } from '@/lib/db';
 import { teamMembers, teamMessages } from '@/lib/db/schema';
 import { getPubSubPublisher } from '@/lib/redis';
+import { wake } from '@/workers/processors/lib/wake';
 
 const log = createLogger('tools:SendMessage');
 
@@ -271,6 +272,262 @@ async function publishToRedis(
 }
 
 // ---------------------------------------------------------------------------
+// Variant dispatchers (Phase C Task 2)
+// ---------------------------------------------------------------------------
+//
+// Each dispatcher: (1) resolves recipient(s) where applicable, (2) inserts
+// the team_messages row(s) with the variant-specific shape, (3) optionally
+// calls wake() on the target so it processes the request promptly,
+// (4) publishes to Redis for live SSE delivery, (5) returns SendMessageResult.
+
+interface DispatchDeps {
+  teamId: string;
+  currentMemberId: string | null;
+  runId: string | null;
+  db: Database;
+}
+
+async function dispatchMessage(
+  input: Extract<SendMessageInput, { type: 'message' }>,
+  deps: DispatchDeps,
+): Promise<SendMessageResult> {
+  const { teamId, currentMemberId, runId, db } = deps;
+  const toMemberId = await resolveRecipient(input.to, teamId, db);
+  const effectiveRunId = input.run_id ?? runId ?? null;
+  const messageId = crypto.randomUUID();
+  const createdAt = new Date();
+
+  await db.insert(teamMessages).values({
+    id: messageId,
+    runId: effectiveRunId,
+    teamId,
+    fromMemberId: currentMemberId,
+    toMemberId,
+    type: 'agent_text',
+    messageType: 'message',
+    content: input.content,
+    summary: input.summary ?? null,
+    metadata: null,
+    createdAt,
+  });
+
+  await publishToRedis(teamId, {
+    messageId,
+    runId: effectiveRunId,
+    from: currentMemberId,
+    to: toMemberId,
+    content: input.content,
+    createdAt: createdAt.toISOString(),
+    type: 'agent_text',
+    messageType: 'message',
+  });
+
+  return { delivered: true, messageId, toMemberId };
+}
+
+async function dispatchBroadcast(
+  input: Extract<SendMessageInput, { type: 'broadcast' }>,
+  deps: DispatchDeps,
+): Promise<SendMessageResult> {
+  const { teamId, currentMemberId, runId, db } = deps;
+  const effectiveRunId = input.run_id ?? runId ?? null;
+  const createdAt = new Date();
+
+  // Fan out to every member of the current team except the sender.
+  // Sender exclusion is applied client-side after the SELECT — using a
+  // single `eq(teamId)` constraint keeps the query trivially indexed and
+  // avoids reasoning about NULL semantics when `currentMemberId` is null
+  // (e.g. user-initiated broadcasts via the API route).
+  const allMembers = await db
+    .select({ id: teamMembers.id })
+    .from(teamMembers)
+    .where(eq(teamMembers.teamId, teamId));
+  const recipients = allMembers.filter((m) => m.id !== currentMemberId);
+
+  if (recipients.length === 0) {
+    throw new Error(
+      `SendMessage broadcast: no other members in team ${teamId} to broadcast to.`,
+    );
+  }
+
+  const insertedIds: string[] = [];
+  for (const recipient of recipients) {
+    const messageId = crypto.randomUUID();
+    insertedIds.push(messageId);
+    await db.insert(teamMessages).values({
+      id: messageId,
+      runId: effectiveRunId,
+      teamId,
+      fromMemberId: currentMemberId,
+      toMemberId: recipient.id,
+      type: 'agent_text',
+      messageType: 'broadcast',
+      content: input.content,
+      summary: input.summary ?? null,
+      metadata: null,
+      createdAt,
+    });
+  }
+
+  // One publish per broadcast (not per recipient) — SSE subscribers can
+  // dispatch to all recipient panels from the single fan-out event.
+  await publishToRedis(teamId, {
+    messageIds: insertedIds,
+    runId: effectiveRunId,
+    from: currentMemberId,
+    content: input.content,
+    createdAt: createdAt.toISOString(),
+    type: 'agent_text',
+    messageType: 'broadcast',
+  });
+
+  // Return the first inserted id + first recipient for compat with the
+  // SendMessageResult shape (broadcasts have no single recipient).
+  return {
+    delivered: true,
+    messageId: insertedIds[0],
+    toMemberId: recipients[0].id,
+  };
+}
+
+async function dispatchShutdownRequest(
+  input: Extract<SendMessageInput, { type: 'shutdown_request' }>,
+  deps: DispatchDeps,
+): Promise<SendMessageResult> {
+  const { teamId, currentMemberId, runId, db } = deps;
+  const toMemberId = await resolveRecipient(input.to, teamId, db);
+  const effectiveRunId = input.run_id ?? runId ?? null;
+  const messageId = crypto.randomUUID();
+  const createdAt = new Date();
+
+  await db.insert(teamMessages).values({
+    id: messageId,
+    runId: effectiveRunId,
+    teamId,
+    fromMemberId: currentMemberId,
+    toMemberId,
+    type: 'user_prompt',
+    messageType: 'shutdown_request',
+    content: input.content,
+    summary: input.summary ?? null,
+    metadata: null,
+    createdAt,
+  });
+
+  // Wake the target so it drains the request at its next idle turn.
+  // Phase C kludge: `toMemberId` is treated as the wake target. Phase E will
+  // route via agent_runs.id when the unified team-run / agent-run model lands.
+  await wake(toMemberId);
+
+  await publishToRedis(teamId, {
+    messageId,
+    runId: effectiveRunId,
+    from: currentMemberId,
+    to: toMemberId,
+    content: input.content,
+    createdAt: createdAt.toISOString(),
+    type: 'user_prompt',
+    messageType: 'shutdown_request',
+  });
+
+  return { delivered: true, messageId, toMemberId };
+}
+
+async function dispatchShutdownResponse(
+  input: Extract<SendMessageInput, { type: 'shutdown_response' }>,
+  deps: DispatchDeps,
+): Promise<SendMessageResult> {
+  const { teamId, currentMemberId, runId, db } = deps;
+  const effectiveRunId = input.run_id ?? runId ?? null;
+  const messageId = crypto.randomUUID();
+  const createdAt = new Date();
+
+  // shutdown_response has no `to` — it routes via the request_id chain.
+  // We leave toMemberId NULL; the conversation thread is recovered by
+  // following repliesToId back to the originating shutdown_request.
+  const content =
+    input.content ?? (input.approve ? 'shutdown approved' : 'shutdown declined');
+
+  await db.insert(teamMessages).values({
+    id: messageId,
+    runId: effectiveRunId,
+    teamId,
+    fromMemberId: currentMemberId,
+    toMemberId: null,
+    type: 'agent_text',
+    messageType: 'shutdown_response',
+    content,
+    summary: null,
+    metadata: { approve: input.approve },
+    repliesToId: input.request_id,
+    createdAt,
+  });
+
+  await publishToRedis(teamId, {
+    messageId,
+    runId: effectiveRunId,
+    from: currentMemberId,
+    repliesToId: input.request_id,
+    approve: input.approve,
+    content,
+    createdAt: createdAt.toISOString(),
+    type: 'agent_text',
+    messageType: 'shutdown_response',
+  });
+
+  // toMemberId is null for shutdown_response (lead picks up on its next
+  // natural turn); fall back to empty string in the result to satisfy the
+  // SendMessageResult shape without inventing a fake recipient.
+  return { delivered: true, messageId, toMemberId: '' };
+}
+
+async function dispatchPlanApprovalResponse(
+  input: Extract<SendMessageInput, { type: 'plan_approval_response' }>,
+  deps: DispatchDeps,
+): Promise<SendMessageResult> {
+  const { teamId, currentMemberId, runId, db } = deps;
+  const toMemberId = await resolveRecipient(input.to, teamId, db);
+  const effectiveRunId = input.run_id ?? runId ?? null;
+  const messageId = crypto.randomUUID();
+  const createdAt = new Date();
+  const content =
+    input.content ?? (input.approve ? 'plan approved' : 'plan rejected');
+
+  await db.insert(teamMessages).values({
+    id: messageId,
+    runId: effectiveRunId,
+    teamId,
+    fromMemberId: currentMemberId,
+    toMemberId,
+    type: 'user_prompt',
+    messageType: 'plan_approval_response',
+    content,
+    summary: null,
+    metadata: { approve: input.approve },
+    repliesToId: input.request_id,
+    createdAt,
+  });
+
+  // Wake the teammate so it resumes its plan promptly on approval/rejection.
+  await wake(toMemberId);
+
+  await publishToRedis(teamId, {
+    messageId,
+    runId: effectiveRunId,
+    from: currentMemberId,
+    to: toMemberId,
+    repliesToId: input.request_id,
+    approve: input.approve,
+    content,
+    createdAt: createdAt.toISOString(),
+    type: 'user_prompt',
+    messageType: 'plan_approval_response',
+  });
+
+  return { delivered: true, messageId, toMemberId };
+}
+
+// ---------------------------------------------------------------------------
 // Tool definition
 // ---------------------------------------------------------------------------
 
@@ -294,49 +551,23 @@ export const sendMessageTool: ToolDefinition<
   // INSERTs a row + PUBLISHes — unambiguously side-effecting.
   isReadOnly: false,
   async execute(input, ctx): Promise<SendMessageResult> {
-    // Phase C Task 1: schema is now a 5-variant discriminated union, but
-    // execute() is still single-path until Task 2 wires the dispatcher.
-    // For Task 1 we narrow to `type: 'message'` (the legacy shape every
-    // current caller sends via the preprocessor) and reject the other
-    // variants with a clear error so we surface any premature use.
-    if (input.type !== 'message') {
-      throw new Error(
-        `SendMessage: type="${input.type}" is recognized by the schema but ` +
-          `dispatcher is not yet wired (Phase C Task 2). Caller should use ` +
-          `type="message" until Task 2 lands.`,
-      );
+    // Phase C Task 2: dispatch by variant. Each variant inserts a different
+    // team_messages shape (messageType column distinguishes them; the
+    // legacy `type` column keeps its LLM-flow meaning). shutdown_request +
+    // plan_approval_response also wake() the recipient.
+    const deps = readTeamContext(ctx);
+
+    switch (input.type) {
+      case 'message':
+        return dispatchMessage(input, deps);
+      case 'broadcast':
+        return dispatchBroadcast(input, deps);
+      case 'shutdown_request':
+        return dispatchShutdownRequest(input, deps);
+      case 'shutdown_response':
+        return dispatchShutdownResponse(input, deps);
+      case 'plan_approval_response':
+        return dispatchPlanApprovalResponse(input, deps);
     }
-
-    const { teamId, currentMemberId, runId, db } = readTeamContext(ctx);
-
-    const toMemberId = await resolveRecipient(input.to, teamId, db);
-    const effectiveRunId = input.run_id ?? runId ?? null;
-
-    const messageId = crypto.randomUUID();
-    const createdAt = new Date();
-
-    await db.insert(teamMessages).values({
-      id: messageId,
-      runId: effectiveRunId,
-      teamId,
-      fromMemberId: currentMemberId,
-      toMemberId,
-      type: 'agent_text',
-      content: input.content,
-      metadata: null,
-      createdAt,
-    });
-
-    await publishToRedis(teamId, {
-      messageId,
-      runId: effectiveRunId,
-      from: currentMemberId,
-      to: toMemberId,
-      content: input.content,
-      createdAt: createdAt.toISOString(),
-      type: 'agent_text',
-    });
-
-    return { delivered: true, messageId, toMemberId };
   },
 });

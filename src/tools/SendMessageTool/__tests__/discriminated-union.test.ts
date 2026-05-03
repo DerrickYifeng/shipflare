@@ -29,6 +29,12 @@ vi.mock('@/lib/logger', () => ({
     error: () => {},
   }),
 }));
+// Phase C Task 2: SendMessageTool.ts now imports `wake` from
+// `@/workers/processors/lib/wake`, which transitively pulls in BullMQ. Stub
+// it so this schema-only test doesn't try to open a Redis connection.
+vi.mock('@/workers/processors/lib/wake', () => ({
+  wake: async () => {},
+}));
 
 import { SendMessageInputSchema } from '@/tools/SendMessageTool/SendMessageTool';
 

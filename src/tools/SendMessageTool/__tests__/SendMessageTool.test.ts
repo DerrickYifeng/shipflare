@@ -99,24 +99,45 @@ function makeFakeDb() {
         },
         where(cond: EqSentinel | AndSentinel) {
           filters = flattenConditions(cond);
-          return builder;
+          // Make `where(...)` thenable so tests that fan out (broadcast)
+          // can `await db.select(...).from(...).where(...)` without an
+          // explicit `.limit()` and still receive every matching member.
+          // We retain the chainable builder shape (with .limit) for the
+          // recipient-resolution call sites.
+          const thenableBuilder = builder as typeof builder & {
+            then?: (
+              onFulfilled: (rows: Array<{ id: string }>) => unknown,
+            ) => Promise<unknown>;
+          };
+          thenableBuilder.then = (
+            onFulfilled: (rows: Array<{ id: string }>) => unknown,
+          ): Promise<unknown> => {
+            const rows = resolveMembers();
+            return Promise.resolve(onFulfilled(rows));
+          };
+          return thenableBuilder;
         },
         limit(n: number): Promise<Array<{ id: string }>> {
           if (mode !== 'members') return Promise.resolve([]);
-          // The drizzle column object varies in shape across versions — we
-          // take a shape-agnostic approach: collect all filter values and
-          // filter the in-memory members by "every filter matches at least
-          // one of { id, teamId, displayName }". Works because SendMessage
-          // only composes eq() across these three fields.
-          const values = filters.map((f) => f.value);
-          const matches = members.filter((m) =>
+          const rows = resolveMembers();
+          return Promise.resolve(rows.slice(0, n));
+        },
+      };
+      function resolveMembers(): Array<{ id: string }> {
+        // The drizzle column object varies in shape across versions — we
+        // take a shape-agnostic approach: collect all filter values and
+        // filter the in-memory members by "every filter matches at least
+        // one of { id, teamId, displayName }". Works because SendMessage
+        // only composes eq() across these three fields.
+        const values = filters.map((f) => f.value);
+        return members
+          .filter((m) =>
             values.every(
               (v) => v === m.id || v === m.teamId || v === m.displayName,
             ),
-          );
-          return Promise.resolve(matches.slice(0, n).map((m) => ({ id: m.id })));
-        },
-      };
+          )
+          .map((m) => ({ id: m.id }));
+      }
       return builder;
     },
     insert(_table: unknown) {
@@ -159,6 +180,13 @@ vi.mock('@/lib/logger', () => ({
   }),
 }));
 
+// Phase C: SendMessage shutdown_request + plan_approval_response call wake()
+// on the recipient. We mock the wake helper so we can assert the call.
+vi.mock('@/workers/processors/lib/wake', () => ({
+  wake: vi.fn(async () => {}),
+}));
+import { wake } from '@/workers/processors/lib/wake';
+
 // ---------------------------------------------------------------------------
 // Import AFTER mocks
 // ---------------------------------------------------------------------------
@@ -187,6 +215,7 @@ beforeEach(() => {
   members.length = 0;
   inserts.length = 0;
   publishedRaw.length = 0;
+  vi.mocked(wake).mockClear();
 });
 
 describe('SendMessage tool', () => {
@@ -301,5 +330,171 @@ describe('SendMessage tool', () => {
     expect(result.delivered).toBe(true);
     expect(inserts).toHaveLength(1);
     spy.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase C Task 2 — execute() variant dispatch
+// ---------------------------------------------------------------------------
+//
+// Each variant inserts a different `team_messages` row shape. shutdown_request
+// + plan_approval_response also call wake() on the recipient so the target
+// processes the request promptly. shutdown_response + plan_approval_response
+// chain the conversation thread via repliesToId.
+
+describe('SendMessage execute() — variant dispatch', () => {
+  it('type:message inserts a single team_messages row with messageType="message"', async () => {
+    members.push({ id: 'mem-alex', teamId: 'team-1', displayName: 'Alex' });
+
+    const ctx = makeCtx({
+      db: fakeDb,
+      teamId: 'team-1',
+      currentMemberId: 'mem-sam',
+      runId: 'run-1',
+    });
+
+    const result = await sendMessageTool.execute(
+      { type: 'message', to: 'Alex', content: 'hello' },
+      ctx,
+    );
+
+    expect(result.delivered).toBe(true);
+    expect(result.toMemberId).toBe('mem-alex');
+    expect(inserts).toHaveLength(1);
+    expect(inserts[0].toMemberId).toBe('mem-alex');
+    expect((inserts[0] as MessageRow & { messageType?: string }).messageType).toBe(
+      'message',
+    );
+    // type:message does NOT wake — peer DMs are passive (lead receives shadow
+    // without preemptive scheduling, target wakes via reconcile-mailbox cron
+    // or its own poll).
+    expect(vi.mocked(wake)).not.toHaveBeenCalled();
+  });
+
+  it('type:broadcast fans out to all team members except the sender', async () => {
+    // 3 members on team-1; sender (mem-sam) excluded → 2 inserts.
+    members.push({ id: 'mem-sam', teamId: 'team-1', displayName: 'Sam' });
+    members.push({ id: 'mem-alex', teamId: 'team-1', displayName: 'Alex' });
+    members.push({ id: 'mem-bea', teamId: 'team-1', displayName: 'Bea' });
+    // Member on a different team must NOT receive the broadcast.
+    members.push({ id: 'mem-other', teamId: 'team-other', displayName: 'Other' });
+
+    const ctx = makeCtx({
+      db: fakeDb,
+      teamId: 'team-1',
+      currentMemberId: 'mem-sam',
+      runId: 'run-1',
+    });
+
+    const result = await sendMessageTool.execute(
+      { type: 'broadcast', content: 'Critical: stop all work' },
+      ctx,
+    );
+
+    expect(result.delivered).toBe(true);
+    expect(inserts).toHaveLength(2);
+    const recipientIds = inserts.map((r) => r.toMemberId).sort();
+    expect(recipientIds).toEqual(['mem-alex', 'mem-bea']);
+    for (const row of inserts) {
+      expect(
+        (row as MessageRow & { messageType?: string }).messageType,
+      ).toBe('broadcast');
+      expect(row.fromMemberId).toBe('mem-sam');
+      expect(row.content).toBe('Critical: stop all work');
+    }
+    // Result returns first messageId for compat — must be one of the inserted ids.
+    expect(inserts.map((r) => r.id)).toContain(result.messageId);
+  });
+
+  it('type:shutdown_request inserts row with messageType="shutdown_request" and wakes target', async () => {
+    members.push({ id: 'mem-alex', teamId: 'team-1', displayName: 'Alex' });
+
+    const ctx = makeCtx({
+      db: fakeDb,
+      teamId: 'team-1',
+      currentMemberId: 'mem-sam',
+      runId: 'run-1',
+    });
+
+    const result = await sendMessageTool.execute(
+      { type: 'shutdown_request', to: 'Alex', content: 'wrap up' },
+      ctx,
+    );
+
+    expect(result.delivered).toBe(true);
+    expect(inserts).toHaveLength(1);
+    expect(
+      (inserts[0] as MessageRow & { messageType?: string }).messageType,
+    ).toBe('shutdown_request');
+    expect(inserts[0].toMemberId).toBe('mem-alex');
+    expect(inserts[0].content).toBe('wrap up');
+    // Target must be woken so it processes the request promptly.
+    expect(vi.mocked(wake)).toHaveBeenCalledOnce();
+    expect(vi.mocked(wake)).toHaveBeenCalledWith('mem-alex');
+  });
+
+  it('type:shutdown_response inserts row with repliesToId and messageType="shutdown_response"', async () => {
+    const ctx = makeCtx({
+      db: fakeDb,
+      teamId: 'team-1',
+      currentMemberId: 'mem-alex',
+      runId: 'run-1',
+    });
+
+    const result = await sendMessageTool.execute(
+      {
+        type: 'shutdown_response',
+        request_id: 'orig-msg-id',
+        approve: false,
+        content: 'need 5 more minutes',
+      },
+      ctx,
+    );
+
+    expect(result.delivered).toBe(true);
+    expect(inserts).toHaveLength(1);
+    const row = inserts[0] as MessageRow & {
+      messageType?: string;
+      repliesToId?: string | null;
+    };
+    expect(row.messageType).toBe('shutdown_response');
+    expect(row.repliesToId).toBe('orig-msg-id');
+    expect(row.content).toBe('need 5 more minutes');
+    // shutdown_response does not wake the lead (lead picks up on next natural turn).
+    expect(vi.mocked(wake)).not.toHaveBeenCalled();
+  });
+
+  it('type:plan_approval_response inserts row with repliesToId, toMemberId, and wakes target', async () => {
+    members.push({ id: 'mem-alex', teamId: 'team-1', displayName: 'Alex' });
+
+    const ctx = makeCtx({
+      db: fakeDb,
+      teamId: 'team-1',
+      currentMemberId: 'mem-lead',
+      runId: 'run-1',
+    });
+
+    const result = await sendMessageTool.execute(
+      {
+        type: 'plan_approval_response',
+        request_id: 'plan-msg-id',
+        to: 'Alex',
+        approve: true,
+      },
+      ctx,
+    );
+
+    expect(result.delivered).toBe(true);
+    expect(inserts).toHaveLength(1);
+    const row = inserts[0] as MessageRow & {
+      messageType?: string;
+      repliesToId?: string | null;
+    };
+    expect(row.messageType).toBe('plan_approval_response');
+    expect(row.repliesToId).toBe('plan-msg-id');
+    expect(row.toMemberId).toBe('mem-alex');
+    // Approval must wake the teammate so it resumes promptly.
+    expect(vi.mocked(wake)).toHaveBeenCalledOnce();
+    expect(vi.mocked(wake)).toHaveBeenCalledWith('mem-alex');
   });
 });
