@@ -584,6 +584,97 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
       return;
     }
 
+    // (3) Persist tool_call rows (tool_start) and tool_result rows
+    // (tool_done) so the founder UI can render the lead's (and any
+    // teammate's) tool usage. Skip Sleep — it's signaling-only and the
+    // existing early-exit detector below still owns it. Skip
+    // SyntheticOutput — that terminal write is already covered by the
+    // assistant_text_stop branch above; persisting it here would
+    // double-paint. The block must FALL THROUGH so the Sleep branch
+    // below still fires for tool_done events.
+    if (event.type === 'tool_start' || event.type === 'tool_done') {
+      if (event.toolName !== 'Sleep' && event.toolName !== 'SyntheticOutput') {
+        const insertedId = crypto.randomUUID();
+        const createdAt = new Date();
+        const isCall = event.type === 'tool_start';
+        const TRUNC_LIMIT = 4000;
+        const rawContent = isCall ? event.toolName : event.result.content;
+        const truncatedContent =
+          !isCall && rawContent.length > TRUNC_LIMIT
+            ? `${rawContent.slice(0, TRUNC_LIMIT)}…`
+            : rawContent;
+        const metadata = isCall
+          ? {
+              tool_use_id: event.toolUseId,
+              tool_name: event.toolName,
+              tool_input: event.input,
+            }
+          : {
+              tool_use_id: event.toolUseId,
+              tool_name: event.toolName,
+              tool_output: event.result.content,
+              is_error: !!event.result.is_error,
+              duration_ms: event.durationMs,
+            };
+        try {
+          await db.insert(teamMessages).values({
+            id: insertedId,
+            teamId: row.teamId,
+            // Mirror assistant_text_stop: only stamp conversationId on
+            // the lead path so the founder UI's per-thread filter renders
+            // the row. Teammates have no conversation handle.
+            conversationId: isLead ? leadConversationId : null,
+            type: isCall ? 'tool_call' : 'tool_result',
+            messageType: 'message',
+            fromMemberId: row.memberId,
+            fromAgentId: agentId,
+            content: truncatedContent,
+            metadata,
+            deliveredAt: createdAt,
+            createdAt,
+          });
+        } catch (err) {
+          log.warn(
+            `agent-run ${agentId}: failed to persist ${isCall ? 'tool_call' : 'tool_result'}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+          // Fall through; persistence failure must not abort the stream.
+        }
+        // Lead path additionally publishes to the team SSE channel so
+        // the founder UI paints the tool card live. Teammates skip — the
+        // live SSE channel is for the founder-visible lead conversation;
+        // teammate tool activity reaches the lead only as
+        // <task-notification> summaries. Mirrors the agent_text envelope
+        // shape (incl. conversationId + runId) and the failure handling
+        // (publish failure is non-fatal — the durable row already landed).
+        if (def.role === 'lead') {
+          try {
+            const pub = getPubSubPublisher();
+            await pub.publish(
+              teamMessagesChannel(row.teamId),
+              JSON.stringify({
+                messageId: insertedId,
+                conversationId: leadConversationId,
+                runId: leadRequestId,
+                teamId: row.teamId,
+                from: row.memberId,
+                fromAgentId: agentId,
+                type: isCall ? 'tool_call' : 'tool_result',
+                content: truncatedContent,
+                metadata,
+                createdAt: createdAt.toISOString(),
+              }),
+            );
+          } catch (err) {
+            log.warn(
+              `agent-run ${agentId}: SSE publish failed for ${isCall ? 'tool_call' : 'tool_result'}: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+        }
+      }
+      // Don't return — tool_done with toolName='Sleep' must still reach
+      // the early-exit detector below.
+    }
+
     // (1) Sleep early-exit detection.
     if (event.type !== 'tool_done') return;
     if (event.toolName !== 'Sleep') return;

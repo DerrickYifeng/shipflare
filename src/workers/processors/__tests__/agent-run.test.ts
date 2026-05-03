@@ -1129,4 +1129,324 @@ describe('processAgentRun', () => {
       .find((p) => p.type === 'completion' || p.type === 'error');
     expect(terminal).toBeUndefined();
   });
+
+  // ---------------------------------------------------------------------
+  // Tool-call visibility — persist tool_start → tool_call rows and
+  // tool_done → tool_result rows so the founder UI can render the lead's
+  // tool usage. Lead path additionally publishes to the team SSE channel.
+  // Sleep + SyntheticOutput are skipped (Sleep is signaling-only and the
+  // existing early-exit detector still owns it; SyntheticOutput is the
+  // terminal write already covered by assistant_text_stop).
+  // ---------------------------------------------------------------------
+
+  it('persists tool_call row when runAgent emits tool_start', async () => {
+    vi.mocked(db.query.agentRuns.findFirst).mockResolvedValue({
+      id: 'agent-tool-call',
+      teamId: 'team-tc',
+      memberId: 'mem-tc',
+      agentDefName: 'content-manager',
+      parentAgentId: 'lead-agent',
+      status: 'queued',
+    } as never);
+
+    runAgentHoisted.fn.mockImplementationOnce(async (...args: unknown[]) => {
+      runAgentHoisted.state.lastArgs = args;
+      const onEvent = args[7] as
+        | ((event: {
+            type: string;
+            toolName?: string;
+            toolUseId?: string;
+            input?: unknown;
+          }) => void | Promise<void>)
+        | undefined;
+      if (onEvent) {
+        await onEvent({
+          type: 'tool_start',
+          toolName: 'query_strategic_path',
+          toolUseId: 'toolu_test_1',
+          input: { reason: 'test' },
+        });
+      }
+      return {
+        result: 'ok',
+        usage: {
+          inputTokens: 1,
+          outputTokens: 1,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          costUsd: 0,
+          model: 'claude-sonnet-4-6',
+          turns: 1,
+        },
+      };
+    });
+
+    await processAgentRun(makeJob('agent-tool-call'));
+
+    const insertedRows = insertChain.values.mock.calls.map(
+      (c) => (c as unknown as [Record<string, unknown>])[0],
+    );
+    const toolCallRow = insertedRows.find((r) => r.type === 'tool_call');
+    expect(toolCallRow).toBeDefined();
+    expect(toolCallRow).toMatchObject({
+      type: 'tool_call',
+      messageType: 'message',
+      teamId: 'team-tc',
+      fromMemberId: 'mem-tc',
+      fromAgentId: 'agent-tool-call',
+      content: 'query_strategic_path',
+    });
+    const metadata = toolCallRow!.metadata as Record<string, unknown>;
+    expect(metadata).toMatchObject({
+      tool_use_id: 'toolu_test_1',
+      tool_name: 'query_strategic_path',
+      tool_input: { reason: 'test' },
+    });
+    expect(toolCallRow!.deliveredAt).toBeInstanceOf(Date);
+    // Sleep / SyntheticOutput exclusions: this row is a regular tool, so
+    // it should be persisted (this assertion is the negation of the skip).
+    expect(toolCallRow!.content).not.toBe('Sleep');
+    expect(toolCallRow!.content).not.toBe('SyntheticOutput');
+  });
+
+  it('persists tool_result row when runAgent emits tool_done (truncated content + full output in metadata)', async () => {
+    vi.mocked(db.query.agentRuns.findFirst).mockResolvedValue({
+      id: 'agent-tool-result',
+      teamId: 'team-tr',
+      memberId: 'mem-tr',
+      agentDefName: 'content-manager',
+      parentAgentId: 'lead-agent',
+      status: 'queued',
+    } as never);
+
+    // Build a payload longer than the 4 000 char truncation cap so the
+    // assertion can verify both truncated `content` and full
+    // `metadata.tool_output`.
+    const longPayload = 'a'.repeat(5000);
+
+    runAgentHoisted.fn.mockImplementationOnce(async (...args: unknown[]) => {
+      runAgentHoisted.state.lastArgs = args;
+      const onEvent = args[7] as
+        | ((event: {
+            type: string;
+            toolName?: string;
+            toolUseId?: string;
+            durationMs?: number;
+            result?: { content: string; is_error?: boolean };
+          }) => void | Promise<void>)
+        | undefined;
+      if (onEvent) {
+        await onEvent({
+          type: 'tool_done',
+          toolName: 'query_strategic_path',
+          toolUseId: 'toolu_test_2',
+          durationMs: 42,
+          result: { content: longPayload, is_error: false },
+        });
+      }
+      return {
+        result: 'ok',
+        usage: {
+          inputTokens: 1,
+          outputTokens: 1,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          costUsd: 0,
+          model: 'claude-sonnet-4-6',
+          turns: 1,
+        },
+      };
+    });
+
+    await processAgentRun(makeJob('agent-tool-result'));
+
+    const insertedRows = insertChain.values.mock.calls.map(
+      (c) => (c as unknown as [Record<string, unknown>])[0],
+    );
+    const toolResultRow = insertedRows.find((r) => r.type === 'tool_result');
+    expect(toolResultRow).toBeDefined();
+    expect(toolResultRow).toMatchObject({
+      type: 'tool_result',
+      messageType: 'message',
+      teamId: 'team-tr',
+      fromMemberId: 'mem-tr',
+      fromAgentId: 'agent-tool-result',
+    });
+    // content truncated to 4000 chars + ellipsis when output is bigger.
+    expect((toolResultRow!.content as string).length).toBe(4001);
+    expect((toolResultRow!.content as string).endsWith('…')).toBe(true);
+    const metadata = toolResultRow!.metadata as Record<string, unknown>;
+    expect(metadata).toMatchObject({
+      tool_use_id: 'toolu_test_2',
+      tool_name: 'query_strategic_path',
+      is_error: false,
+      duration_ms: 42,
+    });
+    // Full untruncated output preserved in metadata for the UI's "expand"
+    // affordance.
+    expect(metadata.tool_output).toBe(longPayload);
+  });
+
+  it('lead path publishes tool_call to the team SSE channel; teammate path does not', async () => {
+    // --- Lead arm ---
+    vi.mocked(db.query.agentRuns.findFirst).mockResolvedValueOnce({
+      id: 'lead-tool-sse',
+      teamId: 'team-tool-sse',
+      memberId: 'mem-tool-sse',
+      agentDefName: 'coordinator',
+      parentAgentId: null,
+      status: 'queued',
+    } as never);
+    vi.mocked(resolveAgent).mockResolvedValueOnce({
+      source: 'built-in',
+      sourcePath: '/test',
+      name: 'coordinator',
+      description: 'mock lead',
+      role: 'lead',
+      tools: [],
+      disallowedTools: [],
+      skills: [],
+      requires: [],
+      background: false,
+      maxTurns: 10,
+      systemPrompt: 'You are the team lead.',
+    } as never);
+    selectChain.limit.mockResolvedValueOnce([{ id: 'conv-tool-sse' }]);
+    runAgentHoisted.fn.mockImplementationOnce(async (...args: unknown[]) => {
+      runAgentHoisted.state.lastArgs = args;
+      const onEvent = args[7] as
+        | ((event: {
+            type: string;
+            toolName?: string;
+            toolUseId?: string;
+            input?: unknown;
+          }) => void | Promise<void>)
+        | undefined;
+      if (onEvent) {
+        await onEvent({
+          type: 'tool_start',
+          toolName: 'query_strategic_path',
+          toolUseId: 'toolu_lead_sse',
+          input: { reason: 'lead-call' },
+        });
+      }
+      return {
+        result: 'ok',
+        usage: {
+          inputTokens: 1,
+          outputTokens: 1,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          costUsd: 0,
+          model: 'claude-sonnet-4-6',
+          turns: 1,
+        },
+      };
+    });
+
+    await processAgentRun(makeJob('lead-tool-sse'));
+
+    const sseToolCall = publishMock.mock.calls.find(([channel, raw]) => {
+      if (channel !== teamMessagesChannel('team-tool-sse')) return false;
+      try {
+        return (
+          (JSON.parse(raw as string) as { type?: string }).type === 'tool_call'
+        );
+      } catch {
+        return false;
+      }
+    });
+    expect(sseToolCall).toBeDefined();
+    const payload = JSON.parse(sseToolCall![1]);
+    expect(payload).toMatchObject({
+      teamId: 'team-tool-sse',
+      type: 'tool_call',
+      content: 'query_strategic_path',
+      fromAgentId: 'lead-tool-sse',
+    });
+    const payloadMeta = payload.metadata as Record<string, unknown>;
+    expect(payloadMeta).toMatchObject({
+      tool_use_id: 'toolu_lead_sse',
+      tool_name: 'query_strategic_path',
+    });
+    // The durable row id must match the SSE payload id so the founder UI
+    // can swap the live tool-card into its persisted row in place.
+    const insertedRows = insertChain.values.mock.calls.map(
+      (c) => (c as unknown as [Record<string, unknown>])[0],
+    );
+    const dbToolCallRow = insertedRows.find(
+      (r) => r.type === 'tool_call' && r.fromAgentId === 'lead-tool-sse',
+    );
+    expect(dbToolCallRow).toBeDefined();
+    expect(dbToolCallRow!.id).toBe(payload.messageId);
+    // Lead row is stamped with the primary conversationId so the per-thread
+    // filter in the founder UI surfaces it.
+    expect(dbToolCallRow!.conversationId).toBe('conv-tool-sse');
+
+    // --- Teammate arm: same tool_start event, but no SSE publish ---
+    publishMock.mockClear();
+    insertChain.values.mockClear();
+    vi.mocked(db.query.agentRuns.findFirst).mockResolvedValueOnce({
+      id: 'mate-tool-no-sse',
+      teamId: 'team-tool-quiet',
+      memberId: 'mem-tool-quiet',
+      agentDefName: 'content-manager',
+      parentAgentId: 'lead-agent',
+      status: 'queued',
+    } as never);
+    runAgentHoisted.fn.mockImplementationOnce(async (...args: unknown[]) => {
+      runAgentHoisted.state.lastArgs = args;
+      const onEvent = args[7] as
+        | ((event: {
+            type: string;
+            toolName?: string;
+            toolUseId?: string;
+            input?: unknown;
+          }) => void | Promise<void>)
+        | undefined;
+      if (onEvent) {
+        await onEvent({
+          type: 'tool_start',
+          toolName: 'query_strategic_path',
+          toolUseId: 'toolu_mate_no_sse',
+          input: { reason: 'teammate-call' },
+        });
+      }
+      return {
+        result: 'ok',
+        usage: {
+          inputTokens: 1,
+          outputTokens: 1,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          costUsd: 0,
+          model: 'claude-sonnet-4-6',
+          turns: 1,
+        },
+      };
+    });
+
+    await processAgentRun(makeJob('mate-tool-no-sse'));
+
+    // Teammate persists the row but skips the SSE publish.
+    const teammateInsertedRows = insertChain.values.mock.calls.map(
+      (c) => (c as unknown as [Record<string, unknown>])[0],
+    );
+    expect(
+      teammateInsertedRows.some(
+        (r) => r.type === 'tool_call' && r.fromAgentId === 'mate-tool-no-sse',
+      ),
+    ).toBe(true);
+    const sseToolCallTeammate = publishMock.mock.calls.find(([channel, raw]) => {
+      if (channel !== teamMessagesChannel('team-tool-quiet')) return false;
+      try {
+        return (
+          (JSON.parse(raw as string) as { type?: string }).type === 'tool_call'
+        );
+      } catch {
+        return false;
+      }
+    });
+    expect(sseToolCallTeammate).toBeUndefined();
+  });
 });
