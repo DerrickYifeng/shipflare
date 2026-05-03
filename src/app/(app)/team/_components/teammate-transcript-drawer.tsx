@@ -212,17 +212,37 @@ export function TeammateTranscriptDrawer({
   onClose,
   title,
 }: TeammateTranscriptDrawerProps): ReactNode {
-  const [state, setState] = useState<FetchState>(INITIAL_STATE);
+  // First render: if agentId is set, start in loading immediately so
+  // the drawer skeleton + spinner render synchronously with mount
+  // (matches the pre-fix behavior where the in-effect setState fired
+  // on the same commit as the initial render).
+  const [state, setState] = useState<FetchState>(() =>
+    agentId ? { status: 'loading', messages: [], error: null } : INITIAL_STATE,
+  );
+
+  // Reset on agentId change BEFORE the fetch effect runs, via the
+  // state-during-render pattern (sanctioned by React's "Storing
+  // information from previous renders" guidance — see
+  // https://react.dev/reference/react/useState#storing-information-from-previous-renders).
+  // This avoids the cascading-render risk of setState-in-effect AND
+  // ensures the drawer never flashes the previous teammate's messages
+  // while a new fetch is in flight: the loading-flash setState happens
+  // synchronously with the agentId change, batched into the same
+  // render cycle.
+  const [prevAgentId, setPrevAgentId] = useState(agentId);
+  if (prevAgentId !== agentId) {
+    setPrevAgentId(agentId);
+    setState(
+      agentId ? { status: 'loading', messages: [], error: null } : INITIAL_STATE,
+    );
+  }
 
   useEffect(() => {
-    if (!agentId) {
-      // Reset so re-opening the drawer doesn't flash the previous
-      // teammate's messages while the new fetch is in flight.
-      setState(INITIAL_STATE);
-      return;
-    }
+    if (!agentId) return;
     const controller = new AbortController();
-    setState({ status: 'loading', messages: [], error: null });
+    // setState({ status: 'loading' }) was hoisted to the ref-compare
+    // block above so the loading flash happens synchronously with the
+    // agentId change, not on the next render.
     fetch(`/api/team/agent/${encodeURIComponent(agentId)}/transcript`, {
       signal: controller.signal,
     })

@@ -23,7 +23,6 @@
 
 import {
   useCallback,
-  useEffect,
   useMemo,
   useState,
   type CSSProperties,
@@ -421,36 +420,33 @@ export function TeammateRoster({
 
   // Optimistic-cancel marker set: ids that we've POSTed to the cancel
   // endpoint but haven't yet seen a status='killed' SSE for. Cleared
-  // automatically when the row is removed by `applyStatusChange`
-  // (terminal status branch); the explicit clear in `useEffect` below
-  // catches the rare case where the row sticks around (e.g. re-seed).
+  // from the SSE handler below when the canonical terminal-status
+  // event arrives (mirroring `applyStatusChange`'s row removal). A
+  // re-seed without a terminal SSE could leave a stale id in this set
+  // for the rest of the session; that's bounded by user clicks and
+  // never read for any non-rendered row, so it's an acceptable leak.
   const [cancellingIds, setCancellingIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
 
   // Re-seed when the parent re-fetches (e.g. after a navigation): the
-  // initial props become the new authoritative snapshot.
-  useEffect(() => {
+  // initial props become the new authoritative snapshot. Done at render
+  // via state-during-render (sanctioned by React's "Storing
+  // information from previous renders" guidance — see
+  // https://react.dev/reference/react/useState#storing-information-from-previous-renders)
+  // so we don't trigger a cascading render: React batches the prop-
+  // driven setState into the SAME render cycle.
+  const [prevInitialLead, setPrevInitialLead] = useState(initialLead);
+  const [prevInitialTeammates, setPrevInitialTeammates] =
+    useState(initialTeammates);
+  if (
+    prevInitialLead !== initialLead ||
+    prevInitialTeammates !== initialTeammates
+  ) {
+    setPrevInitialLead(initialLead);
+    setPrevInitialTeammates(initialTeammates);
     setState({ lead: initialLead, teammates: [...initialTeammates] });
-  }, [initialLead, initialTeammates]);
-
-  // Drop "cancelling" markers for ids that no longer have a row — this
-  // is the cleanup path for the SSE-driven removal. We can't react
-  // inside `applyStatusChange` (it's a pure reducer) so we sweep here.
-  useEffect(() => {
-    if (cancellingIds.size === 0) return;
-    const liveIds = new Set(state.teammates.map((t) => t.agentId));
-    let changed = false;
-    const next = new Set<string>();
-    for (const id of cancellingIds) {
-      if (liveIds.has(id)) {
-        next.add(id);
-      } else {
-        changed = true;
-      }
-    }
-    if (changed) setCancellingIds(next);
-  }, [state.teammates, cancellingIds]);
+  }
 
   useTeamEvents({
     teamId,
@@ -458,6 +454,25 @@ export function TeammateRoster({
       const ev = readStatusChange(msg);
       if (!ev) return;
       setState((prev) => applyStatusChange(prev, ev));
+      // Option B: drop "cancelling" markers from the SSE handler when
+      // the canonical terminal status arrives, instead of from a
+      // reactive effect that watches `state.teammates` (which lint
+      // flagged as a cascading-render risk). `applyStatusChange`
+      // removes the teammate row on terminal status; we mirror that
+      // here for `cancellingIds` so the two stay in sync. The lead is
+      // never removed (it stays visible across terminal states) so we
+      // skip cleanup when the lead's id matches.
+      if (
+        TERMINAL_STATUSES.has(ev.status) &&
+        state.lead?.agentId !== ev.agentId
+      ) {
+        setCancellingIds((prev) => {
+          if (!prev.has(ev.agentId)) return prev;
+          const next = new Set(prev);
+          next.delete(ev.agentId);
+          return next;
+        });
+      }
     },
     // No `filter` — the chat surface in `team-desk.tsx` also subscribes
     // to this channel; sharing the connection per-tab is fine because
