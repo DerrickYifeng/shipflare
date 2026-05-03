@@ -67,13 +67,11 @@ vi.mock('@/core/query-loop', async () => {
 
 // ---------------------------------------------------------------------------
 // Mock the Phase B async-branch deps BEFORE importing AgentTool. The async
-// branch is gated by the feature flag and uses `wake()` to enqueue the
-// agent-run BullMQ job — both are mocked so the test stays self-contained.
+// branch uses `wake()` to enqueue the agent-run BullMQ job — mocked so the
+// test stays self-contained. (Phase G removed the SHIPFLARE_AGENT_TEAMS
+// feature flag, so there is no flag to mock.)
 // ---------------------------------------------------------------------------
 
-vi.mock('@/lib/feature-flags/agent-teams', () => ({
-  isAgentTeamsEnabledForTeam: vi.fn(),
-}));
 vi.mock('@/workers/processors/lib/wake', () => ({
   wake: vi.fn(async () => undefined),
 }));
@@ -91,7 +89,6 @@ import {
   __resetAgentRegistry,
   getAvailableAgents,
 } from '../registry';
-import { isAgentTeamsEnabledForTeam } from '@/lib/feature-flags/agent-teams';
 import { wake } from '@/workers/processors/lib/wake';
 
 // ---------------------------------------------------------------------------
@@ -411,11 +408,10 @@ function makeTeamRunCtx(
 describe('Task tool — async branch (Phase B)', () => {
   beforeEach(() => {
     asyncInserts.length = 0;
-    vi.mocked(isAgentTeamsEnabledForTeam).mockResolvedValue(true);
     vi.mocked(wake).mockClear();
   });
 
-  it('returns immediately with {agentId, status:"async_launched"} when flag on + run_in_background:true', async () => {
+  it('returns immediately with {agentId, status:"async_launched"} when run_in_background:true and team context present', async () => {
     const result = await taskTool.execute(
       {
         subagent_type: 'test-agent',
@@ -480,41 +476,7 @@ describe('Task tool — async branch (Phase B)', () => {
     expect(agentRunRow.parentAgentId).toBe('agent-lead-7');
   });
 
-  it('falls back to sync path when the team flag is OFF', async () => {
-    vi.mocked(isAgentTeamsEnabledForTeam).mockResolvedValue(false);
-    runAgentImpl = async () => ({
-      result: 'sync-fallback',
-      usage: {
-        inputTokens: 0,
-        outputTokens: 0,
-        cacheReadTokens: 0,
-        cacheWriteTokens: 0,
-        costUsd: 0.0001,
-        model: 'test',
-        turns: 1,
-      },
-    });
-
-    const result = await taskTool.execute(
-      {
-        subagent_type: 'test-agent',
-        prompt: 'hello',
-        description: 'flag-off fallback',
-        run_in_background: true,
-      },
-      makeTeamRunCtx(),
-    );
-
-    expect(result.status).toBeUndefined();
-    expect(result.agentId).toBeUndefined();
-    expect(result.result).toBe('sync-fallback');
-    expect(result.turns).toBe(1);
-    expect(wake).not.toHaveBeenCalled();
-    expect(runAgentCalls).toHaveLength(1);
-  });
-
   it('falls back to sync path when run_in_background is unset', async () => {
-    vi.mocked(isAgentTeamsEnabledForTeam).mockResolvedValue(true);
     runAgentImpl = async () => ({
       result: 'sync-default',
       usage: {
@@ -542,7 +504,5 @@ describe('Task tool — async branch (Phase B)', () => {
     expect(result.result).toBe('sync-default');
     expect(wake).not.toHaveBeenCalled();
     expect(runAgentCalls).toHaveLength(1);
-    // Flag should NOT be consulted when run_in_background is absent.
-    expect(vi.mocked(isAgentTeamsEnabledForTeam)).not.toHaveBeenCalled();
   });
 });
