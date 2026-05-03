@@ -1,14 +1,26 @@
 // @vitest-environment happy-dom
 //
-// UI-B Task 8 — TeammateRoster behavior tests.
+// UI-B Task 8 + Task 11 — TeammateRoster behavior tests.
 //
 // `useTeamEvents` is mocked so the component receives synthesized SSE
 // payloads on demand. We capture the `onMessage` callback the roster
 // passes in, then drive it directly to assert the apply-status-change
 // reducer wires through to the rendered DOM.
+//
+// Task 11 adds tests for the per-teammate cancel flow: the default
+// (no `onStop` prop) calls `fetch('/api/team/agent/[id]/cancel')`;
+// supplying `onStop` overrides the fetch path so existing tests still
+// drive the click handler directly.
 
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { act, render, screen, cleanup, fireEvent } from '@testing-library/react';
+import {
+  act,
+  render,
+  screen,
+  cleanup,
+  fireEvent,
+  waitFor,
+} from '@testing-library/react';
 import type { TeamActivityMessage } from '@/hooks/use-team-events';
 
 // Hoisted mock so we can capture and re-use the onMessage callback across
@@ -282,7 +294,7 @@ describe('<TeammateRoster>', () => {
     expect(row!.getAttribute('data-status')).toBe('running');
   });
 
-  it('renders a stop button only when row is stoppable AND onStop is supplied', () => {
+  it('invokes the supplied onStop override when the stop button is clicked', () => {
     const onStop = vi.fn();
     render(
       <TeammateRoster
@@ -298,7 +310,9 @@ describe('<TeammateRoster>', () => {
     expect(onStop).toHaveBeenCalledWith('agent-author');
   });
 
-  it('does NOT render a stop button when onStop is not supplied', () => {
+  it('renders a stop button by default (Task 11) — onStop is no longer required', () => {
+    // The default cancel handler POSTs the cancel endpoint; the button
+    // surface should still be present without an explicit onStop prop.
     render(
       <TeammateRoster
         teamId="team-1"
@@ -306,6 +320,161 @@ describe('<TeammateRoster>', () => {
         initialTeammates={[teammateAuthor]}
       />,
     );
+    expect(screen.getByTestId('teammate-roster-stop')).toBeTruthy();
+  });
+
+  it('does NOT render a stop button on the lead row even when stoppable', () => {
+    // Lead row is excluded from the stop affordance (see RosterRow).
+    render(
+      <TeammateRoster
+        teamId="team-1"
+        initialLead={{ ...lead, status: 'running' }}
+        initialTeammates={[]}
+      />,
+    );
     expect(screen.queryByTestId('teammate-roster-stop')).toBeNull();
+  });
+
+  describe('Task 11 — per-teammate cancel via fetch', () => {
+    let originalFetch: typeof fetch;
+
+    beforeEach(() => {
+      originalFetch = global.fetch;
+    });
+
+    afterEach(() => {
+      global.fetch = originalFetch;
+    });
+
+    it('POSTs /api/team/agent/[agentId]/cancel when default handler runs', async () => {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ cancelled: true, agentId: 'agent-author' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+      global.fetch = fetchMock as unknown as typeof fetch;
+
+      render(
+        <TeammateRoster
+          teamId="team-1"
+          initialLead={lead}
+          initialTeammates={[teammateAuthor]}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId('teammate-roster-stop'));
+
+      await waitFor(() => {
+        expect(fetchMock).toHaveBeenCalledOnce();
+      });
+      const [url, init] = fetchMock.mock.calls[0];
+      expect(url).toBe('/api/team/agent/agent-author/cancel');
+      expect((init as RequestInit).method).toBe('POST');
+    });
+
+    it('marks the row as cancelling optimistically after click (data-cancelling=true)', async () => {
+      // Resolve the fetch on a deferred promise so the optimistic flag
+      // is observable in the rendered DOM before the network resolves.
+      let resolveFetch!: (v: Response) => void;
+      const pending = new Promise<Response>((resolve) => {
+        resolveFetch = resolve;
+      });
+      const fetchMock = vi.fn().mockReturnValue(pending);
+      global.fetch = fetchMock as unknown as typeof fetch;
+
+      render(
+        <TeammateRoster
+          teamId="team-1"
+          initialLead={lead}
+          initialTeammates={[teammateAuthor]}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId('teammate-roster-stop'));
+
+      await waitFor(() => {
+        const row = screen.getAllByTestId('teammate-roster-row')[0];
+        expect(row.getAttribute('data-cancelling')).toBe('true');
+      });
+
+      // Pill label should swap to "cancelling…".
+      expect(screen.getByTestId('teammate-roster').textContent).toContain('cancelling');
+
+      // Resolve to clean up.
+      resolveFetch(
+        new Response(JSON.stringify({ cancelled: true, agentId: 'agent-author' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+    });
+
+    it('rolls back the optimistic cancelling marker on fetch failure', async () => {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response('boom', { status: 500 }),
+      );
+      global.fetch = fetchMock as unknown as typeof fetch;
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      render(
+        <TeammateRoster
+          teamId="team-1"
+          initialLead={lead}
+          initialTeammates={[teammateAuthor]}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId('teammate-roster-stop'));
+
+      // Wait for the fetch to settle, then assert the marker was cleared.
+      await waitFor(() => {
+        expect(fetchMock).toHaveBeenCalledOnce();
+      });
+      await waitFor(() => {
+        const row = screen.getAllByTestId('teammate-roster-row')[0];
+        expect(row.getAttribute('data-cancelling')).toBeNull();
+      });
+      expect(errSpy).toHaveBeenCalled();
+      errSpy.mockRestore();
+    });
+
+    it('clears the cancelling marker once the SSE removal arrives', async () => {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ cancelled: true, agentId: 'agent-author' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+      global.fetch = fetchMock as unknown as typeof fetch;
+
+      render(
+        <TeammateRoster
+          teamId="team-1"
+          initialLead={lead}
+          initialTeammates={[teammateAuthor]}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId('teammate-roster-stop'));
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+
+      // Now simulate the SSE-driven terminal status. The reducer
+      // removes the row entirely; the cleanup effect should drop the
+      // optimistic marker as well.
+      act(() => {
+        captured.onMessage!(
+          statusChangeMessage({
+            agentId: 'agent-author',
+            status: 'killed',
+            lastActiveAt: '2026-05-02T01:05:00.000Z',
+          }),
+        );
+      });
+
+      // Row should be gone — the empty-state hint takes its place.
+      expect(screen.queryAllByTestId('teammate-roster-row')).toHaveLength(0);
+      expect(screen.getByTestId('teammate-roster-empty')).toBeTruthy();
+    });
   });
 });

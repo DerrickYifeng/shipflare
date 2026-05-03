@@ -1,6 +1,6 @@
 'use client';
 
-// UI-B Task 8: TeammateRoster sidebar.
+// UI-B Task 8 + Task 11: TeammateRoster sidebar.
 //
 // Renders the team's live roster — the lead row pinned at top, then any
 // non-terminal teammate `agent_runs` grouped under their parent (the
@@ -14,12 +14,15 @@
 // to, with the messageType discriminator filtering out non-status
 // events.
 //
-// Per the UI-B spec the per-teammate "stop" button is wired in Task 11
-// (`/api/team/agent/[agentId]/cancel`); for now it surfaces as a
-// no-op stub so the surface is feature-complete on hover and callers
-// can pass `onStop` when the cancel route lands.
+// UI-B Task 11 wires the per-teammate stop button to
+// `/api/team/agent/[agentId]/cancel` by default. Callers can pass
+// `onStop` to override (e.g. tests assert the prop is invoked); the
+// default handler does the real POST and applies an optimistic
+// "cancelling…" status until SSE delivers the canonical 'killed'
+// transition that removes the row.
 
 import {
+  useCallback,
   useEffect,
   useMemo,
   useState,
@@ -63,9 +66,11 @@ export interface TeammateRosterProps {
   initialLead: RosterLead | null;
   initialTeammates: readonly RosterTeammate[];
   /**
-   * Optional cancel handler — wired to the per-teammate cancel endpoint
-   * by UI-B Task 11. Until that ships, callers leave it undefined and the
-   * stop button is rendered as a no-op for hover affordance only.
+   * Optional cancel handler override. When omitted, the roster
+   * defaults to POSTing `/api/team/agent/${agentId}/cancel` (UI-B
+   * Task 11). Tests pass an explicit handler to assert the click
+   * surface without going through fetch. Production callers can leave
+   * it undefined — the default is the right behavior.
    */
   onStop?: (agentId: string) => void;
 }
@@ -250,6 +255,14 @@ interface RowProps {
   status: AgentStatus | null;
   isLead?: boolean;
   onStop?: () => void;
+  /**
+   * Optimistic cancel marker — set after a successful POST to the
+   * cancel endpoint and cleared when SSE delivers status='killed' (and
+   * the row is removed). When true the pill swaps its label to
+   * "cancelling…" so the user gets immediate feedback without waiting
+   * a full agent turn for the real status flip.
+   */
+  cancelling?: boolean;
 }
 
 function rowStyles(): {
@@ -334,6 +347,7 @@ function RosterRow({
   status,
   isLead,
   onStop,
+  cancelling,
 }: RowProps): ReactNode {
   const styles = rowStyles();
   return (
@@ -342,6 +356,7 @@ function RosterRow({
       data-testid={isLead ? 'teammate-roster-lead' : 'teammate-roster-row'}
       data-agent-id={agentId ?? ''}
       data-status={status ?? 'idle'}
+      data-cancelling={cancelling ? 'true' : undefined}
     >
       <div style={styles.inner}>
         <span style={styles.name}>{displayName}</span>
@@ -349,7 +364,10 @@ function RosterRow({
       </div>
       <span style={styles.trailing}>
         {status ? (
-          <AgentStatusPill status={status} />
+          <AgentStatusPill
+            status={status}
+            label={cancelling ? 'cancelling…' : undefined}
+          />
         ) : (
           <span style={styles.meta}>idle</span>
         )}
@@ -359,6 +377,7 @@ function RosterRow({
             aria-label={`Stop ${displayName}`}
             data-testid="teammate-roster-stop"
             style={styles.stop}
+            disabled={cancelling}
             onClick={(e) => {
               e.stopPropagation();
               onStop();
@@ -372,6 +391,23 @@ function RosterRow({
   );
 }
 
+/**
+ * Default cancel handler — POSTs `/api/team/agent/${agentId}/cancel`
+ * (UI-B Task 11). Intentionally fire-and-forget at the call site; the
+ * caller manages the optimistic "cancelling…" state via `cancellingIds`
+ * and removes the marker on response. Errors are logged + surfaced via
+ * the returned promise so the caller can roll the optimistic flag back.
+ */
+async function defaultCancel(agentId: string): Promise<void> {
+  const res = await fetch(`/api/team/agent/${agentId}/cancel`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new Error(`cancel failed (${res.status}): ${detail}`);
+  }
+}
+
 export function TeammateRoster({
   teamId,
   initialLead,
@@ -383,11 +419,38 @@ export function TeammateRoster({
     teammates: [...initialTeammates],
   }));
 
+  // Optimistic-cancel marker set: ids that we've POSTed to the cancel
+  // endpoint but haven't yet seen a status='killed' SSE for. Cleared
+  // automatically when the row is removed by `applyStatusChange`
+  // (terminal status branch); the explicit clear in `useEffect` below
+  // catches the rare case where the row sticks around (e.g. re-seed).
+  const [cancellingIds, setCancellingIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+
   // Re-seed when the parent re-fetches (e.g. after a navigation): the
   // initial props become the new authoritative snapshot.
   useEffect(() => {
     setState({ lead: initialLead, teammates: [...initialTeammates] });
   }, [initialLead, initialTeammates]);
+
+  // Drop "cancelling" markers for ids that no longer have a row — this
+  // is the cleanup path for the SSE-driven removal. We can't react
+  // inside `applyStatusChange` (it's a pure reducer) so we sweep here.
+  useEffect(() => {
+    if (cancellingIds.size === 0) return;
+    const liveIds = new Set(state.teammates.map((t) => t.agentId));
+    let changed = false;
+    const next = new Set<string>();
+    for (const id of cancellingIds) {
+      if (liveIds.has(id)) {
+        next.add(id);
+      } else {
+        changed = true;
+      }
+    }
+    if (changed) setCancellingIds(next);
+  }, [state.teammates, cancellingIds]);
 
   useTeamEvents({
     teamId,
@@ -410,6 +473,42 @@ export function TeammateRoster({
     );
   }, [state.teammates]);
 
+  const handleCancel = useCallback(
+    async (agentId: string) => {
+      // Mark optimistically so the pill swaps to "cancelling…"
+      // immediately. SSE removal of the row clears the marker.
+      setCancellingIds((prev) => {
+        if (prev.has(agentId)) return prev;
+        const next = new Set(prev);
+        next.add(agentId);
+        return next;
+      });
+      try {
+        if (onStop) {
+          // Caller-supplied override (used by tests). Treat as
+          // synchronous; if they want async behavior they can return a
+          // promise that we still await.
+          await Promise.resolve(onStop(agentId));
+        } else {
+          await defaultCancel(agentId);
+        }
+      } catch (error: unknown) {
+        // Roll the optimistic flag back so the user can retry. The
+        // row stays in its current state — SSE will deliver the real
+        // truth either way.
+        setCancellingIds((prev) => {
+          if (!prev.has(agentId)) return prev;
+          const next = new Set(prev);
+          next.delete(agentId);
+          return next;
+        });
+        // eslint-disable-next-line no-console
+        console.error('[TeammateRoster] cancel failed', error);
+      }
+    },
+    [onStop],
+  );
+
   const styles = rosterStyles();
 
   return (
@@ -423,9 +522,12 @@ export function TeammateRoster({
             agentDefName={state.lead.agentDefName}
             status={state.lead.status}
             isLead
+            // Lead row never gets a stop button (excluded by isLead +
+            // isStoppable check inside RosterRow). We still pass a
+            // handler for symmetry but it's unreachable through the UI.
             onStop={
-              state.lead.agentId && onStop
-                ? () => onStop(state.lead!.agentId!)
+              state.lead.agentId
+                ? () => handleCancel(state.lead!.agentId!)
                 : undefined
             }
           />
@@ -442,7 +544,8 @@ export function TeammateRoster({
               displayName={t.displayName}
               agentDefName={t.agentDefName}
               status={t.status}
-              onStop={onStop ? () => onStop(t.agentId) : undefined}
+              cancelling={cancellingIds.has(t.agentId)}
+              onStop={() => handleCancel(t.agentId)}
             />
           ))
         )}
