@@ -1155,7 +1155,7 @@ unified path coexist behind flag), validated, then cut.
   - Task 1 — drop flag (code): `94cf5ee`
   - Task 2 — drop flag (tests): `d090919`
   - Task 3 — CLAUDE.md invariants: `21895fa`
-  - Task 4 — verification gate + final spec entry: `<THIS COMMIT>`
+  - Task 4 — verification gate + final spec entry: `e27c6a4`
 
 ---
 
