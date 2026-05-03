@@ -73,6 +73,60 @@ const SHUTDOWN_REASON_GRACEFUL = 'shutdown_request received';
 // ---------------------------------------------------------------------------
 
 /**
+ * UI-B Task 8: emit an `agent_status_change` event onto the team SSE
+ * channel after every `agent_runs.status` transition. The TeammateRoster
+ * (and any future status consumer — activity feed, etc.) listens for these
+ * to keep the UI in sync without polling.
+ *
+ * Wire shape mirrors the existing publishes in this file: a JSON payload
+ * carrying a `type` discriminator (renamed to `messageType` by the SSE
+ * route — see `src/app/api/team/events/route.ts`). A synthetic `messageId`
+ * is required so `useTeamEvents`' `normalizeEvent` doesn't drop the event
+ * on the way to the client (it requires a non-null id for dedupe).
+ *
+ * Failures are non-fatal: the durable DB row + Redis cache write-through
+ * are the source of truth; SSE is a best-effort live channel and a missed
+ * event is healed by the next cache miss / page reload.
+ */
+async function publishStatusChange(params: {
+  teamId: string;
+  agentId: string;
+  status:
+    | 'queued'
+    | 'running'
+    | 'sleeping'
+    | 'resuming'
+    | 'completed'
+    | 'failed'
+    | 'killed';
+  lastActiveAt: Date;
+  displayName?: string;
+}): Promise<void> {
+  try {
+    const pub = getPubSubPublisher();
+    await pub.publish(
+      teamMessagesChannel(params.teamId),
+      JSON.stringify({
+        // Synthetic id so the SSE route's wire wrapper survives the
+        // useTeamEvents `normalizeEvent` filter (requires messageId).
+        messageId: crypto.randomUUID(),
+        type: 'agent_status_change',
+        teamId: params.teamId,
+        agentId: params.agentId,
+        status: params.status,
+        lastActiveAt: params.lastActiveAt.toISOString(),
+        displayName: params.displayName ?? null,
+        createdAt: params.lastActiveAt.toISOString(),
+      }),
+    );
+  } catch (err) {
+    log.warn(
+      `agent-run publishStatusChange failed (team=${params.teamId} agent=${params.agentId}): ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
+
+/**
  * Build a minimal synthetic ToolContext for a Phase B teammate run. Tools
  * that require richer deps (db / teamId / userId / platform clients) are
  * NOT yet plumbed here — Phase B teammates run with the agent definition's
@@ -127,6 +181,13 @@ async function markFailed(
   } else {
     await cacheTeammateStatus(teamId, agentId, 'failed', now);
   }
+  // UI-B Task 8: SSE event so the roster reflects the failure live.
+  await publishStatusChange({
+    teamId,
+    agentId,
+    status: 'failed',
+    lastActiveAt: now,
+  });
 }
 
 /**
@@ -296,6 +357,13 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
       .where(eq(agentRuns.id, agentId));
     // UI-D: cache write-through. Teammate transitioning sleeping → resuming.
     await cacheTeammateStatus(row.teamId, agentId, 'resuming', resumingAt, null);
+    // UI-B Task 8: SSE event for the same transition.
+    await publishStatusChange({
+      teamId: row.teamId,
+      agentId,
+      status: 'resuming',
+      lastActiveAt: resumingAt,
+    });
     priorMessages = await loadAgentRunHistory(agentId, db);
     log.info(
       `agent-run ${agentId}: resuming from sleep with ${priorMessages.length} prior messages`,
@@ -323,6 +391,13 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
   } else {
     await cacheTeammateStatus(row.teamId, agentId, 'running', runningAt, null);
   }
+  // UI-B Task 8: SSE event so the roster reflects the running state live.
+  await publishStatusChange({
+    teamId: row.teamId,
+    agentId,
+    status: 'running',
+    lastActiveAt: runningAt,
+  });
 
   // Read initial prompt from mailbox (the Task tool inserted it before
   // calling wake()). The first drain still seeds the prompt; Phase C
@@ -629,6 +704,13 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
     } else {
       await cacheTeammateStatus(row.teamId, agentId, 'sleeping', sleptAt);
     }
+    // UI-B Task 8: SSE event so the roster reflects the yield live.
+    await publishStatusChange({
+      teamId: row.teamId,
+      agentId,
+      status: 'sleeping',
+      lastActiveAt: sleptAt,
+    });
     return;
   }
 
@@ -667,6 +749,16 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
   } else {
     await cacheTeammateStatus(row.teamId, agentId, status, exitAt);
   }
+  // UI-B Task 8: SSE event so the roster removes (terminal) or repins
+  // (lead → 'sleeping') the row live. Mirror the cache routing: lead
+  // surfaces as 'sleeping' on a clean completion; everything else is
+  // the literal terminal status.
+  await publishStatusChange({
+    teamId: row.teamId,
+    agentId,
+    status: isLead && status === 'completed' ? 'sleeping' : status,
+    lastActiveAt: exitAt,
+  });
 
   await synthAndDeliverNotification({
     agentId,

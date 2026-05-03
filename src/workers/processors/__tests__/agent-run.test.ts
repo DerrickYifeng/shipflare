@@ -823,11 +823,21 @@ describe('processAgentRun', () => {
     await processAgentRun(makeJob('lead-sse'));
 
     // SSE publish must have fired with the team-messages channel and a
-    // payload echoing the assistant text.
+    // payload echoing the assistant text. UI-B Task 8 added an
+    // `agent_status_change` publish on every status transition, so the
+    // channel now carries multiple message types — filter for the
+    // assistant_text payload specifically.
     expect(publishMock).toHaveBeenCalled();
-    const sseCall = publishMock.mock.calls.find(
-      ([channel]) => channel === teamMessagesChannel('team-sse'),
-    );
+    const sseCall = publishMock.mock.calls.find(([channel, raw]) => {
+      if (channel !== teamMessagesChannel('team-sse')) return false;
+      try {
+        return (
+          (JSON.parse(raw as string) as { type?: string }).type === 'agent_text'
+        );
+      } catch {
+        return false;
+      }
+    });
     expect(sseCall).toBeDefined();
     const payload = JSON.parse(sseCall![1]);
     expect(payload).toMatchObject({
@@ -902,12 +912,22 @@ describe('processAgentRun', () => {
 
     await processAgentRun(makeJob('agent-no-sse'));
 
-    // No publish to the team-messages SSE channel — teammate output reaches
-    // the lead via task_notification mailbox routing, not the live stream.
-    const sseCall = publishMock.mock.calls.find(
-      ([channel]) => channel === teamMessagesChannel('team-quiet'),
-    );
-    expect(sseCall).toBeUndefined();
+    // No `agent_text` publish to the team-messages SSE channel — teammate
+    // output reaches the lead via task_notification mailbox routing, not
+    // the live stream. UI-B Task 8 does emit `agent_status_change` events
+    // for teammates (so the founder UI's roster updates live), so we
+    // narrow the assertion to the agent_text type only.
+    const sseTextCall = publishMock.mock.calls.find(([channel, raw]) => {
+      if (channel !== teamMessagesChannel('team-quiet')) return false;
+      try {
+        return (
+          (JSON.parse(raw as string) as { type?: string }).type === 'agent_text'
+        );
+      } catch {
+        return false;
+      }
+    });
+    expect(sseTextCall).toBeUndefined();
 
     // Sanity: the durable per-turn row still landed (Phase D persistence
     // is independent of the lead-only SSE branch).
