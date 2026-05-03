@@ -56,6 +56,7 @@ describe('spawnSubagent skill preload', () => {
     });
 
     const def: AgentDefinition = {
+      source: 'built-in' as const,
       name: 'caller-agent',
       description: 'parent',
       tools: [],
@@ -88,6 +89,7 @@ describe('spawnSubagent skill preload', () => {
 
   it('passes no prebuilt when agent declares no skills', async () => {
     const def: AgentDefinition = {
+      source: 'built-in' as const,
       name: 'no-skills-agent',
       description: 'parent',
       tools: [],
@@ -110,6 +112,7 @@ describe('spawnSubagent skill preload', () => {
 
   it('logs warning when a declared skill is not registered', async () => {
     const def: AgentDefinition = {
+      source: 'built-in' as const,
       name: 'missing-skill-agent',
       description: 'parent',
       tools: [],

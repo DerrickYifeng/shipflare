@@ -81,6 +81,7 @@ export const skillTool: ToolDefinition<SkillToolInput, SkillToolOutput> = buildT
     );
 
     const subAgentDef: AgentDefinition = {
+      source: 'built-in' as const,
       name: `skill_${cmd.name}`,
       description: cmd.description,
       tools: cmd.allowedTools,

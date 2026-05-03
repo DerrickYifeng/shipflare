@@ -18,23 +18,41 @@ const log = createLogger('tools:agent-loader');
 
 export type AgentRole = 'lead' | 'member';
 
-export interface AgentDefinition {
+interface BaseAgentDefinition {
   name: string;
   description: string;
+  role: AgentRole;             // Phase A — primary input to four-layer tool filter (Agent Teams spec §5)
   tools: string[];
   disallowedTools: string[];   // restored Phase A — see Agent Teams spec §5
-  background: boolean;         // restored Phase A — semantics adapted, see Agent Teams spec §5
-  role: AgentRole;             // Phase A — primary input to four-layer tool filter (Agent Teams spec §5)
-  requires: string[];          // NEW — Phase A; DSL: 'channel:x', 'product:has_description'
   skills: string[];
+  requires: string[];          // NEW — Phase A; DSL: 'channel:x', 'product:has_description'
+  background: boolean;         // restored Phase A — semantics adapted, see Agent Teams spec §5
   model?: string;
   maxTurns: number;
   color?: string;
   /** Markdown body + inlined references + inlined shared-references. */
   systemPrompt: string;
+}
+
+export interface BuiltInAgentDefinition extends BaseAgentDefinition {
+  source: 'built-in';
   /** Absolute path to the AGENT.md file that produced this definition. */
   sourcePath: string;
 }
+
+// Forward-declaration for Phase 2+ — user-defined agents stored in the DB
+// (see Agent Teams spec §5.5). Declared now so the discriminated union
+// compiles cleanly and so reviewers who grep for `'custom'` can see the
+// reserved branch. The loader path that produces this lands later when
+// DB-stored custom agents become user-facing; until then, no code should
+// construct one.
+export interface CustomAgentDefinition extends BaseAgentDefinition {
+  source: 'custom';
+  ownerId: string;
+  storedAt: 'db';
+}
+
+export type AgentDefinition = BuiltInAgentDefinition | CustomAgentDefinition;
 
 // ---------------------------------------------------------------------------
 // Frontmatter shape
@@ -383,7 +401,7 @@ interface LoadOptions {
 export async function loadAgent(
   agentDirPath: string,
   options: LoadOptions = {},
-): Promise<AgentDefinition> {
+): Promise<BuiltInAgentDefinition> {
   const agentMdPath = path.join(agentDirPath, 'AGENT.md');
   const source = await fs.readFile(agentMdPath, 'utf8');
 
@@ -438,14 +456,15 @@ export async function loadAgent(
   }
 
   return {
+    source: 'built-in' as const,
     name: parsed.name,
     description: parsed.description,
+    role: parsed.role ?? 'member',
     tools: parsed.tools ?? [],
     disallowedTools: parsed.disallowedTools ?? [],
-    background: parsed.background ?? false,
-    role: parsed.role ?? 'member',
-    requires: parsed.requires ?? [],
     skills: parsed.skills ?? [],
+    requires: parsed.requires ?? [],
+    background: parsed.background ?? false,
     ...(parsed.model !== undefined ? { model: parsed.model } : {}),
     maxTurns: parsed.maxTurns ?? DEFAULT_MAX_TURNS,
     ...(parsed.color !== undefined ? { color: parsed.color } : {}),
@@ -457,7 +476,7 @@ export async function loadAgent(
 export async function loadAgentsDir(
   rootDir: string,
   options: LoadOptions = {},
-): Promise<AgentDefinition[]> {
+): Promise<BuiltInAgentDefinition[]> {
   const agentDirs = await discoverAgentDirs(rootDir);
   const loaded = await Promise.all(
     agentDirs.map((dir) => loadAgent(dir, options)),

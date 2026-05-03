@@ -73,4 +73,12 @@ describe('loader — Phase A restored fields', () => {
     });
     expect(agent.requires).toEqual([]);
   });
+
+  it('marks loader-produced agents with source: "built-in"', async () => {
+    const agent = await loadAgent(
+      path.join(FIXTURES, 'full-frontmatter-agent'),
+      { sharedReferencesDir: path.join(FIXTURES, '_shared', 'references') },
+    );
+    expect(agent.source).toBe('built-in');
+  });
 });

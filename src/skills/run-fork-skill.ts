@@ -75,6 +75,7 @@ export async function runForkSkill<T = unknown>(
   );
 
   const def: AgentDefinition = {
+    source: 'built-in' as const,
     name: `skill_${skill.name}`,
     description: skill.description,
     tools: skill.allowedTools,

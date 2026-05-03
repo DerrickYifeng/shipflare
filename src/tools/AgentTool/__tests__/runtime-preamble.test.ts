@@ -51,6 +51,7 @@ describe('renderRuntimePreamble', () => {
 
 describe('buildAgentConfigFromDefinition', () => {
   const def: AgentDefinition = {
+    source: 'built-in' as const,
     name: 'content-planner',
     description: 'plans stuff',
     tools: [],
