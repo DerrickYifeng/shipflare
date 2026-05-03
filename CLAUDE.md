@@ -311,6 +311,24 @@ The `agent-run` BullMQ worker drives all teammate lifecycles. Each
 teammate's transcript is persisted to `team_messages` per assistant turn
 for resume-from-sleep continuity.
 
+### Founder UI mental model
+
+The team-lead is **always present** as a sleeping `agent_runs` row. Founders
+don't "start runs" — they send messages to the lead. Each message wakes
+the lead; the lead processes (potentially spawning parallel teammates),
+replies, and goes back to sleep.
+
+UI implications:
+- The "Start a run" CTA is replaced with "Send a message"
+- The lead's status pill is always visible (sleeping/running/resuming)
+- Teammates appear in the roster sidebar when spawned, disappear when terminal
+- Activity feed shows cross-agent events (peer-DM, status changes, completions)
+- Cancel = SendMessage with type='shutdown_request' (eventually consistent;
+  takes seconds to propagate, not synchronous)
+- Per-teammate cancel button POSTs to /api/team/agent/[agentId]/cancel
+  (lead-only restriction is enforced separately by SendMessage's runtime
+  validation when the cancel comes from inside an agent context)
+
 ## Security TODO
 
 Tracking pending security hardening beyond what `feat/security-hardening` already shipped.
