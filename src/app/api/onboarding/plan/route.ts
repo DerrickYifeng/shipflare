@@ -224,8 +224,9 @@ export async function POST(request: NextRequest): Promise<Response> {
         // products.id (FK + notNull on strategic_paths.product_id).
         // Resolve an existing row if there is one; otherwise INSERT a
         // fresh row using the body fields the route already has. The
-        // commit route's upsert path (commit/route.ts:175-192) refines
-        // whatever lands here when the user clicks through stage-plan.
+        // commit route's upsert block (commit/route.ts:175-213, both
+        // the UPDATE and INSERT arms) refines whatever lands here when
+        // the user clicks through stage-plan.
         const existingProduct = await db
           .select({ id: products.id })
           .from(products)
@@ -237,9 +238,10 @@ export async function POST(request: NextRequest): Promise<Response> {
           productId = existingProduct[0].id;
         } else {
           // onboardingCompletedAt stays null until /commit; the commit
-          // route stamps it when the user finalizes.
-          const launchDateValue = body.launchDate ? new Date(body.launchDate) : null;
-          const launchedAtValue = body.launchedAt ? new Date(body.launchedAt) : null;
+          // route stamps it when the user finalizes. launchDate /
+          // launchedAt are reused from the top-of-handler normalization
+          // (see line 157) so the INSERT shape stays in sync with the
+          // rest of the handler — single source of truth for the coercion.
           const inserted = await db
             .insert(products)
             .values({
@@ -251,8 +253,8 @@ export async function POST(request: NextRequest): Promise<Response> {
               targetAudience: body.product.targetAudience ?? null,
               category: body.product.category,
               state: body.state,
-              launchDate: launchDateValue,
-              launchedAt: launchedAtValue,
+              launchDate,
+              launchedAt,
             })
             .onConflictDoNothing({ target: products.userId })
             .returning({ id: products.id });
@@ -270,9 +272,18 @@ export async function POST(request: NextRequest): Promise<Response> {
               .where(eq(products.userId, userId))
               .limit(1);
             if (!refetch[0]) {
-              throw new Error(
-                `products INSERT lost the race but no row was found for user=${userId}`,
+              // Theoretically unreachable: PG READ COMMITTED + the
+              // products_user_uq unique index means the racing tx's
+              // row is committed-and-visible by the time
+              // onConflictDoNothing returns []. If we ever hit this
+              // branch it indicates a driver-level invariant break
+              // (or REPEATABLE READ leaking into the pool). Log loud
+              // with userId + traceId so an oncall can triage, then
+              // throw a stable code an alert can grep / page on.
+              log.error(
+                `onboarding/plan: race-loss re-select returned no row for user=${userId} traceId=${traceId} — products_user_uq invariant broken`,
               );
+              throw new Error('PRODUCTS_RACE_REFETCH_MISS');
             }
             productId = refetch[0].id;
           }
