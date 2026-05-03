@@ -32,14 +32,50 @@ const selectChain: {
   // running without priorMessages. Individual tests can override.
   limit: vi.fn(async () => []),
 };
+// Phase E orphan fix (Task 1): the agent-run worker now loads the team row
+// once at startup via `db.select({id, userId, productId}).from(teams).where(...).limit(1)`
+// to wire userId / productId / platform clients into the ToolContext. We
+// route this select to a dedicated chain so it doesn't compete with the
+// existing teamConversations lookup. Discriminator is the projection's
+// `userId` key — only the teams query carries it.
+const teamSelectChain: {
+  from: ReturnType<typeof vi.fn>;
+  where: ReturnType<typeof vi.fn>;
+  limit: ReturnType<typeof vi.fn>;
+} = {
+  from: vi.fn(() => teamSelectChain),
+  where: vi.fn(() => teamSelectChain),
+  // Default fixture matches the agent_runs row's teamId/userId/productId
+  // used across the test suite. Individual tests can override via
+  // `teamSelectChain.limit.mockResolvedValueOnce([...])`.
+  limit: vi.fn(async () => [
+    { id: 'team-1', userId: 'user-1', productId: null },
+  ]),
+};
 vi.mock('@/lib/db', () => ({
   db: {
     query: { agentRuns: { findFirst: vi.fn() } },
     update: vi.fn(() => updateChain),
     insert: vi.fn(() => insertChain),
-    select: vi.fn(() => selectChain),
+    select: vi.fn((projection?: Record<string, unknown>) => {
+      // Route the teams-row lookup to its own chain so existing tests'
+      // selectChain.limit overrides only affect teamConversations queries.
+      if (projection && 'userId' in projection) return teamSelectChain;
+      return selectChain;
+    }),
     transaction: vi.fn(),
   },
+}));
+
+// Phase E orphan fix (Task 1): platform-deps mock — agent-run preloads
+// every platform client the team could need into the ToolContext via
+// `createTeamPlatformDeps(userId, productId)`. Default returns an empty
+// bag; tests that probe the ctx wiring override per-call.
+const createTeamPlatformDepsMock = vi.hoisted(() =>
+  vi.fn(async (_userId: string, _productId: string | null) => ({})),
+);
+vi.mock('@/lib/platform-deps', () => ({
+  createTeamPlatformDeps: createTeamPlatformDepsMock,
 }));
 
 // Captured runAgent call args so tests can probe the injectMessages /
@@ -190,6 +226,18 @@ describe('processAgentRun', () => {
     selectChain.where.mockReturnValue(selectChain);
     selectChain.orderBy.mockReturnValue(selectChain);
     selectChain.limit.mockResolvedValue([]);
+    // Phase E orphan fix (Task 1): reset the teams-row chain back to its
+    // default fixture so each test starts with a known-good team row.
+    teamSelectChain.from.mockClear();
+    teamSelectChain.where.mockClear();
+    teamSelectChain.limit.mockReset();
+    teamSelectChain.from.mockReturnValue(teamSelectChain);
+    teamSelectChain.where.mockReturnValue(teamSelectChain);
+    teamSelectChain.limit.mockResolvedValue([
+      { id: 'team-1', userId: 'user-1', productId: null },
+    ]);
+    createTeamPlatformDepsMock.mockClear();
+    createTeamPlatformDepsMock.mockResolvedValue({});
     runAgentHoisted.state.lastArgs = null;
     publishMock.mockClear();
     loadSystemPromptContextMock.mockClear();
@@ -1660,5 +1708,158 @@ describe('processAgentRun', () => {
     expect(config.systemPrompt).not.toContain('{productName}');
     expect(config.systemPrompt).not.toContain('{founderName}');
     expect(config.systemPrompt).not.toContain('{TEAM_ROSTER}');
+  });
+
+  // ---------------------------------------------------------------------
+  // Phase E orphan fix (2026-05-03 plan, Task 1) — domain tool ctx wiring
+  //
+  // The deleted team-run.ts loaded userId / productId / teamId / db /
+  // platform clients into the ToolContext. agent-run only exposed
+  // callerAgentId, so every domain tool (~20 of them, e.g.
+  // query_strategic_path, query_plan_items, add_plan_item) threw
+  // "Domain tool context missing required dependency 'userId'" the
+  // moment the team-lead invoked them. These tests pin the wiring back
+  // in so a future cleanup pass can't silently regress it.
+  // ---------------------------------------------------------------------
+
+  it('tool ctx exposes db / userId / productId / teamId / currentMemberId / conversationId / runId', async () => {
+    vi.mocked(db.query.agentRuns.findFirst).mockResolvedValue({
+      id: 'agent-ctx',
+      teamId: 'team-ctx',
+      memberId: 'mem-ctx',
+      agentDefName: 'content-manager',
+      parentAgentId: null,
+      status: 'queued',
+    } as never);
+
+    // Seed a specific team row so the assertions below can pin the exact
+    // values the ctx surfaces. The agent_runs row's teamId/memberId are
+    // independent of the team row's userId/productId, so we set both.
+    teamSelectChain.limit.mockResolvedValueOnce([
+      { id: 'team-ctx', userId: 'user-7', productId: 'prod-3' },
+    ]);
+
+    let capturedCtx: { get<V>(key: string): V } | null = null;
+    runAgentHoisted.fn.mockImplementationOnce(async (...args: unknown[]) => {
+      runAgentHoisted.state.lastArgs = args;
+      capturedCtx = args[2] as { get<V>(key: string): V };
+      return {
+        result: 'ok',
+        usage: {
+          inputTokens: 1,
+          outputTokens: 1,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          costUsd: 0,
+          model: 'claude-sonnet-4-6',
+          turns: 1,
+        },
+      };
+    });
+
+    await processAgentRun(makeJob('agent-ctx'));
+
+    expect(capturedCtx).not.toBeNull();
+    // Standard domain keys every ~20 tools read via requireDep().
+    expect(capturedCtx!.get<unknown>('db')).toBeDefined();
+    expect(capturedCtx!.get<string>('userId')).toBe('user-7');
+    expect(capturedCtx!.get<string | null>('productId')).toBe('prod-3');
+    expect(capturedCtx!.get<string>('teamId')).toBe('team-ctx');
+    expect(capturedCtx!.get<string>('currentMemberId')).toBe('mem-ctx');
+    // Teammate path: conversationId is null (only the lead carries one).
+    expect(capturedCtx!.get<string | null>('conversationId')).toBeNull();
+    // Teammate path: runId falls back to the agentId since there's no
+    // leadRequestId in scope.
+    expect(capturedCtx!.get<string>('runId')).toBe('agent-ctx');
+    // Phase D Sleep tool key — must keep working unchanged.
+    expect(capturedCtx!.get<string>('callerAgentId')).toBe('agent-ctx');
+  });
+
+  it('tool ctx exposes platform clients from createTeamPlatformDeps', async () => {
+    vi.mocked(db.query.agentRuns.findFirst).mockResolvedValue({
+      id: 'agent-platform',
+      teamId: 'team-platform',
+      memberId: 'mem-platform',
+      agentDefName: 'content-manager',
+      parentAgentId: null,
+      status: 'queued',
+    } as never);
+
+    teamSelectChain.limit.mockResolvedValueOnce([
+      { id: 'team-platform', userId: 'user-platform', productId: 'prod-1' },
+    ]);
+
+    // Stub createTeamPlatformDeps with sentinel client values so the
+    // assertions can confirm the ctx routes platform-keyed lookups
+    // through the helper rather than throwing or returning undefined.
+    createTeamPlatformDepsMock.mockResolvedValueOnce({
+      xClient: 'fake-x',
+      redditClient: 'fake-r',
+    });
+
+    let capturedCtx: { get<V>(key: string): V } | null = null;
+    runAgentHoisted.fn.mockImplementationOnce(async (...args: unknown[]) => {
+      runAgentHoisted.state.lastArgs = args;
+      capturedCtx = args[2] as { get<V>(key: string): V };
+      return {
+        result: 'ok',
+        usage: {
+          inputTokens: 1,
+          outputTokens: 1,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          costUsd: 0,
+          model: 'claude-sonnet-4-6',
+          turns: 1,
+        },
+      };
+    });
+
+    await processAgentRun(makeJob('agent-platform'));
+
+    // The helper must have been invoked with the user/product loaded
+    // from the team row.
+    expect(createTeamPlatformDepsMock).toHaveBeenCalledWith(
+      'user-platform',
+      'prod-1',
+    );
+
+    expect(capturedCtx).not.toBeNull();
+    expect(capturedCtx!.get<string>('xClient')).toBe('fake-x');
+    expect(capturedCtx!.get<string>('redditClient')).toBe('fake-r');
+  });
+
+  it('fails the run with a clear error when team row is missing', async () => {
+    vi.mocked(db.query.agentRuns.findFirst).mockResolvedValue({
+      id: 'agent-missing-team',
+      teamId: 'team-gone',
+      memberId: 'mem-x',
+      agentDefName: 'content-manager',
+      parentAgentId: null,
+      status: 'queued',
+    } as never);
+
+    // Simulate the team row having been deleted — the team-row select
+    // returns an empty array. The processor must surface a clear failure
+    // instead of silently invoking runAgent with undefined deps.
+    teamSelectChain.limit.mockResolvedValueOnce([]);
+
+    await processAgentRun(makeJob('agent-missing-team'));
+
+    // runAgent must NOT have been invoked — the team-row check throws
+    // before we get there, and the catch path settles the run as failed.
+    expect(runAgentHoisted.state.lastArgs).toBeNull();
+
+    // The run must be marked failed with a shutdownReason that names
+    // the missing team so operators can see the root cause in the
+    // agent_runs row without spelunking logs.
+    const setCalls = updateChain.set.mock.calls.map(
+      (c) => (c as unknown as [Record<string, unknown>])[0],
+    );
+    const failedSet = setCalls.find((s) => s.status === 'failed');
+    expect(failedSet).toBeDefined();
+    expect(String(failedSet?.shutdownReason ?? '')).toContain(
+      'team team-gone not found',
+    );
   });
 });

@@ -35,10 +35,11 @@ import { desc, eq } from 'drizzle-orm';
 import type Anthropic from '@anthropic-ai/sdk';
 import { db } from '@/lib/db';
 import type { Database } from '@/lib/db';
-import { agentRuns, teamConversations, teamMessages } from '@/lib/db/schema';
+import { agentRuns, teamConversations, teamMessages, teams } from '@/lib/db/schema';
 import { runAgent } from '@/core/query-loop';
 import { resolveAgent } from '@/tools/AgentTool/registry';
 import { buildAgentConfigFromDefinition } from '@/tools/AgentTool/spawn';
+import { createTeamPlatformDeps } from '@/lib/platform-deps';
 import { synthesizeTaskNotification } from './lib/synthesize-notification';
 import { wake } from './lib/wake';
 import { drainMailbox } from './lib/mailbox-drain';
@@ -132,33 +133,76 @@ async function publishStatusChange(params: {
 }
 
 /**
- * Build a minimal synthetic ToolContext for a Phase B teammate run. Tools
- * that require richer deps (db / teamId / userId / platform clients) are
- * NOT yet plumbed here — Phase B teammates run with the agent definition's
- * declared tool list only, which for the first wave (content-manager etc.)
- * is mostly self-contained. Phase E will replace this stub with a proper
- * teammate context that mirrors the team-run worker's shape.
+ * Build the ToolContext for an agent-run dispatch (lead OR teammate).
  *
- * Phase D: `callerAgentId` is injected so the Sleep tool can mark the
- * correct agent_runs row as sleeping. Without it, Sleep would have no
- * way to know which row to update from inside its execute body.
+ * Phase E orphan fix (2026-05-03 plan, Task 1): the deleted
+ * `team-run.ts` (commit 4249236) loaded a 10-key get-switch + preloaded
+ * platform clients into the lead's ctx. Phase E unified the worker but
+ * never restored the wiring, so every domain tool (~20 of them — see
+ * `src/tools/context-helpers.ts:requireDep`) threw
+ *   "Domain tool context missing required dependency 'userId'"
+ * the moment the team-lead invoked them. Restore the standard domain
+ * keys (`db`, `userId`, `productId`, `teamId`, `currentMemberId`,
+ * `conversationId`, `runId`) plus per-platform clients via the
+ * sanctioned `createTeamPlatformDeps` helper (CLAUDE.md "Architecture
+ * Rule 5" forbids calling `XClient.fromChannel` etc. directly here).
+ *
+ * Phase D: `callerAgentId` is preserved so the Sleep tool can mark the
+ * correct agent_runs row as sleeping.
  *
  * `createChildContext` is intentionally NOT used: it takes a real parent
  * ToolContext to inherit deps from, which we don't have at the BullMQ
  * worker entry point.
  */
-function buildPhaseBToolContext(
+interface PhaseBToolContextArgs {
+  teamId: string;
+  userId: string;
+  productId: string | null;
+  memberId: string;
+  conversationId: string | null;
+  runId: string;
+}
+
+async function buildPhaseBToolContext(
   controller: AbortController,
   agentId: string,
-): ToolContext {
+  args: PhaseBToolContextArgs,
+): Promise<ToolContext> {
+  // Preload every platform client the team could need so domain tools
+  // (xClient.search, redditClient.fetchThread, memoryStore.set, ...) can
+  // pull them off the ctx without each tool spinning up its own client.
+  // Sanctioned per CLAUDE.md "Architecture Rule 5".
+  const platformDeps = await createTeamPlatformDeps(args.userId, args.productId);
+
   return {
     abortSignal: controller.signal,
     get<V>(key: string): V {
-      // Phase D: Sleep tool reads its caller identity from this key.
-      if (key === 'callerAgentId') return agentId as unknown as V;
-      // Phase B: no other deps wired through. Tools that need a key throw
-      // the same "Missing dependency" error they would in any other context.
-      throw new Error(`Missing dependency: ${key}`);
+      // Platform clients win over the static switch (matches the deleted
+      // team-run.ts precedent: `if (key in platformDeps) return ...`).
+      if (key in platformDeps) {
+        return (platformDeps as Record<string, unknown>)[key] as V;
+      }
+      switch (key) {
+        case 'db':
+          return db as unknown as V;
+        case 'teamId':
+          return args.teamId as unknown as V;
+        case 'userId':
+          return args.userId as unknown as V;
+        case 'productId':
+          return args.productId as unknown as V;
+        case 'currentMemberId':
+          return args.memberId as unknown as V;
+        case 'conversationId':
+          return args.conversationId as unknown as V;
+        case 'runId':
+          return args.runId as unknown as V;
+        // Phase D: Sleep tool reads its caller identity from this key.
+        case 'callerAgentId':
+          return agentId as unknown as V;
+        default:
+          throw new Error(`Missing dependency: ${key}`);
+      }
     },
   };
 }
@@ -793,7 +837,45 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
       systemPrompt: substitutePlaceholders(def.systemPrompt, promptCtx),
     };
     const config = buildAgentConfigFromDefinition(renderedDef);
-    const ctx = buildPhaseBToolContext(controller, agentId);
+
+    // Phase E orphan fix (2026-05-03 plan, Task 1): the team-run worker
+    // used to load userId / productId / teamId / platformDeps into the
+    // ctx via the now-deleted team-run.ts. agent-run never did, so every
+    // domain tool threw "Missing required dependency 'userId'" the moment
+    // the lead invoked them. Load the team row once at startup, then
+    // build a context that exposes the standard domain keys plus per-
+    // platform clients via the sanctioned helper.
+    const teamRows = await db
+      .select({
+        id: teams.id,
+        userId: teams.userId,
+        productId: teams.productId,
+      })
+      .from(teams)
+      .where(eq(teams.id, row.teamId))
+      .limit(1);
+    if (teamRows.length === 0) {
+      throw new Error(
+        `agent-run ${agentId}: team ${row.teamId} not found`,
+      );
+    }
+    const team = teamRows[0]!;
+
+    const ctx = await buildPhaseBToolContext(controller, agentId, {
+      teamId: team.id,
+      userId: team.userId,
+      productId: team.productId,
+      memberId: row.memberId,
+      // Lead carries the founder's primary thread id; teammates have no
+      // conversation handle (their output reaches the lead via
+      // task_notification mailbox routing, not the per-thread filter).
+      conversationId: isLead ? leadConversationId : null,
+      // Lead's runId mirrors the user_prompt messageId the API route
+      // advertises to SSE so the founder UI's working-indicator pairing
+      // works. Teammates have no leadRequestId in scope — fall back to
+      // the agentId so the run is still uniquely identifiable.
+      runId: isLead && leadRequestId ? leadRequestId : agentId,
+    });
     result = await runAgent(
       config,
       initialPrompt,
