@@ -313,4 +313,135 @@ describe('processAgentRun', () => {
     expect(notification).toBeDefined();
     expect(String(notification?.content ?? '')).toContain('<status>killed</status>');
   }, 10000);
+
+  // ---------------------------------------------------------------------
+  // Phase D Task 4 — Sleep tool early-exit without notification
+  // ---------------------------------------------------------------------
+
+  it('Sleep tool_done event triggers early exit WITHOUT calling synthesizeTaskNotification', async () => {
+    vi.mocked(db.query.agentRuns.findFirst).mockResolvedValue({
+      id: 'agent-1',
+      teamId: 'team-1',
+      memberId: 'mem-1',
+      agentDefName: 'content-manager',
+      parentAgentId: 'lead-agent',
+      status: 'queued',
+    } as never);
+
+    // Only the initial-prompt drain is needed — Sleep takes the agent out
+    // of the loop before any further idle drain happens.
+    vi.mocked(drainMailbox).mockImplementation(async () => [
+      {
+        id: 'msg-init',
+        toAgentId: 'agent-1',
+        type: 'user_prompt',
+        messageType: 'message',
+        content: 'Initial prompt.',
+        createdAt: new Date(),
+      },
+    ]);
+
+    // runAgent stub: emit a `tool_done` event with toolName='Sleep' and
+    // a JSON-stringified `{slept:true,...}` content (mirrors the tool
+    // executor's serialization). Then resolve cleanly — the processor
+    // should observe `sleepingExit` and skip the notification regardless.
+    runAgentHoisted.fn.mockImplementationOnce(async (...args: unknown[]) => {
+      runAgentHoisted.state.lastArgs = args;
+      const onEvent = args[7] as
+        | ((event: { type: string; toolName?: string; result?: { content: string } }) => void | Promise<void>)
+        | undefined;
+      if (onEvent) {
+        await onEvent({
+          type: 'tool_done',
+          toolName: 'Sleep',
+          result: {
+            content: JSON.stringify({
+              slept: true,
+              agentId: 'agent-1',
+              durationMs: 30_000,
+              wakeAt: new Date().toISOString(),
+            }),
+          },
+        });
+      }
+      return {
+        result: '',
+        usage: {
+          inputTokens: 1,
+          outputTokens: 1,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          costUsd: 0,
+          model: 'claude-sonnet-4-6',
+          turns: 1,
+        },
+      };
+    });
+
+    await processAgentRun(makeJob('agent-1'));
+
+    // No task_notification row should have been inserted — the Sleep tool
+    // already updated agent_runs.status='sleeping' itself; the agent is
+    // yielding, not finished.
+    const insertedRows = insertChain.values.mock.calls.map(
+      (c) => (c as unknown as [Record<string, unknown>])[0],
+    );
+    const notification = insertedRows.find(
+      (r) => r.messageType === 'task_notification',
+    );
+    expect(notification).toBeUndefined();
+
+    // The processor must NOT have overwritten agent_runs.status to
+    // 'completed' / 'failed' / 'killed' on exit. The Sleep tool already
+    // set status='sleeping'; the early-exit path leaves it untouched.
+    const setCalls = updateChain.set.mock.calls.map(
+      (c) => (c as unknown as [Record<string, unknown>])[0],
+    );
+    expect(
+      setCalls.some(
+        (s) =>
+          s.status === 'completed' ||
+          s.status === 'failed' ||
+          s.status === 'killed',
+      ),
+    ).toBe(false);
+  });
+
+  it('injects callerAgentId into ToolContext so the Sleep tool can read it', async () => {
+    vi.mocked(db.query.agentRuns.findFirst).mockResolvedValue({
+      id: 'agent-42',
+      teamId: 'team-1',
+      memberId: 'mem-1',
+      agentDefName: 'content-manager',
+      parentAgentId: null,
+      status: 'queued',
+    } as never);
+
+    // Capture the ToolContext that runAgent was handed so we can probe
+    // ctx.get('callerAgentId').
+    let capturedCtx: { get<V>(key: string): V } | null = null;
+    runAgentHoisted.fn.mockImplementationOnce(async (...args: unknown[]) => {
+      runAgentHoisted.state.lastArgs = args;
+      capturedCtx = args[2] as { get<V>(key: string): V };
+      return {
+        result: 'ok',
+        usage: {
+          inputTokens: 1,
+          outputTokens: 1,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          costUsd: 0,
+          model: 'claude-sonnet-4-6',
+          turns: 1,
+        },
+      };
+    });
+
+    await processAgentRun(makeJob('agent-42'));
+
+    expect(capturedCtx).not.toBeNull();
+    // The processor must inject the agentId so the Sleep tool can mark
+    // the correct agent_runs row as sleeping.
+    expect(capturedCtx!.get<string>('callerAgentId')).toBe('agent-42');
+  });
 });

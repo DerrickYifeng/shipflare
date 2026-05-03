@@ -70,16 +70,25 @@ const SHUTDOWN_REASON_GRACEFUL = 'shutdown_request received';
  * is mostly self-contained. Phase E will replace this stub with a proper
  * teammate context that mirrors the team-run worker's shape.
  *
+ * Phase D: `callerAgentId` is injected so the Sleep tool can mark the
+ * correct agent_runs row as sleeping. Without it, Sleep would have no
+ * way to know which row to update from inside its execute body.
+ *
  * `createChildContext` is intentionally NOT used: it takes a real parent
  * ToolContext to inherit deps from, which we don't have at the BullMQ
  * worker entry point.
  */
-function buildPhaseBToolContext(controller: AbortController): ToolContext {
+function buildPhaseBToolContext(
+  controller: AbortController,
+  agentId: string,
+): ToolContext {
   return {
     abortSignal: controller.signal,
     get<V>(key: string): V {
-      // Phase B: no deps wired through. Tools that need a key throw the
-      // same "Missing dependency" error they would in any other context.
+      // Phase D: Sleep tool reads its caller identity from this key.
+      if (key === 'callerAgentId') return agentId as unknown as V;
+      // Phase B: no other deps wired through. Tools that need a key throw
+      // the same "Missing dependency" error they would in any other context.
       throw new Error(`Missing dependency: ${key}`);
     },
   };
@@ -199,8 +208,44 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
   // Phase E unification is a refactor, not a redesign.
   const pendingInjections: Anthropic.Messages.MessageParam[] = [];
   let gracefullyKilled = false;
+  // Phase D: set when the Sleep tool's tool_done event fires with a
+  // `{slept: true, ...}` payload. Triggers a graceful early-exit that
+  // SKIPS the synthAndDeliverNotification step — the agent isn't done,
+  // it's just yielding its worker slot. The Sleep tool itself already
+  // marked agent_runs.status='sleeping' before returning.
+  let sleepingExit = false;
 
   const controller = new AbortController();
+
+  // Phase D: watch the runAgent stream for a Sleep tool_done event and
+  // signal early exit. The result.content is JSON-stringified by the
+  // tool executor (see src/core/tool-executor.ts:108), so we parse and
+  // check for the `slept: true` marker that SleepTool returns.
+  const detectSleep = (event: import('@/core/types').StreamEvent): void => {
+    if (event.type !== 'tool_done') return;
+    if (event.toolName !== 'Sleep') return;
+    if (event.result.is_error) return;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(event.result.content);
+    } catch {
+      return;
+    }
+    if (
+      parsed !== null &&
+      typeof parsed === 'object' &&
+      'slept' in parsed &&
+      (parsed as { slept: unknown }).slept === true
+    ) {
+      sleepingExit = true;
+      log.info(`agent-run ${agentId}: Sleep observed, signalling early exit`);
+      try {
+        controller.abort();
+      } catch {
+        // Already aborted — safe to ignore.
+      }
+    }
+  };
 
   // Phase C: background drain timer. Polls every DRAIN_POLL_INTERVAL_MS
   // for new mail addressed to this agent; on shutdown_request, sets
@@ -259,7 +304,7 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
 
   try {
     const config = buildAgentConfigFromDefinition(def);
-    const ctx = buildPhaseBToolContext(controller);
+    const ctx = buildPhaseBToolContext(controller, agentId);
     result = await runAgent(
       config,
       initialPrompt,
@@ -268,7 +313,7 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
       undefined, // onProgress
       undefined, // prebuilt
       undefined, // onIdleReset
-      undefined, // onEvent
+      detectSleep, // onEvent — Phase D Sleep early-exit detector
       injectMessages,
     );
     durationMs = Date.now() - startedAtMs;
@@ -339,6 +384,18 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
         `agent-run ${agentId} final drain failed: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
+  }
+
+  // Phase D: if the Sleep tool fired during this run, the agent is
+  // yielding — not finished. The Sleep tool itself already updated
+  // agent_runs.status='sleeping' + sleepUntil and scheduled a delayed
+  // wake via enqueueAgentRun. Skip the terminal status update + the
+  // task_notification synthesis here; the next agent-run dispatch
+  // (from sleep expiry or a wake() triggered by SendMessage) will
+  // pick up where this turn left off.
+  if (sleepingExit) {
+    log.info(`agent-run ${agentId}: yielded for sleep, skipping notification`);
+    return;
   }
 
   // Persist exit state.
