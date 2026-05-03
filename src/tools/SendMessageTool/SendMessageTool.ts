@@ -9,7 +9,7 @@
 // record; Redis is only a live-delivery optimization.
 
 import { z } from 'zod';
-import { and, eq, gt } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray } from 'drizzle-orm';
 import { buildTool } from '@/core/tool-system';
 import type {
   ToolContext,
@@ -389,6 +389,40 @@ async function getLeadAgentId(
   return null;
 }
 
+/**
+ * Resolve the most recently active `agent_runs.id` for a member that is
+ * still addressable (status='running' or 'sleeping'). Returns `null` when
+ * the member has no live run — callers should treat that as "nothing to
+ * deliver to right now" and surface a clear error to the LLM.
+ *
+ * Phase E Task 8: shutdown_request and plan_approval_response previously
+ * passed `toMemberId` directly to `wake()`, which is the wrong address —
+ * `wake()` enqueues against `agent_runs.id`. This helper lets the
+ * dispatchers route via the correct identifier so the BullMQ payload
+ * lands on the running agent loop, not a no-op.
+ *
+ * `ORDER BY lastActiveAt DESC LIMIT 1` mirrors the team-lead reconnect
+ * heuristic: if the same member somehow has multiple live rows (race
+ * during reconcile), we wake the one that ticked most recently.
+ */
+async function resolveTargetAgentRun(
+  toMemberId: string,
+  database: Database,
+): Promise<string | null> {
+  const rows = await database
+    .select({ id: agentRuns.id })
+    .from(agentRuns)
+    .where(
+      and(
+        eq(agentRuns.memberId, toMemberId),
+        inArray(agentRuns.status, ['running', 'sleeping']),
+      ),
+    )
+    .orderBy(desc(agentRuns.lastActiveAt))
+    .limit(1);
+  return rows[0]?.id ?? null;
+}
+
 async function publishToRedis(
   teamId: string,
   payload: Record<string, unknown>,
@@ -646,6 +680,20 @@ async function dispatchShutdownRequest(
 ): Promise<SendMessageResult> {
   const { teamId, currentMemberId, runId, db } = deps;
   const toMemberId = await resolveRecipient(input.to, teamId, db);
+
+  // Phase E Task 8: route by agent_runs.id, not team_members.id. wake()
+  // enqueues against agent_runs.id; passing the static member id (the
+  // Phase C kludge) silently no-ops because no BullMQ job binds to it.
+  // Inserting `toAgentId` here also lets the recipient's mailbox-drain
+  // pick the row up via `idx_team_messages_to_undelivered`.
+  const targetAgentId = await resolveTargetAgentRun(toMemberId, db);
+  if (targetAgentId === null) {
+    throw new Error(
+      `SendMessage shutdown_request: no active agent_run for member ${toMemberId}. ` +
+        `Recipient must be running or sleeping to receive shutdown requests.`,
+    );
+  }
+
   const effectiveRunId = input.run_id ?? runId ?? null;
   const messageId = crypto.randomUUID();
   const createdAt = new Date();
@@ -656,6 +704,7 @@ async function dispatchShutdownRequest(
     teamId,
     fromMemberId: currentMemberId,
     toMemberId,
+    toAgentId: targetAgentId,
     type: 'user_prompt',
     messageType: 'shutdown_request',
     content: input.content,
@@ -665,9 +714,7 @@ async function dispatchShutdownRequest(
   });
 
   // Wake the target so it drains the request at its next idle turn.
-  // Phase C kludge: `toMemberId` is treated as the wake target. Phase E will
-  // route via agent_runs.id when the unified team-run / agent-run model lands.
-  await wake(toMemberId);
+  await wake(targetAgentId);
 
   await publishToRedis(teamId, {
     messageId,
@@ -737,6 +784,17 @@ async function dispatchPlanApprovalResponse(
 ): Promise<SendMessageResult> {
   const { teamId, currentMemberId, runId, db } = deps;
   const toMemberId = await resolveRecipient(input.to, teamId, db);
+
+  // Phase E Task 8: route by agent_runs.id, not team_members.id. See the
+  // matching block in dispatchShutdownRequest for the full rationale.
+  const targetAgentId = await resolveTargetAgentRun(toMemberId, db);
+  if (targetAgentId === null) {
+    throw new Error(
+      `SendMessage plan_approval_response: no active agent_run for member ${toMemberId}. ` +
+        `Recipient must be running or sleeping to receive plan approvals.`,
+    );
+  }
+
   const effectiveRunId = input.run_id ?? runId ?? null;
   const messageId = crypto.randomUUID();
   const createdAt = new Date();
@@ -749,6 +807,7 @@ async function dispatchPlanApprovalResponse(
     teamId,
     fromMemberId: currentMemberId,
     toMemberId,
+    toAgentId: targetAgentId,
     type: 'user_prompt',
     messageType: 'plan_approval_response',
     content,
@@ -759,7 +818,7 @@ async function dispatchPlanApprovalResponse(
   });
 
   // Wake the teammate so it resumes its plan promptly on approval/rejection.
-  await wake(toMemberId);
+  await wake(targetAgentId);
 
   await publishToRedis(teamId, {
     messageId,

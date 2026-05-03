@@ -77,6 +77,19 @@ vi.mock('drizzle-orm', async () => {
     and: (...clauses: Array<EqSentinel | AndSentinel>): AndSentinel => ({
       __and: clauses,
     }),
+    // Phase E Task 8: resolveTargetAgentRun uses inArray(status, [...]).
+    // The fake builder treats the array as a single sentinel value and
+    // checks `r.status` membership inside resolveRows.
+    inArray: (col: unknown, values: unknown[]): EqSentinel => ({
+      __eq: {
+        column: String((col as { name?: string })?.name ?? col),
+        value: values,
+      },
+    }),
+    // desc() / asc() are pass-throughs in tests — only the projection +
+    // .limit() are observable via resolveRows.
+    desc: (col: unknown) => col,
+    asc: (col: unknown) => col,
   };
 });
 
@@ -107,8 +120,9 @@ function makeFakeDb() {
       const builder = {
         from(table: unknown) {
           // SendMessage queries team_members for recipient resolution and,
-          // post-Phase-D, agent_runs for the wake-if-sleeping check. The
-          // table-name shape varies across drizzle versions, so the resolver
+          // post-Phase-D, agent_runs for the wake-if-sleeping check + the
+          // Phase E Task 8 resolveTargetAgentRun helper. The table-name
+          // shape varies across drizzle versions, so the resolver
           // disambiguates from the filter-value shape (see resolveRows).
           const name = tableName(table);
           if (name.includes('team_members') || true) {
@@ -118,18 +132,31 @@ function makeFakeDb() {
         },
         where(cond: EqSentinel | AndSentinel) {
           filters = flattenConditions(cond);
-          // Phase D: the agent_runs probe uses a `status='sleeping'` filter.
-          // Detect it heuristically by sniffing for the literal among
-          // filter values — team_members never carries 'sleeping' as a
-          // column value, so this is collision-free.
-          if (filters.some((f) => f.value === 'sleeping')) {
+          // Detect the agent_runs probe by sniffing for either:
+          //   - the Phase D wake-if-sleeping `status='sleeping'` literal, or
+          //   - the Phase E Task 8 `inArray(status, ['running','sleeping'])`
+          //     sentinel — value is an array containing those literals.
+          // team_members never carries either as a column value, so this
+          // is collision-free.
+          const hasAgentRunsFilter = filters.some((f) => {
+            if (f.value === 'sleeping' || f.value === 'running') return true;
+            if (
+              Array.isArray(f.value) &&
+              f.value.some(
+                (v) => v === 'sleeping' || v === 'running',
+              )
+            )
+              return true;
+            return false;
+          });
+          if (hasAgentRunsFilter) {
             mode = 'agent_runs';
           }
           // Make `where(...)` thenable so tests that fan out (broadcast)
           // can `await db.select(...).from(...).where(...)` without an
           // explicit `.limit()` and still receive every matching member.
-          // We retain the chainable builder shape (with .limit) for the
-          // recipient-resolution call sites.
+          // We retain the chainable builder shape (with .limit / .orderBy)
+          // for the recipient-resolution + agent-run lookup call sites.
           const thenableBuilder = builder as typeof builder & {
             then?: (
               onFulfilled: (rows: MemberRow[] | AgentRunRow[]) => unknown,
@@ -143,6 +170,13 @@ function makeFakeDb() {
           };
           return thenableBuilder;
         },
+        // Phase E Task 8: resolveTargetAgentRun chains
+        // `.orderBy(desc(...)).limit(1)`. The order is irrelevant to the
+        // assertions — tests seed at most one matching agent_run per
+        // member — so this is a transparent pass-through.
+        orderBy(_col: unknown) {
+          return builder;
+        },
         limit(n: number): Promise<MemberRow[] | AgentRunRow[]> {
           if (mode === null) return Promise.resolve([]);
           const rows = resolveRows();
@@ -154,13 +188,19 @@ function makeFakeDb() {
         // take a shape-agnostic approach: collect all filter values and
         // filter the in-memory rows by "every filter matches at least
         // one of the row's known fields". Works because SendMessage only
-        // composes eq() across a small fixed set of columns per table.
+        // composes eq() / inArray() across a small fixed set of columns
+        // per table.
         const values = filters.map((f) => f.value);
         if (mode === 'agent_runs') {
-          // Filter agent_runs by memberId + status (the only two columns
-          // dispatchMessage's wake-if-sleeping probe constrains).
+          // Filter agent_runs by memberId + status (eq) OR
+          // inArray(status, [...]). For each filter value we accept the
+          // row when EITHER the value matches a row field OR (for arrays)
+          // the row's status is contained in the array.
           return agentRunRows.filter((r) =>
-            values.every((v) => v === r.memberId || v === r.status),
+            values.every((v) => {
+              if (Array.isArray(v)) return v.includes(r.status);
+              return v === r.memberId || v === r.status;
+            }),
           );
         }
         // Default: team_members lookup. Phase C Task 5 returns the full
@@ -457,8 +497,16 @@ describe('SendMessage execute() — variant dispatch', () => {
     expect(inserts.map((r) => r.id)).toContain(result.messageId);
   });
 
-  it('type:shutdown_request inserts row with messageType="shutdown_request" and wakes target', async () => {
+  it('type:shutdown_request inserts row with messageType="shutdown_request", sets toAgentId, and wakes by agent_runs.id (Phase E)', async () => {
     members.push({ id: 'mem-alex', teamId: 'team-1', displayName: 'Alex' });
+    // Phase E Task 8: dispatcher must resolve recipient to agent_runs.id
+    // (not team_members.id) before wake(). Seed a running run so the
+    // resolver returns a non-null id.
+    agentRunRows.push({
+      id: 'agent-run-alex',
+      memberId: 'mem-alex',
+      status: 'running',
+    });
 
     const ctx = makeCtx({
       db: fakeDb,
@@ -474,14 +522,64 @@ describe('SendMessage execute() — variant dispatch', () => {
 
     expect(result.delivered).toBe(true);
     expect(inserts).toHaveLength(1);
-    expect(
-      (inserts[0] as MessageRow & { messageType?: string }).messageType,
-    ).toBe('shutdown_request');
-    expect(inserts[0].toMemberId).toBe('mem-alex');
-    expect(inserts[0].content).toBe('wrap up');
-    // Target must be woken so it processes the request promptly.
+    const row = inserts[0] as MessageRow & {
+      messageType?: string;
+      toAgentId?: string;
+    };
+    expect(row.messageType).toBe('shutdown_request');
+    expect(row.toMemberId).toBe('mem-alex');
+    // The mailbox-drain path indexes on toAgentId — it MUST be set so
+    // the recipient's drain query picks the row up.
+    expect(row.toAgentId).toBe('agent-run-alex');
+    expect(row.content).toBe('wrap up');
+    // Target must be woken by agent_runs.id, NOT the static member id.
     expect(vi.mocked(wake)).toHaveBeenCalledOnce();
-    expect(vi.mocked(wake)).toHaveBeenCalledWith('mem-alex');
+    expect(vi.mocked(wake)).toHaveBeenCalledWith('agent-run-alex');
+  });
+
+  it('type:shutdown_request also resolves a sleeping recipient (Phase E)', async () => {
+    members.push({ id: 'mem-alex', teamId: 'team-1', displayName: 'Alex' });
+    agentRunRows.push({
+      id: 'agent-run-alex',
+      memberId: 'mem-alex',
+      status: 'sleeping',
+    });
+
+    const ctx = makeCtx({
+      db: fakeDb,
+      teamId: 'team-1',
+      currentMemberId: 'mem-sam',
+      runId: 'run-1',
+    });
+
+    const result = await sendMessageTool.execute(
+      { type: 'shutdown_request', to: 'Alex', content: 'wrap up' },
+      ctx,
+    );
+
+    expect(result.delivered).toBe(true);
+    expect(vi.mocked(wake)).toHaveBeenCalledWith('agent-run-alex');
+  });
+
+  it('type:shutdown_request throws when recipient has no active agent_run (Phase E)', async () => {
+    members.push({ id: 'mem-alex', teamId: 'team-1', displayName: 'Alex' });
+    // No agentRunRows seeded — recipient is not addressable.
+
+    const ctx = makeCtx({
+      db: fakeDb,
+      teamId: 'team-1',
+      currentMemberId: 'mem-sam',
+      runId: 'run-1',
+    });
+
+    await expect(
+      sendMessageTool.execute(
+        { type: 'shutdown_request', to: 'Alex', content: 'wrap up' },
+        ctx,
+      ),
+    ).rejects.toThrow(/no active agent_run for member mem-alex/);
+    expect(inserts).toHaveLength(0);
+    expect(vi.mocked(wake)).not.toHaveBeenCalled();
   });
 
   it('type:shutdown_response inserts row with repliesToId and messageType="shutdown_response"', async () => {
@@ -515,8 +613,13 @@ describe('SendMessage execute() — variant dispatch', () => {
     expect(vi.mocked(wake)).not.toHaveBeenCalled();
   });
 
-  it('type:plan_approval_response inserts row with repliesToId, toMemberId, and wakes target', async () => {
+  it('type:plan_approval_response inserts row with repliesToId, toMemberId, toAgentId, and wakes by agent_runs.id (Phase E)', async () => {
     members.push({ id: 'mem-alex', teamId: 'team-1', displayName: 'Alex' });
+    agentRunRows.push({
+      id: 'agent-run-alex',
+      memberId: 'mem-alex',
+      status: 'sleeping',
+    });
 
     const ctx = makeCtx({
       db: fakeDb,
@@ -540,13 +643,42 @@ describe('SendMessage execute() — variant dispatch', () => {
     const row = inserts[0] as MessageRow & {
       messageType?: string;
       repliesToId?: string | null;
+      toAgentId?: string;
     };
     expect(row.messageType).toBe('plan_approval_response');
     expect(row.repliesToId).toBe('plan-msg-id');
     expect(row.toMemberId).toBe('mem-alex');
-    // Approval must wake the teammate so it resumes promptly.
+    expect(row.toAgentId).toBe('agent-run-alex');
+    // Approval must wake the teammate by agent_runs.id, not the static
+    // member id (Phase C kludge removed).
     expect(vi.mocked(wake)).toHaveBeenCalledOnce();
-    expect(vi.mocked(wake)).toHaveBeenCalledWith('mem-alex');
+    expect(vi.mocked(wake)).toHaveBeenCalledWith('agent-run-alex');
+  });
+
+  it('type:plan_approval_response throws when recipient has no active agent_run (Phase E)', async () => {
+    members.push({ id: 'mem-alex', teamId: 'team-1', displayName: 'Alex' });
+    // No agentRunRows seeded.
+
+    const ctx = makeCtx({
+      db: fakeDb,
+      teamId: 'team-1',
+      currentMemberId: 'mem-lead',
+      runId: 'run-1',
+    });
+
+    await expect(
+      sendMessageTool.execute(
+        {
+          type: 'plan_approval_response',
+          request_id: 'plan-msg-id',
+          to: 'Alex',
+          approve: true,
+        },
+        ctx,
+      ),
+    ).rejects.toThrow(/no active agent_run for member mem-alex/);
+    expect(inserts).toHaveLength(0);
+    expect(vi.mocked(wake)).not.toHaveBeenCalled();
   });
 
   // -------------------------------------------------------------------------
