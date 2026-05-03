@@ -57,6 +57,7 @@ export {
   teamRuns,
   teamMessages,
   teamTasks,
+  agentRuns,
   type Team,
   type NewTeam,
   type TeamMember,
@@ -69,4 +70,6 @@ export {
   type NewTeamMessage,
   type TeamTask,
   type NewTeamTask,
+  type AgentRun,
+  type NewAgentRun,
 } from './team';
