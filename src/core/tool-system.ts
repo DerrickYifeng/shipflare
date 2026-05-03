@@ -103,6 +103,11 @@ export class ToolRegistry {
     return Array.from(this.tools.values());
   }
 
+  /** Return just the names of registered tools (Set-friendly for filter pipelines). */
+  getAllToolNames(): string[] {
+    return Array.from(this.tools.keys());
+  }
+
   /** Return a subset of tools matching the given names. */
   getForAgent(names: string[]): AnyToolDefinition[] {
     const result: AnyToolDefinition[] = [];
