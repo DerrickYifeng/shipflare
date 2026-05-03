@@ -173,18 +173,21 @@ vi.mock('@/lib/team-conversation-registry', () => ({
   ensureActiveConversation: async () => 'conv-stub',
 }));
 
-vi.mock('@/tools/AgentTool/registry', () => ({
-  resolveAgent: async () => ({
-    name: 'coordinator',
-    description: 'coord',
-    tools: [],
-    model: 'm',
-    maxTurns: 5,
-    systemPrompt: 's',
-    sourcePath: '/c.md',
-  }),
-  getAvailableAgents: async () => [],
-}));
+vi.mock('@/tools/AgentTool/registry', async () => {
+  const { makeMockAgentDefinition } = await import('./_lib/mock-agent');
+  return {
+    resolveAgent: async () =>
+      makeMockAgentDefinition({
+        name: 'coordinator',
+        description: 'coord',
+        model: 'm',
+        maxTurns: 5,
+        systemPrompt: 's',
+        sourcePath: '/c.md',
+      }),
+    getAvailableAgents: async () => [],
+  };
+});
 
 vi.mock('@/tools/AgentTool/spawn', () => ({
   buildAgentConfigFromDefinition: (def: { name: string }) => ({

@@ -169,18 +169,21 @@ vi.mock('@/tools/SendMessageTool/SendMessageTool', () => ({
 
 vi.mock('@/tools/registry-team', () => ({}));
 
-vi.mock('@/tools/AgentTool/registry', () => ({
-  resolveAgent: async () => ({
-    name: 'coordinator',
-    description: 'x',
-    tools: [],
-    model: 'm',
-    maxTurns: 5,
-    systemPrompt: 's',
-    sourcePath: '/c.md',
-  }),
-  getAvailableAgents: async () => [],
-}));
+vi.mock('@/tools/AgentTool/registry', async () => {
+  const { makeMockAgentDefinition } = await import('./_lib/mock-agent');
+  return {
+    resolveAgent: async () =>
+      makeMockAgentDefinition({
+        name: 'coordinator',
+        description: 'x',
+        model: 'm',
+        maxTurns: 5,
+        systemPrompt: 's',
+        sourcePath: '/c.md',
+      }),
+    getAvailableAgents: async () => [],
+  };
+});
 
 vi.mock('@/tools/AgentTool/spawn', () => ({
   buildAgentConfigFromDefinition: () => ({

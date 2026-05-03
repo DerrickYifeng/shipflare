@@ -21,6 +21,7 @@ import type {
 } from '@/core/types';
 import type { AgentDefinition } from './loader';
 import { assembleToolPool } from './assemble-tool-pool';
+import { ALL_TOOLS } from './role-tools';
 import { renderRuntimePreamble } from './runtime-preamble';
 
 const log = createLogger('agent:spawn');
@@ -115,9 +116,13 @@ export function resolveAgentTools(def: AgentDefinition): AnyToolDefinition[] {
   // Diagnostic: surface unknown tools at spawn time (preserves pre-Phase-A
   // "fail closed" behavior). assembleToolPool itself silently drops them.
   // StructuredOutput is virtual (runAgent re-adds it) — exclude it from the check.
-  // The '*' wildcard is also excluded — it's a sentinel, not a tool name.
+  // The ALL_TOOLS sentinel ('*') is also excluded — it's a wildcard, not a tool name.
+  //
+  // Future Phase B/C/D additions (TaskStop, Sleep, SyntheticOutput) — when
+  // any new virtual / synthesized tool lands, add it to this exclusion list
+  // so AGENT.md files declaring it don't fail the diagnostic check.
   const declared = def.tools.filter(
-    (n) => n !== STRUCTURED_OUTPUT_TOOL_NAME && n !== '*',
+    (n) => n !== STRUCTURED_OUTPUT_TOOL_NAME && n !== ALL_TOOLS,
   );
   const missing = declared.filter((n) => !registry.get(n));
   if (missing.length > 0) {

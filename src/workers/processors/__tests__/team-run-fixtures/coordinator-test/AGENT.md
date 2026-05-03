@@ -1,6 +1,7 @@
 ---
 name: coordinator-test
 description: Integration-test coordinator. Spawns echo-agent once and emits a terminal StructuredOutput.
+role: lead
 model: claude-sonnet-4-6
 maxTurns: 6
 tools:

@@ -190,18 +190,20 @@ vi.mock('@/tools/AgentTool/registry', async () => {
   const actual = await vi.importActual<
     typeof import('@/tools/AgentTool/registry')
   >('@/tools/AgentTool/registry');
+  const { makeMockAgentDefinition } = await import('./_lib/mock-agent');
   return {
     ...actual,
-    resolveAgent: async () => ({
-      name: 'coordinator',
-      description: 'test coord',
-      tools: ['Task'],
-      skills: [],
-      model: 'm',
-      maxTurns: 5,
-      systemPrompt: 's',
-      sourcePath: '/c.md',
-    }),
+    resolveAgent: async () =>
+      makeMockAgentDefinition({
+        name: 'coordinator',
+        description: 'test coord',
+        role: 'lead',
+        tools: ['Task'],
+        model: 'm',
+        maxTurns: 5,
+        systemPrompt: 's',
+        sourcePath: '/c.md',
+      }),
   };
 });
 

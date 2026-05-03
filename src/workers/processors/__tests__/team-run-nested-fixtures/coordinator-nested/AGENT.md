@@ -1,6 +1,7 @@
 ---
 name: coordinator-nested
 description: Nested-spawn integration coordinator. Spawns echo-agent-a, which spawns echo-agent-b; used to assert onEvent propagation with parentTaskId tagging across 2 levels.
+role: lead
 model: claude-sonnet-4-6
 maxTurns: 8
 tools:
