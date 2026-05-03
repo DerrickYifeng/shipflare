@@ -1095,4 +1095,4 @@ unified path coexist behind flag), validated, then cut.
   - Task 5 — SendMessage wires peer-DM shadow: `9b87068`
   - Task 6 — TaskStop tool: `4742ce1`
   - Task 7 — agent-run drain + shutdown handler: `7d7e1e0`
-  - Task 8 — verification gate: `<PENDING-COMMIT-SHA>`
+  - Task 8 — verification gate: `fa07936`
