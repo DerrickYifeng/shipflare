@@ -45,6 +45,8 @@ import { drainMailbox } from './lib/mailbox-drain';
 import { loadAgentRunHistory } from './lib/agent-run-history';
 import { loadConversationHistory } from '@/lib/team-conversation';
 import { createLogger } from '@/lib/logger';
+import { getPubSubPublisher } from '@/lib/redis';
+import { teamMessagesChannel } from '@/tools/SendMessageTool/SendMessageTool';
 import type { AgentRunJobData } from '@/lib/queue/agent-run';
 import type { AgentResult, ToolContext } from '@/core/types';
 
@@ -323,20 +325,56 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
   ): Promise<void> => {
     // (2) Persist assistant turns.
     if (event.type === 'assistant_text_stop' && event.text.length > 0) {
+      // Generate the row id up front so the SSE publish (lead path) can
+      // reference the same id the durable row carries.
+      const insertedId = crypto.randomUUID();
+      const createdAt = new Date();
       try {
         await db.insert(teamMessages).values({
+          id: insertedId,
           teamId: row.teamId,
           type: 'agent_text',
           messageType: 'message',
           fromMemberId: row.memberId,
           fromAgentId: agentId,
           content: event.text,
-          deliveredAt: new Date(),
+          deliveredAt: createdAt,
+          createdAt,
         });
       } catch (err) {
         log.warn(
           `agent-run ${agentId}: failed to persist assistant turn: ${err instanceof Error ? err.message : String(err)}`,
         );
+        return;
+      }
+
+      // Phase E Task 6: lead path additionally publishes to the team SSE
+      // channel so the founder UI can paint the assistant turn live.
+      // Teammates skip — their output reaches the lead via task_notification
+      // mailbox routing, not the team-messages SSE stream.
+      // Publish failures are non-fatal: the durable row already landed; SSE
+      // is a best-effort live channel and a missed event triggers a refetch
+      // on the client side.
+      if (def.role === 'lead') {
+        try {
+          const pub = getPubSubPublisher();
+          await pub.publish(
+            teamMessagesChannel(row.teamId),
+            JSON.stringify({
+              messageId: insertedId,
+              teamId: row.teamId,
+              from: row.memberId,
+              fromAgentId: agentId,
+              type: 'agent_text',
+              content: event.text,
+              createdAt: createdAt.toISOString(),
+            }),
+          );
+        } catch (err) {
+          log.warn(
+            `agent-run ${agentId}: SSE publish failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
       }
       return;
     }

@@ -122,12 +122,22 @@ vi.mock('@/lib/team-conversation', () => ({
   loadConversationHistory: vi.fn(async () => []),
 }));
 
+// Phase E Task 6: SSE publisher — tests assert publish is called for the
+// lead's assistant turns and skipped for teammates'.
+const publishMock = vi.hoisted(() =>
+  vi.fn(async (_channel: string, _payload: string) => 1),
+);
+vi.mock('@/lib/redis', () => ({
+  getPubSubPublisher: () => ({ publish: publishMock }),
+}));
+
 import { processAgentRun } from '@/workers/processors/agent-run';
 import { db } from '@/lib/db';
 import { drainMailbox } from '@/workers/processors/lib/mailbox-drain';
 import { loadAgentRunHistory } from '@/workers/processors/lib/agent-run-history';
 import { loadConversationHistory } from '@/lib/team-conversation';
 import { resolveAgent } from '@/tools/AgentTool/registry';
+import { teamMessagesChannel } from '@/tools/SendMessageTool/SendMessageTool';
 
 function makeJob(agentId: string): Job<AgentRunJobData> {
   return { id: 'job-1', data: { agentId } } as unknown as Job<AgentRunJobData>;
@@ -149,6 +159,7 @@ describe('processAgentRun', () => {
     selectChain.orderBy.mockReturnValue(selectChain);
     selectChain.limit.mockResolvedValue([]);
     runAgentHoisted.state.lastArgs = null;
+    publishMock.mockClear();
   });
 
   it('loads agent_runs row by agentId', async () => {
@@ -739,5 +750,176 @@ describe('processAgentRun', () => {
     );
     expect(setCalls.some((s) => s.status === 'resuming')).toBe(true);
     expect(setCalls.some((s) => s.status === 'running')).toBe(true);
+  });
+
+  // ---------------------------------------------------------------------
+  // Phase E Task 6 — lead SSE publish on assistant_text_stop
+  // ---------------------------------------------------------------------
+
+  it('lead agent publishes assistant turns to the team SSE channel', async () => {
+    vi.mocked(db.query.agentRuns.findFirst).mockResolvedValue({
+      id: 'lead-sse',
+      teamId: 'team-sse',
+      memberId: 'mem-sse',
+      agentDefName: 'coordinator',
+      parentAgentId: null,
+      status: 'queued',
+    } as never);
+
+    // Flag the agent as the team-lead so Phase E SSE path fires.
+    vi.mocked(resolveAgent).mockResolvedValueOnce({
+      source: 'built-in',
+      sourcePath: '/test',
+      name: 'coordinator',
+      description: 'mock lead',
+      role: 'lead',
+      tools: [],
+      disallowedTools: [],
+      skills: [],
+      requires: [],
+      background: false,
+      maxTurns: 10,
+      systemPrompt: 'You are the team lead.',
+    } as never);
+
+    // Fresh lead — no prior team_conversations row, so priorMessages stays
+    // undefined and the lead just runs.
+    selectChain.limit.mockResolvedValueOnce([]);
+
+    runAgentHoisted.fn.mockImplementationOnce(async (...args: unknown[]) => {
+      runAgentHoisted.state.lastArgs = args;
+      const onEvent = args[7] as
+        | ((event: {
+            type: string;
+            messageId?: string;
+            turn?: number;
+            blockIndex?: number;
+            text?: string;
+          }) => void | Promise<void>)
+        | undefined;
+      if (onEvent) {
+        await onEvent({
+          type: 'assistant_text_stop',
+          messageId: 'm-lead-1',
+          turn: 1,
+          blockIndex: 0,
+          text: 'lead reply visible to founder',
+        });
+      }
+      return {
+        result: 'final lead answer',
+        usage: {
+          inputTokens: 1,
+          outputTokens: 1,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          costUsd: 0,
+          model: 'claude-sonnet-4-6',
+          turns: 1,
+        },
+      };
+    });
+
+    await processAgentRun(makeJob('lead-sse'));
+
+    // SSE publish must have fired with the team-messages channel and a
+    // payload echoing the assistant text.
+    expect(publishMock).toHaveBeenCalled();
+    const sseCall = publishMock.mock.calls.find(
+      ([channel]) => channel === teamMessagesChannel('team-sse'),
+    );
+    expect(sseCall).toBeDefined();
+    const payload = JSON.parse(sseCall![1]);
+    expect(payload).toMatchObject({
+      teamId: 'team-sse',
+      type: 'agent_text',
+      content: 'lead reply visible to founder',
+      fromAgentId: 'lead-sse',
+    });
+    expect(typeof payload.messageId).toBe('string');
+    expect(payload.messageId.length).toBeGreaterThan(0);
+
+    // The durable team_messages row must use the SAME id the SSE payload
+    // referenced — the client matches them so an in-flight optimistic
+    // bubble swaps into the persisted row in place.
+    const insertedRows = insertChain.values.mock.calls.map(
+      (c) => (c as unknown as [Record<string, unknown>])[0],
+    );
+    const turnRow = insertedRows.find(
+      (r) =>
+        r.type === 'agent_text' &&
+        r.fromAgentId === 'lead-sse' &&
+        r.content === 'lead reply visible to founder',
+    );
+    expect(turnRow).toBeDefined();
+    expect(turnRow!.id).toBe(payload.messageId);
+  });
+
+  it('non-lead agent does NOT publish assistant turns to the SSE channel', async () => {
+    vi.mocked(db.query.agentRuns.findFirst).mockResolvedValue({
+      id: 'agent-no-sse',
+      teamId: 'team-quiet',
+      memberId: 'mem-quiet',
+      agentDefName: 'content-manager',
+      parentAgentId: 'lead-agent',
+      status: 'queued',
+    } as never);
+
+    // Default resolveAgent mock returns role='member' — the non-lead path.
+    runAgentHoisted.fn.mockImplementationOnce(async (...args: unknown[]) => {
+      runAgentHoisted.state.lastArgs = args;
+      const onEvent = args[7] as
+        | ((event: {
+            type: string;
+            messageId?: string;
+            turn?: number;
+            blockIndex?: number;
+            text?: string;
+          }) => void | Promise<void>)
+        | undefined;
+      if (onEvent) {
+        await onEvent({
+          type: 'assistant_text_stop',
+          messageId: 'm-teammate-1',
+          turn: 1,
+          blockIndex: 0,
+          text: 'teammate inner thought',
+        });
+      }
+      return {
+        result: 'teammate done',
+        usage: {
+          inputTokens: 1,
+          outputTokens: 1,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          costUsd: 0,
+          model: 'claude-sonnet-4-6',
+          turns: 1,
+        },
+      };
+    });
+
+    await processAgentRun(makeJob('agent-no-sse'));
+
+    // No publish to the team-messages SSE channel — teammate output reaches
+    // the lead via task_notification mailbox routing, not the live stream.
+    const sseCall = publishMock.mock.calls.find(
+      ([channel]) => channel === teamMessagesChannel('team-quiet'),
+    );
+    expect(sseCall).toBeUndefined();
+
+    // Sanity: the durable per-turn row still landed (Phase D persistence
+    // is independent of the lead-only SSE branch).
+    const insertedRows = insertChain.values.mock.calls.map(
+      (c) => (c as unknown as [Record<string, unknown>])[0],
+    );
+    const turnRow = insertedRows.find(
+      (r) =>
+        r.type === 'agent_text' &&
+        r.fromAgentId === 'agent-no-sse' &&
+        r.content === 'teammate inner thought',
+    );
+    expect(turnRow).toBeDefined();
   });
 });
