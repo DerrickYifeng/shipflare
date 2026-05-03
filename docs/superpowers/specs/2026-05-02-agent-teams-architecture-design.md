@@ -1147,3 +1147,50 @@ unified path coexist behind flag), validated, then cut.
   - Task 2 — continue-vs-spawn.md: `f69f163`
   - Task 3 — sendmessage-rules.md: `7783173`
   - Task 4 — AGENT.md references update + verification: `53cd3d7`
+- **Phase G — Cleanup + retire legacy + documentation:** landed `2026-05-02` on `dev`.
+  SHIPFLARE_AGENT_TEAMS env flag dropped — Agent Teams is the default. Feature
+  flag module + tests deleted. Task tool's async branch unconditionally taken
+  when run_in_background:true. CLAUDE.md gained "Agent Teams Architecture"
+  section codifying 7 cross-phase invariants. Spec doc finalized.
+  - Task 1 — drop flag (code): `94cf5ee`
+  - Task 2 — drop flag (tests): `d090919`
+  - Task 3 — CLAUDE.md invariants: `21895fa`
+  - Task 4 — verification gate + final spec entry: `<THIS COMMIT>`
+
+---
+
+## OVERALL COMPLETION
+
+**Agent Teams architecture COMPLETE on 2026-05-02.**
+
+| Phase | Tasks | Status |
+|---|---|---|
+| A — Foundation | 13 | ✅ |
+| B — Async lifecycle | 14 | ✅ |
+| C — SendMessage protocol | 8 | ✅ |
+| D — Sleep + Resume | 7 | ✅ |
+| E — Team-lead unification (X driver) | 11 | ✅ |
+| F — Team-lead prompt rewrite | 4 | ✅ |
+| G — Cleanup + retire legacy + docs | 4 | ✅ |
+
+**Total: 61 tasks across 7 phases.** All planned via `superpowers:writing-plans`,
+executed via `superpowers:subagent-driven-development` with two-stage review
+(opus model throughout). Tag: `agent-teams-complete`.
+
+The architecture faithfully replicates Claude Code's Agent Teams layer
+(engine PDF §3-§5) adapted for ShipFlare's server-side runtime
+(BullMQ + Postgres). Founder UI input enters via `team_messages`; all
+agent-to-agent communication flows through `team_messages` with the
+appropriate `messageType` discriminator. team-lead is a regular
+`agent_runs` row with `role='lead'`. Async teammates run as separate
+BullMQ jobs and yield slots via `Sleep`. Workers wake on `SendMessage`
+arrival via `wake()` (BullMQ jobId-deduped enqueue). The `<task-notification>`
+XML protocol is engine-verbatim. INTERNAL_TEAMMATE_TOOLS / INTERNAL_SUBAGENT_TOOLS
+blacklists protect single-direction tree topology. peer-DM shadows give
+the lead low-cost transparency without preemptive wakeups.
+
+Deferred to follow-up phases:
+- Coordinator → team-lead rename (touches DB rows + AgentDefinition alias mechanism + many code constants)
+- KAIROS-style proactive scheduling (PDF layer 3)
+- autoDream nightly memory consolidation
+- ULTRAPLAN cloud delegation
