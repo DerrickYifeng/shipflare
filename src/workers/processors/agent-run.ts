@@ -16,8 +16,11 @@
 // `parentAgentId` is `null` for Phase B first-spawn teammates because the
 // Task tool can't yet point at the parent's agent_runs row (the lead is
 // not unified into agent_runs until Phase E). When parent is null,
-// `synthAndDeliverNotification` short-circuits — the run still settles
-// to status='completed' / 'failed' so the durable backstop can observe it.
+// `synthAndDeliverNotification` still inserts the `task_notification` row
+// (with `toAgentId=null`) so the team-run lead's polling drain can pick
+// it up; only the `wake()` call is skipped because there's no specific
+// agent_runs row to wake. Phase E will replace the polling drain with
+// proper wake routing once the lead has its own agent_runs row.
 
 import type { Job } from 'bullmq';
 import { eq } from 'drizzle-orm';
@@ -84,10 +87,17 @@ interface NotifyParams {
   usage: { totalTokens: number; toolUses: number; durationMs: number };
 }
 
+// Phase B vs Phase E behavior:
+//   - Phase B: `parentAgentId` is `null` for first-spawn teammates because
+//     the team-run lead does not yet have an `agent_runs` row. We still
+//     insert the `task_notification` row (with `toAgentId=null`) so the
+//     team-run worker's polling drain (Task 12) can pick it up. We skip
+//     `wake()` because there is no specific agent_runs row to wake — the
+//     lead is on a polling loop, not a sleeping/resuming cycle.
+//   - Phase E: once the lead is unified into `agent_runs`, `parentAgentId`
+//     will be non-null and we route the notification directly via `wake()`,
+//     removing the need for the polling drain.
 async function synthAndDeliverNotification(params: NotifyParams): Promise<void> {
-  // No parent = nothing to notify (Phase B first-spawn / Phase E lead-level run).
-  if (!params.parentAgentId) return;
-
   const xml = synthesizeTaskNotification({
     agentId: params.agentId,
     status: params.status,
@@ -102,12 +112,17 @@ async function synthAndDeliverNotification(params: NotifyParams): Promise<void> 
     messageType: 'task_notification',
     fromMemberId: params.memberId,
     fromAgentId: params.agentId,
-    toAgentId: params.parentAgentId,
+    toAgentId: params.parentAgentId, // null in Phase B (lead has no agent_runs row yet)
     content: xml,
     summary: params.summary,
   });
 
-  await wake(params.parentAgentId);
+  // Phase B: when parentAgentId is null, the team-run drain (Task 12) polls
+  // for these notifications. No wake() needed because there's no agentRun
+  // for the lead yet (Phase E adds proper wake routing).
+  if (params.parentAgentId) {
+    await wake(params.parentAgentId);
+  }
 }
 
 // ---------------------------------------------------------------------------
