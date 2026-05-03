@@ -116,6 +116,74 @@ No polling. SSE reconnect logic must be solid (the existing `useTeamEvents` hook
 | `src/app/api/team/task/[taskId]/cancel/route.ts:52-53` | same as retry |
 | `src/app/(app)/team/page.tsx:158-413` | server component: replace 4 distinct teamRuns queries (activeRunRows / lastRunRows / runLookup / weekly stats) with agent_runs + team_messages queries |
 
+---
+
+## §1.5 UI-D — State caching layer (between UI-A and UI-B)
+
+**Problem**: every API call (status / progress / page hydration / roster) currently does fresh DB SELECTs. With 5+ poll-style endpoints + page reloads, that's a lot of Postgres traffic for state that changes infrequently relative to read frequency. Engine sidesteps this with `AppStateStore` (in-process immutable store + selectors); shipflare can't replicate that across Next.js routes + BullMQ workers, but **Redis is already in the stack** — use it as a state snapshot cache with write-through invalidation.
+
+**Engine pattern (reference)**: `engine/state/AppStateStore.ts` holds `tasks: Record<TaskId, TaskState>` in memory; `engine/state/selectors.ts` derives computed state purely; UI hooks subscribe via React. Authoritative state lives in process memory, not on disk.
+
+**Shipflare adaptation**: authoritative state stays in Postgres (multi-process), but a **Redis snapshot cache** holds the hot read path with write-through from the worker. Cache miss → SELECT + populate. Cache hit → no DB roundtrip.
+
+**Redis key shape**:
+```
+team:state:{teamId} → JSON {
+  leadStatus: 'sleeping' | 'running' | 'resuming' | null,
+  leadAgentId: string | null,
+  leadLastActiveAt: ISO | null,
+  teammates: Array<{
+    agentId, memberId, agentDefName, parentAgentId,
+    status, lastActiveAt, sleepUntil, displayName
+  }>,
+  lastUpdatedAt: ISO
+}
+```
+
+**Write-through points** (where worker process updates Redis after DB write):
+- `agent-run.ts` after every `agent_runs.status` transition
+- `agent-run.ts` after `team_messages.task_notification` insert (teammate completed)
+- `Task tool` async branch after `agent_runs` insert (teammate spawned)
+- `cancel-teammate.ts` (Task 11) after shutdown_request insert
+- Sleep tool after `status='sleeping'` set
+
+**Read path** (every API route + server component):
+- `getTeamStateCached(teamId)`: try Redis; on miss, do the DB queries + populate Redis with 60s TTL
+- TTL is a safety net; write-through is the primary correctness mechanism
+- Cache miss is rare (< 1% under normal traffic); cache hit is ~0.5ms vs ~10-50ms DB roundtrip
+
+**Files (UI-D, 4 new + 5 modifications):**
+
+| Path | Responsibility |
+|---|---|
+| `src/lib/team/team-state-cache.ts` (NEW) | `getTeamState(teamId, db, redis)` — Redis-first with DB fallback. `invalidateTeamState(teamId, redis)` — explicit eviction. `writeTeamStateField(teamId, patch, redis)` — partial update for write-through |
+| `src/lib/team/__tests__/team-state-cache.test.ts` (NEW) | Cache hit / miss / TTL expiry / write-through patch behavior |
+| `src/workers/processors/lib/team-state-writethrough.ts` (NEW) | Helpers called from agent-run.ts at status-change points: `cacheLeadStatus`, `cacheTeammateStatus`, `cacheTeammateSpawn`, `cacheTeammateRemove` |
+| `src/lib/team/__tests__/team-state-writethrough.test.ts` (NEW) | Verifies each helper writes the right Redis patch |
+| `src/workers/processors/agent-run.ts` (MODIFY) | After every `agent_runs` status update, call the appropriate writethrough helper |
+| `src/tools/AgentTool/AgentTool.ts` (MODIFY) | Task tool's async branch: after spawning agent_runs row, call `cacheTeammateSpawn` |
+| `src/tools/SleepTool/SleepTool.ts` (MODIFY) | After `status='sleeping'` set, call `cacheTeammateStatus` |
+| `src/app/api/team/status/route.ts` (MODIFY UI-A Task 1's output) | Use `getTeamState` cache instead of direct SELECT |
+| `src/app/api/team/[teamId]/teammates/route.ts` (MODIFY UI-B Task 8's output) | Same — use cache |
+
+**Invariants** (review-reject if violated):
+1. **Every `agent_runs.status` write must be paired with a writethrough call** — otherwise cache drifts. Wrap the update in a helper if needed.
+2. **TTL is the safety net, not the primary correctness mechanism** — if you find yourself relying on TTL for correctness, the writethrough is missing somewhere
+3. **Never read from Redis without a DB fallback** — Redis may be temporarily unreachable; fall back gracefully
+
+**Estimate**: 1-2 days for the cache layer + write-through wiring. Each modified caller (agent-run, Task tool, Sleep tool) is a 5-10 line addition.
+
+**Why this is worth it**:
+- Lead status reads on every page load + every status poll → big QPS reduction
+- Roster reads on team-page initial render → goes from N teammate-row SELECTs + JOIN to 1 Redis HGET
+- Cache miss falls through to DB so no behavior change; just latency improvement
+
+**When to land UI-D**: AFTER UI-A (so the cache wraps the corrected DB queries, not the broken ones), BEFORE UI-B (so the new affordances naturally use the cache). New sequence:
+
+```
+UI-A (correctness fix) → UI-D (cache layer) → UI-B (affordances) → UI-C (reframe)
+```
+
 **New files (UI-B — Agent Teams affordances, ~7 files):**
 
 | Path | Responsibility |
