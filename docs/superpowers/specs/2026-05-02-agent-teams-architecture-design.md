@@ -1054,3 +1054,27 @@ unified path coexist behind flag), validated, then cut.
   - Task 11 — spawn refactor: `f1d71f8`
   - Task 12 — AGENT.md role tagging: `de0ccb7`
   - Task 13 — verification gate: `6d19c1b`
+- **Phase B — Async lifecycle:** landed `2026-05-02` on `dev`. Task tool's
+  `run_in_background:true` opt-in async path works end-to-end behind
+  `SHIPFLARE_AGENT_TEAMS=1`. Async teammates run in dedicated agent-run
+  BullMQ jobs; on exit they synthesize <task-notification> XML inserted with
+  toAgentId=null; team-run lead polls the drain queue every 1s and injects
+  notifications into its transcript at the next idle turn. Lead-side mailbox
+  routing is a Phase B kludge (toAgentId IS NULL filter) — Phase E will
+  replace with proper agent_runs routing when the lead also runs as an
+  agent_runs row.
+  - Task 1 — schema additions: `1d147b8`
+  - Task 2 — drizzle migration: `da9df98`
+  - Task 3 — feature flag: `d9446b3`
+  - Task 4 — wake helper: `e80da86`
+  - Task 5 — mailbox-drain helper: `2e31b62`
+  - Task 6 — synthesize-notification: `c1278c3`
+  - Task 7 — agent-run queue helper: `cf9e009` (done out of order, after Task 4 to resolve forward dep)
+  - Task 8 — SyntheticOutputTool: `9ad9cb9`
+  - Task 9 — agent-run processor: `1c25968`
+  - Task 10 — register agent-run worker: `2aed674`
+  - Task 11 — Task tool async branch: `9844311`
+  - Task 12 — team-run drain hook: `4933254`
+  - Mid-phase fix — agent-run always inserts notification: `3b262e9`
+  - Task 13 — reconcile-mailbox cron: `f2e9bb7`
+  - Task 14 — verification gate: `d032e5b`
