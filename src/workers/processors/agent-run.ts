@@ -59,7 +59,7 @@ import { createLogger } from '@/lib/logger';
 import { getPubSubPublisher } from '@/lib/redis';
 import { teamMessagesChannel } from '@/tools/SendMessageTool/SendMessageTool';
 import type { AgentRunJobData } from '@/lib/queue/agent-run';
-import type { AgentResult, ToolContext } from '@/core/types';
+import type { AgentResult, StreamEvent, ToolContext } from '@/core/types';
 
 const log = createLogger('agent-run');
 
@@ -154,6 +154,26 @@ async function publishStatusChange(params: {
  * ToolContext to inherit deps from, which we don't have at the BullMQ
  * worker entry point.
  */
+/**
+ * Holder for the per-run `onEvent` handler. The ctx returns
+ * `holder.fn` so the value can be assigned AFTER both the ctx and
+ * `handleStreamEvent` are constructed (resolving the chicken-and-egg
+ * between "ctx needs onEvent" and "handleStreamEvent closes over
+ * variables that are easier to declare after ctx"). Mirrors the
+ * deleted team-run.ts's `onEventHolder` pattern.
+ *
+ * The `null` initial value is intentional — `AgentTool.ts:573` /
+ * `SkillTool.ts:113` both null-check before forwarding, so a child
+ * spawn that fires before assignment runs quietly instead of
+ * throwing. In practice the lead loop is single-threaded; nothing
+ * calls `ctx.get('onEvent')` until handleStreamEvent has already
+ * been wired (Task / Skill tools fire from inside runAgent, which
+ * runs strictly AFTER `holder.fn = handleStreamEvent`).
+ */
+interface OnEventHolder {
+  fn: ((event: StreamEvent) => void | Promise<void>) | null;
+}
+
 interface PhaseBToolContextArgs {
   teamId: string;
   userId: string;
@@ -161,6 +181,14 @@ interface PhaseBToolContextArgs {
   memberId: string;
   conversationId: string | null;
   runId: string;
+  /**
+   * Holder for the lead's per-run event sink. AgentTool / SkillTool
+   * read `ctx.get('onEvent')` and forward the returned function into
+   * spawned runAgent / forked skill calls so child tool events land
+   * on the same `team_messages` channel as the parent's. Without
+   * this key wired, sub-agent / skill-fork events vanish silently.
+   */
+  onEventHolder: OnEventHolder;
 }
 
 async function buildPhaseBToolContext(
@@ -200,6 +228,14 @@ async function buildPhaseBToolContext(
         // Phase D: Sleep tool reads its caller identity from this key.
         case 'callerAgentId':
           return agentId as unknown as V;
+        // Phase E orphan fix (2026-05-03 plan, Task 2): AgentTool /
+        // SkillTool read this key when forwarding a child spawn's
+        // events back into the lead's stream. Returns `null` until
+        // `handleStreamEvent` is wired into the holder (see comment
+        // on `OnEventHolder`); both consumers null-check before
+        // calling, so an early lookup is safe.
+        case 'onEvent':
+          return args.onEventHolder.fn as unknown as V;
         default:
           throw new Error(`Missing dependency: ${key}`);
       }
@@ -545,6 +581,15 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
 
   const controller = new AbortController();
 
+  // Phase E orphan fix (2026-05-03 plan, Task 2): holder for the
+  // `onEvent` ctx key. Declared BEFORE handleStreamEvent so we can
+  // pass it into `buildPhaseBToolContext`'s args; populated AFTER
+  // handleStreamEvent's declaration so the ctx returns the live
+  // function once it's available. AgentTool / SkillTool null-check
+  // before forwarding, so the `null` initial value is safe even if
+  // a child spawn somehow fired before assignment.
+  const onEventHolder: OnEventHolder = { fn: null };
+
   // Phase D: composite onEvent handler.
   //
   // Two responsibilities:
@@ -564,6 +609,22 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
   const handleStreamEvent = async (
     event: import('@/core/types').StreamEvent,
   ): Promise<void> => {
+    // Phase E orphan fix (2026-05-03 plan, Task 2): when a sub-agent
+    // (sync Task) or a skill fork bubbles its events up through
+    // wrapOnEventWithSpawnMeta, the event carries `spawnMeta.fromMemberId`
+    // identifying the spawned specialist. Without this branch, the
+    // persisted row would be stamped with the LEAD's memberId, breaking
+    // the activity-log delegation tree (the UI would render the lead as
+    // having "executed" tool calls actually run by the spawn).
+    const resolveFromMemberId = (
+      e: import('@/core/types').StreamEvent,
+    ): string => {
+      if ('spawnMeta' in e && e.spawnMeta && e.spawnMeta.fromMemberId) {
+        return e.spawnMeta.fromMemberId;
+      }
+      return row.memberId;
+    };
+
     // (2) Persist assistant turns.
     if (event.type === 'assistant_text_stop' && event.text.length > 0) {
       // Generate the row id up front so the SSE publish (lead path) can
@@ -582,9 +643,20 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
           conversationId: isLead ? leadConversationId : null,
           type: 'agent_text',
           messageType: 'message',
-          fromMemberId: row.memberId,
+          fromMemberId: resolveFromMemberId(event),
           fromAgentId: agentId,
           content: event.text,
+          // Stash spawnMeta only when present so the UI's delegation
+          // tree can nest a child agent's text under the parent Task's
+          // dispatch card. Top-level lead text leaves metadata null
+          // (matches the legacy schema; we don't synthesize a nullable
+          // object for the common case).
+          metadata: event.spawnMeta
+            ? {
+                parent_tool_use_id: event.spawnMeta.parentToolUseId,
+                agent_name: event.spawnMeta.agentName,
+              }
+            : null,
           deliveredAt: createdAt,
           createdAt,
         });
@@ -652,11 +724,23 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
           !isCall && rawContent.length > TRUNC_LIMIT
             ? `${rawContent.slice(0, TRUNC_LIMIT)}…`
             : rawContent;
+        // Phase E orphan fix (2026-05-03 plan, Task 2): when the event
+        // carries spawnMeta (sub-agent / fork-skill bubbled up via
+        // wrapOnEventWithSpawnMeta), stash the parent_tool_use_id +
+        // agent_name in metadata so the founder UI's delegation card
+        // can nest the child row under the parent Task's dispatch.
+        const spawnMetaFields = event.spawnMeta
+          ? {
+              parent_tool_use_id: event.spawnMeta.parentToolUseId,
+              agent_name: event.spawnMeta.agentName,
+            }
+          : {};
         const metadata = isCall
           ? {
               tool_use_id: event.toolUseId,
               tool_name: event.toolName,
               tool_input: event.input,
+              ...spawnMetaFields,
             }
           : {
               tool_use_id: event.toolUseId,
@@ -664,6 +748,7 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
               tool_output: event.result.content,
               is_error: !!event.result.is_error,
               duration_ms: event.durationMs,
+              ...spawnMetaFields,
             };
         let persisted = true;
         try {
@@ -676,7 +761,7 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
             conversationId: isLead ? leadConversationId : null,
             type: isCall ? 'tool_call' : 'tool_result',
             messageType: 'message',
-            fromMemberId: row.memberId,
+            fromMemberId: resolveFromMemberId(event),
             fromAgentId: agentId,
             content: truncatedContent,
             metadata,
@@ -763,6 +848,14 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
       }
     }
   };
+
+  // Phase E orphan fix (2026-05-03 plan, Task 2): with handleStreamEvent
+  // now declared, wire it into the holder so `ctx.get('onEvent')` (read
+  // by AgentTool / SkillTool when forwarding child spawn events) returns
+  // the live handler. Sub-agent / fork-skill events from now on will
+  // attribute themselves via spawnMeta and land in team_messages just
+  // like the lead's own events.
+  onEventHolder.fn = handleStreamEvent;
 
   // Phase C: background drain timer. Polls every DRAIN_POLL_INTERVAL_MS
   // for new mail addressed to this agent; on shutdown_request, sets
@@ -875,6 +968,12 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
       // works. Teammates have no leadRequestId in scope — fall back to
       // the agentId so the run is still uniquely identifiable.
       runId: isLead && leadRequestId ? leadRequestId : agentId,
+      // Phase E orphan fix (2026-05-03 plan, Task 2): pass the holder
+      // so `ctx.get('onEvent')` returns the live `handleStreamEvent`
+      // (already wired into `onEventHolder.fn` above). Restores the
+      // sub-agent + fork-skill event forwarding the deleted team-run.ts
+      // owned via the same pattern.
+      onEventHolder,
     });
     result = await runAgent(
       config,

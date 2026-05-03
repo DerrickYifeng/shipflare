@@ -1862,4 +1862,180 @@ describe('processAgentRun', () => {
       'team team-gone not found',
     );
   });
+
+  // ---------------------------------------------------------------------
+  // Phase E orphan fix (2026-05-03 plan, Task 2) — onEvent ctx key +
+  // spawnMeta-aware attribution
+  //
+  // Phase E silently dropped the `onEvent` ctx key that AgentTool /
+  // SkillTool read for sub-agent + fork-skill event forwarding. Without
+  // it, child runAgent / fork events vanished and the lead's UI never
+  // saw nested tool calls. The deleted team-run.ts used a holder pattern
+  // (`onEventHolder.fn = handleStreamEvent` after both were declared) so
+  // the ctx could close over a value assigned later in the same scope.
+  //
+  // Separately, when child events DO reach handleStreamEvent, they
+  // carry `spawnMeta.fromMemberId` identifying the spawned member. The
+  // legacy code stamped the lead's memberId on every persisted row,
+  // breaking the activity-log delegation tree. handleStreamEvent must
+  // honor `event.spawnMeta?.fromMemberId` when present and stash the
+  // parent tool_use_id in metadata so the UI can nest child tool calls
+  // under the parent Task's dispatch card.
+  // ---------------------------------------------------------------------
+
+  it('tool ctx exposes onEvent that fires handleStreamEvent for child events', async () => {
+    vi.mocked(db.query.agentRuns.findFirst).mockResolvedValue({
+      id: 'lead-onevent',
+      teamId: 'team-onevent',
+      memberId: 'mem-lead',
+      agentDefName: 'coordinator',
+      parentAgentId: null,
+      status: 'queued',
+    } as never);
+
+    teamSelectChain.limit.mockResolvedValueOnce([
+      { id: 'team-onevent', userId: 'user-onevent', productId: null },
+    ]);
+
+    // Capture ctx so the test can probe `ctx.get('onEvent')` directly —
+    // mirrors how AgentTool.ts:573 / SkillTool.ts:113 read the key when
+    // forwarding events from a spawned subagent / fork.
+    let capturedCtx: { get<V>(key: string): V } | null = null;
+    runAgentHoisted.fn.mockImplementationOnce(async (...args: unknown[]) => {
+      runAgentHoisted.state.lastArgs = args;
+      capturedCtx = args[2] as { get<V>(key: string): V };
+      return {
+        result: 'ok',
+        usage: {
+          inputTokens: 1,
+          outputTokens: 1,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          costUsd: 0,
+          model: 'claude-sonnet-4-6',
+          turns: 1,
+        },
+      };
+    });
+
+    await processAgentRun(makeJob('lead-onevent'));
+
+    expect(capturedCtx).not.toBeNull();
+    // The ctx must surface a callable function — the holder is wired
+    // AFTER handleStreamEvent's declaration so the lookup returns the
+    // actual handler, not the initial null sentinel.
+    const onEventFromCtx = capturedCtx!.get<
+      ((event: import('@/core/types').StreamEvent) => void | Promise<void>) | null
+    >('onEvent');
+    expect(typeof onEventFromCtx).toBe('function');
+
+    // Synthesize a child tool_start tagged with spawnMeta — the shape a
+    // subagent spawned via Task would emit through wrapOnEventWithSpawnMeta
+    // (see src/tools/AgentTool/AgentTool.ts:579-600). Driving the ctx-
+    // sourced onEvent must persist a tool_call row with the CHILD's
+    // memberId, not the lead's.
+    insertChain.values.mockClear();
+    await onEventFromCtx!({
+      type: 'tool_start',
+      toolName: 'reddit_search',
+      toolUseId: 'toolu_child_1',
+      input: { query: 'launch announcements' },
+      spawnMeta: {
+        parentTaskId: 'task_parent_1',
+        parentToolUseId: 'toolu_parent_1',
+        fromMemberId: 'child-mem',
+        agentName: 'discovery-agent',
+      },
+    });
+
+    const insertedRows = insertChain.values.mock.calls.map(
+      (c) => (c as unknown as [Record<string, unknown>])[0],
+    );
+    const toolCallRow = insertedRows.find((r) => r.type === 'tool_call');
+    expect(toolCallRow).toBeDefined();
+    // Child attribution: the row is owed to the spawned member, not the lead.
+    expect(toolCallRow!.fromMemberId).toBe('child-mem');
+    // Metadata carries the parent_tool_use_id so the UI's delegation card
+    // can nest the child row under the lead's Task dispatch.
+    const metadata = toolCallRow!.metadata as Record<string, unknown>;
+    expect(metadata).toMatchObject({
+      tool_use_id: 'toolu_child_1',
+      tool_name: 'reddit_search',
+      parent_tool_use_id: 'toolu_parent_1',
+      agent_name: 'discovery-agent',
+    });
+  });
+
+  it('handleStreamEvent uses spawnMeta.fromMemberId when present', async () => {
+    vi.mocked(db.query.agentRuns.findFirst).mockResolvedValue({
+      id: 'lead-spawn',
+      teamId: 'team-spawn',
+      memberId: 'mem-lead-spawn',
+      agentDefName: 'coordinator',
+      parentAgentId: null,
+      status: 'queued',
+    } as never);
+
+    teamSelectChain.limit.mockResolvedValueOnce([
+      { id: 'team-spawn', userId: 'user-spawn', productId: null },
+    ]);
+
+    // Drive runAgent's onEvent (positional arg 7) directly — simulates
+    // a spawned subagent whose tool events have already been wrapped
+    // with spawnMeta by AgentTool's wrapOnEventWithSpawnMeta, then bubbled
+    // up through the parent runAgent to the worker.
+    runAgentHoisted.fn.mockImplementationOnce(async (...args: unknown[]) => {
+      runAgentHoisted.state.lastArgs = args;
+      const onEvent = args[7] as
+        | ((event: import('@/core/types').StreamEvent) => void | Promise<void>)
+        | undefined;
+      if (onEvent) {
+        await onEvent({
+          type: 'tool_start',
+          toolName: 'reddit_search',
+          toolUseId: 'toolu_child_2',
+          input: { query: 'spawnMeta-tagged' },
+          spawnMeta: {
+            parentTaskId: 'task_parent_2',
+            parentToolUseId: 'toolu_parent_2',
+            fromMemberId: 'spawned-member',
+            agentName: 'discovery-agent',
+          },
+        });
+      }
+      return {
+        result: 'ok',
+        usage: {
+          inputTokens: 1,
+          outputTokens: 1,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          costUsd: 0,
+          model: 'claude-sonnet-4-6',
+          turns: 1,
+        },
+      };
+    });
+
+    await processAgentRun(makeJob('lead-spawn'));
+
+    const insertedRows = insertChain.values.mock.calls.map(
+      (c) => (c as unknown as [Record<string, unknown>])[0],
+    );
+    const toolCallRow = insertedRows.find(
+      (r) => r.type === 'tool_call' && (r.metadata as { tool_use_id?: string } | undefined)?.tool_use_id === 'toolu_child_2',
+    );
+    expect(toolCallRow).toBeDefined();
+    // The persisted row must attribute to the SPAWNED member id (carried
+    // on the event), NOT the lead's row.memberId. Otherwise the activity-
+    // log UI would show the lead "executing" tool calls actually run by
+    // a spawned subagent.
+    expect(toolCallRow!.fromMemberId).toBe('spawned-member');
+    expect(toolCallRow!.fromMemberId).not.toBe('mem-lead-spawn');
+    // Sanity: the parent_tool_use_id pointer is preserved so the UI can
+    // nest under the parent Task dispatch card.
+    expect((toolCallRow!.metadata as Record<string, unknown>).parent_tool_use_id).toBe(
+      'toolu_parent_2',
+    );
+  });
 });
