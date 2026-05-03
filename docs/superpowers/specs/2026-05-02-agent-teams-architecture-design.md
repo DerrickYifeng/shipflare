@@ -1110,3 +1110,29 @@ unified path coexist behind flag), validated, then cut.
   - Task 5 — agent-run resume + per-turn persist: `300bf05`
   - Task 6 — SendMessage wakes sleeping recipient: `420a6c4`
   - Task 7 — verification gate: `71ff0ee`
+- **Phase E — Team-lead unification (X driver):** landed `2026-05-02` on `dev`.
+  team-run.ts DELETED. agent-run is the sole driver for both lead and teammate.
+  Lead is an agent_runs row with agentDefName='coordinator'; founder UI input
+  enters via team_messages (toAgentId=lead.agentId) + wake(); cancellation also
+  via shutdown_request mailbox row. Phase B/C kludges replaced: parentAgentId
+  properly set from callerAgentId (Task 7); SendMessage wake routing uses
+  agent_runs.id (Task 8); lead drains via standard mailbox-drain (custom drain
+  hook removed). Migration script backfills lead agent_runs for existing teams.
+  Task 11 cutover also migrated 7 unaddressed callers of `enqueueTeamRun` (the
+  lib/queue/team-run.ts queue file is kept for now per plan; revisit in Phase G):
+  product/phase, team/conversations/[id]/messages, automation/run, re-plan,
+  team-kickoff, daily-run-fanout → `dispatchLeadMessage` (insert team_message
+  → wake lead); plan-execute-sweeper, team/task/[taskId]/retry → new
+  `spawnMemberAgentRun` (insert agent_runs + initial mailbox row + wake;
+  mirrors Task tool's launchAsyncTeammate shape).
+  - Task 1 — spawn-lead factory: `42e310b`
+  - Task 2 — find-lead-agent helper: `33637be`
+  - Task 3 — API route refactor: `ee45fb4`
+  - Task 4 — agent-run lead init: `ec5bc11`
+  - Task 5 — agent-run lead cancellation: `4479b40`
+  - Task 6 — agent-run lead SSE wiring: `4542705`
+  - Task 7 — Task tool parentAgentId proper: `692ba02`
+  - Task 8 — SendMessage wake routing fix: `67a1e27`
+  - Task 9 — backfill migration script: `1cf809f`
+  - Task 10 — e2e founder UI test: `ec5a294`
+  - Task 11 — DELETE team-run.ts + cutover all callers: `4249236`
