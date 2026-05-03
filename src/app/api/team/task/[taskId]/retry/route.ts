@@ -1,10 +1,9 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import {
   teams,
-  teamRuns,
   teamTasks,
   teamMembers,
   teamConversations,
@@ -43,20 +42,23 @@ export async function POST(
   const userId = session.user.id;
   const { taskId } = await params;
 
+  // UI-A Task 3: ownership chain is now teamTasks → teamMembers → teams.
+  // Phase E removed teamRuns from the read path; team_tasks has no
+  // conversationId column of its own, so the parent conversation is
+  // resolved separately below as the team's most recent conversation
+  // (mirrors `agent-run.ts:resolvePrimaryConversation`).
   const rows = await db
     .select({
       taskId: teamTasks.id,
-      runId: teamTasks.runId,
       teamId: teams.id,
       prompt: teamTasks.prompt,
       description: teamTasks.description,
       input: teamTasks.input,
       taskStatus: teamTasks.status,
-      parentConversationId: teamRuns.conversationId,
     })
     .from(teamTasks)
-    .innerJoin(teamRuns, eq(teamRuns.id, teamTasks.runId))
-    .innerJoin(teams, eq(teams.id, teamRuns.teamId))
+    .innerJoin(teamMembers, eq(teamMembers.id, teamTasks.memberId))
+    .innerJoin(teams, eq(teams.id, teamMembers.teamId))
     .where(and(eq(teamTasks.id, taskId), eq(teams.userId, userId)))
     .limit(1);
 
@@ -122,11 +124,19 @@ export async function POST(
     task.description ||
     `Retry subtask ${task.taskId.slice(0, 8)}`;
 
-  // Chat refactor: the retry attaches to the same conversation the
-  // parent run belonged to. If for some reason the parent has no
-  // conversation (shouldn't happen post-migration), mint a fresh one
-  // so the retry still has a valid home.
-  let conversationId: string | null = task.parentConversationId ?? null;
+  // Chat refactor: the retry attaches to the team's primary (most
+  // recent) conversation — same convention as
+  // `agent-run.ts:resolvePrimaryConversation`. If the team has no
+  // conversation yet, mint a fresh one so the retry still has a valid
+  // home.
+  const primaryConvRows = await db
+    .select({ id: teamConversations.id })
+    .from(teamConversations)
+    .where(eq(teamConversations.teamId, task.teamId))
+    .orderBy(desc(teamConversations.createdAt))
+    .limit(1);
+
+  let conversationId: string | null = primaryConvRows[0]?.id ?? null;
   if (!conversationId) {
     const [created] = await db
       .insert(teamConversations)
