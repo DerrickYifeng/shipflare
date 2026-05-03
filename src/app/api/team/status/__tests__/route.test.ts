@@ -1,19 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
+import type { TeamState } from '@/lib/team/team-state-cache';
 
 let authUserId: string | null = 'user-1';
 vi.mock('@/lib/auth', () => ({
   auth: async () => (authUserId ? { user: { id: authUserId } } : null),
 }));
 
-// Three select chains fan out from GET (in implementation order):
-//   (1) team lookup           — fields include `userId` + `name`
-//   (2) team_members list     — fields include `agent_type`
-//   (3) active lead lookup    — fields include `runId` + `status` (from
-//                                agent_runs WHERE agentDefName='coordinator'
-//                                AND status IN ('running','resuming'))
-// The mock dispatches on field presence so the route-level call order
-// doesn't couple the test to the implementation's internal sequence.
+// UI-D Task 3: the route now reads activeRun from `getTeamState` instead
+// of issuing a direct agent_runs SELECT. We only need to mock two select
+// chains here (team lookup + members) and stub getTeamState for the lead
+// state.
 
 type TeamRow = {
   id: string;
@@ -28,15 +25,9 @@ type MemberRow = {
   status: string;
   last_active_at: Date | null;
 };
-type ActiveLeadRow = {
-  runId: string;
-  status: string;
-  lastActiveAt: Date;
-};
 
 let teamRows: TeamRow[] = [];
 let memberRows: MemberRow[] = [];
-let activeLeadRows: ActiveLeadRow[] = [];
 
 vi.mock('@/lib/db', () => ({
   db: {
@@ -44,8 +35,6 @@ vi.mock('@/lib/db', () => ({
       const fields = Object.keys(projection);
       const isTeam = fields.includes('userId') && fields.includes('name');
       const isMembers = fields.includes('agent_type');
-      const isActiveLead =
-        fields.includes('runId') && fields.includes('status');
 
       if (isTeam) {
         return {
@@ -61,16 +50,6 @@ vi.mock('@/lib/db', () => ({
         return {
           from: () => ({
             where: () => Promise.resolve(memberRows),
-          }),
-        };
-      }
-
-      if (isActiveLead) {
-        return {
-          from: () => ({
-            where: () => ({
-              limit: () => Promise.resolve(activeLeadRows),
-            }),
           }),
         };
       }
@@ -99,6 +78,24 @@ vi.mock('drizzle-orm', async () => {
   };
 });
 
+let teamStateMock: TeamState = {
+  leadStatus: null,
+  leadAgentId: null,
+  leadLastActiveAt: null,
+  teammates: [],
+  lastUpdatedAt: '2026-05-02T00:00:00.000Z',
+};
+
+const getTeamStateMock = vi.hoisted(() => vi.fn());
+vi.mock('@/lib/team/team-state-cache', () => ({
+  getTeamState: getTeamStateMock,
+}));
+
+const sentinelRedis = { __sentinel: 'kv-client' } as const;
+vi.mock('@/lib/redis', () => ({
+  getKeyValueClient: vi.fn(() => sentinelRedis),
+}));
+
 import { GET } from '../route';
 
 beforeEach(() => {
@@ -112,7 +109,15 @@ beforeEach(() => {
     },
   ];
   memberRows = [];
-  activeLeadRows = [];
+  teamStateMock = {
+    leadStatus: null,
+    leadAgentId: null,
+    leadLastActiveAt: null,
+    teammates: [],
+    lastUpdatedAt: '2026-05-02T00:00:00.000Z',
+  };
+  getTeamStateMock.mockReset();
+  getTeamStateMock.mockImplementation(async () => teamStateMock);
 });
 
 function makeReq(teamId: string): NextRequest {
@@ -120,28 +125,76 @@ function makeReq(teamId: string): NextRequest {
 }
 
 describe('GET /api/team/status', () => {
-  it('returns activeRun when lead agent_runs status is running', async () => {
-    activeLeadRows = [
-      {
-        runId: 'lead-agent-1',
-        status: 'running',
-        lastActiveAt: new Date('2026-05-02T01:23:45Z'),
-      },
-    ];
+  it('returns activeRun when team-state cache reports lead as running', async () => {
+    teamStateMock = {
+      leadStatus: 'running',
+      leadAgentId: 'lead-agent-1',
+      leadLastActiveAt: '2026-05-02T01:23:45.000Z',
+      teammates: [],
+      lastUpdatedAt: '2026-05-02T01:23:45.000Z',
+    };
     const res = await GET(makeReq('team-1'));
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.activeRun).toMatchObject({
       runId: 'lead-agent-1',
       status: 'running',
+      lastActiveAt: '2026-05-02T01:23:45.000Z',
     });
   });
 
-  it('returns activeRun=null when lead is sleeping (no active row)', async () => {
-    activeLeadRows = [];
+  it('returns activeRun when team-state cache reports lead as resuming', async () => {
+    teamStateMock = {
+      leadStatus: 'resuming',
+      leadAgentId: 'lead-agent-2',
+      leadLastActiveAt: '2026-05-02T02:00:00.000Z',
+      teammates: [],
+      lastUpdatedAt: '2026-05-02T02:00:00.000Z',
+    };
+    const res = await GET(makeReq('team-1'));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.activeRun).toMatchObject({
+      runId: 'lead-agent-2',
+      status: 'resuming',
+    });
+  });
+
+  it('returns activeRun=null when lead is sleeping', async () => {
+    teamStateMock = {
+      leadStatus: 'sleeping',
+      leadAgentId: 'lead-agent-3',
+      leadLastActiveAt: '2026-05-02T03:00:00.000Z',
+      teammates: [],
+      lastUpdatedAt: '2026-05-02T03:00:00.000Z',
+    };
     const res = await GET(makeReq('team-1'));
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.activeRun).toBeNull();
+  });
+
+  it('returns activeRun=null when lead has never run (cache reports leadStatus=null)', async () => {
+    // teamStateMock default — leadStatus null
+    const res = await GET(makeReq('team-1'));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.activeRun).toBeNull();
+  });
+
+  it('passes the configured KV redis client to getTeamState', async () => {
+    teamStateMock = {
+      leadStatus: 'running',
+      leadAgentId: 'lead-agent-1',
+      leadLastActiveAt: '2026-05-02T01:23:45.000Z',
+      teammates: [],
+      lastUpdatedAt: '2026-05-02T01:23:45.000Z',
+    };
+    await GET(makeReq('team-1'));
+    expect(getTeamStateMock).toHaveBeenCalledWith(
+      'team-1',
+      expect.anything(),
+      sentinelRedis,
+    );
   });
 });

@@ -36,12 +36,40 @@
 // Worker-boot surrogate — see header comment.
 import '@/tools/registry-team';
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as path from 'node:path';
 import { loadAgent } from '@/tools/AgentTool/loader';
 import { buildAgentConfigFromDefinition } from '@/tools/AgentTool/spawn';
 import { toAnthropicTool } from '@/core/tool-system';
 import type { ToolDefinition } from '@/core/types';
+
+// UI-D Task 3 — write-through smoke test below relies on a mocked
+// `getKeyValueClient` so we don't need a live Redis. The mock is hoisted
+// so it's installed before any module that imports `@/lib/redis` is
+// evaluated. Other tests in this file do not exercise the cache path,
+// so the mock is inert for them.
+const fakeRedisStore = vi.hoisted(() => new Map<string, string>());
+const fakeRedis = vi.hoisted(() => ({
+  store: fakeRedisStore,
+  get: vi.fn(async (key: string) => fakeRedisStore.get(key) ?? null),
+  setex: vi.fn(async (key: string, _ttl: number, value: string) => {
+    fakeRedisStore.set(key, value);
+    return 'OK';
+  }),
+  del: vi.fn(async (key: string) => {
+    const had = fakeRedisStore.has(key);
+    fakeRedisStore.delete(key);
+    return had ? 1 : 0;
+  }),
+}));
+vi.mock('@/lib/redis', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@/lib/redis')>();
+  return {
+    ...actual,
+    getKeyValueClient: () => fakeRedis,
+  };
+});
 
 // `ToolDefinition<TInput, TOutput>` is invariant in TInput / TOutput,
 // so a concrete tool isn't assignable to the
@@ -125,4 +153,157 @@ describe('agent-run smoke — production agents resolve + serialize cleanly', ()
       });
     });
   }
+});
+
+// ---------------------------------------------------------------------------
+// UI-D Task 3 — team-state cache write-through smoke
+// ---------------------------------------------------------------------------
+//
+// The cache module unit tests (src/lib/team/__tests__/team-state-cache.test.ts)
+// and the writethrough wrapper tests
+// (src/workers/processors/lib/__tests__/team-state-writethrough.test.ts)
+// each cover one half of the contract in isolation. This smoke test
+// stitches them together end-to-end against the same fake Redis: the
+// writethrough helpers (called from agent-run worker hot paths in
+// production) populate the cache, and `getTeamState` reads back what
+// they wrote. If either side drifts (key shape, JSON shape, patch
+// merge semantics) this test fails.
+//
+// We do NOT exercise the DB fallback path here — that's covered by the
+// cache module tests. We only verify the wholly-cache-resident
+// write-then-read round trip.
+
+import {
+  cacheLeadStatus,
+  cacheTeammateSpawn,
+  cacheTeammateStatus,
+} from '@/workers/processors/lib/team-state-writethrough';
+import {
+  getTeamState,
+  teamStateKey,
+  type TeamState,
+} from '@/lib/team/team-state-cache';
+
+const SMOKE_TEAM_ID = 'team-smoke-uid-d';
+const SMOKE_LEAD_AGENT_ID = 'lead-smoke-1';
+const SMOKE_TEAMMATE_AGENT_ID = 'tm-smoke-1';
+const SMOKE_TS = new Date('2026-05-03T00:00:00.000Z');
+
+function seedCache(state: TeamState): void {
+  fakeRedisStore.set(teamStateKey(SMOKE_TEAM_ID), JSON.stringify(state));
+}
+
+function emptyState(): TeamState {
+  return {
+    leadStatus: null,
+    leadAgentId: null,
+    leadLastActiveAt: null,
+    teammates: [],
+    lastUpdatedAt: SMOKE_TS.toISOString(),
+  };
+}
+
+describe('UI-D state cache smoke — write-through populates cache from helper calls', () => {
+  beforeEach(() => {
+    fakeRedisStore.clear();
+    fakeRedis.get.mockClear();
+    fakeRedis.setex.mockClear();
+    fakeRedis.del.mockClear();
+  });
+
+  it('cacheLeadStatus → getTeamState reads back the patched lead fields', async () => {
+    // Seed an empty snapshot so write-through has something to patch.
+    // (writeTeamStateField is no-op on cache miss by design — see
+    // src/lib/team/team-state-cache.ts comment block.)
+    seedCache(emptyState());
+
+    await cacheLeadStatus(
+      SMOKE_TEAM_ID,
+      SMOKE_LEAD_AGENT_ID,
+      'running',
+      SMOKE_TS,
+    );
+
+    // The DB arg is unused on a cache hit — pass an obvious sentinel so
+    // any accidental DB touch in the read path would blow up loudly.
+    const dbSentinel = {
+      select: () => {
+        throw new Error('UI-D smoke: DB should not be touched on cache hit');
+      },
+    } as unknown as Parameters<typeof getTeamState>[1];
+
+    const state = await getTeamState(SMOKE_TEAM_ID, dbSentinel, fakeRedis);
+    expect(state.leadStatus).toBe('running');
+    expect(state.leadAgentId).toBe(SMOKE_LEAD_AGENT_ID);
+    expect(state.leadLastActiveAt).toBe(SMOKE_TS.toISOString());
+  });
+
+  it('cacheTeammateSpawn appends a teammate that getTeamState surfaces', async () => {
+    seedCache(emptyState());
+
+    await cacheTeammateSpawn(SMOKE_TEAM_ID, {
+      agentId: SMOKE_TEAMMATE_AGENT_ID,
+      memberId: 'member-smoke-1',
+      agentDefName: 'content-manager',
+      parentAgentId: SMOKE_LEAD_AGENT_ID,
+      status: 'queued',
+      lastActiveAt: SMOKE_TS,
+      displayName: 'Smoke Teammate',
+    });
+
+    const state = await getTeamState(
+      SMOKE_TEAM_ID,
+      // Same DB-touch tripwire as above.
+      {
+        select: () => {
+          throw new Error('UI-D smoke: DB should not be touched on cache hit');
+        },
+      } as unknown as Parameters<typeof getTeamState>[1],
+      fakeRedis,
+    );
+    expect(state.teammates).toHaveLength(1);
+    expect(state.teammates[0]).toMatchObject({
+      agentId: SMOKE_TEAMMATE_AGENT_ID,
+      memberId: 'member-smoke-1',
+      status: 'queued',
+      displayName: 'Smoke Teammate',
+    });
+  });
+
+  it('cacheTeammateStatus terminal removes the teammate from the cached roster', async () => {
+    // Seed a snapshot with one live teammate, then mark it completed.
+    seedCache({
+      ...emptyState(),
+      teammates: [
+        {
+          agentId: SMOKE_TEAMMATE_AGENT_ID,
+          memberId: 'member-smoke-1',
+          agentDefName: 'content-manager',
+          parentAgentId: SMOKE_LEAD_AGENT_ID,
+          status: 'running',
+          lastActiveAt: SMOKE_TS.toISOString(),
+          sleepUntil: null,
+          displayName: 'Smoke Teammate',
+        },
+      ],
+    });
+
+    await cacheTeammateStatus(
+      SMOKE_TEAM_ID,
+      SMOKE_TEAMMATE_AGENT_ID,
+      'completed',
+      SMOKE_TS,
+    );
+
+    const state = await getTeamState(
+      SMOKE_TEAM_ID,
+      {
+        select: () => {
+          throw new Error('UI-D smoke: DB should not be touched on cache hit');
+        },
+      } as unknown as Parameters<typeof getTeamState>[1],
+      fakeRedis,
+    );
+    expect(state.teammates).toHaveLength(0);
+  });
 });
