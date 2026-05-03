@@ -1096,3 +1096,17 @@ unified path coexist behind flag), validated, then cut.
   - Task 6 — TaskStop tool: `4742ce1`
   - Task 7 — agent-run drain + shutdown handler: `7d7e1e0`
   - Task 8 — verification gate: `fa07936`
+- **Phase D — Sleep + Resume:** landed `2026-05-02` on `dev`. Sleep tool yields
+  the BullMQ worker slot mid-conversation (max 24h); agent-run processor handles
+  sleeping → resuming → running transitions; loadAgentRunHistory rebuilds
+  the conversation from team_messages on resume. SendMessage type:message
+  now wakes sleeping recipients. Each assistant turn (assistant_text_stop event)
+  is persisted to team_messages during runAgent so resume sees full prior history.
+  Sleep added to INTERNAL_SUBAGENT_TOOLS — sync subagents must complete in-turn.
+  - Task 1 — Sleep tool: `5353195`
+  - Task 2 — whitelist + register: `fd356d1`
+  - Task 3 — loadAgentRunHistory: `1deec4f`
+  - Task 4 — agent-run Sleep early-exit: `9e54c88`
+  - Task 5 — agent-run resume + per-turn persist: `300bf05`
+  - Task 6 — SendMessage wakes sleeping recipient: `420a6c4`
+  - Task 7 — verification gate: <THIS COMMIT>
