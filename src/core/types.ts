@@ -9,11 +9,39 @@ import type Anthropic from '@anthropic-ai/sdk';
  * Tool definition for ShipFlare headless agents.
  * Combines engine's ToolDef (engine/Tool.ts) with bridge's flat format.
  */
+/**
+ * Tool-level runtime validation result. Returned from `validateInput()` for
+ * checks that depend on dynamic context (caller role, rate limits, prior DB
+ * state) rather than the static input schema. The four-layer engine pipeline
+ * is: zod schema → validateInput → permissions → execute.
+ *
+ * - `{ result: true }` — input is permitted; proceed to permission check + execute
+ * - `{ result: false, errorCode, message }` — block the call. The errorCode
+ *   follows HTTP semantics (403 forbidden, 429 rate-limited, 422 invalid)
+ *   and `message` is surfaced to the LLM via tool_result so it can self-correct.
+ */
+export type ValidationResult =
+  | { result: true }
+  | { result: false; errorCode: number; message: string };
+
 export interface ToolDefinition<TInput = unknown, TOutput = unknown> {
   name: string;
   description: string;
   inputSchema: z.ZodType<TInput>;
   execute: (input: TInput, context: ToolContext) => Promise<TOutput>;
+  /**
+   * Optional dynamic-context validation that runs AFTER zod parsing but
+   * BEFORE execute(). Use for checks that need the live ToolContext —
+   * caller role, rate limits, recent DB state — that the static zod
+   * schema cannot express.
+   *
+   * Returning `{ result: false, errorCode, message }` blocks execution
+   * and surfaces the message to the LLM via tool_result.
+   */
+  validateInput?: (
+    input: TInput,
+    context: ToolContext,
+  ) => Promise<ValidationResult>;
 
   // Engine fields with fail-closed defaults (set via buildTool)
   /** Whether this tool can safely run in parallel. Default: false. */

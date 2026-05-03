@@ -9,9 +9,13 @@
 // record; Redis is only a live-delivery optimization.
 
 import { z } from 'zod';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, gt } from 'drizzle-orm';
 import { buildTool } from '@/core/tool-system';
-import type { ToolContext, ToolDefinition } from '@/core/types';
+import type {
+  ToolContext,
+  ToolDefinition,
+  ValidationResult,
+} from '@/core/types';
 import { createLogger } from '@/lib/logger';
 import { db as defaultDb, type Database } from '@/lib/db';
 import { teamMembers, teamMessages } from '@/lib/db/schema';
@@ -252,6 +256,53 @@ async function resolveRecipient(
     );
   }
   return rows[0].id;
+}
+
+/**
+ * Read the caller's team role from the ToolContext.
+ *
+ * Phase C: the team-run / agent-run runners inject `callerRole` into the
+ * tool deps Map (`'lead' | 'member'`). When the key is absent (legacy call
+ * sites that haven't been wired yet), this returns `null` so lead-only
+ * checks fail closed — the engine fail-closed pattern requires explicit
+ * positive assertion of authority, never inference.
+ */
+function getCallerRole(ctx: ToolContext): 'lead' | 'member' | null {
+  try {
+    return ctx.get<'lead' | 'member'>('callerRole');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Count broadcasts sent by `fromMemberId` in the team within the last
+ * `windowSeconds`. Used by `validateInput` to enforce the engine PDF's
+ * "broadcasting is expensive" rate-limit (1 per turn ≈ 5s).
+ *
+ * Returns the row count (`> 0` => block). The caller passes its own
+ * Database handle so test mocks flow through cleanly.
+ */
+async function countRecentBroadcasts(
+  database: Database,
+  teamId: string,
+  fromMemberId: string,
+  windowSeconds: number,
+): Promise<number> {
+  const since = new Date(Date.now() - windowSeconds * 1000);
+  const rows = await database
+    .select({ id: teamMessages.id })
+    .from(teamMessages)
+    .where(
+      and(
+        eq(teamMessages.teamId, teamId),
+        eq(teamMessages.fromMemberId, fromMemberId),
+        eq(teamMessages.messageType, 'broadcast'),
+        gt(teamMessages.createdAt, since),
+      ),
+    )
+    .limit(1);
+  return rows.length;
 }
 
 async function publishToRedis(
@@ -550,6 +601,52 @@ export const sendMessageTool: ToolDefinition<
   isConcurrencySafe: true,
   // INSERTs a row + PUBLISHes — unambiguously side-effecting.
   isReadOnly: false,
+  // Phase C Task 3: engine fail-closed runtime validation. Two architectural
+  // rules that the static zod schema cannot express:
+  //   1. plan_approval_response is lead-only — only the team-lead can approve
+  //      or reject teammate-submitted plans (engine PDF §2.4).
+  //   2. broadcast is rate-limited to 1 per assistant turn (~5s window) per
+  //      sender — broadcasts fan out to every teammate, so the engine prompt
+  //      explicitly warns "broadcasting is expensive". Best-effort enforced
+  //      by a SELECT against team_messages within the window.
+  // Other variants pass through untouched.
+  async validateInput(input, ctx): Promise<ValidationResult> {
+    if (input.type === 'plan_approval_response') {
+      const role = getCallerRole(ctx);
+      if (role !== 'lead') {
+        return {
+          result: false,
+          errorCode: 403,
+          message:
+            'plan_approval_response is restricted to team-lead. ' +
+            'Only the lead can approve / reject teammate-submitted plans.',
+        };
+      }
+    }
+
+    if (input.type === 'broadcast') {
+      const { teamId, currentMemberId, db } = readTeamContext(ctx);
+      if (currentMemberId) {
+        const recent = await countRecentBroadcasts(
+          db,
+          teamId,
+          currentMemberId,
+          5,
+        );
+        if (recent > 0) {
+          return {
+            result: false,
+            errorCode: 429,
+            message:
+              'broadcast is rate-limited to 1 per turn / 5 seconds. ' +
+              'Use type:message (DM) for follow-up messages to a specific teammate.',
+          };
+        }
+      }
+    }
+
+    return { result: true };
+  },
   async execute(input, ctx): Promise<SendMessageResult> {
     // Phase C Task 2: dispatch by variant. Each variant inserts a different
     // team_messages shape (messageType column distinguishes them; the

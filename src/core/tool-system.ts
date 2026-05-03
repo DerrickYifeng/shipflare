@@ -1,7 +1,12 @@
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { z } from 'zod';
 import type Anthropic from '@anthropic-ai/sdk';
-import type { ToolDefinition, ToolContext, AnyToolDefinition } from './types';
+import type {
+  ToolDefinition,
+  ToolContext,
+  AnyToolDefinition,
+  ValidationResult,
+} from './types';
 
 // ---------------------------------------------------------------------------
 // buildTool factory (ported from engine/Tool.ts:749-792, merged with bridge)
@@ -21,6 +26,10 @@ export function buildTool<TInput, TOutput>(config: {
   description: string;
   inputSchema: z.ZodType<TInput>;
   execute: (input: TInput, context: ToolContext) => Promise<TOutput>;
+  validateInput?: (
+    input: TInput,
+    context: ToolContext,
+  ) => Promise<ValidationResult>;
   isConcurrencySafe?: boolean;
   isReadOnly?: boolean;
   maxResultSizeChars?: number;
@@ -31,6 +40,7 @@ export function buildTool<TInput, TOutput>(config: {
     description: config.description,
     inputSchema: config.inputSchema,
     execute: config.execute,
+    validateInput: config.validateInput,
     isConcurrencySafe: config.isConcurrencySafe ?? false,
     isReadOnly: config.isReadOnly ?? false,
     maxResultSizeChars: config.maxResultSizeChars ?? 100_000,

@@ -498,3 +498,189 @@ describe('SendMessage execute() — variant dispatch', () => {
     expect(vi.mocked(wake)).toHaveBeenCalledWith('mem-alex');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Phase C Task 3 — runtime validation (validateInput)
+// ---------------------------------------------------------------------------
+//
+// Two architectural rules enforced at validateInput time (engine fail-closed
+// pattern):
+//   1. type:plan_approval_response is lead-only — caller's `callerRole` must
+//      be 'lead', else 403.
+//   2. type:broadcast is rate-limited to 1 per 5 seconds per sender — query
+//      DB for prior broadcasts from same fromMemberId within the window;
+//      if any found, return 429.
+// Other variants pass through untouched (validateInput returns {result:true}).
+
+describe('SendMessage validateInput — Phase C runtime checks', () => {
+  // Track recent-broadcast lookups so we can simulate a prior broadcast row.
+  // The fake db's broadcast-count helper reads this counter — simpler than
+  // wiring a full SELECT-with-gt mock. Reset per-test in beforeEach below.
+  let recentBroadcastCount = 0;
+
+  // Replace the fakeDb's select to also model the
+  // `SELECT id FROM team_messages WHERE messageType='broadcast' AND ...`
+  // that countRecentBroadcasts issues. We detect it by checking whether the
+  // filters reference 'broadcast' as a string value.
+  function makeValidateDb(): typeof fakeDb {
+    return {
+      select(_cols?: unknown) {
+        let mode: 'members' | 'broadcast_count' = 'members';
+        let filters: Array<{ column: string; value: unknown }> = [];
+        const builder = {
+          from(_table: unknown) {
+            return builder;
+          },
+          where(cond: unknown) {
+            filters = flattenForValidate(cond);
+            // Detect broadcast-count query by string-value 'broadcast' in filters.
+            if (filters.some((f) => f.value === 'broadcast')) {
+              mode = 'broadcast_count';
+            }
+            const thenableBuilder = builder as typeof builder & {
+              then?: (
+                onFulfilled: (rows: Array<{ id: string }>) => unknown,
+              ) => Promise<unknown>;
+            };
+            thenableBuilder.then = (
+              onFulfilled: (rows: Array<{ id: string }>) => unknown,
+            ): Promise<unknown> => {
+              const rows = resolveRows();
+              return Promise.resolve(onFulfilled(rows));
+            };
+            return thenableBuilder;
+          },
+          limit(n: number): Promise<Array<{ id: string }>> {
+            const rows = resolveRows();
+            return Promise.resolve(rows.slice(0, n));
+          },
+        };
+        function resolveRows(): Array<{ id: string }> {
+          if (mode === 'broadcast_count') {
+            return Array.from({ length: recentBroadcastCount }, (_, i) => ({
+              id: `prior-${i}`,
+            }));
+          }
+          const values = filters.map((f) => f.value);
+          return members
+            .filter((m) =>
+              values.every(
+                (v) => v === m.id || v === m.teamId || v === m.displayName,
+              ),
+            )
+            .map((m) => ({ id: m.id }));
+        }
+        return builder;
+      },
+      insert(_table: unknown) {
+        return {
+          values(row: MessageRow) {
+            inserts.push(row);
+            return Promise.resolve();
+          },
+        };
+      },
+    } as unknown as typeof fakeDb;
+  }
+  function flattenForValidate(
+    cond: unknown,
+  ): Array<{ column: string; value: unknown }> {
+    if (!cond || typeof cond !== 'object') return [];
+    if ('__eq' in cond) {
+      const eqCond = cond as { __eq: { column: string; value: unknown } };
+      return [eqCond.__eq];
+    }
+    if ('__and' in cond) {
+      const andCond = cond as { __and: unknown[] };
+      return andCond.__and.flatMap((c) => flattenForValidate(c));
+    }
+    // gt() returns a different sentinel — capture column+value if shaped.
+    if ('__gt' in cond) {
+      const gtCond = cond as { __gt: { column: string; value: unknown } };
+      return [gtCond.__gt];
+    }
+    return [];
+  }
+
+  beforeEach(() => {
+    recentBroadcastCount = 0;
+  });
+
+  it('rejects plan_approval_response when caller is not lead (403)', async () => {
+    const ctx = makeCtx({
+      db: makeValidateDb(),
+      teamId: 'team-1',
+      currentMemberId: 'mem-member',
+      callerRole: 'member',
+    });
+    const validate = sendMessageTool.validateInput;
+    expect(validate).toBeDefined();
+    const result = await validate!(
+      {
+        type: 'plan_approval_response',
+        request_id: 'plan-1',
+        to: 'Alex',
+        approve: true,
+      },
+      ctx,
+    );
+    expect(result.result).toBe(false);
+    if (!result.result) {
+      expect(result.errorCode).toBe(403);
+      expect(result.message).toMatch(/lead/i);
+    }
+  });
+
+  it('accepts plan_approval_response when caller is lead', async () => {
+    const ctx = makeCtx({
+      db: makeValidateDb(),
+      teamId: 'team-1',
+      currentMemberId: 'mem-lead',
+      callerRole: 'lead',
+    });
+    const result = await sendMessageTool.validateInput!(
+      {
+        type: 'plan_approval_response',
+        request_id: 'plan-1',
+        to: 'Alex',
+        approve: true,
+      },
+      ctx,
+    );
+    expect(result.result).toBe(true);
+  });
+
+  it('rejects broadcast when caller already broadcast in last 5s (429)', async () => {
+    recentBroadcastCount = 1;
+    const ctx = makeCtx({
+      db: makeValidateDb(),
+      teamId: 'team-1',
+      currentMemberId: 'mem-sam',
+      callerRole: 'member',
+    });
+    const result = await sendMessageTool.validateInput!(
+      { type: 'broadcast', content: 'second broadcast in 5s' },
+      ctx,
+    );
+    expect(result.result).toBe(false);
+    if (!result.result) {
+      expect(result.errorCode).toBe(429);
+      expect(result.message).toMatch(/rate.?limit/i);
+    }
+  });
+
+  it('accepts broadcast when no recent broadcasts', async () => {
+    recentBroadcastCount = 0;
+    const ctx = makeCtx({
+      db: makeValidateDb(),
+      teamId: 'team-1',
+      currentMemberId: 'mem-sam',
+      callerRole: 'member',
+    });
+    const result = await sendMessageTool.validateInput!(
+      { type: 'broadcast', content: 'first broadcast' },
+      ctx,
+    );
+    expect(result.result).toBe(true);
+  });
+});
