@@ -14,7 +14,7 @@ import type {
 } from '@/core/types';
 import { createLogger } from '@/lib/logger';
 import type { Database } from '@/lib/db';
-import { teamMembers, teamTasks } from '@/lib/db/schema';
+import { agentRuns, teamMembers, teamMessages, teamTasks } from '@/lib/db/schema';
 import { getAvailableAgents, resolveAgent } from './registry';
 import { getAgentOutputSchema } from './agent-schemas';
 import {
@@ -23,6 +23,8 @@ import {
   type SpawnCallbacks,
 } from './spawn';
 import { teamHasBudgetRemaining } from '@/lib/team-budget';
+import { isAgentTeamsEnabledForTeam } from '@/lib/feature-flags/agent-teams';
+import { wake } from '@/workers/processors/lib/wake';
 
 const log = createLogger('tools:Task');
 
@@ -45,7 +47,12 @@ export const MAX_SPAWN_DEPTH = 3;
 // ---------------------------------------------------------------------------
 //
 // Per spec §5.4 we intentionally drop:
-//   run_in_background, isolation, mode, team_name, cwd, model.
+//   isolation, mode, team_name, cwd, model.
+// Phase B re-adds `run_in_background` as an opt-in async path; the option
+// only takes effect when `isAgentTeamsEnabledForTeam(teamId)` is true AND
+// the call carries a team-run context (`teamId`, `currentMemberId`, `db`).
+// Otherwise it's silently ignored and the call falls through to the
+// existing sync spawn path.
 
 export const TaskInputSchema = z
   .object({
@@ -56,6 +63,13 @@ export const TaskInputSchema = z
       .min(1, 'description is required')
       .max(100, 'description must be 100 characters or fewer'),
     name: z.string().optional(),
+    /**
+     * Phase B: opt-in async path. When true AND the team flag is on AND a
+     * team-run context is present, the call returns immediately with
+     * `{agentId, status:'async_launched'}`; otherwise it falls through to
+     * the synchronous spawn path.
+     */
+    run_in_background: z.boolean().optional(),
   })
   .strict();
 
@@ -78,6 +92,18 @@ export interface TaskResult {
   /** Wall-clock duration in milliseconds. */
   duration: number;
   turns: number;
+  /**
+   * Set on the Phase B async return — the `agent_runs.id` of the spawned
+   * teammate. Undefined for the synchronous path.
+   */
+  agentId?: string;
+  /**
+   * Lifecycle marker. `'completed'` for the sync path (the spawned subagent
+   * has already produced `result`); `'async_launched'` for the Phase B
+   * opt-in async path (the agent_runs row is in `'queued'` state and the
+   * BullMQ wake has been enqueued — no result yet).
+   */
+  status?: 'completed' | 'async_launched';
 }
 
 // ---------------------------------------------------------------------------
@@ -286,6 +312,88 @@ function wrapOnEventWithSpawnMeta(
 }
 
 // ---------------------------------------------------------------------------
+// Phase B — async branch: launch a teammate by inserting `agent_runs` +
+// initial mailbox message, then waking the agent-run BullMQ worker.
+//
+// This path returns IMMEDIATELY with `{agentId, status:'async_launched'}`.
+// The lead's mailbox-drain loop (Phase B Task 12) is what eventually
+// surfaces the teammate's `<task-notification>` back to the caller.
+// ---------------------------------------------------------------------------
+
+async function launchAsyncTeammate(
+  input: TaskInput,
+  ctx: ToolContext,
+): Promise<TaskResult> {
+  const { db, teamId, currentMemberId } = readTeamDeps(ctx);
+  if (!db || !teamId || !currentMemberId) {
+    // Caller upstream guarantees these are present (we only enter this
+    // branch when readTeamDeps already produced a teamId), but the type
+    // narrowing is local so we re-check defensively.
+    throw new Error(
+      'Task: async branch requires team-run context (db, teamId, currentMemberId)',
+    );
+  }
+
+  const agent = await resolveAgent(input.subagent_type);
+  if (!agent) {
+    const available = (await getAvailableAgents()).map((a) => a.name).sort();
+    throw new Error(
+      `Task: unknown subagent_type "${input.subagent_type}". ` +
+        `Valid types: ${
+          available.length > 0 ? available.join(', ') : '(none registered)'
+        }.`,
+    );
+  }
+
+  const agentId = crypto.randomUUID();
+
+  // 1. Queue the agent_runs row. The agent-run worker (Task 9) drains its
+  //    mailbox and drives runAgent against `agentDefName`.
+  await db.insert(agentRuns).values({
+    id: agentId,
+    teamId,
+    memberId: currentMemberId,
+    agentDefName: input.subagent_type,
+    // TODO Phase E: when the lead also runs as an agent_runs row, this
+    //   becomes the lead's agentId so the teammate's task_notification
+    //   can be routed back via parentAgentId. Phase B leaves it null — the
+    //   mailbox-drain kludge in team-run.ts (Task 12) bridges the gap.
+    parentAgentId: null,
+    status: 'queued',
+  });
+
+  // 2. Initial prompt as the FIRST mailbox message addressed to the new
+  //    agentId. The agent-run processor reads it via drainMailbox.
+  await db.insert(teamMessages).values({
+    teamId,
+    type: 'user_prompt',
+    messageType: 'message',
+    fromMemberId: currentMemberId,
+    toAgentId: agentId,
+    content: input.prompt,
+    summary: input.description,
+  });
+
+  // 3. Wake the agent-run worker via BullMQ. Idempotent within a 1-second
+  //    bucket (see wake.ts).
+  await wake(agentId);
+
+  log.debug(
+    `Task launched async teammate "${input.subagent_type}" agentId=${agentId} ` +
+      `team=${teamId} parent_member=${currentMemberId}`,
+  );
+
+  return {
+    result: null,
+    cost: 0,
+    duration: 0,
+    turns: 0,
+    agentId,
+    status: 'async_launched',
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Tool definition
 // ---------------------------------------------------------------------------
 
@@ -294,6 +402,12 @@ function wrapOnEventWithSpawnMeta(
  * the spawn-depth limit, looks up the AgentDefinition, and delegates to
  * spawnSubagent(). Errors are caught and returned as structured strings so the
  * parent agent can read them via tool_result and self-correct.
+ *
+ * Phase B: when `input.run_in_background === true` AND the team flag is on
+ * AND a team-run context is present, the call returns immediately with
+ * `{agentId, status:'async_launched'}` and the spawned teammate runs out
+ * of band. Any failed precondition silently falls through to the existing
+ * sync path so existing callers and tests are unaffected.
  */
 export const taskTool: ToolDefinition<TaskInput, TaskResult> = buildTool({
   name: TASK_TOOL_NAME,
@@ -313,6 +427,27 @@ export const taskTool: ToolDefinition<TaskInput, TaskResult> = buildTool({
   // Task is never side-effect-free: the subagent it spawns may write to DB.
   isReadOnly: false,
   async execute(input, ctx): Promise<TaskResult> {
+    // Phase B — async branch (opt-in via `run_in_background:true`).
+    //
+    // Fires ONLY when ALL of:
+    //   1. `input.run_in_background === true`
+    //   2. The call has a team-run context (`teamId` resolvable from ctx)
+    //   3. `isAgentTeamsEnabledForTeam(teamId)` returns true
+    //
+    // Any failed precondition silently falls through to the sync path —
+    // this preserves backward compatibility for ad-hoc / CLI / test
+    // callers that don't carry team context.
+    if (input.run_in_background === true) {
+      const { teamId: asyncTeamId } = readTeamDeps(ctx);
+      if (asyncTeamId !== null) {
+        const enabled = await isAgentTeamsEnabledForTeam(asyncTeamId);
+        if (enabled) {
+          return await launchAsyncTeammate(input, ctx);
+        }
+        // Flag off: silently fall through to the sync path below.
+      }
+    }
+
     // Spec §16: cap the spawn chain length BEFORE doing any work. Reading
     // depth off the caller's ToolContext means this check sees the live
     // chain regardless of whether the caller went through the registry or

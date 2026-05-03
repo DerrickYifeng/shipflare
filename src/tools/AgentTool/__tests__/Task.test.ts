@@ -65,6 +65,19 @@ vi.mock('@/core/query-loop', async () => {
   };
 });
 
+// ---------------------------------------------------------------------------
+// Mock the Phase B async-branch deps BEFORE importing AgentTool. The async
+// branch is gated by the feature flag and uses `wake()` to enqueue the
+// agent-run BullMQ job — both are mocked so the test stays self-contained.
+// ---------------------------------------------------------------------------
+
+vi.mock('@/lib/feature-flags/agent-teams', () => ({
+  isAgentTeamsEnabledForTeam: vi.fn(),
+}));
+vi.mock('@/workers/processors/lib/wake', () => ({
+  wake: vi.fn(async () => undefined),
+}));
+
 // Import *after* vi.mock so the stub is installed before the real module
 // binds runAgent via module resolution.
 import {
@@ -78,6 +91,8 @@ import {
   __resetAgentRegistry,
   getAvailableAgents,
 } from '../registry';
+import { isAgentTeamsEnabledForTeam } from '@/lib/feature-flags/agent-teams';
+import { wake } from '@/workers/processors/lib/wake';
 
 // ---------------------------------------------------------------------------
 // Test harness
@@ -310,5 +325,203 @@ describe('buildTaskDescription — roster + teaching composition', () => {
     // Still embeds the teaching block so the delegator learns the rules even
     // before any specialists are registered.
     expect(desc).toMatch(/When NOT to delegate/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase B — async branch: `run_in_background:true` flag-gated lifecycle
+// ---------------------------------------------------------------------------
+
+interface AsyncInsert {
+  table: string;
+  row: Record<string, unknown>;
+}
+
+const asyncInserts: AsyncInsert[] = [];
+
+function makeFakeAsyncDb() {
+  return {
+    insert(table: unknown) {
+      const name =
+        (table as { _?: { name?: string } })?._?.name ??
+        (table as { name?: string })?.name ??
+        String(table);
+      return {
+        values(row: Record<string, unknown>) {
+          asyncInserts.push({ table: name, row });
+          return Promise.resolve();
+        },
+      };
+    },
+    // Sync-fallback path records team_tasks completion via db.update — make
+    // the chain a no-op so the sync path can finish cleanly.
+    update() {
+      const builder = {
+        set() {
+          return builder;
+        },
+        where() {
+          return Promise.resolve();
+        },
+      };
+      return builder;
+    },
+    // Async branch never selects, but the budget check on the sync path may.
+    // Provide a no-op select so it short-circuits if it ever fires.
+    select() {
+      const builder = {
+        from() {
+          return builder;
+        },
+        where() {
+          return builder;
+        },
+        limit() {
+          return Promise.resolve([]);
+        },
+        orderBy() {
+          return builder;
+        },
+      };
+      return builder;
+    },
+  };
+}
+
+function makeTeamRunCtx(
+  deps: Record<string, unknown> = {},
+): ToolContext {
+  const ac = new AbortController();
+  const merged = {
+    db: makeFakeAsyncDb(),
+    teamId: 'team-async-1',
+    currentMemberId: 'mem-lead',
+    runId: 'run-async-1',
+    ...deps,
+  };
+  return {
+    abortSignal: ac.signal,
+    get<V>(key: string): V {
+      if (key in merged) return merged[key as keyof typeof merged] as V;
+      throw new Error(`no dep ${key}`);
+    },
+  };
+}
+
+describe('Task tool — async branch (Phase B)', () => {
+  beforeEach(() => {
+    asyncInserts.length = 0;
+    vi.mocked(isAgentTeamsEnabledForTeam).mockResolvedValue(true);
+    vi.mocked(wake).mockClear();
+  });
+
+  it('returns immediately with {agentId, status:"async_launched"} when flag on + run_in_background:true', async () => {
+    const result = await taskTool.execute(
+      {
+        subagent_type: 'test-agent',
+        prompt: 'Draft 3 reply variations for the latest mention.',
+        description: 'Async draft',
+        run_in_background: true,
+      },
+      makeTeamRunCtx(),
+    );
+
+    expect(result.status).toBe('async_launched');
+    expect(typeof result.agentId).toBe('string');
+    expect(result.agentId!.length).toBeGreaterThan(0);
+    expect(result.cost).toBe(0);
+    expect(result.duration).toBe(0);
+    expect(result.turns).toBe(0);
+    expect(wake).toHaveBeenCalledOnce();
+    expect(wake).toHaveBeenCalledWith(result.agentId);
+
+    // Sanity: the async branch did NOT go down the sync path that calls runAgent.
+    expect(runAgentCalls).toHaveLength(0);
+
+    // Two inserts: agent_runs (queued) + team_messages (initial prompt mailbox).
+    expect(asyncInserts).toHaveLength(2);
+    const agentRunRow = asyncInserts[0]!.row;
+    const mailboxRow = asyncInserts[1]!.row;
+    expect(agentRunRow.id).toBe(result.agentId);
+    expect(agentRunRow.teamId).toBe('team-async-1');
+    expect(agentRunRow.memberId).toBe('mem-lead');
+    expect(agentRunRow.agentDefName).toBe('test-agent');
+    expect(agentRunRow.parentAgentId).toBeNull();
+    expect(agentRunRow.status).toBe('queued');
+    expect(mailboxRow.teamId).toBe('team-async-1');
+    expect(mailboxRow.toAgentId).toBe(result.agentId);
+    expect(mailboxRow.fromMemberId).toBe('mem-lead');
+    expect(mailboxRow.content).toBe(
+      'Draft 3 reply variations for the latest mention.',
+    );
+    expect(mailboxRow.summary).toBe('Async draft');
+    expect(mailboxRow.type).toBe('user_prompt');
+    expect(mailboxRow.messageType).toBe('message');
+  });
+
+  it('falls back to sync path when the team flag is OFF', async () => {
+    vi.mocked(isAgentTeamsEnabledForTeam).mockResolvedValue(false);
+    runAgentImpl = async () => ({
+      result: 'sync-fallback',
+      usage: {
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        costUsd: 0.0001,
+        model: 'test',
+        turns: 1,
+      },
+    });
+
+    const result = await taskTool.execute(
+      {
+        subagent_type: 'test-agent',
+        prompt: 'hello',
+        description: 'flag-off fallback',
+        run_in_background: true,
+      },
+      makeTeamRunCtx(),
+    );
+
+    expect(result.status).toBeUndefined();
+    expect(result.agentId).toBeUndefined();
+    expect(result.result).toBe('sync-fallback');
+    expect(result.turns).toBe(1);
+    expect(wake).not.toHaveBeenCalled();
+    expect(runAgentCalls).toHaveLength(1);
+  });
+
+  it('falls back to sync path when run_in_background is unset', async () => {
+    vi.mocked(isAgentTeamsEnabledForTeam).mockResolvedValue(true);
+    runAgentImpl = async () => ({
+      result: 'sync-default',
+      usage: {
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        costUsd: 0.0002,
+        model: 'test',
+        turns: 1,
+      },
+    });
+
+    const result = await taskTool.execute(
+      {
+        subagent_type: 'test-agent',
+        prompt: 'hello',
+        description: 'no flag set',
+      },
+      makeTeamRunCtx(),
+    );
+
+    expect(result.status).toBeUndefined();
+    expect(result.agentId).toBeUndefined();
+    expect(result.result).toBe('sync-default');
+    expect(wake).not.toHaveBeenCalled();
+    expect(runAgentCalls).toHaveLength(1);
+    // Flag should NOT be consulted when run_in_background is absent.
+    expect(vi.mocked(isAgentTeamsEnabledForTeam)).not.toHaveBeenCalled();
   });
 });
