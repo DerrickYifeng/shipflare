@@ -18,7 +18,7 @@ import type {
 } from '@/core/types';
 import { createLogger } from '@/lib/logger';
 import { db as defaultDb, type Database } from '@/lib/db';
-import { teamMembers, teamMessages } from '@/lib/db/schema';
+import { agentRuns, teamMembers, teamMessages } from '@/lib/db/schema';
 import { getPubSubPublisher } from '@/lib/redis';
 import { wake } from '@/workers/processors/lib/wake';
 import { insertPeerDmShadow } from '@/workers/processors/lib/peer-dm-shadow';
@@ -477,6 +477,30 @@ async function dispatchMessage(
     db,
     ctx,
   });
+
+  // Phase D Task 6 — wake the recipient if it's sleeping.
+  // Phase C only woke targets on shutdown_request + plan_approval_response.
+  // Now that teammates can yield their BullMQ slot via Sleep, a plain
+  // type:message must also resume them — otherwise the message would sit in
+  // the mailbox until the next reconcile-mailbox tick (~60s) or the sleep
+  // timer fires. Phase B-C resolves recipients by team_members.id; we look
+  // up the corresponding agent_runs row for that member and wake by its
+  // agent_runs.id (the wake helper's actual address). If the recipient has
+  // no agent_runs row OR it's already running, this query returns nothing
+  // and wake is a no-op.
+  const sleeping = await db
+    .select({ id: agentRuns.id })
+    .from(agentRuns)
+    .where(
+      and(
+        eq(agentRuns.memberId, toMemberId),
+        eq(agentRuns.status, 'sleeping'),
+      ),
+    )
+    .limit(1);
+  if (sleeping.length > 0) {
+    await wake(sleeping[0].id);
+  }
 
   return { delivered: true, messageId, toMemberId };
 }

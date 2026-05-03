@@ -30,8 +30,22 @@ interface MessageRow {
   content: string | null;
 }
 
+/**
+ * Phase D Task 6: in-memory `agent_runs` rows so tests can model
+ * "recipient is sleeping" without standing up Postgres. The fakeDb
+ * detects an agent_runs query by sniffing for a `'sleeping'` filter
+ * value (uniquely identifying — `team_members` never carries that
+ * literal as a column value).
+ */
+interface AgentRunRow {
+  id: string;
+  memberId: string;
+  status: 'sleeping' | 'running' | 'queued' | 'completed' | 'failed';
+}
+
 const members: MemberRow[] = [];
 const inserts: MessageRow[] = [];
+const agentRunRows: AgentRunRow[] = [];
 
 // ---------------------------------------------------------------------------
 // Fake drizzle query builders
@@ -88,11 +102,14 @@ function tableName(t: unknown): string {
 function makeFakeDb() {
   return {
     select(_cols?: unknown) {
-      let mode: 'members' | null = null;
+      let mode: 'members' | 'agent_runs' | null = null;
       let filters: Array<{ column: string; value: unknown }> = [];
       const builder = {
         from(table: unknown) {
-          // We only select from team_members in SendMessage.
+          // SendMessage queries team_members for recipient resolution and,
+          // post-Phase-D, agent_runs for the wake-if-sleeping check. The
+          // table-name shape varies across drizzle versions, so the resolver
+          // disambiguates from the filter-value shape (see resolveRows).
           const name = tableName(table);
           if (name.includes('team_members') || true) {
             mode = 'members';
@@ -101,6 +118,13 @@ function makeFakeDb() {
         },
         where(cond: EqSentinel | AndSentinel) {
           filters = flattenConditions(cond);
+          // Phase D: the agent_runs probe uses a `status='sleeping'` filter.
+          // Detect it heuristically by sniffing for the literal among
+          // filter values — team_members never carries 'sleeping' as a
+          // column value, so this is collision-free.
+          if (filters.some((f) => f.value === 'sleeping')) {
+            mode = 'agent_runs';
+          }
           // Make `where(...)` thenable so tests that fan out (broadcast)
           // can `await db.select(...).from(...).where(...)` without an
           // explicit `.limit()` and still receive every matching member.
@@ -108,32 +132,40 @@ function makeFakeDb() {
           // recipient-resolution call sites.
           const thenableBuilder = builder as typeof builder & {
             then?: (
-              onFulfilled: (rows: MemberRow[]) => unknown,
+              onFulfilled: (rows: MemberRow[] | AgentRunRow[]) => unknown,
             ) => Promise<unknown>;
           };
           thenableBuilder.then = (
-            onFulfilled: (rows: MemberRow[]) => unknown,
+            onFulfilled: (rows: MemberRow[] | AgentRunRow[]) => unknown,
           ): Promise<unknown> => {
-            const rows = resolveMembers();
+            const rows = resolveRows();
             return Promise.resolve(onFulfilled(rows));
           };
           return thenableBuilder;
         },
-        limit(n: number): Promise<MemberRow[]> {
-          if (mode !== 'members') return Promise.resolve([]);
-          const rows = resolveMembers();
+        limit(n: number): Promise<MemberRow[] | AgentRunRow[]> {
+          if (mode === null) return Promise.resolve([]);
+          const rows = resolveRows();
           return Promise.resolve(rows.slice(0, n));
         },
       };
-      function resolveMembers(): MemberRow[] {
+      function resolveRows(): MemberRow[] | AgentRunRow[] {
         // The drizzle column object varies in shape across versions — we
         // take a shape-agnostic approach: collect all filter values and
-        // filter the in-memory members by "every filter matches at least
-        // one of { id, teamId, displayName }". Works because SendMessage
-        // only composes eq() across these three fields. Phase C Task 5:
-        // returns the full member row so column projections that pick
-        // agentType / displayName (peer-DM-shadow lookups) get real values.
+        // filter the in-memory rows by "every filter matches at least
+        // one of the row's known fields". Works because SendMessage only
+        // composes eq() across a small fixed set of columns per table.
         const values = filters.map((f) => f.value);
+        if (mode === 'agent_runs') {
+          // Filter agent_runs by memberId + status (the only two columns
+          // dispatchMessage's wake-if-sleeping probe constrains).
+          return agentRunRows.filter((r) =>
+            values.every((v) => v === r.memberId || v === r.status),
+          );
+        }
+        // Default: team_members lookup. Phase C Task 5 returns the full
+        // member row so column projections picking agentType / displayName
+        // (peer-DM-shadow lookups) get real values.
         return members.filter((m) =>
           values.every(
             (v) => v === m.id || v === m.teamId || v === m.displayName,
@@ -232,6 +264,7 @@ function makeCtx(
 beforeEach(() => {
   members.length = 0;
   inserts.length = 0;
+  agentRunRows.length = 0;
   publishedRaw.length = 0;
   vi.mocked(wake).mockClear();
 });
@@ -514,6 +547,71 @@ describe('SendMessage execute() — variant dispatch', () => {
     // Approval must wake the teammate so it resumes promptly.
     expect(vi.mocked(wake)).toHaveBeenCalledOnce();
     expect(vi.mocked(wake)).toHaveBeenCalledWith('mem-alex');
+  });
+
+  // -------------------------------------------------------------------------
+  // Phase D Task 6 — type:message wakes a sleeping recipient
+  // -------------------------------------------------------------------------
+  //
+  // Phase C only woke targets on shutdown_request + plan_approval_response.
+  // Phase D extends the plain `message` variant: if the recipient's
+  // agent_runs row is in `status='sleeping'`, dispatchMessage must call
+  // wake() so the teammate resumes its conversation. If the recipient is
+  // already running (or has no agent_runs row at all), wake() must NOT
+  // fire — wake on a running agent burns an idempotent enqueue but signals
+  // wrong intent in the logs and risks racing the active loop.
+
+  it('type:message wakes recipient when their agent_runs.status is sleeping (Phase D)', async () => {
+    members.push({ id: 'mem-alex', teamId: 'team-1', displayName: 'Alex' });
+    // Seed a sleeping agent_runs row for the recipient.
+    agentRunRows.push({
+      id: 'agent-run-alex',
+      memberId: 'mem-alex',
+      status: 'sleeping',
+    });
+
+    const ctx = makeCtx({
+      db: fakeDb,
+      teamId: 'team-1',
+      currentMemberId: 'mem-sam',
+      runId: 'run-1',
+    });
+
+    const result = await sendMessageTool.execute(
+      { type: 'message', to: 'Alex', content: 'wake up' },
+      ctx,
+    );
+
+    expect(result.delivered).toBe(true);
+    // Wake must fire with the agent_runs.id (not the memberId) so the
+    // BullMQ payload routes to the correct sleeping agent.
+    expect(vi.mocked(wake)).toHaveBeenCalledOnce();
+    expect(vi.mocked(wake)).toHaveBeenCalledWith('agent-run-alex');
+  });
+
+  it('type:message does NOT wake recipient when their agent_runs.status is running (Phase D)', async () => {
+    members.push({ id: 'mem-alex', teamId: 'team-1', displayName: 'Alex' });
+    agentRunRows.push({
+      id: 'agent-run-alex',
+      memberId: 'mem-alex',
+      status: 'running',
+    });
+
+    const ctx = makeCtx({
+      db: fakeDb,
+      teamId: 'team-1',
+      currentMemberId: 'mem-sam',
+      runId: 'run-1',
+    });
+
+    const result = await sendMessageTool.execute(
+      { type: 'message', to: 'Alex', content: 'fyi' },
+      ctx,
+    );
+
+    expect(result.delivered).toBe(true);
+    // No sleeping row → wake() must NOT fire.
+    expect(vi.mocked(wake)).not.toHaveBeenCalled();
   });
 });
 
