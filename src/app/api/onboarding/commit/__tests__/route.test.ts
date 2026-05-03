@@ -72,11 +72,6 @@ vi.mock('@/lib/team-provisioner', () => ({
   provisionTeamForProduct: provisionTeamForProductMock,
 }));
 
-const enqueueTeamRunMock = vi.fn(async () => ({ runId: 'run-1' }));
-vi.mock('@/lib/queue/team-run', () => ({
-  enqueueTeamRun: enqueueTeamRunMock,
-}));
-
 const createAutomationConversationMock = vi.fn(async () => 'conv-1');
 vi.mock('@/lib/team-conversation-helpers', () => ({
   createAutomationConversation: createAutomationConversationMock,
@@ -273,7 +268,6 @@ beforeEach(() => {
   recordPipelineEventMock.mockClear();
   ensureTeamExistsMock.mockClear();
   provisionTeamForProductMock.mockClear();
-  enqueueTeamRunMock.mockClear();
   createAutomationConversationMock.mockClear();
   getUserChannelsMock.mockClear();
 });
@@ -429,7 +423,12 @@ describe('POST /api/onboarding/commit — happy path', () => {
       payload.enqueued.some((e) => e.startsWith('team-run:kickoff:')),
     ).toBe(false);
     expect(createAutomationConversationMock).not.toHaveBeenCalled();
-    expect(enqueueTeamRunMock).not.toHaveBeenCalled();
+    // Phase G cleanup (migration 0016_drop_team_runs): the legacy
+    // `enqueueTeamRun` helper has been deleted; this test used to
+    // assert it wasn't called. Kickoff dispatch now flows through
+    // team-kickoff.ts → dispatchLeadMessage, mocked out separately
+    // above (provisionTeamForProductMock) so this branch is still a
+    // no-op as far as kickoff is concerned.
   });
 
   it('clears the Redis draft after a successful commit', async () => {

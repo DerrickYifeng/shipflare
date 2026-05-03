@@ -4,9 +4,11 @@
 // Five tables model a user's AI team runtime:
 //   teams          — one row per product-scoped team
 //   team_members   — instances of AgentDefinition (AGENT.md) attached to a team
-//   team_runs      — a single coordinator main-loop execution
 //   team_messages  — every message that flowed during a run (user ↔ member ↔ tool)
 //   team_tasks     — one row per Task-tool spawn (supports nested spawns via parent_task_id)
+//   agent_runs     — one row per agent invocation (Phase B+ unified runtime;
+//                    superseded the deleted team_runs table — see migration
+//                    0016_drop_team_runs)
 //
 // ID convention mirrors the existing schema (users.id, products.id): text
 // columns populated with application-side UUIDs via `$defaultFn(() => crypto.randomUUID())`.
@@ -20,7 +22,6 @@ import {
   numeric,
   jsonb,
   index,
-  uniqueIndex,
   unique,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
@@ -134,54 +135,6 @@ export type TeamMember = typeof teamMembers.$inferSelect;
 export type NewTeamMember = typeof teamMembers.$inferInsert;
 
 // ---------------------------------------------------------------------------
-// team_runs
-// ---------------------------------------------------------------------------
-
-export const teamRuns = pgTable(
-  'team_runs',
-  {
-    id: text('id')
-      .primaryKey()
-      .$defaultFn(() => crypto.randomUUID()),
-    teamId: text('team_id')
-      .notNull()
-      .references(() => teams.id, { onDelete: 'cascade' }),
-    /** Phase 2: the conversation this run belongs to. Nullable for
-     *  legacy rows that predate the team_conversations table. */
-    conversationId: text('conversation_id').references(
-      () => teamConversations.id,
-      { onDelete: 'set null' },
-    ),
-    // 'onboarding' | 'kickoff' | 'weekly' | 'daily' | 'phase_transition' | 'draft_post'
-    trigger: text('trigger').notNull(),
-    goal: text('goal').notNull(),
-    rootAgentId: text('root_agent_id')
-      .notNull()
-      .references(() => teamMembers.id, { onDelete: 'cascade' }),
-    // 'running' | 'completed' | 'failed' | 'cancelled' | 'pending'
-    status: text('status').notNull().default('running'),
-    startedAt: timestamp('started_at', { mode: 'date' }).defaultNow().notNull(),
-    completedAt: timestamp('completed_at', { mode: 'date' }),
-    totalCostUsd: numeric('total_cost_usd', { precision: 10, scale: 4 }),
-    totalTurns: integer('total_turns').default(0),
-    traceId: text('trace_id'),
-    errorMessage: text('error_message'),
-  },
-  (t) => [
-    index('idx_team_runs_team_status').on(t.teamId, t.status),
-    index('idx_team_runs_trace').on(t.traceId),
-    // Partial unique index — spec §16: only one 'running' team_run per team.
-    // Drizzle-kit emits this via the `.where(...)` helper on uniqueIndex.
-    uniqueIndex('idx_team_runs_one_running_per_team')
-      .on(t.teamId)
-      .where(sql`status = 'running'`),
-  ],
-);
-
-export type TeamRun = typeof teamRuns.$inferSelect;
-export type NewTeamRun = typeof teamRuns.$inferInsert;
-
-// ---------------------------------------------------------------------------
 // team_messages
 // ---------------------------------------------------------------------------
 
@@ -191,7 +144,12 @@ export const teamMessages = pgTable(
     id: text('id')
       .primaryKey()
       .$defaultFn(() => crypto.randomUUID()),
-    runId: text('run_id').references(() => teamRuns.id, { onDelete: 'cascade' }),
+    // Phase G cleanup (migration 0016_drop_team_runs): the FK to team_runs
+    // is gone. runId is now a free-text grouping handle pointing at the
+    // user_prompt team_messages.id that initiated this row's request.
+    // Nullable because system messages (cron broadcasts, etc.) may not be
+    // tied to a request.
+    runId: text('run_id'),
     teamId: text('team_id')
       .notNull()
       .references(() => teams.id, { onDelete: 'cascade' }),
@@ -281,9 +239,12 @@ export const teamTasks = pgTable(
     id: text('id')
       .primaryKey()
       .$defaultFn(() => crypto.randomUUID()),
-    runId: text('run_id')
-      .notNull()
-      .references(() => teamRuns.id, { onDelete: 'cascade' }),
+    // Phase G cleanup (migration 0016_drop_team_runs): the FK to team_runs
+    // is gone. runId is now a free-text grouping handle pointing at the
+    // user_prompt team_messages.id that initiated the request. Stays
+    // notNull because every Task spawn happens inside a request — never
+    // standalone.
+    runId: text('run_id').notNull(),
     // Nested spawns (A spawns B spawns C) chain through here.
     parentTaskId: text('parent_task_id'),
     memberId: text('member_id')

@@ -580,9 +580,12 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
   // synthetic "run handle" replacing the deleted team_runs.id). The lead's
   // outputs need to echo the same handle so the founder UI's threadIsLive
   // pairing (team-desk.tsx) can match user_prompt → terminal event and
-  // clear the "working..." typing indicator. We only stamp this on SSE
-  // payloads (NOT the team_messages.run_id column) because that column is
-  // a FK to team_runs which no longer carries a row for the lead.
+  // clear the "working..." typing indicator. Phase G cleanup (migration
+  // 0016_drop_team_runs) dropped the FK on team_messages.run_id, so we
+  // now persist this same handle on the durable team_messages.run_id
+  // column too — admin pages and per-request aggregation read it. For
+  // teammates, the per-row runId falls back to agentId so their activity
+  // still groups distinctly under the teammate's own agent_runs.id handle.
   const leadRequestId =
     isLead && initialBatch.length > 0 ? initialBatch[0].id : null;
 
@@ -655,6 +658,13 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
         await db.insert(teamMessages).values({
           id: insertedId,
           teamId: row.teamId,
+          // Phase G cleanup (migration 0016_drop_team_runs): stamp the
+          // request handle so admin per-request aggregation can group
+          // this row with its originating user_prompt. Lead path uses
+          // leadRequestId (the user_prompt.id from the mailbox); teammate
+          // path falls back to agentId so the teammate's own activity
+          // still groups distinctly under its agent_runs.id.
+          runId: isLead && leadRequestId ? leadRequestId : agentId,
           // Phase E hot-fix: stamp the lead's primary conversation so the UI's
           // per-thread filter (team-desk.tsx threadMessages) renders this row.
           // Without conversationId the lead's reply would only show after a
@@ -782,6 +792,11 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
           await db.insert(teamMessages).values({
             id: insertedId,
             teamId: row.teamId,
+            // Phase G cleanup (migration 0016_drop_team_runs): mirror the
+            // assistant_text_stop branch — stamp the request handle so
+            // tool_call / tool_result rows group with their originating
+            // user_prompt for per-request aggregation.
+            runId: isLead && leadRequestId ? leadRequestId : agentId,
             // Mirror assistant_text_stop: only stamp conversationId on
             // the lead path so the founder UI's per-thread filter renders
             // the row. Teammates have no conversation handle.

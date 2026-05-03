@@ -12,8 +12,19 @@ import {
 } from '@/lib/db/schema';
 import { ensureLeadAgentRun } from '@/lib/team/spawn-lead';
 import { wake } from '@/workers/processors/lib/wake';
-import { type TeamRunTrigger } from '@/lib/queue/team-run';
 import { createLogger } from '@/lib/logger';
+
+/**
+ * Inlined from the deleted `@/lib/queue/team-run` module (Phase G cleanup,
+ * migration 0016_drop_team_runs). The route narrows to a 4-value subset
+ * (matches `requestSchema.trigger` below) — the legacy `'kickoff'` and
+ * `'draft_post'` triggers from the team_runs era are no longer accepted.
+ */
+type TeamRunTrigger =
+  | 'daily'
+  | 'onboarding'
+  | 'weekly'
+  | 'phase_transition';
 
 const log = createLogger('api:team:run');
 
