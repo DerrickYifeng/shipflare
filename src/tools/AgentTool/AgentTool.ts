@@ -124,6 +124,27 @@ function readUserIdFromCtx(ctx: ToolContext): string | null {
   }
 }
 
+/**
+ * Read the agent_runs.id of the agent currently executing this Task call.
+ * The agent-run processor (Phase D Task 4) injects `callerAgentId` into the
+ * ToolContext for every tool invocation. When the lead spawns a teammate
+ * via `Task(run_in_background:true)`, this returns the lead's agentId, which
+ * becomes the spawned teammate's `parentAgentId` — the routing key the
+ * teammate's eventual `task_notification` uses to find its parent's mailbox.
+ *
+ * Returns null when the ctx isn't agent-scoped (legacy callers, tests,
+ * CLI). The async branch tolerates a null parent — agent_runs.parent_agent_id
+ * is nullable.
+ */
+function getCallerAgentId(ctx: ToolContext): string | null {
+  try {
+    const v = ctx.get<string>('callerAgentId');
+    return typeof v === 'string' && v.length > 0 ? v : null;
+  } catch {
+    return null;
+  }
+}
+
 function readTeamDeps(ctx: ToolContext): {
   db: Database | null;
   runId: string | null;
@@ -347,6 +368,14 @@ async function launchAsyncTeammate(
 
   const agentId = crypto.randomUUID();
 
+  // Phase E Task 7: read the caller's agentId from the ctx the agent-run
+  // processor (Phase D Task 4) injected. When the lead spawns a teammate,
+  // callerAgentId === lead.agentId; sub-spawns (forbidden by
+  // INTERNAL_TEAMMATE_TOOLS in Phase C) would carry the parent teammate's
+  // id. Null when no agent-scoped ctx is present (legacy / test paths) —
+  // agent_runs.parent_agent_id is nullable so this is safe.
+  const parentAgentId = getCallerAgentId(ctx);
+
   // 1. Queue the agent_runs row. The agent-run worker (Task 9) drains its
   //    mailbox and drives runAgent against `agentDefName`.
   await db.insert(agentRuns).values({
@@ -354,11 +383,7 @@ async function launchAsyncTeammate(
     teamId,
     memberId: currentMemberId,
     agentDefName: input.subagent_type,
-    // TODO Phase E: when the lead also runs as an agent_runs row, this
-    //   becomes the lead's agentId so the teammate's task_notification
-    //   can be routed back via parentAgentId. Phase B leaves it null — the
-    //   mailbox-drain kludge in team-run.ts (Task 12) bridges the gap.
-    parentAgentId: null,
+    parentAgentId,
     status: 'queued',
   });
 

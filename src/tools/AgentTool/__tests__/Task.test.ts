@@ -459,6 +459,27 @@ describe('Task tool — async branch (Phase B)', () => {
     expect(mailboxRow.messageType).toBe('message');
   });
 
+  it('sets parentAgentId from callerAgentId when the agent-run ctx provides it (Phase E Task 7)', async () => {
+    const result = await taskTool.execute(
+      {
+        subagent_type: 'test-agent',
+        prompt: 'Spawn me with a parent.',
+        description: 'Parent-aware async draft',
+        run_in_background: true,
+      },
+      makeTeamRunCtx({ callerAgentId: 'agent-lead-7' }),
+    );
+
+    expect(result.status).toBe('async_launched');
+    expect(typeof result.agentId).toBe('string');
+
+    // The first insert is into agent_runs — parent_agent_id should be the
+    // callerAgentId from ctx, NOT null (Phase B kludge removed).
+    const agentRunRow = asyncInserts[0]!.row;
+    expect(agentRunRow.id).toBe(result.agentId);
+    expect(agentRunRow.parentAgentId).toBe('agent-lead-7');
+  });
+
   it('falls back to sync path when the team flag is OFF', async () => {
     vi.mocked(isAgentTeamsEnabledForTeam).mockResolvedValue(false);
     runAgentImpl = async () => ({
