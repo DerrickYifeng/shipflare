@@ -10,7 +10,7 @@
 // subscribers.
 
 import type { Job } from 'bullmq';
-import { and, eq, inArray, not } from 'drizzle-orm';
+import { and, eq, inArray, isNull, not } from 'drizzle-orm';
 import { createLogger, loggerForJob } from '@/lib/logger';
 import { db, type Database } from '@/lib/db';
 import {
@@ -312,6 +312,83 @@ async function recordMessage(
     createdAt: createdAt.toISOString(),
   });
   return id;
+}
+
+// ---------------------------------------------------------------------------
+// Phase B mailbox drain — async teammate notifications for the lead
+// ---------------------------------------------------------------------------
+
+/**
+ * Phase B kludge: pull `<task-notification>` rows addressed to "the lead
+ * of this team". The lead doesn't yet have an `agent_runs` row (Phase E
+ * adds that), so async teammates spawned via Task with
+ * `run_in_background: true` insert their notifications with
+ * `toAgentId: null` — meaning "the team's lead". This drain filters
+ * by `(teamId, messageType='task_notification', toAgentId IS NULL,
+ * deliveredAt IS NULL)`, marks the rows delivered in the same
+ * transaction, and returns the XML content blocks. Phase E replaces
+ * this with proper agent_runs routing.
+ *
+ * Returns an empty array when nothing is undelivered. Failures
+ * (transient DB hiccup, missing transaction support in test fakes)
+ * are logged and swallowed — the lead's run keeps progressing on
+ * its primary goal.
+ */
+const POLL_INTERVAL_MS = 1000;
+
+interface LeadDrainedRow {
+  id: string;
+  content: string | null;
+}
+
+async function drainLeadMailbox(
+  database: Database,
+  teamId: string,
+): Promise<string[]> {
+  try {
+    return await database.transaction(async (tx) => {
+      const rows = (await tx
+        .select({
+          id: teamMessages.id,
+          content: teamMessages.content,
+        })
+        .from(teamMessages)
+        .where(
+          and(
+            eq(teamMessages.teamId, teamId),
+            eq(teamMessages.messageType, 'task_notification'),
+            isNull(teamMessages.toAgentId),
+            isNull(teamMessages.deliveredAt),
+          ),
+        )
+        .orderBy(teamMessages.createdAt)
+        .for('update')) as LeadDrainedRow[];
+
+      if (rows.length === 0) return [];
+
+      await tx
+        .update(teamMessages)
+        .set({ deliveredAt: new Date() })
+        .where(
+          inArray(
+            teamMessages.id,
+            rows.map((r) => r.id),
+          ),
+        );
+
+      return rows
+        .map((r) => r.content ?? '')
+        .filter((c) => c.length > 0);
+    });
+  } catch (err) {
+    // Swallow: drain is a best-effort idle-turn convenience. A failure
+    // here must not abort the lead's run on its primary goal. Phase E
+    // unification cleans up this kludge entirely.
+    baseLog.warn(
+      `drainLeadMailbox failed for team=${teamId}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return [];
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -660,6 +737,23 @@ export async function processTeamRunInternal(
     }
   }
 
+  // --- 9a) Wire async-teammate mailbox drain (Phase B) ---
+  // Background poller that drains `<task-notification>` rows addressed
+  // to the lead (toAgentId IS NULL) and pushes them onto the same FIFO
+  // user-message injections use. The lead's runAgent reads them from
+  // `injectMessages()` at the next idle-turn boundary. Phase B kludge:
+  // see `drainLeadMailbox` jsdoc for the toAgentId=null convention.
+  const drainTimer: ReturnType<typeof setInterval> = setInterval(() => {
+    void drainLeadMailbox(deps.db, team.id).then((contents) => {
+      if (contents.length === 0) return;
+      for (const content of contents) {
+        pendingInjections.push({ role: 'user', content });
+      }
+    });
+  }, POLL_INTERVAL_MS);
+  // Don't keep the worker process alive solely for this timer.
+  if (typeof drainTimer.unref === 'function') drainTimer.unref();
+
   // --- 9b) Wire cancellation signal ---
   // `/api/team/run/[runId]/cancel` publishes on this channel when the
   // user hits the Stop button in the composer. Aborting the controller
@@ -862,6 +956,17 @@ export async function processTeamRunInternal(
     await markFailed(deps, runId, message);
     throw err;
   } finally {
+    clearInterval(drainTimer);
+    // Final synchronous drain attempt so any notifications that landed
+    // between the last poll and run completion still get marked
+    // delivered_at — preventing the reconcile cron from re-enqueueing
+    // them. Best-effort; the helper already swallows its own errors.
+    try {
+      await drainLeadMailbox(deps.db, team.id);
+    } catch {
+      // drainLeadMailbox is already try/catch internally — defensive
+      // outer guard for completeness.
+    }
     if (injectSub) {
       try {
         await injectSub.unsubscribe();
