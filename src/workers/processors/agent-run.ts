@@ -31,10 +31,11 @@
 // skipped because there's no specific agent_runs row to wake.
 
 import type { Job } from 'bullmq';
-import { eq } from 'drizzle-orm';
+import { desc, eq } from 'drizzle-orm';
 import type Anthropic from '@anthropic-ai/sdk';
 import { db } from '@/lib/db';
-import { agentRuns, teamMessages } from '@/lib/db/schema';
+import type { Database } from '@/lib/db';
+import { agentRuns, teamConversations, teamMessages } from '@/lib/db/schema';
 import { runAgent } from '@/core/query-loop';
 import { resolveAgent } from '@/tools/AgentTool/registry';
 import { buildAgentConfigFromDefinition } from '@/tools/AgentTool/spawn';
@@ -42,6 +43,7 @@ import { synthesizeTaskNotification } from './lib/synthesize-notification';
 import { wake } from './lib/wake';
 import { drainMailbox } from './lib/mailbox-drain';
 import { loadAgentRunHistory } from './lib/agent-run-history';
+import { loadConversationHistory } from '@/lib/team-conversation';
 import { createLogger } from '@/lib/logger';
 import type { AgentRunJobData } from '@/lib/queue/agent-run';
 import type { AgentResult, ToolContext } from '@/core/types';
@@ -104,6 +106,30 @@ async function markFailed(agentId: string, reason: string): Promise<void> {
       lastActiveAt: new Date(),
     })
     .where(eq(agentRuns.id, agentId));
+}
+
+/**
+ * Phase E: resolve the team's primary `team_conversations.id` for the
+ * lead agent's history load.
+ *
+ * MVP rule: most recent conversation (by createdAt). Founders typically
+ * have a single ongoing thread per team in early Phase E; we'll evolve
+ * this once multi-conversation routing lands. Returns `null` for
+ * brand-new teams that haven't created a conversation row yet — the
+ * lead simply runs without priorMessages in that case (the founder's
+ * first message becomes the first turn).
+ */
+async function resolvePrimaryConversation(
+  teamId: string,
+  database: Database,
+): Promise<string | null> {
+  const rows = await database
+    .select({ id: teamConversations.id })
+    .from(teamConversations)
+    .where(eq(teamConversations.teamId, teamId))
+    .orderBy(desc(teamConversations.createdAt))
+    .limit(1);
+  return rows.length > 0 ? rows[0].id : null;
 }
 
 interface NotifyParams {
@@ -169,45 +195,9 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
     throw new Error(`agent_runs row not found for agentId=${agentId}`);
   }
 
-  // Phase D: resume path. When the row was put to sleep by the Sleep
-  // tool on a prior worker invocation, it is woken via either (a) the
-  // delayed BullMQ job Sleep scheduled, or (b) a SendMessage that called
-  // wake(). Either way we land here with status='sleeping' and need to
-  // rebuild the conversation transcript from team_messages before we
-  // can re-enter runAgent.
-  //
-  // Sequence: sleeping → resuming (transitional, in case load fails) →
-  // running. priorMessages stays empty for fresh (queued) runs so the
-  // existing Phase B/C single-shot path is unchanged.
-  let priorMessages: Anthropic.Messages.MessageParam[] | undefined;
-  if (row.status === 'sleeping') {
-    await db
-      .update(agentRuns)
-      .set({
-        status: 'resuming',
-        lastActiveAt: new Date(),
-        bullmqJobId: job.id ?? null,
-      })
-      .where(eq(agentRuns.id, agentId));
-    priorMessages = await loadAgentRunHistory(agentId, db);
-    log.info(
-      `agent-run ${agentId}: resuming from sleep with ${priorMessages.length} prior messages`,
-    );
-  }
-
-  // Mark running. (For a resume, this is the second update — moves the
-  // row from 'resuming' to 'running'. For a fresh run, this is the only
-  // status update before runAgent starts.)
-  await db
-    .update(agentRuns)
-    .set({
-      status: 'running',
-      lastActiveAt: new Date(),
-      bullmqJobId: job.id ?? null,
-    })
-    .where(eq(agentRuns.id, agentId));
-
-  // Load AgentDefinition
+  // Load AgentDefinition first — Phase E needs `def.role` to decide
+  // whether this run is the team-lead (loads from team_conversations)
+  // or a teammate (Phase D resume path keyed off agent_runs row).
   const def = await resolveAgent(row.agentDefName);
   if (!def) {
     const reason = `unknown agent: ${row.agentDefName}`;
@@ -224,6 +214,72 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
     });
     return;
   }
+
+  const isLead = def.role === 'lead';
+
+  // Resolve priorMessages.
+  //
+  // Phase E (lead): the team-lead's conversation lives in `team_messages`
+  // scoped by `team_conversations.id` — same pattern team-run.ts used
+  // before unification (lines 789-801 of the legacy driver). Each lead
+  // agent_runs row reuses the team's persistent conversation so the
+  // founder sees a single ongoing thread instead of one history-per-run.
+  //
+  // Phase D (teammate resume): when the row was put to sleep by the
+  // Sleep tool on a prior worker invocation, it is woken via either
+  // (a) the delayed BullMQ job Sleep scheduled, or (b) a SendMessage
+  // that called wake(). Either way we land here with status='sleeping'
+  // and rebuild the per-agent transcript via loadAgentRunHistory.
+  //
+  // Phase B/C (fresh teammate): priorMessages stays undefined; the
+  // initial mailbox drain seeds the first user prompt and runAgent
+  // builds history from there.
+  //
+  // Sleeping → resuming → running is preserved for the non-lead resume
+  // path; the lead path skips the resuming dance because lead runs are
+  // always fresh BullMQ jobs (Phase E API inserts a queued row + wakes).
+  let priorMessages: Anthropic.Messages.MessageParam[] | undefined;
+  if (isLead) {
+    const conversationId = await resolvePrimaryConversation(row.teamId, db);
+    if (conversationId) {
+      priorMessages = await loadConversationHistory(row.teamId, {
+        conversationId,
+        db,
+      });
+      log.info(
+        `agent-run ${agentId}: lead loaded ${priorMessages.length} messages from conversation ${conversationId}`,
+      );
+    } else {
+      log.info(
+        `agent-run ${agentId}: lead has no team_conversations row yet — running without priorMessages`,
+      );
+    }
+  } else if (row.status === 'sleeping') {
+    await db
+      .update(agentRuns)
+      .set({
+        status: 'resuming',
+        lastActiveAt: new Date(),
+        bullmqJobId: job.id ?? null,
+      })
+      .where(eq(agentRuns.id, agentId));
+    priorMessages = await loadAgentRunHistory(agentId, db);
+    log.info(
+      `agent-run ${agentId}: resuming from sleep with ${priorMessages.length} prior messages`,
+    );
+  }
+
+  // Mark running. (For a non-lead resume, this is the second update —
+  // moves the row from 'resuming' to 'running'. For a fresh run or a
+  // lead run, this is the only status update before runAgent starts.)
+  await db
+    .update(agentRuns)
+    .set({
+      status: 'running',
+      lastActiveAt: new Date(),
+      bullmqJobId: job.id ?? null,
+    })
+    .where(eq(agentRuns.id, agentId));
 
   // Read initial prompt from mailbox (the Task tool inserted it before
   // calling wake()). The first drain still seeds the prompt; Phase C

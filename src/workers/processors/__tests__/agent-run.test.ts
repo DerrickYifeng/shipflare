@@ -6,7 +6,12 @@ import type { AgentRunJobData } from '@/lib/queue/agent-run';
 // Mocks — full integration runs in Phase B Task 14 e2e.
 // ---------------------------------------------------------------------------
 
-// db mock — chainable update / insert builders + query.agentRuns.findFirst.
+// db mock — chainable update / insert / select builders + query.agentRuns.findFirst.
+//
+// The select chain backs `resolvePrimaryConversation`'s
+// `db.select({id}).from(teamConversations).where(...).orderBy(...).limit(1)`.
+// Tests can rebind `selectChain.limit` per case to return whichever rows
+// they want (most cases want either zero rows or a single conversation id).
 const updateChain = {
   set: vi.fn(() => updateChain),
   where: vi.fn(async () => undefined),
@@ -14,11 +19,25 @@ const updateChain = {
 const insertChain = {
   values: vi.fn(async () => undefined),
 };
+const selectChain: {
+  from: ReturnType<typeof vi.fn>;
+  where: ReturnType<typeof vi.fn>;
+  orderBy: ReturnType<typeof vi.fn>;
+  limit: ReturnType<typeof vi.fn>;
+} = {
+  from: vi.fn(() => selectChain),
+  where: vi.fn(() => selectChain),
+  orderBy: vi.fn(() => selectChain),
+  // Default: no team_conversations row exists — lead falls back to
+  // running without priorMessages. Individual tests can override.
+  limit: vi.fn(async () => []),
+};
 vi.mock('@/lib/db', () => ({
   db: {
     query: { agentRuns: { findFirst: vi.fn() } },
     update: vi.fn(() => updateChain),
     insert: vi.fn(() => insertChain),
+    select: vi.fn(() => selectChain),
     transaction: vi.fn(),
   },
 }));
@@ -99,10 +118,16 @@ vi.mock('@/workers/processors/lib/agent-run-history', () => ({
   loadAgentRunHistory: vi.fn(async () => []),
 }));
 
+vi.mock('@/lib/team-conversation', () => ({
+  loadConversationHistory: vi.fn(async () => []),
+}));
+
 import { processAgentRun } from '@/workers/processors/agent-run';
 import { db } from '@/lib/db';
 import { drainMailbox } from '@/workers/processors/lib/mailbox-drain';
 import { loadAgentRunHistory } from '@/workers/processors/lib/agent-run-history';
+import { loadConversationHistory } from '@/lib/team-conversation';
+import { resolveAgent } from '@/tools/AgentTool/registry';
 
 function makeJob(agentId: string): Job<AgentRunJobData> {
   return { id: 'job-1', data: { agentId } } as unknown as Job<AgentRunJobData>;
@@ -114,6 +139,15 @@ describe('processAgentRun', () => {
     updateChain.set.mockClear();
     updateChain.where.mockClear();
     insertChain.values.mockClear();
+    selectChain.from.mockClear();
+    selectChain.where.mockClear();
+    selectChain.orderBy.mockClear();
+    selectChain.limit.mockReset();
+    // Reset to default chain behavior after mockReset wiped the impl.
+    selectChain.from.mockReturnValue(selectChain);
+    selectChain.where.mockReturnValue(selectChain);
+    selectChain.orderBy.mockReturnValue(selectChain);
+    selectChain.limit.mockResolvedValue([]);
     runAgentHoisted.state.lastArgs = null;
   });
 
@@ -599,5 +633,111 @@ describe('processAgentRun', () => {
       (r) => r.messageType === 'task_notification',
     );
     expect(notification).toBeDefined();
+  });
+
+  // ---------------------------------------------------------------------
+  // Phase E Task 4 — lead init: load conversation history
+  // ---------------------------------------------------------------------
+
+  it('lead agent loads conversation history via loadConversationHistory and passes it as priorMessages to runAgent', async () => {
+    // Lead row — fresh queued, no parent (lead is the root).
+    vi.mocked(db.query.agentRuns.findFirst).mockResolvedValue({
+      id: 'lead-1',
+      teamId: 'team-lead',
+      memberId: 'mem-lead',
+      agentDefName: 'coordinator',
+      parentAgentId: null,
+      status: 'queued',
+    } as never);
+
+    // Flag this agent as the team-lead so the Phase E branch fires.
+    vi.mocked(resolveAgent).mockResolvedValueOnce({
+      source: 'built-in',
+      sourcePath: '/test',
+      name: 'coordinator',
+      description: 'mock lead',
+      role: 'lead',
+      tools: [],
+      disallowedTools: [],
+      skills: [],
+      requires: [],
+      background: false,
+      maxTurns: 10,
+      systemPrompt: 'You are the team lead.',
+    } as never);
+
+    // resolvePrimaryConversation: select(...).from(...).where(...).orderBy(...).limit(1)
+    // Return one row → lead has a primary conversation to load from.
+    selectChain.limit.mockResolvedValueOnce([{ id: 'conv-primary' }]);
+
+    const priorTurns = [
+      { role: 'user' as const, content: 'previous chat msg 1' },
+      { role: 'assistant' as const, content: 'previous reply' },
+    ];
+    vi.mocked(loadConversationHistory).mockResolvedValueOnce(priorTurns);
+
+    await processAgentRun(makeJob('lead-1'));
+
+    // Lead consulted team_conversations for its primary thread id and
+    // then loaded history scoped to that conversation.
+    expect(loadConversationHistory).toHaveBeenCalledOnce();
+    const [teamIdArg, optsArg] = vi.mocked(loadConversationHistory).mock.calls[0];
+    expect(teamIdArg).toBe('team-lead');
+    expect(optsArg).toMatchObject({ conversationId: 'conv-primary' });
+
+    // Phase D's per-agent transcript loader must NOT run for the lead —
+    // lead history lives in team_messages keyed by conversation, not by
+    // agent_runs row.
+    expect(loadAgentRunHistory).not.toHaveBeenCalled();
+
+    // priorMessages lands at runAgent positional arg 9
+    // (config, userMessage, ctx, schema, onProgress, prebuilt, onIdleReset,
+    //  onEvent, injectMessages, priorMessages).
+    expect(runAgentHoisted.state.lastArgs).not.toBeNull();
+    expect(runAgentHoisted.state.lastArgs?.[9]).toEqual(priorTurns);
+
+    // Lead path skips the resuming dance — it's a fresh BullMQ job, not
+    // a wake-from-sleep.
+    const setCalls = updateChain.set.mock.calls.map(
+      (c) => (c as unknown as [Record<string, unknown>])[0],
+    );
+    expect(setCalls.some((s) => s.status === 'resuming')).toBe(false);
+    expect(setCalls.some((s) => s.status === 'running')).toBe(true);
+  });
+
+  it('non-lead agent (Phase D resume from sleeping) keeps the loadAgentRunHistory path unchanged', async () => {
+    vi.mocked(db.query.agentRuns.findFirst).mockResolvedValue({
+      id: 'agent-non-lead-resume',
+      teamId: 'team-1',
+      memberId: 'mem-1',
+      agentDefName: 'content-manager',
+      parentAgentId: 'lead-agent',
+      status: 'sleeping',
+    } as never);
+
+    // Default resolveAgent returns role='member' — non-lead path.
+    const priorTurns = [
+      { role: 'user' as const, content: 'agent-scoped resume turn' },
+    ];
+    vi.mocked(loadAgentRunHistory).mockResolvedValueOnce(priorTurns);
+
+    await processAgentRun(makeJob('agent-non-lead-resume'));
+
+    // Phase E's lead loader must NOT run for a non-lead agent.
+    expect(loadConversationHistory).not.toHaveBeenCalled();
+
+    // Phase D path runs — agent-scoped history, with the resuming → running
+    // status hop preserved.
+    expect(loadAgentRunHistory).toHaveBeenCalledOnce();
+    expect(vi.mocked(loadAgentRunHistory).mock.calls[0][0]).toBe(
+      'agent-non-lead-resume',
+    );
+    expect(runAgentHoisted.state.lastArgs?.[9]).toEqual(priorTurns);
+
+    const setCalls = updateChain.set.mock.calls.map(
+      (c) => (c as unknown as [Record<string, unknown>])[0],
+    );
+    expect(setCalls.some((s) => s.status === 'resuming')).toBe(true);
+    expect(setCalls.some((s) => s.status === 'running')).toBe(true);
   });
 });
