@@ -63,6 +63,16 @@ export function buildTool<TInput, TOutput>(config: {
  * jsonSchema7 emits the number form (`exclusiveMinimum: 0`) that is
  * forward-compatible with 2020-12. Also treats `.optional()` as
  * actually-optional instead of `anyOf: [X, null]` + required.
+ *
+ * Top-level `type: 'object'` is REQUIRED by Anthropic's tool input_schema
+ * grammar (`Anthropic.Messages.Tool.InputSchema.type: 'object'`). Some Zod
+ * constructs — notably `z.preprocess(...)` wrapping a discriminated union
+ * (see `SendMessageInputSchema`) and `z.union([...])` at the root — emit a
+ * top-level `{ anyOf: [...] }` with no `type`, which fails the API's
+ * validator with `tools.N.custom.input_schema.type: Field required`. We
+ * inject `type: 'object'` when missing; the underlying `anyOf` / `oneOf`
+ * still narrows the accepted shapes correctly because each alternative is
+ * itself an object schema.
  */
 export function toAnthropicTool(tool: ToolDefinition): Anthropic.Messages.Tool {
   const jsonSchema = zodToJsonSchema(tool.inputSchema, {
@@ -73,6 +83,9 @@ export function toAnthropicTool(tool: ToolDefinition): Anthropic.Messages.Tool {
   // Strip the JSON Schema `$schema` meta field — Anthropic rejects it.
   const schema = { ...(jsonSchema as Record<string, unknown>) };
   delete schema.$schema;
+  if (schema.type === undefined) {
+    schema.type = 'object';
+  }
 
   return {
     name: tool.name,
