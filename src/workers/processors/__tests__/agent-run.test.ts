@@ -122,6 +122,38 @@ vi.mock('@/lib/team-conversation', () => ({
   loadConversationHistory: vi.fn(async () => []),
 }));
 
+// system-prompt-context: agent-run.ts now renders def.systemPrompt
+// against live DB context before invoking runAgent. Default fixture
+// returns a generic ctx so the prior tests keep passing; the wiring
+// test below overrides it per-call to assert substitution lands.
+const loadSystemPromptContextMock = vi.hoisted(() =>
+  vi.fn(async () => ({
+    productName: 'TestProduct',
+    productDescription: 'a test product',
+    productState: 'mvp',
+    currentPhase: 'foundation',
+    channels: 'none yet',
+    strategicPathId: 'none yet',
+    itemCount: 0,
+    statusBreakdown: '',
+    founderName: 'TestFounder',
+    teamRoster: '- coordinator: Chief of Staff (Tools: Task)',
+  })),
+);
+vi.mock('@/lib/team/system-prompt-context', () => ({
+  loadSystemPromptContext: loadSystemPromptContextMock,
+  // The implementation re-exports its `substitutePlaceholders` for
+  // direct callers; agent-run uses the real function so the mock
+  // forwards a deterministic shape.
+  substitutePlaceholders: (template: string, ctx: { productName: string; founderName: string; teamRoster: string }) => {
+    let out = template;
+    out = out.split('{productName}').join(ctx.productName);
+    out = out.split('{founderName}').join(ctx.founderName);
+    out = out.split('{TEAM_ROSTER}').join(ctx.teamRoster);
+    return out;
+  },
+}));
+
 // Phase E Task 6: SSE publisher — tests assert publish is called for the
 // lead's assistant turns and skipped for teammates'.
 const publishMock = vi.hoisted(() =>
@@ -160,6 +192,7 @@ describe('processAgentRun', () => {
     selectChain.limit.mockResolvedValue([]);
     runAgentHoisted.state.lastArgs = null;
     publishMock.mockClear();
+    loadSystemPromptContextMock.mockClear();
   });
 
   it('loads agent_runs row by agentId', async () => {
@@ -1555,5 +1588,77 @@ describe('processAgentRun', () => {
     (insertChain.values.mockImplementation as unknown as (
       impl: (...args: unknown[]) => Promise<undefined>,
     ) => void)(async () => undefined);
+  });
+
+  // ---------------------------------------------------------------------
+  // Task 2 — system-prompt placeholder substitution wiring
+  // ---------------------------------------------------------------------
+
+  it('substitutes system-prompt placeholders before invoking runAgent', async () => {
+    vi.mocked(db.query.agentRuns.findFirst).mockResolvedValueOnce({
+      id: 'lead-subst',
+      teamId: 'team-subst',
+      memberId: 'mem-subst',
+      agentDefName: 'coordinator',
+      parentAgentId: null,
+      status: 'queued',
+    } as never);
+
+    // The fixture def carries an unsubstituted `{productName}` token —
+    // exactly the failure mode this task fixes.
+    vi.mocked(resolveAgent).mockResolvedValueOnce({
+      source: 'built-in',
+      sourcePath: '/test',
+      name: 'coordinator',
+      description: 'mock lead',
+      role: 'lead',
+      tools: [],
+      disallowedTools: [],
+      skills: [],
+      requires: [],
+      background: false,
+      maxTurns: 10,
+      systemPrompt:
+        'Welcome to {productName}. Founder: {founderName}. Roster:\n{TEAM_ROSTER}',
+    } as never);
+
+    // Stub the substitution context with values we can grep for in the
+    // rendered prompt the worker hands to runAgent.
+    loadSystemPromptContextMock.mockResolvedValueOnce({
+      productName: 'Acme',
+      productDescription: 'a magical thing',
+      productState: 'launched',
+      currentPhase: 'growth',
+      channels: 'x, reddit',
+      strategicPathId: 'sp_42',
+      itemCount: 3,
+      statusBreakdown: 'planned: 3',
+      founderName: 'Alex',
+      teamRoster: '- coordinator: Chief of Staff (Tools: Task)',
+    });
+
+    await processAgentRun(makeJob('lead-subst'));
+
+    // The worker must have queried system-prompt context for this team
+    // before invoking runAgent.
+    expect(loadSystemPromptContextMock).toHaveBeenCalledWith(
+      expect.objectContaining({ teamId: 'team-subst' }),
+    );
+
+    // runAgent's first positional arg is the AgentConfig built from the
+    // rendered def. Assert the substituted values landed and no literal
+    // braces survived for the tokens we set.
+    expect(runAgentHoisted.state.lastArgs).not.toBeNull();
+    const config = runAgentHoisted.state.lastArgs?.[0] as {
+      systemPrompt: string;
+    };
+    expect(config.systemPrompt).toContain('Welcome to Acme');
+    expect(config.systemPrompt).toContain('Founder: Alex');
+    expect(config.systemPrompt).toContain(
+      '- coordinator: Chief of Staff (Tools: Task)',
+    );
+    expect(config.systemPrompt).not.toContain('{productName}');
+    expect(config.systemPrompt).not.toContain('{founderName}');
+    expect(config.systemPrompt).not.toContain('{TEAM_ROSTER}');
   });
 });

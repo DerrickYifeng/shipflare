@@ -49,6 +49,11 @@ import {
 } from './lib/team-state-writethrough';
 import type { LeadStatus } from '@/lib/team/team-state-cache';
 import { loadConversationHistory } from '@/lib/team-conversation';
+import {
+  loadSystemPromptContext,
+  substitutePlaceholders,
+} from '@/lib/team/system-prompt-context';
+import type { AgentDefinition } from '@/tools/AgentTool/loader';
 import { createLogger } from '@/lib/logger';
 import { getPubSubPublisher } from '@/lib/redis';
 import { teamMessagesChannel } from '@/tools/SendMessageTool/SendMessageTool';
@@ -771,7 +776,23 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
   let result: AgentResult<unknown> | null = null;
 
   try {
-    const config = buildAgentConfigFromDefinition(def);
+    // Render the AGENT.md template's `{productName}` / `{TEAM_ROSTER}` /
+    // etc. placeholders against live team / product / strategic-path /
+    // plan-items / channels / user state BEFORE handing the prompt to
+    // runAgent. Until this lands, the lead reads literal braces and
+    // improvises "DB context not injected" excuses instead of calling
+    // its own query tools. `loadSystemPromptContext` throws only when
+    // the team row itself is missing — every other lookup falls back to
+    // a sane default so a freshly-onboarded team still renders coherently.
+    const promptCtx = await loadSystemPromptContext({
+      teamId: row.teamId,
+      db,
+    });
+    const renderedDef: AgentDefinition = {
+      ...def,
+      systemPrompt: substitutePlaceholders(def.systemPrompt, promptCtx),
+    };
+    const config = buildAgentConfigFromDefinition(renderedDef);
     const ctx = buildPhaseBToolContext(controller, agentId);
     result = await runAgent(
       config,

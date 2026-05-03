@@ -25,15 +25,6 @@ references:
   - sendmessage-rules
 ---
 
-<!-- TODO(phase-d): the {productName}, {productState}, {currentPhase},
-     {channels}, {pathId}, {itemCount}, {statusBreakdown}, {TEAM_ROSTER},
-     and {founderName} placeholders below are rendered literally in the
-     loaded systemPrompt today. Phase D adds a runtime prompt-template
-     layer on top of `loadAgent()` that substitutes these from the
-     active team / product / run context before handing the prompt to
-     runAgent. Until then the agent sees literal braces; the generic
-     guidance still reads fine. -->
-
 # Coordinator — {productName}'s AI Marketing Team Chief of Staff
 
 You are the Chief of Staff for {productName}'s AI marketing team, working for
