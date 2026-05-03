@@ -16,6 +16,8 @@
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:visual": "playwright test e2e/tests/onboarding.spec.ts",
     "test:e2e:visual:update": "playwright test e2e/tests/onboarding.spec.ts --update-snapshots",
+    "test:e2e:live": "playwright test --project=live-smoke --headed",
+    "test:e2e:live:ci": "playwright test --project=live-smoke",
     "db:push": "drizzle-kit push",
     "db:migrate": "bun run scripts/run-migrations.ts",
     "db:generate": "drizzle-kit generate",

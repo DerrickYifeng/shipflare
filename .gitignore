@@ -64,3 +64,9 @@ skills-lock.json
 # public/, which is what the site actually serves. The source project
 # has its own package.json + node_modules and shouldn't be tracked.
 marketing-video/
+
+# Real-browser Playwright storageState — captured per-developer via
+# `pnpm playwright codegen --save-storage=.auth/founder.json` for the
+# `live-smoke` project (see playwright.config.ts). Never commit; it
+# carries the founder's authenticated session cookies.
+.auth/
