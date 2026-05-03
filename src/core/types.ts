@@ -114,8 +114,15 @@ export interface ToolResult {
  * the existing tag so leaf events carry their immediate parent.
  */
 export interface StreamEventSpawnMeta {
-  /** `team_tasks.id` of the spawn that produced this event. */
-  parentTaskId: string;
+  /**
+   * `team_tasks.id` of the spawn that produced this event, when the
+   * spawn flowed through the Task tool (which records a team_tasks
+   * row before runAgent). `null` when the spawn was a SkillTool fork
+   * — skills don't allocate a team_tasks row, so the
+   * parent_tool_use_id + agentName fields are the only attribution
+   * the worker persists for fork-skill events.
+   */
+  parentTaskId: string | null;
   /**
    * Anthropic-issued `tool_use_id` of the coordinator's Task call that
    * spawned this subagent. Gives the UI a stable anchor to nest every

@@ -2038,4 +2038,238 @@ describe('processAgentRun', () => {
       'toolu_parent_2',
     );
   });
+
+  // ---------------------------------------------------------------------
+  // Task 1 — correctness orphans (callerRole + SSE-from attribution)
+  //
+  // (a) callerRole ctx key was never wired. SendMessageTool.ts:254 and
+  // TaskStopTool.ts:120 call tryGet<string>(ctx, 'callerRole') and
+  // fail-closed when missing → the lead can't TaskStop teammates from
+  // inside its own loop. The fix: extend PhaseBToolContextArgs with
+  // `role: 'lead' | 'member'` and add a switch case so consumers see
+  // the right value.
+  //
+  // (b) lead-path SSE publish for spawnMeta-tagged events still sends
+  // `from: row.memberId`, while the durable row (above) correctly
+  // attributes via resolveFromMemberId. The live envelope must agree
+  // with the persisted truth so the founder UI doesn't snap from
+  // "lead" to "specialist" on refresh (~1-3s visual stutter today).
+  // ---------------------------------------------------------------------
+
+  it('tool ctx exposes callerRole=lead when the agent role is lead', async () => {
+    vi.mocked(db.query.agentRuns.findFirst).mockResolvedValue({
+      id: 'lead-callerrole',
+      teamId: 'team-callerrole',
+      memberId: 'mem-lead-cr',
+      agentDefName: 'coordinator',
+      parentAgentId: null,
+      status: 'queued',
+    } as never);
+
+    teamSelectChain.limit.mockResolvedValueOnce([
+      { id: 'team-callerrole', userId: 'user-callerrole', productId: null },
+    ]);
+
+    vi.mocked(resolveAgent).mockResolvedValueOnce({
+      source: 'built-in',
+      sourcePath: '/test',
+      name: 'coordinator',
+      description: 'mock lead',
+      role: 'lead',
+      tools: [],
+      disallowedTools: [],
+      skills: [],
+      requires: [],
+      background: false,
+      maxTurns: 10,
+      systemPrompt: 'You are the team lead.',
+    } as never);
+
+    let capturedCtx: { get<V>(key: string): V } | null = null;
+    runAgentHoisted.fn.mockImplementationOnce(async (...args: unknown[]) => {
+      runAgentHoisted.state.lastArgs = args;
+      capturedCtx = args[2] as { get<V>(key: string): V };
+      return {
+        result: 'ok',
+        usage: {
+          inputTokens: 1,
+          outputTokens: 1,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          costUsd: 0,
+          model: 'claude-sonnet-4-6',
+          turns: 1,
+        },
+      };
+    });
+
+    await processAgentRun(makeJob('lead-callerrole'));
+
+    expect(capturedCtx).not.toBeNull();
+    // Lead-only consumers (TaskStopTool, SendMessageTool) read via
+    // tryGet<string>(ctx, 'callerRole') and fail-closed when missing.
+    // After Task 1 the wiring lands so this lookup returns 'lead'.
+    expect(capturedCtx!.get<'lead' | 'member'>('callerRole')).toBe('lead');
+  });
+
+  it('tool ctx exposes callerRole=member when the agent role is member', async () => {
+    vi.mocked(db.query.agentRuns.findFirst).mockResolvedValue({
+      id: 'mate-callerrole',
+      teamId: 'team-callerrole-mem',
+      memberId: 'mem-cr',
+      agentDefName: 'content-manager',
+      parentAgentId: 'lead-agent',
+      status: 'queued',
+    } as never);
+
+    let capturedCtx: { get<V>(key: string): V } | null = null;
+    runAgentHoisted.fn.mockImplementationOnce(async (...args: unknown[]) => {
+      runAgentHoisted.state.lastArgs = args;
+      capturedCtx = args[2] as { get<V>(key: string): V };
+      return {
+        result: 'ok',
+        usage: {
+          inputTokens: 1,
+          outputTokens: 1,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          costUsd: 0,
+          model: 'claude-sonnet-4-6',
+          turns: 1,
+        },
+      };
+    });
+
+    await processAgentRun(makeJob('mate-callerrole'));
+
+    expect(capturedCtx).not.toBeNull();
+    expect(capturedCtx!.get<'lead' | 'member'>('callerRole')).toBe('member');
+  });
+
+  it('lead-path SSE publish uses spawnMeta.fromMemberId when present (live envelope agrees with durable row)', async () => {
+    vi.mocked(db.query.agentRuns.findFirst).mockResolvedValueOnce({
+      id: 'lead-sse-from',
+      teamId: 'team-sse-from',
+      memberId: 'mem-lead-sse-from',
+      agentDefName: 'coordinator',
+      parentAgentId: null,
+      status: 'queued',
+    } as never);
+
+    teamSelectChain.limit.mockResolvedValueOnce([
+      { id: 'team-sse-from', userId: 'user-sse-from', productId: null },
+    ]);
+
+    vi.mocked(resolveAgent).mockResolvedValueOnce({
+      source: 'built-in',
+      sourcePath: '/test',
+      name: 'coordinator',
+      description: 'mock lead',
+      role: 'lead',
+      tools: [],
+      disallowedTools: [],
+      skills: [],
+      requires: [],
+      background: false,
+      maxTurns: 10,
+      systemPrompt: 'You are the team lead.',
+    } as never);
+
+    selectChain.limit.mockResolvedValueOnce([{ id: 'conv-sse-from' }]);
+
+    runAgentHoisted.fn.mockImplementationOnce(async (...args: unknown[]) => {
+      runAgentHoisted.state.lastArgs = args;
+      const onEvent = args[7] as
+        | ((event: import('@/core/types').StreamEvent) => void | Promise<void>)
+        | undefined;
+      if (onEvent) {
+        // Drive a tool_start + tool_done + assistant_text_stop, all
+        // tagged with spawnMeta. Each of the three lead-path SSE
+        // publishes must use spawnMeta.fromMemberId for the `from`
+        // field instead of the lead's row.memberId.
+        await onEvent({
+          type: 'tool_start',
+          toolName: 'reddit_search',
+          toolUseId: 'toolu_sse_from_1',
+          input: { query: 'spawn-attributed' },
+          spawnMeta: {
+            parentTaskId: 'task_sse_from_1',
+            parentToolUseId: 'toolu_lead_disp_1',
+            fromMemberId: 'spawned-mem-sse',
+            agentName: 'discovery-agent',
+          },
+        });
+        await onEvent({
+          type: 'tool_done',
+          toolName: 'reddit_search',
+          toolUseId: 'toolu_sse_from_1',
+          durationMs: 17,
+          result: {
+            tool_use_id: 'toolu_sse_from_1',
+            content: 'ok',
+            is_error: false,
+          },
+          spawnMeta: {
+            parentTaskId: 'task_sse_from_1',
+            parentToolUseId: 'toolu_lead_disp_1',
+            fromMemberId: 'spawned-mem-sse',
+            agentName: 'discovery-agent',
+          },
+        });
+        await onEvent({
+          type: 'assistant_text_stop',
+          messageId: 'msg-sse-from-1',
+          turn: 1,
+          blockIndex: 0,
+          text: 'spawn-attributed reply',
+          spawnMeta: {
+            parentTaskId: 'task_sse_from_1',
+            parentToolUseId: 'toolu_lead_disp_1',
+            fromMemberId: 'spawned-mem-sse',
+            agentName: 'discovery-agent',
+          },
+        });
+      }
+      return {
+        result: 'ok',
+        usage: {
+          inputTokens: 1,
+          outputTokens: 1,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          costUsd: 0,
+          model: 'claude-sonnet-4-6',
+          turns: 1,
+        },
+      };
+    });
+
+    await processAgentRun(makeJob('lead-sse-from'));
+
+    // Find the three SSE payloads on the team-messages channel.
+    const channel = teamMessagesChannel('team-sse-from');
+    const ssePayloads = publishMock.mock.calls
+      .filter(([c]) => c === channel)
+      .map(([, raw]) => JSON.parse(raw as string) as Record<string, unknown>);
+
+    const sseToolCall = ssePayloads.find((p) => p.type === 'tool_call');
+    const sseToolResult = ssePayloads.find((p) => p.type === 'tool_result');
+    const sseAgentText = ssePayloads.find((p) => p.type === 'agent_text');
+
+    expect(sseToolCall).toBeDefined();
+    expect(sseToolResult).toBeDefined();
+    expect(sseAgentText).toBeDefined();
+
+    // The published `from` field must be the spawned member's id, not
+    // the lead's row.memberId. Otherwise the live envelope contradicts
+    // the durable row (which already uses resolveFromMemberId), causing
+    // the founder UI to render the lead "executing" tool calls and
+    // then snap to the specialist on refresh.
+    expect(sseToolCall!.from).toBe('spawned-mem-sse');
+    expect(sseToolResult!.from).toBe('spawned-mem-sse');
+    expect(sseAgentText!.from).toBe('spawned-mem-sse');
+    expect(sseToolCall!.from).not.toBe('mem-lead-sse-from');
+    expect(sseToolResult!.from).not.toBe('mem-lead-sse-from');
+    expect(sseAgentText!.from).not.toBe('mem-lead-sse-from');
+  });
 });

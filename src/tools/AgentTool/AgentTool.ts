@@ -275,7 +275,7 @@ async function recordTaskFailure(
  * team_provisioner hasn't seeded a row for this agent_type yet — callers
  * fall back to the caller's memberId for legacy-compatible attribution.
  */
-async function resolveSpecialistMemberId(
+export async function resolveSpecialistMemberId(
   ctx: ToolContext,
   agentType: string,
 ): Promise<string | null> {
@@ -302,7 +302,7 @@ async function resolveSpecialistMemberId(
  * the event; deeper spawns preserve an existing tag so leaf events always
  * carry their immediate parent. Non-tool events pass through untouched.
  */
-function wrapOnEventWithSpawnMeta(
+export function wrapOnEventWithSpawnMeta(
   parentOnEvent: (event: StreamEvent) => void | Promise<void>,
   spawnMeta: StreamEventSpawnMeta,
 ): (event: StreamEvent) => void | Promise<void> {

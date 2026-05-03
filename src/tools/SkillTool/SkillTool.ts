@@ -11,10 +11,17 @@
 
 import { z } from 'zod';
 import { buildTool } from '@/core/tool-system';
-import type { ToolDefinition } from '@/core/types';
+import type {
+  StreamEventSpawnMeta,
+  ToolDefinition,
+} from '@/core/types';
 import { createLogger } from '@/lib/logger';
 import { spawnSubagent, type SpawnCallbacks } from '@/tools/AgentTool/spawn';
 import type { AgentDefinition } from '@/tools/AgentTool/loader';
+import {
+  resolveSpecialistMemberId,
+  wrapOnEventWithSpawnMeta,
+} from '@/tools/AgentTool/AgentTool';
 import { DEFAULT_SKILL_FORK_MAX_TURNS, SKILL_TOOL_NAME } from './constants';
 import { getAllSkills } from './registry';
 
@@ -101,7 +108,7 @@ export const skillTool: ToolDefinition<SkillToolInput, SkillToolOutput> = buildT
     // team_messages channel as the parent's. The team-run worker stashes
     // its onEvent under ctx.get('onEvent'); callers that aren't
     // team-scoped won't have it, in which case we pass undefined and the
-    // fork runs quietly. Mirrors AgentTool's wiring (AgentTool.ts:380).
+    // fork runs quietly. Mirrors AgentTool's wiring (AgentTool.ts:580).
     //
     // Without this, fork-mode tool calls (e.g. write_strategic_path
     // inside generating-strategy) never publish to the channel that
@@ -115,8 +122,44 @@ export const skillTool: ToolDefinition<SkillToolInput, SkillToolOutput> = buildT
     } catch {
       onEventFn = undefined;
     }
-    const callbacks: SpawnCallbacks | undefined = onEventFn
-      ? { onEvent: onEventFn }
+
+    // Task 1 (2026-05-03 plan): wrap the forwarded onEvent with
+    // spawnMeta so child events attribute to the spawned fork specialist
+    // instead of the lead. Mirrors AgentTool.ts (lines 580-603); the
+    // only behavioral difference is `parentTaskId: null` — skills don't
+    // allocate a `team_tasks` row, so the worker persists only
+    // parent_tool_use_id + agent_name in metadata for fork-skill events.
+    //
+    // resolveSpecialistMemberId may return null when the ctx isn't
+    // team-scoped (CLI / tests / non-team callers); the wrap still
+    // injects parentToolUseId + agentName so the UI's delegation card
+    // can nest by tool_use_id even without a member id. Same fallback
+    // contract as the Task tool's wiring.
+    let wrappedOnEvent: SpawnCallbacks['onEvent'] | undefined = onEventFn;
+    if (onEventFn) {
+      const specialistMemberId = await resolveSpecialistMemberId(
+        ctx,
+        subAgentDef.name,
+      );
+      let parentToolUseId = '';
+      try {
+        const fromCtx = ctx.get<string | null | undefined>('toolUseId');
+        if (typeof fromCtx === 'string' && fromCtx.length > 0) {
+          parentToolUseId = fromCtx;
+        }
+      } catch {
+        parentToolUseId = '';
+      }
+      const spawnMeta: StreamEventSpawnMeta = {
+        parentTaskId: null,
+        parentToolUseId,
+        fromMemberId: specialistMemberId,
+        agentName: subAgentDef.name,
+      };
+      wrappedOnEvent = wrapOnEventWithSpawnMeta(onEventFn, spawnMeta);
+    }
+    const callbacks: SpawnCallbacks | undefined = wrappedOnEvent
+      ? { onEvent: wrappedOnEvent }
       : undefined;
 
     const result = await spawnSubagent<unknown>(

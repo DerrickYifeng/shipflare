@@ -182,6 +182,16 @@ interface PhaseBToolContextArgs {
   conversationId: string | null;
   runId: string;
   /**
+   * The caller's team role — exposed via `ctx.get('callerRole')` to
+   * lead-only consumers (TaskStopTool, SendMessageTool's lead-only
+   * checks). The deleted team-run.ts never wired this key either; the
+   * fail-closed default in those tools meant the lead silently lost
+   * authority over teammates from inside its own loop. Restoring the
+   * wiring lets the lead `TaskStop({task_id})` / send broadcast
+   * messages without crossing the per-teammate cancel HTTP boundary.
+   */
+  role: 'lead' | 'member';
+  /**
    * Holder for the lead's per-run event sink. AgentTool / SkillTool
    * read `ctx.get('onEvent')` and forward the returned function into
    * spawned runAgent / forked skill calls so child tool events land
@@ -228,6 +238,15 @@ async function buildPhaseBToolContext(
         // Phase D: Sleep tool reads its caller identity from this key.
         case 'callerAgentId':
           return agentId as unknown as V;
+        // Task 1 (2026-05-03 plan): TaskStopTool + SendMessageTool's
+        // lead-only checks read this key via tryGet<string>(ctx,
+        // 'callerRole'). When absent, both tools fail-closed —
+        // historically meaning the lead couldn't TaskStop teammates
+        // from inside its own loop. Wiring the key restores the
+        // intended authority distinction without touching the SSOT
+        // assembleToolPool() routing layer.
+        case 'callerRole':
+          return args.role as unknown as V;
         // Phase E orphan fix (2026-05-03 plan, Task 2): AgentTool /
         // SkillTool read this key when forwarding a child spawn's
         // events back into the lead's stream. Returns `null` until
@@ -689,7 +708,15 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
               conversationId: leadConversationId,
               runId: leadRequestId,
               teamId: row.teamId,
-              from: row.memberId,
+              // Task 1 (2026-05-03 plan): mirror the durable row's
+              // `fromMemberId` so the live SSE envelope agrees with
+              // what loadConversationHistory will return on refresh.
+              // Otherwise the founder UI renders the lead's bubble
+              // briefly, then snaps to the spawned specialist as soon
+              // as the persisted row arrives — a 1-3 second visual
+              // stutter every time a spawn assistant-text reaches the
+              // lead's stream.
+              from: resolveFromMemberId(event),
               fromAgentId: agentId,
               type: 'agent_text',
               content: event.text,
@@ -804,7 +831,11 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
                 conversationId: leadConversationId,
                 runId: leadRequestId,
                 teamId: row.teamId,
-                from: row.memberId,
+                // Task 1 (2026-05-03 plan): see assistant_text_stop branch
+                // above — keep the live envelope consistent with the
+                // durable `fromMemberId` so spawnMeta-tagged tool events
+                // attribute to the spawned specialist on first paint.
+                from: resolveFromMemberId(event),
                 fromAgentId: agentId,
                 type: isCall ? 'tool_call' : 'tool_result',
                 content: truncatedContent,
@@ -968,6 +999,14 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
       // works. Teammates have no leadRequestId in scope — fall back to
       // the agentId so the run is still uniquely identifiable.
       runId: isLead && leadRequestId ? leadRequestId : agentId,
+      // Task 1 (2026-05-03 plan): wire callerRole so lead-only consumers
+      // (TaskStopTool, SendMessageTool) see the correct authority value
+      // from inside the lead's own loop. Pre-existing orphan — the
+      // deleted team-run.ts also missed the wiring; the fail-closed
+      // default in those tools meant the lead lost its TaskStop /
+      // broadcast authority unless the call originated from the
+      // per-teammate cancel HTTP route.
+      role: isLead ? 'lead' : 'member',
       // Phase E orphan fix (2026-05-03 plan, Task 2): pass the holder
       // so `ctx.get('onEvent')` returns the live `handleStreamEvent`
       // (already wired into `onEventHolder.fn` above). Restores the
