@@ -32,12 +32,14 @@ const selectChain: {
   // running without priorMessages. Individual tests can override.
   limit: vi.fn(async () => []),
 };
-// Phase E orphan fix (Task 1): the agent-run worker now loads the team row
-// once at startup via `db.select({id, userId, productId}).from(teams).where(...).limit(1)`
-// to wire userId / productId / platform clients into the ToolContext. We
-// route this select to a dedicated chain so it doesn't compete with the
-// existing teamConversations lookup. Discriminator is the projection's
-// `userId` key — only the teams query carries it.
+// Phase E orphan fix (Task 1) seed of this chain is preserved as a
+// negative assertion target: after the duplicate teams SELECT was hoisted
+// into `loadSystemPromptContext` (Task 2 / fd9ee1a), the agent-run worker
+// no longer queries the teams table directly — every team row flows
+// through the module-mocked `loadSystemPromptContext`. The chain stays
+// here so the "no duplicate select" test (2421-2423) can assert it was
+// never called. Discriminator is the projection's `userId` key — only
+// the teams query carries it.
 const teamSelectChain: {
   from: ReturnType<typeof vi.fn>;
   where: ReturnType<typeof vi.fn>;
@@ -45,9 +47,10 @@ const teamSelectChain: {
 } = {
   from: vi.fn(() => teamSelectChain),
   where: vi.fn(() => teamSelectChain),
-  // Default fixture matches the agent_runs row's teamId/userId/productId
-  // used across the test suite. Individual tests can override via
-  // `teamSelectChain.limit.mockResolvedValueOnce([...])`.
+  // Default fixture is benign — kept as a safety net so a regression
+  // that re-introduces the duplicate teams SELECT resolves to a sane
+  // shape rather than `undefined`. The "no duplicate select" assertion
+  // is what actively guards against that regression.
   limit: vi.fn(async () => [
     { id: 'team-1', userId: 'user-1', productId: null },
   ]),
@@ -189,8 +192,8 @@ const loadSystemPromptContextMock = vi.hoisted(() =>
         productDescription: 'a test product',
         productState: 'mvp',
         currentPhase: 'foundation',
-        channels: 'none yet',
-        strategicPathId: 'none yet',
+        channels: '(none yet)',
+        strategicPathId: '(none yet)',
         itemCount: 0,
         statusBreakdown: '',
         founderName: 'TestFounder',
@@ -237,6 +240,37 @@ import { teamMessagesChannel } from '@/tools/SendMessageTool/SendMessageTool';
 
 function makeJob(agentId: string): Job<AgentRunJobData> {
   return { id: 'job-1', data: { agentId } } as unknown as Job<AgentRunJobData>;
+}
+
+// `runAgent`'s positional arg indices, pinned in one place. If the
+// signature in `src/core/query-loop.ts` ever shifts, every test that
+// reads onEvent / injectMessages / priorMessages from the captured
+// args array breaks here in one obvious spot — instead of N silent
+// no-ops scattered across the file.
+//
+//   runAgent(config, userMessage, ctx, outputSchema, onProgress,
+//            prebuilt, onIdleReset, onEvent, injectMessages,
+//            priorMessages)
+//   indices: 0       1            2    3             4
+//            5         6             7        8                9
+const RUN_AGENT_ON_EVENT_ARG_INDEX = 7;
+
+/**
+ * Read the `onEvent` callback that the production agent-run worker
+ * passes to `runAgent`. Tests use this when they want to drive
+ * synthetic events through the worker's stream-event handler — the
+ * body of `runAgentMock.mockImplementationOnce(async (...args) => …)`
+ * receives the captured args, and this helper pulls onEvent out by
+ * name instead of by raw index.
+ *
+ * The cast type stays at each call site because each test narrows the
+ * event shape to whatever fields it actually emits (tool_start vs
+ * assistant_text_stop vs …). Centralizing the INDEX is what protects
+ * against signature shifts; centralizing the cast type would over-
+ * constrain the tests.
+ */
+function getOnEventArg(args: unknown[]): unknown {
+  return args[RUN_AGENT_ON_EVENT_ARG_INDEX];
 }
 
 describe('processAgentRun', () => {
@@ -506,7 +540,7 @@ describe('processAgentRun', () => {
     // should observe `sleepingExit` and skip the notification regardless.
     runAgentHoisted.fn.mockImplementationOnce(async (...args: unknown[]) => {
       runAgentHoisted.state.lastArgs = args;
-      const onEvent = args[7] as
+      const onEvent = getOnEventArg(args) as
         | ((event: { type: string; toolName?: string; result?: { content: string } }) => void | Promise<void>)
         | undefined;
       if (onEvent) {
@@ -681,7 +715,7 @@ describe('processAgentRun', () => {
     // event — see src/core/types.ts and src/core/query-loop.ts.
     runAgentHoisted.fn.mockImplementationOnce(async (...args: unknown[]) => {
       runAgentHoisted.state.lastArgs = args;
-      const onEvent = args[7] as
+      const onEvent = getOnEventArg(args) as
         | ((event: {
             type: string;
             messageId?: string;
@@ -897,7 +931,7 @@ describe('processAgentRun', () => {
 
     runAgentHoisted.fn.mockImplementationOnce(async (...args: unknown[]) => {
       runAgentHoisted.state.lastArgs = args;
-      const onEvent = args[7] as
+      const onEvent = getOnEventArg(args) as
         | ((event: {
             type: string;
             messageId?: string;
@@ -987,7 +1021,7 @@ describe('processAgentRun', () => {
     // Default resolveAgent mock returns role='member' — the non-lead path.
     runAgentHoisted.fn.mockImplementationOnce(async (...args: unknown[]) => {
       runAgentHoisted.state.lastArgs = args;
-      const onEvent = args[7] as
+      const onEvent = getOnEventArg(args) as
         | ((event: {
             type: string;
             messageId?: string;
@@ -1109,7 +1143,7 @@ describe('processAgentRun', () => {
     ]);
 
     runAgentHoisted.fn.mockImplementationOnce(async (...args: unknown[]) => {
-      const onEvent = args[7] as
+      const onEvent = getOnEventArg(args) as
         | ((event: {
             type: string;
             messageId?: string;
@@ -1260,7 +1294,7 @@ describe('processAgentRun', () => {
 
     runAgentHoisted.fn.mockImplementationOnce(async (...args: unknown[]) => {
       runAgentHoisted.state.lastArgs = args;
-      const onEvent = args[7] as
+      const onEvent = getOnEventArg(args) as
         | ((event: {
             type: string;
             toolName?: string;
@@ -1335,7 +1369,7 @@ describe('processAgentRun', () => {
 
     runAgentHoisted.fn.mockImplementationOnce(async (...args: unknown[]) => {
       runAgentHoisted.state.lastArgs = args;
-      const onEvent = args[7] as
+      const onEvent = getOnEventArg(args) as
         | ((event: {
             type: string;
             toolName?: string;
@@ -1423,7 +1457,7 @@ describe('processAgentRun', () => {
     selectChain.limit.mockResolvedValueOnce([{ id: 'conv-tool-sse' }]);
     runAgentHoisted.fn.mockImplementationOnce(async (...args: unknown[]) => {
       runAgentHoisted.state.lastArgs = args;
-      const onEvent = args[7] as
+      const onEvent = getOnEventArg(args) as
         | ((event: {
             type: string;
             toolName?: string;
@@ -1505,7 +1539,7 @@ describe('processAgentRun', () => {
     } as never);
     runAgentHoisted.fn.mockImplementationOnce(async (...args: unknown[]) => {
       runAgentHoisted.state.lastArgs = args;
-      const onEvent = args[7] as
+      const onEvent = getOnEventArg(args) as
         | ((event: {
             type: string;
             toolName?: string;
@@ -1601,7 +1635,7 @@ describe('processAgentRun', () => {
 
     runAgentHoisted.fn.mockImplementationOnce(async (...args: unknown[]) => {
       runAgentHoisted.state.lastArgs = args;
-      const onEvent = args[7] as
+      const onEvent = getOnEventArg(args) as
         | ((event: {
             type: string;
             toolName?: string;
@@ -1779,8 +1813,8 @@ describe('processAgentRun', () => {
         productDescription: 'a test product',
         productState: 'mvp',
         currentPhase: 'foundation',
-        channels: 'none yet',
-        strategicPathId: 'none yet',
+        channels: '(none yet)',
+        strategicPathId: '(none yet)',
         itemCount: 0,
         statusBreakdown: '',
         founderName: 'TestFounder',
@@ -1843,8 +1877,8 @@ describe('processAgentRun', () => {
         productDescription: 'a test product',
         productState: 'mvp',
         currentPhase: 'foundation',
-        channels: 'none yet',
-        strategicPathId: 'none yet',
+        channels: '(none yet)',
+        strategicPathId: '(none yet)',
         itemCount: 0,
         statusBreakdown: '',
         founderName: 'TestFounder',
@@ -1967,10 +2001,6 @@ describe('processAgentRun', () => {
       status: 'queued',
     } as never);
 
-    teamSelectChain.limit.mockResolvedValueOnce([
-      { id: 'team-onevent', userId: 'user-onevent', productId: null },
-    ]);
-
     // Capture ctx so the test can probe `ctx.get('onEvent')` directly —
     // mirrors how AgentTool.ts:573 / SkillTool.ts:113 read the key when
     // forwarding events from a spawned subagent / fork.
@@ -2050,17 +2080,13 @@ describe('processAgentRun', () => {
       status: 'queued',
     } as never);
 
-    teamSelectChain.limit.mockResolvedValueOnce([
-      { id: 'team-spawn', userId: 'user-spawn', productId: null },
-    ]);
-
     // Drive runAgent's onEvent (positional arg 7) directly — simulates
     // a spawned subagent whose tool events have already been wrapped
     // with spawnMeta by AgentTool's wrapOnEventWithSpawnMeta, then bubbled
     // up through the parent runAgent to the worker.
     runAgentHoisted.fn.mockImplementationOnce(async (...args: unknown[]) => {
       runAgentHoisted.state.lastArgs = args;
-      const onEvent = args[7] as
+      const onEvent = getOnEventArg(args) as
         | ((event: import('@/core/types').StreamEvent) => void | Promise<void>)
         | undefined;
       if (onEvent) {
@@ -2139,10 +2165,6 @@ describe('processAgentRun', () => {
       parentAgentId: null,
       status: 'queued',
     } as never);
-
-    teamSelectChain.limit.mockResolvedValueOnce([
-      { id: 'team-callerrole', userId: 'user-callerrole', productId: null },
-    ]);
 
     vi.mocked(resolveAgent).mockResolvedValueOnce({
       source: 'built-in',
@@ -2230,10 +2252,6 @@ describe('processAgentRun', () => {
       status: 'queued',
     } as never);
 
-    teamSelectChain.limit.mockResolvedValueOnce([
-      { id: 'team-sse-from', userId: 'user-sse-from', productId: null },
-    ]);
-
     vi.mocked(resolveAgent).mockResolvedValueOnce({
       source: 'built-in',
       sourcePath: '/test',
@@ -2253,7 +2271,7 @@ describe('processAgentRun', () => {
 
     runAgentHoisted.fn.mockImplementationOnce(async (...args: unknown[]) => {
       runAgentHoisted.state.lastArgs = args;
-      const onEvent = args[7] as
+      const onEvent = getOnEventArg(args) as
         | ((event: import('@/core/types').StreamEvent) => void | Promise<void>)
         | undefined;
       if (onEvent) {
@@ -2381,8 +2399,8 @@ describe('processAgentRun', () => {
         productDescription: 'no-duplicate-select test',
         productState: 'mvp',
         currentPhase: 'foundation',
-        channels: 'none yet',
-        strategicPathId: 'none yet',
+        channels: '(none yet)',
+        strategicPathId: '(none yet)',
         itemCount: 0,
         statusBreakdown: '',
         founderName: 'TestFounder',

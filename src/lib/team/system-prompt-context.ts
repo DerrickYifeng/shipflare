@@ -185,20 +185,25 @@ export async function loadSystemPromptContext(
   // 2-7. dependent queries — fire concurrently. Each returns its own
   //      shape and gets normalized below. The `productId === null`
   //      branch returns an empty array via Promise.resolve so the
-  //      positional unpacking stays uniform.
+  //      bag stays uniform.
   //
   //      Task 3 (2026-05-03 plan): the `as Array<{…}>` / `as Promise<…>`
   //      casts that wrapped each query are gone — Drizzle's inferred
   //      return types are correct, and dropping the cast means a
   //      column rename or projection drift surfaces at compile time
   //      instead of being silently re-asserted. The `productId ===
-  //      null` arm uses `Promise.resolve([])` (empty array) so the
-  //      positional unpacking lines up with the `then`-arm shape;
+  //      null` arm uses `Promise.resolve([])` (empty array);
   //      productRows.length is the only thing the consumer reads.
+  //
+  //      2026-05-03 LOW-cleanup: stored as a named-key object instead of
+  //      a positional array so adding a 7th query is a one-line add to
+  //      `queries`, not a coordinated update of two lined-up arrays.
+  //      Inserting a new entry in the middle no longer silently shifts
+  //      every consumer downstream.
   const week = currentUtcWeekRange();
-  const [productRows, pathRows, channelRows, planItemRows, userRows, memberRows] =
-    await Promise.all([
-      // 2. product (only when productId is set)
+  const queries = {
+    // 2. product (only when productId is set)
+    productRows:
       team.productId !== null
         ? db
             .select({
@@ -210,56 +215,75 @@ export async function loadSystemPromptContext(
             .from(products)
             .where(eq(products.id, team.productId))
             .limit(1)
-        : Promise.resolve([]),
-      // 3. active strategic_path — keyed by userId, most recent first
-      db
-        .select({ id: strategicPaths.id, phase: strategicPaths.phase })
-        .from(strategicPaths)
-        .where(eq(strategicPaths.userId, team.userId))
-        .orderBy(desc(strategicPaths.generatedAt))
-        .limit(1),
-      // 4. channels — explicit projection (CLAUDE.md security note;
-      //    never select token columns from channels)
-      db
-        .select({ platform: channelsTable.platform })
-        .from(channelsTable)
-        .where(eq(channelsTable.userId, team.userId)),
-      // 5. plan items this UTC week — group by state for breakdown
-      db
-        .select({
-          state: planItems.state,
-          count: sql<number>`count(*)`,
-        })
-        .from(planItems)
-        .where(
-          and(
-            eq(planItems.userId, team.userId),
-            gte(planItems.scheduledAt, week.start),
-            lt(planItems.scheduledAt, week.end),
+        : Promise.resolve(
+            [] as Array<{
+              id: string;
+              name: string;
+              description: string;
+              state: string;
+            }>,
           ),
-        )
-        .groupBy(planItems.state),
-      // 6. founder name source
-      db
-        .select({ id: users.id, name: users.name, email: users.email })
-        .from(users)
-        .where(eq(users.id, team.userId))
-        .limit(1),
-      // 7. team roster source — resolveAgent calls fan out below
-      db
-        .select({
-          id: teamMembers.id,
-          teamId: teamMembers.teamId,
-          agentType: teamMembers.agentType,
-        })
-        .from(teamMembers)
-        .where(eq(teamMembers.teamId, teamId)),
-    ]);
+    // 3. active strategic_path — keyed by userId, most recent first
+    pathRows: db
+      .select({ id: strategicPaths.id, phase: strategicPaths.phase })
+      .from(strategicPaths)
+      .where(eq(strategicPaths.userId, team.userId))
+      .orderBy(desc(strategicPaths.generatedAt))
+      .limit(1),
+    // 4. channels — explicit projection (CLAUDE.md security note;
+    //    never select token columns from channels)
+    channelRows: db
+      .select({ platform: channelsTable.platform })
+      .from(channelsTable)
+      .where(eq(channelsTable.userId, team.userId)),
+    // 5. plan items this UTC week — group by state for breakdown
+    planItemRows: db
+      .select({
+        state: planItems.state,
+        count: sql<number>`count(*)`,
+      })
+      .from(planItems)
+      .where(
+        and(
+          eq(planItems.userId, team.userId),
+          gte(planItems.scheduledAt, week.start),
+          lt(planItems.scheduledAt, week.end),
+        ),
+      )
+      .groupBy(planItems.state),
+    // 6. founder name source
+    userRows: db
+      .select({ id: users.id, name: users.name, email: users.email })
+      .from(users)
+      .where(eq(users.id, team.userId))
+      .limit(1),
+    // 7. team roster source — resolveAgent calls fan out below
+    memberRows: db
+      .select({
+        id: teamMembers.id,
+        teamId: teamMembers.teamId,
+        agentType: teamMembers.agentType,
+      })
+      .from(teamMembers)
+      .where(eq(teamMembers.teamId, teamId)),
+  };
+  // Resolve every entry in parallel, then re-bag by name. The
+  // `Promise.all` over `Object.values` matches the prior behavior 1:1
+  // (one round-trip total); only the unpacking shape changes.
+  const queryKeys = Object.keys(queries) as Array<keyof typeof queries>;
+  const queryValues = await Promise.all(
+    queryKeys.map((k) => queries[k]),
+  );
+  const resolvedQueries = Object.fromEntries(
+    queryKeys.map((k, i) => [k, queryValues[i]]),
+  ) as { [K in keyof typeof queries]: Awaited<(typeof queries)[K]> };
+  const { productRows, pathRows, channelRows, planItemRows, userRows, memberRows } =
+    resolvedQueries;
 
   // 2. product fields (defaults flow through when productId is null
   //    or the row is missing).
   let productName = 'your product';
-  let productDescription = '(product not configured)';
+  let productDescription = '(none yet)';
   let productState = 'unknown';
   if (productRows.length > 0) {
     productName = productRows[0].name;
@@ -269,7 +293,7 @@ export async function loadSystemPromptContext(
 
   // 3. strategic_path — defaults stay when no row.
   let currentPhase = 'unknown';
-  let strategicPathId = 'none yet';
+  let strategicPathId = '(none yet)';
   if (pathRows.length > 0) {
     strategicPathId = pathRows[0].id;
     currentPhase = pathRows[0].phase;
@@ -281,7 +305,7 @@ export async function loadSystemPromptContext(
     new Set(channelRows.map((r) => r.platform)),
   );
   const channelsStr =
-    uniquePlatforms.length > 0 ? uniquePlatforms.join(', ') : 'none yet';
+    uniquePlatforms.length > 0 ? uniquePlatforms.join(', ') : '(none yet)';
 
   // 5. plan items breakdown — coerce bigint→number defensively (some
   //    Postgres drivers return count as a string).
@@ -345,15 +369,17 @@ export async function loadSystemPromptContext(
   // Task 3 (2026-05-03 plan): when no member resolves (fresh team,
   // legacy rows with stale agentTypes, or simply no team_members rows
   // yet) the formatter returns '' — emit an explicit marker instead so
-  // the lead's prompt template renders 'T: (none yet — …)' rather than
-  // a bare 'T:' that the LLM occasionally interprets as a literal
+  // the lead's prompt template renders 'T: (none yet)' rather than a
+  // bare 'T:' that the LLM occasionally interprets as a literal
   // empty-roster instruction. `formatTeamRoster` stays a pure
   // formatter; the marker is loader-policy.
+  //
+  // 2026-05-03 LOW-cleanup: the '(none yet)' literal is shared with
+  // strategicPathId / channels / productDescription so the prompt's
+  // "no value yet" vocabulary is uniform. '(none)' (zero-count) and
+  // 'unknown' (state enum) stay distinct on purpose.
   const formattedRoster = formatTeamRoster(defs);
-  const teamRoster =
-    formattedRoster === ''
-      ? '(none yet — team_members table is empty)'
-      : formattedRoster;
+  const teamRoster = formattedRoster === '' ? '(none yet)' : formattedRoster;
 
   return {
     ctx: {
