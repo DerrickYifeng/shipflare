@@ -23,7 +23,6 @@ import {
   type SpawnCallbacks,
 } from './spawn';
 import { teamHasBudgetRemaining } from '@/lib/team-budget';
-import { isAgentTeamsEnabledForTeam } from '@/lib/feature-flags/agent-teams';
 import { wake } from '@/workers/processors/lib/wake';
 
 const log = createLogger('tools:Task');
@@ -49,10 +48,10 @@ export const MAX_SPAWN_DEPTH = 3;
 // Per spec §5.4 we intentionally drop:
 //   isolation, mode, team_name, cwd, model.
 // Phase B re-adds `run_in_background` as an opt-in async path; the option
-// only takes effect when `isAgentTeamsEnabledForTeam(teamId)` is true AND
-// the call carries a team-run context (`teamId`, `currentMemberId`, `db`).
-// Otherwise it's silently ignored and the call falls through to the
-// existing sync spawn path.
+// only takes effect when the call carries a team-run context (`teamId`,
+// `currentMemberId`, `db`). Otherwise it's silently ignored and the call
+// falls through to the existing sync spawn path. (Phase G removed the
+// `SHIPFLARE_AGENT_TEAMS` feature flag — Agent Teams is now the default.)
 
 export const TaskInputSchema = z
   .object({
@@ -64,10 +63,12 @@ export const TaskInputSchema = z
       .max(100, 'description must be 100 characters or fewer'),
     name: z.string().optional(),
     /**
-     * Phase B: opt-in async path. When true AND the team flag is on AND a
-     * team-run context is present, the call returns immediately with
+     * Phase B: opt-in async path. When true AND a team-run context is
+     * present, the call returns immediately with
      * `{agentId, status:'async_launched'}`; otherwise it falls through to
-     * the synchronous spawn path.
+     * the synchronous spawn path. (Phase G removed the
+     * `SHIPFLARE_AGENT_TEAMS` feature flag — async path now fires
+     * unconditionally when both preconditions are met.)
      */
     run_in_background: z.boolean().optional(),
   })
@@ -457,19 +458,17 @@ export const taskTool: ToolDefinition<TaskInput, TaskResult> = buildTool({
     // Fires ONLY when ALL of:
     //   1. `input.run_in_background === true`
     //   2. The call has a team-run context (`teamId` resolvable from ctx)
-    //   3. `isAgentTeamsEnabledForTeam(teamId)` returns true
     //
     // Any failed precondition silently falls through to the sync path —
     // this preserves backward compatibility for ad-hoc / CLI / test
-    // callers that don't carry team context.
+    // callers that don't carry team context. (Phase G removed the
+    // `SHIPFLARE_AGENT_TEAMS` feature flag — Agent Teams is the default
+    // and the async path is always taken when the two preconditions are
+    // met.)
     if (input.run_in_background === true) {
       const { teamId: asyncTeamId } = readTeamDeps(ctx);
       if (asyncTeamId !== null) {
-        const enabled = await isAgentTeamsEnabledForTeam(asyncTeamId);
-        if (enabled) {
-          return await launchAsyncTeammate(input, ctx);
-        }
-        // Flag off: silently fall through to the sync path below.
+        return await launchAsyncTeammate(input, ctx);
       }
     }
 
