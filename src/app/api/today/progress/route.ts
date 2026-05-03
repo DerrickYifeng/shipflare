@@ -10,8 +10,8 @@ import { and, count, desc, eq, gte, inArray, sql } from 'drizzle-orm';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import {
+  agentRuns,
   teamMessages,
-  teamRuns,
   teams,
 } from '@/lib/db/schema';
 import { createLogger, loggerForRequest } from '@/lib/logger';
@@ -55,11 +55,13 @@ const SUCCESS_FRESH_MS = 5 * 60 * 1000;
  * Initial snapshot for the /today progress widget. Returns the current
  * state of the async onboarding tail:
  *
- *   Team-run tactical pass — the coordinator drives `content-planner`,
- *   which calls `add_plan_item` N times. Each tool_call lands as a row
- *   in `team_messages`. Status derives from `team_runs.status` plus
- *   freshness; item count is a live COUNT on `team_messages` filtered
- *   by `metadata.toolName = 'add_plan_item'`.
+ *   Tactical pass — the coordinator drives `content-planner`, which
+ *   calls `add_plan_item` N times. Each tool_call lands as a row in
+ *   `team_messages`. Post-Phase-E the trigger discriminator lives on
+ *   `team_messages.metadata.trigger` (set by `dispatch-lead-message`)
+ *   and run liveness derives from the lead's `agent_runs` row
+ *   (`agentDefName='coordinator'`); item count is a live COUNT on
+ *   `team_messages` filtered by `metadata.toolName = 'add_plan_item'`.
  *
  * Clients should:
  *   - call this once on mount to seed the UI
@@ -127,25 +129,32 @@ async function loadTacticalStatus(userId: string): Promise<{
   const teamId = teamRows[0].id;
 
   const staleCutoff = new Date(Date.now() - STALE_WINDOW_MS);
-  const [runRow] = await db
+
+  // Phase E retired team_runs as the source of truth for tactical-pass
+  // status. The trigger discriminator now lives on
+  // `team_messages.metadata.trigger` (set by `dispatch-lead-message.ts`),
+  // and run liveness derives from the lead's row in `agent_runs`
+  // (agentDefName='coordinator'). Terminal `completion` / `error`
+  // events currently flow over SSE without a durable team_messages
+  // row, so the lookup below is best-effort: when no terminal row
+  // exists, we fall back to the lead's agent_runs.status.
+  const [latestTacticalMsg] = await db
     .select({
-      id: teamRuns.id,
-      status: teamRuns.status,
-      completedAt: teamRuns.completedAt,
-      errorMessage: teamRuns.errorMessage,
+      id: teamMessages.id,
+      createdAt: teamMessages.createdAt,
     })
-    .from(teamRuns)
+    .from(teamMessages)
     .where(
       and(
-        eq(teamRuns.teamId, teamId),
-        inArray(teamRuns.trigger, TACTICAL_TRIGGERS as unknown as string[]),
-        gte(teamRuns.startedAt, staleCutoff),
+        eq(teamMessages.teamId, teamId),
+        sql`${teamMessages.metadata}->>'trigger' = ANY(${TACTICAL_TRIGGERS as unknown as string[]})`,
+        gte(teamMessages.createdAt, staleCutoff),
       ),
     )
-    .orderBy(desc(teamRuns.startedAt))
+    .orderBy(desc(teamMessages.createdAt))
     .limit(1);
 
-  if (!runRow) {
+  if (!latestTacticalMsg) {
     return {
       tactical: {
         status: 'pending',
@@ -157,6 +166,73 @@ async function loadTacticalStatus(userId: string): Promise<{
       teamRun: null,
     };
   }
+
+  const [leadStatus] = await db
+    .select({
+      status: agentRuns.status,
+      lastActiveAt: agentRuns.lastActiveAt,
+    })
+    .from(agentRuns)
+    .where(
+      and(
+        eq(agentRuns.teamId, teamId),
+        eq(agentRuns.agentDefName, 'coordinator'),
+      ),
+    )
+    .limit(1);
+
+  const [terminalEvent] = await db
+    .select({
+      type: teamMessages.type,
+      content: teamMessages.content,
+      createdAt: teamMessages.createdAt,
+    })
+    .from(teamMessages)
+    .where(
+      and(
+        eq(teamMessages.teamId, teamId),
+        gte(teamMessages.createdAt, latestTacticalMsg.createdAt),
+        inArray(teamMessages.type, ['completion', 'error']),
+      ),
+    )
+    .orderBy(desc(teamMessages.createdAt))
+    .limit(1);
+
+  // Synthesize the legacy `runRow` shape so the downstream branching
+  // (running / failed / completed / fallback) keeps working unchanged.
+  // - id        — the latest tactical wake message id (used by
+  //               countAddPlanItemCalls; legacy team_runs.id surrogate).
+  // - status    — terminal events win when present; otherwise derived
+  //               from the lead's agent_runs.status.
+  // - completedAt — terminal event time, or the lead's lastActiveAt
+  //               when sleeping (best-available approximation since
+  //               agent_runs has no explicit completedAt column).
+  // - errorMessage — terminal `error` content, else null.
+  const synthesizedStatus: TacticalStatus = terminalEvent
+    ? terminalEvent.type === 'completion'
+      ? 'completed'
+      : 'failed'
+    : leadStatus?.status === 'running' || leadStatus?.status === 'resuming'
+      ? 'running'
+      : leadStatus?.status === 'sleeping'
+        ? 'completed'
+        : 'pending';
+
+  const synthesizedCompletedAt: Date | null = terminalEvent
+    ? terminalEvent.createdAt
+    : synthesizedStatus === 'completed'
+      ? (leadStatus?.lastActiveAt ?? null)
+      : null;
+
+  const runRow = {
+    id: latestTacticalMsg.id,
+    status: synthesizedStatus,
+    completedAt: synthesizedCompletedAt,
+    errorMessage:
+      terminalEvent && terminalEvent.type === 'error'
+        ? terminalEvent.content
+        : null,
+  };
 
   const itemCount = await countAddPlanItemCalls(runRow.id);
 
