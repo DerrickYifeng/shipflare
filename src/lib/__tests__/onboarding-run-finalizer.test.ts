@@ -32,6 +32,11 @@ vi.mock('@/lib/redis', () => ({
       return 1;
     },
   }),
+  // Phase D Task 6 added a transitive wake() import via SendMessageTool →
+  // wake.ts → @/lib/queue/agent-run, which calls getBullMQConnection() at
+  // module load. We never enqueue in this test (the wake call path isn't
+  // exercised), but the import has to resolve.
+  getBullMQConnection: () => ({}),
 }));
 
 vi.mock('@/lib/logger', () => ({
