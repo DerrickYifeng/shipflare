@@ -100,14 +100,15 @@ registry.register(validateDraftTool);
 export { registry };
 
 /**
- * Register Team runtime tools (Task, SendMessage, Skill, TaskStop). These
- * are split out of the top-level registration to avoid a module cycle:
- * `AgentTool/spawn.ts` imports `registry` so its tool resolution can look
- * up by name. Eagerly registering `taskTool` (or `skillTool`, which itself
- * imports `spawnSubagent`) in that same module would make the tool exist
- * before its dependencies finished loading. `taskStopTool` is folded in
- * via the same channel because it is referenced by
- * `AgentTool/blacklists.ts` (closing the same import cycle).
+ * Register Team runtime tools (Task, SendMessage, Skill, TaskStop, Sleep).
+ * These are split out of the top-level registration to avoid a module
+ * cycle: `AgentTool/spawn.ts` imports `registry` so its tool resolution
+ * can look up by name. Eagerly registering `taskTool` (or `skillTool`,
+ * which itself imports `spawnSubagent`) in that same module would make
+ * the tool exist before its dependencies finished loading.
+ * `taskStopTool` and `sleepTool` are folded in via the same channel
+ * because they are referenced by `AgentTool/blacklists.ts` (closing the
+ * same import cycle).
  *
  * Callers that need these tools available (the team-run worker + the
  * integration tests) must import `./registry-team` for its side effect.
@@ -125,11 +126,13 @@ export function registerDeferredTools(tools: {
   sendMessageTool: typeof import('./SendMessageTool/SendMessageTool').sendMessageTool;
   skillTool: typeof import('./SkillTool/SkillTool').skillTool;
   taskStopTool: typeof import('./TaskStopTool/TaskStopTool').taskStopTool;
+  sleepTool: typeof import('./SleepTool/SleepTool').sleepTool;
 }): void {
   registry.register(tools.taskTool);
   registry.register(tools.sendMessageTool);
   registry.register(tools.skillTool);
   registry.register(tools.taskStopTool);
+  registry.register(tools.sleepTool);
 }
 
 /**

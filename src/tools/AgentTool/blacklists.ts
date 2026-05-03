@@ -17,6 +17,7 @@ import { TASK_TOOL_NAME } from './AgentTool';
 import { SEND_MESSAGE_TOOL_NAME } from '@/tools/SendMessageTool/SendMessageTool';
 import { SYNTHETIC_OUTPUT_TOOL_NAME } from '@/tools/SyntheticOutputTool/SyntheticOutputTool';
 import { TASK_STOP_TOOL_NAME } from '@/tools/TaskStopTool/TaskStopTool';
+import { SLEEP_TOOL_NAME } from '@/tools/SleepTool/SleepTool';
 import type { AgentRole } from './loader';
 
 const EMPTY_SET: ReadonlySet<string> = new Set();
@@ -44,11 +45,14 @@ export const INTERNAL_TEAMMATE_TOOLS: ReadonlySet<string> = new Set([
  * initiating further coordination.
  *
  * Phase A subagents: teammate blacklist + { SendMessage }.
- * Phase D adds: Sleep (subagents cannot yield mid-turn).
+ * Phase D adds: Sleep (subagents cannot yield mid-turn — the parent agent
+ *   is blocked on the subagent's <task-notification>; a subagent that
+ *   yielded mid-turn would orphan the parent's await).
  */
 export const INTERNAL_SUBAGENT_TOOLS: ReadonlySet<string> = new Set([
   ...INTERNAL_TEAMMATE_TOOLS,
   SEND_MESSAGE_TOOL_NAME,
+  SLEEP_TOOL_NAME,
 ]);
 
 export function getRoleBlacklist(role: AgentRole): ReadonlySet<string> {
