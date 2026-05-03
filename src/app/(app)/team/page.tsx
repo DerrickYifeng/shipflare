@@ -2,13 +2,13 @@ import type { Metadata } from 'next';
 import type { CSSProperties } from 'react';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { and, desc, eq, gte, inArray, isNull, ne, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, sql } from 'drizzle-orm';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import {
   teams,
   teamMembers,
-  teamRuns,
+  agentRuns,
   teamMessages,
   teamTasks,
   teamConversations,
@@ -153,25 +153,50 @@ export default async function TeamPage({
       .from(teamMembers)
       .where(eq(teamMembers.teamId, team.id))
       .orderBy(teamMembers.createdAt),
+    // Phase E retired team_runs as the source of truth for "is the lead
+    // currently running"; the lead's row in `agent_runs`
+    // (agentDefName='coordinator') now carries that state. We synthesize
+    // `id`/`startedAt` so downstream JSX doesn't have to special-case the
+    // shape change. Fields that no longer have a 1:1 source on agent_runs
+    // (totalTurns) are left unset; consumers default to 0 — see
+    // TODO UI-B markers below.
     db
       .select({
-        id: teamRuns.id,
-        startedAt: teamRuns.startedAt,
-        totalTurns: teamRuns.totalTurns,
+        id: agentRuns.id,
+        startedAt: agentRuns.lastActiveAt,
       })
-      .from(teamRuns)
-      .where(and(eq(teamRuns.teamId, team.id), eq(teamRuns.status, 'running')))
+      .from(agentRuns)
+      .where(
+        and(
+          eq(agentRuns.teamId, team.id),
+          eq(agentRuns.agentDefName, 'coordinator'),
+          inArray(agentRuns.status, ['running', 'resuming']),
+        ),
+      )
       .limit(1),
+    // "Last run" derives from the most recent terminal team_messages
+    // event (completion / error). When a terminal event is missing
+    // (legacy gap during the cutover window), the page falls back to
+    // the lead's lastActiveAt as a soft signal.
     db
       .select({
-        status: teamRuns.status,
-        completedAt: teamRuns.completedAt,
-        totalTurns: teamRuns.totalTurns,
+        type: teamMessages.type,
+        completedAt: teamMessages.createdAt,
       })
-      .from(teamRuns)
-      .where(eq(teamRuns.teamId, team.id))
-      .orderBy(desc(teamRuns.startedAt))
+      .from(teamMessages)
+      .where(
+        and(
+          eq(teamMessages.teamId, team.id),
+          inArray(teamMessages.type, ['completion', 'error']),
+        ),
+      )
+      .orderBy(desc(teamMessages.createdAt))
       .limit(1),
+    // `team_messages.runId` is NULL for new flows (Phase E). The
+    // teamRuns join we used to do for onboarding-trigger filtering
+    // is gone; the trigger discriminator now lives on
+    // `team_messages.metadata.trigger`. Filter onboarding kickoffs
+    // there instead.
     db
       .select({
         id: teamMessages.id,
@@ -186,32 +211,34 @@ export default async function TeamPage({
         createdAt: teamMessages.createdAt,
       })
       .from(teamMessages)
-      .leftJoin(teamRuns, eq(teamRuns.id, teamMessages.runId))
       .where(
         and(
           eq(teamMessages.teamId, team.id),
-          or(
-            isNull(teamMessages.runId),
-            ne(teamRuns.trigger, 'onboarding'),
-          ),
+          sql`(${teamMessages.metadata}->>'trigger') IS DISTINCT FROM 'onboarding'`,
         ),
       )
       .orderBy(desc(teamMessages.createdAt))
       .limit(INITIAL_MESSAGE_WINDOW),
+    // Weekly per-member spend: validate team membership via
+    // teamMembers (Phase E), no teamRuns join. `costUsd` lives on
+    // team_tasks already.
     db
       .select({
         memberId: teamTasks.memberId,
         sum: sql<string>`coalesce(sum(${teamTasks.costUsd}), 0)`.as('sum'),
       })
       .from(teamTasks)
-      .innerJoin(teamRuns, eq(teamRuns.id, teamTasks.runId))
+      .innerJoin(teamMembers, eq(teamMembers.id, teamTasks.memberId))
       .where(
         and(
-          eq(teamRuns.teamId, team.id),
-          gte(teamRuns.startedAt, startOfIsoWeek()),
+          eq(teamMembers.teamId, team.id),
+          gte(teamTasks.startedAt, startOfIsoWeek()),
         ),
       )
       .groupBy(teamTasks.memberId),
+    // Recent-tasks list: same migration — chain via teamMembers.
+    // Onboarding-trigger filter dropped (the new dispatch path doesn't
+    // create teamTasks for onboarding kickoffs anyway).
     db
       .select({
         id: teamTasks.id,
@@ -224,13 +251,8 @@ export default async function TeamPage({
         input: teamTasks.input,
       })
       .from(teamTasks)
-      .innerJoin(teamRuns, eq(teamRuns.id, teamTasks.runId))
-      .where(
-        and(
-          eq(teamRuns.teamId, team.id),
-          ne(teamRuns.trigger, 'onboarding'),
-        ),
-      )
+      .innerJoin(teamMembers, eq(teamMembers.id, teamTasks.memberId))
+      .where(eq(teamMembers.teamId, team.id))
       .orderBy(desc(teamTasks.startedAt))
       .limit(200),
     db
@@ -368,49 +390,14 @@ export default async function TeamPage({
     return map;
   })();
 
-  const runIds = Array.from(
-    new Set(
-      rawMessages
-        .map((m) => m.runId)
-        .filter((id): id is string => typeof id === 'string' && id.length > 0),
-    ),
-  );
-
-  const runRows = runIds.length
-    ? await db
-        .select({
-          id: teamRuns.id,
-          trigger: teamRuns.trigger,
-          goal: teamRuns.goal,
-          status: teamRuns.status,
-          startedAt: teamRuns.startedAt,
-          completedAt: teamRuns.completedAt,
-          conversationId: teamRuns.conversationId,
-        })
-        .from(teamRuns)
-        .where(
-          and(eq(teamRuns.teamId, team.id), inArray(teamRuns.id, runIds)),
-        )
-    : [];
-
-  const runLookup: TeamRunLookup = (() => {
-    const map = new Map<string, TeamRunMeta>();
-    for (const r of runRows) {
-      map.set(r.id, {
-        id: r.id,
-        trigger: r.trigger,
-        goal: r.goal ?? null,
-        status: r.status,
-        startedAt:
-          r.startedAt instanceof Date
-            ? r.startedAt.toISOString()
-            : String(r.startedAt),
-        completedAt: isoOrNull(r.completedAt),
-        conversationId: r.conversationId ?? null,
-      });
-    }
-    return map;
-  })();
+  // TODO UI-B: `team_messages.runId` is NULL for new (Phase E+) flows,
+  // so the runId→TeamRunMeta lookup is empty in practice. The conversation
+  // reducer + child components still accept the prop for legacy rendering
+  // paths (session dividers grouping by run); UI-B will replace those with
+  // agent_runs + per-conversation turn boundaries. Until then we pass an
+  // empty map so the prop type stays stable and any legacy render paths
+  // simply skip the run divider.
+  const runLookup: TeamRunLookup = new Map<string, TeamRunMeta>();
 
   // ChatGPT-style sidebar: just the conversation list sorted by
   // updatedAt desc. No per-row status — every thread is always
@@ -452,15 +439,22 @@ export default async function TeamPage({
   let leadMessage: string;
   if (activeRun) {
     leadMessage = 'Team Lead is active.';
-  } else if (lastRun?.status === 'failed') {
+  } else if (lastRun?.type === 'error') {
     leadMessage = 'Team Lead paused after last run failed.';
-  } else if (lastRun?.status === 'completed') {
+  } else if (lastRun?.type === 'completion') {
     leadMessage = 'Team Lead finished the last run.';
   } else {
     leadMessage = 'Team Lead is idle. Brief them below to start.';
   }
 
-  const turns = activeRun?.totalTurns ?? lastRun?.totalTurns ?? 0;
+  // TODO UI-B: `totalTurns` was a column on team_runs that no longer
+  // exists. A plausible derived equivalent is "count of agent_text_stop
+  // messages from the lead since the most recent founder user_prompt",
+  // but that needs another query and the StatusBanner doesn't currently
+  // surface it (no `turns` prop on StatusBanner). Pass 0 to keep the
+  // <TeamDesk> prop type stable; downstream consumers either render 0
+  // or hide the field.
+  const turns = 0;
 
   return (
     <TeamDesk
