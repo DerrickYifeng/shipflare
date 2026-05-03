@@ -151,6 +151,10 @@ vi.mock('@/lib/redis', () => ({
     on: () => undefined,
     quit: async () => undefined,
   }),
+  // Phase B: AgentTool now imports `wake` which loads the agent-run
+  // BullMQ Queue at module init; that constructor calls
+  // getBullMQConnection(). Stub it here so module load doesn't crash.
+  getBullMQConnection: () => ({}),
 }));
 
 vi.mock('@/tools/SendMessageTool/SendMessageTool', () => ({
