@@ -15,6 +15,8 @@ import { processStaleSweeper } from './processors/stale-sweeper';
 import { processWeeklyReplan } from './processors/weekly-replan';
 import { processTeamRun, getTeamRunConcurrency } from './processors/team-run';
 import { TEAM_RUN_QUEUE_NAME, type TeamRunJobData } from '@/lib/queue/team-run';
+import { processAgentRun } from './processors/agent-run';
+import { AGENT_RUN_QUEUE_NAME, type AgentRunJobData } from '@/lib/queue/agent-run';
 import { dreamQueue, discoveryScanQueue, metricsQueue, analyticsQueue, codeScanQueue } from '@/lib/queue';
 import type { PlanExecuteJobData } from '@/lib/queue';
 import { createLogger, loggerForJob } from '@/lib/logger';
@@ -182,6 +184,32 @@ const teamRunWorker = new Worker<TeamRunJobData>(
   { ...BASE_OPTS, concurrency: getTeamRunConcurrency(), lockDuration: 15 * 60_000 },
 );
 
+// AI Team Platform — single-shot agent-run runner (Phase B async lifecycle).
+// Each job processes one agent turn (drain mailbox → fork skill → persist
+// outputs). Lock duration is 10 min — well above the per-turn ceiling but
+// short enough that a crashed worker frees the job for another consumer.
+const agentRunWorker = new Worker<AgentRunJobData>(
+  AGENT_RUN_QUEUE_NAME,
+  async (job) => {
+    const jobLog = loggerForJob(log, job);
+    jobLog.info(`agent-run start agentId=${job.data.agentId}`);
+    await processAgentRun(job);
+    jobLog.info(`agent-run done agentId=${job.data.agentId}`);
+  },
+  { ...BASE_OPTS, concurrency: 4, lockDuration: 600_000 },
+);
+
+// Explicit failed handler for agent-run (the shared loop below also covers
+// it via the workers array, but the per-worker handler keeps the lifecycle
+// log line in shape with the `agent-run start` / `agent-run done` pair).
+agentRunWorker.on('failed', (job, err) => {
+  if (job) {
+    loggerForJob(log, job).error(`agent-run failed agentId=${job.data.agentId}: ${err.message}`);
+  } else {
+    log.error(`agent-run failed (no job ref): ${err.message}`);
+  }
+});
+
 const workers = [
   reviewWorker, postingWorker,
   healthScoreWorker, dreamWorker, codeScanWorker,
@@ -193,6 +221,7 @@ const workers = [
   staleSweeperWorker, weeklyReplanWorker,
   // AI Team Platform
   teamRunWorker,
+  agentRunWorker,
 ];
 
 // Log events — bind traceId / jobId / queue into the child logger so lifecycle
@@ -337,7 +366,7 @@ Promise.all([
   log.error('Failed to schedule cron jobs:', err.message);
 });
 
-log.info('All workers started: review, posting, health-score, dream, code-scan, daily-run, engagement, metrics, analytics, plan-execute, plan-execute-sweeper, stale-sweeper, weekly-replan, team-run. daily-run daily 13:00 UTC, plan-execute-sweeper every 1m, stale-sweeper every 1h, weekly-replan Monday 00:00 UTC, all others daily.');
+log.info('All workers started: review, posting, health-score, dream, code-scan, daily-run, engagement, metrics, analytics, plan-execute, plan-execute-sweeper, stale-sweeper, weekly-replan, team-run, agent-run. daily-run daily 13:00 UTC, plan-execute-sweeper every 1m, stale-sweeper every 1h, weekly-replan Monday 00:00 UTC, all others daily.');
 
 // Graceful shutdown
 async function shutdown() {
