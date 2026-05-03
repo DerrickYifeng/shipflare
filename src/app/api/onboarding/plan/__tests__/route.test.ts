@@ -41,14 +41,24 @@ vi.mock('@/lib/logger', () => ({
 
 // The route's product lookup runs through db.select() — return a single
 // row by default; tests flip productRows = [] to exercise the
-// fresh-onboarding (productId=null) path. The strategic_paths lookup
-// reuses the same db.select() chain (Drizzle wraps every select the same
-// way), so we route by call sequence: first call → products, second
-// call → strategic_paths. Tests that need only one call (error paths)
-// just preload one fixture.
+// fresh-onboarding (INSERT) path. The strategic_paths lookup reuses the
+// same db.select() chain (Drizzle wraps every select the same way), so
+// we route by call sequence: first call → products, second call →
+// strategic_paths (after the skill resolves). When the route INSERTs a
+// products row in the fresh-onboarding branch, productRows is updated
+// to mirror the racing/refetch path so a subsequent select picks it up.
 let productRows: Array<{ id: string }> = [{ id: 'prod-1' }];
 let strategicPathRow: Record<string, unknown> | null = null;
 let dbSelectCallCount = 0;
+
+// Insert behavior — tests flip these to drive the resolve-or-insert
+// branch. By default a fresh insert returns one row with id 'prod-new-1';
+// race tests set insertReturning = [] to mimic onConflictDoNothing
+// losing the race, and stage refetchRows for the post-conflict re-select.
+let insertReturning: Array<{ id: string }> = [{ id: 'prod-new-1' }];
+let lastInsertValues: Record<string, unknown> | null = null;
+let dbInsertCallCount = 0;
+let refetchRows: Array<{ id: string }> | null = null;
 
 vi.mock('@/lib/db', () => ({
   db: {
@@ -57,14 +67,29 @@ vi.mock('@/lib/db', () => ({
         where: () => ({
           limit: async () => {
             dbSelectCallCount += 1;
-            // Heuristic: the route hits products first (call 1), then
-            // strategic_paths after the skill resolves (call 2). This
-            // matches the sequential ordering in route.ts.
+            // Call 1 → products existence check.
+            // Call 2 → optional refetch after onConflictDoNothing race
+            //         (only fires when route hits the race branch).
+            // Final call → strategic_paths after the skill resolves.
             if (dbSelectCallCount === 1) return productRows;
+            if (refetchRows && dbSelectCallCount === 2) return refetchRows;
             return strategicPathRow ? [strategicPathRow] : [];
           },
         }),
       }),
+    }),
+    insert: () => ({
+      values: (values: Record<string, unknown>) => {
+        lastInsertValues = values;
+        return {
+          onConflictDoNothing: () => ({
+            returning: async () => {
+              dbInsertCallCount += 1;
+              return insertReturning;
+            },
+          }),
+        };
+      },
     }),
   },
 }));
@@ -218,6 +243,10 @@ beforeEach(() => {
     phaseGoals: validPath.phaseGoals,
   };
   dbSelectCallCount = 0;
+  insertReturning = [{ id: 'prod-new-1' }];
+  lastInsertValues = null;
+  dbInsertCallCount = 0;
+  refetchRows = null;
   forkSkillBehavior = {};
   recordPipelineEventMock.mockClear();
   runForkSkillMock.mockClear();
@@ -285,8 +314,9 @@ describe('POST /api/onboarding/plan (SSE, direct skill)', () => {
     );
   });
 
-  it('passes productId=null when no product row exists (fresh onboarding)', async () => {
+  it('INSERTs a products row when the user has none, and uses its id for the skill', async () => {
     productRows = [];
+    insertReturning = [{ id: 'prod-new-1' }];
     forkSkillBehavior = {
       resolve: {
         result: {
@@ -303,8 +333,77 @@ describe('POST /api/onboarding/plan (SSE, direct skill)', () => {
     expect(res.status).toBe(200);
     await readSSEEvents(res);
 
+    expect(dbInsertCallCount).toBe(1);
     const [, , , deps] = runForkSkillMock.mock.calls[0]!;
-    expect((deps as Record<string, unknown>).productId).toBeNull();
+    expect((deps as Record<string, unknown>).productId).toBe('prod-new-1');
+
+    // The INSERT pulls fields from body.product / body.state — confirm
+    // the mapping survives any drift in route source.
+    expect(lastInsertValues).toMatchObject({
+      userId: 'user-1',
+      name: validBody.product.name,
+      description: validBody.product.description,
+      valueProp: validBody.product.valueProp,
+      keywords: validBody.product.keywords,
+      targetAudience: validBody.product.targetAudience,
+      category: validBody.product.category,
+      state: validBody.state,
+    });
+    // onboardingCompletedAt MUST stay unset — the commit route stamps
+    // it later when the user finalizes.
+    expect(lastInsertValues).not.toHaveProperty('onboardingCompletedAt');
+  });
+
+  it('reuses the existing products row when one is present (no INSERT)', async () => {
+    productRows = [{ id: 'prod-existing-9' }];
+    forkSkillBehavior = {
+      resolve: {
+        result: {
+          status: 'completed',
+          pathId: 'path-1',
+          summary: 's',
+          notes: 'n',
+        },
+      },
+    };
+
+    const { POST } = await import('../route');
+    const res = await POST(makeRequest(validBody));
+    expect(res.status).toBe(200);
+    await readSSEEvents(res);
+
+    expect(dbInsertCallCount).toBe(0);
+    const [, , , deps] = runForkSkillMock.mock.calls[0]!;
+    expect((deps as Record<string, unknown>).productId).toBe('prod-existing-9');
+  });
+
+  it('handles concurrent INSERT race via onConflictDoNothing → re-select', async () => {
+    // Two browser tabs hit /plan simultaneously. The first wins the
+    // INSERT; the second sees existence-check return [] (snapshot was
+    // before the first commit), tries to INSERT, and onConflictDoNothing
+    // returns []. Route must re-select and use the racing tx's id.
+    productRows = [];
+    insertReturning = [];
+    refetchRows = [{ id: 'prod-race-7' }];
+    forkSkillBehavior = {
+      resolve: {
+        result: {
+          status: 'completed',
+          pathId: 'path-1',
+          summary: 's',
+          notes: 'n',
+        },
+      },
+    };
+
+    const { POST } = await import('../route');
+    const res = await POST(makeRequest(validBody));
+    expect(res.status).toBe(200);
+    await readSSEEvents(res);
+
+    expect(dbInsertCallCount).toBe(1);
+    const [, , , deps] = runForkSkillMock.mock.calls[0]!;
+    expect((deps as Record<string, unknown>).productId).toBe('prod-race-7');
   });
 
   it('streams tool_progress events for each tool the skill calls', async () => {

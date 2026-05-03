@@ -220,19 +220,67 @@ export async function POST(request: NextRequest): Promise<Response> {
       };
 
       try {
-        // When the user hasn't committed a product row yet (fresh
-        // onboarding), pass productId=null — the skill's tools tolerate
-        // a null productId for the duration of the plan call. The commit
-        // route later persists the product and binds the strategic path.
+        // The skill's `write_strategic_path` tool requires a real
+        // products.id (FK + notNull on strategic_paths.product_id).
+        // Resolve an existing row if there is one; otherwise INSERT a
+        // fresh row using the body fields the route already has. The
+        // commit route's upsert path (commit/route.ts:175-192) refines
+        // whatever lands here when the user clicks through stage-plan.
         const existingProduct = await db
           .select({ id: products.id })
           .from(products)
           .where(eq(products.userId, userId))
           .limit(1);
 
+        let productId: string;
+        if (existingProduct[0]) {
+          productId = existingProduct[0].id;
+        } else {
+          // onboardingCompletedAt stays null until /commit; the commit
+          // route stamps it when the user finalizes.
+          const launchDateValue = body.launchDate ? new Date(body.launchDate) : null;
+          const launchedAtValue = body.launchedAt ? new Date(body.launchedAt) : null;
+          const inserted = await db
+            .insert(products)
+            .values({
+              userId,
+              name: body.product.name,
+              description: body.product.description,
+              valueProp: body.product.valueProp ?? null,
+              keywords: body.product.keywords,
+              targetAudience: body.product.targetAudience ?? null,
+              category: body.product.category,
+              state: body.state,
+              launchDate: launchDateValue,
+              launchedAt: launchedAtValue,
+            })
+            .onConflictDoNothing({ target: products.userId })
+            .returning({ id: products.id });
+
+          if (inserted[0]) {
+            productId = inserted[0].id;
+          } else {
+            // Concurrent INSERT race — another tx won; re-select the
+            // row that's now there. uniqueIndex products_user_uq
+            // guarantees exactly one row per user, so a re-select
+            // returns the racing transaction's id.
+            const refetch = await db
+              .select({ id: products.id })
+              .from(products)
+              .where(eq(products.userId, userId))
+              .limit(1);
+            if (!refetch[0]) {
+              throw new Error(
+                `products INSERT lost the race but no row was found for user=${userId}`,
+              );
+            }
+            productId = refetch[0].id;
+          }
+        }
+
         const path: StrategicPath = await runStrategicPathSkill({
           userId,
-          productId: existingProduct[0]?.id ?? null,
+          productId,
           body,
           currentPhase,
           abortSignal: abortController.signal,
@@ -346,11 +394,11 @@ export interface ToolProgressEvent {
 interface RunStrategicPathSkillArgs {
   userId: string;
   /**
-   * Null on fresh onboarding (user hasn't called /api/onboarding/commit
-   * yet). The skill's tools accept null productId and the commit route
-   * later binds the persisted strategic_paths row to the real productId.
+   * Real products.id — the route resolves-or-inserts before invoking
+   * the skill so `write_strategic_path` always has a valid FK target.
+   * The commit route later refines the row via its upsert path.
    */
-  productId: string | null;
+  productId: string;
   body: RequestBody;
   currentPhase: ReturnType<typeof derivePhase>;
   abortSignal: AbortSignal;
