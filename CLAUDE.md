@@ -216,6 +216,101 @@ If you are considering adding a new agent: first ask whether 1
 existing agent + 1-2 new skills could express the same work. The
 default answer is yes.
 
+## Agent Teams Architecture
+
+The multi-agent runtime (Phases A→G, landed 2026-05-02) follows engine
+PDF §3.5.1 and §9 invariants. **The following architectural rules are
+non-negotiable** — code review must reject violations.
+
+### Tool routing — four-layer SSOT
+
+`assembleToolPool(role, def, registry)` in
+`src/tools/AgentTool/assemble-tool-pool.ts` is the SINGLE place that
+decides "what tools does agent X see". Layers in order:
+
+1. Global registry pool
+2. Role whitelist (`src/tools/AgentTool/role-tools.ts`)
+3. Role blacklist (`src/tools/AgentTool/blacklists.ts`) — architecture-level
+   invariants (`INTERNAL_TEAMMATE_TOOLS` / `INTERNAL_SUBAGENT_TOOLS`)
+4. AgentDefinition `tools:` allow + `disallowedTools:` subtract
+
+**Any code that does role-based tool filtering OUTSIDE this function is a
+review reject.** No `if (role === 'lead')` ad-hoc gating; everything
+flows through `assembleToolPool`.
+
+### Messages are the conversation
+
+Worker-to-worker / lead-to-worker / system-to-lead communication ALL flows
+through `team_messages`:
+- Worker results: `messageType='task_notification'`, `type='user_prompt'`
+  — appears as user-role message in parent's transcript
+- Inter-teammate DM: `messageType='message'`
+- Coordinator commands: `messageType='shutdown_request'`,
+  `'plan_approval_response'`, `'broadcast'`
+- Founder UI input: same shape, `toAgentId=lead.agentId`
+
+`agent-run` is the SOLE driver for both lead and teammate (Phase E).
+The legacy `team-run.ts` was deleted.
+
+### Critical invariants (review-reject if violated)
+
+1. **Teammates cannot fan out**: `INTERNAL_TEAMMATE_TOOLS` includes
+   `Task` (sync subagent spawning) — teammates can only spawn via
+   forbidden routes. Removing `Task` from this set is a review reject.
+2. **`SyntheticOutputTool` is system-only**: `isEnabled()` returns false;
+   tool is in `INTERNAL_TEAMMATE_TOOLS`. Adding it to a whitelist or
+   removing the isEnabled gate is a review reject.
+3. **Peer-DM shadow MUST NOT call `wake()`**: peer DMs (teammate↔teammate
+   `type:message`) insert a summary-only shadow to lead's mailbox via
+   `peer-dm-shadow.ts`. The lead picks it up on its NEXT NATURAL wake
+   (task notification or founder message). Adding `wake()` to peer-DM
+   would burn the lead's API budget on every chatter.
+4. **`agent_runs.role` is immutable**: changing role requires deleting
+   the row and spawning fresh. The role is part of the teammate's
+   contract; changing mid-run breaks blacklist invariants.
+5. **`<task-notification>` XML is synthesized in ONE place**:
+   `src/workers/processors/lib/synthesize-notification.ts`. When engine
+   evolves the schema, only this file changes. No inline XML construction
+   anywhere else.
+6. **`delivered_at` is the only mailbox idempotency key**: drainMailbox
+   uses `for update` row lock + `delivered_at` marker. No in-memory
+   deduping. Bypassing this allows double-delivery.
+7. **`assembleToolPool` is the SSOT** (re-stating for emphasis): never
+   compute "agent X's tools" anywhere else.
+
+### When adding a new agent
+
+1. Create `src/tools/AgentTool/agents/<name>/AGENT.md` with `role: lead`
+   or `role: member` declared
+2. Add the agent's `agentType` to `team_members` table seed/migration
+3. The 4-layer filter handles tool resolution automatically — no code
+   change needed unless you also need a new tool
+
+### When adding a new tool
+
+1. Add the tool name constant to its tool file
+2. Decide: should `member` agents have it? If NO, add to
+   `INTERNAL_TEAMMATE_TOOLS` in `blacklists.ts`
+3. Should sync `subagent` invocations have it? If NO, add to
+   `INTERNAL_SUBAGENT_TOOLS`
+4. Register the tool in `src/tools/registry.ts` (or `registry-team.ts`)
+5. Update the relevant AGENT.md `tools:` allow-list to include the new
+   tool by name (optional — only needed if you want the agent to default-have it)
+
+### Async lifecycle quick reference
+
+- `Task({subagent_type, prompt})` → sync subagent (await result)
+- `Task({subagent_type, prompt, run_in_background: true})` → async
+  teammate (returns `{agentId}`; result later as `<task-notification>`)
+- `SendMessage({type, to, content})` → continue / DM / broadcast / etc.
+- `TaskStop({task_id})` → graceful shutdown (lead-only)
+- `Sleep({duration_ms})` → yield BullMQ slot until duration or
+  `SendMessage` arrives (member only — not subagents)
+
+The `agent-run` BullMQ worker drives all teammate lifecycles. Each
+teammate's transcript is persisted to `team_messages` per assistant turn
+for resume-from-sleep continuity.
+
 ## Security TODO
 
 Tracking pending security hardening beyond what `feat/security-hardening` already shipped.
