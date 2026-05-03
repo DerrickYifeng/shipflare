@@ -616,6 +616,7 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
               is_error: !!event.result.is_error,
               duration_ms: event.durationMs,
             };
+        let persisted = true;
         try {
           await db.insert(teamMessages).values({
             id: insertedId,
@@ -634,10 +635,21 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
             createdAt,
           });
         } catch (err) {
+          persisted = false;
           log.warn(
             `agent-run ${agentId}: failed to persist ${isCall ? 'tool_call' : 'tool_result'}: ${err instanceof Error ? err.message : String(err)}`,
           );
           // Fall through; persistence failure must not abort the stream.
+          // The SSE publish below is gated on `persisted` so the founder
+          // UI doesn't render a card whose messageId has no DB backing
+          // (a refetch would otherwise produce a phantom-gone row). The
+          // assistant_text_stop precedent above `return`s on insert
+          // failure for exactly this reason; we use a flag here because
+          // tool_done with toolName='Sleep' must still reach the
+          // early-exit detector below — Sleep is filtered out before we
+          // ever reach this insert, so this branch only matters for
+          // non-Sleep tools, but the flag keeps the control flow honest
+          // either way.
         }
         // Lead path additionally publishes to the team SSE channel so
         // the founder UI paints the tool card live. Teammates skip — the
@@ -646,7 +658,9 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
         // <task-notification> summaries. Mirrors the agent_text envelope
         // shape (incl. conversationId + runId) and the failure handling
         // (publish failure is non-fatal — the durable row already landed).
-        if (def.role === 'lead') {
+        // Skipped when the DB insert above failed so the live card always
+        // has a durable row to back it.
+        if (persisted && def.role === 'lead') {
           try {
             const pub = getPubSubPublisher();
             await pub.publish(

@@ -1449,4 +1449,111 @@ describe('processAgentRun', () => {
     });
     expect(sseToolCallTeammate).toBeUndefined();
   });
+
+  it('lead skips the tool_call SSE publish when the DB insert throws (no phantom row)', async () => {
+    vi.mocked(db.query.agentRuns.findFirst).mockResolvedValueOnce({
+      id: 'lead-insert-throws',
+      teamId: 'team-throws',
+      memberId: 'mem-throws',
+      agentDefName: 'coordinator',
+      parentAgentId: null,
+      status: 'queued',
+    } as never);
+    vi.mocked(resolveAgent).mockResolvedValueOnce({
+      source: 'built-in',
+      sourcePath: '/test',
+      name: 'coordinator',
+      description: 'mock lead',
+      role: 'lead',
+      tools: [],
+      disallowedTools: [],
+      skills: [],
+      requires: [],
+      background: false,
+      maxTurns: 10,
+      systemPrompt: 'You are the team lead.',
+    } as never);
+    selectChain.limit.mockResolvedValueOnce([{ id: 'conv-throws' }]);
+
+    // Reject ONLY the tool_call insert. Other rows the processor writes
+    // during a normal run (status updates / task_notification / etc.)
+    // must still succeed so the worker can settle cleanly.
+    // Cast to a variadic impl so the per-call args (the row being
+    // inserted) flow through despite the chain's zero-arg type sig.
+    (insertChain.values.mockImplementation as unknown as (
+      impl: (...args: unknown[]) => Promise<undefined>,
+    ) => void)(async (...args: unknown[]) => {
+      const row = args[0] as { type?: unknown } | null | undefined;
+      if (row && (row as { type?: string }).type === 'tool_call') {
+        throw new Error('simulated DB outage');
+      }
+      return undefined;
+    });
+
+    runAgentHoisted.fn.mockImplementationOnce(async (...args: unknown[]) => {
+      runAgentHoisted.state.lastArgs = args;
+      const onEvent = args[7] as
+        | ((event: {
+            type: string;
+            toolName?: string;
+            toolUseId?: string;
+            input?: unknown;
+          }) => void | Promise<void>)
+        | undefined;
+      if (onEvent) {
+        await onEvent({
+          type: 'tool_start',
+          toolName: 'query_strategic_path',
+          toolUseId: 'toolu_throws',
+          input: { reason: 'fail-insert' },
+        });
+      }
+      return {
+        result: 'ok',
+        usage: {
+          inputTokens: 1,
+          outputTokens: 1,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          costUsd: 0,
+          model: 'claude-sonnet-4-6',
+          turns: 1,
+        },
+      };
+    });
+
+    await processAgentRun(makeJob('lead-insert-throws'));
+
+    // No tool_call SSE publish — gating on `persisted` prevents the
+    // founder UI from receiving a card whose messageId has no DB row.
+    const sseToolCall = publishMock.mock.calls.find(([channel, raw]) => {
+      if (channel !== teamMessagesChannel('team-throws')) return false;
+      try {
+        return (
+          (JSON.parse(raw as string) as { type?: string }).type === 'tool_call'
+        );
+      } catch {
+        return false;
+      }
+    });
+    expect(sseToolCall).toBeUndefined();
+
+    // Sanity: the worker DID attempt the insert (the throw fires from
+    // the values() call), and DID NOT abort the stream — control fell
+    // through and the run still completed (other inserts ran).
+    const allInsertedRows = insertChain.values.mock.calls.map(
+      (c) => (c as unknown as [Record<string, unknown>])[0],
+    );
+    const attemptedToolCall = allInsertedRows.find(
+      (r) => r.type === 'tool_call' && r.fromAgentId === 'lead-insert-throws',
+    );
+    expect(attemptedToolCall).toBeDefined();
+
+    // Restore the default no-op so future tests added below don't
+    // inherit the rejecting implementation. `beforeEach`'s `mockClear`
+    // wipes call history but leaves the impl in place.
+    (insertChain.values.mockImplementation as unknown as (
+      impl: (...args: unknown[]) => Promise<undefined>,
+    ) => void)(async () => undefined);
+  });
 });
