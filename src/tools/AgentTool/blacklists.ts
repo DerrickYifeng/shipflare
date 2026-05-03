@@ -10,11 +10,13 @@
 // future blacklist entries (TaskStop, TeamCreate, TeamDelete) are added
 // in their respective Phase B/C/D landings. Phase B added SyntheticOutput
 // (architecture invariant: only the system, never an agent, may synthesize
-// a <task-notification>).
+// a <task-notification>). Phase C added TaskStop (lead-only; teammates
+// cannot stop peers — engine PDF §2.4).
 
 import { TASK_TOOL_NAME } from './AgentTool';
 import { SEND_MESSAGE_TOOL_NAME } from '@/tools/SendMessageTool/SendMessageTool';
 import { SYNTHETIC_OUTPUT_TOOL_NAME } from '@/tools/SyntheticOutputTool/SyntheticOutputTool';
+import { TASK_STOP_TOOL_NAME } from '@/tools/TaskStopTool/TaskStopTool';
 import type { AgentRole } from './loader';
 
 const EMPTY_SET: ReadonlySet<string> = new Set();
@@ -26,11 +28,14 @@ const EMPTY_SET: ReadonlySet<string> = new Set();
  * Phase A members: { Task }.
  * Phase B adds: { SyntheticOutput } (architecture invariant: only the
  *   system, never an agent, may synthesize a <task-notification>).
- * Phase B+ adds: TaskStop, TeamCreate, TeamDelete.
+ * Phase C adds: { TaskStop } (lead-only graceful-stop lever; teammates
+ *   cannot stop peers — engine PDF §2.4).
+ * Phase D+ adds: TeamCreate, TeamDelete.
  */
 export const INTERNAL_TEAMMATE_TOOLS: ReadonlySet<string> = new Set([
   TASK_TOOL_NAME,
   SYNTHETIC_OUTPUT_TOOL_NAME,
+  TASK_STOP_TOOL_NAME,
 ]);
 
 /**

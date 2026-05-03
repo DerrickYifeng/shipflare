@@ -100,18 +100,22 @@ registry.register(validateDraftTool);
 export { registry };
 
 /**
- * Register Team runtime tools (Task, SendMessage, Skill). These are split
- * out of the top-level registration to avoid a module cycle:
+ * Register Team runtime tools (Task, SendMessage, Skill, TaskStop). These
+ * are split out of the top-level registration to avoid a module cycle:
  * `AgentTool/spawn.ts` imports `registry` so its tool resolution can look
  * up by name. Eagerly registering `taskTool` (or `skillTool`, which itself
  * imports `spawnSubagent`) in that same module would make the tool exist
- * before its dependencies finished loading.
+ * before its dependencies finished loading. `taskStopTool` is folded in
+ * via the same channel because it is referenced by
+ * `AgentTool/blacklists.ts` (closing the same import cycle).
  *
  * Callers that need these tools available (the team-run worker + the
  * integration tests) must import `./registry-team` for its side effect.
  * StructuredOutput is intentionally NOT registered — it's synthesized
  * per-agent from the caller's Zod outputSchema inside runAgent
  * (see src/tools/StructuredOutputTool/StructuredOutputTool.ts).
+ * SyntheticOutput is intentionally NOT registered — it is system-only
+ * (see src/tools/SyntheticOutputTool/SyntheticOutputTool.ts).
  *
  * Skill primitive — see src/skills/ + src/tools/SkillTool/.
  * Agents that want skill access add `skill` to their AGENT.md tools: list.
@@ -120,10 +124,12 @@ export function registerDeferredTools(tools: {
   taskTool: typeof import('./AgentTool/AgentTool').taskTool;
   sendMessageTool: typeof import('./SendMessageTool/SendMessageTool').sendMessageTool;
   skillTool: typeof import('./SkillTool/SkillTool').skillTool;
+  taskStopTool: typeof import('./TaskStopTool/TaskStopTool').taskStopTool;
 }): void {
   registry.register(tools.taskTool);
   registry.register(tools.sendMessageTool);
   registry.register(tools.skillTool);
+  registry.register(tools.taskStopTool);
 }
 
 /**
