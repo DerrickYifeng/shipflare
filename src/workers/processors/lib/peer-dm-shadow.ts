@@ -12,6 +12,11 @@
 
 import { teamMessages } from '@/lib/db/schema';
 import type { Database } from '@/lib/db';
+import { getPubSubPublisher } from '@/lib/redis';
+import { teamMessagesChannel } from '@/tools/SendMessageTool/SendMessageTool';
+import { createLogger } from '@/lib/logger';
+
+const log = createLogger('peer-dm-shadow');
 
 const SYSTEM_AGENT_ID = '__system__';
 
@@ -58,6 +63,33 @@ export async function insertPeerDmShadow({
     summary,
   });
   // CRITICAL: no wake() call here. See JSDoc above.
+
+  // UI-B Task 10: publish a `peer_dm` SSE event so the activity feed can
+  // surface the cross-teammate chatter live. The lead is intentionally
+  // NOT woken (the invariant above), but the founder UI is interested
+  // either way — this is the "transparency" view, not the conversation.
+  // Best-effort; SSE failures are warned and swallowed.
+  try {
+    const pub = getPubSubPublisher();
+    await pub.publish(
+      teamMessagesChannel(teamId),
+      JSON.stringify({
+        // Synthetic id so the SSE route's wire wrapper survives the
+        // useTeamEvents `normalizeEvent` filter (requires messageId).
+        messageId: crypto.randomUUID(),
+        type: 'peer_dm',
+        teamId,
+        from: fromName,
+        to: toName,
+        summary,
+        createdAt: new Date().toISOString(),
+      }),
+    );
+  } catch (err) {
+    log.warn(
+      `peer-dm-shadow publish failed (team=${teamId}): ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
 }
 
 const XML_ESCAPES: Record<string, string> = {

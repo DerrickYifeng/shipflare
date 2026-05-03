@@ -223,6 +223,56 @@ interface NotifyParams {
   finalText: string;
   summary: string;
   usage: { totalTokens: number; toolUses: number; durationMs: number };
+  /**
+   * Best-effort teammate display name carried onto the SSE
+   * `task_notification` event so the activity feed can render
+   * `"Researcher completed"` instead of a raw agent uuid. Defaults to the
+   * agentDef name (`researcher`, `content-manager`, etc.) at the call
+   * site. Not required because the SSE is best-effort and the durable
+   * `team_messages` row carries the canonical XML payload.
+   */
+  teammateName?: string;
+}
+
+/**
+ * UI-B Task 10: emit a `task_notification` event onto the team SSE
+ * channel after each terminal teammate exit, so the right-side activity
+ * feed can show "Researcher completed: drafted 3 variations" without
+ * waiting for a page reload.
+ *
+ * Best-effort — the durable record is the `team_messages` row inserted
+ * by `synthAndDeliverNotification`. SSE failures are warned and
+ * swallowed.
+ */
+async function publishTaskNotification(params: {
+  teamId: string;
+  agentId: string;
+  status: 'completed' | 'failed' | 'killed';
+  summary: string;
+  teammateName?: string;
+}): Promise<void> {
+  try {
+    const pub = getPubSubPublisher();
+    await pub.publish(
+      teamMessagesChannel(params.teamId),
+      JSON.stringify({
+        // Synthetic id so the SSE route's wire wrapper survives the
+        // useTeamEvents `normalizeEvent` filter (requires messageId).
+        messageId: crypto.randomUUID(),
+        type: 'task_notification',
+        teamId: params.teamId,
+        agentId: params.agentId,
+        status: params.status,
+        summary: params.summary,
+        teammateName: params.teammateName ?? null,
+        createdAt: new Date().toISOString(),
+      }),
+    );
+  } catch (err) {
+    log.warn(
+      `agent-run publishTaskNotification failed (team=${params.teamId} agent=${params.agentId}): ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
 }
 
 // Phase B vs Phase E behavior:
@@ -261,6 +311,17 @@ async function synthAndDeliverNotification(params: NotifyParams): Promise<void> 
   if (params.parentAgentId) {
     await wake(params.parentAgentId);
   }
+
+  // UI-B Task 10: publish the SSE event AFTER the durable insert so the
+  // activity feed only ever shows notifications that are also persisted.
+  // Best-effort; failures are non-fatal (the durable row is the contract).
+  await publishTaskNotification({
+    teamId: params.teamId,
+    agentId: params.agentId,
+    status: params.status,
+    summary: params.summary,
+    teammateName: params.teammateName,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -297,6 +358,10 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
       finalText: '',
       summary: reason,
       usage: { totalTokens: 0, toolUses: 0, durationMs: 0 },
+      // UI-B Task 10: best-effort name for the activity feed. The agent
+      // def didn't resolve, so fall back to the stored agentDefName from
+      // the row — better than rendering a uuid in the feed.
+      teammateName: row.agentDefName,
     });
     return;
   }
@@ -773,6 +838,13 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
       toolUses: 0,
       durationMs,
     },
+    // UI-B Task 10: pass the resolved agent definition name so the
+    // activity feed can label the entry "Researcher completed: …"
+    // instead of showing the agent uuid. The roster also keys off
+    // displayName when available, but that's a team_members lookup —
+    // agentDef.name is locally available and is good enough for the
+    // feed entry.
+    teammateName: def.name,
   });
 
   // Phase E hot-fix (working-indicator gap): publish a terminal SSE event
