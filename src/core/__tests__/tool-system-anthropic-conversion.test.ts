@@ -7,24 +7,34 @@
 //
 // History of this regression:
 //   1. Some Zod constructs — notably `z.preprocess(...)` wrapping a
-//      discriminated union, which is how `SendMessageInputSchema` is
-//      built — emit a top-level `{ anyOf: [...] }` with no `type` field.
+//      discriminated union, which is how `SendMessageInputSchema` USED to
+//      be built — emit a top-level `{ anyOf: [...] }` with no `type` field.
 //      Anthropic rejected the request with
 //      `tools.N.custom.input_schema.type: Field required`.
 //   2. d49f1ee patched that by injecting `type: 'object'` when missing —
 //      but left the `anyOf` in place, which Anthropic STILL rejects with
 //      `tools.N.custom.input_schema: JSON schema is invalid`.
-//   3. The real fix flattens the top-level union into a single permissive
-//      object schema for the wire format; runtime Zod parsing in the
-//      tool's `execute()` keeps using the original discriminated union.
+//   3. The flatten-top-level-union helper collapses any remaining top-level
+//      union into a single permissive object schema for the wire format;
+//      runtime Zod parsing in the tool's `execute()` keeps using its
+//      original schema. Defense-in-depth for any future tool whose author
+//      reaches for a top-level discriminated union.
+//   4. SendMessage was refactored to engine's flat-top + nested-union
+//      design — top level is `{to, summary, message, run_id}` with
+//      `message: string | StructuredMessage`. The schema is now natively
+//      Anthropic-compatible: no top-level union to flatten. The flatten
+//      helper becomes a no-op for SendMessage; the test below verifies
+//      that the resulting wire shape is the engine-style flat-top schema.
 //
 // This test:
 //   - asserts every coordinator tool's serialized shape has
 //     `type: 'object'`, AND
-//   - asserts the SendMessage shape has NO top-level `anyOf` / `oneOf` /
-//     `allOf`, AND
+//   - asserts the SendMessage shape is the engine-style flat-top schema
+//     (no top-level anyOf, properties = {to, summary, message, run_id},
+//     required = ['to', 'message']), AND
 //   - exercises the `z.preprocess(discriminatedUnion(...))` shape in
-//     isolation so future regressions point at the conversion helper.
+//     isolation so the flatten helper still has explicit coverage in case
+//     a future tool needs it.
 
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
@@ -64,7 +74,7 @@ const COORDINATOR_REGISTRY_TOOLS = [
 ];
 
 describe('toAnthropicTool — Anthropic input_schema invariants', () => {
-  it("flattens SendMessage's discriminated union to a single object schema (no top-level anyOf/oneOf/allOf)", () => {
+  it('emits the engine-style flat-top schema for SendMessage (natively Anthropic-compatible — no flatten workaround needed)', () => {
     const apiTool = toAnthropicTool(asAnyTool(sendMessageTool));
     const schema = apiTool.input_schema as Record<string, unknown>;
 
@@ -75,30 +85,26 @@ describe('toAnthropicTool — Anthropic input_schema invariants', () => {
     expect(schema).not.toHaveProperty('oneOf');
     expect(schema).not.toHaveProperty('allOf');
 
-    // The flattened `properties` should be the union of every variant's
-    // properties so the LLM can see every legal field. The SendMessage
-    // discriminated union has variants for: message, broadcast,
-    // shutdown_request, shutdown_response, plan_approval_response — the
-    // union of their fields covers the discriminator + every variant
-    // field name.
+    // Engine-style top-level shape: flat object with four properties.
+    // The discriminated union (shutdown_request | shutdown_response |
+    // plan_approval_response) lives INSIDE the `message` property as a
+    // nested anyOf — Anthropic permits unions inside properties, only
+    // the top level must be a plain object.
     const props = schema.properties as Record<string, unknown> | undefined;
     expect(props).toBeDefined();
     if (!props) return;
-    // Discriminator is in every variant.
-    expect(props).toHaveProperty('type');
-    // Variant fields surface as optional properties.
-    expect(props).toHaveProperty('to');
-    expect(props).toHaveProperty('content');
-    expect(props).toHaveProperty('request_id');
-    expect(props).toHaveProperty('approve');
-    expect(props).toHaveProperty('summary');
-    expect(props).toHaveProperty('run_id');
+    expect(Object.keys(props).sort()).toEqual(
+      ['message', 'run_id', 'summary', 'to'],
+    );
 
-    // `required` = intersection of every variant's required set. Only
-    // `type` is required in EVERY variant of SendMessage's union; every
-    // other field is required only by some variants. Intersection
-    // collapses to ['type'].
-    expect(schema.required).toEqual(['type']);
+    // `to` and `message` are the only required fields — `summary` and
+    // `run_id` are optional.
+    expect((schema.required as string[]).sort()).toEqual(['message', 'to']);
+
+    // Sanity: `message` carries the nested string|StructuredMessage union
+    // (zod-to-json-schema emits `anyOf`). Anthropic accepts this shape.
+    const messageProp = props.message as Record<string, unknown>;
+    expect(messageProp).toHaveProperty('anyOf');
   });
 
   it("emits top-level type: 'object' for Task", () => {

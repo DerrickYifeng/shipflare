@@ -1,9 +1,26 @@
 /**
- * SendMessage tool unit tests.
+ * SendMessage tool unit tests — engine-style flat-top + nested-union schema.
  *
  * Strategy: inject a fake db + fake Redis publisher via ToolContext.get, so
  * we can assert both the INSERT and the PUBLISH happened without standing
  * up Postgres or Redis.
+ *
+ * Input shape (post-Phase-C-deletion refactor):
+ *   { to: string, summary?: string, message: string | StructuredMessage,
+ *     run_id?: string }
+ *
+ * - Plain DM:                 { to: 'Alex', summary?, message: 'hi' }
+ * - Broadcast:                { to: '*',    summary?, message: 'halt!' }
+ * - Shutdown request:         { to: 'Alex', message: { type: 'shutdown_request', reason? } }
+ * - Shutdown response:        { to: 'team-lead', message: { type: 'shutdown_response',
+ *                              request_id, approve, reason? } }
+ * - Plan approval response:   { to: 'Alex', message: { type: 'plan_approval_response',
+ *                              request_id, approve, feedback? } }
+ *
+ * The OLD top-level discriminated union (`{type: 'message', to, content}`,
+ * etc.) was deleted — the engine-style flat-top shape is natively
+ * Anthropic-API-compatible (no top-level anyOf), so the per-tool
+ * `flattenTopLevelUnion` workaround is no longer needed for SendMessage.
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { ToolContext } from '@/core/types';
@@ -330,7 +347,7 @@ describe('SendMessage tool', () => {
     });
 
     const result = await sendMessageTool.execute(
-      { type: 'message', to: 'Alex', content: 'hi Alex' },
+      { to: 'Alex', message: 'hi Alex' },
       ctx,
     );
 
@@ -360,7 +377,7 @@ describe('SendMessage tool', () => {
 
     await expect(
       sendMessageTool.execute(
-        { type: 'message', to: 'Ghost', content: 'hello?' },
+        { to: 'Ghost', message: 'hello?' },
         ctx,
       ),
     ).rejects.toThrow(/no team member named "Ghost"/);
@@ -379,7 +396,7 @@ describe('SendMessage tool', () => {
     });
 
     const result = await sendMessageTool.execute(
-      { type: 'message', to: memberId, content: 'hi' },
+      { to: memberId, message: 'hi' },
       ctx,
     );
     expect(result.toMemberId).toBe(memberId);
@@ -415,7 +432,7 @@ describe('SendMessage tool', () => {
       }) as unknown as ReturnType<typeof redis.getPubSubPublisher>);
 
     const result = await sendMessageTool.execute(
-      { type: 'message', to: 'Alex', content: 'hi' },
+      { to: 'Alex', message: 'hi' },
       ctx,
     );
     expect(result.delivered).toBe(true);
@@ -425,16 +442,23 @@ describe('SendMessage tool', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Phase C Task 2 — execute() variant dispatch
+// execute() — variant dispatch (engine-style: routed by `to` + `message` shape)
 // ---------------------------------------------------------------------------
 //
-// Each variant inserts a different `team_messages` row shape. shutdown_request
-// + plan_approval_response also call wake() on the recipient so the target
-// processes the request promptly. shutdown_response + plan_approval_response
-// chain the conversation thread via repliesToId.
+// Each "variant" is a different combination of (to, message) shape:
+//   - plain DM:               to !== '*' + message: string
+//   - broadcast:              to === '*' + message: string
+//   - shutdown_request:       message: {type: 'shutdown_request', reason?}
+//   - shutdown_response:      message: {type: 'shutdown_response', request_id, approve, reason?}
+//   - plan_approval_response: message: {type: 'plan_approval_response', request_id, approve, feedback?}
+//
+// shutdown_request + plan_approval_response also call wake() on the
+// recipient (resolved via agent_runs.id, not team_members.id) so the
+// target processes the request promptly. shutdown_response +
+// plan_approval_response chain the conversation thread via repliesToId.
 
 describe('SendMessage execute() — variant dispatch', () => {
-  it('type:message inserts a single team_messages row with messageType="message"', async () => {
+  it('plain DM (string message) inserts a single team_messages row with messageType="message"', async () => {
     members.push({ id: 'mem-alex', teamId: 'team-1', displayName: 'Alex' });
 
     const ctx = makeCtx({
@@ -445,7 +469,7 @@ describe('SendMessage execute() — variant dispatch', () => {
     });
 
     const result = await sendMessageTool.execute(
-      { type: 'message', to: 'Alex', content: 'hello' },
+      { to: 'Alex', message: 'hello' },
       ctx,
     );
 
@@ -456,13 +480,15 @@ describe('SendMessage execute() — variant dispatch', () => {
     expect((inserts[0] as MessageRow & { messageType?: string }).messageType).toBe(
       'message',
     );
-    // type:message does NOT wake — peer DMs are passive (lead receives shadow
+    // Plain DM does NOT wake — peer DMs are passive (lead receives shadow
     // without preemptive scheduling, target wakes via reconcile-mailbox cron
-    // or its own poll).
+    // or its own poll). The wake-if-sleeping branch only fires when the
+    // recipient has an `agent_runs.status='sleeping'` row; this test seeds
+    // none.
     expect(vi.mocked(wake)).not.toHaveBeenCalled();
   });
 
-  it('type:broadcast fans out to all team members except the sender', async () => {
+  it('broadcast (to: "*") fans out to all team members except the sender', async () => {
     // 3 members on team-1; sender (mem-sam) excluded → 2 inserts.
     members.push({ id: 'mem-sam', teamId: 'team-1', displayName: 'Sam' });
     members.push({ id: 'mem-alex', teamId: 'team-1', displayName: 'Alex' });
@@ -478,7 +504,7 @@ describe('SendMessage execute() — variant dispatch', () => {
     });
 
     const result = await sendMessageTool.execute(
-      { type: 'broadcast', content: 'Critical: stop all work' },
+      { to: '*', message: 'Critical: stop all work' },
       ctx,
     );
 
@@ -497,7 +523,7 @@ describe('SendMessage execute() — variant dispatch', () => {
     expect(inserts.map((r) => r.id)).toContain(result.messageId);
   });
 
-  it('type:shutdown_request inserts row with messageType="shutdown_request", sets toAgentId, and wakes by agent_runs.id (Phase E)', async () => {
+  it('shutdown_request inserts row with messageType="shutdown_request", sets toAgentId, and wakes by agent_runs.id (Phase E)', async () => {
     members.push({ id: 'mem-alex', teamId: 'team-1', displayName: 'Alex' });
     // Phase E Task 8: dispatcher must resolve recipient to agent_runs.id
     // (not team_members.id) before wake(). Seed a running run so the
@@ -516,7 +542,10 @@ describe('SendMessage execute() — variant dispatch', () => {
     });
 
     const result = await sendMessageTool.execute(
-      { type: 'shutdown_request', to: 'Alex', content: 'wrap up' },
+      {
+        to: 'Alex',
+        message: { type: 'shutdown_request', reason: 'wrap up' },
+      },
       ctx,
     );
 
@@ -537,7 +566,7 @@ describe('SendMessage execute() — variant dispatch', () => {
     expect(vi.mocked(wake)).toHaveBeenCalledWith('agent-run-alex');
   });
 
-  it('type:shutdown_request also resolves a sleeping recipient (Phase E)', async () => {
+  it('shutdown_request also resolves a sleeping recipient (Phase E)', async () => {
     members.push({ id: 'mem-alex', teamId: 'team-1', displayName: 'Alex' });
     agentRunRows.push({
       id: 'agent-run-alex',
@@ -553,7 +582,10 @@ describe('SendMessage execute() — variant dispatch', () => {
     });
 
     const result = await sendMessageTool.execute(
-      { type: 'shutdown_request', to: 'Alex', content: 'wrap up' },
+      {
+        to: 'Alex',
+        message: { type: 'shutdown_request', reason: 'wrap up' },
+      },
       ctx,
     );
 
@@ -561,7 +593,7 @@ describe('SendMessage execute() — variant dispatch', () => {
     expect(vi.mocked(wake)).toHaveBeenCalledWith('agent-run-alex');
   });
 
-  it('type:shutdown_request throws when recipient has no active agent_run (Phase E)', async () => {
+  it('shutdown_request throws when recipient has no active agent_run (Phase E)', async () => {
     members.push({ id: 'mem-alex', teamId: 'team-1', displayName: 'Alex' });
     // No agentRunRows seeded — recipient is not addressable.
 
@@ -574,7 +606,10 @@ describe('SendMessage execute() — variant dispatch', () => {
 
     await expect(
       sendMessageTool.execute(
-        { type: 'shutdown_request', to: 'Alex', content: 'wrap up' },
+        {
+          to: 'Alex',
+          message: { type: 'shutdown_request', reason: 'wrap up' },
+        },
         ctx,
       ),
     ).rejects.toThrow(/no active agent_run for member mem-alex/);
@@ -582,7 +617,7 @@ describe('SendMessage execute() — variant dispatch', () => {
     expect(vi.mocked(wake)).not.toHaveBeenCalled();
   });
 
-  it('type:shutdown_response inserts row with repliesToId and messageType="shutdown_response"', async () => {
+  it('shutdown_response inserts row with repliesToId and messageType="shutdown_response"', async () => {
     const ctx = makeCtx({
       db: fakeDb,
       teamId: 'team-1',
@@ -592,10 +627,13 @@ describe('SendMessage execute() — variant dispatch', () => {
 
     const result = await sendMessageTool.execute(
       {
-        type: 'shutdown_response',
-        request_id: 'orig-msg-id',
-        approve: false,
-        content: 'need 5 more minutes',
+        to: 'team-lead',
+        message: {
+          type: 'shutdown_response',
+          request_id: 'orig-msg-id',
+          approve: false,
+          reason: 'need 5 more minutes',
+        },
       },
       ctx,
     );
@@ -613,7 +651,7 @@ describe('SendMessage execute() — variant dispatch', () => {
     expect(vi.mocked(wake)).not.toHaveBeenCalled();
   });
 
-  it('type:plan_approval_response inserts row with repliesToId, toMemberId, toAgentId, and wakes by agent_runs.id (Phase E)', async () => {
+  it('plan_approval_response inserts row with repliesToId, toMemberId, toAgentId, and wakes by agent_runs.id (Phase E)', async () => {
     members.push({ id: 'mem-alex', teamId: 'team-1', displayName: 'Alex' });
     agentRunRows.push({
       id: 'agent-run-alex',
@@ -630,10 +668,12 @@ describe('SendMessage execute() — variant dispatch', () => {
 
     const result = await sendMessageTool.execute(
       {
-        type: 'plan_approval_response',
-        request_id: 'plan-msg-id',
         to: 'Alex',
-        approve: true,
+        message: {
+          type: 'plan_approval_response',
+          request_id: 'plan-msg-id',
+          approve: true,
+        },
       },
       ctx,
     );
@@ -655,7 +695,7 @@ describe('SendMessage execute() — variant dispatch', () => {
     expect(vi.mocked(wake)).toHaveBeenCalledWith('agent-run-alex');
   });
 
-  it('type:plan_approval_response throws when recipient has no active agent_run (Phase E)', async () => {
+  it('plan_approval_response throws when recipient has no active agent_run (Phase E)', async () => {
     members.push({ id: 'mem-alex', teamId: 'team-1', displayName: 'Alex' });
     // No agentRunRows seeded.
 
@@ -669,10 +709,12 @@ describe('SendMessage execute() — variant dispatch', () => {
     await expect(
       sendMessageTool.execute(
         {
-          type: 'plan_approval_response',
-          request_id: 'plan-msg-id',
           to: 'Alex',
-          approve: true,
+          message: {
+            type: 'plan_approval_response',
+            request_id: 'plan-msg-id',
+            approve: true,
+          },
         },
         ctx,
       ),
@@ -682,18 +724,18 @@ describe('SendMessage execute() — variant dispatch', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Phase D Task 6 — type:message wakes a sleeping recipient
+  // Phase D Task 6 — plain DM wakes a sleeping recipient
   // -------------------------------------------------------------------------
   //
   // Phase C only woke targets on shutdown_request + plan_approval_response.
-  // Phase D extends the plain `message` variant: if the recipient's
+  // Phase D extends the plain string-message dispatch: if the recipient's
   // agent_runs row is in `status='sleeping'`, dispatchMessage must call
   // wake() so the teammate resumes its conversation. If the recipient is
   // already running (or has no agent_runs row at all), wake() must NOT
   // fire — wake on a running agent burns an idempotent enqueue but signals
   // wrong intent in the logs and risks racing the active loop.
 
-  it('type:message wakes recipient when their agent_runs.status is sleeping (Phase D)', async () => {
+  it('plain DM wakes recipient when their agent_runs.status is sleeping (Phase D)', async () => {
     members.push({ id: 'mem-alex', teamId: 'team-1', displayName: 'Alex' });
     // Seed a sleeping agent_runs row for the recipient.
     agentRunRows.push({
@@ -710,7 +752,7 @@ describe('SendMessage execute() — variant dispatch', () => {
     });
 
     const result = await sendMessageTool.execute(
-      { type: 'message', to: 'Alex', content: 'wake up' },
+      { to: 'Alex', message: 'wake up' },
       ctx,
     );
 
@@ -721,7 +763,7 @@ describe('SendMessage execute() — variant dispatch', () => {
     expect(vi.mocked(wake)).toHaveBeenCalledWith('agent-run-alex');
   });
 
-  it('type:message does NOT wake recipient when their agent_runs.status is running (Phase D)', async () => {
+  it('plain DM does NOT wake recipient when their agent_runs.status is running (Phase D)', async () => {
     members.push({ id: 'mem-alex', teamId: 'team-1', displayName: 'Alex' });
     agentRunRows.push({
       id: 'agent-run-alex',
@@ -737,7 +779,7 @@ describe('SendMessage execute() — variant dispatch', () => {
     });
 
     const result = await sendMessageTool.execute(
-      { type: 'message', to: 'Alex', content: 'fyi' },
+      { to: 'Alex', message: 'fyi' },
       ctx,
     );
 
@@ -748,19 +790,19 @@ describe('SendMessage execute() — variant dispatch', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Phase C Task 3 — runtime validation (validateInput)
+// validateInput — runtime checks
 // ---------------------------------------------------------------------------
 //
 // Two architectural rules enforced at validateInput time (engine fail-closed
 // pattern):
-//   1. type:plan_approval_response is lead-only — caller's `callerRole` must
-//      be 'lead', else 403.
-//   2. type:broadcast is rate-limited to 1 per 5 seconds per sender — query
-//      DB for prior broadcasts from same fromMemberId within the window;
-//      if any found, return 429.
-// Other variants pass through untouched (validateInput returns {result:true}).
+//   1. plan_approval_response is lead-only — caller's `callerRole` must be
+//      'lead', else 403.
+//   2. broadcast (to: "*") is rate-limited to 1 per 5 seconds per sender —
+//      query DB for prior broadcasts from same fromMemberId within the
+//      window; if any found, return 429.
+// Other shapes pass through untouched (validateInput returns {result:true}).
 
-describe('SendMessage validateInput — Phase C runtime checks', () => {
+describe('SendMessage validateInput — runtime checks', () => {
   // Track recent-broadcast lookups so we can simulate a prior broadcast row.
   // The fake db's broadcast-count helper reads this counter — simpler than
   // wiring a full SELECT-with-gt mock. Reset per-test in beforeEach below.
@@ -865,10 +907,12 @@ describe('SendMessage validateInput — Phase C runtime checks', () => {
     expect(validate).toBeDefined();
     const result = await validate!(
       {
-        type: 'plan_approval_response',
-        request_id: 'plan-1',
         to: 'Alex',
-        approve: true,
+        message: {
+          type: 'plan_approval_response',
+          request_id: 'plan-1',
+          approve: true,
+        },
       },
       ctx,
     );
@@ -888,10 +932,12 @@ describe('SendMessage validateInput — Phase C runtime checks', () => {
     });
     const result = await sendMessageTool.validateInput!(
       {
-        type: 'plan_approval_response',
-        request_id: 'plan-1',
         to: 'Alex',
-        approve: true,
+        message: {
+          type: 'plan_approval_response',
+          request_id: 'plan-1',
+          approve: true,
+        },
       },
       ctx,
     );
@@ -907,7 +953,7 @@ describe('SendMessage validateInput — Phase C runtime checks', () => {
       callerRole: 'member',
     });
     const result = await sendMessageTool.validateInput!(
-      { type: 'broadcast', content: 'second broadcast in 5s' },
+      { to: '*', message: 'second broadcast in 5s' },
       ctx,
     );
     expect(result.result).toBe(false);
@@ -926,7 +972,7 @@ describe('SendMessage validateInput — Phase C runtime checks', () => {
       callerRole: 'member',
     });
     const result = await sendMessageTool.validateInput!(
-      { type: 'broadcast', content: 'first broadcast' },
+      { to: '*', message: 'first broadcast' },
       ctx,
     );
     expect(result.result).toBe(true);
@@ -937,7 +983,7 @@ describe('SendMessage validateInput — Phase C runtime checks', () => {
 // Phase C Task 5 — peer-DM shadow on teammate↔teammate messages
 // ---------------------------------------------------------------------------
 //
-// When a teammate sends `type:message` to another teammate (NOT to the lead),
+// When a teammate sends a plain DM to another teammate (NOT to the lead),
 // dispatchMessage MUST also insert a peer-DM-shadow row to the lead's mailbox
 // (engine PDF §3.6.1 channel ③ — low-cost transparency, NEVER calls wake on
 // the lead). When the recipient is the lead, no shadow is needed because the
@@ -949,7 +995,7 @@ describe('SendMessage validateInput — Phase C runtime checks', () => {
 // observable without waiting for Phase E.
 
 describe('SendMessage execute() — peer-DM shadow (Phase C Task 5)', () => {
-  it('teammate→teammate message also inserts a peer-DM shadow (2 inserts)', async () => {
+  it('teammate→teammate plain DM also inserts a peer-DM shadow (2 inserts)', async () => {
     // Sender (Sam) and recipient (Alex) are both teammates (agentType !==
     // coordinator). Lead has a synthetic agent_runs.id injected via ctx.
     members.push({
@@ -975,7 +1021,7 @@ describe('SendMessage execute() — peer-DM shadow (Phase C Task 5)', () => {
     });
 
     const result = await sendMessageTool.execute(
-      { type: 'message', to: 'Alex', content: 'hey', summary: 'asking q' },
+      { to: 'Alex', message: 'hey', summary: 'asking q' },
       ctx,
     );
 
@@ -999,7 +1045,7 @@ describe('SendMessage execute() — peer-DM shadow (Phase C Task 5)', () => {
     expect(vi.mocked(wake)).not.toHaveBeenCalled();
   });
 
-  it('teammate→lead message inserts only the primary row (no shadow)', async () => {
+  it('teammate→lead plain DM inserts only the primary row (no shadow)', async () => {
     // Recipient is the lead (agentType: coordinator). Lead is already the
     // direct recipient — shadowing would be redundant.
     members.push({
@@ -1025,7 +1071,7 @@ describe('SendMessage execute() — peer-DM shadow (Phase C Task 5)', () => {
     });
 
     const result = await sendMessageTool.execute(
-      { type: 'message', to: 'Lead', content: 'status update' },
+      { to: 'Lead', message: 'status update' },
       ctx,
     );
 

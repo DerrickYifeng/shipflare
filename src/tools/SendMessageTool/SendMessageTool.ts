@@ -62,92 +62,72 @@ export function teamCancelChannel(teamId: string, runId: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Input schema
+// Input schema — engine-style flat-top + nested-union design
 // ---------------------------------------------------------------------------
 //
-// Phase C: 5-variant discriminated union per Agent Teams spec §4.1.
-// Backward compat: bare {to, message} (no `type`) is treated as
-// `type: 'message'` via preprocessor — preserves the legacy call sites in
-// team-run.ts and the API routes. The preprocessor also renames the legacy
-// `message` field to the canonical `content` so existing callers don't have
-// to change their wire shape.
+// Top-level is a flat object `{to, summary?, message, run_id?}` that maps
+// directly to Anthropic's tool input_schema grammar (no top-level anyOf).
+// `message` is `string | StructuredMessage` — the nested union is allowed
+// inside a property even though Anthropic rejects it at the top level.
+//
+// Routing rules:
+// - Broadcast is signalled by `to: "*"` (NOT a separate variant).
+// - Plain DM/broadcast: `message` is a string.
+// - Protocol responses (shutdown_request, shutdown_response,
+//   plan_approval_response): `message` is a discriminated-union object.
 //
 // `task_notification` and `tick` are intentionally NOT in the union — they
 // are system-only messageTypes inserted directly by the workers and must
 // never be tool-callable.
 
-const messageVariant = z.object({
-  type: z.literal('message'),
-  /** memberId (uuid-like) OR display_name; scoped to the caller's team. */
-  to: z.string().min(1),
-  // `content` is the new canonical name; legacy callers used `message` —
-  // the preprocessor maps `message` → `content` for back-compat.
-  content: z.string().min(1),
-  summary: z.string().optional(),
+const StructuredMessage = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('shutdown_request'),
+    reason: z.string().optional(),
+  }),
+  z.object({
+    type: z.literal('shutdown_response'),
+    request_id: z.string().min(1),
+    approve: z.boolean(),
+    reason: z.string().optional(),
+  }),
+  z.object({
+    type: z.literal('plan_approval_response'),
+    request_id: z.string().min(1),
+    approve: z.boolean(),
+    feedback: z.string().optional(),
+  }),
+]);
+
+export const SendMessageInputSchema = z.object({
+  to: z
+    .string()
+    .min(1)
+    .describe(
+      'Recipient: teammate name, agent_runs.id, OR "*" for broadcast to all teammates. ' +
+        'Broadcast is expensive (linear in team size) — use only when everyone needs it.',
+    ),
+  summary: z
+    .string()
+    .optional()
+    .describe(
+      '5-10 word UI preview shown to the team-lead via peer-DM-visibility. ' +
+        'Required when message is a plain string DM.',
+    ),
+  message: z
+    .union([
+      z.string().min(1).describe('Plain text message content (DM or broadcast)'),
+      StructuredMessage,
+    ])
+    .describe(
+      'Either a plain string (regular DM/broadcast) OR a structured protocol response. ' +
+        'Use structured form to reply to a shutdown_request or plan_approval_request.',
+    ),
   run_id: z.string().optional(),
 });
-
-const broadcastVariant = z
-  .object({
-    type: z.literal('broadcast'),
-    content: z.string().min(1),
-    summary: z.string().optional(),
-    run_id: z.string().optional(),
-  })
-  .strict();
-
-const shutdownRequestVariant = z.object({
-  type: z.literal('shutdown_request'),
-  to: z.string().min(1),
-  content: z.string().min(1),
-  summary: z.string().optional(),
-  run_id: z.string().optional(),
-});
-
-const shutdownResponseVariant = z.object({
-  type: z.literal('shutdown_response'),
-  request_id: z.string().min(1),
-  approve: z.boolean(),
-  content: z.string().optional(),
-  run_id: z.string().optional(),
-});
-
-const planApprovalResponseVariant = z.object({
-  type: z.literal('plan_approval_response'),
-  request_id: z.string().min(1),
-  to: z.string().min(1),
-  approve: z.boolean(),
-  content: z.string().optional(),
-  run_id: z.string().optional(),
-});
-
-// Preprocessor: inject type='message' for legacy {to, message} callers.
-// Also map `message` field → `content` so legacy callers don't break.
-export const SendMessageInputSchema = z.preprocess(
-  (raw) => {
-    if (raw === null || typeof raw !== 'object') return raw;
-    const obj = raw as Record<string, unknown>;
-    if (obj.type === undefined) {
-      // Legacy form: ensure type='message' AND map message→content.
-      const next: Record<string, unknown> = { ...obj, type: 'message' };
-      if (next.message !== undefined && next.content === undefined) {
-        next.content = next.message;
-        delete next.message;
-      }
-      return next;
-    }
-    return raw;
-  },
-  z.discriminatedUnion('type', [
-    messageVariant,
-    broadcastVariant,
-    shutdownRequestVariant,
-    shutdownResponseVariant,
-    planApprovalResponseVariant,
-  ]),
-);
 
 export type SendMessageInput = z.infer<typeof SendMessageInputSchema>;
+export type StructuredMessageInput = z.infer<typeof StructuredMessage>;
 
 // ---------------------------------------------------------------------------
 // Result
@@ -263,11 +243,11 @@ async function resolveRecipient(
 /**
  * Read the caller's team role from the ToolContext.
  *
- * Phase C: the team-run / agent-run runners inject `callerRole` into the
- * tool deps Map (`'lead' | 'member'`). When the key is absent (legacy call
- * sites that haven't been wired yet), this returns `null` so lead-only
- * checks fail closed — the engine fail-closed pattern requires explicit
- * positive assertion of authority, never inference.
+ * The team-run / agent-run runners inject `callerRole` into the tool deps
+ * Map (`'lead' | 'member'`). When the key is absent (legacy call sites),
+ * this returns `null` so lead-only checks fail closed — the engine
+ * fail-closed pattern requires explicit positive assertion of authority,
+ * never inference.
  */
 function getCallerRole(ctx: ToolContext): 'lead' | 'member' | null {
   try {
@@ -308,18 +288,18 @@ async function countRecentBroadcasts(
 }
 
 // ---------------------------------------------------------------------------
-// Peer-DM-shadow helpers (Phase C Task 5)
+// Peer-DM-shadow helpers
 // ---------------------------------------------------------------------------
 //
-// When teammate→teammate `type:message` is sent, dispatchMessage also emits a
-// summary-only shadow row to the lead's mailbox so the lead sees what peers
-// are talking about WITHOUT being preemptively woken (engine PDF §3.6.1).
+// When teammate→teammate plain-string DM is sent, dispatchMessage also emits
+// a summary-only shadow row to the lead's mailbox so the lead sees what
+// peers are talking about WITHOUT being preemptively woken (engine PDF
+// §3.6.1).
 //
 // The three helpers below are intentionally fail-safe: if the DB lookup
 // returns nothing (or the agentType is missing / unknown), the role/name
 // query returns null/fallback and dispatchMessage skips the shadow rather
-// than throwing. Phase C MUST NOT regress legacy callers that don't yet
-// inject `callerRole` / agentType data.
+// than throwing.
 
 /**
  * Look up a team member's role by joining `team_members.agent_type` against
@@ -395,8 +375,8 @@ async function getLeadAgentId(
  * the member has no live run — callers should treat that as "nothing to
  * deliver to right now" and surface a clear error to the LLM.
  *
- * Phase E Task 8: shutdown_request and plan_approval_response previously
- * passed `toMemberId` directly to `wake()`, which is the wrong address —
+ * shutdown_request and plan_approval_response previously passed
+ * `toMemberId` directly to `wake()`, which is the wrong address —
  * `wake()` enqueues against `agent_runs.id`. This helper lets the
  * dispatchers route via the correct identifier so the BullMQ payload
  * lands on the running agent loop, not a no-op.
@@ -441,7 +421,7 @@ async function publishToRedis(
 }
 
 // ---------------------------------------------------------------------------
-// Variant dispatchers (Phase C Task 2)
+// Variant dispatchers
 // ---------------------------------------------------------------------------
 //
 // Each dispatcher: (1) resolves recipient(s) where applicable, (2) inserts
@@ -455,15 +435,15 @@ interface DispatchDeps {
   runId: string | null;
   db: Database;
   /**
-   * Phase C Task 5: needed by `dispatchMessage` to determine fromRole +
-   * (eventually) read a synthetic leadAgentId injected by tests / by Phase E
-   * runners. Other dispatchers ignore this field.
+   * Needed by `dispatchMessage` to determine fromRole + (eventually) read a
+   * synthetic leadAgentId injected by tests / by Phase E runners. Other
+   * dispatchers ignore this field.
    */
   ctx: ToolContext;
 }
 
 async function dispatchMessage(
-  input: Extract<SendMessageInput, { type: 'message' }>,
+  input: SendMessageInput & { message: string },
   deps: DispatchDeps,
 ): Promise<SendMessageResult> {
   const { teamId, currentMemberId, runId, db, ctx } = deps;
@@ -480,7 +460,7 @@ async function dispatchMessage(
     toMemberId,
     type: 'agent_text',
     messageType: 'message',
-    content: input.content,
+    content: input.message,
     summary: input.summary ?? null,
     metadata: null,
     createdAt,
@@ -491,20 +471,21 @@ async function dispatchMessage(
     runId: effectiveRunId,
     from: currentMemberId,
     to: toMemberId,
-    content: input.content,
+    content: input.message,
     createdAt: createdAt.toISOString(),
     type: 'agent_text',
     messageType: 'message',
   });
 
-  // Phase C Task 5 — peer-DM visibility shadow.
+  // Peer-DM visibility shadow.
   // When BOTH ends are teammates (NOT lead), insert a summary-only shadow
   // row to the lead's mailbox so the lead sees what peers are talking about
   // without being woken (engine PDF §3.6.1 channel ③). All lookups are
   // fail-safe: missing role data, missing leadAgentId, or any DB error
   // simply skips the shadow rather than break the primary message dispatch.
   await maybeInsertPeerDmShadow({
-    input,
+    content: input.message,
+    summary: input.summary,
     teamId,
     currentMemberId,
     toMemberId,
@@ -512,16 +493,14 @@ async function dispatchMessage(
     ctx,
   });
 
-  // Phase D Task 6 — wake the recipient if it's sleeping.
-  // Phase C only woke targets on shutdown_request + plan_approval_response.
-  // Now that teammates can yield their BullMQ slot via Sleep, a plain
-  // type:message must also resume them — otherwise the message would sit in
-  // the mailbox until the next reconcile-mailbox tick (~60s) or the sleep
-  // timer fires. Phase B-C resolves recipients by team_members.id; we look
-  // up the corresponding agent_runs row for that member and wake by its
-  // agent_runs.id (the wake helper's actual address). If the recipient has
-  // no agent_runs row OR it's already running, this query returns nothing
-  // and wake is a no-op.
+  // Wake the recipient if it's sleeping. Now that teammates can yield their
+  // BullMQ slot via Sleep, a plain DM must also resume them — otherwise the
+  // message would sit in the mailbox until the next reconcile-mailbox tick
+  // (~60s) or the sleep timer fires. We resolve recipients by
+  // team_members.id; we look up the corresponding agent_runs row for that
+  // member and wake by its agent_runs.id (the wake helper's actual
+  // address). If the recipient has no agent_runs row OR it's already
+  // running, this query returns nothing and wake is a no-op.
   const sleeping = await db
     .select({ id: agentRuns.id })
     .from(agentRuns)
@@ -546,14 +525,16 @@ async function dispatchMessage(
  * primary message has already been durably persisted by the caller.
  */
 async function maybeInsertPeerDmShadow(args: {
-  input: Extract<SendMessageInput, { type: 'message' }>;
+  content: string;
+  summary: string | undefined;
   teamId: string;
   currentMemberId: string | null;
   toMemberId: string;
   db: Database;
   ctx: ToolContext;
 }): Promise<void> {
-  const { input, teamId, currentMemberId, toMemberId, db, ctx } = args;
+  const { content, summary, teamId, currentMemberId, toMemberId, db, ctx } =
+    args;
 
   // 1. Sender role: trust callerRole when injected by the runner; otherwise
   //    fall back to inferring from the sender's agentType. If neither is
@@ -596,7 +577,7 @@ async function maybeInsertPeerDmShadow(args: {
       leadAgentId,
       fromName,
       toName,
-      summary: input.summary ?? input.content.slice(0, 80),
+      summary: summary ?? content.slice(0, 80),
       db,
     });
   } catch (err) {
@@ -610,7 +591,7 @@ async function maybeInsertPeerDmShadow(args: {
 }
 
 async function dispatchBroadcast(
-  input: Extract<SendMessageInput, { type: 'broadcast' }>,
+  input: SendMessageInput & { message: string },
   deps: DispatchDeps,
 ): Promise<SendMessageResult> {
   const { teamId, currentMemberId, runId, db } = deps;
@@ -646,7 +627,7 @@ async function dispatchBroadcast(
       toMemberId: recipient.id,
       type: 'agent_text',
       messageType: 'broadcast',
-      content: input.content,
+      content: input.message,
       summary: input.summary ?? null,
       metadata: null,
       createdAt,
@@ -659,7 +640,7 @@ async function dispatchBroadcast(
     messageIds: insertedIds,
     runId: effectiveRunId,
     from: currentMemberId,
-    content: input.content,
+    content: input.message,
     createdAt: createdAt.toISOString(),
     type: 'agent_text',
     messageType: 'broadcast',
@@ -675,17 +656,18 @@ async function dispatchBroadcast(
 }
 
 async function dispatchShutdownRequest(
-  input: Extract<SendMessageInput, { type: 'shutdown_request' }>,
+  input: SendMessageInput,
+  structured: Extract<StructuredMessageInput, { type: 'shutdown_request' }>,
   deps: DispatchDeps,
 ): Promise<SendMessageResult> {
   const { teamId, currentMemberId, runId, db } = deps;
   const toMemberId = await resolveRecipient(input.to, teamId, db);
 
-  // Phase E Task 8: route by agent_runs.id, not team_members.id. wake()
-  // enqueues against agent_runs.id; passing the static member id (the
-  // Phase C kludge) silently no-ops because no BullMQ job binds to it.
-  // Inserting `toAgentId` here also lets the recipient's mailbox-drain
-  // pick the row up via `idx_team_messages_to_undelivered`.
+  // Route by agent_runs.id, not team_members.id. wake() enqueues against
+  // agent_runs.id; passing the static member id silently no-ops because no
+  // BullMQ job binds to it. Inserting `toAgentId` here also lets the
+  // recipient's mailbox-drain pick the row up via
+  // `idx_team_messages_to_undelivered`.
   const targetAgentId = await resolveTargetAgentRun(toMemberId, db);
   if (targetAgentId === null) {
     throw new Error(
@@ -697,6 +679,7 @@ async function dispatchShutdownRequest(
   const effectiveRunId = input.run_id ?? runId ?? null;
   const messageId = crypto.randomUUID();
   const createdAt = new Date();
+  const content = structured.reason ?? 'shutdown requested';
 
   await db.insert(teamMessages).values({
     id: messageId,
@@ -707,7 +690,7 @@ async function dispatchShutdownRequest(
     toAgentId: targetAgentId,
     type: 'user_prompt',
     messageType: 'shutdown_request',
-    content: input.content,
+    content,
     summary: input.summary ?? null,
     metadata: null,
     createdAt,
@@ -721,7 +704,7 @@ async function dispatchShutdownRequest(
     runId: effectiveRunId,
     from: currentMemberId,
     to: toMemberId,
-    content: input.content,
+    content,
     createdAt: createdAt.toISOString(),
     type: 'user_prompt',
     messageType: 'shutdown_request',
@@ -731,7 +714,8 @@ async function dispatchShutdownRequest(
 }
 
 async function dispatchShutdownResponse(
-  input: Extract<SendMessageInput, { type: 'shutdown_response' }>,
+  input: SendMessageInput,
+  structured: Extract<StructuredMessageInput, { type: 'shutdown_response' }>,
   deps: DispatchDeps,
 ): Promise<SendMessageResult> {
   const { teamId, currentMemberId, runId, db } = deps;
@@ -739,11 +723,12 @@ async function dispatchShutdownResponse(
   const messageId = crypto.randomUUID();
   const createdAt = new Date();
 
-  // shutdown_response has no `to` — it routes via the request_id chain.
-  // We leave toMemberId NULL; the conversation thread is recovered by
-  // following repliesToId back to the originating shutdown_request.
+  // shutdown_response routes via the request_id chain. We leave toMemberId
+  // NULL; the conversation thread is recovered by following repliesToId
+  // back to the originating shutdown_request.
   const content =
-    input.content ?? (input.approve ? 'shutdown approved' : 'shutdown declined');
+    structured.reason ??
+    (structured.approve ? 'shutdown approved' : 'shutdown declined');
 
   await db.insert(teamMessages).values({
     id: messageId,
@@ -755,8 +740,8 @@ async function dispatchShutdownResponse(
     messageType: 'shutdown_response',
     content,
     summary: null,
-    metadata: { approve: input.approve },
-    repliesToId: input.request_id,
+    metadata: { approve: structured.approve },
+    repliesToId: structured.request_id,
     createdAt,
   });
 
@@ -764,8 +749,8 @@ async function dispatchShutdownResponse(
     messageId,
     runId: effectiveRunId,
     from: currentMemberId,
-    repliesToId: input.request_id,
-    approve: input.approve,
+    repliesToId: structured.request_id,
+    approve: structured.approve,
     content,
     createdAt: createdAt.toISOString(),
     type: 'agent_text',
@@ -779,14 +764,18 @@ async function dispatchShutdownResponse(
 }
 
 async function dispatchPlanApprovalResponse(
-  input: Extract<SendMessageInput, { type: 'plan_approval_response' }>,
+  input: SendMessageInput,
+  structured: Extract<
+    StructuredMessageInput,
+    { type: 'plan_approval_response' }
+  >,
   deps: DispatchDeps,
 ): Promise<SendMessageResult> {
   const { teamId, currentMemberId, runId, db } = deps;
   const toMemberId = await resolveRecipient(input.to, teamId, db);
 
-  // Phase E Task 8: route by agent_runs.id, not team_members.id. See the
-  // matching block in dispatchShutdownRequest for the full rationale.
+  // Route by agent_runs.id, not team_members.id. See the matching block in
+  // dispatchShutdownRequest for the full rationale.
   const targetAgentId = await resolveTargetAgentRun(toMemberId, db);
   if (targetAgentId === null) {
     throw new Error(
@@ -799,7 +788,8 @@ async function dispatchPlanApprovalResponse(
   const messageId = crypto.randomUUID();
   const createdAt = new Date();
   const content =
-    input.content ?? (input.approve ? 'plan approved' : 'plan rejected');
+    structured.feedback ??
+    (structured.approve ? 'plan approved' : 'plan rejected');
 
   await db.insert(teamMessages).values({
     id: messageId,
@@ -812,8 +802,8 @@ async function dispatchPlanApprovalResponse(
     messageType: 'plan_approval_response',
     content,
     summary: null,
-    metadata: { approve: input.approve },
-    repliesToId: input.request_id,
+    metadata: { approve: structured.approve },
+    repliesToId: structured.request_id,
     createdAt,
   });
 
@@ -825,8 +815,8 @@ async function dispatchPlanApprovalResponse(
     runId: effectiveRunId,
     from: currentMemberId,
     to: toMemberId,
-    repliesToId: input.request_id,
-    approve: input.approve,
+    repliesToId: structured.request_id,
+    approve: structured.approve,
     content,
     createdAt: createdAt.toISOString(),
     type: 'user_prompt',
@@ -846,30 +836,33 @@ export const sendMessageTool: ToolDefinition<
 > = buildTool({
   name: SEND_MESSAGE_TOOL_NAME,
   description:
-    'Send a message from the current team member to another member. ' +
-    'Target either by `display_name` (exact match) or by member uuid. ' +
-    'The message is durably stored in team_messages and published to the ' +
-    'team\'s live event channel so the UI updates in real time.',
-  // `z.preprocess(...)` returns a `ZodEffects` whose declared input type is
-  // `unknown` (the preprocessor accepts any raw payload). buildTool expects
-  // `z.ZodType<TInput>` with input = output, so we cast to the post-process
-  // shape. Runtime parsing still goes through the preprocessor — only the
-  // compile-time generic is being aligned.
-  inputSchema: SendMessageInputSchema as unknown as z.ZodType<SendMessageInput>,
+    'Send a message to another agent. ' +
+    '`to`: teammate name | agent_runs.id | "*" for broadcast (expensive, use sparingly). ' +
+    '`summary`: 5-10 word UI preview. ' +
+    '`message`: plain string for DM/broadcast, OR structured object for protocol responses. ' +
+    'Examples: ' +
+    '{"to":"researcher","summary":"task 1","message":"start task #1"} | ' +
+    '{"to":"*","summary":"halt","message":"stop work, blocking bug"} | ' +
+    '{"to":"team-lead","message":{"type":"shutdown_response","request_id":"...","approve":true}}',
+  inputSchema: SendMessageInputSchema,
   isConcurrencySafe: true,
   // INSERTs a row + PUBLISHes — unambiguously side-effecting.
   isReadOnly: false,
-  // Phase C Task 3: engine fail-closed runtime validation. Two architectural
-  // rules that the static zod schema cannot express:
+  // Engine fail-closed runtime validation. Two architectural rules that the
+  // static zod schema cannot express:
   //   1. plan_approval_response is lead-only — only the team-lead can approve
   //      or reject teammate-submitted plans (engine PDF §2.4).
-  //   2. broadcast is rate-limited to 1 per assistant turn (~5s window) per
-  //      sender — broadcasts fan out to every teammate, so the engine prompt
-  //      explicitly warns "broadcasting is expensive". Best-effort enforced
-  //      by a SELECT against team_messages within the window.
-  // Other variants pass through untouched.
+  //   2. broadcast (to: "*") is rate-limited to 1 per assistant turn (~5s
+  //      window) per sender — broadcasts fan out to every teammate, so the
+  //      engine prompt explicitly warns "broadcasting is expensive". Best-
+  //      effort enforced by a SELECT against team_messages within the
+  //      window.
+  // Other shapes pass through untouched.
   async validateInput(input, ctx): Promise<ValidationResult> {
-    if (input.type === 'plan_approval_response') {
+    if (
+      typeof input.message === 'object' &&
+      input.message.type === 'plan_approval_response'
+    ) {
       const role = getCallerRole(ctx);
       if (role !== 'lead') {
         return {
@@ -882,7 +875,7 @@ export const sendMessageTool: ToolDefinition<
       }
     }
 
-    if (input.type === 'broadcast') {
+    if (input.to === '*') {
       const { teamId, currentMemberId, db } = readTeamContext(ctx);
       if (currentMemberId) {
         const recent = await countRecentBroadcasts(
@@ -897,7 +890,7 @@ export const sendMessageTool: ToolDefinition<
             errorCode: 429,
             message:
               'broadcast is rate-limited to 1 per turn / 5 seconds. ' +
-              'Use type:message (DM) for follow-up messages to a specific teammate.',
+              'Use a direct DM (to: "<name>") for follow-up messages to a specific teammate.',
           };
         }
       }
@@ -906,25 +899,47 @@ export const sendMessageTool: ToolDefinition<
     return { result: true };
   },
   async execute(input, ctx): Promise<SendMessageResult> {
-    // Phase C Task 2: dispatch by variant. Each variant inserts a different
-    // team_messages shape (messageType column distinguishes them; the
-    // legacy `type` column keeps its LLM-flow meaning). shutdown_request +
-    // plan_approval_response also wake() the recipient.
-    // Phase C Task 5: dispatchMessage additionally reads role / leadAgentId
-    // from the ctx, so we thread it through DispatchDeps.
+    // Dispatch by shape:
+    //   - to === '*' + string message → broadcast
+    //   - to !== '*' + string message → plain DM
+    //   - object message → discriminated by message.type
+    // Each dispatcher inserts a different team_messages shape (messageType
+    // column distinguishes them; the legacy `type` column keeps its
+    // LLM-flow meaning). shutdown_request + plan_approval_response also
+    // wake() the recipient.
     const deps: DispatchDeps = { ...readTeamContext(ctx), ctx };
 
-    switch (input.type) {
-      case 'message':
-        return dispatchMessage(input, deps);
-      case 'broadcast':
-        return dispatchBroadcast(input, deps);
+    // Broadcast path: `to: "*"` + string message.
+    if (input.to === '*') {
+      if (typeof input.message !== 'string') {
+        throw new Error(
+          'SendMessage broadcast: structured messages cannot be broadcast (to: "*"). ' +
+            'Send protocol responses to a specific teammate.',
+        );
+      }
+      // Cast: TS can't narrow the union via the runtime check above.
+      return dispatchBroadcast(
+        input as SendMessageInput & { message: string },
+        deps,
+      );
+    }
+
+    // Plain DM: regular text message to one teammate.
+    if (typeof input.message === 'string') {
+      return dispatchMessage(
+        input as SendMessageInput & { message: string },
+        deps,
+      );
+    }
+
+    // Structured protocol response: dispatch by message.type.
+    switch (input.message.type) {
       case 'shutdown_request':
-        return dispatchShutdownRequest(input, deps);
+        return dispatchShutdownRequest(input, input.message, deps);
       case 'shutdown_response':
-        return dispatchShutdownResponse(input, deps);
+        return dispatchShutdownResponse(input, input.message, deps);
       case 'plan_approval_response':
-        return dispatchPlanApprovalResponse(input, deps);
+        return dispatchPlanApprovalResponse(input, input.message, deps);
     }
   },
 });
