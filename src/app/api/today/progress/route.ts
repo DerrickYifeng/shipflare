@@ -147,7 +147,14 @@ async function loadTacticalStatus(userId: string): Promise<{
     .where(
       and(
         eq(teamMessages.teamId, teamId),
-        sql`${teamMessages.metadata}->>'trigger' = ANY(${TACTICAL_TRIGGERS as unknown as string[]})`,
+        // Drizzle's `sql` template expands JS arrays as row constructors
+        // `($1,$2,$3)`, which Postgres rejects from `ANY(...)` (error
+        // 42809: "op ANY/ALL (array) requires array on right side").
+        // `inArray()` emits `IN (?, ?, ?)` which is what we want here.
+        inArray(
+          sql`${teamMessages.metadata}->>'trigger'`,
+          TACTICAL_TRIGGERS as unknown as string[],
+        ),
         gte(teamMessages.createdAt, staleCutoff),
       ),
     )
