@@ -13,6 +13,7 @@ import { processPlanExecute } from './processors/plan-execute';
 import { processPlanExecuteSweeper } from './processors/plan-execute-sweeper';
 import { processStaleSweeper } from './processors/stale-sweeper';
 import { processWeeklyReplan } from './processors/weekly-replan';
+import { processReconcileMailbox } from './processors/reconcile-mailbox';
 import { processTeamRun, getTeamRunConcurrency } from './processors/team-run';
 import { TEAM_RUN_QUEUE_NAME, type TeamRunJobData } from '@/lib/queue/team-run';
 import { processAgentRun } from './processors/agent-run';
@@ -61,6 +62,22 @@ const weeklyReplanQueue = new Queue<Record<string, never>>(
       // in case of a transient DB hiccup reading strategic_paths.
       attempts: 2,
       backoff: { type: 'exponential', delay: 30_000 },
+    },
+  },
+);
+
+// Reconcile-mailbox cron (Phase B Task 13) — durable backstop for wake()
+// failures. Every minute, finds agent_runs with undelivered messages older
+// than 30 seconds and re-enqueues them. Single attempt: if a tick fails the
+// next minute's tick will catch the same orphans.
+const reconcileMailboxQueue = new Queue<Record<string, never>>(
+  'reconcile-mailbox',
+  {
+    connection: getBullMQConnection(),
+    defaultJobOptions: {
+      removeOnComplete: { count: 10 },
+      removeOnFail: { count: 50 },
+      attempts: 1,
     },
   },
 );
@@ -174,6 +191,14 @@ const weeklyReplanWorker = new Worker<Record<string, never>>(
   { ...BASE_OPTS, concurrency: 1 },
 );
 
+const reconcileMailboxWorker = new Worker<Record<string, never>>(
+  'reconcile-mailbox',
+  async () => {
+    await processReconcileMailbox();
+  },
+  { ...BASE_OPTS, concurrency: 1 },
+);
+
 // AI Team Platform — coordinator main-loop runner.
 // Lock duration accommodates a multi-turn coordinator run with delegated
 // subagents; each subagent is synchronous from the worker's POV and the full
@@ -222,6 +247,7 @@ const workers = [
   // AI Team Platform
   teamRunWorker,
   agentRunWorker,
+  reconcileMailboxWorker,
 ];
 
 // Log events — bind traceId / jobId / queue into the child logger so lifecycle
@@ -353,6 +379,21 @@ async function scheduleWeeklyReplan() {
   );
 }
 
+// Schedule reconcile-mailbox: every minute. Finds agent_runs with
+// undelivered team_messages older than 30s and re-enqueues their
+// agent-run job via wake(). Durable backstop for transient wake()
+// failures from SendMessage / Sleep / Task async paths.
+async function scheduleReconcileMailbox() {
+  await reconcileMailboxQueue.add(
+    'tick',
+    {},
+    {
+      repeat: { pattern: '* * * * *' }, // every minute
+      jobId: 'reconcile-mailbox-tick',
+    },
+  );
+}
+
 Promise.all([
   scheduleNightlyDream(),
   scheduleCodeDiff(),
@@ -362,11 +403,12 @@ Promise.all([
   schedulePlanExecuteSweeper(),
   scheduleStaleSweeper(),
   scheduleWeeklyReplan(),
+  scheduleReconcileMailbox(),
 ]).catch((err) => {
   log.error('Failed to schedule cron jobs:', err.message);
 });
 
-log.info('All workers started: review, posting, health-score, dream, code-scan, daily-run, engagement, metrics, analytics, plan-execute, plan-execute-sweeper, stale-sweeper, weekly-replan, team-run, agent-run. daily-run daily 13:00 UTC, plan-execute-sweeper every 1m, stale-sweeper every 1h, weekly-replan Monday 00:00 UTC, all others daily.');
+log.info('All workers started: review, posting, health-score, dream, code-scan, daily-run, engagement, metrics, analytics, plan-execute, plan-execute-sweeper, stale-sweeper, weekly-replan, team-run, agent-run, reconcile-mailbox. daily-run daily 13:00 UTC, plan-execute-sweeper every 1m, stale-sweeper every 1h, weekly-replan Monday 00:00 UTC, reconcile-mailbox every 1m, all others daily.');
 
 // Graceful shutdown
 async function shutdown() {
