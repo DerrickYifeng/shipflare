@@ -1078,3 +1078,21 @@ unified path coexist behind flag), validated, then cut.
   - Mid-phase fix — agent-run always inserts notification: `3b262e9`
   - Task 13 — reconcile-mailbox cron: `f2e9bb7`
   - Task 14 — verification gate: `d032e5b`
+- **Phase C — SendMessage protocol:** landed `2026-05-02` on `dev`. SendMessageTool
+  is now a 5-variant discriminated union (message / broadcast / shutdown_request /
+  shutdown_response / plan_approval_response) with backward-compat preprocessor
+  for the legacy {to, message} shape. Runtime validation: plan_approval_response
+  is lead-only (403); broadcast is rate-limited to 1 per 5 seconds (429).
+  TaskStop tool added (lead-only; writes shutdown_request + kills agent_runs row +
+  wakes target). Peer-DM-shadow helper inserts visibility shadow to lead's
+  mailbox WITHOUT calling wake (engine PDF §3.6.1 invariant). Agent-run processor
+  drains mailbox at idle turns (1s polling + injectMessages); shutdown_request
+  triggers graceful exit with status='killed' notification.
+  - Task 1 — discriminated union schema: `75f7fff`
+  - Task 2 — execute() variant dispatch: `191a629`
+  - Task 3 — runtime validation: `2b4defd`
+  - Task 4 — peer-dm-shadow helper: `ac7bb3c`
+  - Task 5 — SendMessage wires peer-DM shadow: `9b87068`
+  - Task 6 — TaskStop tool: `4742ce1`
+  - Task 7 — agent-run drain + shutdown handler: `7d7e1e0`
+  - Task 8 — verification gate: `<PENDING-COMMIT-SHA>`
