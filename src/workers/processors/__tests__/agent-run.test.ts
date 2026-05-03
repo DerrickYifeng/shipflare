@@ -922,4 +922,191 @@ describe('processAgentRun', () => {
     );
     expect(turnRow).toBeDefined();
   });
+
+  // ---------------------------------------------------------------------
+  // Phase E hot-fix — working-indicator gap
+  //
+  // Phase E Task 11 deleted team-run.ts which used to:
+  //   (a) stamp conversationId on the lead's outgoing message rows, and
+  //   (b) publish a terminal 'completion'/'error' SSE event when the run
+  //       finished.
+  // Without (a) the founder UI's per-thread filter dropped every reply
+  // bubble; without (b) the typing indicator stayed pinned on
+  // "working..." even after the agent reported end_turn. Both are
+  // reinstated in agent-run.ts; these tests guard the wiring so a
+  // future cleanup pass can't silently regress them.
+  // ---------------------------------------------------------------------
+
+  it('lead persists agent_text rows with conversationId AND publishes SSE with conversationId + runId', async () => {
+    vi.mocked(db.query.agentRuns.findFirst).mockResolvedValue({
+      id: 'lead-stamp',
+      teamId: 'team-stamp',
+      memberId: 'mem-stamp',
+      agentDefName: 'coordinator',
+      parentAgentId: null,
+      status: 'queued',
+    } as never);
+
+    vi.mocked(resolveAgent).mockResolvedValueOnce({
+      source: 'built-in',
+      sourcePath: '/test',
+      name: 'coordinator',
+      description: 'mock lead',
+      role: 'lead',
+      tools: [],
+      disallowedTools: [],
+      skills: [],
+      requires: [],
+      background: false,
+      maxTurns: 10,
+      systemPrompt: 'You are the team lead.',
+    } as never);
+
+    // resolvePrimaryConversation returns a conversation id — the only
+    // path that lets the lead stamp conversationId on its outputs.
+    selectChain.limit.mockResolvedValueOnce([{ id: 'conv-stamp' }]);
+
+    // The mailbox drain seeds the lead's request id (== user_prompt
+    // messageId, the synthetic runId the API route advertises to SSE).
+    vi.mocked(drainMailbox).mockResolvedValueOnce([
+      {
+        id: 'msg-user-prompt',
+        toAgentId: 'lead-stamp',
+        type: 'user_prompt',
+        messageType: 'message',
+        content: 'Founder asked something.',
+        createdAt: new Date(),
+      },
+    ]);
+
+    runAgentHoisted.fn.mockImplementationOnce(async (...args: unknown[]) => {
+      const onEvent = args[7] as
+        | ((event: {
+            type: string;
+            messageId?: string;
+            turn?: number;
+            blockIndex?: number;
+            text?: string;
+          }) => void | Promise<void>)
+        | undefined;
+      if (onEvent) {
+        await onEvent({
+          type: 'assistant_text_stop',
+          messageId: 'm-stamp-1',
+          turn: 1,
+          blockIndex: 0,
+          text: 'Lead reply.',
+        });
+      }
+      return {
+        result: 'done',
+        usage: {
+          inputTokens: 1,
+          outputTokens: 1,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          costUsd: 0,
+          model: 'claude-sonnet-4-6',
+          turns: 1,
+        },
+      };
+    });
+
+    await processAgentRun(makeJob('lead-stamp'));
+
+    // (a) DB row stamps the lead's primary conversationId so the founder
+    // UI's per-thread filter renders the reply.
+    const insertedRows = insertChain.values.mock.calls.map(
+      (c) => (c as unknown as [Record<string, unknown>])[0],
+    );
+    const turnRow = insertedRows.find(
+      (r) => r.type === 'agent_text' && r.fromAgentId === 'lead-stamp',
+    );
+    expect(turnRow).toBeDefined();
+    expect(turnRow!.conversationId).toBe('conv-stamp');
+
+    // (b) SSE publish carries conversationId AND runId so the typing
+    // indicator can pair with the user_prompt and the bubble lands in
+    // the right thread.
+    const sseAgentText = publishMock.mock.calls
+      .map((c) => JSON.parse((c as unknown as [string, string])[1]))
+      .find((p) => p.type === 'agent_text');
+    expect(sseAgentText).toBeDefined();
+    expect(sseAgentText.conversationId).toBe('conv-stamp');
+    expect(sseAgentText.runId).toBe('msg-user-prompt');
+  });
+
+  it('lead publishes a terminal completion SSE event when the run ends naturally', async () => {
+    vi.mocked(db.query.agentRuns.findFirst).mockResolvedValue({
+      id: 'lead-term',
+      teamId: 'team-term',
+      memberId: 'mem-term',
+      agentDefName: 'coordinator',
+      parentAgentId: null,
+      status: 'queued',
+    } as never);
+
+    vi.mocked(resolveAgent).mockResolvedValueOnce({
+      source: 'built-in',
+      sourcePath: '/test',
+      name: 'coordinator',
+      description: 'mock lead',
+      role: 'lead',
+      tools: [],
+      disallowedTools: [],
+      skills: [],
+      requires: [],
+      background: false,
+      maxTurns: 10,
+      systemPrompt: 'You are the team lead.',
+    } as never);
+
+    selectChain.limit.mockResolvedValueOnce([{ id: 'conv-term' }]);
+
+    vi.mocked(drainMailbox).mockResolvedValueOnce([
+      {
+        id: 'msg-user-term',
+        toAgentId: 'lead-term',
+        type: 'user_prompt',
+        messageType: 'message',
+        content: 'Founder ask.',
+        createdAt: new Date(),
+      },
+    ]);
+
+    // runAgent returns end_turn naturally (default mock returns
+    // 'completed'-shaped result without invoking onEvent).
+    await processAgentRun(makeJob('lead-term'));
+
+    // A terminal SSE event of type 'completion' must have fired with
+    // the same runId the user_prompt advertised, and the lead's
+    // conversationId so the client routes it to the right thread.
+    const terminal = publishMock.mock.calls
+      .map((c) => JSON.parse((c as unknown as [string, string])[1]))
+      .find((p) => p.type === 'completion' || p.type === 'error');
+    expect(terminal).toBeDefined();
+    expect(terminal.type).toBe('completion');
+    expect(terminal.runId).toBe('msg-user-term');
+    expect(terminal.conversationId).toBe('conv-term');
+    expect(terminal.teamId).toBe('team-term');
+  });
+
+  it('teammate (non-lead) does NOT publish a terminal SSE event', async () => {
+    vi.mocked(db.query.agentRuns.findFirst).mockResolvedValue({
+      id: 'mate-no-term',
+      teamId: 'team-quiet',
+      memberId: 'mem-quiet',
+      agentDefName: 'content-manager',
+      parentAgentId: 'lead-agent',
+      status: 'queued',
+    } as never);
+
+    // Default resolveAgent mock returns role='member'.
+    await processAgentRun(makeJob('mate-no-term'));
+
+    const terminal = publishMock.mock.calls
+      .map((c) => JSON.parse((c as unknown as [string, string])[1]))
+      .find((p) => p.type === 'completion' || p.type === 'error');
+    expect(terminal).toBeUndefined();
+  });
 });

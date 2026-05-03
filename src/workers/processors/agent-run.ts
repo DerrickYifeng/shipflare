@@ -241,15 +241,20 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
   // path; the lead path skips the resuming dance because lead runs are
   // always fresh BullMQ jobs (Phase E API inserts a queued row + wakes).
   let priorMessages: Anthropic.Messages.MessageParam[] | undefined;
+  // Phase E hot-fix (working-indicator gap): the lead's agent_text rows AND
+  // the SSE payloads MUST carry conversationId so the founder UI's
+  // per-conversation thread filter (team-desk.tsx threadMessages) doesn't
+  // drop them. Resolve once here and reuse below + at terminal-event time.
+  let leadConversationId: string | null = null;
   if (isLead) {
-    const conversationId = await resolvePrimaryConversation(row.teamId, db);
-    if (conversationId) {
+    leadConversationId = await resolvePrimaryConversation(row.teamId, db);
+    if (leadConversationId) {
       priorMessages = await loadConversationHistory(row.teamId, {
-        conversationId,
+        conversationId: leadConversationId,
         db,
       });
       log.info(
-        `agent-run ${agentId}: lead loaded ${priorMessages.length} messages from conversation ${conversationId}`,
+        `agent-run ${agentId}: lead loaded ${priorMessages.length} messages from conversation ${leadConversationId}`,
       );
     } else {
       log.info(
@@ -288,6 +293,17 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
   // additionally polls for new mail between turns.
   const initialBatch = await drainMailbox(agentId, db);
   const initialPrompt = initialBatch.length > 0 ? (initialBatch[0].content ?? '') : '';
+  // Phase E hot-fix (working-indicator gap): the API route at /api/team/run
+  // and /api/team/conversations/:id/messages publishes the inbound user_prompt
+  // SSE event with `runId = messageId` (the user_prompt row's id is the
+  // synthetic "run handle" replacing the deleted team_runs.id). The lead's
+  // outputs need to echo the same handle so the founder UI's threadIsLive
+  // pairing (team-desk.tsx) can match user_prompt → terminal event and
+  // clear the "working..." typing indicator. We only stamp this on SSE
+  // payloads (NOT the team_messages.run_id column) because that column is
+  // a FK to team_runs which no longer carries a row for the lead.
+  const leadRequestId =
+    isLead && initialBatch.length > 0 ? initialBatch[0].id : null;
 
   // Phase C: pendingInjections is the FIFO that the background drain
   // pushes into and runAgent's `injectMessages` callback drains at each
@@ -333,6 +349,12 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
         await db.insert(teamMessages).values({
           id: insertedId,
           teamId: row.teamId,
+          // Phase E hot-fix: stamp the lead's primary conversation so the UI's
+          // per-thread filter (team-desk.tsx threadMessages) renders this row.
+          // Without conversationId the lead's reply would only show after a
+          // full page refresh+reroute; meanwhile the typing indicator stays
+          // pinned because no agent_text appears in the visible thread.
+          conversationId: isLead ? leadConversationId : null,
           type: 'agent_text',
           messageType: 'message',
           fromMemberId: row.memberId,
@@ -362,6 +384,13 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
             teamMessagesChannel(row.teamId),
             JSON.stringify({
               messageId: insertedId,
+              // Phase E hot-fix: include conversationId + runId so the
+              // founder UI's per-conversation thread filter and run-grouping
+              // both place this bubble in the right thread, and so the
+              // typing-indicator pairing (team-desk.tsx threadIsLive) can
+              // match it to the originating user_prompt's runId.
+              conversationId: leadConversationId,
+              runId: leadRequestId,
               teamId: row.teamId,
               from: row.memberId,
               fromAgentId: agentId,
@@ -590,4 +619,46 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
       durationMs,
     },
   });
+
+  // Phase E hot-fix (working-indicator gap): publish a terminal SSE event
+  // for the lead so the founder UI's typing indicator can clear in real
+  // time. The /team thread's `threadIsLive` predicate (team-desk.tsx) pairs
+  // the latest user_prompt with any subsequent message of type
+  // 'completion' or 'error' carrying the same runId; without that pairing
+  // event the indicator is stuck on "working...". team-run.ts used to
+  // publish this; Phase E Task 11 deleted that worker and never wired
+  // its replacement. We do NOT persist a durable team_messages row here
+  // because (a) loadConversationHistory treats 'completion' identically
+  // to 'agent_text' and we already inserted those, and (b) the next page
+  // refresh derives liveness from the DB rows alone (where runId is null
+  // and the predicate falls through cleanly).
+  if (def.role === 'lead' && leadRequestId) {
+    try {
+      const pub = getPubSubPublisher();
+      await pub.publish(
+        teamMessagesChannel(row.teamId),
+        JSON.stringify({
+          messageId: crypto.randomUUID(),
+          conversationId: leadConversationId,
+          runId: leadRequestId,
+          teamId: row.teamId,
+          from: row.memberId,
+          fromAgentId: agentId,
+          type: status === 'completed' ? 'completion' : 'error',
+          content: status === 'completed' ? '' : summary,
+          metadata:
+            status === 'killed'
+              ? { cancelled: true, reason: SHUTDOWN_REASON_GRACEFUL }
+              : status === 'failed'
+                ? { error: summary }
+                : null,
+          createdAt: new Date().toISOString(),
+        }),
+      );
+    } catch (err) {
+      log.warn(
+        `agent-run ${agentId}: terminal SSE publish failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
 }
