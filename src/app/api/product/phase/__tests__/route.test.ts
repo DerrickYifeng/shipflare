@@ -22,8 +22,9 @@ vi.mock('@/lib/logger', () => ({
   }),
 }));
 
-// Phase E Day 3: the route enqueues a team-run via ensureTeamExists +
-// enqueueTeamRun. getUserChannels still drives the channels list.
+// Phase E Task 11: the route now dispatches via ensureTeamExists +
+// dispatchLeadMessage (insert team_message → wake lead). getUserChannels
+// still drives the channels list.
 const getUserChannelsMock = vi.fn(async (_userId: string) => ['x']);
 vi.mock('@/lib/user-channels', () => ({
   getUserChannels: (userId: string) => getUserChannelsMock(userId),
@@ -44,13 +45,14 @@ vi.mock('@/lib/team-provisioner', () => ({
     ensureTeamExistsMock(userId, productId),
 }));
 
-const enqueueTeamRunMock = vi.fn(async (_input: Record<string, unknown>) => ({
+const dispatchLeadMessageMock = vi.fn(async (_input: Record<string, unknown>) => ({
   runId: 'run-phase-1',
   traceId: 'trace-phase-1',
-  alreadyRunning: false,
+  alreadyRunning: false as const,
 }));
-vi.mock('@/lib/queue/team-run', () => ({
-  enqueueTeamRun: (input: Record<string, unknown>) => enqueueTeamRunMock(input),
+vi.mock('@/lib/team/dispatch-lead-message', () => ({
+  dispatchLeadMessage: (input: Record<string, unknown>) =>
+    dispatchLeadMessageMock(input),
 }));
 
 // Minimal validateLaunchDates stub — the real implementation enforces
@@ -135,7 +137,7 @@ beforeEach(() => {
   getUserChannelsMock.mockClear();
   getUserChannelsMock.mockImplementation(async () => ['x']);
   ensureTeamExistsMock.mockClear();
-  enqueueTeamRunMock.mockClear();
+  dispatchLeadMessageMock.mockClear();
 });
 
 describe('POST /api/product/phase', () => {
@@ -183,7 +185,7 @@ describe('POST /api/product/phase', () => {
     expect(payload.error).toBe('no_product');
   });
 
-  it('enqueues a team-run on success and returns { runId, phase, itemsSuperseded }', async () => {
+  it('dispatches a lead message on success and returns { runId, phase, itemsSuperseded }', async () => {
     supersededIds = [{ id: 's1' }, { id: 's2' }, { id: 's3' }];
     const { POST } = await import('../route');
     const res = await POST(
@@ -207,11 +209,11 @@ describe('POST /api/product/phase', () => {
     expect(payload.phase).toBe('audience');
 
     expect(ensureTeamExistsMock).toHaveBeenCalledWith('user-1', 'prod-1');
-    expect(enqueueTeamRunMock).toHaveBeenCalledTimes(1);
-    expect(enqueueTeamRunMock.mock.calls[0]?.[0]).toMatchObject({
+    expect(dispatchLeadMessageMock).toHaveBeenCalledTimes(1);
+    // Phase E shape: lead is the sole recipient — no rootMemberId routing.
+    expect(dispatchLeadMessageMock.mock.calls[0]?.[0]).toMatchObject({
       teamId: 'team-1',
       trigger: 'phase_transition',
-      rootMemberId: 'mem-coord',
     });
   });
 
@@ -224,7 +226,7 @@ describe('POST /api/product/phase', () => {
         launchedAt: '2026-04-07T00:00:00.000Z',
       }),
     );
-    const goal = enqueueTeamRunMock.mock.calls[0]?.[0]?.goal as string;
+    const goal = dispatchLeadMessageMock.mock.calls[0]?.[0]?.goal as string;
     expect(goal).toContain('ShipFlare');
     expect(goal).toContain('launched');
     // derivePhase('launched', 14d ago) = 'compound'
@@ -241,8 +243,8 @@ describe('POST /api/product/phase', () => {
     expect(payload.error).toBe('phase_change_failed');
   });
 
-  it('returns 500 when the team-run enqueue fails', async () => {
-    enqueueTeamRunMock.mockImplementationOnce(async () => {
+  it('returns 500 when the lead dispatch fails', async () => {
+    dispatchLeadMessageMock.mockImplementationOnce(async () => {
       throw new Error('redis-down');
     });
     const { POST } = await import('../route');
@@ -257,7 +259,7 @@ describe('POST /api/product/phase', () => {
     getUserChannelsMock.mockImplementationOnce(async () => []);
     const { POST } = await import('../route');
     await POST(makeReq({ state: 'mvp' }));
-    const goal = enqueueTeamRunMock.mock.calls[0]?.[0]?.goal as string;
+    const goal = dispatchLeadMessageMock.mock.calls[0]?.[0]?.goal as string;
     expect(goal).toContain('x');
   });
 });

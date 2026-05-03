@@ -3,13 +3,13 @@ import type { Job } from 'bullmq';
 import type { DiscoveryScanJobData } from '@/lib/queue/types';
 
 /**
- * Verifies the daily-run-fanout worker. Mirrors the shape used by
- * `discovery-scan-fanout.test.ts` but exercises the team-run-based fanout
- * shipped in T12 of the unified discovery pipeline plan.
+ * Verifies the daily-run-fanout worker. Phase E Task 11: the worker now
+ * dispatches via `dispatchLeadMessage` instead of `enqueueTeamRun`. The
+ * lead is a regular `agent_runs` row driven by the unified agent-run
+ * worker, so per-user team_members lookup + rootMemberId routing is gone.
  */
 
 let lastProductUserFilter: string | null = null;
-let lastTeamMembersFilter: string | null = null;
 
 const fixtures = {
   channels: [
@@ -25,31 +25,17 @@ const fixtures = {
     'u-3': [],
     'u-4': [{ id: 'p-4', name: 'Product Four' }],
   } as Record<string, { id: string; name: string }[]>,
-  teamMembers: {
-    'team-u-1': [
-      { id: 'm-coord-1', agentType: 'coordinator' },
-      { id: 'm-other-1', agentType: 'content-manager' },
-    ],
-    'team-u-2': [{ id: 'm-coord-2', agentType: 'coordinator' }],
-    'team-u-4': [{ id: 'm-coord-4', agentType: 'coordinator' }],
-  } as Record<string, { id: string; agentType: string }[]>,
 };
 
 vi.mock('@/lib/db/schema', () => ({
   channels: { userId: 'userId', platform: 'platform' },
   products: { userId: 'userId', id: 'id', name: 'name' },
-  teamMembers: { id: 'id', teamId: 'teamId', agentType: 'agentType' },
 }));
 
 vi.mock('drizzle-orm', () => ({
   eq: (col: unknown, val: unknown) => {
     if (typeof val === 'string') {
-      // Heuristic: products.userId vs teamMembers.teamId — both are strings.
-      // Last write wins; the processor reads products immediately before the
-      // teamMembers select per user, so stash both targets and let the db mock
-      // route by projection shape.
-      if (val.startsWith('team-')) lastTeamMembersFilter = val;
-      else lastProductUserFilter = val;
+      lastProductUserFilter = val;
     }
     return { col, val };
   },
@@ -73,15 +59,6 @@ vi.mock('@/lib/db', () => ({
                   fixtures.products[lastProductUserFilter ?? ''] ?? [],
                 ),
             }),
-          };
-        }
-        // teamMembers read: { id, agentType } with .where()
-        if (proj && 'id' in proj && 'agentType' in proj) {
-          return {
-            where: () =>
-              Promise.resolve(
-                fixtures.teamMembers[lastTeamMembersFilter ?? ''] ?? [],
-              ),
           };
         }
         return {
@@ -111,14 +88,17 @@ vi.mock('@/lib/team-rolling-conversation', () => ({
   ),
 }));
 
-vi.mock('@/lib/queue/team-run', () => ({
-  enqueueTeamRun: vi.fn(async () => ({ runId: 'run-x', jobId: 'job-x' })),
+vi.mock('@/lib/team/dispatch-lead-message', () => ({
+  dispatchLeadMessage: vi.fn(async () => ({
+    runId: 'msg-x',
+    traceId: 'lead-x',
+    alreadyRunning: false,
+  })),
 }));
 
 beforeEach(() => {
   vi.clearAllMocks();
   lastProductUserFilter = null;
-  lastTeamMembersFilter = null;
   for (const k of Object.keys(stopFlags)) delete stopFlags[k];
 });
 
@@ -150,48 +130,46 @@ function nonFanoutJob(): Job<DiscoveryScanJobData> {
 }
 
 describe('processDailyRunFanout', () => {
-  it('refuses non-fanout jobs without enqueueing anything', async () => {
-    const { processDailyRunFanout } = await import(
-      '../daily-run-fanout'
+  it('refuses non-fanout jobs without dispatching anything', async () => {
+    const { processDailyRunFanout } = await import('../daily-run-fanout');
+    const { dispatchLeadMessage } = await import(
+      '@/lib/team/dispatch-lead-message'
     );
-    const { enqueueTeamRun } = await import('@/lib/queue/team-run');
 
     await processDailyRunFanout(nonFanoutJob());
 
-    expect(enqueueTeamRun).not.toHaveBeenCalled();
+    expect(dispatchLeadMessage).not.toHaveBeenCalled();
   });
 
-  it('enqueues exactly one team-run per user with channels + product', async () => {
-    const { processDailyRunFanout } = await import(
-      '../daily-run-fanout'
+  it('dispatches exactly one lead message per user with channels + product', async () => {
+    const { processDailyRunFanout } = await import('../daily-run-fanout');
+    const { dispatchLeadMessage } = await import(
+      '@/lib/team/dispatch-lead-message'
     );
-    const { enqueueTeamRun } = await import('@/lib/queue/team-run');
     const { resolveRollingConversation } = await import(
       '@/lib/team-rolling-conversation'
     );
 
     await processDailyRunFanout(fanoutJob());
 
-    // u-1: has channels + product → 1 run
-    // u-2: has channels + product → 1 run
+    // u-1: has channels + product → 1 dispatch
+    // u-2: has channels + product → 1 dispatch
     // u-3: no product → skipped
-    // u-4: has channels + product (no stop flag set) → 1 run
-    expect(enqueueTeamRun).toHaveBeenCalledTimes(3);
+    // u-4: has channels + product (no stop flag set) → 1 dispatch
+    expect(dispatchLeadMessage).toHaveBeenCalledTimes(3);
 
     const calls = (
-      enqueueTeamRun as unknown as { mock: { calls: unknown[][] } }
+      dispatchLeadMessage as unknown as { mock: { calls: unknown[][] } }
     ).mock.calls;
     const summaries = calls.map((c) => {
       const p = c[0] as {
         teamId: string;
         trigger: string;
-        rootMemberId: string;
         conversationId: string;
       };
       return {
         teamId: p.teamId,
         trigger: p.trigger,
-        rootMemberId: p.rootMemberId,
         conversationId: p.conversationId,
       };
     });
@@ -201,19 +179,16 @@ describe('processDailyRunFanout', () => {
         {
           teamId: 'team-u-1',
           trigger: 'daily',
-          rootMemberId: 'm-coord-1',
           conversationId: 'conv-team-u-1-Discovery',
         },
         {
           teamId: 'team-u-2',
           trigger: 'daily',
-          rootMemberId: 'm-coord-2',
           conversationId: 'conv-team-u-2-Discovery',
         },
         {
           teamId: 'team-u-4',
           trigger: 'daily',
-          rootMemberId: 'm-coord-4',
           conversationId: 'conv-team-u-4-Discovery',
         },
       ]),
@@ -234,17 +209,17 @@ describe('processDailyRunFanout', () => {
   it('skips users with isStopRequested=true', async () => {
     stopFlags['u-1'] = true;
 
-    const { processDailyRunFanout } = await import(
-      '../daily-run-fanout'
+    const { processDailyRunFanout } = await import('../daily-run-fanout');
+    const { dispatchLeadMessage } = await import(
+      '@/lib/team/dispatch-lead-message'
     );
-    const { enqueueTeamRun } = await import('@/lib/queue/team-run');
 
     await processDailyRunFanout(fanoutJob());
 
-    // u-1 stopped, u-3 no product → only u-2 + u-4 get runs
-    expect(enqueueTeamRun).toHaveBeenCalledTimes(2);
+    // u-1 stopped, u-3 no product → only u-2 + u-4 get dispatched
+    expect(dispatchLeadMessage).toHaveBeenCalledTimes(2);
     const calls = (
-      enqueueTeamRun as unknown as { mock: { calls: unknown[][] } }
+      dispatchLeadMessage as unknown as { mock: { calls: unknown[][] } }
     ).mock.calls;
     const teamIds = calls.map(
       (c) => (c[0] as { teamId: string }).teamId,
@@ -254,20 +229,20 @@ describe('processDailyRunFanout', () => {
   });
 
   it('skips users with channels but no product', async () => {
-    const { processDailyRunFanout } = await import(
-      '../daily-run-fanout'
+    const { processDailyRunFanout } = await import('../daily-run-fanout');
+    const { dispatchLeadMessage } = await import(
+      '@/lib/team/dispatch-lead-message'
     );
-    const { enqueueTeamRun } = await import('@/lib/queue/team-run');
 
     await processDailyRunFanout(fanoutJob());
 
     const calls = (
-      enqueueTeamRun as unknown as { mock: { calls: unknown[][] } }
+      dispatchLeadMessage as unknown as { mock: { calls: unknown[][] } }
     ).mock.calls;
     const teamIds = calls.map(
       (c) => (c[0] as { teamId: string }).teamId,
     );
-    // u-3 has a channel row but no product — must not be enqueued.
+    // u-3 has a channel row but no product — must not be dispatched.
     expect(teamIds).not.toContain('team-u-3');
   });
 });

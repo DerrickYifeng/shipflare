@@ -14,8 +14,6 @@ import { processPlanExecuteSweeper } from './processors/plan-execute-sweeper';
 import { processStaleSweeper } from './processors/stale-sweeper';
 import { processWeeklyReplan } from './processors/weekly-replan';
 import { processReconcileMailbox } from './processors/reconcile-mailbox';
-import { processTeamRun, getTeamRunConcurrency } from './processors/team-run';
-import { TEAM_RUN_QUEUE_NAME, type TeamRunJobData } from '@/lib/queue/team-run';
 import { processAgentRun } from './processors/agent-run';
 import { AGENT_RUN_QUEUE_NAME, type AgentRunJobData } from '@/lib/queue/agent-run';
 import { dreamQueue, discoveryScanQueue, metricsQueue, analyticsQueue, codeScanQueue } from '@/lib/queue';
@@ -199,17 +197,10 @@ const reconcileMailboxWorker = new Worker<Record<string, never>>(
   { ...BASE_OPTS, concurrency: 1 },
 );
 
-// AI Team Platform — coordinator main-loop runner.
-// Lock duration accommodates a multi-turn coordinator run with delegated
-// subagents; each subagent is synchronous from the worker's POV and the full
-// chain ceiling is ~10 minutes (spec §15.3 alert threshold).
-const teamRunWorker = new Worker<TeamRunJobData>(
-  TEAM_RUN_QUEUE_NAME,
-  async (job) => processTeamRun(job),
-  { ...BASE_OPTS, concurrency: getTeamRunConcurrency(), lockDuration: 15 * 60_000 },
-);
-
 // AI Team Platform — single-shot agent-run runner (Phase B async lifecycle).
+// Phase E Task 11: replaces the old team-run worker. The lead is now a
+// regular agent_runs row driven by this worker; founder UI input enters
+// via team_messages + wake() instead of a BullMQ team-run job.
 // Each job processes one agent turn (drain mailbox → fork skill → persist
 // outputs). Lock duration is 10 min — well above the per-turn ceiling but
 // short enough that a crashed worker frees the job for another consumer.
@@ -245,7 +236,6 @@ const workers = [
   planExecuteWorker, planExecuteSweeperWorker,
   staleSweeperWorker, weeklyReplanWorker,
   // AI Team Platform
-  teamRunWorker,
   agentRunWorker,
   reconcileMailboxWorker,
 ];

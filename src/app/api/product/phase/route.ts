@@ -9,7 +9,7 @@ import { validateLaunchDates } from '@/lib/launch-date-rules';
 import { acquireRateLimit } from '@/lib/rate-limit';
 import { getUserChannels } from '@/lib/user-channels';
 import { ensureTeamExists } from '@/lib/team-provisioner';
-import { enqueueTeamRun } from '@/lib/queue/team-run';
+import { dispatchLeadMessage } from '@/lib/team/dispatch-lead-message';
 import { createAutomationConversation } from '@/lib/team-conversation-helpers';
 import { weekBounds } from '@/lib/week-bounds';
 import { createLogger, loggerForRequest } from '@/lib/logger';
@@ -188,6 +188,7 @@ export async function POST(request: NextRequest): Promise<Response> {
   let runId: string;
   try {
     const { teamId, memberIds } = await ensureTeamExists(userId, product.id);
+    void memberIds; // resolved upstream for validation; lead is the sole recipient
     const phaseNow = new Date();
     const goal =
       `Phase change for ${product.name}: the user updated their launch situation. ` +
@@ -202,13 +203,15 @@ export async function POST(request: NextRequest): Promise<Response> {
       teamId,
       'phase_transition',
     );
-    const enqueued = await enqueueTeamRun({
-      teamId,
-      trigger: 'phase_transition',
-      goal,
-      rootMemberId: memberIds.coordinator,
-      conversationId,
-    });
+    const enqueued = await dispatchLeadMessage(
+      {
+        teamId,
+        conversationId,
+        goal,
+        trigger: 'phase_transition',
+      },
+      db,
+    );
     runId = enqueued.runId;
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);

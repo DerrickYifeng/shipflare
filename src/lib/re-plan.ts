@@ -4,7 +4,7 @@ import { planItems, products, strategicPaths } from '@/lib/db/schema';
 import { derivePhase, type ProductState } from '@/lib/launch-phase';
 import { getUserChannels } from '@/lib/user-channels';
 import { ensureTeamExists } from '@/lib/team-provisioner';
-import { enqueueTeamRun } from '@/lib/queue/team-run';
+import { dispatchLeadMessage } from '@/lib/team/dispatch-lead-message';
 import { createAutomationConversation } from '@/lib/team-conversation-helpers';
 import { weekBounds } from '@/lib/week-bounds';
 import { createLogger } from '@/lib/logger';
@@ -236,6 +236,7 @@ export async function runTacticalReplan(
   let runId: string;
   try {
     const { teamId, memberIds } = await ensureTeamExists(userId, row.productId);
+    void memberIds; // resolved upstream; lead is the sole recipient (Phase E)
     const replanNow = new Date();
     const goal =
       `Re-plan week ${weekStart.toISOString().slice(0, 10)} for ${row.productName}. ` +
@@ -250,13 +251,15 @@ export async function runTacticalReplan(
     const replanConvId = await createAutomationConversation(teamId, 'weekly');
     // Both manual and cron replan share the coordinator's `weekly` playbook;
     // the goal text already distinguishes the source for observability.
-    const enqueued = await enqueueTeamRun({
-      teamId,
-      trigger: 'weekly',
-      goal,
-      rootMemberId: memberIds.coordinator,
-      conversationId: replanConvId,
-    });
+    const enqueued = await dispatchLeadMessage(
+      {
+        teamId,
+        conversationId: replanConvId,
+        goal,
+        trigger: 'weekly',
+      },
+      db,
+    );
     runId = enqueued.runId;
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);

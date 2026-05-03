@@ -3,7 +3,7 @@ import { and, eq, inArray, lte, or, sql } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import { planItems, teamMembers, teams } from '@/lib/db/schema';
 import { enqueuePlanExecute } from '@/lib/queue/plan-execute';
-import { enqueueTeamRun } from '@/lib/queue/team-run';
+import { spawnMemberAgentRun } from '@/lib/team/spawn-member-agent-run';
 import { createAutomationConversation } from '@/lib/team-conversation-helpers';
 import { recordPipelineEventsBulk } from '@/lib/pipeline-events';
 import { createLogger, loggerForJob } from '@/lib/logger';
@@ -292,16 +292,27 @@ async function dispatchOneUserBatch(
     'draft_post',
   );
 
-  await enqueueTeamRun({
-    teamId: memberRow.teamId,
-    trigger: 'draft_post',
-    goal,
-    rootMemberId: memberRow.memberId,
-    conversationId,
-  });
+  // Phase E Task 11: spawn the content-manager directly via agent-run
+  // (instead of routing through the lead's team-run). The post_batch
+  // workflow has no planning step — handing it to the lead would just
+  // forward verbatim, wasting a turn. Mirrors Task tool's
+  // `launchAsyncTeammate` shape; parentAgentId stays null because the
+  // sweeper is a cron, not another agent.
+  await spawnMemberAgentRun(
+    {
+      teamId: memberRow.teamId,
+      memberId: memberRow.memberId,
+      agentDefName: 'content-manager',
+      conversationId,
+      prompt: goal,
+      description: `post_batch (${planItemIds.length})`,
+      trigger: 'draft_post',
+    },
+    db,
+  );
 
   jlog.info(
-    `content_post batch: dispatched team-run agent=content-manager team=${memberRow.teamId} user=${group.userId} planItemIds=${planItemIds.length}`,
+    `content_post batch: spawned content-manager agent_run team=${memberRow.teamId} user=${group.userId} planItemIds=${planItemIds.length}`,
   );
 
   return planItemIds.length;

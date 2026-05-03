@@ -29,7 +29,8 @@ import {
 } from '@/lib/db/schema';
 import { getPubSubPublisher } from '@/lib/redis';
 import { teamMessagesChannel } from '@/tools/SendMessageTool/SendMessageTool';
-import { enqueueTeamRun } from '@/lib/queue/team-run';
+import { ensureLeadAgentRun } from '@/lib/team/spawn-lead';
+import { wake } from '@/workers/processors/lib/wake';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('api:team:conversations:messages');
@@ -141,60 +142,44 @@ export async function POST(
     toMemberId = member.id;
   }
 
-  // Find the coordinator (root agent for the spawned run).
-  const [coordinator] = await db
-    .select({ id: teamMembers.id })
-    .from(teamMembers)
-    .where(
-      and(
-        eq(teamMembers.teamId, body.teamId),
-        eq(teamMembers.agentType, 'coordinator'),
-      ),
-    )
-    .limit(1);
+  // Phase E Task 11: route inline chat messages through the unified lead
+  // agent. The lead's playbook handles "review state + propose actions"
+  // for free-form goal text. The optional `body.memberId` (`toMemberId`)
+  // is preserved on the inserted row for UI rendering — the agent-run
+  // worker still routes via `toAgentId=lead`, the original member target
+  // is informational.
+  const { agentId: leadAgentId } = await ensureLeadAgentRun(body.teamId, db);
 
-  const rootMemberId = coordinator?.id ?? toMemberId;
-  if (!rootMemberId) {
-    return NextResponse.json(
-      {
-        error: 'no_root_member',
-        detail:
-          'Team has no coordinator and no explicit member was supplied — cannot spawn a run to process the message.',
-      },
-      { status: 400 },
-    );
-  }
-
-  // Enqueue the coordinator run scoped to THIS conversation. Inline
-  // chat messages share the `daily` playbook entry (coordinator falls
-  // back to "review state + propose actions" when the goal text doesn't
-  // match a known trigger pattern).
-  const enqueued = await enqueueTeamRun({
-    teamId: body.teamId,
-    trigger: 'daily',
-    goal: body.message,
-    rootMemberId,
-    conversationId,
-  });
-
-  // Insert the user_prompt row. Must carry the enqueued runId so the
-  // coordinator reconstructs history correctly and the UI's SSE
-  // subscriber associates the bubble with the right thread.
+  // Insert the user_prompt row addressed to the lead agent. The
+  // coordinator reconstructs history from team_messages by conversationId
+  // (Phase E `loadConversationHistory` path) and the UI's SSE subscriber
+  // associates the bubble with the right thread via conversationId.
   const messageId = crypto.randomUUID();
   const createdAt = new Date();
   await db.insert(teamMessages).values({
     id: messageId,
-    runId: enqueued.runId,
     teamId: body.teamId,
     conversationId,
     fromMemberId: null, // user
     toMemberId,
+    toAgentId: leadAgentId,
     type: 'user_prompt',
+    messageType: 'message',
     content: body.message,
     contentBlocks: [{ type: 'text', text: body.message }],
     metadata: { trigger: 'conversation_message' },
     createdAt,
   });
+
+  // Wake the lead's agent-run loop. Idempotent within a 1-second jobId
+  // window via BullMQ dedupe. The `runId` field on the response is the
+  // inserted message id (legacy clients used team_runs.id; Phase E uses
+  // the message id as the polling handle).
+  await wake(leadAgentId);
+  const enqueued = {
+    runId: messageId,
+    traceId: leadAgentId,
+  };
 
   // Bump conversation.updated_at so the sidebar sort surfaces it.
   // Also backfill title from the first user message if still null.

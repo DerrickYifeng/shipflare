@@ -228,14 +228,19 @@ vi.mock('@/lib/queue/plan-execute', () => ({
   enqueuePlanExecute: (data: unknown) => enqueuePlanExecuteMock(data),
 }));
 
-const enqueueTeamRunMock = vi.fn(async (input: Record<string, unknown>) => ({
-  runId: 'run-batch-1',
-  traceId: 'trace-batch-1',
-  alreadyRunning: false,
+// Phase E Task 11: replaced enqueueTeamRun with spawnMemberAgentRun. The
+// helper inserts an agent_runs row + initial mailbox message for the
+// content-manager directly (mirrors Task tool's launchAsyncTeammate
+// shape); the test only cares that it was called with the right input,
+// so we mock the whole helper.
+const spawnMemberAgentRunMock = vi.fn(async (input: Record<string, unknown>) => ({
+  agentId: 'agent-batch-1',
+  messageId: 'msg-batch-1',
   __input: input,
 }));
-vi.mock('@/lib/queue/team-run', () => ({
-  enqueueTeamRun: (input: Record<string, unknown>) => enqueueTeamRunMock(input),
+vi.mock('@/lib/team/spawn-member-agent-run', () => ({
+  spawnMemberAgentRun: (input: Record<string, unknown>) =>
+    spawnMemberAgentRunMock(input),
 }));
 
 vi.mock('@/lib/team-conversation-helpers', () => ({
@@ -279,7 +284,7 @@ beforeEach(() => {
   teamRows.length = 0;
   teamMemberRows.length = 0;
   enqueuePlanExecuteMock.mockClear();
-  enqueueTeamRunMock.mockClear();
+  spawnMemberAgentRunMock.mockClear();
 });
 
 // ---------------------------------------------------------------------------
@@ -287,7 +292,7 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('plan-execute-sweeper — content_post batch dispatch', () => {
-  it('claims due content_post rows and dispatches ONE team-run with post_batch goal', async () => {
+  it('claims due content_post rows and spawns ONE content-manager agent_run with post_batch goal', async () => {
     const { contentManagerId, teamId } = seedTeam('u-1', 'p-1');
     seedPlanItem({ id: 'pi-1' });
     seedPlanItem({ id: 'pi-2' });
@@ -299,26 +304,28 @@ describe('plan-execute-sweeper — content_post batch dispatch', () => {
     );
     await processPlanExecuteSweeper(makeJob());
 
-    // 1. Exactly one team-run dispatched (no per-row enqueue).
-    expect(enqueueTeamRunMock).toHaveBeenCalledTimes(1);
+    // 1. Exactly one content-manager agent_run spawned (no per-row enqueue).
+    expect(spawnMemberAgentRunMock).toHaveBeenCalledTimes(1);
     expect(enqueuePlanExecuteMock).not.toHaveBeenCalled();
 
-    // 2. Goal carries Mode: post_batch + both due plan_item ids.
-    const call = enqueueTeamRunMock.mock.calls[0]?.[0] as {
+    // 2. Prompt carries Mode: post_batch + both due plan_item ids.
+    const call = spawnMemberAgentRunMock.mock.calls[0]?.[0] as {
       teamId: string;
       trigger: string;
-      rootMemberId: string;
-      goal: string;
+      memberId: string;
+      agentDefName: string;
+      prompt: string;
       conversationId: string;
     };
     expect(call.teamId).toBe(teamId);
     expect(call.trigger).toBe('draft_post');
-    expect(call.rootMemberId).toBe(contentManagerId);
+    expect(call.memberId).toBe(contentManagerId);
+    expect(call.agentDefName).toBe('content-manager');
     expect(call.conversationId).toBe('conv-batch-1');
-    expect(call.goal).toContain('Mode: post_batch');
-    expect(call.goal).toContain('"pi-1"');
-    expect(call.goal).toContain('"pi-2"');
-    expect(call.goal).not.toContain('"pi-3"');
+    expect(call.prompt).toContain('Mode: post_batch');
+    expect(call.prompt).toContain('"pi-1"');
+    expect(call.prompt).toContain('"pi-2"');
+    expect(call.prompt).not.toContain('"pi-3"');
 
     // 3. Claimed rows are now in `drafting`. Untouched row stays `drafted`.
     expect(planItemRows.find((r) => r.id === 'pi-1')!.state).toBe('drafting');
@@ -326,7 +333,7 @@ describe('plan-execute-sweeper — content_post batch dispatch', () => {
     expect(planItemRows.find((r) => r.id === 'pi-3')!.state).toBe('drafted');
   });
 
-  it('groups by (userId, productId) — two users get two team-runs', async () => {
+  it('groups by (userId, productId) — two users get two agent_runs', async () => {
     seedTeam('u-1', 'p-1');
     seedTeam('u-2', 'p-2');
     seedPlanItem({ id: 'a-1', userId: 'u-1', productId: 'p-1' });
@@ -337,7 +344,7 @@ describe('plan-execute-sweeper — content_post batch dispatch', () => {
     );
     await processPlanExecuteSweeper(makeJob());
 
-    expect(enqueueTeamRunMock).toHaveBeenCalledTimes(2);
+    expect(spawnMemberAgentRunMock).toHaveBeenCalledTimes(2);
   });
 
   it('is idempotent — a re-run after the first claim dispatches nothing for the same rows', async () => {
@@ -349,13 +356,13 @@ describe('plan-execute-sweeper — content_post batch dispatch', () => {
       '../plan-execute-sweeper'
     );
     await processPlanExecuteSweeper(makeJob());
-    expect(enqueueTeamRunMock).toHaveBeenCalledTimes(1);
+    expect(spawnMemberAgentRunMock).toHaveBeenCalledTimes(1);
 
-    enqueueTeamRunMock.mockClear();
+    spawnMemberAgentRunMock.mockClear();
     await processPlanExecuteSweeper(makeJob());
     // Second sweep — both rows are now in `drafting`, so the candidate
-    // query returns nothing and no team-run is dispatched.
-    expect(enqueueTeamRunMock).not.toHaveBeenCalled();
+    // query returns nothing and no agent_run is spawned.
+    expect(spawnMemberAgentRunMock).not.toHaveBeenCalled();
   });
 
   it('skips dispatch when the team has no content-manager (older default-squad)', async () => {
@@ -374,7 +381,7 @@ describe('plan-execute-sweeper — content_post batch dispatch', () => {
     );
     await processPlanExecuteSweeper(makeJob());
 
-    expect(enqueueTeamRunMock).not.toHaveBeenCalled();
+    expect(spawnMemberAgentRunMock).not.toHaveBeenCalled();
     // Row is left in `planned` so a future tick (after content-manager
     // is provisioned) can still pick it up.
     expect(planItemRows.find((r) => r.id === 'pi-orphan')!.state).toBe(
@@ -394,7 +401,7 @@ describe('plan-execute-sweeper — content_post batch dispatch', () => {
     );
     await processPlanExecuteSweeper(makeJob());
 
-    expect(enqueueTeamRunMock).not.toHaveBeenCalled();
+    expect(spawnMemberAgentRunMock).not.toHaveBeenCalled();
     expect(planItemRows.find((r) => r.id === 'pi-future')!.state).toBe(
       'planned',
     );
@@ -410,7 +417,7 @@ describe('plan-execute-sweeper — content_post batch dispatch', () => {
     await processPlanExecuteSweeper(makeJob());
 
     // No team-run from the batch path (kind != content_post).
-    expect(enqueueTeamRunMock).not.toHaveBeenCalled();
+    expect(spawnMemberAgentRunMock).not.toHaveBeenCalled();
     // Per-row enqueue runs as before for content_reply + planned + approve.
     expect(enqueuePlanExecuteMock).toHaveBeenCalledTimes(1);
     const call = enqueuePlanExecuteMock.mock.calls[0]?.[0] as {

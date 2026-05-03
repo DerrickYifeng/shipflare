@@ -1,12 +1,12 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { products, channels, teamMembers } from '@/lib/db/schema';
+import { products, channels } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { publishUserEvent } from '@/lib/redis';
 import { clearStop } from '@/lib/automation-stop';
 import { ensureTeamExists } from '@/lib/team-provisioner';
-import { enqueueTeamRun } from '@/lib/queue/team-run';
+import { dispatchLeadMessage } from '@/lib/team/dispatch-lead-message';
 import { resolveRollingConversation } from '@/lib/team-rolling-conversation';
 import { createLogger, loggerForRequest } from '@/lib/logger';
 import { PLATFORMS, isPlatformAvailable } from '@/lib/platform-config';
@@ -77,17 +77,6 @@ export async function POST(request: NextRequest) {
   });
 
   const { teamId } = await ensureTeamExists(userId, product.id);
-  const memberRows = await db
-    .select({ id: teamMembers.id, agentType: teamMembers.agentType })
-    .from(teamMembers)
-    .where(eq(teamMembers.teamId, teamId));
-  const coordinator = memberRows.find((m) => m.agentType === 'coordinator');
-  if (!coordinator) {
-    return NextResponse.json(
-      { error: 'team_misconfigured', detail: 'coordinator member missing' },
-      { status: 500, headers: { 'x-trace-id': traceId } },
-    );
-  }
 
   const conversationId = await resolveRollingConversation(teamId, 'Discovery');
   const goal =
@@ -100,13 +89,15 @@ export async function POST(request: NextRequest) {
     `when each slot terminates. If no slots are found, fall back to ` +
     `default top-3 drafting from a single discovery-agent dispatch.`;
 
-  const { runId, alreadyRunning } = await enqueueTeamRun({
-    teamId,
-    trigger: 'daily',
-    goal,
-    rootMemberId: coordinator.id,
-    conversationId,
-  });
+  const { runId, alreadyRunning } = await dispatchLeadMessage(
+    {
+      teamId,
+      conversationId,
+      goal,
+      trigger: 'daily',
+    },
+    db,
+  );
 
   log.info(
     `Automation triggered for product "${product.name}" (${product.id}), platforms: ${activePlatforms.join(', ')}, runId=${runId} alreadyRunning=${alreadyRunning}`,

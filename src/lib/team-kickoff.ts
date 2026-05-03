@@ -15,16 +15,16 @@
  * "thanks!" screen.
  */
 
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import {
   products,
   strategicPaths,
   teamMembers,
-  teamRuns,
+  teamMessages,
 } from '@/lib/db/schema';
 import { getUserChannels } from '@/lib/user-channels';
-import { enqueueTeamRun } from '@/lib/queue/team-run';
+import { dispatchLeadMessage } from '@/lib/team/dispatch-lead-message';
 import { createAutomationConversation } from '@/lib/team-conversation-helpers';
 import { finalizePendingOnboardingRuns } from '@/lib/onboarding-run-finalizer';
 import { currentWeekStart } from '@/lib/week-bounds';
@@ -53,24 +53,31 @@ export async function ensureKickoffEnqueued(args: {
 }): Promise<EnsureKickoffResult> {
   const { userId, productId, teamId } = args;
 
-  // Has this team ever kicked off? Status doesn't matter — running,
-  // completed, or failed all count. The founder gets one shot at
-  // the auto-kickoff; manual re-runs go through /api/team/run.
+  // Has this team ever kicked off? Status doesn't matter — we just want
+  // the founder's one-shot auto-kickoff. Phase E Task 11: detection moved
+  // off `team_runs` (legacy table) onto `team_messages.metadata.trigger`,
+  // which `dispatchLeadMessage` stamps on every dispatched user_prompt.
+  // Manual re-runs go through /api/team/run as before.
   const existing = await db
-    .select({ id: teamRuns.id })
-    .from(teamRuns)
-    .where(and(eq(teamRuns.teamId, teamId), eq(teamRuns.trigger, 'kickoff')))
+    .select({ id: teamMessages.id })
+    .from(teamMessages)
+    .where(
+      and(
+        eq(teamMessages.teamId, teamId),
+        sql`${teamMessages.metadata}->>'trigger' = 'kickoff'`,
+      ),
+    )
     .limit(1);
   if (existing.length > 0) {
     return { fired: false, reason: 'already_kickoffed' };
   }
 
   // Pre-empt the analyst-run race: if the analyst's onboarding-trigger
-  // run is still flagged `running` when we arrive at /team, the
-  // `enqueueTeamRun` partial unique index would treat the team as busy
-  // and silently return `alreadyRunning: true`, leaving us pointing at
-  // the wrong run. Mark any in-flight onboarding run cancelled before
-  // we enqueue so the index clears.
+  // run is still flagged `running` when we arrive at /team, the legacy
+  // `enqueueTeamRun` partial unique index treated the team as busy and
+  // returned `alreadyRunning`. Phase E removes that index path, but we
+  // keep the cleanup so any in-flight onboarding `team_runs` rows are
+  // settled to a terminal state for the historical UI.
   try {
     const finalized = await finalizePendingOnboardingRuns(teamId);
     if (finalized.finalized > 0) {
@@ -153,21 +160,24 @@ export async function ensureKickoffEnqueued(args: {
     return { fired: false, reason: 'enqueue_failed' };
   }
 
+  void coordinator; // resolved for misconfiguration check; lead is the sole recipient
   try {
-    const { runId } = await enqueueTeamRun({
-      teamId,
-      trigger: 'kickoff',
-      goal,
-      rootMemberId: coordinator.id,
-      conversationId,
-    });
+    const { runId } = await dispatchLeadMessage(
+      {
+        teamId,
+        conversationId,
+        goal,
+        trigger: 'kickoff',
+      },
+      db,
+    );
     log.info(
-      `kickoff enqueued user=${userId} team=${teamId} run=${runId} conv=${conversationId}`,
+      `kickoff dispatched user=${userId} team=${teamId} run=${runId} conv=${conversationId}`,
     );
     return { fired: true, runId, conversationId };
   } catch (err) {
     log.warn(
-      `enqueueTeamRun failed for kickoff team=${teamId}: ${err instanceof Error ? err.message : String(err)}`,
+      `dispatchLeadMessage failed for kickoff team=${teamId}: ${err instanceof Error ? err.message : String(err)}`,
     );
     return { fired: false, reason: 'enqueue_failed', conversationId };
   }

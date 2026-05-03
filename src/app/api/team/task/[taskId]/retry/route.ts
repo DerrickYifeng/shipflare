@@ -9,7 +9,7 @@ import {
   teamMembers,
   teamConversations,
 } from '@/lib/db/schema';
-import { enqueueTeamRun } from '@/lib/queue/team-run';
+import { spawnMemberAgentRun } from '@/lib/team/spawn-member-agent-run';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('api:team:task:retry');
@@ -83,7 +83,7 @@ export async function POST(
   // carries `subagent_type` — we map that to the team_members row with
   // the matching agent_type. If the team doesn't have one (e.g., the
   // original task was run by a coordinator-direct tool), fall back to
-  // the coordinator so the retry still has a valid rootMemberId.
+  // the coordinator so the retry still has a valid agent target.
   const inputObj =
     task.input && typeof task.input === 'object' && !Array.isArray(task.input)
       ? (task.input as Record<string, unknown>)
@@ -99,13 +99,18 @@ export async function POST(
     .where(eq(teamMembers.teamId, task.teamId));
 
   const byAgentType = new Map(members.map((m) => [m.agentType, m.id]));
-  const rootMemberId =
+  const targetMemberId =
     (subagentType ? byAgentType.get(subagentType) : null) ??
     byAgentType.get('coordinator') ??
     members[0]?.id ??
     null;
+  const targetAgentDefName =
+    (subagentType && byAgentType.has(subagentType)) ? subagentType :
+    byAgentType.has('coordinator') ? 'coordinator' :
+    members[0] ? members[0].agentType :
+    null;
 
-  if (!rootMemberId) {
+  if (!targetMemberId || !targetAgentDefName) {
     return NextResponse.json(
       { error: 'no_root_member_available' },
       { status: 400 },
@@ -130,20 +135,36 @@ export async function POST(
     conversationId = created!.id;
   }
 
-  const { runId, traceId, alreadyRunning } = await enqueueTeamRun({
-    teamId: task.teamId,
-    trigger: 'daily',
-    goal,
-    rootMemberId,
-    conversationId,
-  });
+  // Phase E Task 11: spawn an agent_runs row directly for the target
+  // specialist (mirrors Task tool's `launchAsyncTeammate` shape). The
+  // legacy `alreadyRunning` flag is gone — wake() is idempotent within a
+  // 1-second BullMQ jobId window, so duplicate retry clicks collapse
+  // before reaching the worker.
+  const { agentId: runId, messageId } = await spawnMemberAgentRun(
+    {
+      teamId: task.teamId,
+      memberId: targetMemberId,
+      agentDefName: targetAgentDefName,
+      conversationId,
+      prompt: goal,
+      description: `Retry of ${task.taskId.slice(0, 8)}`,
+      trigger: 'task_retry',
+    },
+    db,
+  );
 
   log.info(
-    `POST /api/team/task/${task.taskId}/retry user=${userId} → new runId=${runId} already=${alreadyRunning}`,
+    `POST /api/team/task/${task.taskId}/retry user=${userId} → spawned agent=${runId} msg=${messageId}`,
   );
 
   return NextResponse.json(
-    { taskId: task.taskId, runId, traceId, alreadyRunning, conversationId },
-    { status: alreadyRunning ? 200 : 202 },
+    {
+      taskId: task.taskId,
+      runId,
+      traceId: runId,
+      alreadyRunning: false,
+      conversationId,
+    },
+    { status: 202 },
   );
 }
