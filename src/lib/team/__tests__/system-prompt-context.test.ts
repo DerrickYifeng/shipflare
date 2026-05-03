@@ -202,7 +202,7 @@ describe('loadSystemPromptContext', () => {
     ]);
 
     const db = makeDb({ tableResults });
-    const ctx = await loadSystemPromptContext({
+    const { ctx } = await loadSystemPromptContext({
       teamId: 'team-1',
       db: db as never,
     });
@@ -274,7 +274,7 @@ describe('loadSystemPromptContext', () => {
     });
 
     const db = makeDb({ tableResults });
-    const ctx = await loadSystemPromptContext({
+    const { ctx } = await loadSystemPromptContext({
       teamId: 'team-77',
       db: db as never,
     });
@@ -304,5 +304,80 @@ describe('loadSystemPromptContext', () => {
     await expect(
       loadSystemPromptContext({ teamId: 'missing-team', db: db as never }),
     ).rejects.toThrow(/team not found/i);
+  });
+
+  // ---------------------------------------------------------------------
+  // Task 2 (2026-05-03 plan) — return shape exposes the team row so
+  // agent-run.ts can drop its own duplicate `select({id, userId,
+  // productId}) from teams` and reuse the row this loader already
+  // queried internally.
+  // ---------------------------------------------------------------------
+
+  it('returns both ctx and team object', async () => {
+    const tableResults = new Map<unknown, FakeRow[]>();
+    tableResults.set(tableTokens.teams, [
+      { id: 'team-shape', userId: 'user-shape', productId: 'prod-shape' },
+    ]);
+    tableResults.set(tableTokens.products, [
+      {
+        id: 'prod-shape',
+        userId: 'user-shape',
+        name: 'Acme',
+        description: 'd',
+        state: 'mvp',
+      },
+    ]);
+    tableResults.set(tableTokens.strategicPaths, []);
+    tableResults.set(tableTokens.channels, []);
+    tableResults.set(tableTokens.planItems, []);
+    tableResults.set(tableTokens.users, [
+      { id: 'user-shape', name: 'Alex', email: null },
+    ]);
+    tableResults.set(tableTokens.teamMembers, []);
+
+    const db = makeDb({ tableResults });
+    const result = await loadSystemPromptContext({
+      teamId: 'team-shape',
+      db: db as never,
+    });
+
+    // The new envelope: callers still get the substitution context via
+    // `result.ctx`, but ALSO get the team row this loader queried so
+    // agent-run.ts can build its ToolContext args without re-querying
+    // the same row 13 lines later.
+    expect(result.ctx).toBeDefined();
+    expect(result.ctx.productName).toBe('Acme');
+    expect(result.ctx.founderName).toBe('Alex');
+
+    expect(result.team).toEqual({
+      id: 'team-shape',
+      userId: 'user-shape',
+      productId: 'prod-shape',
+    });
+  });
+
+  it('returned team.productId is null when the team has no product', async () => {
+    const tableResults = new Map<unknown, FakeRow[]>();
+    tableResults.set(tableTokens.teams, [
+      { id: 'team-noprod', userId: 'user-noprod', productId: null },
+    ]);
+    tableResults.set(tableTokens.products, []);
+    tableResults.set(tableTokens.strategicPaths, []);
+    tableResults.set(tableTokens.channels, []);
+    tableResults.set(tableTokens.planItems, []);
+    tableResults.set(tableTokens.users, [
+      { id: 'user-noprod', name: null, email: null },
+    ]);
+    tableResults.set(tableTokens.teamMembers, []);
+
+    const db = makeDb({ tableResults });
+    const result = await loadSystemPromptContext({
+      teamId: 'team-noprod',
+      db: db as never,
+    });
+
+    expect(result.team.productId).toBeNull();
+    // Sanity: the prior contract still holds — defaults flow through ctx.
+    expect(result.ctx.productName).toBe('your product');
   });
 });

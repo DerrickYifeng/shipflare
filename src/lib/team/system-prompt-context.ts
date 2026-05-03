@@ -145,13 +145,33 @@ interface LoadArgs {
  * — that's the only fatal error. All other lookups have safe defaults
  * so a freshly-onboarded team (no product, no path, no items) still
  * gets a coherent rendered prompt.
+ *
+ * Task 2 (2026-05-03 plan): the loader returns both the rendered ctx
+ * AND the team row it queried internally. agent-run.ts is the only
+ * caller and used to run a duplicate `select({id, userId, productId})
+ * .from(teams)` 13 lines after this; exposing the row here lets it
+ * drop that second query without losing the typed shape it consumed.
+ *
+ * Task 2 also parallelizes the dependent queries — six of the seven
+ * SELECTs (product, strategic_path, channels, plan_items, user,
+ * team_members) only need `team.userId` / `team.productId`, so they
+ * fire concurrently via `Promise.all` once the team row settles.
+ * The roster's per-member `resolveAgent(...)` lookups are likewise
+ * parallelized so a 12-member team doesn't pay 12× sequential
+ * registry latency. Behavior is otherwise identical to the prior
+ * sequential implementation: same defaults, same throw-on-missing-team,
+ * same skip-with-warn for unresolvable agentTypes.
  */
 export async function loadSystemPromptContext(
   args: LoadArgs,
-): Promise<SystemPromptContext> {
+): Promise<{
+  ctx: SystemPromptContext;
+  team: { id: string; userId: string; productId: string | null };
+}> {
   const { teamId, db } = args;
 
-  // 1. team
+  // 1. team — must resolve before the parallel batch so its userId /
+  //    productId can fan out into the dependent queries.
   const teamRows = (await db
     .select({ id: teams.id, userId: teams.userId, productId: teams.productId })
     .from(teams)
@@ -166,89 +186,122 @@ export async function loadSystemPromptContext(
   }
   const team = teamRows[0];
 
-  // 2. product (LEFT JOIN by intent — productId may be null for legacy
-  //    teams). Defaults applied below.
+  // 2-7. dependent queries — fire concurrently. Each returns its own
+  //      shape and gets normalized below. The `productId === null`
+  //      branch returns an empty array via Promise.resolve so the
+  //      positional unpacking stays uniform.
+  const week = currentUtcWeekRange();
+  const [productRows, pathRows, channelRows, planItemRows, userRows, memberRows] =
+    await Promise.all([
+      // 2. product (only when productId is set)
+      team.productId !== null
+        ? (db
+            .select({
+              id: products.id,
+              name: products.name,
+              description: products.description,
+              state: products.state,
+            })
+            .from(products)
+            .where(eq(products.id, team.productId))
+            .limit(1) as Promise<
+            Array<{
+              id: string;
+              name: string;
+              description: string;
+              state: string;
+            }>
+          >)
+        : Promise.resolve(
+            [] as Array<{
+              id: string;
+              name: string;
+              description: string;
+              state: string;
+            }>,
+          ),
+      // 3. active strategic_path — keyed by userId, most recent first
+      db
+        .select({ id: strategicPaths.id, phase: strategicPaths.phase })
+        .from(strategicPaths)
+        .where(eq(strategicPaths.userId, team.userId))
+        .orderBy(desc(strategicPaths.generatedAt))
+        .limit(1) as Promise<Array<{ id: string; phase: string }>>,
+      // 4. channels — explicit projection (CLAUDE.md security note;
+      //    never select token columns from channels)
+      db
+        .select({ platform: channelsTable.platform })
+        .from(channelsTable)
+        .where(eq(channelsTable.userId, team.userId)) as Promise<
+        Array<{ platform: string }>
+      >,
+      // 5. plan items this UTC week — group by state for breakdown
+      db
+        .select({
+          state: planItems.state,
+          count: sql<number>`count(*)`,
+        })
+        .from(planItems)
+        .where(
+          and(
+            eq(planItems.userId, team.userId),
+            gte(planItems.scheduledAt, week.start),
+            lt(planItems.scheduledAt, week.end),
+          ),
+        )
+        .groupBy(planItems.state) as Promise<
+        Array<{ state: string; count: number | string }>
+      >,
+      // 6. founder name source
+      db
+        .select({ id: users.id, name: users.name, email: users.email })
+        .from(users)
+        .where(eq(users.id, team.userId))
+        .limit(1) as Promise<
+        Array<{ id: string; name: string | null; email: string | null }>
+      >,
+      // 7. team roster source — resolveAgent calls fan out below
+      db
+        .select({
+          id: teamMembers.id,
+          teamId: teamMembers.teamId,
+          agentType: teamMembers.agentType,
+        })
+        .from(teamMembers)
+        .where(eq(teamMembers.teamId, teamId)) as Promise<
+        Array<{ id: string; teamId: string; agentType: string }>
+      >,
+    ]);
+
+  // 2. product fields (defaults flow through when productId is null
+  //    or the row is missing).
   let productName = 'your product';
   let productDescription = '(product not configured)';
   let productState = 'unknown';
-  if (team.productId !== null) {
-    const productRows = (await db
-      .select({
-        id: products.id,
-        name: products.name,
-        description: products.description,
-        state: products.state,
-      })
-      .from(products)
-      .where(eq(products.id, team.productId))
-      .limit(1)) as Array<{
-      id: string;
-      name: string;
-      description: string;
-      state: string;
-    }>;
-    if (productRows.length > 0) {
-      productName = productRows[0].name;
-      productDescription = productRows[0].description;
-      productState = productRows[0].state;
-    }
+  if (productRows.length > 0) {
+    productName = productRows[0].name;
+    productDescription = productRows[0].description;
+    productState = productRows[0].state;
   }
 
-  // 3. active strategic_path. Schema keys by userId (not teamId) so we
-  //    use team.userId. `generatedAt DESC LIMIT 1` returns the most
-  //    recently generated path — matches the partial unique index that
-  //    enforces `is_active = true` per user.
+  // 3. strategic_path — defaults stay when no row.
   let currentPhase = 'unknown';
   let strategicPathId = 'none yet';
-  const pathRows = (await db
-    .select({ id: strategicPaths.id, phase: strategicPaths.phase })
-    .from(strategicPaths)
-    .where(eq(strategicPaths.userId, team.userId))
-    .orderBy(desc(strategicPaths.generatedAt))
-    .limit(1)) as Array<{ id: string; phase: string }>;
   if (pathRows.length > 0) {
     strategicPathId = pathRows[0].id;
     currentPhase = pathRows[0].phase;
   }
 
-  // 4. channels for the team's userId. Explicit projection (per CLAUDE.md
-  //    security note) — never select token columns from `channels`.
-  //    Dedupe in JS rather than via `selectDistinct` so the helper stays
-  //    portable across Drizzle dialect quirks and easy to fake in tests.
-  const channelRows = (await db
-    .select({ platform: channelsTable.platform })
-    .from(channelsTable)
-    .where(eq(channelsTable.userId, team.userId))) as Array<{
-    platform: string;
-  }>;
+  // 4. channels — dedupe in JS for portability across Drizzle dialect
+  //    quirks; identical output to a `selectDistinct`.
   const uniquePlatforms = Array.from(
     new Set(channelRows.map((r) => r.platform)),
   );
   const channelsStr =
     uniquePlatforms.length > 0 ? uniquePlatforms.join(', ') : 'none yet';
 
-  // 5. plan items this UTC week. Schema keys by userId (not teamId)
-  //    and the column is `state`, not `status`. Group by state.
-  const week = currentUtcWeekRange();
-  const planItemRows = (await db
-    .select({
-      state: planItems.state,
-      count: sql<number>`count(*)`,
-    })
-    .from(planItems)
-    .where(
-      and(
-        eq(planItems.userId, team.userId),
-        gte(planItems.scheduledAt, week.start),
-        lt(planItems.scheduledAt, week.end),
-      ),
-    )
-    .groupBy(planItems.state)) as Array<{
-    state: string;
-    count: number | string;
-  }>;
-  // Postgres returns count as bigint → string in some drivers; coerce
-  // defensively.
+  // 5. plan items breakdown — coerce bigint→number defensively (some
+  //    Postgres drivers return count as a string).
   const normalized = planItemRows.map((r) => ({
     state: r.state,
     count: typeof r.count === 'string' ? Number(r.count) : r.count,
@@ -263,17 +316,8 @@ export async function loadSystemPromptContext(
           .map((r) => `${r.state}: ${r.count}`)
           .join(', ');
 
-  // 6. founder name.
+  // 6. founder name — prefer name, then email's local-part, then default.
   let founderName = 'founder';
-  const userRows = (await db
-    .select({ id: users.id, name: users.name, email: users.email })
-    .from(users)
-    .where(eq(users.id, team.userId))
-    .limit(1)) as Array<{
-    id: string;
-    name: string | null;
-    email: string | null;
-  }>;
   if (userRows.length > 0) {
     const u = userRows[0];
     if (u.name !== null && u.name.length > 0) {
@@ -284,51 +328,52 @@ export async function loadSystemPromptContext(
     }
   }
 
-  // 7. team roster. Resolve each member's agentType through the
-  //    registry; skip with a warn when an agent can't be loaded
-  //    (legacy member referring to an agent the registry no longer
-  //    knows about) so the rest of the team still renders.
-  const memberRows = (await db
-    .select({
-      id: teamMembers.id,
-      teamId: teamMembers.teamId,
-      agentType: teamMembers.agentType,
-    })
-    .from(teamMembers)
-    .where(eq(teamMembers.teamId, teamId))) as Array<{
-    id: string;
-    teamId: string;
-    agentType: string;
-  }>;
-  const defs: AgentDefinition[] = [];
-  for (const m of memberRows) {
-    try {
-      const def = await resolveAgent(m.agentType);
-      if (def === null) {
+  // 7. team roster — resolveAgent in parallel; skip-with-warn for
+  //    unresolvable agentTypes (legacy member referring to an agent
+  //    the registry no longer knows about) so the rest of the team
+  //    still renders. Each resolveAgent is wrapped in its own
+  //    try/catch so one failure can't reject the whole Promise.all.
+  const resolved = await Promise.all(
+    memberRows.map(async (m) => {
+      try {
+        const def = await resolveAgent(m.agentType);
+        if (def === null) {
+          log.warn(
+            `loadSystemPromptContext team=${teamId}: registry could not resolve agentType=${m.agentType}; skipping from roster`,
+          );
+          return null;
+        }
+        return def;
+      } catch (err) {
         log.warn(
-          `loadSystemPromptContext team=${teamId}: registry could not resolve agentType=${m.agentType}; skipping from roster`,
+          `loadSystemPromptContext team=${teamId}: resolveAgent threw for agentType=${m.agentType}; skipping. ${err instanceof Error ? err.message : String(err)}`,
         );
-        continue;
+        return null;
       }
-      defs.push(def);
-    } catch (err) {
-      log.warn(
-        `loadSystemPromptContext team=${teamId}: resolveAgent threw for agentType=${m.agentType}; skipping. ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-  }
+    }),
+  );
+  const defs: AgentDefinition[] = resolved.filter(
+    (d): d is AgentDefinition => d !== null,
+  );
   const teamRoster = formatTeamRoster(defs);
 
   return {
-    productName,
-    productDescription,
-    productState,
-    currentPhase,
-    channels: channelsStr,
-    strategicPathId,
-    itemCount,
-    statusBreakdown,
-    founderName,
-    teamRoster,
+    ctx: {
+      productName,
+      productDescription,
+      productState,
+      currentPhase,
+      channels: channelsStr,
+      strategicPathId,
+      itemCount,
+      statusBreakdown,
+      founderName,
+      teamRoster,
+    },
+    team: {
+      id: team.id,
+      userId: team.userId,
+      productId: team.productId,
+    },
   };
 }

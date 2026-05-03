@@ -160,21 +160,49 @@ vi.mock('@/lib/team-conversation', () => ({
 
 // system-prompt-context: agent-run.ts now renders def.systemPrompt
 // against live DB context before invoking runAgent. Default fixture
-// returns a generic ctx so the prior tests keep passing; the wiring
-// test below overrides it per-call to assert substitution lands.
+// returns a generic envelope so the prior tests keep passing; the
+// wiring test below overrides it per-call to assert substitution lands.
+//
+// Task 2 (2026-05-03 plan): the loader now returns
+// `{ ctx, team: {id, userId, productId} }` so agent-run.ts can drop
+// its duplicate teams SELECT and reuse this row. The default fixture
+// matches the agent_runs row's teamId/userId used across the suite.
 const loadSystemPromptContextMock = vi.hoisted(() =>
-  vi.fn(async () => ({
-    productName: 'TestProduct',
-    productDescription: 'a test product',
-    productState: 'mvp',
-    currentPhase: 'foundation',
-    channels: 'none yet',
-    strategicPathId: 'none yet',
-    itemCount: 0,
-    statusBreakdown: '',
-    founderName: 'TestFounder',
-    teamRoster: '- coordinator: Chief of Staff (Tools: Task)',
-  })),
+  vi.fn(
+    async (): Promise<{
+      ctx: {
+        productName: string;
+        productDescription: string;
+        productState: string;
+        currentPhase: string;
+        channels: string;
+        strategicPathId: string;
+        itemCount: number;
+        statusBreakdown: string;
+        founderName: string;
+        teamRoster: string;
+      };
+      team: { id: string; userId: string; productId: string | null };
+    }> => ({
+      ctx: {
+        productName: 'TestProduct',
+        productDescription: 'a test product',
+        productState: 'mvp',
+        currentPhase: 'foundation',
+        channels: 'none yet',
+        strategicPathId: 'none yet',
+        itemCount: 0,
+        statusBreakdown: '',
+        founderName: 'TestFounder',
+        teamRoster: '- coordinator: Chief of Staff (Tools: Task)',
+      },
+      team: {
+        id: 'team-1',
+        userId: 'user-1',
+        productId: null,
+      },
+    }),
+  ),
 );
 vi.mock('@/lib/team/system-prompt-context', () => ({
   loadSystemPromptContext: loadSystemPromptContextMock,
@@ -1671,18 +1699,27 @@ describe('processAgentRun', () => {
     } as never);
 
     // Stub the substitution context with values we can grep for in the
-    // rendered prompt the worker hands to runAgent.
+    // rendered prompt the worker hands to runAgent. Task 2 envelope
+    // shape (ctx + team) so agent-run can consume the team row from
+    // here instead of re-querying.
     loadSystemPromptContextMock.mockResolvedValueOnce({
-      productName: 'Acme',
-      productDescription: 'a magical thing',
-      productState: 'launched',
-      currentPhase: 'growth',
-      channels: 'x, reddit',
-      strategicPathId: 'sp_42',
-      itemCount: 3,
-      statusBreakdown: 'planned: 3',
-      founderName: 'Alex',
-      teamRoster: '- coordinator: Chief of Staff (Tools: Task)',
+      ctx: {
+        productName: 'Acme',
+        productDescription: 'a magical thing',
+        productState: 'launched',
+        currentPhase: 'growth',
+        channels: 'x, reddit',
+        strategicPathId: 'sp_42',
+        itemCount: 3,
+        statusBreakdown: 'planned: 3',
+        founderName: 'Alex',
+        teamRoster: '- coordinator: Chief of Staff (Tools: Task)',
+      },
+      team: {
+        id: 'team-subst',
+        userId: 'user-subst',
+        productId: null,
+      },
     });
 
     await processAgentRun(makeJob('lead-subst'));
@@ -1733,11 +1770,24 @@ describe('processAgentRun', () => {
     } as never);
 
     // Seed a specific team row so the assertions below can pin the exact
-    // values the ctx surfaces. The agent_runs row's teamId/memberId are
-    // independent of the team row's userId/productId, so we set both.
-    teamSelectChain.limit.mockResolvedValueOnce([
-      { id: 'team-ctx', userId: 'user-7', productId: 'prod-3' },
-    ]);
+    // values the ctx surfaces. Task 2: agent-run no longer queries teams
+    // directly — the team row flows through loadSystemPromptContext's
+    // return envelope. Stub the loader's resolved team object instead.
+    loadSystemPromptContextMock.mockResolvedValueOnce({
+      ctx: {
+        productName: 'TestProduct',
+        productDescription: 'a test product',
+        productState: 'mvp',
+        currentPhase: 'foundation',
+        channels: 'none yet',
+        strategicPathId: 'none yet',
+        itemCount: 0,
+        statusBreakdown: '',
+        founderName: 'TestFounder',
+        teamRoster: '- coordinator: Chief of Staff (Tools: Task)',
+      },
+      team: { id: 'team-ctx', userId: 'user-7', productId: 'prod-3' },
+    });
 
     let capturedCtx: { get<V>(key: string): V } | null = null;
     runAgentHoisted.fn.mockImplementationOnce(async (...args: unknown[]) => {
@@ -1785,9 +1835,27 @@ describe('processAgentRun', () => {
       status: 'queued',
     } as never);
 
-    teamSelectChain.limit.mockResolvedValueOnce([
-      { id: 'team-platform', userId: 'user-platform', productId: 'prod-1' },
-    ]);
+    // Task 2: team row now flows through loadSystemPromptContext's
+    // envelope, not a separate teams SELECT.
+    loadSystemPromptContextMock.mockResolvedValueOnce({
+      ctx: {
+        productName: 'TestProduct',
+        productDescription: 'a test product',
+        productState: 'mvp',
+        currentPhase: 'foundation',
+        channels: 'none yet',
+        strategicPathId: 'none yet',
+        itemCount: 0,
+        statusBreakdown: '',
+        founderName: 'TestFounder',
+        teamRoster: '- coordinator: Chief of Staff (Tools: Task)',
+      },
+      team: {
+        id: 'team-platform',
+        userId: 'user-platform',
+        productId: 'prod-1',
+      },
+    });
 
     // Stub createTeamPlatformDeps with sentinel client values so the
     // assertions can confirm the ctx routes platform-keyed lookups
@@ -1839,27 +1907,33 @@ describe('processAgentRun', () => {
       status: 'queued',
     } as never);
 
-    // Simulate the team row having been deleted — the team-row select
-    // returns an empty array. The processor must surface a clear failure
-    // instead of silently invoking runAgent with undefined deps.
-    teamSelectChain.limit.mockResolvedValueOnce([]);
+    // Task 2: the duplicate teams SELECT in agent-run.ts is gone — the
+    // team-not-found throw lives inside loadSystemPromptContext now.
+    // Drive the failure by rejecting the loader with the same
+    // `team not found: <id>` error message it raises in production
+    // (see system-prompt-context.ts loadSystemPromptContext).
+    loadSystemPromptContextMock.mockRejectedValueOnce(
+      new Error('team not found: team-gone'),
+    );
 
     await processAgentRun(makeJob('agent-missing-team'));
 
-    // runAgent must NOT have been invoked — the team-row check throws
-    // before we get there, and the catch path settles the run as failed.
+    // runAgent must NOT have been invoked — the loader's throw bubbles
+    // out to the catch path which settles the run as failed.
     expect(runAgentHoisted.state.lastArgs).toBeNull();
 
     // The run must be marked failed with a shutdownReason that names
     // the missing team so operators can see the root cause in the
-    // agent_runs row without spelunking logs.
+    // agent_runs row without spelunking logs. The loader's error
+    // message includes "team not found: team-gone"; the catch path
+    // forwards `err.message` to shutdownReason.
     const setCalls = updateChain.set.mock.calls.map(
       (c) => (c as unknown as [Record<string, unknown>])[0],
     );
     const failedSet = setCalls.find((s) => s.status === 'failed');
     expect(failedSet).toBeDefined();
     expect(String(failedSet?.shutdownReason ?? '')).toContain(
-      'team team-gone not found',
+      'team not found: team-gone',
     );
   });
 
@@ -2271,5 +2345,75 @@ describe('processAgentRun', () => {
     expect(sseToolCall!.from).not.toBe('mem-lead-sse-from');
     expect(sseToolResult!.from).not.toBe('mem-lead-sse-from');
     expect(sseAgentText!.from).not.toBe('mem-lead-sse-from');
+  });
+
+  // ---------------------------------------------------------------------
+  // Task 2 (2026-05-03 plan) — hoist duplicate teams SELECT
+  //
+  // loadSystemPromptContext already queries the team row at startup.
+  // agent-run.ts used to run a second `select({id, userId, productId})
+  // .from(teams)` 13 lines later to wire userId / productId through to
+  // buildPhaseBToolContext. Task 2 changes loadSystemPromptContext to
+  // return the team row alongside the ctx, so agent-run can drop the
+  // second query. Test asserts: the test-visible db.select() teams
+  // chain is no longer hit from agent-run.ts (loadSystemPromptContext
+  // is mocked, so the only un-mocked teams SELECT is the duplicate
+  // we're removing — its call count must drop to zero).
+  // ---------------------------------------------------------------------
+
+  it('agent-run does not run a separate teams SELECT — reuses team object from loadSystemPromptContext', async () => {
+    vi.mocked(db.query.agentRuns.findFirst).mockResolvedValue({
+      id: 'lead-no-dup-select',
+      teamId: 'team-no-dup',
+      memberId: 'mem-no-dup',
+      agentDefName: 'coordinator',
+      parentAgentId: null,
+      status: 'queued',
+    } as never);
+
+    // Stub loadSystemPromptContext to return the new envelope shape so
+    // agent-run can consume `team` instead of re-querying. The default
+    // factory above already returns the new shape; this override is
+    // explicit so the test stays readable.
+    loadSystemPromptContextMock.mockResolvedValueOnce({
+      ctx: {
+        productName: 'NoDup',
+        productDescription: 'no-duplicate-select test',
+        productState: 'mvp',
+        currentPhase: 'foundation',
+        channels: 'none yet',
+        strategicPathId: 'none yet',
+        itemCount: 0,
+        statusBreakdown: '',
+        founderName: 'TestFounder',
+        teamRoster: '- coordinator: Chief of Staff (Tools: Task)',
+      },
+      team: {
+        id: 'team-no-dup',
+        userId: 'user-no-dup',
+        productId: null,
+      },
+    });
+
+    await processAgentRun(makeJob('lead-no-dup-select'));
+
+    // The teams-SELECT chain must NOT have been hit. The mock's `select`
+    // routes any projection containing `userId` to `teamSelectChain`;
+    // loadSystemPromptContext is mocked at the module boundary so its
+    // internal teams SELECT doesn't reach this fake. With the duplicate
+    // gone, no production code path consumes the teams chain in this
+    // test — the fake's call count goes to zero.
+    expect(teamSelectChain.from).not.toHaveBeenCalled();
+    expect(teamSelectChain.where).not.toHaveBeenCalled();
+    expect(teamSelectChain.limit).not.toHaveBeenCalled();
+
+    // Sanity: the team / userId / productId returned by
+    // loadSystemPromptContext flowed through to createTeamPlatformDeps
+    // unchanged. Otherwise we'd lose platform deps without a compile
+    // error to catch it.
+    expect(createTeamPlatformDepsMock).toHaveBeenCalledWith(
+      'user-no-dup',
+      null,
+    );
   });
 });

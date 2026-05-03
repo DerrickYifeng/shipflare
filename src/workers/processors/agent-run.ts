@@ -35,7 +35,7 @@ import { desc, eq } from 'drizzle-orm';
 import type Anthropic from '@anthropic-ai/sdk';
 import { db } from '@/lib/db';
 import type { Database } from '@/lib/db';
-import { agentRuns, teamConversations, teamMessages, teams } from '@/lib/db/schema';
+import { agentRuns, teamConversations, teamMessages } from '@/lib/db/schema';
 import { runAgent } from '@/core/query-loop';
 import { resolveAgent } from '@/tools/AgentTool/registry';
 import { buildAgentConfigFromDefinition } from '@/tools/AgentTool/spawn';
@@ -952,7 +952,14 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
     // its own query tools. `loadSystemPromptContext` throws only when
     // the team row itself is missing — every other lookup falls back to
     // a sane default so a freshly-onboarded team still renders coherently.
-    const promptCtx = await loadSystemPromptContext({
+    //
+    // Task 2 (2026-05-03 plan): the loader now returns the team row it
+    // queried internally so we can drop the duplicate
+    // `select({id, userId, productId}) from teams` that used to live
+    // 13 lines below. Same lookup, half the round-trips per lead-wake
+    // — the lead wakes per founder DM and per task_notification, so
+    // shaving one query off the hot path matters.
+    const { ctx: promptCtx, team } = await loadSystemPromptContext({
       teamId: row.teamId,
       db,
     });
@@ -966,25 +973,9 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
     // used to load userId / productId / teamId / platformDeps into the
     // ctx via the now-deleted team-run.ts. agent-run never did, so every
     // domain tool threw "Missing required dependency 'userId'" the moment
-    // the lead invoked them. Load the team row once at startup, then
-    // build a context that exposes the standard domain keys plus per-
-    // platform clients via the sanctioned helper.
-    const teamRows = await db
-      .select({
-        id: teams.id,
-        userId: teams.userId,
-        productId: teams.productId,
-      })
-      .from(teams)
-      .where(eq(teams.id, row.teamId))
-      .limit(1);
-    if (teamRows.length === 0) {
-      throw new Error(
-        `agent-run ${agentId}: team ${row.teamId} not found`,
-      );
-    }
-    const team = teamRows[0]!;
-
+    // the lead invoked them. Use the team row from loadSystemPromptContext
+    // (Task 2 hoist) and build a context that exposes the standard domain
+    // keys plus per-platform clients via the sanctioned helper.
     const ctx = await buildPhaseBToolContext(controller, agentId, {
       teamId: team.id,
       userId: team.userId,
