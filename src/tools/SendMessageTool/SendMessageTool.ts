@@ -21,6 +21,8 @@ import { db as defaultDb, type Database } from '@/lib/db';
 import { teamMembers, teamMessages } from '@/lib/db/schema';
 import { getPubSubPublisher } from '@/lib/redis';
 import { wake } from '@/workers/processors/lib/wake';
+import { insertPeerDmShadow } from '@/workers/processors/lib/peer-dm-shadow';
+import { resolveAgent } from '@/tools/AgentTool/registry';
 
 const log = createLogger('tools:SendMessage');
 
@@ -305,6 +307,88 @@ async function countRecentBroadcasts(
   return rows.length;
 }
 
+// ---------------------------------------------------------------------------
+// Peer-DM-shadow helpers (Phase C Task 5)
+// ---------------------------------------------------------------------------
+//
+// When teammate→teammate `type:message` is sent, dispatchMessage also emits a
+// summary-only shadow row to the lead's mailbox so the lead sees what peers
+// are talking about WITHOUT being preemptively woken (engine PDF §3.6.1).
+//
+// The three helpers below are intentionally fail-safe: if the DB lookup
+// returns nothing (or the agentType is missing / unknown), the role/name
+// query returns null/fallback and dispatchMessage skips the shadow rather
+// than throwing. Phase C MUST NOT regress legacy callers that don't yet
+// inject `callerRole` / agentType data.
+
+/**
+ * Look up a team member's role by joining `team_members.agent_type` against
+ * the AgentDefinition registry. Returns `null` on any failure (member not
+ * found, agentType missing, registry lookup error) so the caller can fail
+ * safely and skip the shadow rather than break legacy code paths.
+ */
+async function getRoleOfMember(
+  memberId: string,
+  database: Database,
+): Promise<'lead' | 'member' | null> {
+  try {
+    const rows = await database
+      .select({ agentType: teamMembers.agentType })
+      .from(teamMembers)
+      .where(eq(teamMembers.id, memberId))
+      .limit(1);
+    const agentType = rows[0]?.agentType;
+    if (!agentType) return null;
+    const def = await resolveAgent(agentType);
+    return def?.role ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Look up a team member's display_name. Returns the memberId itself as a
+ * fallback so the shadow content always has *something* to show, even when
+ * the member row was deleted between resolveRecipient() and now.
+ */
+async function getMemberName(
+  memberId: string,
+  database: Database,
+): Promise<string> {
+  try {
+    const rows = await database
+      .select({ displayName: teamMembers.displayName })
+      .from(teamMembers)
+      .where(eq(teamMembers.id, memberId))
+      .limit(1);
+    return rows[0]?.displayName ?? memberId;
+  } catch {
+    return memberId;
+  }
+}
+
+/**
+ * Resolve the lead's `agent_runs.id` for this team.
+ *
+ * Phase B kludge: the team-lead currently runs in the team-run worker
+ * without a backing `agent_runs` row, so this returns `null` and
+ * `insertPeerDmShadow` short-circuits. Phase E lifts this when team-lead
+ * unifies onto the agent-run worker (X model). The signature already takes
+ * the live db so the swap is a body-only change.
+ *
+ * Tests may inject a synthetic `leadAgentId` via the ToolContext to exercise
+ * the post-Phase-E path.
+ */
+async function getLeadAgentId(
+  _teamId: string,
+  _database: Database,
+): Promise<string | null> {
+  // Phase B: lead has no agent_runs row → return null. Phase E will issue
+  // `SELECT id FROM agent_runs WHERE team_id=$1 AND role='lead' LIMIT 1`
+  // (or equivalent) here.
+  return null;
+}
+
 async function publishToRedis(
   teamId: string,
   payload: Record<string, unknown>,
@@ -336,13 +420,19 @@ interface DispatchDeps {
   currentMemberId: string | null;
   runId: string | null;
   db: Database;
+  /**
+   * Phase C Task 5: needed by `dispatchMessage` to determine fromRole +
+   * (eventually) read a synthetic leadAgentId injected by tests / by Phase E
+   * runners. Other dispatchers ignore this field.
+   */
+  ctx: ToolContext;
 }
 
 async function dispatchMessage(
   input: Extract<SendMessageInput, { type: 'message' }>,
   deps: DispatchDeps,
 ): Promise<SendMessageResult> {
-  const { teamId, currentMemberId, runId, db } = deps;
+  const { teamId, currentMemberId, runId, db, ctx } = deps;
   const toMemberId = await resolveRecipient(input.to, teamId, db);
   const effectiveRunId = input.run_id ?? runId ?? null;
   const messageId = crypto.randomUUID();
@@ -373,7 +463,92 @@ async function dispatchMessage(
     messageType: 'message',
   });
 
+  // Phase C Task 5 — peer-DM visibility shadow.
+  // When BOTH ends are teammates (NOT lead), insert a summary-only shadow
+  // row to the lead's mailbox so the lead sees what peers are talking about
+  // without being woken (engine PDF §3.6.1 channel ③). All lookups are
+  // fail-safe: missing role data, missing leadAgentId, or any DB error
+  // simply skips the shadow rather than break the primary message dispatch.
+  await maybeInsertPeerDmShadow({
+    input,
+    teamId,
+    currentMemberId,
+    toMemberId,
+    db,
+    ctx,
+  });
+
   return { delivered: true, messageId, toMemberId };
+}
+
+/**
+ * Conditionally insert the peer-DM shadow. Extracted from `dispatchMessage`
+ * so the (already long) main dispatcher stays readable. The function never
+ * throws — any error inside is logged at warn level and swallowed; the
+ * primary message has already been durably persisted by the caller.
+ */
+async function maybeInsertPeerDmShadow(args: {
+  input: Extract<SendMessageInput, { type: 'message' }>;
+  teamId: string;
+  currentMemberId: string | null;
+  toMemberId: string;
+  db: Database;
+  ctx: ToolContext;
+}): Promise<void> {
+  const { input, teamId, currentMemberId, toMemberId, db, ctx } = args;
+
+  // 1. Sender role: trust callerRole when injected by the runner; otherwise
+  //    fall back to inferring from the sender's agentType. If neither is
+  //    available, fromRole is null → skip shadow (fail-closed for legacy).
+  let fromRole: 'lead' | 'member' | null = getCallerRole(ctx);
+  if (fromRole === null && currentMemberId !== null) {
+    fromRole = await getRoleOfMember(currentMemberId, db);
+  }
+  if (fromRole !== 'member') return;
+
+  // 2. Recipient role: must also be 'member'. Lead recipients are already
+  //    the direct recipient — shadowing would be redundant.
+  const toRole = await getRoleOfMember(toMemberId, db);
+  if (toRole !== 'member') return;
+
+  // 3. Resolve the lead's agent_runs.id. Tests inject `leadAgentId` via the
+  //    ToolContext to exercise the post-Phase-E path; production reads from
+  //    `getLeadAgentId(teamId, db)` which currently returns null (Phase B).
+  let leadAgentId: string | null = null;
+  try {
+    leadAgentId = ctx.get<string | null>('leadAgentId');
+  } catch {
+    leadAgentId = null;
+  }
+  if (leadAgentId === null) {
+    leadAgentId = await getLeadAgentId(teamId, db);
+  }
+
+  // 4. Resolve display names for the <peer-dm> attributes. Names are best-
+  //    effort: if the row vanished mid-flight, we fall back to the memberId
+  //    so the shadow still carries useful provenance.
+  const fromName = currentMemberId
+    ? await getMemberName(currentMemberId, db)
+    : 'unknown';
+  const toName = await getMemberName(toMemberId, db);
+
+  try {
+    await insertPeerDmShadow({
+      teamId,
+      leadAgentId,
+      fromName,
+      toName,
+      summary: input.summary ?? input.content.slice(0, 80),
+      db,
+    });
+  } catch (err) {
+    // Shadow is a transparency optimization, not a durable contract.
+    log.warn(
+      `peer-DM shadow insert failed (primary message already persisted): ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
 }
 
 async function dispatchBroadcast(
@@ -652,7 +827,9 @@ export const sendMessageTool: ToolDefinition<
     // team_messages shape (messageType column distinguishes them; the
     // legacy `type` column keeps its LLM-flow meaning). shutdown_request +
     // plan_approval_response also wake() the recipient.
-    const deps = readTeamContext(ctx);
+    // Phase C Task 5: dispatchMessage additionally reads role / leadAgentId
+    // from the ctx, so we thread it through DispatchDeps.
+    const deps: DispatchDeps = { ...readTeamContext(ctx), ctx };
 
     switch (input.type) {
       case 'message':

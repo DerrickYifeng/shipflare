@@ -16,6 +16,8 @@ interface MemberRow {
   id: string;
   teamId: string;
   displayName: string;
+  /** Phase C Task 5: needed by getRoleOfMember → resolveAgent(agentType).role. */
+  agentType?: string;
 }
 
 interface MessageRow {
@@ -106,37 +108,37 @@ function makeFakeDb() {
           // recipient-resolution call sites.
           const thenableBuilder = builder as typeof builder & {
             then?: (
-              onFulfilled: (rows: Array<{ id: string }>) => unknown,
+              onFulfilled: (rows: MemberRow[]) => unknown,
             ) => Promise<unknown>;
           };
           thenableBuilder.then = (
-            onFulfilled: (rows: Array<{ id: string }>) => unknown,
+            onFulfilled: (rows: MemberRow[]) => unknown,
           ): Promise<unknown> => {
             const rows = resolveMembers();
             return Promise.resolve(onFulfilled(rows));
           };
           return thenableBuilder;
         },
-        limit(n: number): Promise<Array<{ id: string }>> {
+        limit(n: number): Promise<MemberRow[]> {
           if (mode !== 'members') return Promise.resolve([]);
           const rows = resolveMembers();
           return Promise.resolve(rows.slice(0, n));
         },
       };
-      function resolveMembers(): Array<{ id: string }> {
+      function resolveMembers(): MemberRow[] {
         // The drizzle column object varies in shape across versions — we
         // take a shape-agnostic approach: collect all filter values and
         // filter the in-memory members by "every filter matches at least
         // one of { id, teamId, displayName }". Works because SendMessage
-        // only composes eq() across these three fields.
+        // only composes eq() across these three fields. Phase C Task 5:
+        // returns the full member row so column projections that pick
+        // agentType / displayName (peer-DM-shadow lookups) get real values.
         const values = filters.map((f) => f.value);
-        return members
-          .filter((m) =>
-            values.every(
-              (v) => v === m.id || v === m.teamId || v === m.displayName,
-            ),
-          )
-          .map((m) => ({ id: m.id }));
+        return members.filter((m) =>
+          values.every(
+            (v) => v === m.id || v === m.teamId || v === m.displayName,
+          ),
+        );
       }
       return builder;
     },
@@ -186,6 +188,22 @@ vi.mock('@/workers/processors/lib/wake', () => ({
   wake: vi.fn(async () => {}),
 }));
 import { wake } from '@/workers/processors/lib/wake';
+
+// Phase C Task 5: peer-DM shadow needs the recipient's role, derived from
+// AgentDefinition.role via resolveAgent(agentType). Tests stub the registry
+// so role lookups are deterministic and don't touch disk.
+vi.mock('@/tools/AgentTool/registry', () => ({
+  resolveAgent: vi.fn(async (agentType: string) => {
+    if (!agentType) return null;
+    // Convention for these tests: agentType 'coordinator' is the lead;
+    // every other agentType is a member. Real resolveAgent loads from
+    // AGENT.md frontmatter.
+    return {
+      name: agentType,
+      role: agentType === 'coordinator' ? 'lead' : 'member',
+    };
+  }),
+}));
 
 // ---------------------------------------------------------------------------
 // Import AFTER mocks
@@ -682,5 +700,108 @@ describe('SendMessage validateInput — Phase C runtime checks', () => {
       ctx,
     );
     expect(result.result).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase C Task 5 — peer-DM shadow on teammate↔teammate messages
+// ---------------------------------------------------------------------------
+//
+// When a teammate sends `type:message` to another teammate (NOT to the lead),
+// dispatchMessage MUST also insert a peer-DM-shadow row to the lead's mailbox
+// (engine PDF §3.6.1 channel ③ — low-cost transparency, NEVER calls wake on
+// the lead). When the recipient is the lead, no shadow is needed because the
+// lead is already the direct recipient.
+//
+// Phase B kludge: leadAgentId is null in Phase B (the lead has no agent_runs
+// row yet) — the helper handles null gracefully and skips the insert. These
+// tests inject a synthetic leadAgentId via the ctx so the shadow row is
+// observable without waiting for Phase E.
+
+describe('SendMessage execute() — peer-DM shadow (Phase C Task 5)', () => {
+  it('teammate→teammate message also inserts a peer-DM shadow (2 inserts)', async () => {
+    // Sender (Sam) and recipient (Alex) are both teammates (agentType !==
+    // coordinator). Lead has a synthetic agent_runs.id injected via ctx.
+    members.push({
+      id: 'mem-sam',
+      teamId: 'team-1',
+      displayName: 'Sam',
+      agentType: 'content-manager',
+    });
+    members.push({
+      id: 'mem-alex',
+      teamId: 'team-1',
+      displayName: 'Alex',
+      agentType: 'discovery-agent',
+    });
+
+    const ctx = makeCtx({
+      db: fakeDb,
+      teamId: 'team-1',
+      currentMemberId: 'mem-sam',
+      callerRole: 'member',
+      leadAgentId: 'lead-agent-run-1',
+      runId: 'run-1',
+    });
+
+    const result = await sendMessageTool.execute(
+      { type: 'message', to: 'Alex', content: 'hey', summary: 'asking q' },
+      ctx,
+    );
+
+    expect(result.delivered).toBe(true);
+    expect(inserts).toHaveLength(2);
+    // First insert is the primary message → mem-alex.
+    expect(inserts[0].toMemberId).toBe('mem-alex');
+    expect(inserts[0].content).toBe('hey');
+    // Second insert is the shadow → lead's agent_runs.id with <peer-dm> body.
+    const shadow = inserts[1] as MessageRow & {
+      toAgentId?: string;
+      messageType?: string;
+    };
+    expect(shadow.toAgentId).toBe('lead-agent-run-1');
+    expect(shadow.messageType).toBe('message');
+    expect(shadow.content).toContain('<peer-dm');
+    expect(shadow.content).toContain('Sam');
+    expect(shadow.content).toContain('Alex');
+    expect(shadow.content).toContain('asking q');
+    // CRITICAL invariant: shadow MUST NOT call wake() on the lead.
+    expect(vi.mocked(wake)).not.toHaveBeenCalled();
+  });
+
+  it('teammate→lead message inserts only the primary row (no shadow)', async () => {
+    // Recipient is the lead (agentType: coordinator). Lead is already the
+    // direct recipient — shadowing would be redundant.
+    members.push({
+      id: 'mem-sam',
+      teamId: 'team-1',
+      displayName: 'Sam',
+      agentType: 'content-manager',
+    });
+    members.push({
+      id: 'mem-lead',
+      teamId: 'team-1',
+      displayName: 'Lead',
+      agentType: 'coordinator',
+    });
+
+    const ctx = makeCtx({
+      db: fakeDb,
+      teamId: 'team-1',
+      currentMemberId: 'mem-sam',
+      callerRole: 'member',
+      leadAgentId: 'lead-agent-run-1',
+      runId: 'run-1',
+    });
+
+    const result = await sendMessageTool.execute(
+      { type: 'message', to: 'Lead', content: 'status update' },
+      ctx,
+    );
+
+    expect(result.delivered).toBe(true);
+    expect(inserts).toHaveLength(1);
+    expect(inserts[0].toMemberId).toBe('mem-lead');
+    expect(vi.mocked(wake)).not.toHaveBeenCalled();
   });
 });
