@@ -397,7 +397,7 @@ export const StickyComposer = forwardRef<
           <form
             onSubmit={handleSubmit}
             style={card}
-            aria-label="Brief your Team Lead"
+            aria-label="Send a message to your Team Lead"
             data-testid="sticky-composer"
           >
             <textarea
@@ -405,9 +405,9 @@ export const StickyComposer = forwardRef<
               value={value}
               onChange={(e) => setValue(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Brief your Team Lead…"
+              placeholder="Message your Team Lead…"
               style={textareaStyle}
-              aria-label="Brief your Team Lead"
+              aria-label="Send a message to your Team Lead"
               disabled={submitting}
               data-testid="sticky-composer-input"
             />
@@ -496,8 +496,8 @@ export const StickyComposer = forwardRef<
               )}
             </div>
             <div style={footerCaption}>
-              Team Lead routes your brief across specialists · nothing posts
-              without your approval
+              Team Lead is always here · spawns specialists in parallel ·
+              nothing posts without your approval
             </div>
           </form>
         </div>

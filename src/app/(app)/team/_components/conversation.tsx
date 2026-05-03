@@ -464,7 +464,7 @@ function EmptyConversation({
   };
   return (
     <div style={wrap}>
-      <span>Brief your Team Lead below to kick off the first run.</span>
+      <span>Send your Team Lead a message below — it&apos;s always here, ready to spin up specialists in parallel.</span>
       <SuggestionChips
         onPrefillComposer={onPrefillComposer}
         onFocusComposer={onFocusComposer}
