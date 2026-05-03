@@ -214,10 +214,16 @@ describe('loadSystemPromptContext', () => {
     expect(ctx.strategicPathId).toBe('none yet');
     expect(ctx.channels).toBe('none yet');
     expect(ctx.itemCount).toBe(0);
-    expect(ctx.statusBreakdown).toBe('');
+    // Task 3 (2026-05-03 plan): empty defaults for the two fields that
+    // would otherwise render as bare 'B:' / 'T:' in the lead's prompt.
+    // Other fields (productName, productDescription, …) already have
+    // meaningful defaults and stay untouched.
+    expect(ctx.statusBreakdown).toBe('(none)');
     expect(ctx.founderName).toBe('founder');
-    // No team_members rows → empty roster, but never throws.
-    expect(typeof ctx.teamRoster).toBe('string');
+    // No team_members rows → roster carries an explicit '(none yet …)'
+    // marker so the lead doesn't read a literal blank line in its
+    // delegation roster.
+    expect(ctx.teamRoster).toBe('(none yet — team_members table is empty)');
   });
 
   it('composes the happy path correctly', async () => {

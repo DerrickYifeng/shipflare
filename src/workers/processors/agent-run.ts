@@ -36,6 +36,7 @@ import type Anthropic from '@anthropic-ai/sdk';
 import { db } from '@/lib/db';
 import type { Database } from '@/lib/db';
 import { agentRuns, teamConversations, teamMessages } from '@/lib/db/schema';
+import { TOOL_RESULT_TRUNCATION_LIMIT } from '@/lib/limits';
 import { runAgent } from '@/core/query-loop';
 import { resolveAgent } from '@/tools/AgentTool/registry';
 import { buildAgentConfigFromDefinition } from '@/tools/AgentTool/spawn';
@@ -745,11 +746,10 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
         const insertedId = crypto.randomUUID();
         const createdAt = new Date();
         const isCall = event.type === 'tool_start';
-        const TRUNC_LIMIT = 4000;
         const rawContent = isCall ? event.toolName : event.result.content;
         const truncatedContent =
-          !isCall && rawContent.length > TRUNC_LIMIT
-            ? `${rawContent.slice(0, TRUNC_LIMIT)}…`
+          !isCall && rawContent.length > TOOL_RESULT_TRUNCATION_LIMIT
+            ? `${rawContent.slice(0, TOOL_RESULT_TRUNCATION_LIMIT)}…`
             : rawContent;
         // Phase E orphan fix (2026-05-03 plan, Task 2): when the event
         // carries spawnMeta (sub-agent / fork-skill bubbled up via

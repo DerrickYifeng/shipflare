@@ -172,15 +172,11 @@ export async function loadSystemPromptContext(
 
   // 1. team — must resolve before the parallel batch so its userId /
   //    productId can fan out into the dependent queries.
-  const teamRows = (await db
+  const teamRows = await db
     .select({ id: teams.id, userId: teams.userId, productId: teams.productId })
     .from(teams)
     .where(eq(teams.id, teamId))
-    .limit(1)) as Array<{
-    id: string;
-    userId: string;
-    productId: string | null;
-  }>;
+    .limit(1);
   if (teamRows.length === 0) {
     throw new Error(`team not found: ${teamId}`);
   }
@@ -190,12 +186,21 @@ export async function loadSystemPromptContext(
   //      shape and gets normalized below. The `productId === null`
   //      branch returns an empty array via Promise.resolve so the
   //      positional unpacking stays uniform.
+  //
+  //      Task 3 (2026-05-03 plan): the `as Array<{…}>` / `as Promise<…>`
+  //      casts that wrapped each query are gone — Drizzle's inferred
+  //      return types are correct, and dropping the cast means a
+  //      column rename or projection drift surfaces at compile time
+  //      instead of being silently re-asserted. The `productId ===
+  //      null` arm uses `Promise.resolve([])` (empty array) so the
+  //      positional unpacking lines up with the `then`-arm shape;
+  //      productRows.length is the only thing the consumer reads.
   const week = currentUtcWeekRange();
   const [productRows, pathRows, channelRows, planItemRows, userRows, memberRows] =
     await Promise.all([
       // 2. product (only when productId is set)
       team.productId !== null
-        ? (db
+        ? db
             .select({
               id: products.id,
               name: products.name,
@@ -204,37 +209,21 @@ export async function loadSystemPromptContext(
             })
             .from(products)
             .where(eq(products.id, team.productId))
-            .limit(1) as Promise<
-            Array<{
-              id: string;
-              name: string;
-              description: string;
-              state: string;
-            }>
-          >)
-        : Promise.resolve(
-            [] as Array<{
-              id: string;
-              name: string;
-              description: string;
-              state: string;
-            }>,
-          ),
+            .limit(1)
+        : Promise.resolve([]),
       // 3. active strategic_path — keyed by userId, most recent first
       db
         .select({ id: strategicPaths.id, phase: strategicPaths.phase })
         .from(strategicPaths)
         .where(eq(strategicPaths.userId, team.userId))
         .orderBy(desc(strategicPaths.generatedAt))
-        .limit(1) as Promise<Array<{ id: string; phase: string }>>,
+        .limit(1),
       // 4. channels — explicit projection (CLAUDE.md security note;
       //    never select token columns from channels)
       db
         .select({ platform: channelsTable.platform })
         .from(channelsTable)
-        .where(eq(channelsTable.userId, team.userId)) as Promise<
-        Array<{ platform: string }>
-      >,
+        .where(eq(channelsTable.userId, team.userId)),
       // 5. plan items this UTC week — group by state for breakdown
       db
         .select({
@@ -249,17 +238,13 @@ export async function loadSystemPromptContext(
             lt(planItems.scheduledAt, week.end),
           ),
         )
-        .groupBy(planItems.state) as Promise<
-        Array<{ state: string; count: number | string }>
-      >,
+        .groupBy(planItems.state),
       // 6. founder name source
       db
         .select({ id: users.id, name: users.name, email: users.email })
         .from(users)
         .where(eq(users.id, team.userId))
-        .limit(1) as Promise<
-        Array<{ id: string; name: string | null; email: string | null }>
-      >,
+        .limit(1),
       // 7. team roster source — resolveAgent calls fan out below
       db
         .select({
@@ -268,9 +253,7 @@ export async function loadSystemPromptContext(
           agentType: teamMembers.agentType,
         })
         .from(teamMembers)
-        .where(eq(teamMembers.teamId, teamId)) as Promise<
-        Array<{ id: string; teamId: string; agentType: string }>
-      >,
+        .where(eq(teamMembers.teamId, teamId)),
     ]);
 
   // 2. product fields (defaults flow through when productId is null
@@ -307,9 +290,13 @@ export async function loadSystemPromptContext(
     count: typeof r.count === 'string' ? Number(r.count) : r.count,
   }));
   const itemCount = normalized.reduce((acc, r) => acc + r.count, 0);
+  // Task 3 (2026-05-03 plan): emit '(none)' instead of '' so the
+  // lead's prompt template renders 'B: (none)' instead of a bare 'B:'
+  // — empty-string substitution leaves the surrounding label dangling
+  // and the LLM occasionally improvises a literal '(none)' itself.
   const statusBreakdown =
     itemCount === 0
-      ? ''
+      ? '(none)'
       : normalized
           .filter((r) => r.count > 0)
           .sort((a, b) => b.count - a.count)
@@ -355,7 +342,18 @@ export async function loadSystemPromptContext(
   const defs: AgentDefinition[] = resolved.filter(
     (d): d is AgentDefinition => d !== null,
   );
-  const teamRoster = formatTeamRoster(defs);
+  // Task 3 (2026-05-03 plan): when no member resolves (fresh team,
+  // legacy rows with stale agentTypes, or simply no team_members rows
+  // yet) the formatter returns '' — emit an explicit marker instead so
+  // the lead's prompt template renders 'T: (none yet — …)' rather than
+  // a bare 'T:' that the LLM occasionally interprets as a literal
+  // empty-roster instruction. `formatTeamRoster` stays a pure
+  // formatter; the marker is loader-policy.
+  const formattedRoster = formatTeamRoster(defs);
+  const teamRoster =
+    formattedRoster === ''
+      ? '(none yet — team_members table is empty)'
+      : formattedRoster;
 
   return {
     ctx: {
