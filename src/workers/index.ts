@@ -1,5 +1,15 @@
 import { Queue, Worker } from 'bullmq';
 import { getBullMQConnection } from '@/lib/redis';
+// CRITICAL: side-effect import. registry-team.ts calls registerDeferredTools
+// at module load to register Task / SendMessage / Skill / TaskStop / Sleep
+// (deferred to break a module-init cycle). Without this import the worker
+// process boots with those tools unregistered, and `resolveAgentTools`
+// throws "Agent ... declares unknown tool(s): Task, SendMessage" the first
+// time agent-run picks up the lead. Tests catch this per-file by importing
+// registry-team themselves; the worker boot needs an explicit pull.
+// Phase E Task 11 deleted team-run.ts which had been the implicit transitive
+// importer; this line re-establishes the registration trigger.
+import '@/tools/registry-team';
 import { processReview } from './processors/review';
 import { processPosting } from './processors/posting';
 import { processHealthScore } from './processors/health-score';
