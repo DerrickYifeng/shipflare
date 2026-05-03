@@ -316,6 +316,7 @@
   --animate-sf-walk:      sf-walk 0.8s var(--sf-ease-smooth) infinite;
   --animate-sf-idle-bob:  sf-idle-bob 2.2s var(--sf-ease-smooth) infinite;
   --animate-sf-ticker:    sf-ticker 24s linear infinite;
+  --animate-sf-status-spin: sf-status-spin 1s linear infinite;
 }
 
 /* =====================================================================
@@ -490,6 +491,11 @@
 @keyframes sf-ticker {
   from { transform: translateX(0); }
   to   { transform: translateX(-50%); }
+}
+
+@keyframes sf-status-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
 }
 
 /* =====================================================================
