@@ -9,7 +9,7 @@
 //   ① getAll() on the ToolRegistry
 //   ② role whitelist  (role-tools.ts)            — '*' = pass
 //   ③ role blacklist  (blacklists.ts)            — set membership
-//   ④ AgentDefinition.tools allow-list           — '*' = pass
+//   ④ AgentDefinition.tools allow-list           — any '*' in array = pass
 //      AgentDefinition.disallowedTools subtract
 
 import type { AnyToolDefinition } from '@/core/types';
@@ -43,18 +43,14 @@ function passesBlacklist(
 
 function passesAgentAllow(
   toolName: string,
-  agentTools: readonly string[] | '*',
+  agentTools: readonly string[],
 ): boolean {
-  if (agentTools === '*') return true;
-  // Allow `tools: ['*']` array-form sentinel for AGENT.md ergonomics.
-  if (
-    Array.isArray(agentTools) &&
-    agentTools.length === 1 &&
-    agentTools[0] === '*'
-  ) {
-    return true;
-  }
-  return (agentTools as readonly string[]).includes(toolName);
+  // The '*' sentinel anywhere in the AGENT.md tools array means "allow
+  // any tool name". Both ['*'] and ['*', 'specific_tool'] short-circuit
+  // to true — the latter is treated as redundant declaration, not as
+  // narrowing intent. (Layer ③ blacklist still applies independently.)
+  if (agentTools.includes('*')) return true;
+  return agentTools.includes(toolName);
 }
 
 function passesAgentDisallow(

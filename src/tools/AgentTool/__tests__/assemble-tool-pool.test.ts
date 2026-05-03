@@ -85,6 +85,19 @@ describe('assembleToolPool — SSOT four-layer filter', () => {
     expect(pool.map((t) => t.name).sort()).toEqual(['A', 'B']); // Task blacklisted
   });
 
+  it('AgentDefinition.tools=["*", ...other] short-circuits to allow-all', () => {
+    // Mixed-array form: any '*' in the array means "allow all".
+    // Prior implementation (length === 1 only) would silently filter
+    // unspecified tools — now the wildcard short-circuits regardless.
+    const reg = new ToolRegistry();
+    reg.register(fakeTool('A'));
+    reg.register(fakeTool('B'));
+    reg.register(fakeTool('C'));
+    const def = fakeAgent({ tools: ['*', 'A'] });
+    const pool = assembleToolPool('member', def, reg);
+    expect(pool.map((t) => t.name).sort()).toEqual(['A', 'B', 'C']);
+  });
+
   it('SSOT property: getInjectionTextNames(role, def) === pool tool names', () => {
     // The user-context injection text the team-lead sees about its
     // teammates' tools must equal the actual runtime filter result —
