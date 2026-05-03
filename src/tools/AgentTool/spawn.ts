@@ -20,6 +20,7 @@ import type {
   ToolContext,
 } from '@/core/types';
 import type { AgentDefinition } from './loader';
+import { assembleToolPool } from './assemble-tool-pool';
 import { renderRuntimePreamble } from './runtime-preamble';
 
 const log = createLogger('agent:spawn');
@@ -87,37 +88,45 @@ export interface SpawnCallbacks {
 // ---------------------------------------------------------------------------
 
 /**
- * Resolve a subagent's tool allowlist against the central registry. Throws if
- * any declared tool is unknown — fail-closed keeps misconfigured agents from
- * silently launching with a stripped tool list and then hitting
- * "Unknown tool" runtime errors further down the stack.
+ * Resolve a subagent's tool list via the four-layer filter pipeline
+ * (`assembleToolPool`). This is the public spawn entry point; it MUST
+ * route through `assembleToolPool` so the team-lead's user-context
+ * injection text and the actual runtime tool set cannot drift
+ * (engine PDF §3.5.1 invariant).
  *
- * `StructuredOutput` is a synthesized/virtual tool: runAgent appends it to
- * the Anthropic tool list at runtime when the caller provides an
- * `outputSchema`. AGENT.md files that declare it in `tools: [...]` are
- * telling downstream readers ("this agent emits structured output") — the
- * entry isn't resolved here. See src/tools/registry.ts for why it's
- * intentionally not registered.
+ * `StructuredOutput` is a synthesized/virtual tool: runAgent appends
+ * it at runtime when `outputSchema` is given. AGENT.md files that
+ * declare it in `tools: [...]` carry it for documentation; the
+ * registry doesn't hold it (see src/tools/registry.ts) so the
+ * assemble-tool-pool filter naturally drops it from the resolved
+ * concrete-tool list. That's intended — runAgent re-adds it.
+ *
+ * Diagnostic wrapper: surface unknown tools at spawn time (preserves
+ * pre-Phase-A "fail closed" behavior). assembleToolPool itself silently
+ * drops them.
+ *
+ * Behavior change vs pre-Phase-A: members declaring `Task` in their
+ * tools list now lose it (architecture-level invariant via
+ * INTERNAL_TEAMMATE_TOOLS). No current built-in member declares Task;
+ * verified by the new four-layer-filter test against valid-agent
+ * fixture.
  */
 export function resolveAgentTools(def: AgentDefinition): AnyToolDefinition[] {
-  const resolved: AnyToolDefinition[] = [];
-  const missing: string[] = [];
-  for (const toolName of def.tools) {
-    if (toolName === STRUCTURED_OUTPUT_TOOL_NAME) continue;
-    const tool = registry.get(toolName);
-    if (!tool) {
-      missing.push(toolName);
-      continue;
-    }
-    resolved.push(tool);
-  }
+  // Diagnostic: surface unknown tools at spawn time (preserves pre-Phase-A
+  // "fail closed" behavior). assembleToolPool itself silently drops them.
+  // StructuredOutput is virtual (runAgent re-adds it) — exclude it from the check.
+  // The '*' wildcard is also excluded — it's a sentinel, not a tool name.
+  const declared = def.tools.filter(
+    (n) => n !== STRUCTURED_OUTPUT_TOOL_NAME && n !== '*',
+  );
+  const missing = declared.filter((n) => !registry.get(n));
   if (missing.length > 0) {
     throw new Error(
       `Agent "${def.name}" declares unknown tool(s): ${missing.join(', ')}. ` +
         `Register these in src/tools/registry.ts or remove them from the AGENT.md frontmatter.`,
     );
   }
-  return resolved;
+  return assembleToolPool(def.role, def, registry);
 }
 
 export function buildAgentConfigFromDefinition(
