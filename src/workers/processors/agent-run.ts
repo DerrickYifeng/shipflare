@@ -41,6 +41,7 @@ import { buildAgentConfigFromDefinition } from '@/tools/AgentTool/spawn';
 import { synthesizeTaskNotification } from './lib/synthesize-notification';
 import { wake } from './lib/wake';
 import { drainMailbox } from './lib/mailbox-drain';
+import { loadAgentRunHistory } from './lib/agent-run-history';
 import { createLogger } from '@/lib/logger';
 import type { AgentRunJobData } from '@/lib/queue/agent-run';
 import type { AgentResult, ToolContext } from '@/core/types';
@@ -168,7 +169,35 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
     throw new Error(`agent_runs row not found for agentId=${agentId}`);
   }
 
-  // Mark running
+  // Phase D: resume path. When the row was put to sleep by the Sleep
+  // tool on a prior worker invocation, it is woken via either (a) the
+  // delayed BullMQ job Sleep scheduled, or (b) a SendMessage that called
+  // wake(). Either way we land here with status='sleeping' and need to
+  // rebuild the conversation transcript from team_messages before we
+  // can re-enter runAgent.
+  //
+  // Sequence: sleeping → resuming (transitional, in case load fails) →
+  // running. priorMessages stays empty for fresh (queued) runs so the
+  // existing Phase B/C single-shot path is unchanged.
+  let priorMessages: Anthropic.Messages.MessageParam[] | undefined;
+  if (row.status === 'sleeping') {
+    await db
+      .update(agentRuns)
+      .set({
+        status: 'resuming',
+        lastActiveAt: new Date(),
+        bullmqJobId: job.id ?? null,
+      })
+      .where(eq(agentRuns.id, agentId));
+    priorMessages = await loadAgentRunHistory(agentId, db);
+    log.info(
+      `agent-run ${agentId}: resuming from sleep with ${priorMessages.length} prior messages`,
+    );
+  }
+
+  // Mark running. (For a resume, this is the second update — moves the
+  // row from 'resuming' to 'running'. For a fresh run, this is the only
+  // status update before runAgent starts.)
   await db
     .update(agentRuns)
     .set({
@@ -217,11 +246,46 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
 
   const controller = new AbortController();
 
-  // Phase D: watch the runAgent stream for a Sleep tool_done event and
-  // signal early exit. The result.content is JSON-stringified by the
-  // tool executor (see src/core/tool-executor.ts:108), so we parse and
-  // check for the `slept: true` marker that SleepTool returns.
-  const detectSleep = (event: import('@/core/types').StreamEvent): void => {
+  // Phase D: composite onEvent handler.
+  //
+  // Two responsibilities:
+  //   1. Detect Sleep tool_done → signal early exit (see Task 4 commit
+  //      9e54c88). result.content is JSON-stringified by the tool
+  //      executor (src/core/tool-executor.ts:108); parse and check the
+  //      `slept: true` marker SleepTool returns.
+  //   2. Persist each completed assistant text block to team_messages
+  //      so the next resume sees the full prior history. The
+  //      `assistant_text_stop` event carries the fully accumulated
+  //      `text` for the block — we insert one row per block with
+  //      type='agent_text', fromAgentId=self, deliveredAt=now (so
+  //      loadAgentRunHistory's `deliveredAt IS NOT NULL` filter sees
+  //      it on next resume). Pre-Phase-D runs continue to work because
+  //      these rows are additive: the final task_notification row is
+  //      still inserted at the end.
+  const handleStreamEvent = async (
+    event: import('@/core/types').StreamEvent,
+  ): Promise<void> => {
+    // (2) Persist assistant turns.
+    if (event.type === 'assistant_text_stop' && event.text.length > 0) {
+      try {
+        await db.insert(teamMessages).values({
+          teamId: row.teamId,
+          type: 'agent_text',
+          messageType: 'message',
+          fromMemberId: row.memberId,
+          fromAgentId: agentId,
+          content: event.text,
+          deliveredAt: new Date(),
+        });
+      } catch (err) {
+        log.warn(
+          `agent-run ${agentId}: failed to persist assistant turn: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+      return;
+    }
+
+    // (1) Sleep early-exit detection.
     if (event.type !== 'tool_done') return;
     if (event.toolName !== 'Sleep') return;
     if (event.result.is_error) return;
@@ -313,8 +377,9 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
       undefined, // onProgress
       undefined, // prebuilt
       undefined, // onIdleReset
-      detectSleep, // onEvent — Phase D Sleep early-exit detector
+      handleStreamEvent, // onEvent — Phase D Sleep early-exit + per-turn persist
       injectMessages,
+      priorMessages, // Phase D: undefined for fresh runs, populated on resume
     );
     durationMs = Date.now() - startedAtMs;
     if (gracefullyKilled) {

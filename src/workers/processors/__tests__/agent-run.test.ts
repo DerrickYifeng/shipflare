@@ -95,9 +95,14 @@ vi.mock('@/workers/processors/lib/wake', () => ({
   wake: vi.fn(async () => undefined),
 }));
 
+vi.mock('@/workers/processors/lib/agent-run-history', () => ({
+  loadAgentRunHistory: vi.fn(async () => []),
+}));
+
 import { processAgentRun } from '@/workers/processors/agent-run';
 import { db } from '@/lib/db';
 import { drainMailbox } from '@/workers/processors/lib/mailbox-drain';
+import { loadAgentRunHistory } from '@/workers/processors/lib/agent-run-history';
 
 function makeJob(agentId: string): Job<AgentRunJobData> {
   return { id: 'job-1', data: { agentId } } as unknown as Job<AgentRunJobData>;
@@ -443,5 +448,156 @@ describe('processAgentRun', () => {
     // The processor must inject the agentId so the Sleep tool can mark
     // the correct agent_runs row as sleeping.
     expect(capturedCtx!.get<string>('callerAgentId')).toBe('agent-42');
+  });
+
+  // ---------------------------------------------------------------------
+  // Phase D Task 5 — Resume from sleeping + per-turn persistence
+  // ---------------------------------------------------------------------
+
+  it('on resume from status=sleeping, loads history via loadAgentRunHistory and passes it as priorMessages to runAgent', async () => {
+    vi.mocked(db.query.agentRuns.findFirst).mockResolvedValue({
+      id: 'agent-resume',
+      teamId: 'team-1',
+      memberId: 'mem-1',
+      agentDefName: 'content-manager',
+      parentAgentId: null,
+      status: 'sleeping',
+    } as never);
+
+    const priorTurns = [
+      { role: 'user' as const, content: 'initial prompt' },
+      { role: 'assistant' as const, content: 'I will help' },
+    ];
+    vi.mocked(loadAgentRunHistory).mockResolvedValueOnce(priorTurns);
+
+    await processAgentRun(makeJob('agent-resume'));
+
+    // History was loaded with the resuming agent's id.
+    expect(loadAgentRunHistory).toHaveBeenCalledOnce();
+    expect(vi.mocked(loadAgentRunHistory).mock.calls[0][0]).toBe('agent-resume');
+
+    // runAgent received priorMessages at positional arg 9
+    // (config, userMessage, ctx, schema, onProgress, prebuilt, onIdleReset,
+    //  onEvent, injectMessages, priorMessages).
+    expect(runAgentHoisted.state.lastArgs).not.toBeNull();
+    expect(runAgentHoisted.state.lastArgs?.[9]).toEqual(priorTurns);
+
+    // The processor walked the row through resuming → running before
+    // calling runAgent.
+    const setCalls = updateChain.set.mock.calls.map(
+      (c) => (c as unknown as [Record<string, unknown>])[0],
+    );
+    expect(setCalls.some((s) => s.status === 'resuming')).toBe(true);
+    expect(setCalls.some((s) => s.status === 'running')).toBe(true);
+  });
+
+  it('does NOT load history or set status=resuming when starting from status=queued', async () => {
+    vi.mocked(db.query.agentRuns.findFirst).mockResolvedValue({
+      id: 'agent-fresh',
+      teamId: 'team-1',
+      memberId: 'mem-1',
+      agentDefName: 'content-manager',
+      parentAgentId: null,
+      status: 'queued',
+    } as never);
+
+    await processAgentRun(makeJob('agent-fresh'));
+
+    expect(loadAgentRunHistory).not.toHaveBeenCalled();
+    // priorMessages slot must be undefined (no resume).
+    expect(runAgentHoisted.state.lastArgs?.[9]).toBeUndefined();
+    const setCalls = updateChain.set.mock.calls.map(
+      (c) => (c as unknown as [Record<string, unknown>])[0],
+    );
+    expect(setCalls.some((s) => s.status === 'resuming')).toBe(false);
+  });
+
+  it('persists each assistant turn to team_messages so the next resume sees it (fromAgentId=self, type=agent_text, deliveredAt set)', async () => {
+    vi.mocked(db.query.agentRuns.findFirst).mockResolvedValue({
+      id: 'agent-persist',
+      teamId: 'team-77',
+      memberId: 'mem-9',
+      agentDefName: 'content-manager',
+      parentAgentId: 'lead-agent',
+      status: 'queued',
+    } as never);
+
+    // runAgent stub: emit two completed assistant text blocks before
+    // returning. `assistant_text_stop` is the per-turn-text completion
+    // event — see src/core/types.ts and src/core/query-loop.ts.
+    runAgentHoisted.fn.mockImplementationOnce(async (...args: unknown[]) => {
+      runAgentHoisted.state.lastArgs = args;
+      const onEvent = args[7] as
+        | ((event: {
+            type: string;
+            messageId?: string;
+            turn?: number;
+            blockIndex?: number;
+            text?: string;
+          }) => void | Promise<void>)
+        | undefined;
+      if (onEvent) {
+        await onEvent({
+          type: 'assistant_text_stop',
+          messageId: 'm1',
+          turn: 1,
+          blockIndex: 0,
+          text: 'turn 1 reply',
+        });
+        await onEvent({
+          type: 'assistant_text_stop',
+          messageId: 'm2',
+          turn: 2,
+          blockIndex: 0,
+          text: 'turn 2 reply',
+        });
+      }
+      return {
+        result: 'final answer',
+        usage: {
+          inputTokens: 1,
+          outputTokens: 1,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          costUsd: 0,
+          model: 'claude-sonnet-4-6',
+          turns: 2,
+        },
+      };
+    });
+
+    await processAgentRun(makeJob('agent-persist'));
+
+    const insertedRows = insertChain.values.mock.calls.map(
+      (c) => (c as unknown as [Record<string, unknown>])[0],
+    );
+
+    // Both assistant turns should be persisted with the agent as sender,
+    // type='agent_text', and deliveredAt set so loadAgentRunHistory sees
+    // them on next resume.
+    const turnRows = insertedRows.filter(
+      (r) => r.type === 'agent_text' && r.fromAgentId === 'agent-persist',
+    );
+    expect(turnRows).toHaveLength(2);
+    expect(turnRows[0]).toMatchObject({
+      teamId: 'team-77',
+      type: 'agent_text',
+      fromAgentId: 'agent-persist',
+      content: 'turn 1 reply',
+    });
+    expect(turnRows[0].deliveredAt).toBeInstanceOf(Date);
+    expect(turnRows[1]).toMatchObject({
+      type: 'agent_text',
+      fromAgentId: 'agent-persist',
+      content: 'turn 2 reply',
+    });
+    expect(turnRows[1].deliveredAt).toBeInstanceOf(Date);
+
+    // Final task_notification still goes through (this is a normal
+    // completion run, not a Sleep yield).
+    const notification = insertedRows.find(
+      (r) => r.messageType === 'task_notification',
+    );
+    expect(notification).toBeDefined();
   });
 });
