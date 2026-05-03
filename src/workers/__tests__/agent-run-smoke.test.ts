@@ -95,6 +95,34 @@ describe('agent-run smoke — production agents resolve + serialize cleanly', ()
           ).toBe('object');
         }
       });
+
+      it('no resolved tool emits a top-level anyOf/oneOf/allOf in input_schema (Anthropic rejects these)', async () => {
+        // Anthropic's tool input_schema grammar disallows anyOf/oneOf/allOf
+        // at the top level even when `type: 'object'` is also present
+        // (the bug d49f1ee tried — and failed — to fix). The flatten
+        // pass in `toAnthropicTool` collapses any top-level union into a
+        // single permissive object schema; this assertion guards that
+        // every concrete production tool comes through cleanly.
+        const def = await loadAgent(path.join(AGENTS_DIR, agentName));
+        const config = buildAgentConfigFromDefinition(def);
+
+        for (const tool of config.tools) {
+          const apiTool = toAnthropicTool(asAnyTool(tool));
+          const schema = apiTool.input_schema as Record<string, unknown>;
+          expect(
+            schema,
+            `tool "${tool.name}" must not emit top-level anyOf`,
+          ).not.toHaveProperty('anyOf');
+          expect(
+            schema,
+            `tool "${tool.name}" must not emit top-level oneOf`,
+          ).not.toHaveProperty('oneOf');
+          expect(
+            schema,
+            `tool "${tool.name}" must not emit top-level allOf`,
+          ).not.toHaveProperty('allOf');
+        }
+      });
     });
   }
 });

@@ -53,6 +53,97 @@ export function buildTool<TInput, TOutput>(config: {
 // ---------------------------------------------------------------------------
 
 /**
+ * Anthropic's tool `input_schema` grammar disallows `anyOf` / `oneOf` /
+ * `allOf` at the top level (confirmed: official docs + multiple GitHub
+ * issues closed as not-planned). The previous fix at d49f1ee only injected
+ * `type: 'object'` when it was missing; it left the top-level union in
+ * place, which Anthropic still rejects with
+ * `tools.N.custom.input_schema: JSON schema is invalid`.
+ *
+ * `flattenTopLevelUnion` collapses a top-level discriminated union (or any
+ * `anyOf` / `oneOf` / `allOf`) into a single permissive object schema for
+ * the LLM-facing wire format. Runtime Zod parsing in
+ * `SendMessageTool.execute()` is unchanged — it still uses the original
+ * discriminated-union schema, so type narrowing on `input.type` works
+ * correctly. Only the JSON Schema sent over the API wire is flattened.
+ *
+ * Flattening rules:
+ * - `properties`: union of every variant's properties. The variant
+ *   discriminator (e.g. `type` literal-string field) survives as an enum
+ *   in the merged property because each variant declares its own literal.
+ *   When two variants declare the same property name with different
+ *   subtypes the LATER variant wins — fine in practice since the variants
+ *   are designed to share field semantics under the discriminator.
+ * - `required`: intersection across all variants. Only fields required by
+ *   EVERY variant remain required at the top level — typically just the
+ *   discriminator. The LLM uses the tool description (and the
+ *   discriminator's enum) to know which fields apply per variant; the
+ *   server-side Zod schema enforces the per-variant required set at parse
+ *   time.
+ * - top-level `anyOf` / `oneOf` / `allOf` removed.
+ * - other top-level keys (description, $defs, additionalProperties, etc.)
+ *   preserved.
+ */
+function flattenTopLevelUnion(
+  serialized: Record<string, unknown>,
+): Record<string, unknown> {
+  const variants =
+    serialized.anyOf ?? serialized.oneOf ?? serialized.allOf;
+  if (!Array.isArray(variants) || variants.length === 0) {
+    return serialized;
+  }
+
+  const mergedProperties: Record<string, unknown> = {};
+  const requiredArrays: string[][] = [];
+
+  for (const variant of variants) {
+    if (typeof variant !== 'object' || variant === null) continue;
+    const v = variant as Record<string, unknown>;
+    if (v.properties && typeof v.properties === 'object') {
+      Object.assign(
+        mergedProperties,
+        v.properties as Record<string, unknown>,
+      );
+    }
+    if (Array.isArray(v.required)) {
+      requiredArrays.push(v.required as string[]);
+    }
+  }
+
+  // Required = intersection across all variants. If no variants declared
+  // `required`, default to []. Reduce-with-initial-acc would mutate; spread
+  // each step to keep the helper itself immutable.
+  const requiredIntersection =
+    requiredArrays.length === 0
+      ? []
+      : requiredArrays.reduce<string[]>(
+          (acc, arr) => acc.filter((x) => arr.includes(x)),
+          [...requiredArrays[0]],
+        );
+
+  // Strip union keys + the now-overridden type/properties/required;
+  // preserve everything else (description, $defs, additionalProperties…).
+  const {
+    anyOf: _anyOf,
+    oneOf: _oneOf,
+    allOf: _allOf,
+    type: _type,
+    properties: _properties,
+    required: _required,
+    ...rest
+  } = serialized;
+
+  return {
+    type: 'object',
+    properties: mergedProperties,
+    ...(requiredIntersection.length > 0
+      ? { required: requiredIntersection }
+      : {}),
+    ...rest,
+  };
+}
+
+/**
  * Convert a ToolDefinition to an Anthropic API tool parameter.
  * Uses zod-to-json-schema like engine/Tool.ts does.
  *
@@ -64,15 +155,16 @@ export function buildTool<TInput, TOutput>(config: {
  * forward-compatible with 2020-12. Also treats `.optional()` as
  * actually-optional instead of `anyOf: [X, null]` + required.
  *
- * Top-level `type: 'object'` is REQUIRED by Anthropic's tool input_schema
- * grammar (`Anthropic.Messages.Tool.InputSchema.type: 'object'`). Some Zod
- * constructs — notably `z.preprocess(...)` wrapping a discriminated union
- * (see `SendMessageInputSchema`) and `z.union([...])` at the root — emit a
- * top-level `{ anyOf: [...] }` with no `type`, which fails the API's
- * validator with `tools.N.custom.input_schema.type: Field required`. We
- * inject `type: 'object'` when missing; the underlying `anyOf` / `oneOf`
- * still narrows the accepted shapes correctly because each alternative is
- * itself an object schema.
+ * Top-level `anyOf` / `oneOf` / `allOf` is rejected by Anthropic's
+ * `input_schema` grammar regardless of whether `type: 'object'` is also
+ * present (d49f1ee tried the latter; the API still 400s). For tools whose
+ * Zod schema is a discriminated union — notably `SendMessageInputSchema`'s
+ * `z.preprocess(z.discriminatedUnion(...))` — we flatten the top-level
+ * union into a single permissive object schema via
+ * `flattenTopLevelUnion`. See that helper's docstring for the exact merge
+ * rules. Runtime Zod validation in the tool's `execute()` keeps using the
+ * original discriminated-union schema, so type narrowing inside the tool
+ * works correctly.
  */
 export function toAnthropicTool(tool: ToolDefinition): Anthropic.Messages.Tool {
   const jsonSchema = zodToJsonSchema(tool.inputSchema, {
@@ -83,14 +175,24 @@ export function toAnthropicTool(tool: ToolDefinition): Anthropic.Messages.Tool {
   // Strip the JSON Schema `$schema` meta field — Anthropic rejects it.
   const schema = { ...(jsonSchema as Record<string, unknown>) };
   delete schema.$schema;
-  if (schema.type === undefined) {
-    schema.type = 'object';
+
+  // Flatten any top-level union into a single object schema. For
+  // non-union schemas this is a no-op; for discriminated-union schemas it
+  // sets `type: 'object'`, merges properties, and intersects `required`,
+  // which supersedes the d49f1ee `type: 'object'`-only injection.
+  const flattened = flattenTopLevelUnion(schema);
+
+  // Safety net: if a future zod-to-json-schema construct emits a schema
+  // with no top-level union AND no `type`, force `type: 'object'` so the
+  // Anthropic grammar is still satisfied.
+  if (flattened.type === undefined) {
+    flattened.type = 'object';
   }
 
   return {
     name: tool.name,
     description: tool.description,
-    input_schema: schema as Anthropic.Messages.Tool['input_schema'],
+    input_schema: flattened as Anthropic.Messages.Tool['input_schema'],
   };
 }
 
