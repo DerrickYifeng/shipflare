@@ -1146,4 +1146,4 @@ unified path coexist behind flag), validated, then cut.
   - Task 1 — three-mode-decision.md: `a63a1a5`
   - Task 2 — continue-vs-spawn.md: `f69f163`
   - Task 3 — sendmessage-rules.md: `7783173`
-  - Task 4 — AGENT.md references update + verification: <pending — this commit>
+  - Task 4 — AGENT.md references update + verification: `53cd3d7`
