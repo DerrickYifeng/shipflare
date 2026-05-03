@@ -287,3 +287,18 @@ export {
 } from './plan-execute';
 export type { PlanExecuteJobData } from './plan-execute';
 
+// ----------------------------------------------------------------
+//  Agent-run queue (Phase B Task 7)
+// ----------------------------------------------------------------
+
+export {
+  AGENT_RUN_QUEUE_NAME,
+  agentRunQueue,
+  enqueueAgentRun,
+} from './agent-run';
+export type {
+  AgentRunJobData,
+  EnqueueAgentRunOptions,
+  EnqueueAgentRunResult,
+} from './agent-run';
+
