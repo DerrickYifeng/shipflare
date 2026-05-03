@@ -57,15 +57,88 @@ export function teamCancelChannel(teamId: string, runId: string): string {
 // ---------------------------------------------------------------------------
 // Input schema
 // ---------------------------------------------------------------------------
+//
+// Phase C: 5-variant discriminated union per Agent Teams spec §4.1.
+// Backward compat: bare {to, message} (no `type`) is treated as
+// `type: 'message'` via preprocessor — preserves the legacy call sites in
+// team-run.ts and the API routes. The preprocessor also renames the legacy
+// `message` field to the canonical `content` so existing callers don't have
+// to change their wire shape.
+//
+// `task_notification` and `tick` are intentionally NOT in the union — they
+// are system-only messageTypes inserted directly by the workers and must
+// never be tool-callable.
 
-export const SendMessageInputSchema = z
+const messageVariant = z.object({
+  type: z.literal('message'),
+  /** memberId (uuid-like) OR display_name; scoped to the caller's team. */
+  to: z.string().min(1),
+  // `content` is the new canonical name; legacy callers used `message` —
+  // the preprocessor maps `message` → `content` for back-compat.
+  content: z.string().min(1),
+  summary: z.string().optional(),
+  run_id: z.string().optional(),
+});
+
+const broadcastVariant = z
   .object({
-    /** memberId (uuid-like) OR display_name; scoped to the caller's team. */
-    to: z.string().min(1, 'to is required'),
-    message: z.string().min(1, 'message is required'),
+    type: z.literal('broadcast'),
+    content: z.string().min(1),
+    summary: z.string().optional(),
     run_id: z.string().optional(),
   })
   .strict();
+
+const shutdownRequestVariant = z.object({
+  type: z.literal('shutdown_request'),
+  to: z.string().min(1),
+  content: z.string().min(1),
+  summary: z.string().optional(),
+  run_id: z.string().optional(),
+});
+
+const shutdownResponseVariant = z.object({
+  type: z.literal('shutdown_response'),
+  request_id: z.string().min(1),
+  approve: z.boolean(),
+  content: z.string().optional(),
+  run_id: z.string().optional(),
+});
+
+const planApprovalResponseVariant = z.object({
+  type: z.literal('plan_approval_response'),
+  request_id: z.string().min(1),
+  to: z.string().min(1),
+  approve: z.boolean(),
+  content: z.string().optional(),
+  run_id: z.string().optional(),
+});
+
+// Preprocessor: inject type='message' for legacy {to, message} callers.
+// Also map `message` field → `content` so legacy callers don't break.
+export const SendMessageInputSchema = z.preprocess(
+  (raw) => {
+    if (raw === null || typeof raw !== 'object') return raw;
+    const obj = raw as Record<string, unknown>;
+    if (obj.type === undefined) {
+      // Legacy form: ensure type='message' AND map message→content.
+      const next: Record<string, unknown> = { ...obj, type: 'message' };
+      if (next.message !== undefined && next.content === undefined) {
+        next.content = next.message;
+        delete next.message;
+      }
+      return next;
+    }
+    return raw;
+  },
+  z.discriminatedUnion('type', [
+    messageVariant,
+    broadcastVariant,
+    shutdownRequestVariant,
+    shutdownResponseVariant,
+    planApprovalResponseVariant,
+  ]),
+);
 
 export type SendMessageInput = z.infer<typeof SendMessageInputSchema>;
 
@@ -211,11 +284,29 @@ export const sendMessageTool: ToolDefinition<
     'Target either by `display_name` (exact match) or by member uuid. ' +
     'The message is durably stored in team_messages and published to the ' +
     'team\'s live event channel so the UI updates in real time.',
-  inputSchema: SendMessageInputSchema,
+  // `z.preprocess(...)` returns a `ZodEffects` whose declared input type is
+  // `unknown` (the preprocessor accepts any raw payload). buildTool expects
+  // `z.ZodType<TInput>` with input = output, so we cast to the post-process
+  // shape. Runtime parsing still goes through the preprocessor — only the
+  // compile-time generic is being aligned.
+  inputSchema: SendMessageInputSchema as unknown as z.ZodType<SendMessageInput>,
   isConcurrencySafe: true,
   // INSERTs a row + PUBLISHes — unambiguously side-effecting.
   isReadOnly: false,
   async execute(input, ctx): Promise<SendMessageResult> {
+    // Phase C Task 1: schema is now a 5-variant discriminated union, but
+    // execute() is still single-path until Task 2 wires the dispatcher.
+    // For Task 1 we narrow to `type: 'message'` (the legacy shape every
+    // current caller sends via the preprocessor) and reject the other
+    // variants with a clear error so we surface any premature use.
+    if (input.type !== 'message') {
+      throw new Error(
+        `SendMessage: type="${input.type}" is recognized by the schema but ` +
+          `dispatcher is not yet wired (Phase C Task 2). Caller should use ` +
+          `type="message" until Task 2 lands.`,
+      );
+    }
+
     const { teamId, currentMemberId, runId, db } = readTeamContext(ctx);
 
     const toMemberId = await resolveRecipient(input.to, teamId, db);
@@ -231,7 +322,7 @@ export const sendMessageTool: ToolDefinition<
       fromMemberId: currentMemberId,
       toMemberId,
       type: 'agent_text',
-      content: input.message,
+      content: input.content,
       metadata: null,
       createdAt,
     });
@@ -241,7 +332,7 @@ export const sendMessageTool: ToolDefinition<
       runId: effectiveRunId,
       from: currentMemberId,
       to: toMemberId,
-      content: input.message,
+      content: input.content,
       createdAt: createdAt.toISOString(),
       type: 'agent_text',
     });

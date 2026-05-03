@@ -210,7 +210,7 @@ describe('SendMessage tool', () => {
     });
 
     const result = await sendMessageTool.execute(
-      { to: 'Alex', message: 'hi Alex' },
+      { type: 'message', to: 'Alex', content: 'hi Alex' },
       ctx,
     );
 
@@ -239,7 +239,10 @@ describe('SendMessage tool', () => {
     });
 
     await expect(
-      sendMessageTool.execute({ to: 'Ghost', message: 'hello?' }, ctx),
+      sendMessageTool.execute(
+        { type: 'message', to: 'Ghost', content: 'hello?' },
+        ctx,
+      ),
     ).rejects.toThrow(/no team member named "Ghost"/);
     expect(inserts).toHaveLength(0);
     expect(publishedRaw).toHaveLength(0);
@@ -256,7 +259,7 @@ describe('SendMessage tool', () => {
     });
 
     const result = await sendMessageTool.execute(
-      { to: memberId, message: 'hi' },
+      { type: 'message', to: memberId, content: 'hi' },
       ctx,
     );
     expect(result.toMemberId).toBe(memberId);
@@ -292,7 +295,7 @@ describe('SendMessage tool', () => {
       }) as unknown as ReturnType<typeof redis.getPubSubPublisher>);
 
     const result = await sendMessageTool.execute(
-      { to: 'Alex', message: 'hi' },
+      { type: 'message', to: 'Alex', content: 'hi' },
       ctx,
     );
     expect(result.delivered).toBe(true);
