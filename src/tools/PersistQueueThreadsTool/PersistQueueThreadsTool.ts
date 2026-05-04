@@ -113,6 +113,11 @@ export const persistQueueThreadsTool = buildTool({
       surfacedVia: t.surfaced_via ?? null,
       canMentionProduct: t.can_mention_product ?? false,
       mentionSignal: t.mention_signal ?? 'no_fit',
+      // Author signal (migration 0019): bio + followers used by judging
+      // skill (competitor / engagement-pod filter) and drafting skill
+      // (voice calibration by author scale).
+      authorBio: t.author_bio ?? null,
+      authorFollowers: t.author_followers ?? null,
     }));
 
     const insertedRows = await db

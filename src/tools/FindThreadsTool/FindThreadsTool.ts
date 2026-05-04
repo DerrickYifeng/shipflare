@@ -48,6 +48,10 @@ export interface ThreadRow {
   title: string;
   body: string | null;
   author: string | null;
+  /** OP profile bio (X discovery via xAI). Null when unresolvable / legacy. */
+  authorBio: string | null;
+  /** OP follower count (X discovery via xAI). Null when unresolvable / legacy. */
+  authorFollowers: number | null;
   url: string;
   upvotes: number | null;
   commentCount: number | null;
@@ -106,6 +110,8 @@ export const findThreadsTool: ToolDefinition<FindThreadsInput, { threads: Thread
           title: threads.title,
           body: threads.body,
           author: threads.author,
+          authorBio: threads.authorBio,
+          authorFollowers: threads.authorFollowers,
           url: threads.url,
           upvotes: threads.upvotes,
           commentCount: threads.commentCount,
@@ -131,6 +137,8 @@ export const findThreadsTool: ToolDefinition<FindThreadsInput, { threads: Thread
         title: r.title,
         body: r.body,
         author: r.author,
+        authorBio: r.authorBio,
+        authorFollowers: r.authorFollowers,
         url: r.url,
         upvotes: r.upvotes,
         commentCount: r.commentCount,

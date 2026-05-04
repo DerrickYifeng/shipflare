@@ -168,6 +168,68 @@ describe('persist_queue_threads tool', () => {
     expect(setArg).toHaveProperty('surfacedVia');
   });
 
+  it('persists authorBio + authorFollowers onto the threads row', async () => {
+    const valuesCapture = vi.fn();
+    insertChain.mockReturnValue({
+      values: (rows: unknown) => {
+        valuesCapture(rows);
+        return {
+          onConflictDoNothing: () => ({
+            returning: () => Promise.resolve([{ externalId: 't1' }]),
+          }),
+        };
+      },
+    });
+
+    await persistQueueThreadsTool.execute(
+      {
+        threads: [
+          makeTweet({
+            author_bio: 'building shipflare — indie hacker',
+            author_followers: 1234,
+          }),
+        ],
+      },
+      makeCtx({ userId: 'u1', productId: 'p1' }),
+    );
+
+    expect(valuesCapture).toHaveBeenCalledTimes(1);
+    const rows = valuesCapture.mock.calls[0]![0] as Array<{
+      authorBio: string | null;
+      authorFollowers: number | null;
+    }>;
+    expect(rows[0]!.authorBio).toBe('building shipflare — indie hacker');
+    expect(rows[0]!.authorFollowers).toBe(1234);
+  });
+
+  it('persists null authorBio + authorFollowers when xAI returned them as null', async () => {
+    const valuesCapture = vi.fn();
+    insertChain.mockReturnValue({
+      values: (rows: unknown) => {
+        valuesCapture(rows);
+        return {
+          onConflictDoNothing: () => ({
+            returning: () => Promise.resolve([{ externalId: 't1' }]),
+          }),
+        };
+      },
+    });
+
+    await persistQueueThreadsTool.execute(
+      {
+        threads: [makeTweet({ author_bio: null, author_followers: null })],
+      },
+      makeCtx({ userId: 'u1', productId: 'p1' }),
+    );
+
+    const rows = valuesCapture.mock.calls[0]![0] as Array<{
+      authorBio: string | null;
+      authorFollowers: number | null;
+    }>;
+    expect(rows[0]!.authorBio).toBeNull();
+    expect(rows[0]!.authorFollowers).toBeNull();
+  });
+
   it('persists canMentionProduct + mentionSignal onto the threads row', async () => {
     const valuesCapture = vi.fn();
     insertChain.mockReturnValue({

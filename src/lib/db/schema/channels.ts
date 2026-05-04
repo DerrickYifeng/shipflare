@@ -87,6 +87,12 @@ export const threads = pgTable(
     // earns a product mention at the same time it scores ICP fit.
     canMentionProduct: boolean('can_mention_product'),
     mentionSignal: text('mention_signal'),
+    // Author signal (2026-05-04): bio + follower count from xAI's enriched
+    // search response. Used by judging-thread-quality to filter competitor /
+    // engagement-pod accounts and by drafting-reply to calibrate voice
+    // (small account → more first-person; large account → punchier).
+    authorBio: text('author_bio'),
+    authorFollowers: integer('author_followers'),
   },
   (t) => [
     index('threads_user_discovered_idx').on(t.userId, desc(t.discoveredAt)),

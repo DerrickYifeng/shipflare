@@ -264,6 +264,8 @@ async function judgeCandidate(
       title: tweet.body.slice(0, 80),
       body: tweet.body,
       author: tweet.author_username,
+      authorBio: tweet.author_bio,
+      authorFollowers: tweet.author_followers,
       url: tweet.url,
       platform: 'x' as const,
       postedAt: tweet.posted_at,

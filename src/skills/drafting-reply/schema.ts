@@ -15,6 +15,10 @@ export const draftingReplyInputSchema = z.object({
     title: z.string(),
     body: z.string().default(''),
     author: z.string().optional().default(''),
+    /** OP profile bio. Optional — drafter uses to calibrate voice. */
+    authorBio: z.string().nullable().optional(),
+    /** OP follower count. Optional — drafter uses for tier calibration. */
+    authorFollowers: z.number().int().nullable().optional(),
     platform: channelEnum,
     community: z.string(),
     url: z.string().optional(),

@@ -134,6 +134,13 @@
       "when": 1779700018000,
       "tag": "0018_rename_agent_types",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1779700019000,
+      "tag": "0019_threads_author_bio",
+      "breakpoints": true
     }
   ]
 }

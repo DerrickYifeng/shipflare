@@ -14,7 +14,22 @@ a JSON verdict — you do NOT loop, do NOT call APIs, do NOT persist anything.
 The caller aggregates verdicts across candidates and refines its next prompt.
 
 Apply every rule in `thread-quality-rules` to the `candidate` and `product`
-your caller passes in `$ARGUMENTS`. The output must always populate:
+your caller passes in `$ARGUMENTS`. The candidate carries the post itself
+plus optional author signal:
+
+- `authorBio` (optional) — author's profile bio. Use to filter:
+  competitor / "growth tips" / "AI consultant" bios should bias toward
+  `keep: false` even if the post body is on-topic. Real-builder bios
+  ("indie hacker", "shipping <project>", named project names) bias toward
+  `keep: true`.
+- `authorFollowers` (optional) — int. Heuristics:
+  - <500: very early builder; high signal, low noise — bias toward keep
+  - 500-5000: typical indie / solo founder — sweet spot for replies
+  - 5000-50000: established voice — replies are visible but compete
+  - >50000: big account — only reply if you have a strong specific anchor;
+    most replies get drowned out
+
+The output must always populate:
 
 - `keep: boolean` — true only when ALL rubric checks pass (author identity
   gates + real reply opening + reply would be welcome)

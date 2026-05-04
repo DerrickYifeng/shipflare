@@ -68,6 +68,8 @@ interface ThreadRow {
   url: string;
   body: string | null;
   author: string | null;
+  authorBio: string | null;
+  authorFollowers: number | null;
   canMentionProduct: boolean | null;
   mentionSignal: string | null;
 }
@@ -107,6 +109,8 @@ function seedThreads(
     url: r.url ?? `https://x.com/u/status/${i}`,
     body: r.body ?? 'we tried railway and it broke',
     author: r.author ?? 'alice',
+    authorBio: r.authorBio ?? null,
+    authorFollowers: r.authorFollowers ?? null,
     canMentionProduct:
       r.canMentionProduct === undefined ? true : r.canMentionProduct,
     mentionSignal:
@@ -282,6 +286,67 @@ describe('processRepliesBatchTool', () => {
     expect(result.details.find((d) => d.threadId === 't1')?.reason).toContain(
       'xAI quota exhausted',
     );
+  });
+
+  it('passes thread.authorBio + thread.authorFollowers through to drafting-reply', async () => {
+    seedThreads(store, [
+      {
+        id: 't1',
+        authorBio: 'building thing — indie hacker',
+        authorFollowers: 1234,
+      },
+    ]);
+    runForkSkillMock.mockResolvedValueOnce({
+      result: {
+        draftBody: 'we tried railway too — same.',
+        whyItWorks: 'first-person',
+        confidence: 0.7,
+      },
+      usage: {},
+    });
+    validateDraftExecMock.mockResolvedValue({ failures: [], warnings: [] });
+    draftReplyExecMock.mockResolvedValue({ id: 'd1' });
+
+    await processRepliesBatchTool.execute(
+      { threadIds: ['t1'] },
+      makeCtx(store, { userId: 'user-1', productId: 'prod-1' }),
+    );
+
+    expect(runForkSkillMock).toHaveBeenCalledOnce();
+    const callArgs = runForkSkillMock.mock.calls[0]!;
+    expect(callArgs[0]).toBe('drafting-reply');
+    const argsJson = callArgs[1] as string;
+    const parsed = JSON.parse(argsJson) as {
+      thread: { authorBio: string | null; authorFollowers: number | null };
+    };
+    expect(parsed.thread.authorBio).toBe('building thing — indie hacker');
+    expect(parsed.thread.authorFollowers).toBe(1234);
+  });
+
+  it('passes null authorBio + authorFollowers for legacy rows', async () => {
+    seedThreads(store, [{ id: 't1' }]); // defaults: authorBio=null, authorFollowers=null
+    runForkSkillMock.mockResolvedValueOnce({
+      result: {
+        draftBody: 'we tried railway too — same.',
+        whyItWorks: 'first-person',
+        confidence: 0.7,
+      },
+      usage: {},
+    });
+    validateDraftExecMock.mockResolvedValue({ failures: [], warnings: [] });
+    draftReplyExecMock.mockResolvedValue({ id: 'd1' });
+
+    await processRepliesBatchTool.execute(
+      { threadIds: ['t1'] },
+      makeCtx(store, { userId: 'user-1', productId: 'prod-1' }),
+    );
+
+    const argsJson = runForkSkillMock.mock.calls[0]![1] as string;
+    const parsed = JSON.parse(argsJson) as {
+      thread: { authorBio: string | null; authorFollowers: number | null };
+    };
+    expect(parsed.thread.authorBio).toBeNull();
+    expect(parsed.thread.authorFollowers).toBeNull();
   });
 
   it('rejects threadIds.length > 10 at Zod boundary', () => {

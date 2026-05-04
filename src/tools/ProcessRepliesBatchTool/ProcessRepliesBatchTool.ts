@@ -264,6 +264,8 @@ async function draftOnce(
       title: thread.title,
       body: thread.body ?? '',
       author: thread.author,
+      authorBio: thread.authorBio,
+      authorFollowers: thread.authorFollowers,
       community: thread.community,
       platform: thread.platform,
     },

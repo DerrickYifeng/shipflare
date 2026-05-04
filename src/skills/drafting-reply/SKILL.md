@@ -25,7 +25,14 @@ markdown fences.
 ## Inputs
 
 A JSON payload with:
-- `thread` — the post you are replying to (title, body, author, platform, community)
+- `thread` — the post you are replying to (title, body, author, platform, community).
+  May also carry optional author signal:
+  - `authorBio` (optional) — OP's profile bio. Use to calibrate voice:
+    if their bio mentions a project / specific stack, name-drop it back
+    ("you mentioned Postgres — same boat: ..."). Don't fabricate
+    references not in the bio.
+  - `authorFollowers` (optional) — int. See per-channel voice references
+    for the 4-tier follower-band calibration.
 - `product` — `name`, `description`, optional `valueProp`
 - `channel` — `'x'` or `'reddit'`
 - `voice` — optional voice cluster or free-form hint

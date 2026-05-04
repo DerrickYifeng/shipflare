@@ -423,6 +423,58 @@ describe('findThreadsViaXaiTool', () => {
     expect(runForkSkillMock).toHaveBeenCalled();
   });
 
+  it('passes authorBio + authorFollowers through to judging-thread-quality candidate', async () => {
+    xaiExecMock.mockResolvedValueOnce(
+      xaiResponse([
+        makeTweet({
+          author_bio: 'building thing — indie hacker',
+          author_followers: 1234,
+        }),
+      ]),
+    );
+    runForkSkillMock.mockResolvedValueOnce(
+      judgingResponse({ keep: true, score: 0.85 }),
+    );
+
+    await findThreadsViaXaiTool.execute(
+      { trigger: 'daily', maxResults: 1 },
+      makeCtx(store, { userId: 'user-1', productId: 'prod-1' }),
+    );
+
+    expect(runForkSkillMock).toHaveBeenCalledTimes(1);
+    const callArgs = runForkSkillMock.mock.calls[0]!;
+    // Positional args: (skillName, args, outputSchema, ctx). args is JSON string.
+    const argsJson = callArgs[1] as string;
+    const parsed = JSON.parse(argsJson) as {
+      candidate: { authorBio: string | null; authorFollowers: number | null };
+    };
+    expect(parsed.candidate.authorBio).toBe('building thing — indie hacker');
+    expect(parsed.candidate.authorFollowers).toBe(1234);
+  });
+
+  it('passes null authorBio + authorFollowers when xAI returned them as null', async () => {
+    xaiExecMock.mockResolvedValueOnce(
+      xaiResponse([
+        makeTweet({ author_bio: null, author_followers: null }),
+      ]),
+    );
+    runForkSkillMock.mockResolvedValueOnce(
+      judgingResponse({ keep: true, score: 0.85 }),
+    );
+
+    await findThreadsViaXaiTool.execute(
+      { trigger: 'daily', maxResults: 1 },
+      makeCtx(store, { userId: 'user-1', productId: 'prod-1' }),
+    );
+
+    const argsJson = runForkSkillMock.mock.calls[0]![1] as string;
+    const parsed = JSON.parse(argsJson) as {
+      candidate: { authorBio: string | null; authorFollowers: number | null };
+    };
+    expect(parsed.candidate.authorBio).toBeNull();
+    expect(parsed.candidate.authorFollowers).toBeNull();
+  });
+
   it('passes the judging-thread-quality output schema to runForkSkill', async () => {
     // Schema-pass-through regression: runAgent synthesizes the
     // StructuredOutput tool only when given an output schema. Without

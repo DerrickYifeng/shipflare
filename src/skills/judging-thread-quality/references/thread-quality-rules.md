@@ -112,6 +112,35 @@ account, brand-new account, rate limit, timeout). In that case:
 
 ---
 
+## Author signal (when authorBio / authorFollowers are present)
+
+These augment the gates — they're not standalone gates. Use them to
+break ties when the body alone is ambiguous.
+
+**Bio red flags (bias toward `keep: false`)**:
+- "Growth tips" / "growth hacks" / "build in public coach"
+- "AI consultant" / "AI engineer for hire" (selling, not buying)
+- Pure cryptocurrency / NFT / Web3 phrases when the product isn't blockchain
+- Listing >5 hashtags / pure hashtag soup
+- "Reply guy" / "engagement" mentioned in bio (engagement pod confession)
+
+**Bio green flags (bias toward `keep: true`)**:
+- Named project ("building <name>", "founder of <name>")
+- Specific tech stack mentions ("Postgres", "Rails", "Next.js")
+- "Solo founder" / "indie hacker" / "0 to 1" without sales-y suffix
+- Concrete metrics ("$10k MRR", "3 years bootstrapping")
+
+**Follower band heuristic**:
+- <500 followers + on-topic body → strong keep, signals real early-stage builder
+- 500-5k followers → typical sweet spot
+- >50k followers → only keep if the body has a specific debug / tool question
+  AND you can name a concrete anchor; otherwise the reply gets drowned
+
+These are tie-breakers — if the body itself fails the 3-gate test, no
+amount of bio polish saves the candidate.
+
+---
+
 ## Positive signals on the tweet (lean toward keep=true)
 
 - Author explicitly asks for tool recommendations / alternatives in the

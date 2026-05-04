@@ -12,6 +12,10 @@ export const judgingThreadQualityInputSchema = z.object({
     title: z.string(),
     body: z.string().default(''),
     author: z.string().default(''),
+    /** OP profile bio. Optional — null when xAI couldn't resolve. */
+    authorBio: z.string().nullable().optional(),
+    /** OP follower count. Optional — null when xAI couldn't resolve. */
+    authorFollowers: z.number().int().nullable().optional(),
     url: z.string().optional(),
     platform: z.enum(['x', 'reddit']),
     postedAt: z.string(), // ISO timestamp
