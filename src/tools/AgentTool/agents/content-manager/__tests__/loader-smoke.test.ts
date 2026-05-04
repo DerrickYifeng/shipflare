@@ -4,6 +4,7 @@
 // it to handle both reply_sweep and post_batch input modes.
 
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
 import * as path from 'node:path';
 import { loadAgentsDir } from '@/tools/AgentTool/loader';
 
@@ -50,8 +51,11 @@ describe('content-manager loader smoke', () => {
     expect(cm.systemPrompt).not.toContain('## engagement-playbook');
     expect(cm.systemPrompt).not.toContain('## reply-quality-bar');
 
-    // The agent now orchestrates the judging-opportunity skill instead.
-    expect(cm.systemPrompt).toContain('judging-opportunity');
+    // Judging is now owned by discovery (judging-thread-quality at queue
+    // time). content-manager reads `canMentionProduct` + `mentionSignal`
+    // off the thread row instead of re-judging.
+    expect(cm.systemPrompt).not.toContain('judging-opportunity');
+    expect(cm.systemPrompt).toContain('canMentionProduct');
 
     // Shared reference (base-guidelines) also inlined.
     expect(cm.systemPrompt).toContain('## base-guidelines');
@@ -88,5 +92,14 @@ describe('content-manager loader smoke', () => {
     expect(cm.systemPrompt).toContain('drafting-post');
     expect(cm.systemPrompt).toContain('draft_post');
     expect(cm.systemPrompt).toContain('draft_reply');
+  });
+
+  it('reply_sweep workflow no longer calls judging-opportunity', () => {
+    const md = readFileSync(
+      path.resolve(process.cwd(), 'src/tools/AgentTool/agents/content-manager/AGENT.md'),
+      'utf8',
+    );
+    expect(md).not.toContain('judging-opportunity');
+    expect(md).toContain('canMentionProduct'); // reads it from the thread row
   });
 });

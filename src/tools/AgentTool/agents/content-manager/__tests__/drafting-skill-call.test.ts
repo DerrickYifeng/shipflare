@@ -43,8 +43,13 @@ describe('content-manager AGENT.md (post-Phase-J)', () => {
     expect(cm.systemPrompt).not.toContain('## opportunity-judgment');
   });
 
-  it('directs the agent to call judging-opportunity', async () => {
+  it('reads judging from the thread row instead of re-running judging-opportunity', async () => {
     const cm = await loadContentManager();
-    expect(cm.systemPrompt).toContain('judging-opportunity');
+    // Discovery's judging-thread-quality skill writes canMentionProduct +
+    // mentionSignal onto the thread at queue time; content-manager must
+    // not re-judge.
+    expect(cm.systemPrompt).not.toContain('judging-opportunity');
+    expect(cm.systemPrompt).toContain('canMentionProduct');
+    expect(cm.systemPrompt).toContain('mentionSignal');
   });
 });
