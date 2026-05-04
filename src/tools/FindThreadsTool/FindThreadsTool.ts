@@ -55,6 +55,8 @@ export interface ThreadRow {
   scoutConfidence: number | null;
   postedAt: string | null;
   discoveredAt: string;
+  canMentionProduct: boolean | null;
+  mentionSignal: string | null;
 }
 
 export const findThreadsTool: ToolDefinition<FindThreadsInput, { threads: ThreadRow[] }> =
@@ -72,7 +74,11 @@ export const findThreadsTool: ToolDefinition<FindThreadsInput, { threads: Thread
       'INPUT SHAPE (`platforms` MUST be an array of strings, NOT a single string):\n' +
       '{ "platforms": ["x", "reddit"], "windowMinutes": 1440, "minRelevance": 0.4, "limit": 20 }\n\n' +
       'To filter a single platform: `"platforms": ["x"]` (still wrap it in an array). ' +
-      'Omit `platforms` entirely to return threads from all connected channels.',
+      'Omit `platforms` entirely to return threads from all connected channels.' +
+      '\n\n' +
+      'Each returned thread carries canMentionProduct + mentionSignal — discovery ' +
+      'already decided whether a reply may mention the product. Drafters should ' +
+      'honor canMentionProduct directly and skip a second judging-opportunity pass.',
     inputSchema: findThreadsInputSchema,
     isConcurrencySafe: true,
     isReadOnly: true,
@@ -106,6 +112,8 @@ export const findThreadsTool: ToolDefinition<FindThreadsInput, { threads: Thread
           scoutConfidence: threads.scoutConfidence,
           postedAt: threads.postedAt,
           discoveredAt: threads.discoveredAt,
+          canMentionProduct: threads.canMentionProduct,
+          mentionSignal: threads.mentionSignal,
         })
         .from(threads)
         .where(and(...filters))
@@ -129,6 +137,8 @@ export const findThreadsTool: ToolDefinition<FindThreadsInput, { threads: Thread
         scoutConfidence: r.scoutConfidence,
         postedAt: r.postedAt ? r.postedAt.toISOString() : null,
         discoveredAt: r.discoveredAt.toISOString(),
+        canMentionProduct: r.canMentionProduct,
+        mentionSignal: r.mentionSignal,
       }));
 
       return { threads: out };

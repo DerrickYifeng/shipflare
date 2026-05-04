@@ -42,6 +42,8 @@ interface ThreadRow {
   scoutConfidence: number | null;
   postedAt: Date | null;
   discoveredAt: Date;
+  canMentionProduct: boolean | null;
+  mentionSignal: string | null;
 }
 
 function makeCtx(
@@ -75,6 +77,8 @@ function seed(store: InMemoryStore, rows: Partial<ThreadRow>[]): void {
     scoutConfidence: r.scoutConfidence ?? 0.5,
     postedAt: r.postedAt ?? new Date(now - 60 * 60_000),
     discoveredAt: r.discoveredAt ?? new Date(now - 30 * 60_000),
+    canMentionProduct: r.canMentionProduct ?? null,
+    mentionSignal: r.mentionSignal ?? null,
   }));
   store.register<ThreadRow>(threads, full);
 }
@@ -123,6 +127,25 @@ describe('findThreadsTool', () => {
     const bad = { limit: 10_000 } as any;
     const parse = findThreadsTool.inputSchema.safeParse(bad);
     expect(parse.success).toBe(false);
+  });
+
+  it('returns canMentionProduct + mentionSignal on each row', async () => {
+    seed(store, [
+      {
+        id: 't-mention-1',
+        platform: 'x',
+        community: '@x',
+        title: 't',
+        url: 'https://x.com/u/status/1',
+        canMentionProduct: true,
+        mentionSignal: 'tool_question',
+      },
+    ]);
+    const ctx = makeCtx(store, { userId: 'user-1', productId: 'prod-1' });
+    const result = await findThreadsTool.execute({ platforms: ['x'] }, ctx);
+    const row = result.threads.find((r) => r.threadId.length > 0);
+    expect(row?.canMentionProduct).toBe(true);
+    expect(row?.mentionSignal).toBe('tool_question');
   });
 
   it('serializes Date fields as ISO strings', async () => {
