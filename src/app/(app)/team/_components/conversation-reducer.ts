@@ -71,6 +71,22 @@ export type ProgressItem =
       elapsed: string | null;
       complete: boolean;
       errorText: string | null;
+      /**
+       * Anthropic tool_use_id stamped on this tool_call. Used by
+       * `populateDelegationProgress` to look up nested sub-events
+       * (e.g. fork-skill calls spawned inside this tool) from the
+       * `progressByParentToolUse` map and graft them as `subItems`.
+       */
+      toolUseId?: string;
+      /**
+       * Sub-events emitted while this tool was running — typically
+       * `runForkSkill` invocations whose own messages carry
+       * `parent_tool_use_id = <this tool's tool_use_id>`. Surfaced as
+       * a nested ProgressList in the UI so multi-fork tools like
+       * `find_threads_via_xai` show live activity instead of a blank
+       * RUNNING card. Recursive: a sub-fork can itself spawn forks.
+       */
+      subItems?: ProgressItem[];
     }
   | {
       kind: 'text';
@@ -466,7 +482,12 @@ export function stitchLeadMessages(
   // avatar — which is exactly the "Chief of Staff SYNTHESIS pasting JSON"
   // mis-attribution observed in production traces 2026-05-02.
   const hasSubagentName = (metadata: Record<string, unknown> | null): boolean => {
-    const name = readString(metadata, 'agentName');
+    // Use extractAgentName so both `agentName` (camelCase, defensively
+    // tolerated) and `agent_name` (snake_case, the shape agent-run.ts
+    // actually persists) are read. The earlier inline readString only
+    // matched camelCase, so this safety net never fired for any real
+    // persisted row — defeating the comment above's promise.
+    const name = extractAgentName(metadata);
     return (
       typeof name === 'string' && name.length > 0 && name !== 'coordinator'
     );
@@ -752,9 +773,42 @@ function populateDelegationProgress(
     for (const task of node.delegation) {
       if (!task.toolUseId) continue;
       const bucket = progressByParentToolUse.get(task.toolUseId);
-      if (!bucket || bucket.length === 0) continue;
-      task.progressItems = buildProgressItems(bucket);
+      if (bucket && bucket.length > 0) {
+        task.progressItems = buildProgressItems(bucket);
+      }
+      // Recurse into the just-built progressItems so any tool whose
+      // tool_use_id is itself a parent for a nested bucket (e.g.
+      // `find_threads_via_xai` running ~10-20 `runForkSkill` calls)
+      // gets its sub-events grafted onto `subItems`. Without this,
+      // the tool card sits at "RUNNING 4m 55s" with no live progress
+      // even though sub-event rows are persisted under
+      // `parent_tool_use_id = <find_threads_via_xai's id>`.
+      if (task.progressItems.length > 0) {
+        attachNestedProgress(task.progressItems, progressByParentToolUse);
+      }
     }
+  }
+}
+
+/**
+ * For each tool ProgressItem with a `toolUseId`, look up sub-events
+ * keyed by that id in the parentToolUseId bucket map and attach them
+ * as `subItems`. Recurses one level deeper to handle multi-level
+ * nesting (rare but possible — e.g. a fork-skill that itself calls
+ * another tool that fans out further).
+ */
+function attachNestedProgress(
+  items: readonly ProgressItem[],
+  map: ReadonlyMap<string, TeamActivityMessage[]>,
+): void {
+  for (const item of items) {
+    if (item.kind !== 'tool') continue;
+    if (!item.toolUseId) continue;
+    const bucket = map.get(item.toolUseId);
+    if (!bucket || bucket.length === 0) continue;
+    const sub = buildProgressItems(bucket);
+    item.subItems = sub;
+    attachNestedProgress(sub, map);
   }
 }
 
@@ -810,6 +864,10 @@ function buildProgressItems(
         elapsed,
         complete,
         errorText,
+        // Carry the tool_use_id forward so populateDelegationProgress
+        // can graft nested sub-events (runForkSkill spawns, etc.)
+        // onto this item's `subItems` after pairing is done.
+        ...(useId ? { toolUseId: useId } : {}),
       });
       continue;
     }
