@@ -648,12 +648,105 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
       return row.memberId;
     };
 
+    // (1.5) Live-stream assistant text deltas to the founder UI's SSE
+    // channel. The block-level start/delta/stop events are ephemeral —
+    // never persisted — but they let useTeamEvents' `partials` map render
+    // a streaming bubble character-by-character instead of waiting for
+    // the durable `agent_text` row to land at turn-complete. Lead path
+    // only: teammate text reaches the lead via task_notification, not
+    // the live SSE feed. Failures are non-fatal; the durable row + final
+    // assistant_text_stop branch (below) remain the source of truth.
+    if (
+      def.role === 'lead' &&
+      (event.type === 'assistant_text_start' ||
+        event.type === 'assistant_text_delta' ||
+        event.type === 'assistant_text_stop')
+    ) {
+      try {
+        const pub = getPubSubPublisher();
+        // Match the agent_text_stop publish envelope so the partial
+        // baseline (runId / conversationId / from) is consistent with
+        // the durable bubble that eventually replaces it.
+        const baseEnvelope = {
+          // useTeamEvents keys partials by `messageId`; sharing the
+          // block-level id across start/delta/stop ensures the same
+          // partial accumulates and clears cleanly.
+          messageId: event.messageId,
+          conversationId: leadConversationId,
+          runId: leadRequestId,
+          teamId: row.teamId,
+          from: resolveFromMemberId(event),
+          fromAgentId: agentId,
+          createdAt: new Date().toISOString(),
+        };
+        if (event.type === 'assistant_text_start') {
+          await pub.publish(
+            teamMessagesChannel(row.teamId),
+            JSON.stringify({
+              ...baseEnvelope,
+              type: 'agent_text_start',
+              content: '',
+            }),
+          );
+        } else if (event.type === 'assistant_text_delta') {
+          await pub.publish(
+            teamMessagesChannel(row.teamId),
+            JSON.stringify({
+              ...baseEnvelope,
+              type: 'agent_text_delta',
+              content: event.delta,
+            }),
+          );
+        } else {
+          // assistant_text_stop — drop the partial. The durable
+          // agent_text row published below carries the final bubble
+          // (its messageId differs by design — randomUUID for the DB
+          // row id), so publishing agent_text_stop here cleans up the
+          // partial before the final agent_text arrives so the UI
+          // doesn't render two overlapping bubbles for one block.
+          await pub.publish(
+            teamMessagesChannel(row.teamId),
+            JSON.stringify({
+              ...baseEnvelope,
+              type: 'agent_text_stop',
+              content: '',
+            }),
+          );
+        }
+      } catch (err) {
+        log.warn(
+          `agent-run ${agentId}: agent_text streaming SSE publish failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+      // Fall through for assistant_text_stop so the existing durable
+      // persist branch below still runs. start/delta have no further
+      // handling, so we can return early.
+      if (event.type !== 'assistant_text_stop') return;
+    }
+
     // (2) Persist assistant turns.
     if (event.type === 'assistant_text_stop' && event.text.length > 0) {
       // Generate the row id up front so the SSE publish (lead path) can
       // reference the same id the durable row carries.
       const insertedId = crypto.randomUUID();
       const createdAt = new Date();
+      // Stash spawnMeta only when present so the UI's delegation tree
+      // can nest a child agent's text under the parent Task's dispatch
+      // card. Top-level lead text leaves metadata null (matches the
+      // legacy schema; we don't synthesize a nullable object for the
+      // common case). Hoisted out of the insert so the SSE publish
+      // below carries the same shape — without this, the live envelope
+      // would omit parent_tool_use_id / agent_name and the founder UI
+      // would render a fork-skill's assistant text as the lead's own
+      // bubble until the snapshot fetch on next refresh corrected the
+      // attribution. Mirrors the tool_call/tool_result branch below
+      // (line ~857) which already publishes `metadata` on the wire.
+      const assistantMetadata = event.spawnMeta
+        ? {
+            parent_tool_use_id: event.spawnMeta.parentToolUseId,
+            agent_name: event.spawnMeta.agentName,
+          }
+        : null;
       try {
         await db.insert(teamMessages).values({
           id: insertedId,
@@ -676,17 +769,7 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
           fromMemberId: resolveFromMemberId(event),
           fromAgentId: agentId,
           content: event.text,
-          // Stash spawnMeta only when present so the UI's delegation
-          // tree can nest a child agent's text under the parent Task's
-          // dispatch card. Top-level lead text leaves metadata null
-          // (matches the legacy schema; we don't synthesize a nullable
-          // object for the common case).
-          metadata: event.spawnMeta
-            ? {
-                parent_tool_use_id: event.spawnMeta.parentToolUseId,
-                agent_name: event.spawnMeta.agentName,
-              }
-            : null,
+          metadata: assistantMetadata,
           deliveredAt: createdAt,
           createdAt,
         });
@@ -731,6 +814,13 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
               fromAgentId: agentId,
               type: 'agent_text',
               content: event.text,
+              // Mirror the durable row's metadata so the live UI's
+              // `belongsToSubagent` check (conversation-reducer.ts) can
+              // route a fork-skill's verdict (e.g. judging-thread-quality
+              // returning a JSON `{ keep, score, ... }`) into the
+              // proper delegation card on first paint, instead of
+              // briefly mis-attributing it to the lead.
+              metadata: assistantMetadata,
               createdAt: createdAt.toISOString(),
             }),
           );
