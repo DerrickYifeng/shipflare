@@ -10,6 +10,7 @@ references:
   - output-format
   - review-checklist
   - x-review-rules
+shared-references:
   - slop-rules
 ---
 
