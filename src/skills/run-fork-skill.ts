@@ -14,7 +14,15 @@ import { getAllSkills } from '@/tools/SkillTool/registry';
 import { DEFAULT_SKILL_FORK_MAX_TURNS } from '@/tools/SkillTool/constants';
 import { spawnSubagent, type SpawnCallbacks } from '@/tools/AgentTool/spawn';
 import type { AgentDefinition } from '@/tools/AgentTool/loader';
-import type { AgentResult, ToolContext } from '@/core/types';
+import {
+  resolveSpecialistMemberId,
+  wrapOnEventWithSpawnMeta,
+} from '@/tools/AgentTool/AgentTool';
+import type {
+  AgentResult,
+  StreamEventSpawnMeta,
+  ToolContext,
+} from '@/core/types';
 
 /**
  * Spawn a fork-mode skill as a one-shot subagent and return its parsed
@@ -102,8 +110,45 @@ export async function runForkSkill<T = unknown>(
   } catch {
     onEventFn = undefined;
   }
-  const callbacks: SpawnCallbacks | undefined = onEventFn
-    ? { onEvent: onEventFn }
+
+  // Wrap the forwarded onEvent with spawnMeta so child events attribute
+  // to the spawned fork specialist instead of the lead. Mirrors
+  // SkillTool.ts:138-159 (the same wiring used by `skill` tool fork
+  // calls). Without this, the conversation-reducer's `belongsToSubagent`
+  // check (agentName !== 'coordinator' || parentToolUseId) routes the
+  // events into the lead's bubble — UI shows the lead "pasting" raw
+  // judging JSON.
+  //
+  // resolveSpecialistMemberId may return null when the ctx isn't
+  // team-scoped (CLI / tests / non-team callers — same fallback contract
+  // SkillTool's fork branch uses). Even when null, the wrap still
+  // injects parentToolUseId + agentName so the UI's delegation card
+  // can nest by tool_use_id even without a member id.
+  let wrappedOnEvent: SpawnCallbacks['onEvent'] | undefined = onEventFn;
+  if (onEventFn) {
+    const specialistMemberId = await resolveSpecialistMemberId(
+      ctx,
+      def.name,
+    );
+    let parentToolUseId = '';
+    try {
+      const fromCtx = ctx.get<string | null | undefined>('toolUseId');
+      if (typeof fromCtx === 'string' && fromCtx.length > 0) {
+        parentToolUseId = fromCtx;
+      }
+    } catch {
+      parentToolUseId = '';
+    }
+    const spawnMeta: StreamEventSpawnMeta = {
+      parentTaskId: null,
+      parentToolUseId,
+      fromMemberId: specialistMemberId,
+      agentName: def.name,
+    };
+    wrappedOnEvent = wrapOnEventWithSpawnMeta(onEventFn, spawnMeta);
+  }
+  const callbacks: SpawnCallbacks | undefined = wrappedOnEvent
+    ? { onEvent: wrappedOnEvent }
     : undefined;
 
   return spawnSubagent<T>(def, args, ctx, callbacks, outputSchema);

@@ -28,9 +28,10 @@ import { runForkSkill } from '@/skills/run-fork-skill';
 import { xaiFindCustomersTool } from '@/tools/XaiFindCustomersTool/XaiFindCustomersTool';
 import { persistQueueThreadsTool } from '@/tools/PersistQueueThreadsTool/PersistQueueThreadsTool';
 import type { TweetCandidate } from '@/tools/XaiFindCustomersTool/schema';
-import type {
-  JudgingThreadQualityOutput,
-  MentionSignal,
+import {
+  judgingThreadQualityOutputSchema,
+  type JudgingThreadQualityOutput,
+  type MentionSignal,
 } from '@/skills/judging-thread-quality/schema';
 import { MemoryStore } from '@/memory/store';
 import { createLogger } from '@/lib/logger';
@@ -241,15 +242,23 @@ async function loadRubric(
 
 /**
  * Score a single candidate via the judging-thread-quality skill.
+ *
  * Wraps runForkSkill so the per-round Promise.allSettled fan-out has
- * a stable promise shape. Errors propagate so allSettled can surface
- * them — we drop just the failed candidate, never lose the round.
+ * a stable promise shape. The output schema is passed through so
+ * runAgent synthesizes the StructuredOutput tool with strict shape
+ * validation; we ALSO safeParse defensively — the LLM can still
+ * return partial output on a hiccup, and skipping a malformed
+ * verdict is preferable to crashing the whole loop on
+ * `j.verdict.signals` undefined access.
+ *
+ * Returns null when the fork's output is malformed; callers filter
+ * nulls out before treating the result as a JudgedCandidate.
  */
 async function judgeCandidate(
   tweet: TweetCandidate,
   product: ProductForLoop,
   ctx: ToolContext,
-): Promise<JudgedCandidate> {
+): Promise<JudgedCandidate | null> {
   const args = {
     candidate: {
       title: tweet.body.slice(0, 80),
@@ -265,13 +274,20 @@ async function judgeCandidate(
       ...(product.valueProp ? { valueProp: product.valueProp } : {}),
     },
   };
-  const { result } = await runForkSkill<JudgingThreadQualityOutput>(
+  const { result } = await runForkSkill(
     'judging-thread-quality',
     JSON.stringify(args),
-    undefined,
+    judgingThreadQualityOutputSchema,
     ctx,
   );
-  return { tweet, verdict: result };
+  const parsed = judgingThreadQualityOutputSchema.safeParse(result);
+  if (!parsed.success) {
+    log.warn(
+      `judging-thread-quality returned invalid output for ${tweet.external_id}: ${parsed.error.message}`,
+    );
+    return null;
+  }
+  return { tweet, verdict: parsed.data };
 }
 
 export const findThreadsViaXaiTool = buildTool({
@@ -441,18 +457,20 @@ export const findThreadsViaXaiTool = buildTool({
       consecutiveEmptyRounds = 0;
 
       // Fan out judging in parallel — Plan 2 lessons: allSettled so one
-      // judging fork's exception doesn't lose the whole round.
-      // Bounded parallelism: xAI returns ≤50 (schema cap) per call,
-      // typically 10-20, which is fine without chunking.
+      // judging fork's exception doesn't lose the whole round. Also
+      // tolerates malformed verdicts (judgeCandidate returns null when
+      // safeParse fails) so a single bad LLM hiccup doesn't crash the
+      // round. Bounded parallelism: xAI returns ≤50 (schema cap) per
+      // call, typically 10-20, which is fine without chunking.
       const settled = await Promise.allSettled(
         fresh.map((t) => judgeCandidate(t, product, ctx)),
       );
       const judged: JudgedCandidate[] = [];
       for (let i = 0; i < settled.length; i++) {
         const s = settled[i]!;
-        if (s.status === 'fulfilled') {
+        if (s.status === 'fulfilled' && s.value !== null) {
           judged.push(s.value);
-        } else {
+        } else if (s.status === 'rejected') {
           log.warn(
             `judging-thread-quality fork rejected for ${
               fresh[i]?.external_id
@@ -461,6 +479,8 @@ export const findThreadsViaXaiTool = buildTool({
             }`,
           );
         }
+        // s.value === null means safeParse failed — already logged
+        // inside judgeCandidate.
       }
 
       totalScanned = seen.size;

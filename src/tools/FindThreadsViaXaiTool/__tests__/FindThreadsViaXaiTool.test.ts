@@ -382,6 +382,72 @@ describe('findThreadsViaXaiTool', () => {
     expect(persistArgs.threads[0]!.mention_signal).toBe('vulnerable');
   });
 
+  it('handles malformed judging output gracefully (skips, does not crash)', async () => {
+    // Production crash regression: judging-thread-quality returned an
+    // object missing the `signals` array, and the loop accessed
+    // `j.verdict.signals` directly. Now safeParse drops the malformed
+    // verdict and the loop continues.
+    //
+    // Every judging call returns a malformed verdict — proves the loop
+    // never accesses `verdict.signals` on a parse-failure path. The
+    // tool must complete without throwing and queue zero.
+    const tweets = Array.from({ length: 3 }, (_, i) =>
+      makeTweet({ external_id: `t-${i}` }),
+    );
+    // Use mockResolvedValue (not Once) so all 10 rounds — if the loop
+    // doesn't break early — still hit the same malformed shape.
+    xaiExecMock.mockResolvedValue(xaiResponse(tweets));
+
+    runForkSkillMock.mockResolvedValue({
+      // Schema requires `keep`, `score`, `reason`, etc. — empty object
+      // mirrors the production payload that triggered
+      // `j.verdict.signals` undefined.
+      result: { something: 'totally wrong' },
+      usage: {},
+    });
+
+    // The execute call MUST NOT throw, despite every verdict being
+    // malformed. The loop drops parse failures and continues.
+    const result = await findThreadsViaXaiTool.execute(
+      { trigger: 'daily', maxResults: 3 },
+      makeCtx(store, { userId: 'user-1', productId: 'prod-1' }),
+    );
+
+    // No valid verdicts → no strong matches → queued = 0 → persist
+    // skipped entirely.
+    expect(result.queued).toBe(0);
+    expect(persistExecMock).not.toHaveBeenCalled();
+    // The judging mock was invoked — the orchestrator did try to
+    // judge candidates. The loop DID NOT crash on
+    // `j.verdict.signals` access.
+    expect(runForkSkillMock).toHaveBeenCalled();
+  });
+
+  it('passes the judging-thread-quality output schema to runForkSkill', async () => {
+    // Schema-pass-through regression: runAgent synthesizes the
+    // StructuredOutput tool only when given an output schema. Without
+    // it, the LLM is free to emit anything and the safeParse downstream
+    // becomes the only line of defense.
+    xaiExecMock.mockResolvedValueOnce(xaiResponse([makeTweet()]));
+    runForkSkillMock.mockResolvedValueOnce(
+      judgingResponse({ keep: true, score: 0.8 }),
+    );
+
+    await findThreadsViaXaiTool.execute(
+      { trigger: 'daily', maxResults: 1 },
+      makeCtx(store, { userId: 'user-1', productId: 'prod-1' }),
+    );
+
+    expect(runForkSkillMock).toHaveBeenCalledTimes(1);
+    const callArgs = runForkSkillMock.mock.calls[0]!;
+    // Positional args: (skillName, args, outputSchema, ctx)
+    expect(callArgs[0]).toBe('judging-thread-quality');
+    // outputSchema MUST be a Zod-shaped object (has .safeParse method).
+    const schema = callArgs[2] as { safeParse?: unknown } | undefined;
+    expect(schema).toBeDefined();
+    expect(typeof schema?.safeParse).toBe('function');
+  });
+
   it('one judging-thread-quality fork rejection does NOT lose the round (allSettled)', async () => {
     const tweets = Array.from({ length: 5 }, (_, i) =>
       makeTweet({ external_id: `t-${i}` }),
