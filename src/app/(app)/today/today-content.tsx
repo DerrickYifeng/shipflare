@@ -102,6 +102,67 @@ function TodayContentInner({
   initialLastScanAt,
   onboardingCompletedAt,
 }: TodayContentInnerProps) {
+  // Only the HeaderBar's meta line consumes data here. `TodayBody` calls
+  // `useToday()` separately; SWR dedupes by key so both calls share the
+  // same in-flight request and cache entry — no double fetch.
+  const { items, stats, isLoading } = useToday();
+
+  // Discovery is cron-driven; the page only consumes whatever the
+  // workers have surfaced. The "last scan" timestamp is server-seeded.
+  const lastScanAt = initialLastScanAt;
+
+  if (isLoading) {
+    // loading.tsx owns the skeleton surface, but keep a guard so hooks
+    // don't render a partial view if SWR hasn't hydrated yet.
+    return null;
+  }
+
+  // Meta line for HeaderBar: "{n} to review · ● {n} shipped today · last run {t}"
+  const metaLine = (
+    <MetaLine
+      toReview={stats.pending_count ?? items.length}
+      shippedToday={stats.acted_today}
+      lastScan={lastScanAt}
+    />
+  );
+
+  const welcomeRibbon = (
+    <TodayWelcomeRibbon onboardingCompletedAt={onboardingCompletedAt} />
+  );
+
+  return (
+    <>
+      <HeaderBar title="Today" meta={metaLine} />
+      {welcomeRibbon}
+      <TodayBody yesterdayTop={yesterdayTop} />
+    </>
+  );
+}
+
+/* ─── Body — everything below the header strip ──────────────────────── */
+
+interface TodayBodyProps {
+  /**
+   * Surfaced by `TodayContent` so the completion state can show
+   * yesterday's top thread once everything is handled. Defaults to
+   * `null` so the new `/briefing` route can mount `<TodayBody />` with
+   * no props.
+   */
+  yesterdayTop?: YesterdayTop | null;
+}
+
+/**
+ * The Today inbox below the header strip — TacticalProgressCard, source
+ * filter rail, replies + scheduled posts sections, and the keyboard
+ * shortcut help dialog. Owns all the action callbacks and local UI
+ * state. Reads its data from `useToday()`; SWR dedupes the request when
+ * `TodayContentInner` (or any other consumer) calls the same hook in
+ * the same render tree.
+ *
+ * Exported so the new `/briefing` Today tab can mount it standalone
+ * without re-wiring HeaderBar / WelcomeRibbon.
+ */
+export function TodayBody({ yesterdayTop = null }: TodayBodyProps = {}) {
   const {
     items,
     replySlots,
@@ -126,10 +187,6 @@ function TodayContentInner({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const [sourceFilterId, setSourceFilterId] = useState<string | null>(null);
-
-  // Discovery is cron-driven; the page only consumes whatever the
-  // workers have surfaced. The "last scan" timestamp is server-seeded.
-  const lastScanAt = initialLastScanAt;
 
   // Approve with 5s undo window ──────────────────────────────────────
   const surfaceError = useCallback(
@@ -314,29 +371,14 @@ function TodayContentInner({
   const activeItem = items[activeIndex];
   const activeId = activeItem?.id ?? null;
 
-  const welcomeRibbon = (
-    <TodayWelcomeRibbon onboardingCompletedAt={onboardingCompletedAt} />
-  );
-
   if (isLoading) {
     // loading.tsx owns the skeleton surface, but keep a guard so hooks
     // don't render a partial view if SWR hasn't hydrated yet.
     return null;
   }
 
-  // Meta line for HeaderBar: "{n} to review · ● {n} shipped today · last run {t}"
-  const metaLine = (
-    <MetaLine
-      toReview={stats.pending_count ?? items.length}
-      shippedToday={stats.acted_today}
-      lastScan={lastScanAt}
-    />
-  );
-
   return (
     <>
-      <HeaderBar title="Today" meta={metaLine} />
-      {welcomeRibbon}
       <TacticalProgressCard />
 
       <SourceFilterRail
