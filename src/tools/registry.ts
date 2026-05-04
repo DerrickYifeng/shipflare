@@ -29,6 +29,7 @@ import { draftPostTool } from './DraftPostTool/DraftPostTool';
 import { findThreadsTool } from './FindThreadsTool/FindThreadsTool';
 import { draftReplyTool } from './DraftReplyTool/DraftReplyTool';
 import { validateDraftTool } from './ValidateDraftTool/ValidateDraftTool';
+import { processRepliesBatchTool } from './ProcessRepliesBatchTool/ProcessRepliesBatchTool';
 
 /**
  * Central tool registry for ShipFlare agents.
@@ -96,6 +97,13 @@ registry.register(draftReplyTool);
 // the source of truth for ShipFlare style warnings (hashtag count, links
 // in body/reply, anchor token).
 registry.register(validateDraftTool);
+// process_replies_batch — pipeline-to-tools Plan 2 Task 2. The Tool's
+// execute() owns the full reply pipeline (drafting-reply →
+// validate_draft → validating-draft → draft_reply with one REVISE
+// retry). Replaces the prose orchestration formerly inside
+// content-manager AGENT.md. Plan 3 will narrow visibility to the
+// social-media-manager allowlist.
+registry.register(processRepliesBatchTool);
 
 export { registry };
 
