@@ -78,7 +78,7 @@ export const findThreadsTool: ToolDefinition<FindThreadsInput, { threads: Thread
       '\n\n' +
       'Each returned thread carries canMentionProduct + mentionSignal — discovery ' +
       'already decided whether a reply may mention the product. Drafters should ' +
-      'honor canMentionProduct directly and skip a second judging-opportunity pass.',
+      'honor canMentionProduct directly and skip a second mention-eligibility judging pass.',
     inputSchema: findThreadsInputSchema,
     isConcurrencySafe: true,
     isReadOnly: true,
