@@ -122,6 +122,34 @@ function seedProduct(store: InMemoryStore): void {
   store.register<ProductRow>(products, [row]);
 }
 
+/**
+ * Build a validating-draft output that conforms to validatingDraftOutputSchema.
+ * The orchestrator only uses verdict / score / slopFingerprint, but the
+ * schema also requires checks / issues / suggestions — provide empties so
+ * safeParse passes.
+ */
+function makeReview(
+  verdict: 'PASS' | 'FAIL' | 'REVISE',
+  slopFingerprint: string[] = [],
+  score = 0.8,
+): {
+  verdict: 'PASS' | 'FAIL' | 'REVISE';
+  score: number;
+  checks: { name: string; result: 'PASS' | 'FAIL'; detail: string }[];
+  issues: string[];
+  suggestions: string[];
+  slopFingerprint: string[];
+} {
+  return {
+    verdict,
+    score,
+    checks: [],
+    issues: [],
+    suggestions: [],
+    slopFingerprint,
+  };
+}
+
 let store: InMemoryStore;
 beforeEach(() => {
   vi.clearAllMocks();
@@ -146,7 +174,7 @@ describe('processRepliesBatchTool', () => {
         usage: {},
       })
       .mockResolvedValueOnce({
-        result: { verdict: 'PASS', score: 0.85, slopFingerprint: [] },
+        result: makeReview('PASS', []),
         usage: {},
       });
     validateDraftExecMock.mockResolvedValue({ failures: [], warnings: [] });
@@ -207,11 +235,7 @@ describe('processRepliesBatchTool', () => {
         usage: {},
       })
       .mockResolvedValueOnce({
-        result: {
-          verdict: 'REVISE',
-          score: 0.5,
-          slopFingerprint: ['preamble_opener'],
-        },
+        result: makeReview('REVISE', ['preamble_opener'], 0.5),
         usage: {},
       })
       .mockResolvedValueOnce({
@@ -223,7 +247,7 @@ describe('processRepliesBatchTool', () => {
         usage: {},
       })
       .mockResolvedValueOnce({
-        result: { verdict: 'PASS', score: 0.8, slopFingerprint: [] },
+        result: makeReview('PASS', [], 0.8),
         usage: {},
       });
     validateDraftExecMock.mockResolvedValue({ failures: [], warnings: [] });
@@ -249,11 +273,7 @@ describe('processRepliesBatchTool', () => {
         usage: {},
       })
       .mockResolvedValueOnce({
-        result: {
-          verdict: 'REVISE',
-          score: 0.5,
-          slopFingerprint: ['fortune_cookie_closer'],
-        },
+        result: makeReview('REVISE', ['fortune_cookie_closer'], 0.5),
         usage: {},
       })
       .mockResolvedValueOnce({
@@ -261,11 +281,7 @@ describe('processRepliesBatchTool', () => {
         usage: {},
       })
       .mockResolvedValueOnce({
-        result: {
-          verdict: 'REVISE',
-          score: 0.5,
-          slopFingerprint: ['fortune_cookie_closer'],
-        },
+        result: makeReview('REVISE', ['fortune_cookie_closer'], 0.5),
         usage: {},
       });
     validateDraftExecMock.mockResolvedValue({ failures: [], warnings: [] });
@@ -290,11 +306,7 @@ describe('processRepliesBatchTool', () => {
         usage: {},
       })
       .mockResolvedValueOnce({
-        result: {
-          verdict: 'FAIL',
-          score: 0.1,
-          slopFingerprint: ['banned_vocabulary'],
-        },
+        result: makeReview('FAIL', ['banned_vocabulary'], 0.1),
         usage: {},
       });
     validateDraftExecMock.mockResolvedValue({ failures: [], warnings: [] });
@@ -325,16 +337,20 @@ describe('processRepliesBatchTool', () => {
 
   it('parallelizes across multiple threads via Promise.all', async () => {
     seedThreads(store, [{ id: 't1' }, { id: 't2' }, { id: 't3' }]);
-    runForkSkillMock.mockResolvedValue({
-      result: {
-        draftBody: 'd',
-        whyItWorks: '',
-        confidence: 0.7,
-        verdict: 'PASS',
-        score: 0.8,
-        slopFingerprint: [],
-      },
-      usage: {},
+    // Mock alternates draft / validating for each thread. Using
+    // mockResolvedValue with a unioned object would fail strict schema
+    // validation now, so dispatch by skill name.
+    runForkSkillMock.mockImplementation(async (skillName: string) => {
+      if (skillName === 'drafting-reply') {
+        return {
+          result: { draftBody: 'd', whyItWorks: '', confidence: 0.7 },
+          usage: {},
+        };
+      }
+      if (skillName === 'validating-draft') {
+        return { result: makeReview('PASS', [], 0.8), usage: {} };
+      }
+      throw new Error(`unexpected skill: ${skillName}`);
     });
     validateDraftExecMock.mockResolvedValue({ failures: [], warnings: [] });
     draftReplyExecMock.mockResolvedValue({ id: 'd' });
@@ -367,11 +383,7 @@ describe('processRepliesBatchTool', () => {
         usage: {},
       })
       .mockResolvedValueOnce({
-        result: {
-          verdict: 'REVISE',
-          score: 0.5,
-          slopFingerprint: ['fortune_cookie_closer'],
-        },
+        result: makeReview('REVISE', ['fortune_cookie_closer'], 0.5),
         usage: {},
       })
       .mockResolvedValueOnce({
@@ -379,11 +391,11 @@ describe('processRepliesBatchTool', () => {
         usage: {},
       })
       .mockResolvedValueOnce({
-        result: {
-          verdict: 'REVISE',
-          score: 0.5,
-          slopFingerprint: ['fortune_cookie_closer', 'preamble_opener'],
-        },
+        result: makeReview(
+          'REVISE',
+          ['fortune_cookie_closer', 'preamble_opener'],
+          0.5,
+        ),
         usage: {},
       });
     validateDraftExecMock.mockResolvedValue({ failures: [], warnings: [] });
@@ -403,22 +415,25 @@ describe('processRepliesBatchTool', () => {
 
   it("one thread's drafting-reply rejection does NOT lose the whole batch", async () => {
     seedThreads(store, [{ id: 't1' }, { id: 't2' }, { id: 't3' }]);
-    runForkSkillMock
-      // t1's first fork-skill (drafting-reply) rejects — the whole
-      // processOne(t1) promise rejects mid-pipeline.
-      .mockRejectedValueOnce(new Error('xAI quota exhausted'))
-      // t2 + t3 each need 2 fork-skill calls (draft + validating).
-      .mockResolvedValue({
-        result: {
-          draftBody: 'd',
-          whyItWorks: '',
-          confidence: 0.7,
-          verdict: 'PASS',
-          score: 0.8,
-          slopFingerprint: [],
-        },
-        usage: {},
-      });
+    let firstCall = true;
+    runForkSkillMock.mockImplementation(async (skillName: string) => {
+      if (firstCall) {
+        // t1's first fork-skill (drafting-reply) rejects — the whole
+        // processOne(t1) promise rejects mid-pipeline.
+        firstCall = false;
+        throw new Error('xAI quota exhausted');
+      }
+      if (skillName === 'drafting-reply') {
+        return {
+          result: { draftBody: 'd', whyItWorks: '', confidence: 0.7 },
+          usage: {},
+        };
+      }
+      if (skillName === 'validating-draft') {
+        return { result: makeReview('PASS', [], 0.8), usage: {} };
+      }
+      throw new Error(`unexpected skill: ${skillName}`);
+    });
     validateDraftExecMock.mockResolvedValue({ failures: [], warnings: [] });
     draftReplyExecMock.mockResolvedValue({ id: 'd' });
 
@@ -447,5 +462,56 @@ describe('processRepliesBatchTool', () => {
       threadIds: Array.from({ length: 10 }, (_, i) => `t${i}`),
     });
     expect(ok.success).toBe(true);
+  });
+
+  it('treats malformed drafting-reply output as errored, does not crash', async () => {
+    seedThreads(store, [{ id: 't1' }]);
+    // Returned object missing draftBody — pre-fix this would crash
+    // downstream when validate_draft tries text.split(...) on undefined.
+    runForkSkillMock.mockResolvedValueOnce({
+      result: { whyItWorks: 'no body', confidence: 0.5 },
+      usage: {},
+    });
+    validateDraftExecMock.mockResolvedValue({ failures: [], warnings: [] });
+
+    const result = await processRepliesBatchTool.execute(
+      { threadIds: ['t1'] },
+      makeCtx(store, { userId: 'user-1', productId: 'prod-1' }),
+    );
+
+    expect(result.draftsCreated).toBe(0);
+    expect(result.draftsSkipped).toBe(1);
+    expect(result.details[0]?.status).toBe('errored');
+    expect(result.details[0]?.reason).toContain('drafting-reply');
+    // Mechanical / persist were never invoked because draft was null.
+    expect(validateDraftExecMock).not.toHaveBeenCalled();
+    expect(draftReplyExecMock).not.toHaveBeenCalled();
+  });
+
+  it('treats malformed validating-draft output as errored, does not crash', async () => {
+    seedThreads(store, [{ id: 't1' }]);
+    runForkSkillMock
+      .mockResolvedValueOnce({
+        result: { draftBody: 'we tried that', whyItWorks: '', confidence: 0.6 },
+        usage: {},
+      })
+      // Missing required fields (checks/issues/suggestions) AND verdict.
+      // safeParse fails → validateOnce returns null → errored, no crash.
+      .mockResolvedValueOnce({
+        result: { score: 0.5 },
+        usage: {},
+      });
+    validateDraftExecMock.mockResolvedValue({ failures: [], warnings: [] });
+
+    const result = await processRepliesBatchTool.execute(
+      { threadIds: ['t1'] },
+      makeCtx(store, { userId: 'user-1', productId: 'prod-1' }),
+    );
+
+    expect(result.draftsCreated).toBe(0);
+    expect(result.draftsSkipped).toBe(1);
+    expect(result.details[0]?.status).toBe('errored');
+    expect(result.details[0]?.reason).toContain('validating-draft');
+    expect(draftReplyExecMock).not.toHaveBeenCalled();
   });
 });

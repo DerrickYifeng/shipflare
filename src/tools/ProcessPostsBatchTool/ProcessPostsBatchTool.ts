@@ -24,6 +24,8 @@ import type { ToolDefinition, ToolContext } from '@/core/types';
 import { planItems as planItemsTbl, products } from '@/lib/db/schema';
 import { readDomainDeps } from '@/tools/context-helpers';
 import { runForkSkill } from '@/skills/run-fork-skill';
+import { draftingPostOutputSchema } from '@/skills/drafting-post/schema';
+import { validatingDraftOutputSchema } from '@/skills/validating-draft/schema';
 import { validateDraftTool } from '@/tools/ValidateDraftTool/ValidateDraftTool';
 import { draftPostTool } from '@/tools/DraftPostTool/DraftPostTool';
 import { mapSlopFingerprintToVoiceCue } from '@/lib/slop-cue-mapper';
@@ -62,17 +64,8 @@ export interface ProcessPostsBatchResult {
   details: BatchItemResult[];
 }
 
-interface DraftSkillOutput {
-  draftBody: string;
-  whyItWorks: string;
-  confidence: number;
-}
-
-interface ValidatingSkillOutput {
-  verdict: 'PASS' | 'REVISE' | 'FAIL';
-  score: number;
-  slopFingerprint: string[];
-}
+type DraftSkillOutput = z.infer<typeof draftingPostOutputSchema>;
+type ValidatingSkillOutput = z.infer<typeof validatingDraftOutputSchema>;
 
 type PlanItemRow = typeof planItemsTbl.$inferSelect;
 
@@ -200,6 +193,13 @@ async function processOne(
 ): Promise<BatchItemResult> {
   // Step 1: draft
   const draft = await draftOnce(item, product, input, undefined, ctx);
+  if (!draft) {
+    return {
+      planItemId: item.id,
+      status: 'errored',
+      reason: 'drafting-post returned invalid output',
+    };
+  }
 
   // Step 2: mechanical
   const channel = item.channel ?? '';
@@ -222,6 +222,13 @@ async function processOne(
 
   // Step 3: validating-draft (LLM)
   const review = await validateOnce(item, product, draft, ctx);
+  if (!review) {
+    return {
+      planItemId: item.id,
+      status: 'errored',
+      reason: 'validating-draft returned invalid output',
+    };
+  }
 
   // Step 4: decide
   if (review.verdict === 'PASS') {
@@ -243,6 +250,14 @@ async function processOne(
   if (review.verdict === 'REVISE') {
     const cue = mapSlopFingerprintToVoiceCue(review.slopFingerprint);
     const retry = await draftOnce(item, product, input, cue, ctx);
+    if (!retry) {
+      return {
+        planItemId: item.id,
+        status: 'errored',
+        reason: 'drafting-post retry returned invalid output',
+        slopFingerprint: review.slopFingerprint,
+      };
+    }
     const retryMech = await validateDraftTool.execute(
       {
         text: retry.draftBody,
@@ -261,6 +276,14 @@ async function processOne(
       };
     }
     const retryReview = await validateOnce(item, product, retry, ctx);
+    if (!retryReview) {
+      return {
+        planItemId: item.id,
+        status: 'errored',
+        reason: 'validating-draft retry returned invalid output',
+        slopFingerprint: review.slopFingerprint,
+      };
+    }
     if (retryReview.verdict === 'PASS') {
       await draftPostTool.execute(
         {
@@ -320,13 +343,20 @@ async function processOne(
   };
 }
 
+/**
+ * Draft once via the drafting-post skill. Passes the Zod schema through to
+ * runForkSkill (so runAgent synthesizes StructuredOutput with strict
+ * validation) and ALSO safeParses defensively. Returns null when the
+ * fork's output is malformed so callers short-circuit to 'errored'
+ * instead of crashing on `draft.draftBody` undefined access.
+ */
 async function draftOnce(
   item: PlanItemRow,
   product: ProductForDraft,
   input: ProcessPostsBatchInput,
   voiceOverride: string | undefined,
   ctx: ToolContext,
-): Promise<DraftSkillOutput> {
+): Promise<DraftSkillOutput | null> {
   const args = {
     planItem: {
       id: item.id,
@@ -354,21 +384,34 @@ async function draftOnce(
       ? { founderVoiceBlock: input.founderVoiceBlock }
       : {}),
   };
-  const { result } = await runForkSkill<DraftSkillOutput>(
+  const { result } = await runForkSkill(
     'drafting-post',
     JSON.stringify(args),
-    undefined,
+    draftingPostOutputSchema,
     ctx,
   );
-  return result;
+  const parsed = draftingPostOutputSchema.safeParse(result);
+  if (!parsed.success) {
+    log.warn(
+      `drafting-post returned invalid output for plan_item ${item.id}: ${parsed.error.message}`,
+    );
+    return null;
+  }
+  return parsed.data;
 }
 
+/**
+ * Validate once via the validating-draft skill. Same safeParse pattern as
+ * draftOnce — schema passed through for StructuredOutput, then safeParse
+ * defensively. Returns null when malformed so processOne short-circuits
+ * to 'errored' instead of crashing on `review.verdict` undefined.
+ */
 async function validateOnce(
   item: PlanItemRow,
   product: ProductForDraft,
   draft: DraftSkillOutput,
   ctx: ToolContext,
-): Promise<ValidatingSkillOutput> {
+): Promise<ValidatingSkillOutput | null> {
   // The validating-draft skill's schema is reply-shaped (replyBody,
   // threadTitle, threadBody, subreddit). For posts we reuse the same
   // shape exactly the way content-manager's post_batch did:
@@ -391,11 +434,18 @@ async function validateOnce(
     ],
     memoryContext: '',
   };
-  const { result } = await runForkSkill<ValidatingSkillOutput>(
+  const { result } = await runForkSkill(
     'validating-draft',
     JSON.stringify(args),
-    undefined,
+    validatingDraftOutputSchema,
     ctx,
   );
-  return result;
+  const parsed = validatingDraftOutputSchema.safeParse(result);
+  if (!parsed.success) {
+    log.warn(
+      `validating-draft returned invalid output for plan_item ${item.id}: ${parsed.error.message}`,
+    );
+    return null;
+  }
+  return parsed.data;
 }
