@@ -1,21 +1,19 @@
-// process_posts_batch — orchestrates the full post pipeline for a
-// batch of already-allocated `plan_items` rows. The Tool's `execute()`
-// IS the orchestrator: parallel for-loop over plan_items, four-step
-// pipeline per item (drafting-post → validate_draft → validating-draft
-// → draft_post), with at most one REVISE retry that uses
-// `mapSlopFingerprintToVoiceCue` to feed the writer a deterministic
-// repair cue.
+// process_posts_batch — orchestrates the post pipeline for a batch of
+// already-allocated `plan_items` rows. The Tool's `execute()` IS the
+// orchestrator: parallel for-loop over plan_items, three-step pipeline
+// per item (drafting-post → validate_draft (mechanical) → draft_post
+// persistence). The LLM-validation fork was intentionally dropped —
+// empirical recall < precision when validating-draft was gating, so the
+// drafting skill's prompt now performs an in-fork self-audit and the
+// founder reviews surviving drafts in /today.
 //
 // Unlike the reply pipeline there is NO judging step — the tactical
 // planner already decided this plan_item earns a post; we trust the
 // allocation. That collapses the per-artifact cost ceiling to:
 //
 // Per-artifact cost ceiling (CLAUDE.md "Per-artifact cost ceiling"):
-//   - Default 2 fork-skill calls (drafting + validating, no gating skill
-//     because allocation is the gate).
-//   - Max 4 fork-skill calls when REVISE fires once.
-// REVISE retry max is 1; on a second REVISE the tool persists with a
-// `[needs human review: ...]` flag in `whyItWorks` instead of looping.
+//   - 1 fork-skill call (drafting only). Mechanical `validate_draft`
+//     runs as a deterministic tool (no LLM cost).
 
 import { z } from 'zod';
 import { and, eq, inArray } from 'drizzle-orm';
@@ -25,10 +23,8 @@ import { planItems as planItemsTbl, products } from '@/lib/db/schema';
 import { readDomainDeps } from '@/tools/context-helpers';
 import { runForkSkill } from '@/skills/run-fork-skill';
 import { draftingPostOutputSchema } from '@/skills/drafting-post/schema';
-import { validatingDraftOutputSchema } from '@/skills/validating-draft/schema';
 import { validateDraftTool } from '@/tools/ValidateDraftTool/ValidateDraftTool';
 import { draftPostTool } from '@/tools/DraftPostTool/DraftPostTool';
-import { mapSlopFingerprintToVoiceCue } from '@/lib/slop-cue-mapper';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('tool:process_posts_batch');
@@ -45,15 +41,8 @@ type ProcessPostsBatchInput = z.infer<typeof inputSchema>;
 
 interface BatchItemResult {
   planItemId: string;
-  status:
-    | 'persisted'
-    | 'persisted_after_revise'
-    | 'persisted_flagged_for_review'
-    | 'rejected_mechanical'
-    | 'rejected_validating'
-    | 'errored';
+  status: 'persisted' | 'rejected_mechanical' | 'errored';
   reason?: string;
-  slopFingerprint?: string[];
 }
 
 export interface ProcessPostsBatchResult {
@@ -65,7 +54,6 @@ export interface ProcessPostsBatchResult {
 }
 
 type DraftSkillOutput = z.infer<typeof draftingPostOutputSchema>;
-type ValidatingSkillOutput = z.infer<typeof validatingDraftOutputSchema>;
 
 type PlanItemRow = typeof planItemsTbl.$inferSelect;
 
@@ -82,11 +70,11 @@ export const processPostsBatchTool: ToolDefinition<
 > = buildTool({
   name: PROCESS_POSTS_BATCH_TOOL_NAME,
   description:
-    'Process a batch of plan_items through the full post pipeline ' +
-    '(drafting-post → validate_draft → validating-draft → draft_post ' +
-    'with REVISE retry, max 1). The post path has NO judging step ' +
-    '(judging-thread-quality is for reply targets only). Returns a ' +
-    'per-item summary in the response.\n\n' +
+    'Process a batch of plan_items through the post pipeline ' +
+    '(drafting-post → validate_draft → draft_post). The post path has NO ' +
+    'judging step (judging-thread-quality is for reply targets only) and ' +
+    'NO LLM-validation fork — the drafting skill self-audits in-fork. ' +
+    'Returns a per-item summary in the response.\n\n' +
     'INPUT: { "planItemIds": ["uuid1",...up to 10], "voice"?: string, "founderVoiceBlock"?: string }\n' +
     'OUTPUT: { itemsScanned, draftsCreated, draftsSkipped, notes, details[] }',
   inputSchema,
@@ -156,25 +144,7 @@ export const processPostsBatchTool: ToolDefinition<
       };
     });
 
-    const draftsCreated = results.filter(
-      (r) =>
-        r.status === 'persisted' ||
-        r.status === 'persisted_after_revise' ||
-        r.status === 'persisted_flagged_for_review',
-    ).length;
-
-    const slopCounts = new Map<string, number>();
-    for (const r of results) {
-      for (const fp of r.slopFingerprint ?? []) {
-        slopCounts.set(fp, (slopCounts.get(fp) ?? 0) + 1);
-      }
-    }
-    const notes =
-      slopCounts.size > 0
-        ? `slop fingerprints: ${[...slopCounts.entries()]
-            .map(([k, v]) => `${k}=${v}`)
-            .join(', ')}`
-        : 'no slop patterns matched';
+    const draftsCreated = results.filter((r) => r.status === 'persisted').length;
 
     log.info(
       `process_posts_batch user=${userId} items=${itemRows.length} ` +
@@ -184,11 +154,7 @@ export const processPostsBatchTool: ToolDefinition<
     const draftsSkipped = itemRows.length - draftsCreated;
     const skipBreakdown = new Map<string, number>();
     for (const r of results) {
-      if (
-        r.status !== 'persisted' &&
-        r.status !== 'persisted_after_revise' &&
-        r.status !== 'persisted_flagged_for_review'
-      ) {
+      if (r.status !== 'persisted') {
         skipBreakdown.set(r.status, (skipBreakdown.get(r.status) ?? 0) + 1);
       }
     }
@@ -196,6 +162,10 @@ export const processPostsBatchTool: ToolDefinition<
       skipBreakdown.size > 0
         ? ` (${[...skipBreakdown.entries()].map(([k, v]) => `${k}=${v}`).join(', ')})`
         : '';
+    const notes =
+      skipBreakdown.size > 0
+        ? `breakdown: ${[...skipBreakdown.entries()].map(([k, v]) => `${k}=${v}`).join(', ')}`
+        : 'all drafts persisted';
     ctx.emitProgress?.(
       PROCESS_POSTS_BATCH_TOOL_NAME,
       `${draftsCreated} drafted, ${draftsSkipped} skipped${skipDetail}`,
@@ -218,8 +188,8 @@ async function processOne(
   input: ProcessPostsBatchInput,
   ctx: ToolContext,
 ): Promise<BatchItemResult> {
-  // Step 1: draft
-  const draft = await draftOnce(item, product, input, undefined, ctx);
+  // Step 1: draft (only fork-skill call — drafting-post self-audits)
+  const draft = await draftOnce(item, product, input, ctx);
   if (!draft) {
     return {
       planItemId: item.id,
@@ -228,7 +198,7 @@ async function processOne(
     };
   }
 
-  // Step 2: mechanical
+  // Step 2: mechanical validate (deterministic — length, banned vocab regex)
   const channel = item.channel ?? '';
   const mech = await validateDraftTool.execute(
     {
@@ -247,126 +217,18 @@ async function processOne(
     };
   }
 
-  // Step 3: validating-draft (LLM)
-  const review = await validateOnce(item, product, draft, ctx);
-  if (!review) {
-    return {
+  // Step 3: persist
+  await draftPostTool.execute(
+    {
       planItemId: item.id,
-      status: 'errored',
-      reason: 'validating-draft returned invalid output',
-    };
-  }
-
-  // Step 4: decide
-  if (review.verdict === 'PASS') {
-    await draftPostTool.execute(
-      {
-        planItemId: item.id,
-        draftBody: draft.draftBody,
-        whyItWorks: draft.whyItWorks,
-      },
-      ctx,
-    );
-    return {
-      planItemId: item.id,
-      status: 'persisted',
-      slopFingerprint: review.slopFingerprint,
-    };
-  }
-
-  if (review.verdict === 'REVISE') {
-    const cue = mapSlopFingerprintToVoiceCue(review.slopFingerprint);
-    const retry = await draftOnce(item, product, input, cue, ctx);
-    if (!retry) {
-      return {
-        planItemId: item.id,
-        status: 'errored',
-        reason: 'drafting-post retry returned invalid output',
-        slopFingerprint: review.slopFingerprint,
-      };
-    }
-    const retryMech = await validateDraftTool.execute(
-      {
-        text: retry.draftBody,
-        platform: channel,
-        kind: 'post',
-      },
-      ctx,
-    );
-    if (retryMech.failures.length > 0) {
-      const f = retryMech.failures[0]!;
-      return {
-        planItemId: item.id,
-        status: 'rejected_mechanical',
-        reason: `retry mech: ${f.validator}:${f.reason}`,
-        slopFingerprint: review.slopFingerprint,
-      };
-    }
-    const retryReview = await validateOnce(item, product, retry, ctx);
-    if (!retryReview) {
-      return {
-        planItemId: item.id,
-        status: 'errored',
-        reason: 'validating-draft retry returned invalid output',
-        slopFingerprint: review.slopFingerprint,
-      };
-    }
-    if (retryReview.verdict === 'PASS') {
-      await draftPostTool.execute(
-        {
-          planItemId: item.id,
-          draftBody: retry.draftBody,
-          whyItWorks: retry.whyItWorks,
-        },
-        ctx,
-      );
-      return {
-        planItemId: item.id,
-        status: 'persisted_after_revise',
-        slopFingerprint: review.slopFingerprint,
-      };
-    }
-    if (retryReview.verdict === 'REVISE') {
-      // Per CLAUDE.md max-1-revise rule: persist with a human-review flag
-      // rather than spending another fork-skill round.
-      // DraftPostTool enforces whyItWorks.max(500) (Zod), so truncate the
-      // base whyItWorks to leave room for the flag suffix and clamp the
-      // total to 500 chars.
-      const flagSuffix = ` [needs human review: ${retryReview.slopFingerprint.join(',')}]`;
-      const baseLen = Math.max(0, 500 - flagSuffix.length);
-      const truncatedWhy =
-        retry.whyItWorks.length > baseLen
-          ? retry.whyItWorks.slice(0, Math.max(0, baseLen - 1)) + '…'
-          : retry.whyItWorks;
-      const flaggedWhy = (truncatedWhy + flagSuffix).slice(0, 500);
-      await draftPostTool.execute(
-        {
-          planItemId: item.id,
-          draftBody: retry.draftBody,
-          whyItWorks: flaggedWhy,
-        },
-        ctx,
-      );
-      return {
-        planItemId: item.id,
-        status: 'persisted_flagged_for_review',
-        slopFingerprint: retryReview.slopFingerprint,
-      };
-    }
-    return {
-      planItemId: item.id,
-      status: 'rejected_validating',
-      reason: 'retry FAIL',
-      slopFingerprint: retryReview.slopFingerprint,
-    };
-  }
-
-  // First-pass FAIL
+      draftBody: draft.draftBody,
+      whyItWorks: draft.whyItWorks,
+    },
+    ctx,
+  );
   return {
     planItemId: item.id,
-    status: 'rejected_validating',
-    reason: 'FAIL on first review',
-    slopFingerprint: review.slopFingerprint,
+    status: 'persisted',
   };
 }
 
@@ -381,7 +243,6 @@ async function draftOnce(
   item: PlanItemRow,
   product: ProductForDraft,
   input: ProcessPostsBatchInput,
-  voiceOverride: string | undefined,
   ctx: ToolContext,
 ): Promise<DraftSkillOutput | null> {
   const args = {
@@ -402,11 +263,7 @@ async function draftOnce(
     },
     channel: item.channel ?? '',
     phase: item.phase,
-    ...(voiceOverride
-      ? { voice: voiceOverride }
-      : input.voice
-        ? { voice: input.voice }
-        : {}),
+    ...(input.voice ? { voice: input.voice } : {}),
     ...(input.founderVoiceBlock
       ? { founderVoiceBlock: input.founderVoiceBlock }
       : {}),
@@ -421,56 +278,6 @@ async function draftOnce(
   if (!parsed.success) {
     log.warn(
       `drafting-post returned invalid output for plan_item ${item.id}: ${parsed.error.message}`,
-    );
-    return null;
-  }
-  return parsed.data;
-}
-
-/**
- * Validate once via the validating-draft skill. Same safeParse pattern as
- * draftOnce — schema passed through for StructuredOutput, then safeParse
- * defensively. Returns null when malformed so processOne short-circuits
- * to 'errored' instead of crashing on `review.verdict` undefined.
- */
-async function validateOnce(
-  item: PlanItemRow,
-  product: ProductForDraft,
-  draft: DraftSkillOutput,
-  ctx: ToolContext,
-): Promise<ValidatingSkillOutput | null> {
-  // The validating-draft skill's schema is reply-shaped (replyBody,
-  // threadTitle, threadBody, subreddit). For posts we reuse the same
-  // shape exactly the way content-manager's post_batch did:
-  //   replyBody  ← draft.draftBody
-  //   threadTitle ← planItem.title
-  //   threadBody  ← planItem.description
-  //   subreddit  ← channel (placeholder — 'x' or 'reddit')
-  const args = {
-    drafts: [
-      {
-        replyBody: draft.draftBody,
-        threadTitle: item.title,
-        threadBody: item.description ?? '',
-        subreddit: item.channel ?? '',
-        productName: product.name,
-        productDescription: product.description,
-        confidence: draft.confidence,
-        whyItWorks: draft.whyItWorks,
-      },
-    ],
-    memoryContext: '',
-  };
-  const { result } = await runForkSkill(
-    'validating-draft',
-    JSON.stringify(args),
-    validatingDraftOutputSchema,
-    ctx,
-  );
-  const parsed = validatingDraftOutputSchema.safeParse(result);
-  if (!parsed.success) {
-    log.warn(
-      `validating-draft returned invalid output for plan_item ${item.id}: ${parsed.error.message}`,
     );
     return null;
   }

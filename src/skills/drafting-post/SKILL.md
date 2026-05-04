@@ -50,10 +50,8 @@ When `params` is empty, fall back to the lifecycle defaults from the per-phase p
 
 ## Slop rules — DO NOT EMIT THESE PATTERNS
 
-Apply every rule in `slop-rules` while you draft. The validating-draft
-skill checks the SAME patterns immediately after you — drafts that
-match a hard-fail rule will be rejected. The cheap path is to not
-write them in the first place. Pay particular attention to:
+Apply every rule in `slop-rules` while you draft. The cheap path is to
+not write them in the first place. Pay particular attention to:
 
 - `preamble_opener`, `engagement_bait_filler`, `banned_vocabulary` —
   hard fails on contact.
@@ -65,6 +63,48 @@ write them in the first place. Pay particular attention to:
   `negation_cadence` — REVISE-or-tighten; avoid them.
 
 Read the full slop-rules section below for triggers + examples.
+
+## Self-audit before output (REQUIRED)
+
+You will NOT get a second LLM pass — this is the only fork that runs.
+Before emitting your JSON, run this checklist on your own draft:
+
+1. **Anchor check** — does the draft have at least ONE of: a number, a
+   proper noun (brand/tool name), a timestamp phrase, or a URL? If no,
+   either rewrite to add one OR drop the post and ask a question instead.
+   Posts without a concrete anchor read as generic LinkedIn slop.
+
+2. **First-person check** — every generalized claim ("the real X", "most
+   founders", "winners do Y") MUST carry an `I/we + concrete` receipt
+   somewhere in the same post. If you have a sermon-style claim with
+   no first-person anchor, REWRITE. Posts especially: lead with what
+   you did, not what others should do.
+
+3. **Slop pattern scan** — re-read each `slop-rules` pattern below.
+   If your draft matches any HARD-FAIL rule (preamble_opener,
+   diagnostic_from_above, binary_not_x_its_y, banned_vocabulary,
+   engagement_bait_filler, no_first_person paired with claim) — REWRITE.
+   If it matches a REVISE pattern (fortune_cookie_closer,
+   colon_aphorism_opener, naked_number_unsourced, em_dash_overuse,
+   triple_grouping, negation_cadence) — TIGHTEN.
+
+4. **Length check** — X post ≤ 280 weighted chars (single tweet only,
+   no threads). Reddit post 150-600 words (single body, lead with value
+   and reserve product mention for the bottom). Verify by counting.
+
+5. **Phase + voice check** — does the draft match the resolved phase's
+   voice cluster from the per-phase playbook? If `params.pillar` is
+   set, does the post live within that pillar (milestone vs hot_take vs
+   behind_the_scenes etc.)? If `params.theme` is set, does the post
+   stay on-theme without drifting? If `params.metaphor_ban` is set,
+   does the post avoid every banned phrase? If any answer is no, REWRITE.
+
+6. **Sibling-platform check** — no sibling-platform mentions without
+   an explicit contrast marker (per `content-safety` reference). No
+   hallucinated stats — every number must be defensible from the
+   inputs you were given.
+
+If any check fails, REWRITE before outputting. You only get one shot.
 
 ## Output
 

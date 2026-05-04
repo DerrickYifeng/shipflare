@@ -187,28 +187,32 @@ artifact" is a skill in agent clothing; convert it.
    Cross-references between docs are fine; copies are not. Before
    adding a rule, grep for prior art and extend the existing owner.
 
-3. **Drafting and validating run in different fork calls.** The
-   skill that drafts content does not produce the final pass/fail
-   verdict on that same content. The orchestrating agent (or the
-   review worker for post-persistence) invokes a separate
-   `validating-*` skill in a fresh fork. REVISE retry loops belong
-   to the agent, not the drafting skill.
+3. **When you DO validate, drafting and validating run in different
+   fork calls** (approval bias mitigation — same fork tends to approve
+   its own output). But validation is OPTIONAL per pipeline; the reply /
+   post batch tools (`process_replies_batch`, `process_posts_batch`)
+   intentionally skip the LLM-validation fork after empirical recall <
+   precision: the drafting skill self-audits via its prompt
+   (drafting-reply / drafting-post Self-audit section), persists
+   directly after the mechanical `validate_draft` tool, and lets the
+   founder review in `/today` rather than filtering server-side.
+   The `validating-draft` skill remains available for callers that
+   genuinely need a second-fork audit (post-review worker, ad-hoc
+   audits) — but do not gate batch drafting on it.
 
 ### Per-artifact cost ceiling
 
 Counted in fork-skill calls; the orchestrating agent's own loop
 turns are amortized across artifacts in a sweep.
 
-- **Default: 3 fork-skill calls** (judging + drafting + validating).
-  The judging skill may short-circuit "skip"; the per-artifact cost
-  collapses to 1 in that case.
-- **Max with one REVISE retry: 5 fork-skill calls.**
-- Pipelines without a gating skill (e.g. `drafting-post` for an
-  already-allocated plan_item) use 2 default / 4 with REVISE.
-- More retries are not allowed; tighten the drafting skill's rules
-  instead.
-
-Sweeps that produce multiple artifacts multiply per artifact.
+- **Default: 1 fork-skill call** (drafting only) for reply / post pipelines.
+  Mechanical `validate_draft` runs as a tool (no LLM cost). Drafting
+  skill's prompt enforces slop rules + self-audit in-fork.
+- **With validation (e.g. post-publication review): 2 fork-skill calls
+  max** (drafting + validating). REVISE retries are no longer used.
+- The judging skill at discovery time is the only gate; one judge per
+  thread, no double-check downstream.
+- Sweeps multiply per artifact.
 
 ### When in doubt, default to skill
 

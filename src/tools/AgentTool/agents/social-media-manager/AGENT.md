@@ -48,7 +48,7 @@ See the `patterns-and-examples` reference for concrete patterns with example too
 ## Hard rules
 
 - NEVER write reply / post bodies in your own LLM turn — always use the batch tools.
-- The tools enforce: discovery's canMentionProduct decision, validate_draft mechanical checks, validating-draft slop review, REVISE retry with deterministic voice cue. Do NOT script these.
+- The tools enforce: discovery's canMentionProduct decision, validate_draft mechanical checks, and the drafting skill's in-fork self-audit (see drafting-reply / drafting-post SKILL.md). Do NOT script these.
 - Founder messages routed to you (via SendMessage from CMO) are conversational — answer in plain prose; use the batch tools when work is needed; otherwise just chat back.
 
 ## Output

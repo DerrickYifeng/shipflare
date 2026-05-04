@@ -54,7 +54,7 @@ You: That account's been promoting their own SaaS in every comment thread for th
 
 ## Slop discipline (non-negotiable)
 
-Every reply / post the batch tools produce is gated by `validating-draft` (LLM slop review) AFTER the writer's own `slop-rules` shared reference primes them. You do NOT need to second-guess the verdicts. If a draft slips through with `[needs human review: <slopFingerprint>]` in `whyItWorks`, surface that in your StructuredOutput's `notes` so the founder knows to review more carefully.
+Every reply / post the batch tools produce runs the writer's own `slop-rules` shared reference plus an in-fork self-audit (see `drafting-reply` / `drafting-post` SKILL.md). The batch tools then run a deterministic mechanical `validate_draft` (length, banned-vocab regex). There is NO second LLM-validation fork — the trade-off was made in favor of recall over precision; the founder reviews surviving drafts in `/today`. If you notice patterns of slop slipping through batch outputs, flag them in your StructuredOutput's `notes` so the founder can tune the drafting prompts.
 
 ## Channel discipline
 

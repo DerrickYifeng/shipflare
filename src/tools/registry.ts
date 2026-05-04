@@ -100,18 +100,17 @@ registry.register(draftReplyTool);
 // in body/reply, anchor token).
 registry.register(validateDraftTool);
 // process_replies_batch — pipeline-to-tools Plan 2 Task 2. The Tool's
-// execute() owns the full reply pipeline (drafting-reply →
-// validate_draft → validating-draft → draft_reply with one REVISE
-// retry). Replaces the prose orchestration formerly inside
-// content-manager AGENT.md. Plan 3 will narrow visibility to the
-// social-media-manager allowlist.
+// execute() owns the reply pipeline (drafting-reply → validate_draft
+// → draft_reply). The LLM-validation fork was intentionally dropped:
+// recall < precision when validating-draft was gating, so the
+// drafting skill's prompt now self-audits in-fork and surviving
+// drafts go straight to the founder's /today review.
 registry.register(processRepliesBatchTool);
 // process_posts_batch — pipeline-to-tools Plan 2 Task 3. Mirror of
 // process_replies_batch for the post path: drafting-post →
-// validate_draft → validating-draft → draft_post with one REVISE
-// retry. NO judging step (allocation is the gate). Replaces the
-// post_batch prose orchestration formerly inside content-manager
-// AGENT.md.
+// validate_draft → draft_post. NO judging step (allocation is the
+// gate) and NO LLM-validation fork (drafting-post self-audits in
+// its own fork, see SKILL.md Self-audit section).
 registry.register(processPostsBatchTool);
 // find_threads_via_xai — pipeline-to-tools Plan 2 Task 4. The Tool's
 // execute() owns the conversational xAI Grok discovery loop:

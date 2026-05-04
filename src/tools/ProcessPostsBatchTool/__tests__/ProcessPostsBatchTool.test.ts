@@ -1,12 +1,15 @@
 /**
  * process_posts_batch unit tests.
  *
- * Mocks runForkSkill (drafting-post + validating-draft) and the two
- * sub-tools (validate_draft + draft_post) so the test asserts the
- * orchestration shape only — the 4-step pipeline order, REVISE retry
- * behavior, slop-fingerprint → voice-cue mapping, and the parallel
- * batch fan-out. Unlike the reply path, there is NO judging step
- * and NO skip-legacy branch — allocation is the gate.
+ * Mocks runForkSkill (drafting-post only — the validating-draft fork
+ * was intentionally dropped; recall < precision when it gated drafts)
+ * and the two sub-tools (validate_draft + draft_post) so the test
+ * asserts the orchestration shape only — the 3-step pipeline order,
+ * mechanical short-circuit, and the parallel batch fan-out. Unlike
+ * the reply path, there is NO judging step and NO skip-legacy branch
+ * — allocation is the gate.
+ *
+ * Per-item fork-skill calls = 1 (drafting-post only).
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { ToolContext } from '@/core/types';
@@ -136,34 +139,6 @@ function seedProduct(store: InMemoryStore): void {
   store.register<ProductRow>(products, [row]);
 }
 
-/**
- * Build a validating-draft output that conforms to validatingDraftOutputSchema.
- * The orchestrator only uses verdict / score / slopFingerprint, but the
- * schema also requires checks / issues / suggestions — provide empties so
- * safeParse passes.
- */
-function makeReview(
-  verdict: 'PASS' | 'FAIL' | 'REVISE',
-  slopFingerprint: string[] = [],
-  score = 0.8,
-): {
-  verdict: 'PASS' | 'FAIL' | 'REVISE';
-  score: number;
-  checks: { name: string; result: 'PASS' | 'FAIL'; detail: string }[];
-  issues: string[];
-  suggestions: string[];
-  slopFingerprint: string[];
-} {
-  return {
-    verdict,
-    score,
-    checks: [],
-    issues: [],
-    suggestions: [],
-    slopFingerprint,
-  };
-}
-
 let store: InMemoryStore;
 beforeEach(() => {
   vi.clearAllMocks();
@@ -176,21 +151,16 @@ describe('processPostsBatchTool', () => {
     expect(PROCESS_POSTS_BATCH_TOOL_NAME).toBe('process_posts_batch');
   });
 
-  it('persists when mechanical + validating both PASS (single plan_item)', async () => {
+  it('persists when mechanical passes (single plan_item, one fork-skill call)', async () => {
     seedPlanItems(store, [{ id: 'p1' }]);
-    runForkSkillMock
-      .mockResolvedValueOnce({
-        result: {
-          draftBody: 'shipped first revenue today: $42 MRR',
-          whyItWorks: 'first-person milestone',
-          confidence: 0.7,
-        },
-        usage: {},
-      })
-      .mockResolvedValueOnce({
-        result: makeReview('PASS', [], 0.85),
-        usage: {},
-      });
+    runForkSkillMock.mockResolvedValueOnce({
+      result: {
+        draftBody: 'shipped first revenue today: $42 MRR',
+        whyItWorks: 'first-person milestone',
+        confidence: 0.7,
+      },
+      usage: {},
+    });
     validateDraftExecMock.mockResolvedValue({ failures: [], warnings: [] });
     draftPostExecMock.mockResolvedValue({ planItemId: 'p1' });
 
@@ -206,9 +176,12 @@ describe('processPostsBatchTool', () => {
       kind: string;
     };
     expect(validateCall.kind).toBe('post');
+    // Only drafting-post — no validating-draft fork.
+    expect(runForkSkillMock).toHaveBeenCalledOnce();
+    expect(runForkSkillMock.mock.calls[0]![0]).toBe('drafting-post');
   });
 
-  it('rejects on mechanical fail without calling validating-draft', async () => {
+  it('rejects on mechanical fail and short-circuits before persisting', async () => {
     seedPlanItems(store, [{ id: 'p1' }]);
     runForkSkillMock.mockResolvedValueOnce({
       result: {
@@ -238,107 +211,10 @@ describe('processPostsBatchTool', () => {
 
     expect(result.draftsCreated).toBe(0);
     expect(draftPostExecMock).not.toHaveBeenCalled();
-    // validating-draft (the LLM) NOT called when mechanical failed
+    // Only drafting-post was called; no second fork (validating-draft
+    // fork was removed entirely).
     expect(runForkSkillMock).toHaveBeenCalledOnce();
-  });
-
-  it('retries with voice cue on REVISE; persists if retry passes', async () => {
-    seedPlanItems(store, [{ id: 'p1' }]);
-    runForkSkillMock
-      .mockResolvedValueOnce({
-        result: {
-          draftBody: 'great post! the real win is...',
-          whyItWorks: '',
-          confidence: 0.6,
-        },
-        usage: {},
-      })
-      .mockResolvedValueOnce({
-        result: makeReview('REVISE', ['preamble_opener'], 0.5),
-        usage: {},
-      })
-      .mockResolvedValueOnce({
-        result: {
-          draftBody: 'first revenue: $42 MRR. ten months in.',
-          whyItWorks: '',
-          confidence: 0.7,
-        },
-        usage: {},
-      })
-      .mockResolvedValueOnce({
-        result: makeReview('PASS', [], 0.8),
-        usage: {},
-      });
-    validateDraftExecMock.mockResolvedValue({ failures: [], warnings: [] });
-    draftPostExecMock.mockResolvedValue({ planItemId: 'p1' });
-
-    const result = await processPostsBatchTool.execute(
-      { planItemIds: ['p1'] },
-      makeCtx(store, { userId: 'user-1', productId: 'prod-1' }),
-    );
-
-    expect(result.draftsCreated).toBe(1);
-    expect(runForkSkillMock).toHaveBeenCalledTimes(4);
-    // The retry-draft fork-skill call (3rd call, index 2) must include the voice cue
-    const retryDraftCall = runForkSkillMock.mock.calls[2];
-    expect(retryDraftCall[1]).toContain('opener');
-  });
-
-  it('persists with [needs human review] flag when retry still REVISEs', async () => {
-    seedPlanItems(store, [{ id: 'p1' }]);
-    runForkSkillMock
-      .mockResolvedValueOnce({
-        result: { draftBody: 'd1', whyItWorks: '', confidence: 0.6 },
-        usage: {},
-      })
-      .mockResolvedValueOnce({
-        result: makeReview('REVISE', ['fortune_cookie_closer'], 0.5),
-        usage: {},
-      })
-      .mockResolvedValueOnce({
-        result: { draftBody: 'd2', whyItWorks: '', confidence: 0.6 },
-        usage: {},
-      })
-      .mockResolvedValueOnce({
-        result: makeReview('REVISE', ['fortune_cookie_closer'], 0.5),
-        usage: {},
-      });
-    validateDraftExecMock.mockResolvedValue({ failures: [], warnings: [] });
-    draftPostExecMock.mockResolvedValue({ planItemId: 'p1' });
-
-    const result = await processPostsBatchTool.execute(
-      { planItemIds: ['p1'] },
-      makeCtx(store, { userId: 'user-1', productId: 'prod-1' }),
-    );
-
-    expect(result.draftsCreated).toBe(1);
-    expect(draftPostExecMock).toHaveBeenCalledOnce();
-    const persistArgs = draftPostExecMock.mock.calls[0]![0] as {
-      whyItWorks: string;
-    };
-    expect(persistArgs.whyItWorks).toContain('needs human review');
-  });
-
-  it('skips when validating returns FAIL', async () => {
-    seedPlanItems(store, [{ id: 'p1' }]);
-    runForkSkillMock
-      .mockResolvedValueOnce({
-        result: { draftBody: 'd1', whyItWorks: '', confidence: 0.6 },
-        usage: {},
-      })
-      .mockResolvedValueOnce({
-        result: makeReview('FAIL', ['banned_vocabulary'], 0.1),
-        usage: {},
-      });
-    validateDraftExecMock.mockResolvedValue({ failures: [], warnings: [] });
-
-    const result = await processPostsBatchTool.execute(
-      { planItemIds: ['p1'] },
-      makeCtx(store, { userId: 'user-1', productId: 'prod-1' }),
-    );
-
-    expect(result.draftsCreated).toBe(0);
-    expect(draftPostExecMock).not.toHaveBeenCalled();
+    expect(result.details[0]?.status).toBe('rejected_mechanical');
   });
 
   it('parallelizes across multiple plan_items via Promise.all', async () => {
@@ -349,9 +225,6 @@ describe('processPostsBatchTool', () => {
           result: { draftBody: 'd', whyItWorks: '', confidence: 0.7 },
           usage: {},
         };
-      }
-      if (skillName === 'validating-draft') {
-        return { result: makeReview('PASS', [], 0.8), usage: {} };
       }
       throw new Error(`unexpected skill: ${skillName}`);
     });
@@ -364,6 +237,8 @@ describe('processPostsBatchTool', () => {
     );
 
     expect(result.draftsCreated).toBe(3);
+    // Three drafting-post calls, one per item; no validating-draft.
+    expect(runForkSkillMock).toHaveBeenCalledTimes(3);
   });
 
   it('returns empty result when no planItemIds match in DB (no fork calls)', async () => {
@@ -374,55 +249,6 @@ describe('processPostsBatchTool', () => {
     );
     expect(result.itemsScanned).toBe(0);
     expect(runForkSkillMock).not.toHaveBeenCalled();
-  });
-
-  it('truncates whyItWorks on flag-persist branch so total stays <= 500 chars', async () => {
-    seedPlanItems(store, [{ id: 'p1' }]);
-    // 480-char retry whyItWorks + flagSuffix would exceed 500.
-    const longWhy = 'w'.repeat(480);
-    runForkSkillMock
-      .mockResolvedValueOnce({
-        result: { draftBody: 'd1', whyItWorks: '', confidence: 0.6 },
-        usage: {},
-      })
-      .mockResolvedValueOnce({
-        result: {
-          verdict: 'REVISE',
-          score: 0.5,
-          slopFingerprint: ['fortune_cookie_closer'],
-          checks: [],
-          issues: [],
-          suggestions: [],
-        },
-        usage: {},
-      })
-      .mockResolvedValueOnce({
-        result: { draftBody: 'd2', whyItWorks: longWhy, confidence: 0.7 },
-        usage: {},
-      })
-      .mockResolvedValueOnce({
-        result: makeReview(
-          'REVISE',
-          ['fortune_cookie_closer', 'preamble_opener'],
-          0.5,
-        ),
-        usage: {},
-      });
-    validateDraftExecMock.mockResolvedValue({ failures: [], warnings: [] });
-    draftPostExecMock.mockResolvedValue({ planItemId: 'p1' });
-
-    const result = await processPostsBatchTool.execute(
-      { planItemIds: ['p1'] },
-      makeCtx(store, { userId: 'user-1', productId: 'prod-1' }),
-    );
-
-    expect(result.draftsCreated).toBe(1);
-    const persistArgs = draftPostExecMock.mock.calls[0]![0] as {
-      whyItWorks: string;
-    };
-    expect(persistArgs.whyItWorks).toContain('needs human review');
-    // Stays within DraftPostTool's z.string().max(500) bound.
-    expect(persistArgs.whyItWorks.length).toBeLessThanOrEqual(500);
   });
 
   it("one item's drafting-post rejection does NOT lose the whole batch", async () => {
@@ -440,9 +266,6 @@ describe('processPostsBatchTool', () => {
           result: { draftBody: 'd', whyItWorks: '', confidence: 0.7 },
           usage: {},
         };
-      }
-      if (skillName === 'validating-draft') {
-        return { result: makeReview('PASS', [], 0.8), usage: {} };
       }
       throw new Error(`unexpected skill: ${skillName}`);
     });
@@ -484,19 +307,14 @@ describe('processPostsBatchTool', () => {
         params: { pillar: 'milestone', theme: 'first revenue' },
       },
     ]);
-    runForkSkillMock
-      .mockResolvedValueOnce({
-        result: {
-          draftBody: '$42 MRR. first dollar.',
-          whyItWorks: 'compound-phase milestone',
-          confidence: 0.7,
-        },
-        usage: {},
-      })
-      .mockResolvedValueOnce({
-        result: makeReview('PASS', [], 0.85),
-        usage: {},
-      });
+    runForkSkillMock.mockResolvedValueOnce({
+      result: {
+        draftBody: '$42 MRR. first dollar.',
+        whyItWorks: 'compound-phase milestone',
+        confidence: 0.7,
+      },
+      usage: {},
+    });
     validateDraftExecMock.mockResolvedValue({ failures: [], warnings: [] });
     draftPostExecMock.mockResolvedValue({ planItemId: 'p1' });
 
@@ -536,48 +354,16 @@ describe('processPostsBatchTool', () => {
     expect(draftPostExecMock).not.toHaveBeenCalled();
   });
 
-  it('treats malformed validating-draft output as errored, does not crash', async () => {
-    seedPlanItems(store, [{ id: 'p1' }]);
-    runForkSkillMock
-      .mockResolvedValueOnce({
-        result: { draftBody: 'shipped today', whyItWorks: '', confidence: 0.6 },
-        usage: {},
-      })
-      // Missing required fields (checks/issues/suggestions) AND verdict.
-      // safeParse fails → validateOnce returns null → errored, no crash.
-      .mockResolvedValueOnce({
-        result: { score: 0.5 },
-        usage: {},
-      });
-    validateDraftExecMock.mockResolvedValue({ failures: [], warnings: [] });
-
-    const result = await processPostsBatchTool.execute(
-      { planItemIds: ['p1'] },
-      makeCtx(store, { userId: 'user-1', productId: 'prod-1' }),
-    );
-
-    expect(result.draftsCreated).toBe(0);
-    expect(result.draftsSkipped).toBe(1);
-    expect(result.details[0]?.status).toBe('errored');
-    expect(result.details[0]?.reason).toContain('validating-draft');
-    expect(draftPostExecMock).not.toHaveBeenCalled();
-  });
-
   it('emits live progress at start and finish so UI tool card updates in real-time', async () => {
     seedPlanItems(store, [{ id: 'p1' }]);
-    runForkSkillMock
-      .mockResolvedValueOnce({
-        result: {
-          draftBody: 'shipped first revenue today: $42 MRR',
-          whyItWorks: 'first-person milestone',
-          confidence: 0.7,
-        },
-        usage: {},
-      })
-      .mockResolvedValueOnce({
-        result: makeReview('PASS', [], 0.85),
-        usage: {},
-      });
+    runForkSkillMock.mockResolvedValueOnce({
+      result: {
+        draftBody: 'shipped first revenue today: $42 MRR',
+        whyItWorks: 'first-person milestone',
+        confidence: 0.7,
+      },
+      usage: {},
+    });
     validateDraftExecMock.mockResolvedValue({ failures: [], warnings: [] });
     draftPostExecMock.mockResolvedValue({ planItemId: 'p1' });
 
