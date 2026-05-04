@@ -20,23 +20,22 @@
 // content_post drafting is now batched into content-manager(post_batch)
 // at the plan-execute-sweeper level. content-manager's terminal output
 // schema covers both reply_sweep and post_batch flows.
+//
+// Plan 3: `content-manager`, `content-planner`, and `discovery-agent`
+// were collapsed into the `social-media-manager` agent. The CMO
+// (`coordinator`) now owns strategic-path / plan-item generation
+// directly via its `generate_strategic_path` + `add_plan_item` /
+// `update_plan_item` tools. Discovery + drafting both live inside
+// `social-media-manager` via `find_threads_via_xai` /
+// `process_replies_batch` / `process_posts_batch`.
 
 import type { ZodType } from 'zod';
 import { coordinatorOutputSchema } from './agents/coordinator/schema';
-import { contentPlannerOutputSchema } from './agents/content-planner/schema';
-import {
-  contentManagerOutputSchema,
-  // Back-compat alias — kept exported below for callers that haven't
-  // migrated their import names yet.
-  communityManagerOutputSchema,
-} from './agents/content-manager/schema';
-import { discoveryAgentOutputSchema } from './agents/discovery-agent/schema';
+import { socialMediaManagerOutputSchema } from './agents/social-media-manager/schema';
 
 const registry: Record<string, ZodType<unknown>> = {
   coordinator: coordinatorOutputSchema as ZodType<unknown>,
-  'content-planner': contentPlannerOutputSchema as ZodType<unknown>,
-  'content-manager': contentManagerOutputSchema as ZodType<unknown>,
-  'discovery-agent': discoveryAgentOutputSchema as ZodType<unknown>,
+  'social-media-manager': socialMediaManagerOutputSchema as ZodType<unknown>,
 };
 
 /**
@@ -51,9 +50,5 @@ export function getAgentOutputSchema(agentType: string): ZodType<unknown> | null
 
 export {
   coordinatorOutputSchema,
-  contentPlannerOutputSchema,
-  contentManagerOutputSchema,
-  // Re-exported for back-compat — points at the same Zod schema.
-  communityManagerOutputSchema,
-  discoveryAgentOutputSchema,
+  socialMediaManagerOutputSchema,
 };
