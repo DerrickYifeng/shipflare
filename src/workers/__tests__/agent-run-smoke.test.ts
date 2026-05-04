@@ -87,9 +87,7 @@ const AGENTS_DIR = path.resolve(__dirname, '../../tools/AgentTool/agents');
 
 const PRODUCTION_AGENTS = [
   'coordinator',
-  'content-manager',
-  'content-planner',
-  'discovery-agent',
+  'social-media-manager',
 ] as const;
 
 describe('agent-run smoke — production agents resolve + serialize cleanly', () => {

@@ -43,10 +43,10 @@ describe('four-layer filter — spawn.resolveAgentTools delegates to assembleToo
     expect(names).toContain('Task');
   });
 
-  it('coordinator (role=lead) keeps Task; content-manager (role=member) has no Task', async () => {
+  it('coordinator (role=lead) keeps Task; social-media-manager (role=member) has no Task', async () => {
     const root = path.resolve(__dirname, '../agents');
     const lead = await loadAgent(path.join(root, 'coordinator'));
-    const member = await loadAgent(path.join(root, 'content-manager'));
+    const member = await loadAgent(path.join(root, 'social-media-manager'));
     expect(lead.role).toBe('lead');
     expect(member.role).toBe('member');
     expect(resolveAgentTools(lead).map((t) => t.name)).toContain('Task');
