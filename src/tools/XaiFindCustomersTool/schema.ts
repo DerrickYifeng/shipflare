@@ -30,6 +30,16 @@ export const tweetCandidateSchema = z.object({
   surfaced_via: z.array(z.string()).nullable(),
   confidence: z.number().min(0).max(1),
   reason: z.string().min(1),
+  /**
+   * Whether the product can be tastefully name-dropped in a reply.
+   * Optional for back-compat; persist tool defaults to `false` when omitted.
+   */
+  can_mention_product: z.boolean().optional(),
+  /**
+   * Why the mention is/isn't appropriate (matches MENTION_SIGNALS enum).
+   * Optional for back-compat; persist tool defaults to `'no_fit'` when omitted.
+   */
+  mention_signal: z.string().optional(),
 });
 
 export type TweetCandidate = z.infer<typeof tweetCandidateSchema>;

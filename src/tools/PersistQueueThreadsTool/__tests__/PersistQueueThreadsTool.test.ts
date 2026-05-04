@@ -168,6 +168,66 @@ describe('persist_queue_threads tool', () => {
     expect(setArg).toHaveProperty('surfacedVia');
   });
 
+  it('persists canMentionProduct + mentionSignal onto the threads row', async () => {
+    const valuesCapture = vi.fn();
+    insertChain.mockReturnValue({
+      values: (rows: unknown) => {
+        valuesCapture(rows);
+        return {
+          onConflictDoNothing: () => ({
+            returning: () => Promise.resolve([{ externalId: 't1' }]),
+          }),
+        };
+      },
+    });
+
+    await persistQueueThreadsTool.execute(
+      {
+        threads: [
+          makeTweet({
+            can_mention_product: true,
+            mention_signal: 'tool_question',
+          }),
+        ],
+      },
+      makeCtx({ userId: 'u1', productId: 'p1' }),
+    );
+
+    expect(valuesCapture).toHaveBeenCalledTimes(1);
+    const rows = valuesCapture.mock.calls[0]![0] as Array<{
+      canMentionProduct: boolean;
+      mentionSignal: string;
+    }>;
+    expect(rows[0]!.canMentionProduct).toBe(true);
+    expect(rows[0]!.mentionSignal).toBe('tool_question');
+  });
+
+  it('defaults canMentionProduct=false + mentionSignal="no_fit" when omitted', async () => {
+    const valuesCapture = vi.fn();
+    insertChain.mockReturnValue({
+      values: (rows: unknown) => {
+        valuesCapture(rows);
+        return {
+          onConflictDoNothing: () => ({
+            returning: () => Promise.resolve([{ externalId: 't1' }]),
+          }),
+        };
+      },
+    });
+
+    await persistQueueThreadsTool.execute(
+      { threads: [makeTweet()] },
+      makeCtx({ userId: 'u1', productId: 'p1' }),
+    );
+
+    const rows = valuesCapture.mock.calls[0]![0] as Array<{
+      canMentionProduct: boolean;
+      mentionSignal: string;
+    }>;
+    expect(rows[0]!.canMentionProduct).toBe(false);
+    expect(rows[0]!.mentionSignal).toBe('no_fit');
+  });
+
   it('emits tool_progress before persistence', async () => {
     insertChain.mockReturnValue({
       values: () => ({

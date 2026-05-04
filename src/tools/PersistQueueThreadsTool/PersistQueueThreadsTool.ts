@@ -111,6 +111,8 @@ export const persistQueueThreadsTool = buildTool({
       originalUrl: t.original_url,
       originalAuthorUsername: t.original_author_username,
       surfacedVia: t.surfaced_via ?? null,
+      canMentionProduct: t.can_mention_product ?? false,
+      mentionSignal: t.mention_signal ?? 'no_fit',
     }));
 
     const insertedRows = await db
