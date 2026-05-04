@@ -190,6 +190,13 @@ export function buildFirstTurnMessage(
     '  do NOT filter them out as noise. The reply target for a repost is the',
     '  ORIGINAL author (set original_url + original_author_username; surfaced_via',
     '  carries the reposter handle).',
+    '- If the tweet QUOTES another tweet, include `quoted_text` (the quoted post',
+    "  body, verbatim) and `quoted_author` (the quoted author's @handle, no @).",
+    '  If the tweet is a REPLY in a thread, include `in_reply_to_text` (the parent',
+    "  post body, verbatim) and `in_reply_to_author` (parent author's @handle).",
+    '  Leave any of these null when not applicable. A standalone tweet has all four',
+    '  null. A self-quote (quoted_author == author_username) is allowed and common —',
+    '  surface it.',
     "- Empty `tweets` is allowed if you genuinely find nothing — don't pad.",
   ].join('\n');
 }
