@@ -83,7 +83,12 @@ export async function processReview(job: Job<ReviewJobData>) {
 
     log.info(`Review verdict: ${result.verdict}, score=${result.score.toFixed(2)}, cost=$${usage.costUsd.toFixed(4)}`);
 
-    // Apply verdict
+    // Apply verdict: keep verdict + score as OBSERVABILITY metadata only.
+    // Per Plan-2 follow-up (recall > precision): the founder sees ALL
+    // drafts in /briefing regardless of verdict; UI may render a slop-flag
+    // badge based on reviewVerdict but the draft stays visible & sendable.
+    // The drafter self-audits in-fork; this async review is observability +
+    // auto-approve gate only — it does NOT mutate `status` on FAIL/REVISE.
     const updateData: Record<string, unknown> = {
       reviewVerdict: result.verdict,
       reviewScore: result.score,
@@ -96,12 +101,8 @@ export async function processReview(job: Job<ReviewJobData>) {
       updatedAt: new Date(),
     };
 
-    if (result.verdict === 'FAIL') {
-      updateData.status = 'flagged';
-    } else if (result.verdict === 'REVISE') {
-      updateData.status = 'needs_revision';
-    }
-    // PASS: check auto-approve, otherwise keep as 'pending'
+    // PASS: check auto-approve, otherwise keep as 'pending'.
+    // FAIL / REVISE: keep as 'pending' too — verdict is metadata, not a gate.
 
     let autoApproved = false;
 

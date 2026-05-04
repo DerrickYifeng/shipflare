@@ -258,6 +258,52 @@ describe('processReview — slopFingerprint persistence', () => {
     expect(reviewJson.suggestions).toEqual(['rewrite with first-person']);
   });
 
+  it('does NOT mutate status on FAIL — verdict is observability, not a gate (recall > precision)', async () => {
+    // Per the recall-over-precision follow-up: the async review worker
+    // records the verdict + score as metadata but MUST NOT downgrade
+    // drafts to 'flagged' / 'needs_revision', because /briefing only
+    // renders status='pending' drafts and a downgrade would hide them
+    // from the founder. The drafter self-audits in-fork; this worker
+    // is observability only.
+    hoisted.reviewResult = {
+      verdict: 'FAIL',
+      score: 0.2,
+      checks: [],
+      issues: ['some-issue'],
+      suggestions: [],
+      slopFingerprint: [],
+    };
+
+    const { processReview } = await import('../review');
+    await processReview(makeJob());
+
+    expect(hoisted.capturedSetPayloads.length).toBeGreaterThan(0);
+    const payload = hoisted.capturedSetPayloads[0]!;
+    expect(payload.status).toBeUndefined();
+    expect(payload.reviewVerdict).toBe('FAIL');
+    expect(payload.reviewScore).toBe(0.2);
+  });
+
+  it('does NOT mutate status on REVISE — same recall>precision rationale', async () => {
+    hoisted.reviewResult = {
+      verdict: 'REVISE',
+      score: 0.5,
+      checks: [],
+      issues: ['mild-issue'],
+      suggestions: ['tighten the hook'],
+      slopFingerprint: [],
+    };
+
+    const { processReview } = await import('../review');
+    await processReview(makeJob());
+
+    expect(hoisted.capturedSetPayloads.length).toBeGreaterThan(0);
+    const payload = hoisted.capturedSetPayloads[0]!;
+    expect(payload.status).toBeUndefined();
+    expect(payload.reviewVerdict).toBe('REVISE');
+    expect(payload.reviewScore).toBe(0.5);
+  });
+
   it('defaults slopFingerprint to [] when the skill omits it', async () => {
     // Simulate a legacy / forgiving runForkSkill payload that did not include
     // slopFingerprint at all. The processor's `?? []` should kick in.
