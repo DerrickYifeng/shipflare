@@ -345,6 +345,23 @@ export function ReplyCard({
               </span>
             )}
           </div>
+          <div
+            className="sf-mono"
+            style={{
+              marginTop: 2,
+              fontSize: 'var(--sf-text-xs)',
+              color: 'var(--sf-fg-3)',
+              letterSpacing: 'var(--sf-track-mono)',
+            }}
+          >
+            Your scout flagged this
+            {item.community
+              ? ` · ${item.platform === 'reddit' ? 'r/' : ''}${item.community}`
+              : ''}
+            {typeof item.draftConfidence === 'number'
+              ? ` · score ${item.draftConfidence.toFixed(1)}`
+              : ''}
+          </div>
           {(secondary || postedLabel) && (
             <div
               style={{
