@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MENTION_SIGNALS } from '@/skills/judging-thread-quality/schema';
 
 /**
  * Shape of one tweet returned by xAI's structured-outputs response.
@@ -36,10 +37,11 @@ export const tweetCandidateSchema = z.object({
    */
   can_mention_product: z.boolean().optional(),
   /**
-   * Why the mention is/isn't appropriate (matches MENTION_SIGNALS enum).
+   * Why the mention is/isn't appropriate. Enforced against the MENTION_SIGNALS
+   * enum from judging-thread-quality so producer drift surfaces at parse time.
    * Optional for back-compat; persist tool defaults to `'no_fit'` when omitted.
    */
-  mention_signal: z.string().optional(),
+  mention_signal: z.enum(MENTION_SIGNALS).optional(),
 });
 
 export type TweetCandidate = z.infer<typeof tweetCandidateSchema>;
