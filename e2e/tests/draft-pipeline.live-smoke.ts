@@ -1,9 +1,15 @@
 /**
- * Discovery → draft pipeline smoke after the Plan 1
- * (merge-judging-share-slop-rules) merge. Conservative on purpose:
- * the goal is "page renders, automation route triggers, no console
- * errors" — NOT "specific draft content lands in 90s" (LLM workloads
- * fail for unrelated reasons all the time).
+ * Discovery → draft pipeline smoke covering Plans 1 + 2:
+ *   - Plan 1 (judging merge + shared slop-rules) — drafters consume slop-rules
+ *     via shared-references; threads carry canMentionProduct/mentionSignal.
+ *   - Plan 2 (pipeline → Tools) — content_post sweeper invokes
+ *     processPostsBatchTool.execute() directly; NO agent_run is spawned for
+ *     cron-driven post batches. Reply path goes through processRepliesBatchTool
+ *     when content-manager is triggered by the lead.
+ *
+ * Conservative on purpose: the goal is "page renders, automation route
+ * triggers, no console errors" — NOT "specific draft content lands in 90s"
+ * (LLM workloads fail for unrelated reasons all the time).
  *
  * Verifies:
  *   - /briefing renders with the BriefingHeader H1
