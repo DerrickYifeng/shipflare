@@ -35,7 +35,7 @@ const log = createLogger('tool:process_replies_batch');
 export const PROCESS_REPLIES_BATCH_TOOL_NAME = 'process_replies_batch';
 
 const inputSchema = z.object({
-  threadIds: z.array(z.string()).min(1).max(50),
+  threadIds: z.array(z.string()).min(1).max(10),
   voice: z.string().optional(),
   founderVoiceBlock: z.string().optional(),
 });
@@ -50,7 +50,8 @@ interface BatchItemResult {
     | 'persisted_flagged_for_review'
     | 'rejected_mechanical'
     | 'rejected_validating'
-    | 'skipped_legacy_unjudged';
+    | 'skipped_legacy_unjudged'
+    | 'errored';
   reason?: string;
   slopFingerprint?: string[];
 }
@@ -94,8 +95,8 @@ export const processRepliesBatchTool: ToolDefinition<
     'validate_draft → validating-draft → draft_reply with REVISE retry). Discovery ' +
     'already judged each thread (canMentionProduct on the row); this tool does ' +
     'NOT re-judge. Threads with canMentionProduct=null are skipped as legacy. ' +
-    'Returns a per-thread result summary; details are logged at INFO level.\n\n' +
-    'INPUT: { "threadIds": ["uuid1","uuid2",...], "voice"?: string, "founderVoiceBlock"?: string }\n' +
+    'Returns a per-thread result summary in the response.\n\n' +
+    'INPUT: { "threadIds": ["uuid1",...up to 10], "voice"?: string, "founderVoiceBlock"?: string }\n' +
     'OUTPUT: { itemsScanned, draftsCreated, draftsSkipped, notes, details[] }',
   inputSchema,
   isConcurrencySafe: false,
@@ -140,11 +141,23 @@ export const processRepliesBatchTool: ToolDefinition<
       );
     }
 
-    const results = await Promise.all(
-      threadRows.map((thread) =>
-        processOne(thread as ThreadRow, productRow, input, ctx),
-      ),
+    // Promise.allSettled rather than Promise.all so one thread's
+    // exception (e.g. xAI quota exhausted mid-batch) doesn't lose the
+    // whole batch and orphan already-persisted drafts from earlier
+    // items.
+    const settled = await Promise.allSettled(
+      threadRows.map((thread) => processOne(thread, productRow, input, ctx)),
     );
+    const results: BatchItemResult[] = settled.map((s, i) => {
+      if (s.status === 'fulfilled') return s.value;
+      const reason =
+        s.reason instanceof Error ? s.reason.message : String(s.reason);
+      return {
+        threadId: threadRows[i]!.id,
+        status: 'errored' as const,
+        reason,
+      };
+    });
 
     const draftsCreated = results.filter(
       (r) =>
@@ -277,12 +290,22 @@ async function processOne(
     if (retryReview.verdict === 'REVISE') {
       // Per CLAUDE.md max-1-revise rule: persist with a human-review flag
       // rather than spending another fork-skill round.
+      // DraftReplyTool enforces whyItWorks.max(500) (Zod), so truncate the
+      // base whyItWorks to leave room for the flag suffix and clamp the
+      // total to 500 chars.
+      const flagSuffix = ` [needs human review: ${retryReview.slopFingerprint.join(',')}]`;
+      const baseLen = Math.max(0, 500 - flagSuffix.length);
+      const truncatedWhy =
+        retry.whyItWorks.length > baseLen
+          ? retry.whyItWorks.slice(0, Math.max(0, baseLen - 1)) + '…'
+          : retry.whyItWorks;
+      const flaggedWhy = (truncatedWhy + flagSuffix).slice(0, 500);
       await draftReplyTool.execute(
         {
           threadId: thread.id,
           draftBody: retry.draftBody,
           confidence: retry.confidence,
-          whyItWorks: `${retry.whyItWorks} [needs human review: ${retryReview.slopFingerprint.join(',')}]`,
+          whyItWorks: flaggedWhy,
         },
         ctx,
       );

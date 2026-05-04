@@ -356,4 +356,96 @@ describe('processRepliesBatchTool', () => {
     expect(result.itemsScanned).toBe(0);
     expect(runForkSkillMock).not.toHaveBeenCalled();
   });
+
+  it('truncates whyItWorks on flag-persist branch so total stays <= 500 chars', async () => {
+    seedThreads(store, [{ id: 't1' }]);
+    // 480-char retry whyItWorks + flagSuffix would exceed 500.
+    const longWhy = 'w'.repeat(480);
+    runForkSkillMock
+      .mockResolvedValueOnce({
+        result: { draftBody: 'd1', whyItWorks: '', confidence: 0.6 },
+        usage: {},
+      })
+      .mockResolvedValueOnce({
+        result: {
+          verdict: 'REVISE',
+          score: 0.5,
+          slopFingerprint: ['fortune_cookie_closer'],
+        },
+        usage: {},
+      })
+      .mockResolvedValueOnce({
+        result: { draftBody: 'd2', whyItWorks: longWhy, confidence: 0.7 },
+        usage: {},
+      })
+      .mockResolvedValueOnce({
+        result: {
+          verdict: 'REVISE',
+          score: 0.5,
+          slopFingerprint: ['fortune_cookie_closer', 'preamble_opener'],
+        },
+        usage: {},
+      });
+    validateDraftExecMock.mockResolvedValue({ failures: [], warnings: [] });
+    draftReplyExecMock.mockResolvedValue({ id: 'd1' });
+
+    const result = await processRepliesBatchTool.execute(
+      { threadIds: ['t1'] },
+      makeCtx(store, { userId: 'user-1', productId: 'prod-1' }),
+    );
+
+    expect(result.draftsCreated).toBe(1);
+    const persistArgs = draftReplyExecMock.mock.calls[0][0];
+    expect(persistArgs.whyItWorks).toContain('needs human review');
+    // Stays within DraftReplyTool's z.string().max(500) bound.
+    expect(persistArgs.whyItWorks.length).toBeLessThanOrEqual(500);
+  });
+
+  it("one thread's drafting-reply rejection does NOT lose the whole batch", async () => {
+    seedThreads(store, [{ id: 't1' }, { id: 't2' }, { id: 't3' }]);
+    runForkSkillMock
+      // t1's first fork-skill (drafting-reply) rejects — the whole
+      // processOne(t1) promise rejects mid-pipeline.
+      .mockRejectedValueOnce(new Error('xAI quota exhausted'))
+      // t2 + t3 each need 2 fork-skill calls (draft + validating).
+      .mockResolvedValue({
+        result: {
+          draftBody: 'd',
+          whyItWorks: '',
+          confidence: 0.7,
+          verdict: 'PASS',
+          score: 0.8,
+          slopFingerprint: [],
+        },
+        usage: {},
+      });
+    validateDraftExecMock.mockResolvedValue({ failures: [], warnings: [] });
+    draftReplyExecMock.mockResolvedValue({ id: 'd' });
+
+    const result = await processRepliesBatchTool.execute(
+      { threadIds: ['t1', 't2', 't3'] },
+      makeCtx(store, { userId: 'user-1', productId: 'prod-1' }),
+    );
+
+    expect(result.draftsCreated).toBe(2);
+    expect(result.draftsSkipped).toBe(1);
+    expect(result.details.find((d) => d.threadId === 't1')?.status).toBe(
+      'errored',
+    );
+    expect(result.details.find((d) => d.threadId === 't1')?.reason).toContain(
+      'xAI quota exhausted',
+    );
+  });
+
+  it('rejects threadIds.length > 10 at Zod boundary', () => {
+    const parse = processRepliesBatchTool.inputSchema.safeParse({
+      threadIds: Array.from({ length: 11 }, (_, i) => `t${i}`),
+    });
+    expect(parse.success).toBe(false);
+    // Sanity-check: 10 still passes.
+    const ok = processRepliesBatchTool.inputSchema.safeParse({
+      threadIds: Array.from({ length: 10 }, (_, i) => `t${i}`),
+    });
+    expect(ok.success).toBe(true);
+  });
 });
