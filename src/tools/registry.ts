@@ -30,6 +30,7 @@ import { findThreadsTool } from './FindThreadsTool/FindThreadsTool';
 import { draftReplyTool } from './DraftReplyTool/DraftReplyTool';
 import { validateDraftTool } from './ValidateDraftTool/ValidateDraftTool';
 import { processRepliesBatchTool } from './ProcessRepliesBatchTool/ProcessRepliesBatchTool';
+import { processPostsBatchTool } from './ProcessPostsBatchTool/ProcessPostsBatchTool';
 
 /**
  * Central tool registry for ShipFlare agents.
@@ -104,6 +105,13 @@ registry.register(validateDraftTool);
 // content-manager AGENT.md. Plan 3 will narrow visibility to the
 // social-media-manager allowlist.
 registry.register(processRepliesBatchTool);
+// process_posts_batch — pipeline-to-tools Plan 2 Task 3. Mirror of
+// process_replies_batch for the post path: drafting-post →
+// validate_draft → validating-draft → draft_post with one REVISE
+// retry. NO judging step (allocation is the gate). Replaces the
+// post_batch prose orchestration formerly inside content-manager
+// AGENT.md.
+registry.register(processPostsBatchTool);
 
 export { registry };
 
