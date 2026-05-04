@@ -82,6 +82,11 @@ export const threads = pgTable(
     originalUrl: text('original_url'),
     originalAuthorUsername: text('original_author_username'),
     surfacedVia: jsonb('surfaced_via').$type<string[] | null>(),
+    // Discovery v4 (2026-05-03): merge of judging-opportunity into
+    // judging-thread-quality. Discovery now decides whether the thread
+    // earns a product mention at the same time it scores ICP fit.
+    canMentionProduct: boolean('can_mention_product'),
+    mentionSignal: text('mention_signal'),
   },
   (t) => [
     index('threads_user_discovered_idx').on(t.userId, desc(t.discoveredAt)),
