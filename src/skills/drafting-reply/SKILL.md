@@ -1,6 +1,6 @@
 ---
 name: drafting-reply
-description: Draft ONE reply body for a single thread. Receives the thread + product context + (optional) voice hint, returns a single draftBody + whyItWorks + confidence. Does not gate, does not validate, does not persist — pure transformation. Caller (content-manager or engagement worker) handles judging-opportunity, validating-draft, and draft_reply persistence.
+description: Draft ONE reply body for a single thread. Receives the thread + product context + (optional) voice hint, returns a single draftBody + whyItWorks + confidence. Does not gate, does not validate, does not persist — pure transformation. Caller (content-manager or engagement worker) handles judging-thread-quality, validating-draft, and draft_reply persistence.
 context: fork
 model: claude-sonnet-4-6
 maxTurns: 1
@@ -30,7 +30,7 @@ A JSON payload with:
 - `channel` — `'x'` or `'reddit'`
 - `voice` — optional voice cluster or free-form hint
 - `founderVoiceBlock` — optional verbatim founder voice anchor text
-- `canMentionProduct` — boolean from `judging-opportunity`; only mention the product when true AND the thread is asking for the kind of tool the product is
+- `canMentionProduct` — boolean from `judging-thread-quality`; only mention the product when true AND the thread is asking for the kind of tool the product is
 
 ## Per-channel rules
 
