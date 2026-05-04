@@ -26,8 +26,8 @@ const baseLog = createLogger('worker:plan-execute');
  * Plan-execute dispatcher.
  *
  * After Phase J Task 2, content_post draft-phase rows are batched at
- * the sweeper layer (one content-manager(post_batch) team-run per user
- * per tick), so this processor no longer fires per-row writer team-runs.
+ * the sweeper layer (one social-media-manager(post_batch) team-run per
+ * user per tick), so this processor no longer fires per-row writer team-runs.
  * The remaining cases are:
  *
  *  - **Legacy state-machine stub** for every (kind, phase) combination

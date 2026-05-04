@@ -232,7 +232,8 @@ export async function runTacticalReplan(
   });
 
   // Ensure the team exists (idempotent) and enqueue a team-run. The
-  // coordinator's goal prompt seeds the delegation to content-planner.
+  // coordinator generates plan_items directly via its `generate_strategic_path`
+  // + `add_plan_item` tools (Plan 3 absorbed the legacy content-planner spawn).
   let runId: string;
   try {
     const { teamId, memberIds } = await ensureTeamExists(userId, row.productId);
@@ -243,7 +244,7 @@ export async function runTacticalReplan(
       `weekStart=${weekStart.toISOString()} now=${replanNow.toISOString()}. ` +
       `State: ${state}. Phase: ${currentPhase}. ` +
       `Channels: ${channels.join(', ')}. ` +
-      `Pass weekStart + now to content-planner verbatim in its spawn prompt. ` +
+      `Generate plan_items directly with your add_plan_item tool — pass weekStart + now verbatim. ` +
       (trigger === 'weekly'
         ? 'Monday cron replan — produce fresh plan_items for the coming 7 days.'
         : 'Manual replan — previous week items have been superseded; produce fresh plan_items for the coming 7 days.');

@@ -1,17 +1,17 @@
 // Team provisioner.
 //
-// Baseline roster: coordinator + content-planner. Phase F layers category
-// presets on top — dev_tool / saas / consumer pick up a content-manager,
-// default-squad stays at the baseline. The baseline stays as the floor
-// so legacy callers of `ensureTeamExists` keep working and older teams
+// Baseline roster: coordinator. Plan 3 (2026-05-04 collapse) layers a
+// single `social-media-manager` on top of the baseline for any
+// category-specific preset (dev / saas / consumer); `default-squad`
+// stays at the baseline alone. The baseline stays as the floor so
+// legacy callers of `ensureTeamExists` keep working and older teams
 // keep rendering.
 //
-// `content-manager` owns BOTH the reply pipeline (`reply_sweep` mode)
-// and original-post drafting (`post_batch` mode). It was renamed from
-// `community-manager` in Phase J. The legacy `post-writer` teammate
-// was retired in Phase J Task 2 — the plan-execute-sweeper now batches
-// content_post drafts directly into a content-manager(post_batch)
-// team-run instead of firing one writer team-run per row.
+// `social-media-manager` owns the entire social pipeline: discovery,
+// judging, reply drafting, and original-post drafting + scheduling
+// across every connected channel. It absorbed the legacy
+// `content-manager` (renamed in place by drizzle/0018) plus the
+// retired `content-planner` and `discovery-agent` rows.
 //
 // Idempotent: re-running against an existing team returns the existing ids
 // without mutating rows. The unique index on `team_members (team_id,
@@ -32,8 +32,8 @@ import {
   type BaseAgentType,
   type DisplayNameMap,
   type ProductCategory,
+  type SocialAgentType,
   type TeamPreset,
-  type WriterAgentType,
 } from '@/lib/team-presets';
 
 // Re-export the pure preset API so existing server callers (API routes,
@@ -50,8 +50,8 @@ export type {
   BaseAgentType,
   DisplayNameMap,
   ProductCategory,
+  SocialAgentType,
   TeamPreset,
-  WriterAgentType,
 };
 
 const log = createLogger('lib:team-provisioner');
@@ -146,10 +146,7 @@ export async function ensureTeamExists(
 
   const roster: AgentType[] = options?.preset
     ? getTeamCompositionForPreset(options.preset)
-    : [
-        'coordinator',
-        'content-planner',
-      ];
+    : ['coordinator'];
 
   for (const agentType of roster) {
     if (byType.has(agentType)) continue;
@@ -171,7 +168,6 @@ export async function ensureTeamExists(
   // above guarantees it by including them in `roster`.
   const memberIds: Record<BaseAgentType, string> = {
     coordinator: byType.get('coordinator')!,
-    'content-planner': byType.get('content-planner')!,
   };
 
   return { teamId, memberIds, created };
@@ -199,7 +195,7 @@ export interface ProvisionResult {
  * Safe to call repeatedly:
  *   - First call creates the team + all members.
  *   - Subsequent calls after a new channel connects insert only the
- *     delta (e.g. adding `content-manager` when a category is upgraded).
+ *     delta (e.g. adding `social-media-manager` when a category is upgraded).
  *   - Existing members are never renamed, re-statused, or removed.
  *
  * When `productId` is null or the product doesn't exist, falls back to
@@ -258,9 +254,9 @@ export async function provisionTeamForProduct(
 
   // Channel-aware adjustment: if no platform channel is connected at all,
   // fall back to default-squad — without an inbox to monitor or a
-  // platform to post to, content-manager has nothing to do. Any of
-  // x / reddit being connected is enough to seed the full preset
-  // (content-manager is channel-agnostic at the agent layer:
+  // platform to post to, the social-media-manager has nothing to do.
+  // Any of x / reddit being connected is enough to seed the full preset
+  // (social-media-manager is channel-agnostic at the agent layer:
   // `plan_items.channel` decides which guide it consults at draft time).
   const userChannels = await db
     .select({ platform: channels.platform })

@@ -18,39 +18,30 @@
  * per BaseAgentType so `plan-execute` / `team-run` callers can route
  * without reading the config.
  *
- * Phase 6 (agent-cleanup) dropped `reply-drafter` from the baseline —
- * the unified content-drafting agent (content-manager, formerly
- * community-manager) now owns reply drafting end-to-end (drafts the
- * body inline + self-checks against the slop / anchor / length / stats
- * rules in its references), so the standalone reply-drafter teammate
- * is gone.
- *
- * Phase F (agent-skill-tool-decomposition) dropped `growth-strategist` —
- * the strategic-path generator was converted to the `generating-strategy`
- * fork-mode skill (src/skills/generating-strategy/) and is now invoked
- * directly via `runForkSkill` from onboarding + phase-transition routes,
- * bypassing the team-run primitive entirely.
+ * Plan 3 (2026-05-04 collapse): the marketing-side specialists
+ * (`content-manager`, `content-planner`, `discovery-agent`) were merged
+ * into a single `social-media-manager` — the real industry job title for
+ * someone who owns X (and later Reddit / LinkedIn / HN / Discord)
+ * end-to-end. The strategic-path / plan-item generation that used to
+ * live in `content-planner` was absorbed by the coordinator (chief of
+ * staff scope at solo-founder scale).
  */
-export type BaseAgentType =
-  | 'coordinator'
-  | 'content-planner';
+export type BaseAgentType = 'coordinator';
 
 /**
- * Writer + community agents layered on top of the baseline by preset.
- * `content-manager` owns BOTH original-post drafting (`post_batch` mode,
- * dispatched by the plan-execute-sweeper since Phase J Task 2) and the
- * reply pipeline (`reply_sweep` mode). It was renamed from
- * `community-manager` in Phase J. The legacy `post-writer` teammate
- * was retired alongside the batching change since per-row drafting is
- * no longer fired from plan-execute.
+ * Specialist agents layered on top of the baseline by preset.
+ * `social-media-manager` owns the full social pipeline: discovery,
+ * judging, reply drafting, and original-post drafting + scheduling
+ * across every connected channel. Replaces the legacy
+ * `content-manager` + `discovery-agent` pair retired in Plan 3.
  */
-export type WriterAgentType = 'content-manager';
+export type SocialAgentType = 'social-media-manager';
 
 /**
  * Full agent type set. Must match AGENT.md `name` under
  * `src/tools/AgentTool/agents/<agent_type>`.
  */
-export type AgentType = BaseAgentType | WriterAgentType;
+export type AgentType = BaseAgentType | SocialAgentType;
 
 // ---------------------------------------------------------------------------
 // Presets + category mapping
@@ -82,19 +73,17 @@ export type ProductCategory =
 
 export interface DisplayNameMap {
   coordinator: string;
-  'content-planner': string;
-  'content-manager': string;
+  'social-media-manager': string;
 }
 
 /**
  * Default display names used by the provisioner and the "Meet your team"
  * onboarding card. Role labels (not personal names) so copy reads honestly —
- * "Community Manager" instead of "Jordan".
+ * "Social Media Manager" instead of "Jordan".
  */
 export const DEFAULT_DISPLAY_NAMES: DisplayNameMap = {
   coordinator: 'Chief of Staff',
-  'content-planner': 'Head of Content',
-  'content-manager': 'Community Manager',
+  'social-media-manager': 'Social Media Manager',
 };
 
 /**
@@ -124,23 +113,20 @@ export function pickPresetByCategory(
  * The roster for a preset. Order matters for deterministic insertion +
  * the Meet-your-team card. The baseline always comes first.
  *
- * Phase J Task 2 retired `post-writer` from every preset — content-manager
- * now drafts original posts in batches via the post_batch flow, so the
- * single-channel writer is no longer needed. Default-squad is now just
- * the baseline; consumer/dev/saas-squad layer content-manager on top.
+ * Plan 3 (2026-05-04): every category-specific preset layers a single
+ * `social-media-manager` onto the coordinator baseline. `default-squad`
+ * stays at the baseline alone (no platform connected, nothing for the
+ * social specialist to work).
  */
 export function getTeamCompositionForPreset(preset: TeamPreset): AgentType[] {
-  const base: AgentType[] = [
-    'coordinator',
-    'content-planner',
-  ];
+  const base: AgentType[] = ['coordinator'];
   switch (preset) {
     case 'dev-squad':
-      return [...base, 'content-manager'];
+      return [...base, 'social-media-manager'];
     case 'saas-squad':
-      return [...base, 'content-manager'];
+      return [...base, 'social-media-manager'];
     case 'consumer-squad':
-      return [...base, 'content-manager'];
+      return [...base, 'social-media-manager'];
     case 'default-squad':
       return [...base];
   }

@@ -26,7 +26,7 @@ export interface DelegationTask {
   toMemberId: string | null;
   /**
    * `subagent_type` pulled from the Task tool_call's input (e.g.
-   * "content-planner"). Used to look up the specialist by agent_type when
+   * "social-media-manager"). Used to look up the specialist by agent_type when
    * `toMemberId` is null — team_messages.to_member_id is always null on
    * tool_calls so this is the only reliable hook to the correct member
    * row until the worker starts stamping it.

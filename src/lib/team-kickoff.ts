@@ -3,9 +3,9 @@
  * team-run the first time a (user, product, team) is observed, then
  * never again. The kickoff run produces the three artefacts the founder
  * sees on their first visit to /team:
- *   1. plan draft (content-planner)
- *   2. reply-target discovery (discovery-agent via Task dispatch)
- *   3. draft replies (content-manager on top queued targets)
+ *   1. plan draft (coordinator's add_plan_item tool — direct, post-Plan-3)
+ *   2. reply-target discovery (rolled into the social-media-manager spawn)
+ *   3. draft replies (social-media-manager on the discovered top targets)
  *
  * Called from `app/(app)/team/page.tsx` server component on every render —
  * the first call schedules the run, subsequent calls are cheap no-ops.
@@ -135,19 +135,20 @@ export async function ensureKickoffEnqueued(args: {
 
   // The kickoff playbook is in coordinator/AGENT.md (`trigger: 'kickoff'`).
   // The goal text gives the coordinator just enough context to dispatch:
-  // calendar anchor for content-planner, discovery-agent for async search,
-  // channel list for the skip-with-message branch. Detailed step ordering
-  // lives in the playbook so we can change it without redeploying API code.
+  // calendar anchor for direct add_plan_item calls, social-media-manager
+  // for combined discovery + drafting, channel list for the skip-with-message
+  // branch. Detailed step ordering lives in the playbook so we can change
+  // it without redeploying API code.
   const goal =
     `First-visit kickoff for ${productRow.name}. ` +
     (pathId ? `Strategic path pathId=${pathId}. ` : '') +
     `weekStart=${kickoffWeekStart} now=${kickoffNow.toISOString()}. ` +
     `Connected channels: ${channels.join(', ') || 'none'}. ` +
     `Trigger: kickoff. ` +
-    `Follow your kickoff playbook end-to-end (plan → discovery → drafts): ` +
-    `(1) Task content-planner for week-1 plan items — pass weekStart + now in its prompt verbatim. ` +
-    `(2) Task({ subagent_type: 'discovery-agent', description: 'find X reply targets for kickoff', prompt: '...' }) — the agent talks to xAI Grok conversationally and persists the queue itself; read its StructuredOutput.topQueued for step 3. ` +
-    `(3) Look up today's content_reply slot for the primary channel via query_plan_items (kind=content_reply, today's UTC scheduledAt) and read params.targetCount. Compute N = min(targetCount ?? 3, topQueued.length). Task content-manager on the top N from step 2's topQueued (skip if step 2 reported queued: 0). ` +
+    `Follow your kickoff playbook end-to-end (plan → social-media-manager): ` +
+    `(1) Generate week-1 plan items directly with your add_plan_item tool — pass weekStart + now verbatim. ` +
+    `(2) Look up today's content_reply slot for the primary channel via query_plan_items (kind=content_reply, today's UTC scheduledAt) and read params.targetCount. ` +
+    `(3) Task({ subagent_type: 'social-media-manager', description: 'fill reply slot <planItemId>', prompt: 'Mode: discover-and-fill-slot\\nplanItemId: <uuid>\\ntargetCount: <slot.targetCount>' }) — the agent runs discovery + judging + drafting internally and returns one StructuredOutput. ` +
     `Skip steps 2-3 if no channels are connected.`;
 
   let conversationId: string;

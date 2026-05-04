@@ -206,14 +206,15 @@ describe('pickPresetByCategory', () => {
 });
 
 describe('getTeamCompositionForPreset', () => {
-  it('always includes the 2 baseline agents', async () => {
+  it('always includes the coordinator baseline', async () => {
     const { getTeamCompositionForPreset } = await import(
       '@/lib/team-provisioner'
     );
-    // Phase F dropped `growth-strategist` from the baseline — the
-    // strategic-path generator is now the `generating-strategy`
-    // fork-mode skill, not a team member.
-    const baseline: AgentType[] = ['coordinator', 'content-planner'];
+    // Plan 3 (2026-05-04): the baseline collapsed to just the
+    // coordinator — content-planner's planning work was absorbed by
+    // the chief of staff via direct add_plan_item / generate_strategic_path
+    // tool calls. Specialist agents layer on top per preset.
+    const baseline: AgentType[] = ['coordinator'];
     for (const preset of [
       'dev-squad',
       'saas-squad',
@@ -225,46 +226,42 @@ describe('getTeamCompositionForPreset', () => {
     }
   });
 
-  it('dev-squad: base + content-manager', async () => {
+  it('dev-squad: base + social-media-manager', async () => {
     const { getTeamCompositionForPreset } = await import(
       '@/lib/team-provisioner'
     );
     expect(getTeamCompositionForPreset('dev-squad')).toEqual([
       'coordinator',
-      'content-planner',
-      'content-manager',
+      'social-media-manager',
     ]);
   });
 
-  it('saas-squad: base + content-manager', async () => {
+  it('saas-squad: base + social-media-manager', async () => {
     const { getTeamCompositionForPreset } = await import(
       '@/lib/team-provisioner'
     );
     expect(getTeamCompositionForPreset('saas-squad')).toEqual([
       'coordinator',
-      'content-planner',
-      'content-manager',
+      'social-media-manager',
     ]);
   });
 
-  it('consumer-squad: base + content-manager', async () => {
+  it('consumer-squad: base + social-media-manager', async () => {
     const { getTeamCompositionForPreset } = await import(
       '@/lib/team-provisioner'
     );
     expect(getTeamCompositionForPreset('consumer-squad')).toEqual([
       'coordinator',
-      'content-planner',
-      'content-manager',
+      'social-media-manager',
     ]);
   });
 
-  it('default-squad: base only (Phase J Task 2 retired post-writer)', async () => {
+  it('default-squad: coordinator only (no platform connected → no specialist)', async () => {
     const { getTeamCompositionForPreset } = await import(
       '@/lib/team-provisioner'
     );
     expect(getTeamCompositionForPreset('default-squad')).toEqual([
       'coordinator',
-      'content-planner',
     ]);
   });
 });
@@ -276,23 +273,17 @@ describe('getTeamCompositionForPreset', () => {
 describe('ensureTeamExists (baseline, no preset)', () => {
   beforeEach(() => resetTables());
 
-  it('creates a new team with the 2 baseline members on first call', async () => {
+  it('creates a new team with the coordinator baseline on first call', async () => {
     const { ensureTeamExists } = await import('@/lib/team-provisioner');
     const res = await ensureTeamExists('u-1', 'p-1');
     expect(res.created).toBe(true);
     expect(res.teamId).toBeTruthy();
     expect(res.memberIds.coordinator).toBeTruthy();
-    expect(res.memberIds['content-planner']).toBeTruthy();
 
     const members = getTeamMembers();
-    expect(members).toHaveLength(2);
+    expect(members).toHaveLength(1);
     const types = new Set(members.map((m) => m.agentType));
-    expect(types).toEqual(
-      new Set([
-        'coordinator',
-        'content-planner',
-      ]),
-    );
+    expect(types).toEqual(new Set(['coordinator']));
   });
 
   it('is idempotent — second call returns same teamId, no new inserts', async () => {
@@ -302,43 +293,35 @@ describe('ensureTeamExists (baseline, no preset)', () => {
     expect(first.teamId).toBe(second.teamId);
     expect(first.memberIds).toEqual(second.memberIds);
     expect(second.created).toBe(false);
-    expect(getTeamMembers()).toHaveLength(2);
+    expect(getTeamMembers()).toHaveLength(1);
   });
 });
 
 describe('ensureTeamExists (with preset)', () => {
   beforeEach(() => resetTables());
 
-  it('dev-squad preset seeds 3 members on a fresh team', async () => {
+  it('dev-squad preset seeds coordinator + social-media-manager on a fresh team', async () => {
     const { ensureTeamExists } = await import('@/lib/team-provisioner');
     const res = await ensureTeamExists('u-1', 'p-1', { preset: 'dev-squad' });
     expect(res.created).toBe(true);
-    expect(getTeamMembers()).toHaveLength(3);
+    expect(getTeamMembers()).toHaveLength(2);
     const types = new Set(getTeamMembers().map((m) => m.agentType));
     expect(types).toEqual(
-      new Set([
-        'coordinator',
-        'content-planner',
-        'content-manager',
-      ]),
+      new Set(['coordinator', 'social-media-manager']),
     );
   });
 
   it('reconciles — adding preset on an existing baseline team inserts the delta', async () => {
     const { ensureTeamExists } = await import('@/lib/team-provisioner');
-    await ensureTeamExists('u-1', 'p-1'); // baseline: 2 members
-    expect(getTeamMembers()).toHaveLength(2);
+    await ensureTeamExists('u-1', 'p-1'); // baseline: coordinator only
+    expect(getTeamMembers()).toHaveLength(1);
 
     // Now a channel connects and we re-run with the consumer-squad preset.
     await ensureTeamExists('u-1', 'p-1', { preset: 'consumer-squad' });
-    expect(getTeamMembers()).toHaveLength(3);
+    expect(getTeamMembers()).toHaveLength(2);
     const types = new Set(getTeamMembers().map((m) => m.agentType));
     expect(types).toEqual(
-      new Set([
-        'coordinator',
-        'content-planner',
-        'content-manager',
-      ]),
+      new Set(['coordinator', 'social-media-manager']),
     );
   });
 
@@ -349,15 +332,14 @@ describe('ensureTeamExists (with preset)', () => {
       getTeamMembers().map((m) => [m.agentType, m.displayName]),
     );
     expect(nameByType['coordinator']).toBe('Chief of Staff');
-    expect(nameByType['content-planner']).toBe('Head of Content');
-    expect(nameByType['content-manager']).toBe('Community Manager');
+    expect(nameByType['social-media-manager']).toBe('Social Media Manager');
   });
 });
 
 describe('provisionTeamForProduct', () => {
   beforeEach(() => resetTables());
 
-  it('dev_tool category + X channel connected → dev-squad with 3 members', async () => {
+  it('dev_tool category + X channel connected → dev-squad with 2 members', async () => {
     rows[productsTable].push({ id: 'p-1', userId: 'u-1', category: 'dev_tool' });
     rows[channelsTable].push({ id: 'c-1', userId: 'u-1', platform: 'x' });
     const { provisionTeamForProduct } = await import('@/lib/team-provisioner');
@@ -365,32 +347,31 @@ describe('provisionTeamForProduct', () => {
     expect(res.preset).toBe('dev-squad');
     expect(res.roster).toEqual([
       'coordinator',
-      'content-planner',
-      'content-manager',
+      'social-media-manager',
     ]);
-    expect(getTeamMembers()).toHaveLength(3);
+    expect(getTeamMembers()).toHaveLength(2);
   });
 
-  it('consumer category + only X connected → still consumer-squad (content-manager is channel-agnostic)', async () => {
+  it('consumer category + only X connected → still consumer-squad (social-media-manager is channel-agnostic)', async () => {
     rows[productsTable].push({ id: 'p-1', userId: 'u-1', category: 'consumer' });
     rows[channelsTable].push({ id: 'c-1', userId: 'u-1', platform: 'x' });
-    // No reddit channel connected, but content-manager covers X just as
+    // No reddit channel connected, but social-media-manager covers X just as
     // well — the channel comes in via plan_items.channel.
     const { provisionTeamForProduct } = await import('@/lib/team-provisioner');
     const res = await provisionTeamForProduct('u-1', 'p-1');
     expect(res.preset).toBe('consumer-squad');
     const types = new Set(getTeamMembers().map((m) => m.agentType));
-    expect(types).toContain('content-manager');
+    expect(types).toContain('social-media-manager');
   });
 
-  it('consumer category + reddit channel connected → consumer-squad seeds content-manager', async () => {
+  it('consumer category + reddit channel connected → consumer-squad seeds social-media-manager', async () => {
     rows[productsTable].push({ id: 'p-1', userId: 'u-1', category: 'consumer' });
     rows[channelsTable].push({ id: 'c-1', userId: 'u-1', platform: 'reddit' });
     const { provisionTeamForProduct } = await import('@/lib/team-provisioner');
     const res = await provisionTeamForProduct('u-1', 'p-1');
     expect(res.preset).toBe('consumer-squad');
     const types = new Set(getTeamMembers().map((m) => m.agentType));
-    expect(types).toContain('content-manager');
+    expect(types).toContain('social-media-manager');
   });
 
   it('no channels connected → falls back to default-squad even for dev_tool', async () => {
@@ -399,31 +380,26 @@ describe('provisionTeamForProduct', () => {
     const res = await provisionTeamForProduct('u-1', 'p-1');
     expect(res.preset).toBe('default-squad');
     const types = new Set(getTeamMembers().map((m) => m.agentType));
-    expect(types).toEqual(
-      new Set([
-        'coordinator',
-        'content-planner',
-      ]),
-    );
+    expect(types).toEqual(new Set(['coordinator']));
   });
 
   it('reconciles when a new channel connects after initial provisioning', async () => {
     rows[productsTable].push({ id: 'p-1', userId: 'u-1', category: 'consumer' });
     // No platform channels yet → falls back to default-squad (baseline
-    // only — no content-manager because there's no inbox to monitor and
-    // no platform to post to).
+    // only — no social-media-manager because there's no inbox to monitor
+    // and no platform to post to).
     const { provisionTeamForProduct } = await import('@/lib/team-provisioner');
     await provisionTeamForProduct('u-1', 'p-1');
     expect(
       new Set(getTeamMembers().map((m) => m.agentType)),
-    ).not.toContain('content-manager');
+    ).not.toContain('social-media-manager');
 
     // User connects X, re-run — full consumer-squad now seeds.
     rows[channelsTable].push({ id: 'c-1', userId: 'u-1', platform: 'x' });
     const second = await provisionTeamForProduct('u-1', 'p-1');
     expect(second.preset).toBe('consumer-squad');
     const types = new Set(getTeamMembers().map((m) => m.agentType));
-    expect(types).toContain('content-manager');
+    expect(types).toContain('social-media-manager');
     // Baseline still present.
     expect(types).toContain('coordinator');
   });

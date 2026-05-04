@@ -147,11 +147,11 @@ function SubtaskBody({
   elapsedMs,
 }: SubtaskShellProps) {
   // Strategist isn't a registered agent type in the team accent map, so
-  // pull the content-planner palette as a sensible visual stand-in
-  // (warm orange — distinct from the coordinator's neutral disc and from
-  // the community/purple tone). Falls back through the same "?": grey
-  // fallback path the team page uses for unknown types.
-  const agentType = 'content-planner';
+  // pull the social-media-manager palette as a sensible visual stand-in
+  // (community purple — distinct from the coordinator's neutral disc).
+  // Falls back through the same "?": grey fallback path the team page
+  // uses for unknown types.
+  const agentType = 'social-media-manager';
   const accent = accentForAgentType(agentType);
   const borderColor = accent?.solid ?? colorHexForAgentType(agentType);
 

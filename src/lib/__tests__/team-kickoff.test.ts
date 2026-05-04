@@ -116,23 +116,23 @@ describe('ensureKickoffEnqueued', () => {
     expect(callArg.goal).toContain('weekStart=');
     expect(callArg.goal).toContain('now=');
     expect(callArg.goal).toContain('pathId=path-1');
-    // New playbook: plan → discovery → drafts.
-    expect(callArg.goal).toContain('content-planner');
-    expect(callArg.goal).toContain("subagent_type: 'discovery-agent'");
-    expect(callArg.goal).toContain('content-manager');
+    // Plan 3 playbook: coordinator generates plan items directly +
+    // dispatches a single social-media-manager spawn that does
+    // discovery + judging + drafting internally.
+    expect(callArg.goal).toContain('add_plan_item');
+    expect(callArg.goal).toContain("subagent_type: 'social-media-manager'");
+    expect(callArg.goal).toContain('discover-and-fill-slot');
     // Calibration / scout / reviewer / inline-mode references are gone.
     expect(callArg.goal).not.toContain('calibrate_search_strategy');
     expect(callArg.goal).not.toContain('run_discovery_scan');
     expect(callArg.goal).not.toContain('inlineQueryCount');
     expect(callArg.goal).not.toContain('discovery-scout');
+    // Legacy specialist agent names are gone (Plan 3 collapse).
+    expect(callArg.goal).not.toContain('content-planner');
+    expect(callArg.goal).not.toContain('discovery-agent');
+    expect(callArg.goal).not.toContain('content-manager');
     // No-channels skip preserved.
     expect(callArg.goal).toContain('Skip steps 2-3 if no channels');
-    // Order: discovery-agent appears before content-manager.
-    const goal: string = callArg.goal;
-    const discoveryIdx = goal.indexOf("subagent_type: 'discovery-agent'");
-    const draftsIdx = goal.indexOf('content-manager');
-    expect(discoveryIdx).toBeGreaterThan(0);
-    expect(draftsIdx).toBeGreaterThan(discoveryIdx);
   });
 
   it('returns no_coordinator when team has no coordinator member', async () => {
@@ -141,7 +141,7 @@ describe('ensureKickoffEnqueued', () => {
       buildSelectChain([{ name: 'Shipflare' }]),
     );
     dbSelectMock.mockReturnValueOnce(
-      buildSelectChain([{ id: 'm-other', agentType: 'content-planner' }]),
+      buildSelectChain([{ id: 'm-other', agentType: 'social-media-manager' }]),
     );
 
     const result = await ensureKickoffEnqueued({

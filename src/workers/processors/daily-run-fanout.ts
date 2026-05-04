@@ -75,10 +75,11 @@ export async function processDailyRunFanout(
         `Connected platforms: ${platforms}. ` +
         `Trigger: daily. Source: cron. ` +
         `Follow your daily playbook: load today's content_reply plan_items ` +
-        `for this user, run the per-slot discovery → content-manager loop ` +
-        `(max 3 inner attempts per slot), and update_plan_item state='drafted' ` +
-        `when each slot terminates. If no slots are found, fall back to ` +
-        `default top-3 drafting from a single discovery-agent dispatch.`;
+        `for this user, dispatch ONE social-media-manager per slot (it runs ` +
+        `discovery + judging + drafting internally), and update_plan_item ` +
+        `state='drafted' when each slot terminates. If no slots are found, ` +
+        `fall back to a single social-media-manager dispatch with mode ` +
+        `discover-and-fill-slot for the primary connected channel.`;
 
       await dispatchLeadMessage(
         {

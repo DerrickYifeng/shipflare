@@ -332,7 +332,7 @@ interface NotifyParams {
    * Best-effort teammate display name carried onto the SSE
    * `task_notification` event so the activity feed can render
    * `"Researcher completed"` instead of a raw agent uuid. Defaults to the
-   * agentDef name (`researcher`, `content-manager`, etc.) at the call
+   * agentDef name (`researcher`, `social-media-manager`, etc.) at the call
    * site. Not required because the SSE is best-effort and the durable
    * `team_messages` row carries the canonical XML payload.
    */

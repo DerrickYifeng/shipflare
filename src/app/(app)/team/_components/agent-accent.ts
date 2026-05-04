@@ -6,8 +6,8 @@ import type { BadgeVariant } from '@/components/ui/badge';
  * TeamMemberPage (hero avatar), and any place that needs a consistent
  * color, monogram, and role code for an agent.
  *
- * The base pair (coordinator / content-planner) maps onto existing
- * `--sf-*` tokens. The community accent adopts an iOS system hue by
+ * The coordinator accent maps onto existing `--sf-*` tokens. The
+ * community accent (`social-media-manager`) adopts an iOS system hue by
  * literal hex — there's no matching semantic token in globals.css,
  * and the plan calls out that we keep the inline hex value right here
  * rather than inventing a new CSS variable.
@@ -42,34 +42,24 @@ const COORDINATOR: AgentAccent = {
   initial: 'L',
   colorHex: '#1d1d1f',
 };
-const CONTENT: AgentAccent = {
-  solid: 'var(--sf-warning)',
-  soft: 'var(--sf-warning-light)',
-  ink: 'var(--sf-warning-ink)',
-  badgeVariant: 'warning',
-  code: 'CONTENT',
-  initial: 'P',
-  colorHex: '#c67a05',
-};
 const COMMUNITY: AgentAccent = {
   solid: '#af52de',
   soft: '#f3e5fa',
   ink: '#803aa7',
   badgeVariant: 'accent',
-  code: 'COMMUNITY',
+  code: 'SOCIAL MEDIA',
   initial: 'M',
   colorHex: '#af52de',
 };
 
 const ACCENTS: Record<string, AgentAccent> = {
   coordinator: COORDINATOR,
-  'content-planner': CONTENT,
-  // Phase J renamed `community-manager` → `content-manager`. The UI
-  // accent (purple "M" monogram, "COMMUNITY" code) is preserved so the
-  // teammate keeps its identity in the founder-facing roster. Phase J
-  // Task 2 retired the separate `post-writer` accent — content-manager
-  // now drafts original posts in batches via post_batch as well.
-  'content-manager': COMMUNITY,
+  // Plan 3 (2026-05-04) collapsed `content-manager` + `content-planner`
+  // + `discovery-agent` into a single `social-media-manager`. The
+  // purple "M" monogram identity is preserved from the legacy
+  // content-manager accent so migrated teammates keep their visual
+  // continuity in the founder-facing roster.
+  'social-media-manager': COMMUNITY,
 };
 
 export function accentForAgentType(agentType: string): AgentAccent | null {
@@ -96,9 +86,9 @@ export function roleCodeForAgentType(agentType: string): string {
 
 /**
  * Single-letter monogram. Prefers the curated initial (so we can
- * disambiguate `coordinator` → "L" and `content-planner` → "P") and
- * falls back to the first letter of the display name, then the first
- * letter of the agent type.
+ * disambiguate `coordinator` → "L" and `social-media-manager` → "M")
+ * and falls back to the first letter of the display name, then the
+ * first letter of the agent type.
  */
 export function initialForAgent(agentType: string, displayName: string): string {
   const curated = accentForAgentType(agentType)?.initial;

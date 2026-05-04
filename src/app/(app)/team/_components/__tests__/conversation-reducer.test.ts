@@ -39,9 +39,9 @@ describe('stitchLeadMessages — subagent routing (regression)', () => {
     const messages = [
       msg({
         type: 'agent_text',
-        from: 'discovery-member',
+        from: 'social-member',
         content: 'I found 6 candidates.',
-        metadata: { parentToolUseId: 'toolu_abc', agentName: 'discovery-agent' },
+        metadata: { parentToolUseId: 'toolu_abc', agentName: 'social-media-manager' },
       }),
     ];
     const nodes = stitchLeadMessages(messages);
@@ -51,15 +51,15 @@ describe('stitchLeadMessages — subagent routing (regression)', () => {
 
   it('routes subagent agent_text away from top-level even when parentToolUseId is missing — backstop on agentName', () => {
     // This is the production bug: parentToolUseId was missing on a
-    // discovery-agent agent_text row, so the row bubbled up and the UI
-    // rendered it as the coordinator (Chief of Staff). The agentName
-    // backstop catches this case.
+    // subagent agent_text row, so the row bubbled up and the UI rendered
+    // it as the coordinator (Chief of Staff). The agentName backstop
+    // catches this case.
     const messages = [
       msg({
         type: 'agent_text',
-        from: 'discovery-member',
+        from: 'social-member',
         content: '```json\n{ "keep": true, "score": 0.82 }\n```',
-        metadata: { agentName: 'discovery-agent' }, // parentToolUseId missing
+        metadata: { agentName: 'social-media-manager' }, // parentToolUseId missing
       }),
     ];
     const nodes = stitchLeadMessages(messages);
