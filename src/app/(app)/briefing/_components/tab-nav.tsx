@@ -16,13 +16,20 @@ const navStyle: CSSProperties = {
   borderBottom: '1px solid var(--sf-border-1, rgba(0,0,0,0.08))',
 };
 
+// Use longhand border properties on both states so the active style
+// only overrides `borderBottomColor` cleanly. Mixing the shorthand
+// `borderBottom: '2px solid transparent'` with a longhand override
+// triggers React 19's "Removing a style property during rerender"
+// warning when the longhand goes away on tab switch.
 const linkBase: CSSProperties = {
   fontSize: 14,
   fontWeight: 500,
   color: 'var(--sf-fg-3)',
   textDecoration: 'none',
   padding: '10px 0',
-  borderBottom: '2px solid transparent',
+  borderBottomWidth: 2,
+  borderBottomStyle: 'solid',
+  borderBottomColor: 'transparent',
   transition: 'color 120ms, border-color 120ms',
 };
 
