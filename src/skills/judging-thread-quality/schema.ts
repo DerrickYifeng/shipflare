@@ -27,17 +27,38 @@ export type JudgingThreadQualityInput = z.infer<
   typeof judgingThreadQualityInputSchema
 >;
 
+export const MENTION_SIGNALS = [
+  'tool_question',
+  'debug_problem_fit',
+  'competitor_complaint',
+  'case_study_request',
+  'review_invitation',
+  'milestone',
+  'vulnerable',
+  'grief_or_layoff',
+  'political',
+  'no_fit',
+] as const;
+export type MentionSignal = (typeof MENTION_SIGNALS)[number];
+
 /**
  * Output: keep/skip verdict, 0–1 confidence score, one-sentence reason that
  * names the specific product signal (or the gate that blocked), and a tag set
  * the discovery loop can aggregate to refine its next xAI prompt
  * (e.g. "many `competitor_bio` skips → tighten the bio filter").
+ *
+ * Also carries the product-mention decision (`canMentionProduct` +
+ * `mentionSignal`) — folded in from the deprecated `judging-opportunity`
+ * skill so a single judging pass produces both the keep verdict and the
+ * downstream drafter's product-mention green-light.
  */
 export const judgingThreadQualityOutputSchema = z.object({
   keep: z.boolean(),
   score: z.number().min(0).max(1),
   reason: z.string().max(500),
   signals: z.array(z.string()).default([]),
+  canMentionProduct: z.boolean().default(false),
+  mentionSignal: z.enum(MENTION_SIGNALS).default('no_fit'),
 });
 
 export type JudgingThreadQualityOutput = z.infer<

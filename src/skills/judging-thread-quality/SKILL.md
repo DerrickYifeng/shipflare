@@ -26,6 +26,8 @@ your caller passes in `$ARGUMENTS`. The output must always populate:
   (`help_request`, `in_domain`, `competitor_bio`, `engagement_pod`,
   `vulnerable`, `milestone`, `repost_unreplyable`, etc.). Caller aggregates
   these to drive the next refinement turn.
+- `canMentionProduct: boolean` — green-light fired AND product plausibly fits AND your confidence ≥ 0.6. Suppress on any hard-mute signal.
+- `mentionSignal: string` — the dominant signal name (one of: tool_question, debug_problem_fit, competitor_complaint, case_study_request, review_invitation, milestone, vulnerable, grief_or_layoff, political, no_fit).
 
 ## Output
 
@@ -35,8 +37,10 @@ Single JSON object. No markdown fences. Start `{`, end `}`.
 {
   "keep": true,
   "score": 0.85,
-  "reason": "Solo founder asking for a deploy tool — exact ICP, recent post, room in thread",
-  "signals": ["help_request", "in_domain", "solo_founder"]
+  "reason": "Solo founder asking for a deploy tool — exact ICP, recent post",
+  "signals": ["help_request", "in_domain", "solo_founder"],
+  "canMentionProduct": true,
+  "mentionSignal": "tool_question"
 }
 ```
 
@@ -49,6 +53,8 @@ bio filter on the next xAI turn):
   "keep": false,
   "score": 0.9,
   "reason": "Bio describes a SaaS marketing-attribution tool — direct category competitor",
-  "signals": ["competitor_bio"]
+  "signals": ["competitor_bio"],
+  "canMentionProduct": false,
+  "mentionSignal": "no_fit"
 }
 ```
