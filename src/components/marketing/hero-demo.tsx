@@ -15,12 +15,12 @@ export interface HeroDemoProps {
 const DEFAULT_HEADLINE = 'The AI marketing team for solo founders.';
 
 const AGENT_ROLES = [
-  'CMO',
-  'SOCIAL',
-  'SEARCH',
-  'PERFORMANCE',
-  'CONTENT',
-  'ANALYTICS',
+  'Chief Marketing Officer',
+  'Social Media Manager',
+  'SEO Manager',
+  'Performance Marketing Manager',
+  'Content Marketing Manager',
+  'Marketing Analytics Manager',
 ] as const;
 
 /**
@@ -133,17 +133,16 @@ export function HeroDemo({ headline = DEFAULT_HEADLINE, isAuthenticated }: HeroD
           className="flex flex-wrap items-center justify-center"
           style={{
             marginTop: 64,
-            gap: 18,
+            gap: 14,
             opacity: 0.85,
           }}
         >
           {AGENT_ROLES.map((role, i) => (
-            <span key={role} className="inline-flex items-center" style={{ gap: 18 }}>
+            <span key={role} className="inline-flex items-center" style={{ gap: 14 }}>
               <span
                 style={{
                   fontFamily: 'var(--sf-font-mono)',
                   fontSize: 'var(--sf-text-xs)',
-                  textTransform: 'uppercase',
                   letterSpacing: 'var(--sf-track-mono)',
                   color: 'var(--sf-fg-on-dark-3)',
                   fontWeight: 600,
