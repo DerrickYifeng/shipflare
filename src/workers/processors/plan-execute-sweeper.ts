@@ -1,13 +1,13 @@
 import type { Job } from 'bullmq';
 import { and, eq, inArray, lte, or, sql } from 'drizzle-orm';
 import { db } from '@/lib/db';
-import { planItems, teamMembers, teams } from '@/lib/db/schema';
+import { planItems } from '@/lib/db/schema';
 import { enqueuePlanExecute } from '@/lib/queue/plan-execute';
-import { spawnMemberAgentRun } from '@/lib/team/spawn-member-agent-run';
-import { createAutomationConversation } from '@/lib/team-conversation-helpers';
 import { recordPipelineEventsBulk } from '@/lib/pipeline-events';
 import { createLogger, loggerForJob } from '@/lib/logger';
 import { nextDispatchPhase } from '@/lib/plan-state';
+import { processPostsBatchTool } from '@/tools/ProcessPostsBatchTool/ProcessPostsBatchTool';
+import { createToolContext } from '@/bridge/agent-runner';
 
 const log = createLogger('worker:plan-execute-sweeper');
 
@@ -26,11 +26,12 @@ const MAX_PER_TICK = 200;
  * Two dispatch paths from this sweep:
  *
  * 1. **content_post draft batch (Phase J Task 2)** — content_post rows
- *    in `state='planned' + userAction='approve'` and due go through
- *    one team-run per user with content-manager(post_batch). The
- *    sweeper atomically flips `planned → drafting` to claim rows
- *    before dispatching, so concurrent ticks don't double-fire.
- *    `draft_post` advances `drafting → drafted` once the writer
+ *    in `state='planned' + userAction='approve'` and due are handed
+ *    directly to `processPostsBatchTool.execute()` (one tool call per
+ *    user/product) — no `agent_run` spawn. The sweeper atomically
+ *    flips `planned → drafting` to claim rows before invoking the
+ *    tool, so concurrent ticks don't double-fire. The tool's internal
+ *    `draft_post` step advances `drafting → drafted` once the writer
  *    persists.
  *
  * 2. **per-row plan-execute jobs** — every other (kind, phase) combo:
@@ -58,9 +59,9 @@ export async function processPlanExecuteSweeper(
   // ------------------------------------------------------------------
   // Path 1 — content_post draft batch.
   //
-  // Pulls due content_post rows in planned + approve, groups by user,
-  // atomically claims them via planned → drafting, and dispatches ONE
-  // content-manager(post_batch) team-run per user.
+  // Pulls due content_post rows in planned + approve, groups by
+  // (userId, productId), atomically claims them via planned →
+  // drafting, and invokes `processPostsBatchTool` once per group.
   // ------------------------------------------------------------------
   const batchedDrafts = await dispatchContentPostBatch(now, jlog);
   for (const [userId, count] of batchedDrafts) {
@@ -160,7 +161,7 @@ function sum(values: Iterable<number>): number {
 /**
  * Pull due content_post + planned + approve rows, group by user, and
  * for each user atomically claim the rows (planned → drafting) and
- * dispatch ONE content-manager(post_batch) team-run.
+ * invoke `processPostsBatchTool` directly (no `agent_run` spawn).
  *
  * Returns a map of `userId → claimed-count` so the caller can fold the
  * counts into the cross-path per-user aggregate.
@@ -190,8 +191,9 @@ async function dispatchContentPostBatch(
 
   if (candidates.length === 0) return dispatched;
 
-  // Group by (userId, productId). The team is product-scoped, so two
-  // products belonging to the same user dispatch separate team-runs.
+  // Group by (userId, productId). The product context is the tool's
+  // dep, so two products belonging to the same user trigger separate
+  // tool calls.
   const groups = new Map<
     string,
     {
@@ -238,29 +240,21 @@ interface UserBatchGroup {
 
 /**
  * Atomically claim the candidate rows (planned → drafting) for one
- * user/product, then dispatch a single content-manager(post_batch)
- * team-run. Returns the number of rows actually claimed (0 means
- * another tick already dispatched, or no team yet exists).
+ * user/product, then invoke `processPostsBatchTool` directly. Returns
+ * the number of rows actually claimed (0 means another tick already
+ * dispatched).
+ *
+ * No `agent_run` is spawned — the tool's `execute()` IS the post
+ * pipeline orchestrator. On tool dispatch failure we reset claimed
+ * rows back to `planned` so a future tick retries.
  */
 async function dispatchOneUserBatch(
   group: UserBatchGroup,
   jlog: ReturnType<typeof loggerForJob>,
 ): Promise<number> {
-  // Look up the team + content-manager member BEFORE claiming. If the
-  // team doesn't yet have content-manager (older default-squad team
-  // pre-Phase-J reconcile), bail out without claiming so the rows
-  // stay claimable on the next tick once the roster catches up.
-  const memberRow = await findContentManagerMember(group.userId, group.productId);
-  if (!memberRow) {
-    jlog.warn(
-      `content_post batch: no content-manager member for user=${group.userId} product=${group.productId} — leaving rows in planned`,
-    );
-    return 0;
-  }
-
   // Atomic claim — UPDATE only flips rows that are still planned. The
   // returning() list tells us which ids actually transitioned, so the
-  // post_batch goal carries only the rows we own.
+  // tool call carries only the rows we own.
   const claimed = await db
     .update(planItems)
     .set({ state: 'drafting', updatedAt: sql`now()` })
@@ -278,79 +272,44 @@ async function dispatchOneUserBatch(
   }
 
   const planItemIds = claimed.map((r) => r.id);
-  const goal =
-    `Mode: post_batch\n` +
-    `planItemIds: ${JSON.stringify(planItemIds)}\n\n` +
-    `Draft ${planItemIds.length} original-post(s). For each id, call ` +
-    `query_plan_items to load the row, query_product_context once for ` +
-    `shared product context, then run the post_batch workflow per ` +
-    `AGENT.md (drafting-post → validate_draft → validating-draft → ` +
-    `draft_post). Persist via draft_post; that tool flips state to drafted.`;
 
-  const conversationId = await createAutomationConversation(
-    memberRow.teamId,
-    'draft_post',
-  );
-
-  // Phase E Task 11: spawn the content-manager directly via agent-run
-  // (instead of routing through the lead's team-run). The post_batch
-  // workflow has no planning step — handing it to the lead would just
-  // forward verbatim, wasting a turn. Mirrors Task tool's
-  // `launchAsyncTeammate` shape; parentAgentId stays null because the
-  // sweeper is a cron, not another agent.
-  await spawnMemberAgentRun(
-    {
-      teamId: memberRow.teamId,
-      memberId: memberRow.memberId,
-      agentDefName: 'content-manager',
-      conversationId,
-      prompt: goal,
-      description: `post_batch (${planItemIds.length})`,
-      trigger: 'draft_post',
-    },
+  // Pipeline-to-tools refactor: invoke the tool directly. The tool
+  // handles drafting → drafted via its internal draftPostTool.execute()
+  // calls. No team conversation, no agent_run — the sweeper is a cron
+  // and the tool is its own orchestrator.
+  const syntheticCtx = createToolContext({
     db,
-  );
+    userId: group.userId,
+    productId: group.productId,
+  });
 
-  jlog.info(
-    `content_post batch: spawned content-manager agent_run team=${memberRow.teamId} user=${group.userId} planItemIds=${planItemIds.length}`,
-  );
-
-  return planItemIds.length;
-}
-
-interface ContentManagerLookup {
-  teamId: string;
-  memberId: string;
-}
-
-/**
- * Find the team for (userId, productId) and the content-manager
- * member id within it. Returns null if either is missing — older
- * teams provisioned before Phase J or default-squad teams without a
- * content-manager fall through and the sweeper retries next tick.
- */
-async function findContentManagerMember(
-  userId: string,
-  productId: string,
-): Promise<ContentManagerLookup | null> {
-  const [teamRow] = await db
-    .select({ id: teams.id })
-    .from(teams)
-    .where(and(eq(teams.userId, userId), eq(teams.productId, productId)))
-    .limit(1);
-  if (!teamRow) return null;
-
-  const [memberRow] = await db
-    .select({ id: teamMembers.id })
-    .from(teamMembers)
-    .where(
-      and(
-        eq(teamMembers.teamId, teamRow.id),
-        eq(teamMembers.agentType, 'content-manager'),
-      ),
-    )
-    .limit(1);
-  if (!memberRow) return null;
-
-  return { teamId: teamRow.id, memberId: memberRow.id };
+  try {
+    const result = await processPostsBatchTool.execute(
+      { planItemIds },
+      syntheticCtx,
+    );
+    jlog.info(
+      `content_post batch via tool: created=${result.draftsCreated} ` +
+        `skipped=${result.draftsSkipped} for user=${group.userId} product=${group.productId}`,
+    );
+    return planItemIds.length;
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    jlog.error(
+      `content_post batch tool dispatch failed for user=${group.userId} product=${group.productId}: ${msg}`,
+    );
+    // Reset claimed rows back to 'planned' so the next tick retries.
+    // Filter on state='drafting' so we don't clobber rows that the tool
+    // already advanced to 'drafted' before throwing partway through.
+    await db
+      .update(planItems)
+      .set({ state: 'planned', updatedAt: sql`now()` })
+      .where(
+        and(
+          inArray(planItems.id, planItemIds),
+          eq(planItems.state, 'drafting'),
+        ),
+      );
+    return 0;
+  }
 }

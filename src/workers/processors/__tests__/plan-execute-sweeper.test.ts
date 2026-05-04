@@ -1,22 +1,24 @@
 /**
- * plan-execute-sweeper Phase J Task 2 batch coverage.
+ * plan-execute-sweeper coverage.
  *
- * The sweeper is now responsible for two paths:
+ * The sweeper is responsible for two paths:
  *
  *   1. content_post draft batching — pulls due content_post + planned +
  *      approve rows, atomically claims them (planned → drafting), and
- *      dispatches ONE content-manager(post_batch) team-run per
- *      (userId, productId).
+ *      invokes `processPostsBatchTool.execute()` directly per
+ *      (userId, productId) group. No `agent_run` spawn, no team
+ *      conversation — the sweeper is a cron and the tool is its own
+ *      orchestrator.
  *
  *   2. The legacy per-row plan-execute enqueue path for every other
  *      (kind, phase) combination, which we keep covered indirectly
  *      via plan-execute.test.ts.
  *
- * This test focuses on path 1 — the new batch dispatch — to lock in:
+ * This test focuses on path 1 — the tool dispatch — to lock in:
  *   - rows actually flip planned → drafting (claim is atomic)
  *   - drafted/skipped rows are NOT touched
- *   - exactly ONE team-run is enqueued for the user, with `Mode:
- *     post_batch` + the claimed planItemIds in the goal
+ *   - exactly ONE tool call per group, with the claimed planItemIds
+ *   - on tool failure, claimed rows are reset back to `planned` for retry
  *   - the legacy per-row enqueue is NOT also fired for the same rows
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -37,22 +39,8 @@ interface PlanItemRow {
   scheduledAt: Date;
   [key: string]: unknown;
 }
-interface TeamRow {
-  id: string;
-  userId: string;
-  productId: string;
-  [key: string]: unknown;
-}
-interface MemberRow {
-  id: string;
-  teamId: string;
-  agentType: string;
-  [key: string]: unknown;
-}
 
 const planItemRows: PlanItemRow[] = [];
-const teamRows: TeamRow[] = [];
-const teamMemberRows: MemberRow[] = [];
 
 // Each table is a tagged proxy. Accessing `planItems.id` returns
 // `{ _col: 'id', _table: 'plan_items' }`; the in-memory db mock keys
@@ -72,13 +60,9 @@ function tableProxy(name: string): Record<string, { _col: string; _table: string
 }
 
 const PLAN_ITEMS_PROXY = tableProxy('plan_items');
-const TEAMS_PROXY = tableProxy('teams');
-const TEAM_MEMBERS_PROXY = tableProxy('team_members');
 
 vi.mock('@/lib/db/schema', () => ({
   planItems: PLAN_ITEMS_PROXY,
-  teams: TEAMS_PROXY,
-  teamMembers: TEAM_MEMBERS_PROXY,
 }));
 
 // drizzle-orm mocks. We model the operators as opaque sentinels and
@@ -153,8 +137,6 @@ vi.mock('@/lib/db', () => {
   function tableRows(table: unknown): Record<string, unknown>[] {
     const name = tableName(table);
     if (name === 'plan_items') return planItemRows as Record<string, unknown>[];
-    if (name === 'teams') return teamRows as Record<string, unknown>[];
-    if (name === 'team_members') return teamMemberRows as Record<string, unknown>[];
     return [];
   }
 
@@ -228,39 +210,44 @@ vi.mock('@/lib/queue/plan-execute', () => ({
   enqueuePlanExecute: (data: unknown) => enqueuePlanExecuteMock(data),
 }));
 
-// Phase E Task 11: replaced enqueueTeamRun with spawnMemberAgentRun. The
-// helper inserts an agent_runs row + initial mailbox message for the
-// content-manager directly (mirrors Task tool's launchAsyncTeammate
-// shape); the test only cares that it was called with the right input,
-// so we mock the whole helper.
-const spawnMemberAgentRunMock = vi.fn(async (input: Record<string, unknown>) => ({
-  agentId: 'agent-batch-1',
-  messageId: 'msg-batch-1',
-  __input: input,
+// Pipeline-to-tools refactor: the sweeper now invokes
+// `processPostsBatchTool.execute()` directly. The legacy
+// `spawnMemberAgentRun` / `createAutomationConversation` helpers are
+// mocked here only so we can ASSERT they are NOT called for content_post
+// drafts. (Other call sites — onboarding finalizer, retry route — still
+// use them, but the sweeper no longer does.)
+const spawnMemberAgentRunMock = vi.fn(async () => ({
+  agentId: 'unused',
+  messageId: 'unused',
 }));
 vi.mock('@/lib/team/spawn-member-agent-run', () => ({
-  spawnMemberAgentRun: (input: Record<string, unknown>) =>
-    spawnMemberAgentRunMock(input),
+  spawnMemberAgentRun: () => spawnMemberAgentRunMock(),
 }));
 
+const createAutomationConversationMock = vi
+  .fn()
+  .mockResolvedValue('unused-conv');
 vi.mock('@/lib/team-conversation-helpers', () => ({
-  createAutomationConversation: vi.fn().mockResolvedValue('conv-batch-1'),
+  createAutomationConversation: (...args: unknown[]) =>
+    createAutomationConversationMock(...args),
 }));
+
+// processPostsBatchTool — the canonical mock for path 1. Test bodies
+// override the implementation per-case to simulate success / failure.
+const processPostsBatchExecuteMock = vi.fn();
+vi.mock(
+  '@/tools/ProcessPostsBatchTool/ProcessPostsBatchTool',
+  () => ({
+    processPostsBatchTool: {
+      execute: (input: unknown, ctx: unknown) =>
+        processPostsBatchExecuteMock(input, ctx),
+    },
+  }),
+);
 
 // ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------
-
-function seedTeam(userId: string, productId: string): {
-  teamId: string;
-  contentManagerId: string;
-} {
-  const teamId = `team-${userId}-${productId}`;
-  teamRows.push({ id: teamId, userId, productId });
-  const cmId = `mem-${teamId}-content-manager`;
-  teamMemberRows.push({ id: cmId, teamId, agentType: 'content-manager' });
-  return { teamId, contentManagerId: cmId };
-}
 
 function seedPlanItem(init: Partial<PlanItemRow> & { id: string }): void {
   planItemRows.push({
@@ -281,19 +268,26 @@ function makeJob(): Job<Record<string, never>> {
 
 beforeEach(() => {
   planItemRows.length = 0;
-  teamRows.length = 0;
-  teamMemberRows.length = 0;
   enqueuePlanExecuteMock.mockClear();
   spawnMemberAgentRunMock.mockClear();
+  createAutomationConversationMock.mockClear();
+  processPostsBatchExecuteMock.mockReset();
+  // Default: tool succeeds, no retries.
+  processPostsBatchExecuteMock.mockResolvedValue({
+    itemsScanned: 0,
+    draftsCreated: 0,
+    draftsSkipped: 0,
+    notes: '',
+    details: [],
+  });
 });
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('plan-execute-sweeper — content_post batch dispatch', () => {
-  it('claims due content_post rows and spawns ONE content-manager agent_run with post_batch goal', async () => {
-    const { contentManagerId, teamId } = seedTeam('u-1', 'p-1');
+describe('plan-execute-sweeper — content_post batch dispatch via tool', () => {
+  it('claims due content_post rows and invokes processPostsBatchTool with claimed ids — NOT spawnMemberAgentRun', async () => {
     seedPlanItem({ id: 'pi-1' });
     seedPlanItem({ id: 'pi-2' });
     // Already-drafted row should be ignored — sweeper only claims `planned`.
@@ -304,38 +298,38 @@ describe('plan-execute-sweeper — content_post batch dispatch', () => {
     );
     await processPlanExecuteSweeper(makeJob());
 
-    // 1. Exactly one content-manager agent_run spawned (no per-row enqueue).
-    expect(spawnMemberAgentRunMock).toHaveBeenCalledTimes(1);
+    // 1. Tool called exactly once with both due plan_item ids.
+    expect(processPostsBatchExecuteMock).toHaveBeenCalledTimes(1);
+    const [input, ctx] = processPostsBatchExecuteMock.mock.calls[0]!;
+    expect((input as { planItemIds: string[] }).planItemIds.sort()).toEqual([
+      'pi-1',
+      'pi-2',
+    ]);
+
+    // 2. Tool context exposes the user/product/db deps the tool reads.
+    const toolCtx = ctx as {
+      get: <T>(k: string) => T;
+      abortSignal: AbortSignal;
+    };
+    expect(toolCtx.get('userId')).toBe('u-1');
+    expect(toolCtx.get('productId')).toBe('p-1');
+    expect(toolCtx.get('db')).toBeDefined();
+
+    // 3. No agent_run spawn / team conversation — the tool is the
+    //    orchestrator, not a teammate.
+    expect(spawnMemberAgentRunMock).not.toHaveBeenCalled();
+    expect(createAutomationConversationMock).not.toHaveBeenCalled();
+
+    // 4. No per-row enqueue for content_post draft (path 1 owns it).
     expect(enqueuePlanExecuteMock).not.toHaveBeenCalled();
 
-    // 2. Prompt carries Mode: post_batch + both due plan_item ids.
-    const call = spawnMemberAgentRunMock.mock.calls[0]?.[0] as {
-      teamId: string;
-      trigger: string;
-      memberId: string;
-      agentDefName: string;
-      prompt: string;
-      conversationId: string;
-    };
-    expect(call.teamId).toBe(teamId);
-    expect(call.trigger).toBe('draft_post');
-    expect(call.memberId).toBe(contentManagerId);
-    expect(call.agentDefName).toBe('content-manager');
-    expect(call.conversationId).toBe('conv-batch-1');
-    expect(call.prompt).toContain('Mode: post_batch');
-    expect(call.prompt).toContain('"pi-1"');
-    expect(call.prompt).toContain('"pi-2"');
-    expect(call.prompt).not.toContain('"pi-3"');
-
-    // 3. Claimed rows are now in `drafting`. Untouched row stays `drafted`.
+    // 5. Claimed rows are now in `drafting`. Untouched row stays `drafted`.
     expect(planItemRows.find((r) => r.id === 'pi-1')!.state).toBe('drafting');
     expect(planItemRows.find((r) => r.id === 'pi-2')!.state).toBe('drafting');
     expect(planItemRows.find((r) => r.id === 'pi-3')!.state).toBe('drafted');
   });
 
-  it('groups by (userId, productId) — two users get two agent_runs', async () => {
-    seedTeam('u-1', 'p-1');
-    seedTeam('u-2', 'p-2');
+  it('groups by (userId, productId) — two users get two tool calls', async () => {
     seedPlanItem({ id: 'a-1', userId: 'u-1', productId: 'p-1' });
     seedPlanItem({ id: 'b-1', userId: 'u-2', productId: 'p-2' });
 
@@ -344,11 +338,14 @@ describe('plan-execute-sweeper — content_post batch dispatch', () => {
     );
     await processPlanExecuteSweeper(makeJob());
 
-    expect(spawnMemberAgentRunMock).toHaveBeenCalledTimes(2);
+    expect(processPostsBatchExecuteMock).toHaveBeenCalledTimes(2);
+    const userIds = processPostsBatchExecuteMock.mock.calls
+      .map((c) => (c[1] as { get: <T>(k: string) => T }).get<string>('userId'))
+      .sort();
+    expect(userIds).toEqual(['u-1', 'u-2']);
   });
 
-  it('is idempotent — a re-run after the first claim dispatches nothing for the same rows', async () => {
-    seedTeam('u-1', 'p-1');
+  it('is idempotent — a re-run after the first claim invokes the tool zero times', async () => {
     seedPlanItem({ id: 'pi-A' });
     seedPlanItem({ id: 'pi-B' });
 
@@ -356,41 +353,40 @@ describe('plan-execute-sweeper — content_post batch dispatch', () => {
       '../plan-execute-sweeper'
     );
     await processPlanExecuteSweeper(makeJob());
-    expect(spawnMemberAgentRunMock).toHaveBeenCalledTimes(1);
+    expect(processPostsBatchExecuteMock).toHaveBeenCalledTimes(1);
 
-    spawnMemberAgentRunMock.mockClear();
+    processPostsBatchExecuteMock.mockClear();
     await processPlanExecuteSweeper(makeJob());
     // Second sweep — both rows are now in `drafting`, so the candidate
-    // query returns nothing and no agent_run is spawned.
-    expect(spawnMemberAgentRunMock).not.toHaveBeenCalled();
+    // query returns nothing and no tool call is made.
+    expect(processPostsBatchExecuteMock).not.toHaveBeenCalled();
   });
 
-  it('skips dispatch when the team has no content-manager (older default-squad)', async () => {
-    // Team without a content-manager — only baseline coordinator.
-    const teamId = 'team-old';
-    teamRows.push({ id: teamId, userId: 'u-1', productId: 'p-1' });
-    teamMemberRows.push({
-      id: 'mem-c',
-      teamId,
-      agentType: 'coordinator',
-    });
-    seedPlanItem({ id: 'pi-orphan' });
+  it('on tool dispatch failure, resets claimed rows back to planned for retry', async () => {
+    seedPlanItem({ id: 'pi-fail-1' });
+    seedPlanItem({ id: 'pi-fail-2' });
+
+    processPostsBatchExecuteMock.mockRejectedValueOnce(
+      new Error('xAI quota exhausted'),
+    );
 
     const { processPlanExecuteSweeper } = await import(
       '../plan-execute-sweeper'
     );
     await processPlanExecuteSweeper(makeJob());
 
-    expect(spawnMemberAgentRunMock).not.toHaveBeenCalled();
-    // Row is left in `planned` so a future tick (after content-manager
-    // is provisioned) can still pick it up.
-    expect(planItemRows.find((r) => r.id === 'pi-orphan')!.state).toBe(
+    // Tool was attempted, but threw. Both rows must be back in
+    // `planned` so the next tick retries them.
+    expect(processPostsBatchExecuteMock).toHaveBeenCalledTimes(1);
+    expect(planItemRows.find((r) => r.id === 'pi-fail-1')!.state).toBe(
+      'planned',
+    );
+    expect(planItemRows.find((r) => r.id === 'pi-fail-2')!.state).toBe(
       'planned',
     );
   });
 
   it('does NOT batch content_post rows that are scheduled in the future', async () => {
-    seedTeam('u-1', 'p-1');
     seedPlanItem({
       id: 'pi-future',
       scheduledAt: new Date('3000-01-01T00:00:00Z'),
@@ -401,14 +397,13 @@ describe('plan-execute-sweeper — content_post batch dispatch', () => {
     );
     await processPlanExecuteSweeper(makeJob());
 
-    expect(spawnMemberAgentRunMock).not.toHaveBeenCalled();
+    expect(processPostsBatchExecuteMock).not.toHaveBeenCalled();
     expect(planItemRows.find((r) => r.id === 'pi-future')!.state).toBe(
       'planned',
     );
   });
 
   it('does NOT short-circuit other-kind rows — content_reply still flows through per-row enqueue', async () => {
-    seedTeam('u-1', 'p-1');
     seedPlanItem({ id: 'pi-reply', kind: 'content_reply', channel: 'x' });
 
     const { processPlanExecuteSweeper } = await import(
@@ -416,8 +411,8 @@ describe('plan-execute-sweeper — content_post batch dispatch', () => {
     );
     await processPlanExecuteSweeper(makeJob());
 
-    // No team-run from the batch path (kind != content_post).
-    expect(spawnMemberAgentRunMock).not.toHaveBeenCalled();
+    // No tool invocation from the batch path (kind != content_post).
+    expect(processPostsBatchExecuteMock).not.toHaveBeenCalled();
     // Per-row enqueue runs as before for content_reply + planned + approve.
     expect(enqueuePlanExecuteMock).toHaveBeenCalledTimes(1);
     const call = enqueuePlanExecuteMock.mock.calls[0]?.[0] as {
