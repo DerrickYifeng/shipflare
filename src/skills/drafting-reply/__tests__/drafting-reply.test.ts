@@ -40,6 +40,67 @@ describe('drafting-reply schema', () => {
     });
     expect(parsed.confidence).toBeGreaterThan(0.8);
   });
+
+  it('accepts thread with conversation-context fields populated', () => {
+    const parsed = draftingReplyInputSchema.parse({
+      thread: {
+        title: 'marketing has been the biggest frustration',
+        body: 'tried Apple Search Ads, Meta, SEO, influencers',
+        author: 'anumness',
+        platform: 'x',
+        community: 'x',
+        quotedText: 'OMG this actually worked — database is complete',
+        quotedAuthor: 'anumness',
+        inReplyToText: null,
+        inReplyToAuthor: null,
+      },
+      product: { name: 'ShipFlare', description: 'AI growth' },
+      channel: 'x',
+    });
+    // Load-bearing: verify the fields actually round-trip through the schema.
+    expect(parsed.thread.quotedText).toBe('OMG this actually worked — database is complete');
+    expect(parsed.thread.quotedAuthor).toBe('anumness');
+    expect(parsed.thread.inReplyToText).toBeNull();
+    expect(parsed.thread.inReplyToAuthor).toBeNull();
+  });
+
+  it('accepts thread with all conversation fields null', () => {
+    const parsed = draftingReplyInputSchema.parse({
+      thread: {
+        title: 't',
+        body: 'b',
+        author: 'a',
+        platform: 'x',
+        community: 'x',
+        quotedText: null,
+        quotedAuthor: null,
+        inReplyToText: null,
+        inReplyToAuthor: null,
+      },
+      product: { name: 'ShipFlare', description: 'AI' },
+      channel: 'x',
+    });
+    expect(parsed.thread.quotedText).toBeNull();
+    expect(parsed.thread.quotedAuthor).toBeNull();
+    expect(parsed.thread.inReplyToText).toBeNull();
+    expect(parsed.thread.inReplyToAuthor).toBeNull();
+  });
+
+  it('accepts thread without conversation fields at all (back-compat)', () => {
+    expect(() =>
+      draftingReplyInputSchema.parse({
+        thread: {
+          title: 't',
+          body: 'b',
+          author: 'a',
+          platform: 'x',
+          community: 'x',
+        },
+        product: { name: 'ShipFlare', description: 'AI' },
+        channel: 'x',
+      }),
+    ).not.toThrow();
+  });
 });
 
 describe('drafting-reply skill loader', () => {

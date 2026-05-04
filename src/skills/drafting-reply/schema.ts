@@ -19,6 +19,14 @@ export const draftingReplyInputSchema = z.object({
     authorBio: z.string().nullable().optional(),
     /** OP follower count. Optional — drafter uses for tier calibration. */
     authorFollowers: z.number().int().nullable().optional(),
+    /** Outer tweet QUOTES this post — body verbatim. Null/absent when not a quote-tweet. */
+    quotedText: z.string().nullable().optional(),
+    /** Quoted post author handle (no @). Compare to `author` to detect self-quote. */
+    quotedAuthor: z.string().nullable().optional(),
+    /** Outer tweet is a REPLY to this post — body verbatim. Null/absent when standalone. */
+    inReplyToText: z.string().nullable().optional(),
+    /** Parent post author handle (no @). */
+    inReplyToAuthor: z.string().nullable().optional(),
     platform: channelEnum,
     community: z.string(),
     url: z.string().optional(),
