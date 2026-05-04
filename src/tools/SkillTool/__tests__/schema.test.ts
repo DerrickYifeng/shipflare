@@ -81,4 +81,21 @@ describe('SkillFrontmatterSchema', () => {
     });
     expect((parsed as Record<string, unknown>)['future-cc-field']).toBe('whatever');
   });
+
+  it('parses shared-references as optional string[]', () => {
+    const parsed = SkillFrontmatterSchema.parse({
+      name: 'demo',
+      description: 'd',
+      'shared-references': ['slop-rules', 'launch-phases'],
+    });
+    expect(parsed['shared-references']).toEqual(['slop-rules', 'launch-phases']);
+  });
+
+  it('omits shared-references when not specified', () => {
+    const parsed = SkillFrontmatterSchema.parse({
+      name: 'demo',
+      description: 'd',
+    });
+    expect(parsed['shared-references']).toBeUndefined();
+  });
 });
