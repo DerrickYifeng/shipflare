@@ -31,6 +31,7 @@ import { draftReplyTool } from './DraftReplyTool/DraftReplyTool';
 import { validateDraftTool } from './ValidateDraftTool/ValidateDraftTool';
 import { processRepliesBatchTool } from './ProcessRepliesBatchTool/ProcessRepliesBatchTool';
 import { processPostsBatchTool } from './ProcessPostsBatchTool/ProcessPostsBatchTool';
+import { findThreadsViaXaiTool } from './FindThreadsViaXaiTool/FindThreadsViaXaiTool';
 
 /**
  * Central tool registry for ShipFlare agents.
@@ -112,6 +113,17 @@ registry.register(processRepliesBatchTool);
 // post_batch prose orchestration formerly inside content-manager
 // AGENT.md.
 registry.register(processPostsBatchTool);
+// find_threads_via_xai — pipeline-to-tools Plan 2 Task 4. The Tool's
+// execute() owns the conversational xAI Grok discovery loop:
+// composes the first-turn message from product context + ICP rubric,
+// fans out to judging-thread-quality per candidate (Promise.allSettled
+// so one judging fork's exception doesn't lose the round), aggregates
+// rejection signals into mechanical refinement nudges, escalates to
+// the reasoning Grok variant ONCE after 2 unsuccessful refines, caps
+// at 10 rounds, and persists the deduped keepers via
+// persist_queue_threads. Replaces the multi-step xAI loop prose
+// formerly inside discovery-agent AGENT.md.
+registry.register(findThreadsViaXaiTool);
 
 export { registry };
 
