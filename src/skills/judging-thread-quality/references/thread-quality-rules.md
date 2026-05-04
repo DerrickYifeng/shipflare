@@ -231,10 +231,10 @@ bolt the pitch onto an unrelated reply.
 If any of these fire, suppress the mention regardless of any
 green-light:
 
-- **`milestone_celebration`** — revenue, user count, years,
-  anniversaries. Pitching into a celebration reads predatory.
-- **`vulnerable_post`** — burnout, doubt, grief, "close to giving
-  up", "first churn hurt more than I expected".
+- **`milestone`** — revenue, user count, years, anniversaries.
+  Pitching into a celebration reads predatory.
+- **`vulnerable`** — burnout, doubt, grief, "close to giving up",
+  "first churn hurt more than I expected".
 - **`grief_or_layoff`** — job loss, company death, personal hardship.
 - **`political`** — political takes, culture war, social-issue posts.
 - **`no_fit`** — no green-light or hard-mute signal fires; the OP
@@ -273,7 +273,7 @@ Signal: `debug_problem_fit`. Gates pass. `canMentionProduct: true`
 when the product addresses that exact symptom — anchor on the
 specific fix, not a marketing pitch.
 
-### Hard-mute: vulnerable_post
+### Hard-mute: vulnerable
 
 > "first churn hit today and I'm gutted"
 
@@ -282,7 +282,7 @@ kind of thread where a peer reply matters), but
 `canMentionProduct: false`. The drafter should write a supportive
 reply with no product reference.
 
-### Hard-mute: milestone_celebration
+### Hard-mute: milestone
 
 > "we just crossed $10k MRR — 14 months of grinding"
 

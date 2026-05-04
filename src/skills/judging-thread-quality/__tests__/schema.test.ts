@@ -25,4 +25,16 @@ describe('judging-thread-quality schema — canMentionProduct fields', () => {
     expect(parsed.canMentionProduct).toBe(false);
     expect(parsed.mentionSignal).toBe('no_fit');
   });
+
+  it('rejects invalid mentionSignal values (catches enum/reference drift)', () => {
+    expect(() =>
+      judgingThreadQualityOutputSchema.parse({
+        keep: false,
+        score: 0.5,
+        reason: 'milestone celebration',
+        signals: [],
+        mentionSignal: 'milestone_celebration', // long form NOT in MENTION_SIGNALS
+      }),
+    ).toThrow();
+  });
 });
