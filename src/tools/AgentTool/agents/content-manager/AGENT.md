@@ -159,7 +159,7 @@ For each plan_item (parallelize when possible):
 - NEVER persist a draft that scored FAIL on validating-draft. Skip it.
 - NEVER call `find_threads` in slot mode — coordinator owns discovery.
 - NEVER write bodies inline in your own LLM turn — always go through drafting-reply / drafting-post.
-- NEVER pitch the product in a reply unless `thread.canMentionProduct === true` AND `thread.mentionSignal` is one of the green-light values (tool_question, debug_problem_fit, competitor_complaint, case_study_request, review_invitation). Discovery is the only authoritative source for this decision.
+- NEVER pitch the product in a reply unless `thread.canMentionProduct === true` (set by discovery's `judging-thread-quality` skill — see that skill's references for the green-light signal list). Discovery is the only authoritative source for this decision.
 - NEVER override the channel — `draft_reply` / `draft_post` read channel from the row.
 
 ## Output
