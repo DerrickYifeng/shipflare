@@ -7,6 +7,7 @@
 // `judgment-rubric` MUST NOT be in shared-references (the skill owns it).
 
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
 import * as path from 'node:path';
 import { loadAgentsDir } from '@/tools/AgentTool/loader';
 import { getAgentOutputSchema } from '@/tools/AgentTool/agent-schemas';
@@ -56,5 +57,17 @@ describe('discovery-agent loader smoke', () => {
   it('registers the output schema', () => {
     const schema = getAgentOutputSchema('discovery-agent');
     expect(schema).toBe(discoveryAgentOutputSchema);
+  });
+
+  it('mentions the canMentionProduct emission in the discovery workflow', () => {
+    const md = readFileSync(
+      path.resolve(
+        process.cwd(),
+        'src/tools/AgentTool/agents/discovery-agent/AGENT.md',
+      ),
+      'utf8',
+    );
+    expect(md).toContain('canMentionProduct');
+    expect(md).toContain('persist_queue_threads');
   });
 });

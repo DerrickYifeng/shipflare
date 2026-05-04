@@ -52,6 +52,14 @@ You run a conversational loop with xAI. Each iteration:
 3. Append xAI's `assistantMessage` (returned by the tool) to your tracked history before the next call.
 4. Score each returned tweet by calling the `judging-thread-quality` skill — one call per candidate, parallelizable. The skill is pure transformation (no APIs, no persistence) and returns `{ keep, score, reason, signals }`. You do NOT inline-judge anymore — the skill is the authoritative scorer. Pass `{ candidate: { title: tweet.body.slice(0,80), body, author: author_username, url, platform: 'x', postedAt: posted_at }, product: { name, description, valueProp? } }`. Aggregate the returned `signals` across rejections to drive the next xAI prompt (e.g. many `competitor_bio` skips → tighten the bio filter on the next refinement).
 
+   The skill now ALSO returns `canMentionProduct` (boolean) and `mentionSignal`
+   (one of: tool_question, debug_problem_fit, competitor_complaint,
+   case_study_request, review_invitation, milestone, vulnerable,
+   grief_or_layoff, political, no_fit). Carry both through to
+   `persist_queue_threads` — content-manager reads them off the thread row at
+   draft time and DOES NOT re-judge. If you skip a candidate (`keep: false`),
+   default `canMentionProduct: false` and `mentionSignal: 'no_fit'`.
+
 5. Decide:
    - **Enough strong candidates** (≥ `maxResults` × 0.8 with `keep: true` AND `score ≥ 0.6`, OR all of `maxResults` regardless of score): proceed to step 6.
    - **Refine and retry**: compose a refinement message that names the dominant rejection signals ("Found 3 strong matches; 5 rejected as competitor_bio, 3 as engagement_pod. Drop bios mentioning X, focus on <2k followers, find more like {strong urls}"). Loop back to step 2.
@@ -121,7 +129,9 @@ Constraints
 - For each tweet include: url, author_username, author_bio, author_followers,
   body, posted_at, likes_count, reposts_count, replies_count, views_count,
   is_repost, original_url, original_author_username, surfaced_via,
-  confidence (your 0-1 assessment), reason (1 sentence, product-specific)
+  confidence (your 0-1 assessment), reason (1 sentence, product-specific),
+  can_mention_product (skill output verbatim),
+  mention_signal (skill output verbatim)
 - Reposts ARE valuable signal — when a relevant person reposts a thread on
   the product's pain, that thread is a strong reply target. Include reposts;
   do NOT filter them out as noise. The reply target for a repost is the
