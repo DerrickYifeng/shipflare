@@ -8,7 +8,7 @@ import { SignInModal } from '@/components/auth/sign-in-modal';
 
 export interface HeroDemoProps {
   headline?: string;
-  /** When authenticated, the primary CTA navigates to /today instead of opening sign-in. */
+  /** When authenticated, the primary CTA navigates to /briefing instead of opening sign-in. */
   isAuthenticated: boolean;
 }
 
@@ -101,10 +101,10 @@ export function HeroDemo({ headline = DEFAULT_HEADLINE, isAuthenticated }: HeroD
           {isAuthenticated ? (
             <PillCta
               onClick={() => {
-                window.location.href = '/today';
+                window.location.href = '/briefing';
               }}
             >
-              Open Today
+              Open Briefing
             </PillCta>
           ) : (
             <PillCta onClick={() => setSignInOpen(true)}>

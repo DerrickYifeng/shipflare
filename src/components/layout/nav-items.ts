@@ -16,7 +16,6 @@ import {
   TodayIcon,
   ProductIcon,
   GrowthIcon,
-  CalendarIcon,
   ZapIcon,
   GearIcon,
 } from './nav-icons';
@@ -30,7 +29,14 @@ export interface NavItem {
 }
 
 export const NAV_ITEMS: ReadonlyArray<NavItem> = [
-  { href: '/today', label: 'Today', Icon: TodayIcon },
+  {
+    href: '/briefing',
+    label: 'Briefing',
+    Icon: TodayIcon,
+    // /today and /calendar are 301-redirected to /briefing; aliases keep
+    // the topnav label correct during the redirect flash.
+    aliases: [/^\/today/, /^\/calendar/, /^\/briefing/],
+  },
   {
     href: '/team',
     label: 'My AI Team',
@@ -40,7 +46,6 @@ export const NAV_ITEMS: ReadonlyArray<NavItem> = [
     aliases: [/^\/automation/],
   },
   { href: '/product', label: 'My Product', Icon: ProductIcon },
-  { href: '/calendar', label: 'Calendar', Icon: CalendarIcon },
   { href: '/growth', label: 'Growth', Icon: GrowthIcon },
   { href: '/settings', label: 'Settings', Icon: GearIcon },
 ];

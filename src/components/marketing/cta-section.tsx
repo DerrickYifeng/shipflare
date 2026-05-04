@@ -14,7 +14,7 @@ export interface CTASectionProps {
  *
  * Auth is GitHub-only during beta (no email/password, no Google, no X).
  * Unauthenticated: primary pill triggers SignInModal → GitHub OAuth.
- * Authenticated: pill links to /today.
+ * Authenticated: pill links to /briefing.
  */
 export function CTASection({ isAuthenticated }: CTASectionProps) {
   const [signInOpen, setSignInOpen] = useState(false);
@@ -80,10 +80,10 @@ export function CTASection({ isAuthenticated }: CTASectionProps) {
           {isAuthenticated ? (
             <PillCta
               onClick={() => {
-                window.location.href = '/today';
+                window.location.href = '/briefing';
               }}
             >
-              Open Today
+              Open Briefing
             </PillCta>
           ) : (
             <PillCta onClick={() => setSignInOpen(true)}>

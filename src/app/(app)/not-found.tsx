@@ -10,10 +10,10 @@ export default function AppNotFound() {
         Page not found
       </h1>
       <p className="text-[14px] tracking-[-0.224px] text-sf-text-secondary max-w-[360px] mb-6 leading-[1.47]">
-        That route doesn&apos;t exist. Head back to your Today list.
+        That route doesn&apos;t exist. Head back to your Briefing.
       </p>
       <Link
-        href="/today"
+        href="/briefing"
         className="
           inline-flex items-center justify-center
           min-h-[44px] px-[15px] py-2
@@ -23,7 +23,7 @@ export default function AppNotFound() {
           hover:bg-sf-accent-hover transition-colors duration-200
         "
       >
-        Go to Today
+        Go to Briefing
       </Link>
     </div>
   );

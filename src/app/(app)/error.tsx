@@ -53,8 +53,8 @@ export default function AppError({
       )}
       <div className="flex items-center gap-2">
         <Button onClick={reset}>Try again</Button>
-        <Button variant="ghost" onClick={() => { window.location.href = '/today'; }}>
-          Go to Today
+        <Button variant="ghost" onClick={() => { window.location.href = '/briefing'; }}>
+          Go to Briefing
         </Button>
       </div>
     </div>

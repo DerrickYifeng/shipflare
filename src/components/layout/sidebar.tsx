@@ -169,7 +169,7 @@ function SidebarInner({ user, layout, onNavigate }: SidebarInnerProps) {
       />
 
       <Link
-        href="/today"
+        href="/briefing"
         onClick={onNavigate}
         style={{
           display: 'flex',
