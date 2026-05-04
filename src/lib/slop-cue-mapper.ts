@@ -47,5 +47,5 @@ export function mapSlopFingerprintToVoiceCue(fingerprints: string[]): string {
   if (matched.length === 1) return matched[0];
 
   const combined = `Address each issue: ${matched.map((c, i) => `(${i + 1}) ${c}`).join('; ')}`;
-  return combined.length > 900 ? combined.slice(0, 900) + '...' : combined;
+  return combined.length > 900 ? combined.slice(0, 897) + '...' : combined;
 }
