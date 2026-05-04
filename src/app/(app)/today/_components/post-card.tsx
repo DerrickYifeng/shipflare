@@ -65,6 +65,16 @@ function formatScheduledTime(iso: string | null): string | null {
   });
 }
 
+function formatLocalTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleString(undefined, {
+    weekday: 'short',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
 export function PostCard({
   item,
   onApprove,
@@ -220,6 +230,24 @@ export function PostCard({
           >
             {item.draftPostTitle}
           </p>
+        ) : null}
+
+        {!isEditing ? (
+          <div
+            className="sf-mono"
+            style={{
+              marginTop: 2,
+              marginBottom: 8,
+              fontSize: 'var(--sf-text-xs)',
+              color: 'var(--sf-fg-3)',
+              letterSpacing: 'var(--sf-track-mono)',
+            }}
+          >
+            Drafted by your writer
+            {item.scheduledFor
+              ? ` · scheduled ${formatLocalTime(item.scheduledFor)}`
+              : ''}
+          </div>
         ) : null}
 
         {!isEditing && item.draftBody ? (
