@@ -170,7 +170,7 @@ The tab body is `today-content.tsx` minus the top meta line (BriefingHeader owns
 - Posts: `Drafted by your writer · scheduled Tue 10am`
 - Replies: `Your scout flagged this · r/SaaS · score 8.4`
 
-Pulls from `plan_items.output` (drafter identity), `drafts.confidenceScore`, and `threads.community` — all already populated. One small render addition per card component, no schema change. This is the "your team did this" signal that converts queue → reviewed-by-the-boss.
+The agent-role labels (`writer`, `scout`) are **derived from `plan_items.kind` and the row source**, not stored — content_post/content_reply rows imply the writer; the discovery side of a reply implies the scout. The dynamic parts (`scheduledAt`, `threads.community`, `drafts.confidenceScore`) are all populated today. No schema change; no new persisted field. One small render addition per card component. This is the "your team did this" signal that converts queue → reviewed-by-the-boss.
 
 **(b) Empty state collapses to one line.** Today's centered hero ("All caught up on replies. Discovery runs daily.") is replaced with a thin one-liner inside the tab body: `Nothing on you right now. Next drafts ~10min before scheduled slots.` `BriefingHeader` carries the celebration job; the tab body shouldn't double it.
 
@@ -232,7 +232,7 @@ All three SWR caches are independent. Tab switch is purely client-side; the inac
 | `briefing-header.test.tsx` | renders three lines for steady state; renders day-1 hero when `isDay1=true`; renders all-clear copy when `awaiting=0 && shipped>0 && totalQueued=0`; collapses to single line on null summary |
 | `api/briefing/summary/route.test.ts` | aggregates yesterday/today/this-week buckets correctly; computes `isDay1` from `onboardingCompletedAt` 24h window; handles user with no plan_items (returns zeros, not 500); rejects unauthed |
 | `tab-nav.test.tsx` | active tab matches URL pathname; clicking a tab pushes the right URL; preserves `?weekStart` query when crossing into Plan tab |
-| `today-tab.test.tsx` | byline renders for plan-item posts (uses `plan_items.output.draftedBy`); byline renders for reply drafts (uses `threads.community + drafts.confidenceScore`); empty state is the new one-liner, not the old hero |
+| `today-tab.test.tsx` | byline renders for plan-item posts (role label derived from `plan_items.kind`, schedule from `plan_items.scheduledAt`); byline renders for reply drafts (`threads.community + drafts.confidenceScore`); empty state is the new one-liner, not the old hero |
 
 These are pure render/aggregation tests — no live DB. Existing `today-content.tsx` tests get moved/renamed to `today-tab.test.tsx`; calendar tests stay where they are.
 
