@@ -38,6 +38,14 @@ A JSON payload with:
 - `voice` — optional voice cluster or free-form hint
 - `founderVoiceBlock` — optional verbatim founder voice anchor text
 - `canMentionProduct` — boolean from `judging-thread-quality`; only mention the product when true AND the thread is asking for the kind of tool the product is
+- `thread.quotedText` / `thread.quotedAuthor` (optional, X only) — when
+  present, the surfaced tweet QUOTES this earlier post. Use the quoted
+  body to understand the topic the OP is connecting their outer tweet
+  to. If `quotedAuthor == thread.author`, OP is connecting their own
+  arc (self-quote) — common for "before/after" or "follow-up" tweets.
+- `thread.inReplyToText` / `thread.inReplyToAuthor` (optional, X only) —
+  when present, the surfaced tweet is a REPLY to this parent. Use the
+  parent body to understand what OP was actually responding to.
 
 ## Per-channel rules
 
@@ -97,6 +105,14 @@ Before emitting your JSON, run this checklist on your own draft:
 5. **Reply-vs-post check** — does it answer the OP's actual question /
    address their actual situation? If you wrote a generic statement that
    could attach to any thread, REWRITE with the OP's specific anchor.
+
+6. **Context-awareness check** — if `thread.quotedText` or
+   `thread.inReplyToText` is non-null, does your draft reflect awareness
+   of that other post? Generic acknowledgment ("love your work") doesn't
+   count. Either reference a concrete detail from the quoted/parent
+   post, OR write a reply that wouldn't make sense without having read
+   it. If the draft is purely about the outer body and ignores the
+   linked post, REWRITE.
 
 If any check fails, REWRITE before outputting. You only get one shot.
 Better to ask a clarifying question than ship slop.

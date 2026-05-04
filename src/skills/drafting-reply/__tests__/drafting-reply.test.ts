@@ -119,4 +119,15 @@ describe('drafting-reply skill loader', () => {
     expect(body).toContain('x-reply-voice');
     expect(body).toContain('reddit-reply-voice');
   });
+
+  it('SKILL.md body documents conversation-context inputs and self-audit', async () => {
+    const skill = await loadSkill(SKILL_DIR);
+    const fakeCtx = { abortSignal: new AbortController().signal, get: () => null } as never;
+    const body = await skill!.getPromptForCommand(JSON.stringify({}), fakeCtx);
+    // Inputs section mentions both new field families.
+    expect(body).toContain('quotedText');
+    expect(body).toContain('inReplyToText');
+    // Self-audit step 6 added.
+    expect(body).toContain('Context-awareness check');
+  });
 });
