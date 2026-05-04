@@ -424,19 +424,10 @@ export function TodayBody({ yesterdayTop = null }: TodayBodyProps = {}) {
           ) : null}
 
           {filteredReplies.length === 0 ? (
-            <EmptyState
-              title={
-                sourceFilterId
-                  ? 'Nothing here'
-                  : 'All caught up on replies.'
-              }
-              hint={
-                sourceFilterId
-                  ? undefined
-                  : 'Discovery runs daily. New threads will show here.'
-              }
-              action={
-                sourceFilterId ? (
+            sourceFilterId ? (
+              <EmptyState
+                title="Nothing here"
+                action={
                   <Button
                     variant="ghost"
                     size="sm"
@@ -444,9 +435,21 @@ export function TodayBody({ yesterdayTop = null }: TodayBodyProps = {}) {
                   >
                     Clear filter
                   </Button>
-                ) : undefined
-              }
-            />
+                }
+              />
+            ) : (
+              <p
+                className="sf-mono"
+                style={{
+                  fontSize: 'var(--sf-text-xs)',
+                  color: 'var(--sf-fg-3)',
+                  padding: '8px 0',
+                  margin: 0,
+                }}
+              >
+                Nothing on you right now. Next drafts ~10min before scheduled slots.
+              </p>
+            )
           ) : (
             <div
               style={{
