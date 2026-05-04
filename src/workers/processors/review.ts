@@ -1,3 +1,20 @@
+/**
+ * Draft review BullMQ processor.
+ *
+ * **CURRENTLY UNFED** — all enqueueReview() call sites in DraftReplyTool +
+ * engagement.ts were removed (see commit history). The processor + queue
+ * are kept in place so re-enabling validation is a one-line change at the
+ * persist sites.
+ *
+ * Trade-off recorded in CLAUDE.md "## Primitive Boundaries — Hard rules":
+ * batch tools (process_replies_batch, process_posts_batch) and the
+ * draft persist path intentionally skip the LLM-validation fork. Drafter
+ * skills self-audit in-fork via their `Self-audit` SKILL.md sections;
+ * founder reviews in /today / /briefing.
+ *
+ * If you re-enable: also restore the corresponding test cases in
+ * DraftReplyTool / engagement test files that asserted the enqueue.
+ */
 import type { Job } from 'bullmq';
 import { db } from '@/lib/db';
 import { drafts, threads, products, channels, userPreferences } from '@/lib/db/schema';

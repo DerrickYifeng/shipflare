@@ -12,10 +12,8 @@ import { XClient, XForbiddenError } from '@/lib/x-client';
 import { createPlatformDeps } from '@/lib/platform-deps';
 import { runForkSkill } from '@/skills/run-fork-skill';
 import { monitoringEngagementOutputSchema } from '@/skills/monitoring-engagement/schema';
-import { enqueueReview } from '@/lib/queue';
 import { publishUserEvent } from '@/lib/redis';
 import type { EngagementJobData } from '@/lib/queue/types';
-import { getTraceId } from '@/lib/queue/types';
 import { createLogger, loggerForJob } from '@/lib/logger';
 import { buildContentUrl } from '@/lib/platform-config';
 import { recordPipelineEvent } from '@/lib/pipeline-events';
@@ -25,7 +23,6 @@ const MAX_ENGAGEMENT_DEPTH = 2;
 const baseLog = createLogger('worker:x-engagement');
 
 export async function processXEngagement(job: Job<EngagementJobData>) {
-  const traceId = getTraceId(job.data, job.id);
   const log = loggerForJob(baseLog, job);
   const { userId, contentId: tweetId, productId } = job.data;
   const legacyContentText = (job.data as { contentText?: string }).contentText;
@@ -213,14 +210,6 @@ export async function processXEngagement(job: Job<EngagementJobData>) {
           priority: mention.priority,
           authorUsername: mention.authorUsername,
         },
-      });
-
-      // Auto-enqueue review
-      await enqueueReview({
-        userId,
-        draftId: draft.id,
-        productId,
-        traceId,
       });
 
       // (Phase 2 migration: todo_items table dropped. plan_items injection for

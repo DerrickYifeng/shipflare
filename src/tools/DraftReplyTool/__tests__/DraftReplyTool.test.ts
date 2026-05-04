@@ -23,13 +23,8 @@ vi.mock('@/lib/logger', () => ({
     error: () => {},
   }),
 }));
-vi.mock('@/lib/queue', () => ({
-  enqueueReview: vi.fn(async () => undefined),
-}));
-
 import { draftReplyTool } from '../DraftReplyTool';
 import { drafts, threads } from '@/lib/db/schema';
-import { enqueueReview } from '@/lib/queue';
 
 interface ThreadRow {
   id: string;
@@ -236,97 +231,6 @@ describe('draftReplyTool', () => {
   });
 });
 
-describe('draft_reply enqueueReview wire-up', () => {
-  it('enqueues a review job after a fresh insert', async () => {
-    const ctx = makeCtx(store, { userId: 'user-1', productId: 'prod-1' });
-
-    const result = await draftReplyTool.execute(
-      {
-        threadId: 't-1',
-        draftBody: 'a real first-person reply with concrete anchor.',
-        confidence: 0.8,
-      },
-      ctx,
-    );
-
-    expect(enqueueReview).toHaveBeenCalledTimes(1);
-    expect(enqueueReview).toHaveBeenCalledWith(
-      expect.objectContaining({
-        userId: 'user-1',
-        productId: 'prod-1',
-        draftId: result.draftId,
-      }),
-    );
-    // Regression guard: when no traceId is in ctx, the tool must NOT
-    // pass `traceId: ''` (or any other falsy non-undefined value) — the
-    // review job schema treats traceId as `.min(1).optional()` and
-    // `withEnvelope` mints a UUID only when the field is undefined.
-    // Passing an empty string would throw a Zod `too_small` error.
-    const callArg = (enqueueReview as unknown as ReturnType<typeof vi.fn>).mock
-      .calls[0]![0] as Record<string, unknown>;
-    expect(callArg).not.toHaveProperty('traceId');
-  });
-
-  it('enqueues review on the idempotent update path too', async () => {
-    store.register<DraftRow>(drafts, [
-      {
-        id: 'existing-draft',
-        userId: 'user-1',
-        threadId: 't-1',
-        status: 'pending',
-        draftType: 'reply',
-        replyBody: 'old body',
-        confidenceScore: 0.5,
-        whyItWorks: null,
-        engagementDepth: 0,
-      },
-    ]);
-    const ctx = makeCtx(store, { userId: 'user-1', productId: 'prod-1' });
-
-    await draftReplyTool.execute(
-      {
-        threadId: 't-1',
-        draftBody: 'updated body still needs review',
-        confidence: 0.75,
-      },
-      ctx,
-    );
-
-    expect(enqueueReview).toHaveBeenCalledWith(
-      expect.objectContaining({
-        userId: 'user-1',
-        productId: 'prod-1',
-        draftId: 'existing-draft',
-      }),
-    );
-    // Same regression guard on the idempotent update path.
-    const callArg = (enqueueReview as unknown as ReturnType<typeof vi.fn>).mock
-      .calls[0]![0] as Record<string, unknown>;
-    expect(callArg).not.toHaveProperty('traceId');
-  });
-
-  it('forwards traceId to enqueueReview when one is in the tool context', async () => {
-    const ctx = makeCtx(store, {
-      userId: 'user-1',
-      productId: 'prod-1',
-      traceId: 'trace-xyz',
-    });
-
-    await draftReplyTool.execute(
-      {
-        threadId: 't-1',
-        draftBody: 'reply with trace context',
-        confidence: 0.8,
-      },
-      ctx,
-    );
-
-    expect(enqueueReview).toHaveBeenCalledWith(
-      expect.objectContaining({
-        userId: 'user-1',
-        productId: 'prod-1',
-        traceId: 'trace-xyz',
-      }),
-    );
-  });
-});
+// The legacy `draft_reply enqueueReview wire-up` describe block was
+// removed as of 2026-05-03 — DraftReplyTool no longer enqueues review
+// jobs. See review.ts header comment for context.

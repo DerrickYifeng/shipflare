@@ -15,8 +15,7 @@ import { and, eq, or } from 'drizzle-orm';
 import { buildTool } from '@/core/tool-system';
 import type { ToolDefinition } from '@/core/types';
 import { drafts, threads } from '@/lib/db/schema';
-import { enqueueReview } from '@/lib/queue';
-import { readDomainDeps, tryGet } from '@/tools/context-helpers';
+import { readDomainDeps } from '@/tools/context-helpers';
 
 export const DRAFT_REPLY_TOOL_NAME = 'draft_reply';
 
@@ -71,17 +70,7 @@ export const draftReplyTool: ToolDefinition<DraftReplyInput, DraftReplyResult> =
     isConcurrencySafe: true,
     isReadOnly: false,
     async execute(input, ctx): Promise<DraftReplyResult> {
-      const { db, userId, productId } = readDomainDeps(ctx);
-      // `reviewJobSchema.traceId` is `.string().min(1).optional()` and the
-      // `withEnvelope` helper mints a fresh UUID only when the field is
-      // absent / undefined. Passing an empty string would fail Zod's
-      // min(1) check at enqueue time, so we OMIT the key when no traceId
-      // is present in the tool context rather than substituting `''`.
-      const ctxTraceId = tryGet<string>(ctx, 'traceId');
-      const traceIdPart =
-        typeof ctxTraceId === 'string' && ctxTraceId.length > 0
-          ? { traceId: ctxTraceId }
-          : {};
+      const { db, userId } = readDomainDeps(ctx);
 
       // If the caller passed a URL (scout / coordinator sometimes do),
       // strip it to the trailing path segment so we match externalId.
@@ -152,12 +141,6 @@ export const draftReplyTool: ToolDefinition<DraftReplyInput, DraftReplyResult> =
             updatedAt: new Date(),
           })
           .where(eq(drafts.id, existingId));
-        await enqueueReview({
-          userId,
-          productId,
-          draftId: existingId,
-          ...traceIdPart,
-        });
         return {
           draftId: existingId,
           threadId: thread.id,
@@ -179,13 +162,6 @@ export const draftReplyTool: ToolDefinition<DraftReplyInput, DraftReplyResult> =
         whyItWorks: input.whyItWorks ?? null,
         planItemId: input.planItemId ?? null,
         engagementDepth: 0,
-      });
-
-      await enqueueReview({
-        userId,
-        productId,
-        draftId,
-        ...traceIdPart,
       });
 
       return {
