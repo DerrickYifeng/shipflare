@@ -401,6 +401,20 @@ export const findThreadsViaXaiTool = buildTool({
       const callReasoning = shouldEscalateNow ? true : reasoning;
       if (shouldEscalateNow) reasoningEscalated = true;
 
+      if (shouldEscalateNow) {
+        ctx.emitProgress?.(
+          FIND_THREADS_VIA_XAI_TOOL_NAME,
+          `Escalating to reasoning mode after ${unsuccessfulRefines} refines…`,
+          { round: round + 1, unsuccessfulRefines },
+        );
+      }
+
+      ctx.emitProgress?.(
+        FIND_THREADS_VIA_XAI_TOOL_NAME,
+        `Round ${round + 1} — querying xAI${callReasoning ? ' (reasoning)' : ''}…`,
+        { round: round + 1, reasoning: callReasoning, strongSoFar: strong.size },
+      );
+
       let xaiResult;
       try {
         xaiResult = await xaiFindCustomersTool.execute(
@@ -456,6 +470,12 @@ export const findThreadsViaXaiTool = buildTool({
       }
       consecutiveEmptyRounds = 0;
 
+      ctx.emitProgress?.(
+        FIND_THREADS_VIA_XAI_TOOL_NAME,
+        `Round ${round + 1} — judging ${fresh.length} candidate${fresh.length === 1 ? '' : 's'}…`,
+        { round: round + 1, candidateCount: fresh.length },
+      );
+
       // Fan out judging in parallel — Plan 2 lessons: allSettled so one
       // judging fork's exception doesn't lose the whole round. Also
       // tolerates malformed verdicts (judgeCandidate returns null when
@@ -486,11 +506,13 @@ export const findThreadsViaXaiTool = buildTool({
       totalScanned = seen.size;
 
       let strongInThisRound = 0;
+      let rejectedInThisRound = 0;
       for (const j of judged) {
         if (j.verdict.keep && j.verdict.score >= STRONG_SCORE_THRESHOLD) {
           strong.set(j.tweet.external_id, j);
           strongInThisRound += 1;
         } else if (!j.verdict.keep) {
+          rejectedInThisRound += 1;
           // Aggregate the dominant rejection signals so the next refine
           // message can address them.
           for (const sig of j.verdict.signals) {
@@ -501,6 +523,24 @@ export const findThreadsViaXaiTool = buildTool({
           }
         }
       }
+
+      const topRejectionForRound = [...accumulatedRejectionSignals.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([k, v]) => `${k}=${v}`)
+        .join(', ');
+      ctx.emitProgress?.(
+        FIND_THREADS_VIA_XAI_TOOL_NAME,
+        `Round ${round + 1} — ${strongInThisRound} strong, ${rejectedInThisRound} rejected${
+          topRejectionForRound ? ` (${topRejectionForRound})` : ''
+        }`,
+        {
+          round: round + 1,
+          strongInThisRound,
+          rejectedInThisRound,
+          totalStrong: strong.size,
+        },
+      );
 
       // Convergence check. The agent's old prose: "≥ maxResults × 0.8
       // with keep:true AND score≥0.6, OR all of maxResults regardless
@@ -546,6 +586,11 @@ export const findThreadsViaXaiTool = buildTool({
 
     let inserted = 0;
     if (threadsToPersist.length > 0) {
+      ctx.emitProgress?.(
+        FIND_THREADS_VIA_XAI_TOOL_NAME,
+        `Persisting ${threadsToPersist.length} thread${threadsToPersist.length === 1 ? '' : 's'}…`,
+        { count: threadsToPersist.length },
+      );
       const persistResult = await persistQueueThreadsTool.execute(
         { threads: threadsToPersist },
         ctx,

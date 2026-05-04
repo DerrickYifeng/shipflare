@@ -134,6 +134,12 @@ export const processRepliesBatchTool: ToolDefinition<
       );
     }
 
+    ctx.emitProgress?.(
+      PROCESS_REPLIES_BATCH_TOOL_NAME,
+      `Drafting replies for ${threadRows.length} thread${threadRows.length === 1 ? '' : 's'} in parallel…`,
+      { threadCount: threadRows.length },
+    );
+
     // Promise.allSettled rather than Promise.all so one thread's
     // exception (e.g. xAI quota exhausted mid-batch) doesn't lose the
     // whole batch and orphan already-persisted drafts from earlier
@@ -177,10 +183,31 @@ export const processRepliesBatchTool: ToolDefinition<
         `created=${draftsCreated} skipped=${threadRows.length - draftsCreated}`,
     );
 
+    const draftsSkipped = threadRows.length - draftsCreated;
+    const skipBreakdown = new Map<string, number>();
+    for (const r of results) {
+      if (
+        r.status !== 'persisted' &&
+        r.status !== 'persisted_after_revise' &&
+        r.status !== 'persisted_flagged_for_review'
+      ) {
+        skipBreakdown.set(r.status, (skipBreakdown.get(r.status) ?? 0) + 1);
+      }
+    }
+    const skipDetail =
+      skipBreakdown.size > 0
+        ? ` (${[...skipBreakdown.entries()].map(([k, v]) => `${k}=${v}`).join(', ')})`
+        : '';
+    ctx.emitProgress?.(
+      PROCESS_REPLIES_BATCH_TOOL_NAME,
+      `${draftsCreated} drafted, ${draftsSkipped} skipped${skipDetail}`,
+      { draftsCreated, draftsSkipped },
+    );
+
     return {
       itemsScanned: threadRows.length,
       draftsCreated,
-      draftsSkipped: threadRows.length - draftsCreated,
+      draftsSkipped,
       notes,
       details: results,
     };

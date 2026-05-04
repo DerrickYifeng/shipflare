@@ -531,6 +531,54 @@ describe('findThreadsViaXaiTool', () => {
     expect(firstCall.messages[0]!.content).toContain('TestProduct');
   });
 
+  it('emits live progress at round milestones so UI tool card updates in real-time', async () => {
+    // Single-round happy path: query → judge → persist. We expect at
+    // least the round-query, judging, post-judging, and persist events
+    // attributed to find_threads_via_xai (NOT the sub-tools).
+    const tweets = Array.from({ length: 4 }, (_, i) =>
+      makeTweet({ external_id: `tw-${i}`, url: `https://twitter.com/u/status/${i}` }),
+    );
+    xaiExecMock.mockResolvedValueOnce(xaiResponse(tweets));
+    runForkSkillMock.mockImplementation(async () =>
+      judgingResponse({ keep: true, score: 0.8 }),
+    );
+
+    const emit = vi.fn();
+    const ctx = makeCtx(store, { userId: 'user-1', productId: 'prod-1' });
+    ctx.emitProgress = emit;
+
+    await findThreadsViaXaiTool.execute(
+      { trigger: 'daily', maxResults: 4 },
+      ctx,
+    );
+
+    // All progress events from find_threads_via_xai itself (sub-tool
+    // events have a different toolName and live-stream separately).
+    const ownEvents = emit.mock.calls.filter(
+      (c) => c[0] === 'find_threads_via_xai',
+    );
+    expect(ownEvents.length).toBeGreaterThanOrEqual(2);
+
+    // Round 1 query milestone
+    expect(emit).toHaveBeenCalledWith(
+      'find_threads_via_xai',
+      expect.stringContaining('querying xAI'),
+      expect.any(Object),
+    );
+    // Judging milestone
+    expect(emit).toHaveBeenCalledWith(
+      'find_threads_via_xai',
+      expect.stringContaining('judging'),
+      expect.any(Object),
+    );
+    // Persist milestone
+    expect(emit).toHaveBeenCalledWith(
+      'find_threads_via_xai',
+      expect.stringContaining('Persisting'),
+      expect.any(Object),
+    );
+  });
+
   it('reports rough costUsd from xAI usage tokens', async () => {
     xaiExecMock.mockResolvedValueOnce({
       tweets: [makeTweet()],

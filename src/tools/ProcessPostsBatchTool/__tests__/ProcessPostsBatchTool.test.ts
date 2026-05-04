@@ -562,4 +562,42 @@ describe('processPostsBatchTool', () => {
     expect(result.details[0]?.reason).toContain('validating-draft');
     expect(draftPostExecMock).not.toHaveBeenCalled();
   });
+
+  it('emits live progress at start and finish so UI tool card updates in real-time', async () => {
+    seedPlanItems(store, [{ id: 'p1' }]);
+    runForkSkillMock
+      .mockResolvedValueOnce({
+        result: {
+          draftBody: 'shipped first revenue today: $42 MRR',
+          whyItWorks: 'first-person milestone',
+          confidence: 0.7,
+        },
+        usage: {},
+      })
+      .mockResolvedValueOnce({
+        result: makeReview('PASS', [], 0.85),
+        usage: {},
+      });
+    validateDraftExecMock.mockResolvedValue({ failures: [], warnings: [] });
+    draftPostExecMock.mockResolvedValue({ planItemId: 'p1' });
+
+    const emit = vi.fn();
+    const ctx = makeCtx(store, { userId: 'user-1', productId: 'prod-1' });
+    ctx.emitProgress = emit;
+
+    await processPostsBatchTool.execute({ planItemIds: ['p1'] }, ctx);
+
+    // Start event: announces drafting in parallel
+    expect(emit).toHaveBeenCalledWith(
+      'process_posts_batch',
+      expect.stringContaining('Drafting'),
+      expect.any(Object),
+    );
+    // Finish event: announces drafted/skipped totals
+    expect(emit).toHaveBeenCalledWith(
+      'process_posts_batch',
+      expect.stringContaining('drafted'),
+      expect.any(Object),
+    );
+  });
 });
