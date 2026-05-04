@@ -8,6 +8,7 @@ vi.mock('@/lib/xai-client', () => ({
 }));
 
 import { xaiFindCustomersTool } from '../XaiFindCustomersTool';
+import { tweetCandidateSchema } from '../schema';
 
 function makeCtx(deps: Record<string, unknown>): {
   abortSignal: AbortSignal;
@@ -204,5 +205,78 @@ describe('xai_find_customers tool', () => {
         makeCtx({}),
       ),
     ).rejects.toThrow(/rate limit/);
+  });
+});
+
+describe('tweetCandidateSchema conversation context', () => {
+  const baseTweet = {
+    external_id: 't1',
+    url: 'https://x.com/a/status/1',
+    author_username: 'alice',
+    author_bio: null,
+    author_followers: null,
+    body: 'building',
+    posted_at: '2026-05-04T00:00:00.000Z',
+    likes_count: null,
+    reposts_count: null,
+    replies_count: null,
+    views_count: null,
+    is_repost: false,
+    original_url: null,
+    original_author_username: null,
+    surfaced_via: null,
+    confidence: 0.7,
+    reason: 'pain match',
+  };
+
+  it('parses with all four conversation fields null', () => {
+    const parsed = tweetCandidateSchema.parse({
+      ...baseTweet,
+      quoted_text: null,
+      quoted_author: null,
+      in_reply_to_text: null,
+      in_reply_to_author: null,
+    });
+    expect(parsed.quoted_text).toBeNull();
+    expect(parsed.in_reply_to_text).toBeNull();
+  });
+
+  it('parses a quote-tweet (quoted_text + quoted_author populated)', () => {
+    const parsed = tweetCandidateSchema.parse({
+      ...baseTweet,
+      quoted_text: 'OMG this actually worked',
+      quoted_author: 'anumness',
+      in_reply_to_text: null,
+      in_reply_to_author: null,
+    });
+    expect(parsed.quoted_text).toBe('OMG this actually worked');
+    expect(parsed.quoted_author).toBe('anumness');
+  });
+
+  it('parses a self-quote (quoted_author == author_username)', () => {
+    const parsed = tweetCandidateSchema.parse({
+      ...baseTweet,
+      author_username: 'anumness',
+      quoted_text: 'OMG this actually worked',
+      quoted_author: 'anumness',
+      in_reply_to_text: null,
+      in_reply_to_author: null,
+    });
+    expect(parsed.quoted_author).toBe(parsed.author_username);
+  });
+
+  it('parses a reply-in-thread (in_reply_to_* populated)', () => {
+    const parsed = tweetCandidateSchema.parse({
+      ...baseTweet,
+      quoted_text: null,
+      quoted_author: null,
+      in_reply_to_text: 'what marketing channels worked for you?',
+      in_reply_to_author: 'somefounder',
+    });
+    expect(parsed.in_reply_to_text).toContain('marketing channels');
+  });
+
+  it('back-compat: parses without the new fields at all', () => {
+    expect(() => tweetCandidateSchema.parse(baseTweet)).not.toThrow();
   });
 });
