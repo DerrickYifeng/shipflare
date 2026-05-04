@@ -23,25 +23,25 @@ describe('content-manager loader smoke', () => {
     expect(cm).toBeDefined();
     if (!cm) return;
 
-    // Phase J tool allowlist: orchestrator-only tools, plus skill +
-    // the post_batch-supporting query / draft tools so the agent can
-    // pull plan_items + product context and persist post drafts.
+    // Plan 2 Task 6: pipeline prose collapsed into process_*_batch
+    // Tools — content-manager no longer needs direct skill / draft_*
+    // / validate_draft access. The orchestration tools encapsulate the
+    // full draft → validate → persist with REVISE retry pipeline.
     expect(cm.tools).toEqual([
+      'process_replies_batch',
+      'process_posts_batch',
       'find_threads',
       'query_plan_items',
       'query_product_context',
-      'skill',
-      'validate_draft',
-      'draft_reply',
-      'draft_post',
       'SendMessage',
       'StructuredOutput',
     ]);
     expect(cm.model).toBe('claude-haiku-4-5-20251001');
-    // Phase J Day 6 raised this from 12 — batch post_batch with N items
-    // and per-item retry can exceed 12 turns; 100 is a circuit-breaker
-    // ceiling, agents should StructuredOutput long before.
-    expect(cm.maxTurns).toBe(100);
+    // Plan 2 Task 6: with the per-item pipeline now inside the batch
+    // tools, the agent's own loop is just call-batch-then-summarize.
+    // 10 turns is plenty; the prior 100 was a circuit-breaker for the
+    // embedded-pipeline era.
+    expect(cm.maxTurns).toBe(10);
 
     // Per-agent references are gone after Phase D — gate logic lives
     // in the `judging-opportunity` skill, voice/slop logic lives in
@@ -78,28 +78,40 @@ describe('content-manager loader smoke', () => {
     expect(names).not.toContain('growth-strategist');
   });
 
-  it('declares both reply_sweep and post_batch input modes', async () => {
+  it('declares both reply and post batch tool patterns', async () => {
     const agents = await loadAgentsDir(AGENTS_ROOT);
     const cm = agents.find((a) => a.name === 'content-manager');
     expect(cm).toBeDefined();
     if (!cm) return;
-    // Phase J body covers both flows. Assert the mode names + the
-    // per-flow draft skill names appear in the system prompt so a
-    // future edit that drops a section trips this test.
-    expect(cm.systemPrompt).toContain('reply_sweep');
-    expect(cm.systemPrompt).toContain('post_batch');
-    expect(cm.systemPrompt).toContain('drafting-reply');
-    expect(cm.systemPrompt).toContain('drafting-post');
-    expect(cm.systemPrompt).toContain('draft_post');
-    expect(cm.systemPrompt).toContain('draft_reply');
+    // Plan 2 Task 6: the body now references the orchestration Tools
+    // (process_replies_batch / process_posts_batch) instead of the
+    // old draft_reply / draft_post + drafting-* skill names.
+    expect(cm.systemPrompt).toContain('process_replies_batch');
+    expect(cm.systemPrompt).toContain('process_posts_batch');
   });
 
-  it('reply_sweep workflow no longer calls judging-opportunity', () => {
+  it('content-manager AGENT.md no longer embeds pipeline prose', () => {
     const md = readFileSync(
       path.resolve(process.cwd(), 'src/tools/AgentTool/agents/content-manager/AGENT.md'),
       'utf8',
     );
+    expect(md).not.toMatch(/Per-item workflow/);
+    expect(md).not.toMatch(/1\.\s+\*\*Judge\*\*/);
+    expect(md).not.toMatch(/4\.\s+\*\*Slop \/ voice review/);
+    expect(md).toContain('process_replies_batch');
+    expect(md).toContain('process_posts_batch');
+  });
+
+  it('reply pipeline tools own the canMentionProduct check, not the agent', () => {
+    const md = readFileSync(
+      path.resolve(process.cwd(), 'src/tools/AgentTool/agents/content-manager/AGENT.md'),
+      'utf8',
+    );
+    // judging-opportunity has been gone since Phase J — keep that gate.
     expect(md).not.toContain('judging-opportunity');
-    expect(md).toContain('canMentionProduct'); // reads it from the thread row
+    // canMentionProduct is still mentioned in the agent's hard-rules
+    // section as something the *Tool* enforces, so the rule itself
+    // remains visible to reviewers.
+    expect(md).toContain('canMentionProduct');
   });
 });

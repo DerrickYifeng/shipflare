@@ -1,7 +1,9 @@
-// Phase C — verifies the post-refactor content-manager AGENT.md
-// (renamed from `community-manager` in Phase J) orchestrates via the
-// `skill` tool (calling drafting-reply / drafting-post +
-// validating-draft) instead of doing drafting / slop review inline.
+// Plan 2 Task 6 — verifies the post-refactor content-manager AGENT.md
+// orchestrates via the `process_replies_batch` / `process_posts_batch`
+// orchestration Tools, NOT via the `skill` tool calling drafting-* /
+// validating-* directly. The full per-item pipeline (judge → draft →
+// validate → persist with REVISE retry) lives inside those Tools'
+// execute() methods now.
 //
 // Uses the same `loadAgentsDir` harness as `loader-smoke.test.ts`
 // (project has no `yaml` dependency — the loader's own parser is
@@ -23,13 +25,22 @@ async function loadContentManager() {
   return cm;
 }
 
-describe('content-manager AGENT.md (post-Phase-J)', () => {
-  it('declares the skill tool so it can call drafting-reply / drafting-post / validating-draft', async () => {
+describe('content-manager AGENT.md (post-Plan-2-Task-6)', () => {
+  it('declares the orchestration Tools that own the per-item pipeline', async () => {
     const cm = await loadContentManager();
-    expect(cm.tools).toContain('skill');
+    expect(cm.tools).toContain('process_replies_batch');
+    expect(cm.tools).toContain('process_posts_batch');
   });
 
-  it('drops voice / slop reference docs (now in skills)', async () => {
+  it('drops the direct `skill` / draft_* / validate_draft access — those are inside the orchestration Tools now', async () => {
+    const cm = await loadContentManager();
+    expect(cm.tools).not.toContain('skill');
+    expect(cm.tools).not.toContain('draft_reply');
+    expect(cm.tools).not.toContain('draft_post');
+    expect(cm.tools).not.toContain('validate_draft');
+  });
+
+  it('drops voice / slop reference docs (now in skills, called inside the Tools)', async () => {
     const cm = await loadContentManager();
     // Reference docs are inlined under "## <name>" headers — assert
     // those are absent rather than re-parsing the frontmatter.
@@ -37,19 +48,18 @@ describe('content-manager AGENT.md (post-Phase-J)', () => {
     expect(cm.systemPrompt).not.toContain('## reply-quality-bar');
   });
 
-  it('drops gate-related reference docs (now in judging-opportunity skill)', async () => {
+  it('drops gate-related reference docs (now in judging-opportunity skill, owned by discovery)', async () => {
     const cm = await loadContentManager();
     expect(cm.systemPrompt).not.toContain('## reply-gates');
     expect(cm.systemPrompt).not.toContain('## opportunity-judgment');
   });
 
-  it('reads judging from the thread row instead of re-running judging-opportunity', async () => {
+  it('the canMentionProduct gate is mentioned as a Tool-enforced rule, not as agent inline logic', async () => {
     const cm = await loadContentManager();
-    // Discovery's judging-thread-quality skill writes canMentionProduct +
-    // mentionSignal onto the thread at queue time; content-manager must
-    // not re-judge.
+    // Plan 2 Task 6: the agent's hard rules section names the gate so
+    // reviewers know discovery's decision is honored, but the *Tool*
+    // enforces it — content-manager doesn't re-judge.
     expect(cm.systemPrompt).not.toContain('judging-opportunity');
     expect(cm.systemPrompt).toContain('canMentionProduct');
-    expect(cm.systemPrompt).toContain('mentionSignal');
   });
 });
