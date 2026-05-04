@@ -9,9 +9,10 @@
  *   3. allClear (caught up + 1+ shipped today) → "All clear" hero
  *   4. default                     → steady-state three-line layout
  *
- * Inline styles + CSS variables (`--sf-fg-1`, `--sf-fg-2`,
- * `--sf-text-xl`) follow the same pattern as
- * `src/components/layout/header-bar.tsx`. No CSS module / no Tailwind.
+ * Inline styles + CSS variables (`--sf-fg-1`, `--sf-fg-2`) follow the
+ * same pattern as `src/components/layout/header-bar.tsx`. The H1 uses
+ * the `.sf-h2` type-scale class for visual size while keeping the
+ * `<h1>` semantic role. No CSS module / no Tailwind.
  */
 
 import type { CSSProperties } from 'react';
@@ -31,7 +32,6 @@ const containerStyle: CSSProperties = {
 const titleStyle: CSSProperties = {
   margin: 0,
   color: 'var(--sf-fg-1)',
-  fontSize: 'var(--sf-text-xl)',
 };
 
 const subtitleStyle: CSSProperties = {
@@ -67,7 +67,7 @@ export function BriefingHeader({ summary }: BriefingHeaderProps) {
   if (!summary) {
     return (
       <header style={containerStyle}>
-        <h1 style={titleStyle}>Today</h1>
+        <h1 className="sf-h2" style={titleStyle}>Today</h1>
       </header>
     );
   }
@@ -76,7 +76,10 @@ export function BriefingHeader({ summary }: BriefingHeaderProps) {
     const queued = summary.thisWeek.totalQueued;
     return (
       <header style={containerStyle}>
-        <h1 style={titleStyle}>Day 1 · plan locked</h1>
+        <h1 className="sf-h2" style={titleStyle}>Day 1 · plan locked</h1>
+        {/* Spec example shows "N posts + M reply sessions" — generalized to
+            "N items" because BriefingSummary carries only the totalQueued count.
+            Extend the summary shape if we want the kind-split copy back. */}
         <p style={subtitleStyle}>
           Your team committed to {queued} {pluralize(queued, 'item', 'items')} this week.
         </p>
@@ -91,15 +94,15 @@ export function BriefingHeader({ summary }: BriefingHeaderProps) {
   if (allClear) {
     return (
       <header style={containerStyle}>
-        <h1 style={titleStyle}>All clear · {shipped} shipped today</h1>
-        <p style={subtitleStyle}>Discovery runs every few hours.</p>
+        <h1 className="sf-h2" style={titleStyle}>All clear · {shipped} shipped today</h1>
+        <p style={subtitleStyle}>Discovery runs again ~6h.</p>
       </header>
     );
   }
 
   return (
     <header style={containerStyle}>
-      <h1 style={titleStyle}>{buildTodayLine(summary.today)}</h1>
+      <h1 className="sf-h2" style={titleStyle}>{buildTodayLine(summary.today)}</h1>
       <p style={subtitleStyle}>This week · {totalQueued} more queued</p>
       <p style={subtitleStyle}>{buildYesterdayLine(summary.yesterday)}</p>
     </header>
