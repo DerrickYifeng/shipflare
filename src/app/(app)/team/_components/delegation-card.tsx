@@ -102,6 +102,17 @@ export function DelegationCard({
   };
 
   const specialistCount = tasks.length;
+  // Header label: when there's exactly one dispatch, show the specialist's
+  // name (or their public role label) so the founder sees who's working.
+  // When there are multiple parallel dispatches, summarize with a count
+  // because the names won't fit on one line.
+  const headerTarget =
+    specialistCount === 1
+      ? (() => {
+          const single = resolveMember(tasks[0]);
+          return single?.displayName ?? 'Specialist';
+        })()
+      : `${specialistCount} specialists in parallel`;
 
   return (
     <section style={wrap} aria-label="Dispatched subtasks">
@@ -111,7 +122,7 @@ export function DelegationCard({
         </span>
         <span>Dispatch</span>
         <span aria-hidden="true">·</span>
-        <span>Team Lead → {specialistCount}&nbsp;Specialist{specialistCount === 1 ? '' : 's'}</span>
+        <span>Team Lead → {headerTarget}</span>
         <span style={hairline} aria-hidden="true" />
       </div>
       <ul style={stack}>
