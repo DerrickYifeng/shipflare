@@ -636,22 +636,45 @@ export function stitchLeadMessages(
       // Attach to the most-recent in-flight ActivityNode whose toolName
       // matches the progress event's toolName. The emitProgress lambda
       // doesn't carry parentToolUseId today, so we match by toolName +
-      // recency. If no match (rare — emitProgress fired before tool_call
-      // landed, or the tool emitted from outside a team-run), drop the
-      // event silently — it's UI decoration, not load-bearing.
+      // recency. If no toolName match, fall back to the most-recent
+      // in-flight tool_call in the same runId — this lets fork-skill
+      // progress (emitted by runForkSkill, where the toolName is the
+      // skill name not the calling tool's name) attach to the parent
+      // tool's card. If still no match, drop silently — it's UI
+      // decoration, not load-bearing.
       const progressToolName = extractToolName(msg.metadata);
       const line = (msg.content ?? '').trim();
-      if (!progressToolName || !line) continue;
+      if (!line) continue;
       let target: ActivityNode | null = null;
-      for (const candidate of activityById.values()) {
-        if (candidate.complete) continue;
-        if (candidate.runId !== msg.runId) continue;
-        if (candidate.toolName !== progressToolName) continue;
-        if (!target || candidate.createdAt > target.createdAt) {
-          target = candidate;
+      if (progressToolName) {
+        for (const candidate of activityById.values()) {
+          if (candidate.complete) continue;
+          if (candidate.runId !== msg.runId) continue;
+          if (candidate.toolName !== progressToolName) continue;
+          if (!target || candidate.createdAt > target.createdAt) {
+            target = candidate;
+          }
         }
       }
-      if (target) target.progress.push(line);
+      if (!target) {
+        for (const candidate of activityById.values()) {
+          if (candidate.complete) continue;
+          if (candidate.runId !== msg.runId) continue;
+          if (!target || candidate.createdAt > target.createdAt) {
+            target = candidate;
+          }
+        }
+      }
+      if (target) {
+        // Fork progress events carry their skill name in metadata so
+        // multiple parallel forks under one parent card stay legible
+        // ("[judging-thread-quality] fork done in 8200ms" × 5).
+        const skillName = (msg.metadata as { skillName?: string } | undefined)
+          ?.skillName;
+        const prefix =
+          skillName && skillName !== target.toolName ? `[${skillName}] ` : '';
+        target.progress.push(prefix + line);
+      }
       continue;
     }
 

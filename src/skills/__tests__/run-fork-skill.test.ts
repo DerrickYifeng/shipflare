@@ -285,4 +285,117 @@ body`,
       expect(callbacks).toBeUndefined();
     });
   });
+
+  describe('per-fork progress events (UI fan-out visibility)', () => {
+    function makeForkSkill(name: string) {
+      const dir = join(tmpRoot, name);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(
+        join(dir, 'SKILL.md'),
+        `---
+name: ${name}
+description: test
+context: fork
+---
+body`,
+      );
+    }
+
+    type ProgressCall = {
+      toolName: string;
+      message: string;
+      metadata?: Record<string, unknown>;
+    };
+
+    function makeProgressCtx(deps: Record<string, unknown>): {
+      ctx: ToolContext;
+      progress: ProgressCall[];
+    } {
+      const progress: ProgressCall[] = [];
+      const ctx = {
+        abortSignal: new AbortController().signal,
+        get<V>(key: string): V {
+          if (key in deps) return deps[key] as V;
+          throw new Error(`missing key ${key}`);
+        },
+        emitProgress: (
+          toolName: string,
+          message: string,
+          metadata?: Record<string, unknown>,
+        ) => {
+          progress.push({ toolName, message, ...(metadata ? { metadata } : {}) });
+        },
+      } as ToolContext;
+      return { ctx, progress };
+    }
+
+    it('emits start + end progress events with the skill name as toolName', async () => {
+      makeForkSkill('judging-thread-quality');
+      spawnSubagentMock.mockResolvedValueOnce({
+        result: { keep: true },
+        usage: { costUsd: 0, inputTokens: 0, outputTokens: 0 },
+      });
+
+      const { ctx, progress } = makeProgressCtx({
+        userId: 'u',
+        productId: 'p',
+      });
+
+      await runForkSkill('judging-thread-quality', 'args', undefined, ctx);
+
+      expect(progress.length).toBe(2);
+      expect(progress[0]).toMatchObject({
+        toolName: 'judging-thread-quality',
+        message: 'fork started',
+        metadata: { skillName: 'judging-thread-quality' },
+      });
+      expect(progress[1]!.toolName).toBe('judging-thread-quality');
+      expect(progress[1]!.message).toMatch(/^fork done in \d+ms$/);
+      expect(progress[1]!.metadata).toMatchObject({
+        skillName: 'judging-thread-quality',
+      });
+      expect(progress[1]!.metadata!.elapsedMs).toEqual(expect.any(Number));
+    });
+
+    it('emits a `fork failed` progress event when spawnSubagent throws', async () => {
+      makeForkSkill('judging-thread-quality');
+      const boom = new Error('spawn boom');
+      spawnSubagentMock.mockRejectedValueOnce(boom);
+
+      const { ctx, progress } = makeProgressCtx({
+        userId: 'u',
+        productId: 'p',
+      });
+
+      await expect(
+        runForkSkill('judging-thread-quality', 'args', undefined, ctx),
+      ).rejects.toBe(boom);
+
+      expect(progress.length).toBe(2);
+      expect(progress[0]!.message).toBe('fork started');
+      expect(progress[1]!.message).toMatch(/^fork failed in \d+ms$/);
+      expect(progress[1]!.metadata).toMatchObject({
+        skillName: 'judging-thread-quality',
+        error: true,
+      });
+    });
+
+    it('does not throw when ctx has no emitProgress (worker path with no progress sink)', async () => {
+      makeForkSkill('lonely-skill');
+      spawnSubagentMock.mockResolvedValueOnce({
+        result: 'ok',
+        usage: { costUsd: 0, inputTokens: 0, outputTokens: 0 },
+      });
+
+      // Plain deps record → createToolContext path. No emitProgress on the
+      // resulting ctx. The optional-chained calls in runForkSkill must be
+      // safe.
+      await expect(
+        runForkSkill('lonely-skill', 'args', undefined, {
+          userId: 'u',
+          productId: 'p',
+        }),
+      ).resolves.toBeDefined();
+    });
+  });
 });

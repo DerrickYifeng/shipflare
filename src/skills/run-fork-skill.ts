@@ -151,5 +151,32 @@ export async function runForkSkill<T = unknown>(
     ? { onEvent: wrappedOnEvent }
     : undefined;
 
-  return spawnSubagent<T>(def, args, ctx, callbacks, outputSchema);
+  // Emit per-fork progress so parallel fan-out (e.g. discovery's
+  // judging fork-storm) is visible on the parent tool's card. The
+  // conversation-reducer falls back to the most-recent in-flight
+  // tool_call in the same runId when toolName doesn't match — that
+  // path lets these events attach to the calling tool without
+  // threading the parent toolName through every fork boundary.
+  // `skillName` in metadata is what the UI prefixes each line with so
+  // 5 parallel `[judging-thread-quality]` forks stay legible.
+  const startedAt = Date.now();
+  ctx.emitProgress?.(skill.name, 'fork started', { skillName: skill.name });
+  try {
+    const out = await spawnSubagent<T>(def, args, ctx, callbacks, outputSchema);
+    const elapsedMs = Date.now() - startedAt;
+    ctx.emitProgress?.(
+      skill.name,
+      `fork done in ${elapsedMs}ms`,
+      { skillName: skill.name, elapsedMs },
+    );
+    return out;
+  } catch (err) {
+    const elapsedMs = Date.now() - startedAt;
+    ctx.emitProgress?.(
+      skill.name,
+      `fork failed in ${elapsedMs}ms`,
+      { skillName: skill.name, elapsedMs, error: true },
+    );
+    throw err;
+  }
 }

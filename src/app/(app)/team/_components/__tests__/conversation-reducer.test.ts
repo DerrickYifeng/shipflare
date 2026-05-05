@@ -219,3 +219,104 @@ describe('stitchLeadMessages — nested progress under in-tool ProgressItems', (
     }
   });
 });
+
+describe('stitchLeadMessages — fork progress fallback', () => {
+  it('attaches fork-skill progress (mismatched toolName) to most-recent in-flight tool_call', () => {
+    // Scenario: find_threads_via_xai is in flight; runForkSkill emits two
+    // progress events with toolName='judging-thread-quality' (the skill's
+    // own name, not the calling tool's name). The primary toolName-match
+    // path won't find a tool_call card for 'judging-thread-quality', so
+    // the fallback should attach the lines to find_threads_via_xai's card
+    // and prefix each with the skill name so 5 parallel forks stay
+    // legible.
+    const FIND_USE_ID = 'toolu_find_threads_xai';
+    const messages: TeamActivityMessage[] = [
+      msg({
+        id: 'm-find-call',
+        type: 'tool_call',
+        from: 'coord-member',
+        metadata: {
+          toolName: 'find_threads_via_xai',
+          toolUseId: FIND_USE_ID,
+        },
+        createdAt: '2026-05-04T10:00:00.000Z',
+      }),
+      msg({
+        id: 'm-prog-1',
+        type: 'tool_progress',
+        from: 'coord-member',
+        // toolName here is the SKILL name, no tool_call by that name exists
+        metadata: {
+          toolName: 'judging-thread-quality',
+          skillName: 'judging-thread-quality',
+        },
+        content: 'fork started',
+        createdAt: '2026-05-04T10:00:01.000Z',
+      }),
+      msg({
+        id: 'm-prog-2',
+        type: 'tool_progress',
+        from: 'coord-member',
+        metadata: {
+          toolName: 'judging-thread-quality',
+          skillName: 'judging-thread-quality',
+        },
+        content: 'fork done in 8200ms',
+        createdAt: '2026-05-04T10:00:09.000Z',
+      }),
+    ];
+    const nodes = stitchLeadMessages(messages);
+    // The find_threads_via_xai tool_call lands as an `activity` node with
+    // variant 'tool'. Both progress lines should attach to its progress[]
+    // array, prefixed with [judging-thread-quality].
+    const findNode = nodes.find(
+      (n) =>
+        n.kind === 'activity' &&
+        n.variant === 'tool' &&
+        n.toolName === 'find_threads_via_xai',
+    );
+    expect(findNode).toBeDefined();
+    if (findNode?.kind !== 'activity') throw new Error('expected activity node');
+    expect(findNode.progress).toEqual([
+      '[judging-thread-quality] fork started',
+      '[judging-thread-quality] fork done in 8200ms',
+    ]);
+  });
+
+  it('does NOT prefix when the progress event toolName matches the parent (regular emitProgress path)', () => {
+    // Regression: regular tool emitProgress (e.g. xai_find_customers
+    // emitting "tokens=1234" on its own card) should NOT get a
+    // [skill-name] prefix because the matched node IS the emitter.
+    const USE_ID = 'toolu_xai_find';
+    const messages: TeamActivityMessage[] = [
+      msg({
+        id: 'm-call',
+        type: 'tool_call',
+        from: 'coord-member',
+        metadata: {
+          toolName: 'xai_find_customers',
+          toolUseId: USE_ID,
+        },
+        createdAt: '2026-05-04T10:00:00.000Z',
+      }),
+      msg({
+        id: 'm-prog',
+        type: 'tool_progress',
+        from: 'coord-member',
+        metadata: { toolName: 'xai_find_customers' },
+        content: 'tokens in/out=48367/2501',
+        createdAt: '2026-05-04T10:00:05.000Z',
+      }),
+    ];
+    const nodes = stitchLeadMessages(messages);
+    const node = nodes.find(
+      (n) =>
+        n.kind === 'activity' &&
+        n.variant === 'tool' &&
+        n.toolName === 'xai_find_customers',
+    );
+    if (node?.kind !== 'activity') throw new Error('expected activity node');
+    // No [skill-name] prefix — primary toolName match hit, no fork involved.
+    expect(node.progress).toEqual(['tokens in/out=48367/2501']);
+  });
+});
