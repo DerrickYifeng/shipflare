@@ -197,4 +197,31 @@ describe('GET /api/team/status', () => {
       sentinelRedis,
     );
   });
+
+  it('redacts raw agent_type in members so the multi-agent architecture is hidden', async () => {
+    memberRows = [
+      {
+        id: 'member-lead',
+        agent_type: 'coordinator',
+        display_name: 'Team Lead',
+        status: 'idle',
+        last_active_at: null,
+      },
+      {
+        id: 'member-author',
+        agent_type: 'social-media-manager',
+        display_name: 'Author',
+        status: 'idle',
+        last_active_at: null,
+      },
+    ];
+    const res = await GET(makeReq('team-1'));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    const serialized = JSON.stringify(json);
+    expect(serialized).not.toContain('coordinator');
+    expect(serialized).not.toContain('social-media-manager');
+    expect(json.members[0].agent_type).toBe('Team Lead');
+    expect(json.members[1].agent_type).toBe('Content Specialist');
+  });
 });

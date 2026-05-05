@@ -3,7 +3,7 @@ import { and, asc, eq, or } from 'drizzle-orm';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { teams, teamMembers, teamMessages } from '@/lib/db/schema';
-import { redactMessageRowForClient } from '@/lib/team/redact-for-client';
+import { publicAgentLabel, redactMessageRowForClient } from '@/lib/team/redact-for-client';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -95,7 +95,7 @@ export async function GET(request: NextRequest): Promise<Response> {
     member: {
       id: member.id,
       teamId: member.teamId,
-      agentType: member.agentType,
+      agentType: publicAgentLabel(member.agentType),
       displayName: member.displayName,
       status: member.status,
       lastActiveAt: member.lastActiveAt,

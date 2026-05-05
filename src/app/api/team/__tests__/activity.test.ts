@@ -80,16 +80,15 @@ import { GET } from '../activity/route';
 
 beforeEach(() => {
   authUserId = 'user-1';
-  // NOTE: member.agentType is leaked in the response envelope by design —
-  // that's a separate redaction concern (member roster), not the message
-  // redaction wired by Task 8. Use a neutral agentType here so our "no
-  // social-media-manager / no coordinator" assertions cleanly target the
-  // message metadata path.
+  // member.agentType is now redacted via `publicAgentLabel` in the
+  // response envelope (Job 1 follow-up to Task 8), so the realistic raw
+  // type ('social-media-manager') is safe to use here — the assertions
+  // verify the response carries the founder-facing label instead.
   memberRows = [
     {
       id: 'member-1',
       teamId: 'team-1',
-      agentType: 'unknown-role',
+      agentType: 'social-media-manager',
       displayName: 'Member',
       status: 'idle',
       lastActiveAt: new Date('2026-05-04T00:00:00Z'),
@@ -130,7 +129,7 @@ describe('GET /api/team/activity — redaction', () => {
       {
         id: 'member-1',
         teamId: 'team-1',
-        agentType: 'unknown-role',
+        agentType: 'social-media-manager',
         displayName: 'Member',
         status: 'idle',
         lastActiveAt: null,
@@ -174,13 +173,18 @@ describe('GET /api/team/activity — redaction', () => {
     const serialized = JSON.stringify(body);
 
     // Banned strings — these would leak the multi-agent architecture and
-    // internal mode flags to any logged-in user.
+    // internal mode flags to any logged-in user. With the Job 1 follow-up
+    // patch, member.agentType is now redacted too, so the realistic
+    // 'social-media-manager' raw type must NOT appear anywhere in the body.
     expect(serialized).not.toContain('social-media-manager');
     expect(serialized).not.toContain('discover-and-fill-slot');
     expect(serialized).not.toContain('coordinator');
     expect(serialized).not.toContain('Mode:');
     expect(serialized).not.toContain('tool_output');
     expect(serialized).not.toContain('plan-123');
+
+    // member envelope: raw agentType is replaced with the founder-facing label.
+    expect(body.member.agentType).toBe('Content Specialist');
 
     // Semantic label substitutions surface in the payload.
     expect(body.messages).toHaveLength(1);

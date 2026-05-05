@@ -22,6 +22,7 @@ import { db } from '@/lib/db';
 import { teams, teamMembers } from '@/lib/db/schema';
 import { getTeamState } from '@/lib/team/team-state-cache';
 import { getKeyValueClient } from '@/lib/redis';
+import { publicAgentLabel } from '@/lib/team/redact-for-client';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -44,7 +45,8 @@ export interface LeadRosterRow {
   agentId: string | null;
   /** `team_members.id` for the lead — always present (Phase E invariant). */
   memberId: string;
-  agentDefName: typeof LEAD_AGENT_TYPE;
+  /** Founder-facing agent label (raw agentType is redacted via `publicAgentLabel`). */
+  agentDefName: string;
   /** Display name for the lead row (e.g. "Team Lead"). */
   displayName: string;
   /** Cached lead lifecycle position. Null when the lead has never run. */
@@ -129,7 +131,7 @@ export async function GET(
       ? {
           agentId: state.leadAgentId,
           memberId: leadMemberRows[0].id,
-          agentDefName: LEAD_AGENT_TYPE,
+          agentDefName: publicAgentLabel(LEAD_AGENT_TYPE),
           displayName: leadMemberRows[0].displayName,
           status: state.leadStatus,
           lastActiveAt: state.leadLastActiveAt,
@@ -139,7 +141,7 @@ export async function GET(
   const teammates: TeammateRosterRow[] = state.teammates.map((t) => ({
     agentId: t.agentId,
     memberId: t.memberId,
-    agentDefName: t.agentDefName,
+    agentDefName: publicAgentLabel(t.agentDefName),
     parentAgentId: t.parentAgentId,
     status: t.status,
     lastActiveAt: t.lastActiveAt,

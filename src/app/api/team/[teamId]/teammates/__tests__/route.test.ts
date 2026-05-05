@@ -134,14 +134,17 @@ describe('GET /api/team/[teamId]/teammates', () => {
     const res = await GET(makeReq(), makeParams('team-1'));
     expect(res.status).toBe(200);
     const body = await res.json();
+    // agentDefName is redacted via `publicAgentLabel` so the raw
+    // `coordinator` agent type never reaches the client UI.
     expect(body.lead).toMatchObject({
       memberId: 'member-lead',
-      agentDefName: 'coordinator',
+      agentDefName: 'Team Lead',
       displayName: 'Team Lead',
       status: null,
       agentId: null,
       lastActiveAt: null,
     });
+    expect(JSON.stringify(body)).not.toContain('coordinator');
     expect(body.teammates).toEqual([]);
   });
 
@@ -163,7 +166,7 @@ describe('GET /api/team/[teamId]/teammates', () => {
     });
   });
 
-  it('returns the cached non-terminal teammate list verbatim', async () => {
+  it('returns the cached non-terminal teammate list (raw agent type redacted)', async () => {
     teamStateMock = {
       leadStatus: 'sleeping',
       leadAgentId: 'lead-agent-1',
@@ -172,7 +175,7 @@ describe('GET /api/team/[teamId]/teammates', () => {
         {
           agentId: 'agent-2',
           memberId: 'member-author',
-          agentDefName: 'content-manager',
+          agentDefName: 'social-media-manager',
           parentAgentId: 'lead-agent-1',
           status: 'running',
           lastActiveAt: '2026-05-02T01:23:45.000Z',
@@ -195,14 +198,25 @@ describe('GET /api/team/[teamId]/teammates', () => {
     const res = await GET(makeReq(), makeParams('team-1'));
     expect(res.status).toBe(200);
     const body = await res.json();
+    // Raw agent types are replaced with founder-facing labels: known
+    // types map to a friendly name ('Content Specialist'); unknown types
+    // fall back to the generic 'agent' label. The substring assertions
+    // target raw agentDefName values that should never reach the wire —
+    // 'social-media-manager' is a known leak; we don't substring-check
+    // 'researcher' because it appears legitimately in `displayName` /
+    // `memberId`. Per-row `agentDefName` assertions below pin the
+    // redacted shape directly.
+    expect(JSON.stringify(body)).not.toContain('social-media-manager');
     expect(body.teammates).toHaveLength(2);
     expect(body.teammates[0]).toMatchObject({
       agentId: 'agent-2',
+      agentDefName: 'Content Specialist',
       status: 'running',
       displayName: 'Author',
     });
     expect(body.teammates[1]).toMatchObject({
       agentId: 'agent-3',
+      agentDefName: 'agent',
       status: 'sleeping',
       sleepUntil: '2026-05-02T01:30:00.000Z',
     });
