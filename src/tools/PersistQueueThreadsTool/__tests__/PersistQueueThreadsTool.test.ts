@@ -290,6 +290,63 @@ describe('persist_queue_threads tool', () => {
     expect(rows[0]!.mentionSignal).toBe('no_fit');
   });
 
+  it('writes quotedText / inReplyToText cols when present on the candidate', async () => {
+    const valuesMock = vi.fn().mockReturnValue({
+      onConflictDoNothing: () => ({
+        returning: () => Promise.resolve([]),
+      }),
+    });
+    insertChain.mockReturnValue({ values: valuesMock });
+
+    const tweet = makeTweet({
+      external_id: 't-quote',
+      quoted_text: 'OMG this actually worked',
+      quoted_author: 'anumness',
+      in_reply_to_text: null,
+      in_reply_to_author: null,
+    });
+
+    await persistQueueThreadsTool.execute(
+      { threads: [tweet] },
+      makeCtx({ userId: 'u1', productId: 'p1' }),
+    );
+
+    expect(valuesMock).toHaveBeenCalledTimes(1);
+    const rows = valuesMock.mock.calls[0]![0] as Array<{
+      quotedText?: string | null;
+      quotedAuthor?: string | null;
+      inReplyToText?: string | null;
+      inReplyToAuthor?: string | null;
+    }>;
+    expect(rows[0]!.quotedText).toBe('OMG this actually worked');
+    expect(rows[0]!.quotedAuthor).toBe('anumness');
+    expect(rows[0]!.inReplyToText).toBeNull();
+    expect(rows[0]!.inReplyToAuthor).toBeNull();
+  });
+
+  it('writes nulls when conversation fields are absent on the candidate', async () => {
+    const valuesMock = vi.fn().mockReturnValue({
+      onConflictDoNothing: () => ({
+        returning: () => Promise.resolve([]),
+      }),
+    });
+    insertChain.mockReturnValue({ values: valuesMock });
+
+    const tweet = makeTweet({ external_id: 't-plain' });
+
+    await persistQueueThreadsTool.execute(
+      { threads: [tweet] },
+      makeCtx({ userId: 'u1', productId: 'p1' }),
+    );
+
+    const rows = valuesMock.mock.calls[0]![0] as Array<{
+      quotedText?: string | null;
+      inReplyToText?: string | null;
+    }>;
+    expect(rows[0]!.quotedText ?? null).toBeNull();
+    expect(rows[0]!.inReplyToText ?? null).toBeNull();
+  });
+
   it('emits tool_progress before persistence', async () => {
     insertChain.mockReturnValue({
       values: () => ({

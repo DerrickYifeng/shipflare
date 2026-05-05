@@ -735,4 +735,41 @@ describe('buildFirstTurnMessage helper', () => {
     expect(msg).not.toContain('FOUNDER INTENT');
     expect(msg).not.toContain('ICP RUBRIC');
   });
+
+  it('asks xAI for quoted_text + in_reply_to_text', () => {
+    const msg = buildFirstTurnMessage(
+      {
+        id: 'p1',
+        name: 'ShipFlare',
+        description: 'AI marketing teammates',
+        valueProp: null,
+        targetAudience: null,
+        keywords: ['indie', 'marketing'],
+      },
+      '',
+      undefined,
+      10,
+    );
+    expect(msg).toContain('quoted_text');
+    expect(msg).toContain('quoted_author');
+    expect(msg).toContain('in_reply_to_text');
+    expect(msg).toContain('in_reply_to_author');
+  });
+
+  it('preserves existing repost guidance', () => {
+    const msg = buildFirstTurnMessage(
+      {
+        id: 'p1',
+        name: 'ShipFlare',
+        description: 'AI marketing teammates',
+        valueProp: null,
+        targetAudience: null,
+        keywords: ['indie', 'marketing'],
+      },
+      '',
+      undefined,
+      10,
+    );
+    expect(msg).toContain('Reposts ARE valuable signal');
+  });
 });

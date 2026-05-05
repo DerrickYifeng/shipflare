@@ -29,6 +29,14 @@ export const tweetCandidateSchema = z.object({
   original_author_username: z.string().nullable(),
   /** Reposter handles when is_repost; null when !is_repost. */
   surfaced_via: z.array(z.string()).nullable(),
+  /** Outer is a quote-tweet → the quoted post body, verbatim. Null when not a quote. */
+  quoted_text: z.string().nullable().optional(),
+  /** Outer is a quote-tweet → quoted post author handle (no @). Null when not a quote. */
+  quoted_author: z.string().nullable().optional(),
+  /** Outer is a reply → parent post body, verbatim. Null when not a reply. */
+  in_reply_to_text: z.string().nullable().optional(),
+  /** Outer is a reply → parent post author handle (no @). Null when not a reply. */
+  in_reply_to_author: z.string().nullable().optional(),
   confidence: z.number().min(0).max(1),
   reason: z.string().min(1),
   /**

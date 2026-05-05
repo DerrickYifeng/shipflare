@@ -72,6 +72,10 @@ interface ThreadRow {
   authorFollowers: number | null;
   canMentionProduct: boolean | null;
   mentionSignal: string | null;
+  quotedText: string | null;
+  quotedAuthor: string | null;
+  inReplyToText: string | null;
+  inReplyToAuthor: string | null;
 }
 
 interface ProductRow {
@@ -115,6 +119,11 @@ function seedThreads(
       r.canMentionProduct === undefined ? true : r.canMentionProduct,
     mentionSignal:
       r.mentionSignal === undefined ? 'tool_question' : r.mentionSignal,
+    quotedText: r.quotedText === undefined ? null : r.quotedText,
+    quotedAuthor: r.quotedAuthor === undefined ? null : r.quotedAuthor,
+    inReplyToText: r.inReplyToText === undefined ? null : r.inReplyToText,
+    inReplyToAuthor:
+      r.inReplyToAuthor === undefined ? null : r.inReplyToAuthor,
   }));
   store.register<ThreadRow>(threads, full);
 }
@@ -347,6 +356,81 @@ describe('processRepliesBatchTool', () => {
     };
     expect(parsed.thread.authorBio).toBeNull();
     expect(parsed.thread.authorFollowers).toBeNull();
+  });
+
+  it('passes quotedText + inReplyToText through to drafting-reply input', async () => {
+    seedThreads(store, [
+      {
+        id: 't1',
+        author: 'anumness',
+        body: 'Marketing has been the biggest frustration. Tried Apple Search Ads.',
+        quotedText: 'OMG this actually worked — database is complete',
+        quotedAuthor: 'anumness',
+        inReplyToText: null,
+        inReplyToAuthor: null,
+      },
+    ]);
+    runForkSkillMock.mockResolvedValueOnce({
+      result: {
+        draftBody: 'the database win was wild — same shipper energy.',
+        whyItWorks: 'context-aware',
+        confidence: 0.7,
+      },
+      usage: {},
+    });
+    validateDraftExecMock.mockResolvedValue({ failures: [], warnings: [] });
+    draftReplyExecMock.mockResolvedValue({ id: 'd1' });
+
+    await processRepliesBatchTool.execute(
+      { threadIds: ['t1'] },
+      makeCtx(store, { userId: 'user-1', productId: 'prod-1' }),
+    );
+
+    expect(runForkSkillMock).toHaveBeenCalledOnce();
+    const argsJson = runForkSkillMock.mock.calls[0]![1] as string;
+    const parsed = JSON.parse(argsJson) as {
+      thread: {
+        quotedText: string | null;
+        quotedAuthor: string | null;
+        inReplyToText: string | null;
+        inReplyToAuthor: string | null;
+      };
+    };
+    expect(parsed.thread.quotedText).toBe(
+      'OMG this actually worked — database is complete',
+    );
+    expect(parsed.thread.quotedAuthor).toBe('anumness');
+    expect(parsed.thread.inReplyToText).toBeNull();
+    expect(parsed.thread.inReplyToAuthor).toBeNull();
+  });
+
+  it('passes null conversation fields for plain (non-quote, non-reply) threads', async () => {
+    seedThreads(store, [{ id: 't1' }]); // defaults: all four conversation fields null
+    runForkSkillMock.mockResolvedValueOnce({
+      result: {
+        draftBody: 'we tried railway too — same.',
+        whyItWorks: '',
+        confidence: 0.7,
+      },
+      usage: {},
+    });
+    validateDraftExecMock.mockResolvedValue({ failures: [], warnings: [] });
+    draftReplyExecMock.mockResolvedValue({ id: 'd1' });
+
+    await processRepliesBatchTool.execute(
+      { threadIds: ['t1'] },
+      makeCtx(store, { userId: 'user-1', productId: 'prod-1' }),
+    );
+
+    const argsJson = runForkSkillMock.mock.calls[0]![1] as string;
+    const parsed = JSON.parse(argsJson) as {
+      thread: {
+        quotedText: string | null;
+        inReplyToText: string | null;
+      };
+    };
+    expect(parsed.thread.quotedText).toBeNull();
+    expect(parsed.thread.inReplyToText).toBeNull();
   });
 
   it('rejects threadIds.length > 10 at Zod boundary', () => {

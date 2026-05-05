@@ -93,6 +93,15 @@ export const threads = pgTable(
     // (small account → more first-person; large account → punchier).
     authorBio: text('author_bio'),
     authorFollowers: integer('author_followers'),
+    // Conversation context (migration 0020): quoted-tweet body/author when
+    // the surfaced tweet is a quote-tweet, or parent body/author when it's
+    // a reply in a thread. Used by drafting-reply to write context-aware
+    // replies. judging-thread-quality intentionally does NOT read these
+    // (recall > precision — see 2026-05-04 spec).
+    quotedText: text('quoted_text'),
+    quotedAuthor: text('quoted_author'),
+    inReplyToText: text('in_reply_to_text'),
+    inReplyToAuthor: text('in_reply_to_author'),
   },
   (t) => [
     index('threads_user_discovered_idx').on(t.userId, desc(t.discoveredAt)),
