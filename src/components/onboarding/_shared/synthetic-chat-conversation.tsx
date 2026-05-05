@@ -52,7 +52,7 @@ export function SyntheticChatConversation({
       aria-label="Plan-building conversation"
     >
       <LeadMessage
-        agentType="coordinator"
+        agentType="Team Lead"
         displayName={coordinator.name}
         createdAt={coordinator.timestamp.toISOString()}
         text={coordinator.body}
@@ -146,14 +146,14 @@ function SubtaskBody({
   errorMessage,
   elapsedMs,
 }: SubtaskShellProps) {
-  // Strategist isn't a registered agent type in the team accent map, so
-  // pull the social-media-manager palette as a sensible visual stand-in
-  // (community purple — distinct from the coordinator's neutral disc).
-  // Falls back through the same "?": grey fallback path the team page
-  // uses for unknown types.
-  const agentType = 'social-media-manager';
-  const accent = accentForAgentType(agentType);
-  const borderColor = accent?.solid ?? colorHexForAgentType(agentType);
+  // Strategist isn't a registered agent label in the team accent map,
+  // so pull the Social Media Manager palette as a sensible visual stand-in
+  // (community purple — distinct from the Team Lead's neutral disc).
+  // Falls back through the same grey path the team page uses for
+  // unknown labels. Keys here match `agent-accent.ts` (public labels).
+  const agentLabel = 'Social Media Manager';
+  const accent = accentForAgentType(agentLabel);
+  const borderColor = accent?.solid ?? colorHexForAgentType(agentLabel);
 
   const card: CSSProperties = {
     position: 'relative',

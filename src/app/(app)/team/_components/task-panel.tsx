@@ -225,9 +225,11 @@ function TaskPanelRow({
 }: TaskPanelRowProps) {
   const [hover, setHover] = useState(false);
   const [pending, setPending] = useState(false);
-  const accent = accentForAgentType(task.subagentType ?? 'coordinator');
-  const borderColor =
-    accent?.solid ?? colorHexForAgentType(task.subagentType ?? 'coordinator');
+  // `task.subagentType` is the redacted founder-facing label
+  // (e.g. 'Social Media Manager'); when missing fall through to the
+  // unknown-label gradient via the empty string.
+  const accent = accentForAgentType(task.subagentType ?? '');
+  const borderColor = accent?.solid ?? colorHexForAgentType(task.subagentType ?? '');
 
   const row: CSSProperties = {
     position: 'relative',

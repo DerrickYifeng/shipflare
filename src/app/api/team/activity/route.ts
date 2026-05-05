@@ -3,6 +3,7 @@ import { and, asc, eq, or } from 'drizzle-orm';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { teams, teamMembers, teamMessages } from '@/lib/db/schema';
+import { publicAgentLabel, redactMessageRowForClient } from '@/lib/team/redact-for-client';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -94,22 +95,37 @@ export async function GET(request: NextRequest): Promise<Response> {
     member: {
       id: member.id,
       teamId: member.teamId,
-      agentType: member.agentType,
+      agentType: publicAgentLabel(member.agentType),
       displayName: member.displayName,
       status: member.status,
       lastActiveAt: member.lastActiveAt,
     },
-    messages: rows.map((m) => ({
-      id: m.id,
-      runId: m.runId,
-      teamId: m.teamId,
-      from: m.fromMemberId,
-      to: m.toMemberId,
-      type: m.type,
-      content: m.content,
-      metadata: m.metadata,
-      createdAt:
-        m.createdAt instanceof Date ? m.createdAt.toISOString() : String(m.createdAt),
-    })),
+    messages: rows.map((m) => {
+      const redacted = redactMessageRowForClient({
+        id: m.id,
+        runId: m.runId,
+        teamId: m.teamId,
+        fromMemberId: m.fromMemberId,
+        toMemberId: m.toMemberId,
+        type: m.type,
+        content: m.content,
+        metadata: m.metadata as Record<string, unknown> | null,
+        createdAt: m.createdAt,
+      });
+      return {
+        id: redacted.id,
+        runId: redacted.runId,
+        teamId: redacted.teamId,
+        from: redacted.fromMemberId,
+        to: redacted.toMemberId,
+        type: redacted.type,
+        content: redacted.content,
+        metadata: redacted.metadata,
+        createdAt:
+          redacted.createdAt instanceof Date
+            ? redacted.createdAt.toISOString()
+            : String(redacted.createdAt),
+      };
+    }),
   });
 }

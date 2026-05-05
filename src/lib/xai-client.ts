@@ -167,7 +167,7 @@ export class XAIClient {
       'If no relevant tweets are found, output: NO_RESULTS',
     ].join('\n');
 
-    log.debug(`Searching X via xAI: "${query}"`);
+    log.debug(`xAI search request: query length=${query.length}`);
 
     const requestBody = JSON.stringify({
       model: XAI_MODEL,
@@ -207,7 +207,7 @@ export class XAIClient {
     const tweets = Array.from(tweetMap.values()).slice(0, maxResults);
 
     log.info(
-      `xAI search returned ${tweets.length} tweets, ${data.server_side_tool_usage?.x_search_calls ?? 0} search calls`,
+      `xAI search: tweets=${tweets.length} calls=${data.server_side_tool_usage?.x_search_calls ?? 0}`,
     );
 
     return {
@@ -484,9 +484,8 @@ export class XAIClient {
         parseError =
           err instanceof Error ? err.message : String(err);
         log.warn(
-          `respondConversational: xAI returned non-JSON despite ` +
-            `response_format=json_schema. parseError=${parseError} ` +
-            `text="${text.slice(0, 200)}..."`,
+          `respondConversational: xAI returned non-JSON despite response_format=json_schema. ` +
+            `parseError=${parseError} text_length=${text.length}`,
         );
       }
     }

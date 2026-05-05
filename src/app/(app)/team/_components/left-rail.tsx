@@ -2,7 +2,6 @@
 
 import type { CSSProperties } from 'react';
 import { AgentRow, type AgentRowStatus } from './agent-row';
-import { TokenBudget, type BudgetSegment } from './token-budget';
 import { SessionList } from './session-list';
 import type { ConversationMeta } from './conversation-meta';
 
@@ -20,9 +19,6 @@ export interface LeftRailProps {
   specialists: readonly LeftRailMember[];
   activeMemberId: string | null;
   onSelect: (memberId: string) => void;
-  spentUsd: number;
-  weeklyBudgetUsd: number;
-  budgetSegments: readonly BudgetSegment[];
   conversations: readonly ConversationMeta[];
   selectedConversationId: string | null;
   onSelectConversation: (conversationId: string) => void;
@@ -36,9 +32,6 @@ export function LeftRail({
   specialists,
   activeMemberId,
   onSelect,
-  spentUsd,
-  weeklyBudgetUsd,
-  budgetSegments,
   conversations,
   selectedConversationId,
   onSelectConversation,
@@ -148,12 +141,6 @@ export function LeftRail({
           creating={creating}
         />
       </div>
-
-      <TokenBudget
-        spentUsd={spentUsd}
-        weeklyBudgetUsd={weeklyBudgetUsd}
-        segments={budgetSegments}
-      />
     </aside>
   );
 }

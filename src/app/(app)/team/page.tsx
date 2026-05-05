@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import type { CSSProperties } from 'react';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { and, desc, eq, gte, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import {
@@ -15,14 +15,16 @@ import {
   products,
 } from '@/lib/db/schema';
 import { EmptyState } from '@/components/ui/empty-state';
-import { getTeamBudgetSnapshot } from '@/lib/team-budget';
 import { ensureKickoffEnqueued } from '@/lib/team-kickoff';
+import {
+  publicAgentLabel,
+  redactMessageRowForClient,
+} from '@/lib/team/redact-for-client';
 import type {
   TeamActivityMessage,
   TeamMessageType,
 } from '@/hooks/use-team-events';
 import { TeamDesk, type TeamDeskMember } from './_components/team-desk';
-import type { BudgetSegment } from './_components/token-budget';
 import type {
   TaskLookup,
   TaskLookupEntry,
@@ -40,16 +42,6 @@ export const metadata: Metadata = {
 export const dynamic = 'force-dynamic';
 
 const INITIAL_MESSAGE_WINDOW = 100;
-
-function startOfIsoWeek(now: Date = new Date()): Date {
-  const d = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
-  );
-  const day = d.getUTCDay();
-  const diff = (day + 6) % 7;
-  d.setUTCDate(d.getUTCDate() - diff);
-  return d;
-}
 
 function isoOrNull(value: Date | null): string | null {
   return value instanceof Date ? value.toISOString() : null;
@@ -137,7 +129,6 @@ export default async function TeamPage({
     activeRunRows,
     lastRunRows,
     rawMessages,
-    memberCostRows,
     taskRows,
     conversationRows,
   ] = await Promise.all([
@@ -219,23 +210,6 @@ export default async function TeamPage({
       )
       .orderBy(desc(teamMessages.createdAt))
       .limit(INITIAL_MESSAGE_WINDOW),
-    // Weekly per-member spend: validate team membership via
-    // teamMembers (Phase E), no teamRuns join. `costUsd` lives on
-    // team_tasks already.
-    db
-      .select({
-        memberId: teamTasks.memberId,
-        sum: sql<string>`coalesce(sum(${teamTasks.costUsd}), 0)`.as('sum'),
-      })
-      .from(teamTasks)
-      .innerJoin(teamMembers, eq(teamMembers.id, teamTasks.memberId))
-      .where(
-        and(
-          eq(teamMembers.teamId, team.id),
-          gte(teamTasks.startedAt, startOfIsoWeek()),
-        ),
-      )
-      .groupBy(teamTasks.memberId),
     // Recent-tasks list: same migration — chain via teamMembers.
     // Onboarding-trigger filter dropped (the new dispatch path doesn't
     // create teamTasks for onboarding kickoffs anyway).
@@ -294,10 +268,17 @@ export default async function TeamPage({
     }
   }
 
+  // Redact agentType at the SSR → client boundary so the founder UI
+  // never sees raw architectural names (`coordinator`,
+  // `social-media-manager`). The /api/team/activity and
+  // /api/team/[teamId]/teammates routes already do this; symmetry here
+  // keeps SSR and live SSE / fetch results consistent. Internal lookups
+  // above (find coordinator by agentType === 'coordinator') still
+  // operate on the raw value so the team-lead resolution stays correct.
   const teamLead: TeamDeskMember | null = coordinator
     ? {
         id: coordinator.id,
-        agentType: coordinator.agentType,
+        agentType: publicAgentLabel(coordinator.agentType),
         displayName: coordinator.displayName,
         status: coordinator.status,
         taskCount: openTaskCountByMember.get(coordinator.id) ?? 0,
@@ -306,57 +287,50 @@ export default async function TeamPage({
 
   const specialists: TeamDeskMember[] = specialistsRaw.map((m) => ({
     id: m.id,
-    agentType: m.agentType,
+    agentType: publicAgentLabel(m.agentType),
     displayName: m.displayName,
     status: m.status,
     taskCount: openTaskCountByMember.get(m.id) ?? 0,
   }));
 
-  const memberCostMap = new Map<string, number>();
-  for (const row of memberCostRows) {
-    memberCostMap.set(row.memberId, Number(row.sum) || 0);
-  }
-
-  const budgetSnap = await getTeamBudgetSnapshot(team.id);
-
-  const budgetSegments: BudgetSegment[] = specialists.map((m) => ({
-    memberId: m.id,
-    agentType: m.agentType,
-    displayName: m.displayName,
-    spentUsd: memberCostMap.get(m.id) ?? 0,
-  }));
-  if (teamLead) {
-    const leadSpend = memberCostMap.get(teamLead.id) ?? 0;
-    if (leadSpend > 0) {
-      budgetSegments.unshift({
-        memberId: teamLead.id,
-        agentType: teamLead.agentType,
-        displayName: teamLead.displayName,
-        spentUsd: leadSpend,
-      });
-    }
-  }
-
+  // Pass every team_messages row through the same redactor that the
+  // /api/team/* routes use, so the SSR/RSC payload matches what the
+  // live SSE feed and active fetches return. Without this, kickoff
+  // rows leak the raw goal text ("First-visit kickoff for ShipFlare.
+  // Strategic path... Follow your kickoff playbook end-to-end (plan
+  // → social-media-manager): ...") in the initial render even though
+  // every subsequent fetch is clean.
   const initialMessages: TeamActivityMessage[] = [...rawMessages]
     .reverse()
-    .map((m) => ({
-      id: m.id,
-      runId: m.runId,
-      conversationId: m.conversationId ?? null,
-      teamId: m.teamId,
-      from: m.fromMemberId,
-      to: m.toMemberId,
-      type: m.type as TeamMessageType,
-      content: m.content,
-      metadata:
-        typeof m.metadata === 'object' && m.metadata !== null
-          ? (m.metadata as Record<string, unknown>)
-          : null,
-      createdAt:
-        m.createdAt instanceof Date
-          ? m.createdAt.toISOString()
-          : String(m.createdAt),
-    }));
+    .map((m) => {
+      const redacted = redactMessageRowForClient({
+        id: m.id,
+        runId: m.runId,
+        teamId: m.teamId,
+        conversationId: m.conversationId ?? null,
+        fromMemberId: m.fromMemberId,
+        toMemberId: m.toMemberId,
+        type: m.type,
+        content: m.content,
+        metadata: m.metadata as Record<string, unknown> | null,
+        createdAt: m.createdAt,
+      });
+      return {
+        id: redacted.id,
+        runId: redacted.runId,
+        conversationId: redacted.conversationId ?? null,
+        teamId: redacted.teamId,
+        from: redacted.fromMemberId ?? null,
+        to: redacted.toMemberId ?? null,
+        type: redacted.type as TeamMessageType,
+        content: redacted.content,
+        metadata: redacted.metadata,
+        createdAt:
+          redacted.createdAt instanceof Date
+            ? redacted.createdAt.toISOString()
+            : String(redacted.createdAt),
+      };
+    });
 
   // Dual-key lookup: the coordinator's Task tool_call metadata carries
   // the LLM-issued `toolUseId`, but `team_tasks` rows are keyed by a
@@ -463,9 +437,6 @@ export default async function TeamPage({
       teamLead={teamLead}
       specialists={specialists}
       initialMessages={initialMessages}
-      spentUsd={budgetSnap.spentUsd}
-      weeklyBudgetUsd={budgetSnap.weeklyBudgetUsd}
-      budgetSegments={budgetSegments}
       activeRunId={activeRun?.id ?? null}
       activeRunStartedAt={isoOrNull(activeRun?.startedAt ?? null)}
       isLive={isLive}

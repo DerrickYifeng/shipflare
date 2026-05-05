@@ -24,12 +24,6 @@ vi.mock('@/lib/team-conversation-helpers', () => ({
   createAutomationConversation: vi.fn().mockResolvedValue('conv-1'),
 }));
 
-vi.mock('@/lib/onboarding-run-finalizer', () => ({
-  finalizePendingOnboardingRuns: vi
-    .fn()
-    .mockResolvedValue({ finalized: 0, runIds: [] }),
-}));
-
 import { ensureKickoffEnqueued } from '../team-kickoff';
 import { createAutomationConversation } from '@/lib/team-conversation-helpers';
 import { dispatchLeadMessage } from '@/lib/team/dispatch-lead-message';
@@ -133,6 +127,56 @@ describe('ensureKickoffEnqueued', () => {
     expect(callArg.goal).not.toContain('content-manager');
     // No-channels skip preserved.
     expect(callArg.goal).toContain('Skip steps 2-3 if no channels');
+  });
+
+  it('kickoff dispatches with a publicSummary that excludes architecture details', async () => {
+    // 1. team_messages lookup → empty.
+    dbSelectMock.mockReturnValueOnce(buildSelectChain([]));
+    // 2. products lookup.
+    dbSelectMock.mockReturnValueOnce(
+      buildSelectChain([{ name: 'Acme' }]),
+    );
+    // 3. team_members lookup → coordinator present.
+    dbSelectMock.mockReturnValueOnce(
+      buildSelectChain([{ id: 'm-coord', agentType: 'coordinator' }]),
+    );
+    // 4. strategic_paths lookup — non-empty so we exercise the
+    //    "and content drafts" branch of the publicSummary.
+    dbSelectMock.mockReturnValueOnce(buildSelectChain([{ id: 'path-1' }]));
+
+    dispatchLeadMessageMock.mockResolvedValueOnce({
+      runId: 'run-pub',
+      traceId: 'trace-pub',
+      alreadyRunning: false,
+    });
+
+    await ensureKickoffEnqueued({
+      userId: 'u1',
+      productId: 'p1',
+      teamId: 't1',
+    });
+
+    expect(dispatchLeadMessageMock).toHaveBeenCalledTimes(1);
+    const callArg = dispatchLeadMessageMock.mock.calls[0]![0];
+
+    // Raw goal is preserved (worker reads this for agent replay).
+    expect(callArg.goal).toContain("subagent_type: 'social-media-manager'");
+    expect(callArg.goal).toContain('playbook');
+
+    // publicSummary is set and is a string.
+    expect(typeof callArg.publicSummary).toBe('string');
+    const publicSummary = callArg.publicSummary as string;
+
+    // Founder-friendly: mentions the product name.
+    expect(publicSummary).toContain('Acme');
+
+    // Excludes internal architecture details.
+    expect(publicSummary).not.toContain('social-media-manager');
+    expect(publicSummary).not.toContain('playbook');
+    expect(publicSummary).not.toContain('Task(');
+    expect(publicSummary).not.toContain('subagent_type');
+    expect(publicSummary).not.toContain('add_plan_item');
+    expect(publicSummary).not.toContain('Mode:');
   });
 
   it('returns no_coordinator when team has no coordinator member', async () => {

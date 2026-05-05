@@ -5,6 +5,7 @@ import { db } from '@/lib/db';
 import { teams, teamMembers } from '@/lib/db/schema';
 import { getTeamState } from '@/lib/team/team-state-cache';
 import { getKeyValueClient } from '@/lib/redis';
+import { publicAgentLabel } from '@/lib/team/redact-for-client';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -83,7 +84,7 @@ export async function GET(request: NextRequest): Promise<Response> {
       name: teamRow[0].name,
       createdAt: teamRow[0].createdAt,
     },
-    members,
+    members: members.map((m) => ({ ...m, agent_type: publicAgentLabel(m.agent_type) })),
     activeRun,
   });
 }

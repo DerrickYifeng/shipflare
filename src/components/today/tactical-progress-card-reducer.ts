@@ -60,7 +60,13 @@ export function reduceToolProgress(
 ): ToolProgressViewState {
   if (event.type !== 'tool_progress') return state;
 
-  if (event.toolName === 'xai_find_customers') {
+  // The /api/events SSE redactor maps `'xai_find_customers'` →
+  // `'searching'`. All discovery-search tools (xai_find_customers,
+  // find_threads_via_xai, find_threads, reddit_search) collapse to
+  // the same label. The per-platform bucketing below uses
+  // `metadata.platform`, which still distinguishes X vs Reddit, so
+  // the broader match here is correct.
+  if (event.toolName === 'searching') {
     const platform = readString(event.metadata, 'platform') ?? 'default';
     const prev = state.discovery[platform];
     if (prev && prev.callId === event.callId && prev.ts >= event.ts) {

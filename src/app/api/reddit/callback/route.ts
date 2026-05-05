@@ -9,6 +9,7 @@ import { createLogger } from '@/lib/logger';
 import { PLATFORMS } from '@/lib/platform-config';
 import { provisionTeamForProduct } from '@/lib/team-provisioner';
 import { readReturnToCookie, clearReturnToCookie } from '@/lib/oauth-return';
+import { appUrl } from '@/lib/app-url';
 
 const log = createLogger('api:reddit');
 
@@ -18,7 +19,7 @@ const log = createLogger('api:reddit');
 export async function GET(request: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.redirect(new URL('/', request.url));
+    return NextResponse.redirect(appUrl('/'));
   }
 
   // Reddit can be flipped off at the product level via platform-config. When
@@ -27,7 +28,7 @@ export async function GET(request: NextRequest) {
   if (PLATFORMS.reddit?.enabled === false) {
     log.info('Reddit OAuth callback hit while platform is disabled — redirecting');
     return NextResponse.redirect(
-      new URL('/settings?connections=reddit-coming-soon', request.url),
+      appUrl('/settings?connections=reddit-coming-soon'),
     );
   }
 
@@ -62,8 +63,9 @@ export async function GET(request: NextRequest) {
 
   if (error || !code) {
     log.warn(`Reddit OAuth denied: ${error ?? 'no code'}`);
-    const redirectUrl = new URL('/onboarding?reddit_error=denied', request.url);
-    return clearStateCookie(NextResponse.redirect(redirectUrl));
+    return clearStateCookie(
+      NextResponse.redirect(appUrl('/onboarding?reddit_error=denied')),
+    );
   }
 
   // Exchange code for tokens
@@ -87,11 +89,9 @@ export async function GET(request: NextRequest) {
 
   if (!tokenResponse.ok) {
     log.error(`Reddit token exchange failed: ${tokenResponse.status}`);
-    const redirectUrl = new URL(
-      '/onboarding?reddit_error=token_exchange',
-      request.url,
+    return clearStateCookie(
+      NextResponse.redirect(appUrl('/onboarding?reddit_error=token_exchange')),
     );
-    return clearStateCookie(NextResponse.redirect(redirectUrl));
   }
 
   const tokens = (await tokenResponse.json()) as {
@@ -107,11 +107,9 @@ export async function GET(request: NextRequest) {
 
   if (!meResponse.ok) {
     log.error(`Reddit /me failed: ${meResponse.status}`);
-    const redirectUrl = new URL(
-      '/onboarding?reddit_error=profile_fetch',
-      request.url,
+    return clearStateCookie(
+      NextResponse.redirect(appUrl('/onboarding?reddit_error=profile_fetch')),
     );
-    return clearStateCookie(NextResponse.redirect(redirectUrl));
   }
 
   const me = (await meResponse.json()) as { name: string };
@@ -227,6 +225,6 @@ export async function GET(request: NextRequest) {
   // `?returnTo=` on /api/reddit/connect). Defaults to /today.
   const returnTo = readReturnToCookie(request);
   return clearReturnToCookie(
-    clearStateCookie(NextResponse.redirect(new URL(returnTo, request.url))),
+    clearStateCookie(NextResponse.redirect(appUrl(returnTo))),
   );
 }

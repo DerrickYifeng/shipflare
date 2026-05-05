@@ -24,7 +24,6 @@ import {
 } from './sticky-composer';
 import { StatusBanner } from './status-banner';
 import { OnboardingBanner } from './onboarding-banner';
-import type { BudgetSegment } from './token-budget';
 import {
   stitchLeadMessages,
   type DelegationTask,
@@ -52,9 +51,6 @@ export interface TeamDeskProps {
   teamLead: TeamDeskMember | null;
   specialists: readonly TeamDeskMember[];
   initialMessages: TeamActivityMessage[];
-  spentUsd: number;
-  weeklyBudgetUsd: number;
-  budgetSegments: readonly BudgetSegment[];
   activeRunId: string | null;
   activeRunStartedAt: string | null;
   isLive: boolean;
@@ -96,9 +92,6 @@ export function TeamDesk({
   teamLead,
   specialists,
   initialMessages,
-  spentUsd,
-  weeklyBudgetUsd,
-  budgetSegments,
   activeRunId,
   activeRunStartedAt,
   isLive,
@@ -736,9 +729,6 @@ export function TeamDesk({
             specialists={leftRailSpecialists}
             activeMemberId={null}
             onSelect={noopSelectMember}
-            spentUsd={spentUsd}
-            weeklyBudgetUsd={weeklyBudgetUsd}
-            budgetSegments={budgetSegments}
             conversations={conversationListWithTitles}
             selectedConversationId={selectedConversationId}
             onSelectConversation={handleSelectConversation}

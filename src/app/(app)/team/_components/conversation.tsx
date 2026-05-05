@@ -189,9 +189,12 @@ export function Conversation({
   //
   // `paddingBottom` reserves airspace for the fixed composer plus a
   // comfort gap so the last bubble never grazes the composer's fade.
-  // Sized for the worst case (textarea expanded to its MAX_HEIGHT of
-  // 200px): 20 bottom inset + ~286 card + 40 fade ≈ 346. 360 gives a
-  // ~15px comfort gap even at max composer expansion.
+  // Sized for the typical (collapsed) composer: 20 bottom inset +
+  // ~120 card + 40 fade ≈ 180. When the user expands the textarea
+  // toward its 200px MAX_HEIGHT the topmost messages slide a bit
+  // further behind the composer fade, but the user is focused on the
+  // textarea at that point — this is the right tradeoff vs. burning
+  // ~220px of empty whitespace on every collapsed view.
   const wrap: CSSProperties = {
     display: 'flex',
     flexDirection: 'column',
@@ -199,7 +202,7 @@ export function Conversation({
     flex: 1,
     minHeight: 0,
     overflowY: 'auto',
-    paddingBottom: 360,
+    paddingBottom: 180,
     // Disable Chrome's automatic scroll anchoring. Without this the
     // browser re-anchors to an element above the new content when the
     // list grows, which *subtracts* from `scrollTop` and masks the

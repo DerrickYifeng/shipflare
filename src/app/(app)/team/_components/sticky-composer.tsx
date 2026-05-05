@@ -383,13 +383,6 @@ export const StickyComposer = forwardRef<
     fontVariantNumeric: 'tabular-nums',
   };
 
-  const footerCaption: CSSProperties = {
-    textAlign: 'center',
-    marginTop: 6,
-    fontSize: 11,
-    color: 'rgba(0, 0, 0, 0.4)',
-  };
-
   return (
     <div className="ai-team-composer-wrap" style={outer} aria-hidden={false}>
       <div className={gridClass} style={grid}>
@@ -494,10 +487,6 @@ export const StickyComposer = forwardRef<
                   </svg>
                 </button>
               )}
-            </div>
-            <div style={footerCaption}>
-              Team Lead is always here · spawns specialists in parallel ·
-              nothing posts without your approval
             </div>
           </form>
         </div>

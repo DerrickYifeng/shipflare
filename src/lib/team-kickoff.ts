@@ -1,8 +1,8 @@
 /**
- * Team kickoff bootstrap. Idempotent helper that fires a single kickoff
- * team-run the first time a (user, product, team) is observed, then
- * never again. The kickoff run produces the three artefacts the founder
- * sees on their first visit to /team:
+ * Team kickoff bootstrap. Idempotent helper that dispatches a single
+ * kickoff lead message the first time a (user, product, team) is
+ * observed, then never again. The kickoff run produces the three
+ * artefacts the founder sees on their first visit to /team:
  *   1. plan draft (coordinator's add_plan_item tool — direct, post-Plan-3)
  *   2. reply-target discovery (rolled into the social-media-manager spawn)
  *   3. draft replies (social-media-manager on the discovered top targets)
@@ -26,7 +26,6 @@ import {
 import { getUserChannels } from '@/lib/user-channels';
 import { dispatchLeadMessage } from '@/lib/team/dispatch-lead-message';
 import { createAutomationConversation } from '@/lib/team-conversation-helpers';
-import { finalizePendingOnboardingRuns } from '@/lib/onboarding-run-finalizer';
 import { currentWeekStart } from '@/lib/week-bounds';
 import { createLogger } from '@/lib/logger';
 
@@ -40,11 +39,11 @@ export interface EnsureKickoffResult {
 }
 
 /**
- * Idempotently enqueue the kickoff team-run for `(userId, teamId)`.
+ * Idempotently dispatch the kickoff lead message for `(userId, teamId)`.
  *
- * Detection: we check `team_runs` for ANY past kickoff trigger row
- * (any status). One kickoff per team, ever — re-running is a manual
- * action, not an automatic one.
+ * Detection: we look in `team_messages.metadata.trigger` for ANY past
+ * `kickoff` row (any status). One kickoff per team, ever — re-running
+ * is a manual action, not an automatic one.
  */
 export async function ensureKickoffEnqueued(args: {
   userId: string;
@@ -54,10 +53,10 @@ export async function ensureKickoffEnqueued(args: {
   const { userId, productId, teamId } = args;
 
   // Has this team ever kicked off? Status doesn't matter — we just want
-  // the founder's one-shot auto-kickoff. Phase E Task 11: detection moved
-  // off `team_runs` (legacy table) onto `team_messages.metadata.trigger`,
-  // which `dispatchLeadMessage` stamps on every dispatched user_prompt.
-  // Manual re-runs go through /api/team/run as before.
+  // the founder's one-shot auto-kickoff. `dispatchLeadMessage` stamps
+  // `metadata.trigger` on every user_prompt, so a single SELECT on
+  // team_messages is the source of truth. Manual re-runs go through
+  // /api/team/run as before.
   const existing = await db
     .select({ id: teamMessages.id })
     .from(teamMessages)
@@ -70,25 +69,6 @@ export async function ensureKickoffEnqueued(args: {
     .limit(1);
   if (existing.length > 0) {
     return { fired: false, reason: 'already_kickoffed' };
-  }
-
-  // Pre-empt the analyst-run race: if the analyst's onboarding-trigger
-  // run is still flagged `running` when we arrive at /team, the legacy
-  // `enqueueTeamRun` partial unique index treated the team as busy and
-  // returned `alreadyRunning`. Phase E removes that index path, but we
-  // keep the cleanup so any in-flight onboarding `team_runs` rows are
-  // settled to a terminal state for the historical UI.
-  try {
-    const finalized = await finalizePendingOnboardingRuns(teamId);
-    if (finalized.finalized > 0) {
-      log.info(
-        `kickoff finalized ${finalized.finalized} stale onboarding run(s) ahead of kickoff: [${finalized.runIds.join(',')}]`,
-      );
-    }
-  } catch (err) {
-    log.warn(
-      `finalizePendingOnboardingRuns failed (non-fatal) team=${teamId}: ${err instanceof Error ? err.message : String(err)}`,
-    );
   }
 
   const [productRow] = await db
@@ -148,7 +128,7 @@ export async function ensureKickoffEnqueued(args: {
     `Follow your kickoff playbook end-to-end (plan → social-media-manager): ` +
     `(1) Generate week-1 plan items directly with your add_plan_item tool — pass weekStart + now verbatim. ` +
     `(2) Look up today's content_reply slot for the primary channel via query_plan_items (kind=content_reply, today's UTC scheduledAt) and read params.targetCount. ` +
-    `(3) Task({ subagent_type: 'social-media-manager', description: 'fill reply slot <planItemId>', prompt: 'Mode: discover-and-fill-slot\\nplanItemId: <uuid>\\ntargetCount: <slot.targetCount>' }) — the agent runs discovery + judging + drafting internally and returns one StructuredOutput. ` +
+    `(3) Task({ subagent_type: 'social-media-manager', description: 'fill reply slot', prompt: 'Mode: discover-and-fill-slot\\nplanItemId: <uuid>\\ntargetCount: <slot.targetCount>' }) — the agent runs discovery + judging + drafting internally and returns one StructuredOutput. The description stays a short verb phrase (no UUID); the planItemId travels in the prompt body. ` +
     `Skip steps 2-3 if no channels are connected.`;
 
   let conversationId: string;
@@ -162,12 +142,21 @@ export async function ensureKickoffEnqueued(args: {
   }
 
   void coordinator; // resolved for misconfiguration check; lead is the sole recipient
+  // Founder-facing summary persisted into metadata.publicContent. The
+  // redactor at the API boundary swaps this into `content` when serving
+  // the row to the browser; the raw `goal` (with internal architecture
+  // details — playbook, agent names, mode strings) stays server-side
+  // for the lead's agent-run replay. See dispatchLeadMessage docs.
+  const publicSummary = pathId
+    ? `Building ${productRow.name}'s first-week plan and drafting your first reply candidates.`
+    : `Building ${productRow.name}'s first-week plan.`;
   try {
     const { runId } = await dispatchLeadMessage(
       {
         teamId,
         conversationId,
         goal,
+        publicSummary,
         trigger: 'kickoff',
       },
       db,

@@ -25,11 +25,13 @@ export interface DelegationTask {
   /** Target member id for this dispatched task (from metadata). */
   toMemberId: string | null;
   /**
-   * `subagent_type` pulled from the Task tool_call's input (e.g.
-   * "social-media-manager"). Used to look up the specialist by agent_type when
+   * `agent` (founder-friendly label) pulled from the Task tool_call's
+   * redacted input. Used to look up the specialist by agent_type when
    * `toMemberId` is null — team_messages.to_member_id is always null on
    * tool_calls so this is the only reliable hook to the correct member
-   * row until the worker starts stamping it.
+   * row until the worker starts stamping it. The wire key is `agent`
+   * (not `subagent_type`) to suppress Anthropic Task-tool fingerprint
+   * (see redact-for-client.ts).
    */
   subagentType: string | null;
   /** Short label for the task — "agentType" fallback if none. */
@@ -343,7 +345,7 @@ function buildDelegationTask(
   const description =
     extractToolInputString(metadata, 'description') ??
     lookupEntry?.description ??
-    extractToolInputString(metadata, 'subagent_type') ??
+    extractToolInputString(metadata, 'agent') ??
     'Dispatched task';
 
   // A task_call with no matching team_tasks row in `taskLookup` is
@@ -369,7 +371,7 @@ function buildDelegationTask(
     // either way that's the anchor `progressByParentToolUse` uses.
     toolUseId: readString(metadata, 'toolUseId', 'tool_use_id'),
     toMemberId: message.to,
-    subagentType: extractToolInputString(metadata, 'subagent_type'),
+    subagentType: extractToolInputString(metadata, 'agent'),
     label: description,
     status,
     progress,
@@ -388,7 +390,10 @@ function isLeadTextMessage(message: TeamActivityMessage): boolean {
 
 function isTaskToolCall(message: TeamActivityMessage): boolean {
   if (message.type !== 'tool_call') return false;
-  return extractToolName(message.metadata) === 'Task';
+  // The redactor at the API boundary maps raw tool name `'Task'` to the
+  // semantic label `'delegating'` (see src/lib/team/redact-for-client.ts).
+  // The UI receives the redacted shape, so we match on the label here.
+  return extractToolName(message.metadata) === 'delegating';
 }
 
 /**

@@ -234,6 +234,38 @@ describe('POST /api/product/phase', () => {
     expect(goal).toContain('x');
   });
 
+  it('dispatches with a publicSummary that excludes architecture details', async () => {
+    const { POST } = await import('../route');
+    await POST(
+      makeReq({
+        state: 'launching',
+        launchDate: '2026-05-14T00:00:00.000Z',
+        launchedAt: null,
+      }),
+    );
+
+    expect(dispatchLeadMessageMock).toHaveBeenCalledTimes(1);
+    const callArg = dispatchLeadMessageMock.mock.calls[0]?.[0] as
+      | { goal?: string; publicSummary?: string }
+      | undefined;
+
+    // Raw goal preserves architecture details for agent replay.
+    expect(callArg?.goal).toContain('generating-strategy');
+    expect(callArg?.goal).toContain('content-planner');
+
+    // publicSummary is set and is founder-friendly.
+    expect(typeof callArg?.publicSummary).toBe('string');
+    const publicSummary = callArg!.publicSummary as string;
+    expect(publicSummary).toContain('ShipFlare');
+
+    // Excludes internal architecture details.
+    expect(publicSummary).not.toContain('generating-strategy');
+    expect(publicSummary).not.toContain('content-planner');
+    expect(publicSummary).not.toContain('strategic_path');
+    expect(publicSummary).not.toContain('Task(');
+    expect(publicSummary).not.toContain('subagent_type');
+  });
+
   it('returns 500 when the DB transaction fails', async () => {
     txShouldThrow = true;
     const { POST } = await import('../route');

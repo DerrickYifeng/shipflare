@@ -1,8 +1,8 @@
 // UI-B Task 9 — endpoint contract test for /api/team/agent/[agentId]/transcript.
 //
-// Mocks `loadAgentRunHistory` and the auth + ownership query so the
-// test verifies the route's auth + shaping behavior (content coercion,
-// 401/404 paths) without booting Postgres.
+// Mocks `loadAgentRunHistoryRedactedForClient` and the auth + ownership
+// query so the test verifies the route's auth + shaping behavior
+// (content coercion, 401/404 paths) without booting Postgres.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
@@ -43,8 +43,8 @@ vi.mock('drizzle-orm', async () => {
 });
 
 const loadAgentRunHistoryMock = vi.hoisted(() => vi.fn());
-vi.mock('@/workers/processors/lib/agent-run-history', () => ({
-  loadAgentRunHistory: loadAgentRunHistoryMock,
+vi.mock('@/workers/processors/lib/agent-run-history-for-client', () => ({
+  loadAgentRunHistoryRedactedForClient: loadAgentRunHistoryMock,
 }));
 
 import { GET } from '../route';
@@ -124,7 +124,7 @@ describe('GET /api/team/agent/[agentId]/transcript', () => {
     expect(body.messages).toEqual([]);
   });
 
-  it('passes the agentId through to loadAgentRunHistory', async () => {
+  it('passes the agentId through to loadAgentRunHistoryRedactedForClient', async () => {
     await GET(makeReq(), makeParams('agent-xyz'));
     expect(loadAgentRunHistoryMock).toHaveBeenCalledWith('agent-xyz', expect.anything());
   });

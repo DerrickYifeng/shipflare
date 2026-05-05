@@ -79,13 +79,20 @@ export interface SyntheticInput {
  * actually calls. Anything not in this map renders the raw tool name as a
  * fallback so a future tool addition still surfaces in the UI without
  * blocking the conversation.
+ *
+ * The route redacts raw tool names through `publicToolLabel` before
+ * emitting them on the SSE wire (so a new user with DevTools open can't
+ * enumerate the internal tool surface), so this map is keyed on the
+ * PUBLIC labels (`planning`, `reading-context`, …) — never on raw tool
+ * names.
  */
 const TOOL_LABELS: Record<string, string> = {
-  query_recent_milestones: 'Reading recent shipping signals',
-  query_strategic_path: 'Reading existing strategic path',
-  query_metrics: 'Reading channel metrics',
-  query_product_context: 'Loading product context',
-  write_strategic_path: 'Writing the 30-day plan',
+  planning: 'Writing the 30-day plan',
+  'reading-context': 'Reading recent shipping signals',
+  'reading-plan': 'Reading existing strategic path',
+  'reading-metrics': 'Reading channel metrics',
+  reviewing: 'Reviewing the plan',
+  drafting: 'Drafting',
 };
 
 const COORDINATOR_DISPATCH_BODY =

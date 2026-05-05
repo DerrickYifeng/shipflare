@@ -16,6 +16,7 @@ import {
   type GeneratingStrategyOutput,
 } from '@/skills/generating-strategy/schema';
 import type { StreamEvent } from '@/core/types';
+import { publicToolLabel } from '@/lib/team/redact-for-client';
 
 const baseLog = createLogger('api:onboarding:plan');
 
@@ -343,7 +344,15 @@ export async function POST(request: NextRequest): Promise<Response> {
         }
 
         log.error(`strategic plan failed user=${userId}: ${fullMessage}`);
-        cleanup({ type: 'error', error: message });
+        // Don't leak raw err.message (which can carry skill / tool / driver
+        // internals — e.g. "Failed query: SELECT ... — cause: relation
+        // \"strategic_paths\" does not exist [42P01]"). The client only
+        // needs a stable error label to drive retry UX.
+        const errLabel =
+          err instanceof Error && err.name && err.name !== 'Error'
+            ? err.name
+            : 'PlanGenerationError';
+        cleanup({ type: 'error', error: errLabel });
       }
     },
     cancel() {
@@ -392,10 +401,22 @@ class PlannerTimeoutError extends Error {
 export interface ToolProgressEvent {
   type: 'tool_progress';
   phase: 'start' | 'done' | 'error';
+  /**
+   * Public, semantic tool label (e.g. `planning`, `reading-context`).
+   * Raw internal tool names are redacted via `publicToolLabel` before
+   * the event hits the SSE wire so DevTools onlookers cannot enumerate
+   * the agent's internal tool surface.
+   */
   toolName: string;
   toolUseId: string;
   durationMs?: number;
+  /**
+   * Stable, non-leaky error label like `planning_failed`. Never the raw
+   * tool error content (which may carry stack traces / driver detail).
+   */
   errorMessage?: string;
+  /** Length of the original error content, in characters — useful UI signal without leaking content. */
+  errorMessageLength?: number;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -422,30 +443,46 @@ interface RunStrategicPathSkillArgs {
  * Returns null for events the onboarding stream doesn't surface
  * (turn_start / text_delta / etc.) so the route doesn't leak internal
  * agent-loop chatter into the UI.
+ *
+ * Redaction: raw tool names (`write_strategic_path`, `query_recent_milestones`,
+ * etc.) are replaced with semantic public labels (`planning`, `reading-context`,
+ * etc.) via `publicToolLabel` before they hit the wire — a new user opening
+ * DevTools during onboarding must not see the internal tool surface.
+ *
+ * Likewise, `tool_done` error content (which may carry stack traces,
+ * tool-internal validation messages, or driver-level detail) is collapsed
+ * to a stable `<label>_failed` string with the original length surfaced
+ * separately as a non-leaky integer.
+ *
+ * Exported for unit testing — the redaction is the contract this route
+ * promises the client, so it's pinned by a direct unit test rather than
+ * via the full SSE flow.
  */
-function streamEventToProgress(event: StreamEvent): ToolProgressEvent | null {
+export function streamEventToProgress(event: StreamEvent): ToolProgressEvent | null {
   if (event.type === 'tool_start') {
     return {
       type: 'tool_progress',
       phase: 'start',
-      toolName: event.toolName,
+      toolName: publicToolLabel(event.toolName),
       toolUseId: event.toolUseId,
     };
   }
   if (event.type === 'tool_done') {
     const isError = event.result?.is_error === true;
+    const safeLabel = publicToolLabel(event.toolName);
+    const rawContent = event.result?.content;
+    const errorMessageLength =
+      typeof rawContent === 'string' ? rawContent.length : 0;
     return {
       type: 'tool_progress',
       phase: isError ? 'error' : 'done',
-      toolName: event.toolName,
+      toolName: safeLabel,
       toolUseId: event.toolUseId,
       durationMs: event.durationMs,
       ...(isError
         ? {
-            errorMessage:
-              typeof event.result?.content === 'string'
-                ? event.result.content.slice(0, 500)
-                : undefined,
+            errorMessage: `${safeLabel}_failed`,
+            errorMessageLength,
           }
         : {}),
     };

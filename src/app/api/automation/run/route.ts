@@ -88,6 +88,12 @@ export async function POST(request: NextRequest) {
     `(max 3 inner attempts per slot), and update_plan_item state='drafted' ` +
     `when each slot terminates. If no slots are found, fall back to ` +
     `default top-3 drafting from a single discovery-agent dispatch.`;
+  // Founder-facing summary persisted into metadata.publicContent. The
+  // redactor at the API boundary swaps this into `content` when serving
+  // the row to the browser; the raw `goal` (with internal architecture
+  // details — playbook, agent names, mode strings) stays server-side
+  // for the lead's agent-run replay. See dispatchLeadMessage docs.
+  const publicSummary = `Running your daily automation for ${product.name}.`;
 
   const { runId, alreadyRunning } = await dispatchLeadMessage(
     {
@@ -95,6 +101,7 @@ export async function POST(request: NextRequest) {
       conversationId,
       goal,
       trigger: 'daily',
+      publicSummary,
     },
     db,
   );

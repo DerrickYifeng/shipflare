@@ -39,17 +39,17 @@ describe('deriveTacticalFromMessages', () => {
     expect(out.itemCount).toBe(0);
   });
 
-  it('counts each add_plan_item tool_call and flips to running', () => {
+  it('counts each planning (redacted from add_plan_item) tool_call and flips to running', () => {
     const msgs = [
       makeMessage({
         id: 'm1',
         type: 'tool_call',
-        metadata: { toolName: 'add_plan_item' },
+        metadata: { toolName: 'planning' },
       }),
       makeMessage({
         id: 'm2',
         type: 'tool_call',
-        metadata: { toolName: 'add_plan_item' },
+        metadata: { toolName: 'planning' },
       }),
       makeMessage({
         id: 'm3',
@@ -67,7 +67,7 @@ describe('deriveTacticalFromMessages', () => {
       makeMessage({
         id: 'm1',
         type: 'tool_call',
-        metadata: { toolName: 'add_plan_item' },
+        metadata: { toolName: 'planning' },
       }),
       makeMessage({ id: 'm2', type: 'completion', content: 'done' }),
     ];
@@ -96,7 +96,7 @@ describe('deriveTacticalFromMessages', () => {
       makeMessage({
         id: 'm1',
         type: 'tool_call',
-        metadata: { toolName: 'add_plan_item' },
+        metadata: { toolName: 'planning' },
       }),
     ];
     const out = deriveTacticalFromMessages(msgs, {
