@@ -40,7 +40,7 @@ describe('synthesizeStrategyConversation', () => {
     const state = callSynthesize({
       events: [
         {
-          toolName: 'query_recent_milestones',
+          toolName: 'reading-context',
           phase: 'start',
           toolUseId: 'tu_1',
         },
@@ -49,7 +49,7 @@ describe('synthesizeStrategyConversation', () => {
     expect(state.subtask.toolCalls).toHaveLength(1);
     expect(state.subtask.toolCalls[0]).toMatchObject({
       toolUseId: 'tu_1',
-      toolName: 'query_recent_milestones',
+      toolName: 'reading-context',
       friendlyLabel: 'Reading recent shipping signals',
       phase: 'start',
     });
@@ -60,9 +60,9 @@ describe('synthesizeStrategyConversation', () => {
   it('updates the same tool call to phase=done with durationMs on the matching `done` event', () => {
     const state = callSynthesize({
       events: [
-        { toolName: 'query_metrics', phase: 'start', toolUseId: 'tu_2' },
+        { toolName: 'reading-metrics', phase: 'start', toolUseId: 'tu_2' },
         {
-          toolName: 'query_metrics',
+          toolName: 'reading-metrics',
           phase: 'done',
           toolUseId: 'tu_2',
           durationMs: 1_234,
@@ -81,9 +81,9 @@ describe('synthesizeStrategyConversation', () => {
   it('preserves insertion order across multiple distinct tool_use_ids', () => {
     const state = callSynthesize({
       events: [
-        { toolName: 'query_recent_milestones', phase: 'start', toolUseId: 'a' },
-        { toolName: 'query_strategic_path', phase: 'start', toolUseId: 'b' },
-        { toolName: 'write_strategic_path', phase: 'start', toolUseId: 'c' },
+        { toolName: 'reading-context', phase: 'start', toolUseId: 'a' },
+        { toolName: 'reading-plan', phase: 'start', toolUseId: 'b' },
+        { toolName: 'planning', phase: 'start', toolUseId: 'c' },
       ],
     });
     expect(state.subtask.toolCalls.map((t) => t.toolUseId)).toEqual([
@@ -108,7 +108,7 @@ describe('synthesizeStrategyConversation', () => {
       done: true,
       events: [
         {
-          toolName: 'write_strategic_path',
+          toolName: 'planning',
           phase: 'done',
           toolUseId: 'tu_w',
           durationMs: 4_500,
