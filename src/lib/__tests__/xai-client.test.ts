@@ -136,3 +136,90 @@ describe('XAIClient.respondConversational', () => {
     expect(result.assistantMessage.content).toBe('No strong matches found.');
   });
 });
+
+describe('XAIClient log redaction', () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+  });
+
+  it('does not log raw query strings or model output', async () => {
+    // Capture every line the structured logger writes — both pretty and JSON
+    // modes route through console.log/console.error.
+    const logged: string[] = [];
+    const captureSpy = (...args: unknown[]) => {
+      logged.push(args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' '));
+    };
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(captureSpy);
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(captureSpy);
+    // Force debug to fire so the search-request log is exercised.
+    const prevLevel = process.env.LOG_LEVEL;
+    process.env.LOG_LEVEL = 'debug';
+
+    try {
+      // searchTweets: literal query string must not appear in any log line.
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          id: 'resp-1',
+          output: [
+            {
+              type: 'message',
+              role: 'assistant',
+              content: [{ type: 'output_text', text: 'NO_RESULTS' }],
+            },
+          ],
+          server_side_tool_usage: { x_search_calls: 1, web_search_calls: 0 },
+        }),
+      });
+
+      const client = new XAIClient('test-key');
+      const sensitiveQuery = 'startup founders complaining about cold outreach';
+      await client.searchTweets(sensitiveQuery);
+
+      // respondConversational: prose-fallback path includes raw text snippet
+      // historically — verify the redacted version no longer leaks it.
+      const sensitiveProse =
+        'this is sensitive grok output containing customer ICP signals that should never reach a third-party logger';
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          id: 'resp-2',
+          output: [
+            {
+              type: 'message',
+              role: 'assistant',
+              content: [{ type: 'output_text', text: sensitiveProse }],
+            },
+          ],
+        }),
+      });
+      await client.respondConversational({
+        model: 'grok-4.20-non-reasoning',
+        messages: [{ role: 'user', content: 'x' }],
+        responseFormat: {
+          type: 'json_schema',
+          json_schema: { name: 'X', schema: {}, strict: true },
+        },
+      });
+
+      const allLogs = logged.join('\n');
+      // No fragment of the raw query string should appear.
+      expect(allLogs).not.toContain('startup founders');
+      expect(allLogs).not.toContain('cold outreach');
+      // No fragment of the raw model prose should appear.
+      expect(allLogs).not.toContain('sensitive grok output');
+      expect(allLogs).not.toContain('customer ICP signals');
+      // The redacted log lines DO contain length-only summaries.
+      expect(allLogs).toContain('query length=');
+      expect(allLogs).toContain('text_length=');
+    } finally {
+      logSpy.mockRestore();
+      errSpy.mockRestore();
+      if (prevLevel === undefined) {
+        delete process.env.LOG_LEVEL;
+      } else {
+        process.env.LOG_LEVEL = prevLevel;
+      }
+    }
+  });
+});
