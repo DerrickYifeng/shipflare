@@ -390,7 +390,10 @@ function isLeadTextMessage(message: TeamActivityMessage): boolean {
 
 function isTaskToolCall(message: TeamActivityMessage): boolean {
   if (message.type !== 'tool_call') return false;
-  return extractToolName(message.metadata) === 'Task';
+  // The redactor at the API boundary maps raw tool name `'Task'` to the
+  // semantic label `'delegating'` (see src/lib/team/redact-for-client.ts).
+  // The UI receives the redacted shape, so we match on the label here.
+  return extractToolName(message.metadata) === 'delegating';
 }
 
 /**
