@@ -1,13 +1,10 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { and, eq, inArray, not } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { teams, teamRuns } from '@/lib/db/schema';
-import { getPubSubPublisher } from '@/lib/redis';
-import {
-  teamCancelChannel,
-  teamMessagesChannel,
-} from '@/tools/SendMessageTool/SendMessageTool';
+import { teams, teamMessages } from '@/lib/db/schema';
+import { findLeadAgentId } from '@/lib/team/find-lead-agent';
+import { wake } from '@/workers/processors/lib/wake';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('api:team:run:cancel');
@@ -18,13 +15,27 @@ export const dynamic = 'force-dynamic';
 /**
  * POST /api/team/run/[runId]/cancel
  *
- * Abort a running team_run. Publishes on the per-run cancel channel;
- * the worker subscriber calls its `AbortController.abort()`, which
- * flows through runAgent into the Anthropic SDK. The worker settles
- * the run with `status='cancelled'` in its own catch path.
+ * Phase E (Agent Teams): cancellation is a `shutdown_request` mailbox row
+ * addressed to the team's lead agent. The lead's agent-run loop drains its
+ * mailbox at the next idle turn, observes the `shutdown_request`, and
+ * exits gracefully with `agent_runs.status='killed'` (Phase C Task 7).
  *
- * Idempotent: calling cancel on a run that's already terminal is a
- * 200 no-op so the button can't get stuck in a retry loop.
+ * Note on `runId`: since Phase E Task 3 the value here is a
+ * `team_messages.id` (the user-prompt message that originally triggered
+ * the lead), not a legacy `team_runs.id`. We look up the message → its
+ * team → verify the caller owns it, then route the shutdown to the lead.
+ *
+ * Behaviour change vs. the legacy flow: previously the route flipped
+ * `team_runs.status='cancelled'` synchronously and published a Redis
+ * cancel signal so the worker's AbortController fired immediately.
+ * Phase E is eventually consistent — the lead processes the shutdown on
+ * its next turn boundary (typically within seconds). Callers should treat
+ * the 202 response as "shutdown requested" rather than "cancelled now".
+ *
+ * Idempotent: if no lead agent_runs row exists for the team (e.g. it
+ * already exited), the route still 202s — the message we'd insert would
+ * have nowhere to deliver, so we skip the insert and return success so
+ * the UI button doesn't get stuck in a retry loop.
  */
 export async function POST(
   _req: NextRequest,
@@ -35,109 +46,78 @@ export async function POST(
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
   const userId = session.user.id;
-  const { runId } = await params;
+  const { runId: messageId } = await params;
 
-  // Resolve the run → its team → verify the caller owns the team.
-  // One query with an inArray keeps the check cheap; we don't expose
-  // which half failed so a cross-tenant attacker can't probe run ids.
+  // Resolve the message → its team → verify the caller owns the team.
+  // One inner-join keeps the auth check cheap; we don't expose which
+  // half failed so a cross-tenant attacker can't probe message ids.
   const rows = await db
     .select({
-      runId: teamRuns.id,
-      teamId: teamRuns.teamId,
-      status: teamRuns.status,
-      ownerId: teams.userId,
+      messageId: teamMessages.id,
+      teamId: teamMessages.teamId,
     })
-    .from(teamRuns)
-    .innerJoin(teams, eq(teams.id, teamRuns.teamId))
-    .where(and(inArray(teamRuns.id, [runId]), eq(teams.userId, userId)))
+    .from(teamMessages)
+    .innerJoin(teams, eq(teams.id, teamMessages.teamId))
+    .where(and(eq(teamMessages.id, messageId), eq(teams.userId, userId)))
     .limit(1);
 
   if (rows.length === 0) {
     return NextResponse.json({ error: 'run_not_found' }, { status: 404 });
   }
-  const run = rows[0];
+  const { teamId } = rows[0];
 
-  // Already terminal — no worker to signal, just confirm the state.
-  if (
-    run.status === 'completed' ||
-    run.status === 'failed' ||
-    run.status === 'cancelled'
-  ) {
+  // Resolve the lead. If absent (e.g. lead already exited / team has no
+  // coordinator member), there's no recipient for the shutdown_request —
+  // 202 idempotently rather than 404, so the UI doesn't surface a confusing
+  // error after a successful natural completion.
+  const leadAgentId = await findLeadAgentId(teamId, db);
+  if (leadAgentId === null) {
+    log.info(
+      `POST /api/team/run/${messageId}/cancel user=${userId} team=${teamId} ` +
+        `no lead agent_run found — treating as already terminal`,
+    );
     return NextResponse.json(
-      { runId: run.runId, status: run.status, alreadyTerminal: true },
+      { runId: messageId, status: 'cancelled', alreadyTerminal: true },
       { status: 200 },
     );
   }
 
-  // Best-effort cancel, three lanes in parallel. Any lane working keeps
-  // the user's intent visible:
-  //   1. DB flip (`status='cancelled'`) — authoritative, survives
-  //      worker crashes. Conditional on the row not already being
-  //      terminal to avoid racing the happy path.
-  //   2. SSE terminal broadcast — UI flips the session rail + thread
-  //      immediately, no waiting on the worker.
-  //   3. Redis cancel channel — worker's AbortController fires so the
-  //      in-flight Anthropic stream unwinds and we stop burning tokens.
-  //
-  // Without lane 1+2 a stale worker (bun --watch missing a reload,
-  // crashed process, lane 3 subscribed with 0 listeners) would leave
-  // the button click apparently dead. The worker's own markCancelled/
-  // markFailed still guard against overwriting a cancelled row — see
-  // the conditional `where` below and the matching worker update.
+  // Insert a shutdown_request mailbox row for the lead. The lead's
+  // agent-run loop (Phase C Task 7) drains pending mail at idle-turn
+  // boundaries; on shutdown_request it sets a graceful-exit flag,
+  // unwinds the current turn, and settles status='killed'.
+  await db.insert(teamMessages).values({
+    teamId,
+    type: 'user_prompt',
+    messageType: 'shutdown_request',
+    fromMemberId: null, // founder-originated
+    toAgentId: leadAgentId,
+    content: 'Cancelled by founder',
+    summary: 'cancel',
+  });
+
+  // Wake the lead so it processes the shutdown promptly rather than
+  // waiting on the reconcile-mailbox cron tick. Idempotent within a
+  // 1-second window via BullMQ jobId dedupe; failures are swallowed
+  // by wake() itself, the cron is the durable backstop.
   try {
-    await db
-      .update(teamRuns)
-      .set({ status: 'cancelled', completedAt: new Date() })
-      .where(
-        and(
-          eq(teamRuns.id, run.runId),
-          not(inArray(teamRuns.status, ['completed', 'failed', 'cancelled'])),
-        ),
-      );
+    await wake(leadAgentId);
   } catch (err) {
+    // Defense in depth: even if wake() throws (it shouldn't), the
+    // shutdown_request row is the durable contract — log and continue.
     log.warn(
-      `DB cancel update failed for ${run.runId}: ${err instanceof Error ? err.message : String(err)}`,
+      `wake() failed for lead=${leadAgentId} after cancel insert: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
     );
   }
 
-  try {
-    await getPubSubPublisher().publish(
-      teamMessagesChannel(run.teamId),
-      JSON.stringify({
-        messageId: crypto.randomUUID(),
-        runId: run.runId,
-        teamId: run.teamId,
-        from: null,
-        to: null,
-        type: 'error',
-        content: 'Run cancelled by user.',
-        metadata: { cancelled: true, initiatedBy: 'user' },
-        createdAt: new Date().toISOString(),
-      }),
-    );
-  } catch (err) {
-    log.warn(
-      `SSE cancel broadcast failed for ${run.runId}: ${err instanceof Error ? err.message : String(err)}`,
-    );
-  }
-
-  try {
-    await getPubSubPublisher().publish(
-      teamCancelChannel(run.teamId, run.runId),
-      JSON.stringify({ at: Date.now() }),
-    );
-  } catch (err) {
-    log.warn(
-      `Redis cancel signal failed for ${run.runId}: ${err instanceof Error ? err.message : String(err)}`,
-    );
-    // Don't fail the request — lanes 1+2 already flipped the UI. The
-    // worker will either self-terminate on its own turn budget or the
-    // next status-mismatch read.
-  }
-
-  log.info(`POST /api/team/run/${run.runId}/cancel user=${userId}`);
+  log.info(
+    `POST /api/team/run/${messageId}/cancel user=${userId} team=${teamId} ` +
+      `leadAgentId=${leadAgentId} shutdown_request inserted`,
+  );
   return NextResponse.json(
-    { runId: run.runId, status: 'cancelled' },
+    { runId: messageId, status: 'cancel_requested' },
     { status: 202 },
   );
 }

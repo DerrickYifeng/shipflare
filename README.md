@@ -24,7 +24,7 @@ The planner is **two-tier**:
 
 `plan_items` is the only todo source. Each row is either auto-executed (`userAction='auto'`), queued for your approval (`'approve'`), or surfaced as manual work (`'manual'`). Terminal states: `completed`, `skipped`, `failed`, `superseded`, `stale`.
 
-Execution is a dumb dispatcher: the Plan Execute worker reads `plan_items`, calls the atomic skill named in `skillName` with the row's `params`, advances the state machine. Skills are composable building blocks — `draft-single-post-x`, `draft-single-reply`, `send-email`, `discovery`, `posting`, `draft-review`, etc. — each runnable in isolation.
+Execution is a dumb dispatcher: the Plan Execute worker reads `plan_items`, calls the atomic skill named in `skillName` with the row's `params`, advances the state machine. Skills are composable building blocks — `posting-to-platform`, `reviewing-drafts`, `monitoring-engagement`, etc. — each runnable in isolation. See `src/skills/` for the live catalog and `docs/superpowers/specs/2026-04-30-skill-primitive-restoration-design.md` for the primitive spec.
 
 ### Runtime pipeline
 
@@ -51,11 +51,12 @@ Agents learn over time. A memory system distills insights from every run — whi
 The architecture is channel-agnostic by design. Each channel is a set of tools (search + post) that agents call through the same query loop. Adding a new channel (e.g. LinkedIn, Discord, Indie Hackers, Product Hunt) requires:
 
 1. **Tools** — Implement search and post tools in `src/tools/` following the existing `ToolDefinition` interface.
-2. **Agent prompts** — Add channel-specific instructions to the relevant agent `.md` files (discovery, content, posting).
-3. **OAuth flow** (if needed) — Add a connect route under `src/app/api/<channel>/` and store encrypted tokens in the `channels` table.
-4. **Worker config** — The existing BullMQ pipeline (discovery -> content -> review -> posting) handles new channels automatically once tools are registered.
+2. **Platform config** — Add an entry in `src/lib/platform-config.ts` (display name, source prefix, content URL builder, etc.) and wire it into `src/lib/platform-deps.ts` so workers can mint clients for it.
+3. **Skill references** — Drop channel-specific guides under `src/references/platforms/` and `src/skills/<name>/references/` so the drafting / review / posting skills pick up the right tone and rules.
+4. **OAuth flow** (if needed) — Add a connect route under `src/app/api/<channel>/` and store encrypted tokens in the `channels` table.
+5. **Worker config** — The existing BullMQ pipeline (discovery -> content -> review -> posting) handles new channels automatically once tools, platform config, and references are registered.
 
-No changes to the core runtime (`query-loop`, `swarm`, `skill-runner`) or the scoring/review pipeline are required.
+No changes to the core runtime (`query-loop`, `tool-executor`) or the scoring/review pipeline are required.
 
 ## Tech stack
 
@@ -83,7 +84,7 @@ v3 ships 6 brand-locked agents visible throughout the UI (`SCOUT / DISCOVERY / A
 | Review | Haiku 4.5 | Adversarial quality gate (6 mandatory checks: relevance · tone · authenticity · FTC · risk · truth) |
 | Posting | Haiku 4.5 | Posts to Reddit/X, verifies visibility, detects shadowbans, runs circuit breaker |
 
-Under the hood each agent is a set of atomic skills (SKILL.md + agent.md pairs) that the Plan Executor dispatches per-item. See `src/skills/_catalog.ts` for the full catalog and `docs/superpowers/specs/2026-04-20-planner-and-skills-redesign-design.md` for the architecture.
+Under the hood each role above is a set of atomic skills (`SKILL.md` files under `src/skills/<gerund-name>/`, plus bundled TS skills in `src/skills/_bundled/`) that the Plan Executor dispatches per-item. See `src/skills/` for the shipped skills and `docs/superpowers/specs/2026-04-20-planner-and-skills-redesign-design.md` for the architecture.
 
 ## Getting started
 
@@ -144,17 +145,20 @@ pnpm db:studio        # open Drizzle Studio GUI
 
 ```
 src/
-├── agents/           # Agent definitions (.md with YAML frontmatter)
-├── skills/           # Skill compositions (fan-out configs for agents)
-├── tools/            # 24 tools (Reddit, X, HN, web, scoring, SEO, email)
-├── core/             # Runtime: query loop, swarm coordinator, pipelines
-├── memory/           # Agent memory system (log + distill pattern)
-├── workers/          # BullMQ processors (discovery, content, review, posting, ...)
+├── skills/           # Atomic skills — SKILL.md prompts + bundled TS skills (`_bundled/`)
+├── tools/            # ~30 tools (Reddit, X, planner, scoring, validation, draft, ...)
+├── core/             # Runtime: query loop, tool executor, tool system, API client
+├── memory/           # Memory system (log + distill pattern, per-channel insights)
+├── workers/          # BullMQ processors (plan-execute, review, posting, engagement, ...)
+├── mcp/              # MCP server adapters
+├── references/       # Shared reference docs injected into skills
+├── services/         # Code scanner, web scraper
 ├── app/              # Next.js App Router pages and API routes
 ├── components/       # React components (dashboard, onboarding, landing, ...)
 ├── hooks/            # Client-side data fetching hooks (SWR)
-├── lib/              # Database schema, env config, queue setup, rate limiter
-├── bridge/           # Memory bridge (connects workers to memory system)
+├── lib/              # Database schema, env config, queue setup, platform config + deps
+├── bridge/           # Memory bridge (connects workers to the memory system)
+├── utils/            # Shared utilities
 └── types/            # Shared TypeScript types
 ```
 

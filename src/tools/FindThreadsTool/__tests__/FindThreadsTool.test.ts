@@ -37,11 +37,15 @@ interface ThreadRow {
   url: string;
   body: string | null;
   author: string | null;
+  authorBio: string | null;
+  authorFollowers: number | null;
   upvotes: number | null;
   commentCount: number | null;
   scoutConfidence: number | null;
   postedAt: Date | null;
   discoveredAt: Date;
+  canMentionProduct: boolean | null;
+  mentionSignal: string | null;
 }
 
 function makeCtx(
@@ -70,11 +74,15 @@ function seed(store: InMemoryStore, rows: Partial<ThreadRow>[]): void {
     url: r.url ?? `https://reddit.com/comments/ext-${i}`,
     body: r.body ?? null,
     author: r.author ?? null,
+    authorBio: r.authorBio ?? null,
+    authorFollowers: r.authorFollowers ?? null,
     upvotes: r.upvotes ?? null,
     commentCount: r.commentCount ?? null,
     scoutConfidence: r.scoutConfidence ?? 0.5,
     postedAt: r.postedAt ?? new Date(now - 60 * 60_000),
     discoveredAt: r.discoveredAt ?? new Date(now - 30 * 60_000),
+    canMentionProduct: r.canMentionProduct ?? null,
+    mentionSignal: r.mentionSignal ?? null,
   }));
   store.register<ThreadRow>(threads, full);
 }
@@ -123,6 +131,61 @@ describe('findThreadsTool', () => {
     const bad = { limit: 10_000 } as any;
     const parse = findThreadsTool.inputSchema.safeParse(bad);
     expect(parse.success).toBe(false);
+  });
+
+  it('returns canMentionProduct + mentionSignal on each row', async () => {
+    seed(store, [
+      {
+        id: 't-mention-1',
+        platform: 'x',
+        community: '@x',
+        title: 't',
+        url: 'https://x.com/u/status/1',
+        canMentionProduct: true,
+        mentionSignal: 'tool_question',
+      },
+    ]);
+    const ctx = makeCtx(store, { userId: 'user-1', productId: 'prod-1' });
+    const result = await findThreadsTool.execute({ platforms: ['x'] }, ctx);
+    const row = result.threads.find((r) => r.threadId.length > 0);
+    expect(row?.canMentionProduct).toBe(true);
+    expect(row?.mentionSignal).toBe('tool_question');
+  });
+
+  it('returns authorBio + authorFollowers on each row', async () => {
+    seed(store, [
+      {
+        id: 't-author-1',
+        platform: 'x',
+        community: '@x',
+        title: 't',
+        url: 'https://x.com/u/status/1',
+        authorBio: 'building shipflare — indie hacker',
+        authorFollowers: 1234,
+      },
+    ]);
+    const ctx = makeCtx(store, { userId: 'user-1', productId: 'prod-1' });
+    const result = await findThreadsTool.execute({ platforms: ['x'] }, ctx);
+    const row = result.threads.find((r) => r.threadId === 't-author-1');
+    expect(row?.authorBio).toBe('building shipflare — indie hacker');
+    expect(row?.authorFollowers).toBe(1234);
+  });
+
+  it('returns null authorBio + authorFollowers for legacy rows', async () => {
+    seed(store, [
+      {
+        id: 't-legacy-1',
+        platform: 'x',
+        community: '@x',
+        title: 't',
+        url: 'https://x.com/u/status/1',
+      },
+    ]);
+    const ctx = makeCtx(store, { userId: 'user-1', productId: 'prod-1' });
+    const result = await findThreadsTool.execute({ platforms: ['x'] }, ctx);
+    const row = result.threads.find((r) => r.threadId === 't-legacy-1');
+    expect(row?.authorBio).toBeNull();
+    expect(row?.authorFollowers).toBeNull();
   });
 
   it('serializes Date fields as ISO strings', async () => {

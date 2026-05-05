@@ -41,7 +41,10 @@ export function StagePlan({
   onAboutEdit,
   onCommit,
 }: StagePlanProps) {
-  const [tab, setTab] = useState<TabId>('about');
+  // Timeline-first: the strategic arc is what the founder needs to react
+  // to in this step (about-product is mostly read-only confirmation of
+  // what they already typed in earlier stages).
+  const [tab, setTab] = useState<TabId>('timeline');
   const [committing, setCommitting] = useState(false);
   const [commitError, setCommitError] = useState<string | null>(null);
 

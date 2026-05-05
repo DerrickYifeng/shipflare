@@ -24,6 +24,21 @@ const nextConfig: NextConfig = {
         destination: '/team',
         permanent: false,
       },
+      // `/today` and `/calendar` were merged into `/briefing` (with the
+      // calendar reachable as `/briefing/plan`). Both 301 permanently —
+      // the new tab merge means there's exactly one URL per surface.
+      // Query strings (e.g. `?weekStart=YYYY-MM-DD` on /calendar) survive
+      // the redirect by Next's default behavior.
+      {
+        source: '/today',
+        destination: '/briefing',
+        permanent: true,
+      },
+      {
+        source: '/calendar',
+        destination: '/briefing/plan',
+        permanent: true,
+      },
     ];
   },
 };

@@ -26,7 +26,7 @@ export interface DelegationTask {
   toMemberId: string | null;
   /**
    * `subagent_type` pulled from the Task tool_call's input (e.g.
-   * "content-planner"). Used to look up the specialist by agent_type when
+   * "social-media-manager"). Used to look up the specialist by agent_type when
    * `toMemberId` is null — team_messages.to_member_id is always null on
    * tool_calls so this is the only reliable hook to the correct member
    * row until the worker starts stamping it.
@@ -71,6 +71,22 @@ export type ProgressItem =
       elapsed: string | null;
       complete: boolean;
       errorText: string | null;
+      /**
+       * Anthropic tool_use_id stamped on this tool_call. Used by
+       * `populateDelegationProgress` to look up nested sub-events
+       * (e.g. fork-skill calls spawned inside this tool) from the
+       * `progressByParentToolUse` map and graft them as `subItems`.
+       */
+      toolUseId?: string;
+      /**
+       * Sub-events emitted while this tool was running — typically
+       * `runForkSkill` invocations whose own messages carry
+       * `parent_tool_use_id = <this tool's tool_use_id>`. Surfaced as
+       * a nested ProgressList in the UI so multi-fork tools like
+       * `find_threads_via_xai` show live activity instead of a blank
+       * RUNNING card. Recursive: a sub-fork can itself spawn forks.
+       */
+      subItems?: ProgressItem[];
     }
   | {
       kind: 'text';
@@ -450,8 +466,35 @@ export function stitchLeadMessages(
     if (bucket) bucket.push(msg);
     else progressByParentToolUse.set(parentToolUseId, [msg]);
   }
+  // Two signals routes a message into a subagent's delegation card
+  // instead of the top-level thread:
+  //   1. `parentToolUseId` — the canonical anchor stamped by the Task
+  //      tool's spawnMeta wrapping. Always present in well-behaved spawns.
+  //   2. `agentName` — defensive backstop. Subagents (and only subagents)
+  //      get `agentName` written to their message metadata via spawnMeta;
+  //      coordinator never has it set. If `parentToolUseId` is missing
+  //      for any reason (worker race, legacy row, future regression),
+  //      `agentName` keeps the routing correct.
+  //
+  // Without #2, subagent text whose parentToolUseId failed to land would
+  // bubble up as a LeadNode and the UI's `node.fromMemberId ?? coordinatorId`
+  // fallback (conversation.tsx:256) would render it as the coordinator's
+  // avatar — which is exactly the "Chief of Staff SYNTHESIS pasting JSON"
+  // mis-attribution observed in production traces 2026-05-02.
+  const hasSubagentName = (metadata: Record<string, unknown> | null): boolean => {
+    // Use extractAgentName so both `agentName` (camelCase, defensively
+    // tolerated) and `agent_name` (snake_case, the shape agent-run.ts
+    // actually persists) are read. The earlier inline readString only
+    // matched camelCase, so this safety net never fired for any real
+    // persisted row — defeating the comment above's promise.
+    const name = extractAgentName(metadata);
+    return (
+      typeof name === 'string' && name.length > 0 && name !== 'coordinator'
+    );
+  };
   const belongsToSubagent = (msg: TeamActivityMessage): boolean =>
-    extractParentToolUseId(msg.metadata) !== null;
+    extractParentToolUseId(msg.metadata) !== null ||
+    hasSubagentName(msg.metadata);
   const nodes: ConversationNode[] = [];
   let currentLead: LeadNode | null = null;
   let currentLeadTime = 0;
@@ -593,22 +636,45 @@ export function stitchLeadMessages(
       // Attach to the most-recent in-flight ActivityNode whose toolName
       // matches the progress event's toolName. The emitProgress lambda
       // doesn't carry parentToolUseId today, so we match by toolName +
-      // recency. If no match (rare — emitProgress fired before tool_call
-      // landed, or the tool emitted from outside a team-run), drop the
-      // event silently — it's UI decoration, not load-bearing.
+      // recency. If no toolName match, fall back to the most-recent
+      // in-flight tool_call in the same runId — this lets fork-skill
+      // progress (emitted by runForkSkill, where the toolName is the
+      // skill name not the calling tool's name) attach to the parent
+      // tool's card. If still no match, drop silently — it's UI
+      // decoration, not load-bearing.
       const progressToolName = extractToolName(msg.metadata);
       const line = (msg.content ?? '').trim();
-      if (!progressToolName || !line) continue;
+      if (!line) continue;
       let target: ActivityNode | null = null;
-      for (const candidate of activityById.values()) {
-        if (candidate.complete) continue;
-        if (candidate.runId !== msg.runId) continue;
-        if (candidate.toolName !== progressToolName) continue;
-        if (!target || candidate.createdAt > target.createdAt) {
-          target = candidate;
+      if (progressToolName) {
+        for (const candidate of activityById.values()) {
+          if (candidate.complete) continue;
+          if (candidate.runId !== msg.runId) continue;
+          if (candidate.toolName !== progressToolName) continue;
+          if (!target || candidate.createdAt > target.createdAt) {
+            target = candidate;
+          }
         }
       }
-      if (target) target.progress.push(line);
+      if (!target) {
+        for (const candidate of activityById.values()) {
+          if (candidate.complete) continue;
+          if (candidate.runId !== msg.runId) continue;
+          if (!target || candidate.createdAt > target.createdAt) {
+            target = candidate;
+          }
+        }
+      }
+      if (target) {
+        // Fork progress events carry their skill name in metadata so
+        // multiple parallel forks under one parent card stay legible
+        // ("[judging-thread-quality] fork done in 8200ms" × 5).
+        const skillName = (msg.metadata as { skillName?: string } | undefined)
+          ?.skillName;
+        const prefix =
+          skillName && skillName !== target.toolName ? `[${skillName}] ` : '';
+        target.progress.push(prefix + line);
+      }
       continue;
     }
 
@@ -730,9 +796,42 @@ function populateDelegationProgress(
     for (const task of node.delegation) {
       if (!task.toolUseId) continue;
       const bucket = progressByParentToolUse.get(task.toolUseId);
-      if (!bucket || bucket.length === 0) continue;
-      task.progressItems = buildProgressItems(bucket);
+      if (bucket && bucket.length > 0) {
+        task.progressItems = buildProgressItems(bucket);
+      }
+      // Recurse into the just-built progressItems so any tool whose
+      // tool_use_id is itself a parent for a nested bucket (e.g.
+      // `find_threads_via_xai` running ~10-20 `runForkSkill` calls)
+      // gets its sub-events grafted onto `subItems`. Without this,
+      // the tool card sits at "RUNNING 4m 55s" with no live progress
+      // even though sub-event rows are persisted under
+      // `parent_tool_use_id = <find_threads_via_xai's id>`.
+      if (task.progressItems.length > 0) {
+        attachNestedProgress(task.progressItems, progressByParentToolUse);
+      }
     }
+  }
+}
+
+/**
+ * For each tool ProgressItem with a `toolUseId`, look up sub-events
+ * keyed by that id in the parentToolUseId bucket map and attach them
+ * as `subItems`. Recurses one level deeper to handle multi-level
+ * nesting (rare but possible — e.g. a fork-skill that itself calls
+ * another tool that fans out further).
+ */
+function attachNestedProgress(
+  items: readonly ProgressItem[],
+  map: ReadonlyMap<string, TeamActivityMessage[]>,
+): void {
+  for (const item of items) {
+    if (item.kind !== 'tool') continue;
+    if (!item.toolUseId) continue;
+    const bucket = map.get(item.toolUseId);
+    if (!bucket || bucket.length === 0) continue;
+    const sub = buildProgressItems(bucket);
+    item.subItems = sub;
+    attachNestedProgress(sub, map);
   }
 }
 
@@ -788,6 +887,10 @@ function buildProgressItems(
         elapsed,
         complete,
         errorText,
+        // Carry the tool_use_id forward so populateDelegationProgress
+        // can graft nested sub-events (runForkSkill spawns, etc.)
+        // onto this item's `subItems` after pairing is done.
+        ...(useId ? { toolUseId: useId } : {}),
       });
       continue;
     }

@@ -433,19 +433,34 @@ function ProgressRow({
   };
   if (item.kind === 'tool') {
     const isError = !!item.errorText;
+    const hasSubItems = !!item.subItems && item.subItems.length > 0;
+    // Multi-fork tools like find_threads_via_xai or process_replies_batch
+    // spawn ~10-20 runForkSkill children whose events are bucketed under
+    // this tool's tool_use_id. Render those as a nested, indented
+    // ProgressList so the founder sees live fork progress instead of a
+    // blank RUNNING card. NestedProgressList is recursive, so a fork
+    // that itself spawns more forks renders one level deeper still.
     return (
-      <div
-        style={{ ...base, color: isError ? 'var(--sf-error-ink)' : base.color }}
-      >
-        <span style={treeMark}>└ ◈</span>
-        <span style={{ fontWeight: 500, color: 'var(--sf-fg-2)' }}>
-          {item.toolName}
-        </span>
-        {isError ? (
-          <span style={{ color: 'var(--sf-error-ink)' }}>— {item.errorText}</span>
+      <>
+        <div
+          style={{ ...base, color: isError ? 'var(--sf-error-ink)' : base.color }}
+        >
+          <span style={treeMark}>└ ◈</span>
+          <span style={{ fontWeight: 500, color: 'var(--sf-fg-2)' }}>
+            {item.toolName}
+          </span>
+          {isError ? (
+            <span style={{ color: 'var(--sf-error-ink)' }}>— {item.errorText}</span>
+          ) : null}
+          {item.elapsed ? <span style={elapsed}>{item.elapsed}</span> : null}
+        </div>
+        {hasSubItems ? (
+          <NestedProgressList
+            items={item.subItems!}
+            accentColor={accentColor}
+          />
         ) : null}
-        {item.elapsed ? <span style={elapsed}>{item.elapsed}</span> : null}
-      </div>
+      </>
     );
   }
   if (item.kind === 'group') {
@@ -481,6 +496,39 @@ function ProgressRow({
   return (
     <div style={textWrap}>
       <MessageMarkdown text={item.text} />
+    </div>
+  );
+}
+
+/**
+ * Indented progress feed nested under a tool ProgressItem — used when
+ * a tool (e.g. `find_threads_via_xai`, `process_replies_batch`) spawns
+ * `runForkSkill` children whose events arrive with
+ * `parent_tool_use_id = <this tool's tool_use_id>`. Visual treatment is
+ * a thin left rule in the parent tool's accent color + a margin-left
+ * indent so it's obvious the rows belong to the parent.
+ */
+function NestedProgressList({
+  items,
+  accentColor,
+}: {
+  items: readonly ProgressItem[];
+  accentColor: string;
+}) {
+  const wrap: CSSProperties = {
+    marginLeft: 14,
+    paddingLeft: 8,
+    borderLeft: `1px dashed ${accentColor}`,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 2,
+    opacity: 0.92,
+  };
+  return (
+    <div style={wrap} aria-label="Nested tool progress">
+      {items.map((item) => (
+        <ProgressRow key={item.id} item={item} accentColor={accentColor} />
+      ))}
     </div>
   );
 }

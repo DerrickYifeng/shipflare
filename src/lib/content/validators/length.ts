@@ -1,4 +1,10 @@
-import { parseTweet } from 'twitter-text';
+// twitter-text v3.x only ships `export default { parseTweet, ... }` in its
+// ESM build (dist/esm/index.js). The CJS build exposed named exports via
+// Babel's add-module-exports plugin, which Webpack tolerated; Turbopack's
+// ESM resolver is strict and rejects `import { parseTweet }`. Default-import
+// the namespace and destructure once at module load.
+import twitterText from 'twitter-text';
+const { parseTweet } = twitterText;
 import {
   getPlatformCharLimits,
   type ContentKind,

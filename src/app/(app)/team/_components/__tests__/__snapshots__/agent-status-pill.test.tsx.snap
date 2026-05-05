@@ -1,0 +1,141 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`<AgentStatusPill> > renders the completed variant 1`] = `
+<span
+  aria-label="Agent completed"
+  data-status="completed"
+  data-testid="agent-status-pill"
+  role="status"
+  style="display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 999px; background: var(--sf-success-light); color: var(--sf-success-ink); font-family: var(--sf-font-mono); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; line-height: 1.4; white-space: nowrap;"
+>
+  <span
+    aria-hidden="true"
+    style="display: inline-block; font-size: 12px; line-height: 1;"
+  >
+    ✓
+  </span>
+  <span>
+    completed
+  </span>
+</span>
+`;
+
+exports[`<AgentStatusPill> > renders the failed variant 1`] = `
+<span
+  aria-label="Agent failed"
+  data-status="failed"
+  data-testid="agent-status-pill"
+  role="status"
+  style="display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 999px; background: var(--sf-error-light); color: var(--sf-error-ink); font-family: var(--sf-font-mono); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; line-height: 1.4; white-space: nowrap;"
+>
+  <span
+    aria-hidden="true"
+    style="display: inline-block; font-size: 12px; line-height: 1;"
+  >
+    ✗
+  </span>
+  <span>
+    failed
+  </span>
+</span>
+`;
+
+exports[`<AgentStatusPill> > renders the killed variant 1`] = `
+<span
+  aria-label="Agent killed"
+  data-status="killed"
+  data-testid="agent-status-pill"
+  role="status"
+  style="display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 999px; background: var(--sf-error); color: var(--sf-fg-on-dark-1); font-family: var(--sf-font-mono); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; line-height: 1.4; white-space: nowrap;"
+>
+  <span
+    aria-hidden="true"
+    style="display: inline-block; font-size: 12px; line-height: 1;"
+  >
+    🛑
+  </span>
+  <span>
+    killed
+  </span>
+</span>
+`;
+
+exports[`<AgentStatusPill> > renders the queued variant 1`] = `
+<span
+  aria-label="Agent queued"
+  data-status="queued"
+  data-testid="agent-status-pill"
+  role="status"
+  style="display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 999px; background: var(--sf-warning-light); color: var(--sf-warning-ink); font-family: var(--sf-font-mono); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; line-height: 1.4; white-space: nowrap; animation: var(--animate-sf-pulse);"
+>
+  <span
+    aria-hidden="true"
+    style="display: inline-block; font-size: 12px; line-height: 1;"
+  >
+    ●
+  </span>
+  <span>
+    queued
+  </span>
+</span>
+`;
+
+exports[`<AgentStatusPill> > renders the resuming variant 1`] = `
+<span
+  aria-label="Agent resuming"
+  data-status="resuming"
+  data-testid="agent-status-pill"
+  role="status"
+  style="display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 999px; color: var(--sf-warning-ink); font-family: var(--sf-font-mono); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; line-height: 1.4; white-space: nowrap;"
+>
+  <span
+    aria-hidden="true"
+    style="display: inline-block; font-size: 12px; line-height: 1; animation: var(--animate-sf-status-spin);"
+  >
+    ⟳
+  </span>
+  <span>
+    resuming
+  </span>
+</span>
+`;
+
+exports[`<AgentStatusPill> > renders the running variant 1`] = `
+<span
+  aria-label="Agent running"
+  data-status="running"
+  data-testid="agent-status-pill"
+  role="status"
+  style="display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 999px; background: var(--sf-accent-light); color: var(--sf-accent); font-family: var(--sf-font-mono); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; line-height: 1.4; white-space: nowrap;"
+>
+  <span
+    aria-hidden="true"
+    style="display: inline-block; font-size: 12px; line-height: 1; animation: var(--animate-sf-status-spin);"
+  >
+    ⟳
+  </span>
+  <span>
+    running
+  </span>
+</span>
+`;
+
+exports[`<AgentStatusPill> > renders the sleeping variant 1`] = `
+<span
+  aria-label="Agent sleeping"
+  data-status="sleeping"
+  data-testid="agent-status-pill"
+  role="status"
+  style="display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 999px; background: rgba(0, 0, 0, 0.05); color: var(--sf-fg-3); font-family: var(--sf-font-mono); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; line-height: 1.4; white-space: nowrap;"
+>
+  <span
+    aria-hidden="true"
+    style="display: inline-block; font-size: 12px; line-height: 1;"
+  >
+    zZz
+  </span>
+  <span>
+    sleeping
+  </span>
+</span>
+`;

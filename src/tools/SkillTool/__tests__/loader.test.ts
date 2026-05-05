@@ -114,6 +114,75 @@ references:
 
     await expect(loadSkill(skillDir)).rejects.toThrow(/missing file "nope"/);
   });
+
+  it('inlines shared-references from src/references/ into the body', async () => {
+    const fixtureDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'skill-shared-'),
+    );
+    tmpDirs.push(fixtureDir);
+    const sharedDir = path.join(fixtureDir, '_shared');
+    const skillDir = path.join(fixtureDir, 'demo-shared');
+    await fs.mkdir(sharedDir, { recursive: true });
+    await fs.mkdir(skillDir, { recursive: true });
+    await fs.writeFile(
+      path.join(sharedDir, 'slop-rules.md'),
+      '# Shared slop rules\nbanned vocab: leverage, delve\n',
+    );
+    await fs.writeFile(
+      path.join(skillDir, 'SKILL.md'),
+      [
+        '---',
+        'name: demo-shared',
+        'description: t',
+        'shared-references:',
+        '  - slop-rules',
+        '---',
+        '',
+        'Demo body.',
+        '',
+      ].join('\n'),
+    );
+
+    const cmd = await loadSkill(skillDir, { sharedReferencesDir: sharedDir });
+    expect(cmd).not.toBeNull();
+    const fakeCtx = {
+      abortSignal: new AbortController().signal,
+      get: () => null,
+    } as never;
+    const prompt = await cmd!.getPromptForCommand('', fakeCtx);
+    expect(prompt).toContain('Demo body.');
+    expect(prompt).toContain('## slop-rules');
+    expect(prompt).toContain('banned vocab: leverage, delve');
+  });
+
+  it('throws a clear error when a shared-reference file is missing', async () => {
+    const fixtureDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'skill-shared-missing-'),
+    );
+    tmpDirs.push(fixtureDir);
+    const sharedDir = path.join(fixtureDir, '_shared');
+    const skillDir = path.join(fixtureDir, 'missing-shared-skill');
+    await fs.mkdir(sharedDir, { recursive: true });
+    await fs.mkdir(skillDir, { recursive: true });
+    await fs.writeFile(
+      path.join(skillDir, 'SKILL.md'),
+      [
+        '---',
+        'name: missing-shared-skill',
+        'description: References a shared file that does not exist.',
+        'shared-references:',
+        '  - nope',
+        '---',
+        '',
+        '# Body',
+        '',
+      ].join('\n'),
+    );
+
+    await expect(
+      loadSkill(skillDir, { sharedReferencesDir: sharedDir }),
+    ).rejects.toThrow(/shared-references missing file "nope"/);
+  });
 });
 
 describe('loadSkillsDir (aggregate)', () => {

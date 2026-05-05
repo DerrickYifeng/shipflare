@@ -30,6 +30,9 @@ export const users = pgTable('users', {
   image: text('image'),
   githubId: text('github_id'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
+  // Stamped on every successful `signIn` callback (including bypass via
+  // SUPER_ADMIN_EMAIL). Used by /admin/invites to surface activity.
+  lastLoginAt: timestamp('last_login_at', { mode: 'date' }),
 });
 
 export const accounts = pgTable(
@@ -87,6 +90,11 @@ export const verificationTokens = pgTable(
 /**
  * User automation preferences.
  * Controls auto-approve thresholds, posting schedule, content mix, and notifications.
+ *
+ * Note: as of 2026-05-03, the validation pipeline that gates auto-approve is
+ * currently disabled (enqueueReview() call sites removed from DraftReplyTool +
+ * engagement.ts). The `autoApproveEnabled` flag is dormant until validation is
+ * re-enabled — drafts stay `pending` until the founder manually approves.
  */
 export const userPreferences = pgTable(
   'user_preferences',

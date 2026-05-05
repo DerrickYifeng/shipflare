@@ -1,7 +1,7 @@
 // find_threads — query the discovered-threads inbox for engagement
 // candidates.
 //
-// Called by: community-manager (during a reply sweep). Reads from the
+// Called by: content-manager (during a reply sweep). Reads from the
 // `threads` table — the discovery pipeline (reply-guy discovery worker)
 // fills that table; this tool just filters, ranks, and returns.
 //
@@ -48,6 +48,10 @@ export interface ThreadRow {
   title: string;
   body: string | null;
   author: string | null;
+  /** OP profile bio (X discovery via xAI). Null when unresolvable / legacy. */
+  authorBio: string | null;
+  /** OP follower count (X discovery via xAI). Null when unresolvable / legacy. */
+  authorFollowers: number | null;
   url: string;
   upvotes: number | null;
   commentCount: number | null;
@@ -55,6 +59,8 @@ export interface ThreadRow {
   scoutConfidence: number | null;
   postedAt: string | null;
   discoveredAt: string;
+  canMentionProduct: boolean | null;
+  mentionSignal: string | null;
 }
 
 export const findThreadsTool: ToolDefinition<FindThreadsInput, { threads: ThreadRow[] }> =
@@ -72,7 +78,11 @@ export const findThreadsTool: ToolDefinition<FindThreadsInput, { threads: Thread
       'INPUT SHAPE (`platforms` MUST be an array of strings, NOT a single string):\n' +
       '{ "platforms": ["x", "reddit"], "windowMinutes": 1440, "minRelevance": 0.4, "limit": 20 }\n\n' +
       'To filter a single platform: `"platforms": ["x"]` (still wrap it in an array). ' +
-      'Omit `platforms` entirely to return threads from all connected channels.',
+      'Omit `platforms` entirely to return threads from all connected channels.' +
+      '\n\n' +
+      'Each returned thread carries canMentionProduct + mentionSignal — discovery ' +
+      'already decided whether a reply may mention the product. Drafters should ' +
+      'honor canMentionProduct directly and skip a second mention-eligibility judging pass.',
     inputSchema: findThreadsInputSchema,
     isConcurrencySafe: true,
     isReadOnly: true,
@@ -100,12 +110,16 @@ export const findThreadsTool: ToolDefinition<FindThreadsInput, { threads: Thread
           title: threads.title,
           body: threads.body,
           author: threads.author,
+          authorBio: threads.authorBio,
+          authorFollowers: threads.authorFollowers,
           url: threads.url,
           upvotes: threads.upvotes,
           commentCount: threads.commentCount,
           scoutConfidence: threads.scoutConfidence,
           postedAt: threads.postedAt,
           discoveredAt: threads.discoveredAt,
+          canMentionProduct: threads.canMentionProduct,
+          mentionSignal: threads.mentionSignal,
         })
         .from(threads)
         .where(and(...filters))
@@ -123,12 +137,16 @@ export const findThreadsTool: ToolDefinition<FindThreadsInput, { threads: Thread
         title: r.title,
         body: r.body,
         author: r.author,
+        authorBio: r.authorBio,
+        authorFollowers: r.authorFollowers,
         url: r.url,
         upvotes: r.upvotes,
         commentCount: r.commentCount,
         scoutConfidence: r.scoutConfidence,
         postedAt: r.postedAt ? r.postedAt.toISOString() : null,
         discoveredAt: r.discoveredAt.toISOString(),
+        canMentionProduct: r.canMentionProduct,
+        mentionSignal: r.mentionSignal,
       }));
 
       return { threads: out };

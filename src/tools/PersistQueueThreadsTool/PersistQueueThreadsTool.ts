@@ -111,6 +111,20 @@ export const persistQueueThreadsTool = buildTool({
       originalUrl: t.original_url,
       originalAuthorUsername: t.original_author_username,
       surfacedVia: t.surfaced_via ?? null,
+      canMentionProduct: t.can_mention_product ?? false,
+      mentionSignal: t.mention_signal ?? 'no_fit',
+      // Author signal (migration 0019): bio + followers used by judging
+      // skill (competitor / engagement-pod filter) and drafting skill
+      // (voice calibration by author scale).
+      authorBio: t.author_bio ?? null,
+      authorFollowers: t.author_followers ?? null,
+      // Conversation context (migration 0020). Drafter reads these to
+      // write context-aware replies when the surfaced tweet is a quote
+      // tweet or a reply in a chain.
+      quotedText: t.quoted_text ?? null,
+      quotedAuthor: t.quoted_author ?? null,
+      inReplyToText: t.in_reply_to_text ?? null,
+      inReplyToAuthor: t.in_reply_to_author ?? null,
     }));
 
     const insertedRows = await db

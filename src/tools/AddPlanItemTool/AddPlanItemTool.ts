@@ -82,9 +82,11 @@ export const addPlanItemTool: ToolDefinition<PlanItemInput, AddPlanItemResult> =
     async execute(input, ctx): Promise<AddPlanItemResult> {
       const { db, userId, productId } = readDomainDeps(ctx);
 
-      // Content-post items get a stricter params shape (pillar enum,
+      // Content-post items get a stricter params shape (format enum,
       // length-capped metaphor_ban, etc.). All fields are optional, so
       // legacy callers passing { angle, theme } continue to validate.
+      // `format` is the 5-value FORMAT classification, not the strategic
+      // path's free-form TOPIC pillars — see schemas.ts:contentPostParamsSchema.
       // Other kinds keep the permissive `z.record` shape from the input
       // schema — only content_post carries diversification metadata.
       if (input.kind === 'content_post') {

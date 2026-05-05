@@ -1,7 +1,7 @@
 // Daily 13:00 UTC fanout. For each user with at least one connected
 // channel AND a product, enqueue one coordinator-rooted team-run with
 // `trigger='daily'`. The coordinator's `daily` playbook handles the
-// per-slot discovery → community-manager loop (driven by today's
+// per-slot discovery → content-manager loop (driven by today's
 // `content_reply` plan_items emitted by content-planner) and falls back
 // to default top-3 drafting when no slots exist.
 //
@@ -15,10 +15,10 @@
 import type { Job } from 'bullmq';
 import { eq } from 'drizzle-orm';
 import { db } from '@/lib/db';
-import { channels, products, teamMembers } from '@/lib/db/schema';
+import { channels, products } from '@/lib/db/schema';
 import { isStopRequested } from '@/lib/automation-stop';
 import { ensureTeamExists } from '@/lib/team-provisioner';
-import { enqueueTeamRun } from '@/lib/queue/team-run';
+import { dispatchLeadMessage } from '@/lib/team/dispatch-lead-message';
 import { resolveRollingConversation } from '@/lib/team-rolling-conversation';
 import { createLogger, loggerForJob } from '@/lib/logger';
 import type { DiscoveryScanJobData } from '@/lib/queue/types';
@@ -64,19 +64,6 @@ export async function processDailyRunFanout(
 
     try {
       const { teamId } = await ensureTeamExists(userId, product.id);
-      const memberRows = await db
-        .select({ id: teamMembers.id, agentType: teamMembers.agentType })
-        .from(teamMembers)
-        .where(eq(teamMembers.teamId, teamId));
-      const coordinator = memberRows.find(
-        (m) => m.agentType === 'coordinator',
-      );
-      if (!coordinator) {
-        log.warn(
-          `user=${userId} team=${teamId} missing coordinator — skipping`,
-        );
-        continue;
-      }
 
       const conversationId = await resolveRollingConversation(
         teamId,
@@ -88,18 +75,21 @@ export async function processDailyRunFanout(
         `Connected platforms: ${platforms}. ` +
         `Trigger: daily. Source: cron. ` +
         `Follow your daily playbook: load today's content_reply plan_items ` +
-        `for this user, run the per-slot discovery → community-manager loop ` +
-        `(max 3 inner attempts per slot), and update_plan_item state='drafted' ` +
-        `when each slot terminates. If no slots are found, fall back to ` +
-        `default top-3 drafting from a single discovery-agent dispatch.`;
+        `for this user, dispatch ONE social-media-manager per slot (it runs ` +
+        `discovery + judging + drafting internally), and update_plan_item ` +
+        `state='drafted' when each slot terminates. If no slots are found, ` +
+        `fall back to a single social-media-manager dispatch with mode ` +
+        `discover-and-fill-slot for the primary connected channel.`;
 
-      await enqueueTeamRun({
-        teamId,
-        trigger: 'daily',
-        goal,
-        rootMemberId: coordinator.id,
-        conversationId,
-      });
+      await dispatchLeadMessage(
+        {
+          teamId,
+          conversationId,
+          goal,
+          trigger: 'daily',
+        },
+        db,
+      );
       enqueued++;
     } catch (err) {
       log.warn(
@@ -111,6 +101,6 @@ export async function processDailyRunFanout(
   }
 
   log.info(
-    `daily-run-fanout (trace=${traceId}): enqueued ${enqueued} team-runs`,
+    `daily-run-fanout (trace=${traceId}): dispatched ${enqueued} lead messages`,
   );
 }

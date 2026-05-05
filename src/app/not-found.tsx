@@ -13,7 +13,7 @@ export default function NotFound() {
         The page you&apos;re looking for doesn&apos;t exist or has moved.
       </p>
       <Link
-        href="/today"
+        href="/briefing"
         className="
           inline-flex items-center justify-center
           min-h-[44px] px-[15px] py-2
@@ -23,7 +23,7 @@ export default function NotFound() {
           hover:bg-sf-accent-hover transition-colors duration-200
         "
       >
-        Go to Today
+        Go to Briefing
       </Link>
     </div>
   );

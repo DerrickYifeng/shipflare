@@ -1,53 +1,93 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { eq, asc } from 'drizzle-orm';
+import { eq, and, isNull, isNotNull, asc } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import {
-  teamRuns,
   teams,
   teamMembers,
   teamMessages,
   teamTasks,
+  users,
 } from '@/lib/db/schema';
 
 /**
- * /admin/team-runs/[runId] — single-run trace view. Auth is gated by
- * src/app/(app)/admin/layout.tsx (ADMIN_EMAILS).
+ * /admin/team-runs/[runId] — Phase G rewrite (single-request detail).
  *
- * Shows:
- *   - run header (team, trigger, status, cost, turns, duration, traceId)
- *   - team_tasks breakdown (per-member cost from each subagent spawn)
- *   - team_messages timeline (chronological, tool_call/tool_result pairs)
+ * The `[runId]` URL param is now the user_prompt's `team_messages.id`
+ * (the "request handle" replacing the dropped team_runs.id). Three
+ * queries:
+ *   1. Header — the user_prompt row + team / owner labels.
+ *   2. Activity — every team_messages row whose runId = <param>,
+ *      ordered ascending. Carries the response timeline (agent_text /
+ *      tool_call / tool_result / thinking / etc.).
+ *   3. Tasks — every team_tasks row whose runId = <param>, with
+ *      teamMembers join for the spawned agent's display name.
+ *
+ * Renders the same Conversation / FoldedRow / KeyValue components as
+ * the pre-Phase-G detail page (preserves the user's recent
+ * "team-runs polish" work — see commit 02be710).
+ *
+ * Auth gated by src/app/(app)/admin/layout.tsx.
  */
-export default async function AdminTeamRunDetailPage({
-  params,
-}: {
+
+interface PageProps {
   params: Promise<{ runId: string }>;
-}) {
+}
+
+export default async function AdminTeamRunDetailPage({ params }: PageProps) {
   const { runId } = await params;
 
-  const [run] = await db
+  // Query 1: header. Restrict to the user_prompt shape the list page uses
+  // (founder→lead origin) so deep-linking to a non-request id (e.g. an
+  // agent_text id) 404s cleanly instead of rendering a confusing header.
+  const [request] = await db
     .select({
-      id: teamRuns.id,
-      teamId: teamRuns.teamId,
+      requestId: teamMessages.id,
+      teamId: teamMessages.teamId,
       teamName: teams.name,
-      trigger: teamRuns.trigger,
-      goal: teamRuns.goal,
-      status: teamRuns.status,
-      startedAt: teamRuns.startedAt,
-      completedAt: teamRuns.completedAt,
-      totalCostUsd: teamRuns.totalCostUsd,
-      totalTurns: teamRuns.totalTurns,
-      traceId: teamRuns.traceId,
-      errorMessage: teamRuns.errorMessage,
+      ownerEmail: users.email,
+      goal: teamMessages.content,
+      startedAt: teamMessages.createdAt,
+      metadata: teamMessages.metadata,
     })
-    .from(teamRuns)
-    .leftJoin(teams, eq(teams.id, teamRuns.teamId))
-    .where(eq(teamRuns.id, runId))
+    .from(teamMessages)
+    .leftJoin(teams, eq(teams.id, teamMessages.teamId))
+    .leftJoin(users, eq(users.id, teams.userId))
+    .where(
+      and(
+        eq(teamMessages.id, runId),
+        eq(teamMessages.type, 'user_prompt'),
+        eq(teamMessages.messageType, 'message'),
+        isNull(teamMessages.fromMemberId),
+        isNotNull(teamMessages.toAgentId),
+      ),
+    )
     .limit(1);
 
-  if (!run) notFound();
+  if (!request) notFound();
 
+  // Query 2: full activity. ASC + limit 500 — the same cap the original
+  // page used; runs longer than 500 turns get a truncation badge.
+  const activity = await db
+    .select({
+      id: teamMessages.id,
+      fromMemberId: teamMessages.fromMemberId,
+      toMemberId: teamMessages.toMemberId,
+      type: teamMessages.type,
+      messageType: teamMessages.messageType,
+      content: teamMessages.content,
+      metadata: teamMessages.metadata,
+      summary: teamMessages.summary,
+      createdAt: teamMessages.createdAt,
+    })
+    .from(teamMessages)
+    .where(eq(teamMessages.runId, runId))
+    .orderBy(asc(teamMessages.createdAt))
+    .limit(500);
+
+  // Query 3: spawned tasks for this request. team_tasks.runId now points
+  // at the user_prompt.id (post-migration 0016) — same correlation as
+  // the activity query above.
   const tasks = await db
     .select({
       id: teamTasks.id,
@@ -67,21 +107,9 @@ export default async function AdminTeamRunDetailPage({
     .where(eq(teamTasks.runId, runId))
     .orderBy(asc(teamTasks.startedAt));
 
-  const messages = await db
-    .select({
-      id: teamMessages.id,
-      fromMemberId: teamMessages.fromMemberId,
-      toMemberId: teamMessages.toMemberId,
-      type: teamMessages.type,
-      content: teamMessages.content,
-      metadata: teamMessages.metadata,
-      createdAt: teamMessages.createdAt,
-    })
-    .from(teamMessages)
-    .where(eq(teamMessages.runId, runId))
-    .orderBy(asc(teamMessages.createdAt))
-    .limit(500);
-
+  // Build memberById from the tasks' member joins (the activity rows
+  // carry fromMemberId but no display name; tasks carry both, so this
+  // map covers any member referenced by either query).
   const memberById = new Map<string, { agentType: string; displayName: string }>();
   for (const task of tasks) {
     if (task.memberId && task.agentType && task.displayName) {
@@ -92,9 +120,30 @@ export default async function AdminTeamRunDetailPage({
     }
   }
 
+  // Derive header status with the same heuristic the list page uses
+  // (errors → failed; recent activity → running; quiet → completed;
+  // no activity → pending).
+  const lastActivityAt =
+    activity.length > 0
+      ? activity[activity.length - 1].createdAt
+      : null;
+  const totalTurns = activity.filter((m) => m.type === 'agent_text').length;
+  const errorCount = activity.filter(
+    (m) =>
+      m.type === 'tool_result' &&
+      m.metadata != null &&
+      typeof m.metadata === 'object' &&
+      (m.metadata as { is_error?: unknown }).is_error === true,
+  ).length;
+  const status = deriveStatus({
+    startedAt: request.startedAt,
+    lastActivityAt,
+    totalTurns,
+    errorCount,
+  });
   const durationMs =
-    run.completedAt && run.startedAt
-      ? run.completedAt.getTime() - run.startedAt.getTime()
+    lastActivityAt && request.startedAt
+      ? lastActivityAt.getTime() - request.startedAt.getTime()
       : null;
 
   return (
@@ -113,42 +162,35 @@ export default async function AdminTeamRunDetailPage({
       </Link>
 
       <section style={sectionStyle()}>
-        <h2 style={headingStyle()}>Run</h2>
+        <h2 style={headingStyle()}>Request</h2>
         <dl style={dlStyle()}>
-          <KeyValue k="Run ID" v={<code>{run.id}</code>} />
+          <KeyValue
+            k="Request ID"
+            v={<code>{request.requestId}</code>}
+          />
           <KeyValue
             k="Team"
-            v={run.teamName ?? <code>{run.teamId}</code>}
+            v={request.teamName ?? <code>{request.teamId}</code>}
           />
-          <KeyValue k="Trigger" v={run.trigger} />
-          <KeyValue k="Status" v={run.status} />
+          {request.ownerEmail ? (
+            <KeyValue k="Owner" v={request.ownerEmail} />
+          ) : null}
+          <KeyValue k="Status" v={status} />
           <KeyValue
             k="Started"
-            v={run.startedAt ? run.startedAt.toISOString() : '—'}
+            v={request.startedAt ? request.startedAt.toISOString() : '—'}
           />
           <KeyValue
-            k="Completed"
-            v={run.completedAt ? run.completedAt.toISOString() : '—'}
+            k="Last activity"
+            v={lastActivityAt ? lastActivityAt.toISOString() : '—'}
           />
           <KeyValue
             k="Duration"
             v={durationMs !== null ? formatDuration(durationMs) : '—'}
           />
-          <KeyValue
-            k="Total cost"
-            v={
-              run.totalCostUsd != null
-                ? `$${Number(run.totalCostUsd).toFixed(4)}`
-                : '—'
-            }
-          />
-          <KeyValue k="Total turns" v={run.totalTurns ?? '—'} />
-          <KeyValue
-            k="Trace ID"
-            v={run.traceId ? <code>{run.traceId}</code> : '—'}
-          />
+          <KeyValue k="Total turns" v={totalTurns} />
         </dl>
-        {run.goal && (
+        {request.goal && (
           <div
             style={{
               marginTop: 12,
@@ -164,21 +206,7 @@ export default async function AdminTeamRunDetailPage({
             <strong style={{ fontWeight: 500, color: 'var(--sf-fg-3)' }}>
               Goal:
             </strong>{' '}
-            {run.goal}
-          </div>
-        )}
-        {run.errorMessage && (
-          <div
-            style={{
-              marginTop: 12,
-              padding: '10px 12px',
-              background: 'var(--sf-error-light)',
-              color: 'var(--sf-error-ink)',
-              borderRadius: 6,
-              fontSize: 12.5,
-            }}
-          >
-            <strong>Error:</strong> {run.errorMessage}
+            {request.goal}
           </div>
         )}
       </section>
@@ -187,7 +215,7 @@ export default async function AdminTeamRunDetailPage({
         <h2 style={headingStyle()}>Spawned tasks ({tasks.length})</h2>
         {tasks.length === 0 ? (
           <p style={{ color: 'var(--sf-fg-4)', fontSize: 12.5 }}>
-            This run didn&apos;t spawn any subagents via Task.
+            This request didn&apos;t spawn any subagents via Task.
           </p>
         ) : (
           <table style={tableStyle()}>
@@ -251,11 +279,22 @@ export default async function AdminTeamRunDetailPage({
 
       <section style={sectionStyle()}>
         <h2 style={headingStyle()}>
-          Messages ({messages.length}
-          {messages.length === 500 ? '+' : ''})
+          Conversation ({activity.length}
+          {activity.length === 500 ? '+' : ''})
         </h2>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {messages.map((msg) => {
+        <p
+          style={{
+            fontSize: 11,
+            color: 'var(--sf-fg-4)',
+            marginTop: -8,
+            marginBottom: 14,
+          }}
+        >
+          User ↔ agent turns expanded. Tool calls, thinking, and system events
+          collapsed by default — click any row to expand.
+        </p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {activity.map((msg) => {
             const fromLabel = msg.fromMemberId
               ? memberById.get(msg.fromMemberId)?.displayName ??
                 msg.fromMemberId.slice(0, 8)
@@ -264,77 +303,41 @@ export default async function AdminTeamRunDetailPage({
               ? memberById.get(msg.toMemberId)?.displayName ??
                 msg.toMemberId.slice(0, 8)
               : null;
+            const category = categorizeMessage(msg.type, msg.messageType);
+            const time = msg.createdAt.toISOString().slice(11, 19);
+
+            if (category === 'conversation') {
+              return (
+                <ConversationBubble
+                  key={msg.id}
+                  fromLabel={fromLabel}
+                  toLabel={toLabel}
+                  type={msg.type}
+                  messageType={msg.messageType}
+                  content={msg.content}
+                  metadata={msg.metadata}
+                  time={time}
+                />
+              );
+            }
             return (
-              <div
+              <FoldedRow
                 key={msg.id}
-                style={{
-                  padding: '10px 12px',
-                  background: 'var(--sf-bg-secondary)',
-                  borderRadius: 6,
-                  fontSize: 12.5,
-                }}
-              >
-                <div
-                  style={{
-                    display: 'flex',
-                    gap: 8,
-                    marginBottom: 6,
-                    fontSize: 11,
-                    color: 'var(--sf-fg-4)',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.08em',
-                  }}
-                >
-                  <span>{msg.createdAt.toISOString()}</span>
-                  <span>· {msg.type}</span>
-                  <span>
-                    · {fromLabel}
-                    {toLabel ? ` → ${toLabel}` : ''}
-                  </span>
-                </div>
-                {msg.content && (
-                  <pre
-                    style={{
-                      whiteSpace: 'pre-wrap',
-                      fontFamily: 'inherit',
-                      margin: 0,
-                      color: 'var(--sf-fg-2)',
-                    }}
-                  >
-                    {msg.content}
-                  </pre>
-                )}
-                {msg.metadata != null && (
-                  <details style={{ marginTop: 6 }}>
-                    <summary
-                      style={{
-                        cursor: 'pointer',
-                        fontSize: 11,
-                        color: 'var(--sf-fg-3)',
-                      }}
-                    >
-                      metadata
-                    </summary>
-                    <pre
-                      style={{
-                        marginTop: 4,
-                        fontSize: 11.5,
-                        background: 'var(--sf-bg-primary)',
-                        padding: 8,
-                        borderRadius: 4,
-                        overflow: 'auto',
-                      }}
-                    >
-                      {JSON.stringify(msg.metadata, null, 2)}
-                    </pre>
-                  </details>
-                )}
-              </div>
+                category={category}
+                fromLabel={fromLabel}
+                toLabel={toLabel}
+                type={msg.type}
+                messageType={msg.messageType}
+                content={msg.content}
+                metadata={msg.metadata}
+                summary={msg.summary}
+                time={time}
+              />
             );
           })}
-          {messages.length === 0 && (
+          {activity.length === 0 && (
             <p style={{ color: 'var(--sf-fg-4)', fontSize: 12.5 }}>
-              No messages recorded for this run.
+              No messages recorded for this request.
             </p>
           )}
         </div>
@@ -343,7 +346,297 @@ export default async function AdminTeamRunDetailPage({
   );
 }
 
-function KeyValue({ k, v }: { k: string; v: React.ReactNode }) {
+// ---------------------------------------------------------------------------
+// Status heuristic — same shape as the list page; duplicated locally to
+// keep the two pages independently editable.
+// ---------------------------------------------------------------------------
+
+type DerivedStatus = 'pending' | 'running' | 'completed' | 'failed';
+
+const RUNNING_INACTIVITY_MS = 60_000;
+
+interface DeriveStatusInput {
+  startedAt: Date;
+  lastActivityAt: Date | null;
+  totalTurns: number;
+  errorCount: number;
+}
+
+function deriveStatus(input: DeriveStatusInput): DerivedStatus {
+  if (input.errorCount > 0) return 'failed';
+  const last = input.lastActivityAt;
+  if (
+    input.totalTurns === 0 &&
+    (!last || last.getTime() === input.startedAt.getTime())
+  ) {
+    return 'pending';
+  }
+  if (last && Date.now() - last.getTime() < RUNNING_INACTIVITY_MS) {
+    return 'running';
+  }
+  return 'completed';
+}
+
+// ---------------------------------------------------------------------------
+// Message categorization + render helpers (preserved from the original
+// admin detail page so the user's "team-runs polish" treatment carries
+// forward — see commit 02be710's diff).
+// ---------------------------------------------------------------------------
+
+type Category = 'conversation' | 'tool' | 'thinking' | 'system';
+
+function categorizeMessage(type: string, messageType: string): Category {
+  // task_notification rows use type='user_prompt' but represent a worker's
+  // synthesized result — still "conversation" semantically (it lands as a
+  // user-role turn in the lead's transcript).
+  if (messageType === 'task_notification') return 'conversation';
+  if (messageType === 'shutdown_request' || messageType === 'shutdown_response')
+    return 'system';
+  if (messageType === 'broadcast') return 'conversation';
+  if (messageType === 'plan_approval_response') return 'system';
+
+  if (type === 'user_prompt' || type === 'agent_text') return 'conversation';
+  if (type === 'tool_call' || type === 'tool_result') return 'tool';
+  if (type === 'thinking') return 'thinking';
+  return 'system';
+}
+
+interface BubbleProps {
+  fromLabel: string;
+  toLabel: string | null;
+  type: string;
+  messageType: string;
+  content: string | null;
+  metadata: unknown;
+  time: string;
+}
+
+function ConversationBubble({
+  fromLabel,
+  toLabel,
+  type,
+  messageType,
+  content,
+  metadata,
+  time,
+}: BubbleProps) {
+  // Visual: user input on left with subtle bg; agent response with accent stripe.
+  const isAgent = type === 'agent_text';
+  return (
+    <div
+      style={{
+        padding: '12px 14px',
+        background: 'var(--sf-bg-secondary)',
+        borderRadius: 8,
+        borderLeft: `3px solid ${isAgent ? 'var(--sf-accent, #4a90e2)' : 'var(--sf-fg-4)'}`,
+        fontSize: 13,
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          gap: 8,
+          marginBottom: 6,
+          fontSize: 11,
+          color: 'var(--sf-fg-4)',
+          alignItems: 'center',
+        }}
+      >
+        <strong style={{ color: 'var(--sf-fg-2)', fontWeight: 600 }}>
+          {fromLabel}
+        </strong>
+        {toLabel ? <span>→ {toLabel}</span> : null}
+        <span>·</span>
+        <span>{time}</span>
+        <span>·</span>
+        <span style={{ fontFamily: 'var(--sf-font-mono, monospace)' }}>
+          {messageType !== 'message' ? messageType : type}
+        </span>
+      </div>
+      {content ? (
+        <pre
+          style={{
+            whiteSpace: 'pre-wrap',
+            fontFamily: 'inherit',
+            margin: 0,
+            color: 'var(--sf-fg-1)',
+            lineHeight: 1.55,
+            wordBreak: 'break-word',
+          }}
+        >
+          {content}
+        </pre>
+      ) : (
+        <span style={{ color: 'var(--sf-fg-4)', fontSize: 12 }}>
+          (no content)
+        </span>
+      )}
+      {metadata != null && hasInterestingMetadata(metadata) ? (
+        <details style={{ marginTop: 8 }}>
+          <summary
+            style={{
+              cursor: 'pointer',
+              fontSize: 11,
+              color: 'var(--sf-fg-3)',
+            }}
+          >
+            metadata
+          </summary>
+          <pre
+            style={{
+              marginTop: 4,
+              fontSize: 11.5,
+              background: 'var(--sf-bg-primary)',
+              padding: 8,
+              borderRadius: 4,
+              overflow: 'auto',
+            }}
+          >
+            {JSON.stringify(metadata, null, 2)}
+          </pre>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
+interface FoldedRowProps extends BubbleProps {
+  category: Exclude<Category, 'conversation'>;
+  summary: string | null;
+}
+
+function FoldedRow({
+  category,
+  fromLabel,
+  toLabel,
+  type,
+  messageType,
+  content,
+  metadata,
+  summary,
+  time,
+}: FoldedRowProps) {
+  const meta = metadata as { tool_name?: string; tool_input?: unknown } | null;
+  // Inline summary pulled from the most useful field per category.
+  let inlineSummary: string;
+  if (category === 'tool') {
+    const toolName = meta?.tool_name ?? '?';
+    inlineSummary =
+      type === 'tool_call' ? `→ ${toolName}` : `← ${toolName}`;
+  } else if (category === 'thinking') {
+    inlineSummary =
+      (content ?? '').slice(0, 80) +
+      ((content?.length ?? 0) > 80 ? '…' : '');
+  } else {
+    inlineSummary = summary ?? content?.slice(0, 80) ?? messageType;
+  }
+
+  const accentColor =
+    category === 'tool'
+      ? 'var(--sf-fg-4)'
+      : category === 'thinking'
+        ? 'var(--sf-fg-4)'
+        : 'var(--sf-fg-3)';
+
+  return (
+    <details
+      style={{
+        background: 'var(--sf-bg-primary)',
+        border: '1px solid var(--sf-border-1)',
+        borderRadius: 6,
+        padding: '6px 10px',
+        fontSize: 12,
+      }}
+    >
+      <summary
+        style={{
+          cursor: 'pointer',
+          listStyle: 'none',
+          display: 'flex',
+          gap: 10,
+          alignItems: 'center',
+          color: accentColor,
+          fontFamily: 'var(--sf-font-mono, monospace)',
+        }}
+      >
+        <span style={{ fontSize: 10, opacity: 0.6 }}>{time}</span>
+        <span
+          style={{
+            fontSize: 10,
+            padding: '1px 6px',
+            background: 'var(--sf-bg-secondary)',
+            borderRadius: 3,
+            textTransform: 'uppercase',
+            letterSpacing: '0.06em',
+          }}
+        >
+          {category}
+        </span>
+        <span style={{ flex: 1, color: 'var(--sf-fg-2)' }}>
+          {fromLabel}
+          {toLabel ? ` → ${toLabel}` : ''}
+        </span>
+        <span style={{ color: 'var(--sf-fg-2)' }}>{inlineSummary}</span>
+      </summary>
+      <div
+        style={{
+          marginTop: 8,
+          paddingTop: 8,
+          borderTop: '1px solid var(--sf-border-1)',
+          fontFamily: 'var(--sf-font-mono, monospace)',
+          fontSize: 11.5,
+        }}
+      >
+        <div style={{ color: 'var(--sf-fg-4)', marginBottom: 4 }}>
+          type=<code>{type}</code> messageType=<code>{messageType}</code>
+        </div>
+        {content ? (
+          <pre
+            style={{
+              whiteSpace: 'pre-wrap',
+              fontFamily: 'inherit',
+              margin: 0,
+              color: 'var(--sf-fg-2)',
+            }}
+          >
+            {content}
+          </pre>
+        ) : null}
+        {metadata != null ? (
+          <pre
+            style={{
+              marginTop: 6,
+              fontSize: 11,
+              background: 'var(--sf-bg-secondary)',
+              padding: 8,
+              borderRadius: 4,
+              overflow: 'auto',
+              color: 'var(--sf-fg-2)',
+            }}
+          >
+            {JSON.stringify(metadata, null, 2)}
+          </pre>
+        ) : null}
+      </div>
+    </details>
+  );
+}
+
+function hasInterestingMetadata(meta: unknown): boolean {
+  if (meta == null) return false;
+  if (typeof meta !== 'object') return false;
+  const keys = Object.keys(meta as Record<string, unknown>);
+  // Hide trigger-only metadata (purely routing info, not useful for reading).
+  if (keys.length === 1 && keys[0] === 'trigger') return false;
+  return keys.length > 0;
+}
+
+interface KeyValueProps {
+  k: string;
+  v: React.ReactNode;
+}
+
+function KeyValue({ k, v }: KeyValueProps) {
   return (
     <div style={{ display: 'flex', gap: 12, padding: '4px 0' }}>
       <dt
@@ -401,13 +694,12 @@ function tableStyle(): React.CSSProperties {
   };
 }
 
-function Th({
-  children,
-  align = 'left',
-}: {
+interface ThProps {
   children: React.ReactNode;
   align?: 'left' | 'right';
-}) {
+}
+
+function Th({ children, align = 'left' }: ThProps) {
   return (
     <th
       style={{
@@ -424,13 +716,12 @@ function Th({
   );
 }
 
-function Td({
-  children,
-  align = 'left',
-}: {
+interface TdProps {
   children: React.ReactNode;
   align?: 'left' | 'right';
-}) {
+}
+
+function Td({ children, align = 'left' }: TdProps) {
   return (
     <td
       style={{

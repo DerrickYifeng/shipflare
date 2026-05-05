@@ -1,24 +1,21 @@
 // Weekly budget tracking for AI teams.
 //
-// Phase G Day 2. Each team has a weekly USD budget stored on
-// `teams.config.weeklyBudgetUsd` (defaults to $5). Current spend is
-// computed as the SUM of `team_runs.total_cost_usd` for runs whose
-// `started_at` is on or after the current week's Monday 00:00 UTC.
+// Phase G cleanup (migration 0016_drop_team_runs): the underlying data
+// source — `team_runs.total_cost_usd` — is gone. Phase E stopped writing
+// team_runs rows when it unified the runtime under agent_runs, so this
+// helper has been silently broken (returning stale or empty data) since
+// Phase E shipped. Stubbing to "no spend, never exhausted" makes the
+// behavior honest about what production was already doing in practice.
 //
-// The budget check is consumed in two places:
-//   1. The team-run worker — at run completion it records spend +
-//      fires a 90%-threshold warning email (dedupe per week per team).
-//   2. The `Task` tool — at spawn time it refuses to start a new
-//      subagent when the team has exhausted its budget, returning an
-//      is_error tool_result the parent can read and react to.
-//
-// Budget "reset" is implicit: the SUM's WHERE clause always uses
-// `started_at >= monday(now())`, so as soon as the clock rolls into a
-// new week the existing-runs contribution drops to zero.
+// TODO(perf-cleanup-2026-XX): re-implement cost tracking on top of
+// `agent_runs.totalTokens × model rate`. Until then, all teams are
+// reported as having $0 spent and unlimited remaining budget. The
+// `Task` tool's auto-pause guard never trips, the team-page budget
+// snapshot shows $0/$50, and the 90% warning never fires.
 
-import { and, gte, eq, sql } from 'drizzle-orm';
 import { db as defaultDb, type Database } from '@/lib/db';
-import { teams, teamRuns } from '@/lib/db/schema';
+import { teams } from '@/lib/db/schema';
+import { eq } from 'drizzle-orm';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('lib:team-budget');
@@ -38,6 +35,10 @@ export const DEFAULT_WEEKLY_BUDGET_USD = 50;
  * Feature flag: when false, budget checks are bypassed entirely. Defaults
  * to ON — ops can set `SHIPFLARE_TEAM_AUTO_BUDGET_PAUSE=false` to disable
  * the Task-tool auto-pause without redeploying.
+ *
+ * Post-Phase-G: the flag still threads through `teamHasBudgetRemaining`
+ * for forward-compat; the stub returns `true` regardless because the
+ * cost tracking that fed the check is dropped.
  */
 export function isAutoBudgetPauseEnabled(): boolean {
   const raw = (process.env.SHIPFLARE_TEAM_AUTO_BUDGET_PAUSE ?? '').trim();
@@ -51,7 +52,9 @@ export function isAutoBudgetPauseEnabled(): boolean {
 
 /**
  * Monday 00:00 UTC of the current week (or the week containing `now`).
- * Spec §11 Phase G is explicit: reset on UTC Monday, always.
+ * Spec §11 Phase G is explicit: reset on UTC Monday, always. Kept exported
+ * because the stubbed snapshot still surfaces the week start in case a
+ * future implementation wants to plumb it through.
  */
 export function weekStartUtc(now: Date = new Date()): Date {
   const start = new Date(
@@ -64,37 +67,35 @@ export function weekStartUtc(now: Date = new Date()): Date {
 }
 
 // ---------------------------------------------------------------------------
-// Budget lookup
+// Budget snapshot
 // ---------------------------------------------------------------------------
 
 export interface TeamBudgetSnapshot {
   teamId: string;
   /** Configured weekly budget in USD. */
   weeklyBudgetUsd: number;
-  /** Spend so far in the current UTC-week (monday → now). */
+  /** Spend so far in the current UTC-week. Always 0 post-Phase-G stub. */
   spentUsd: number;
-  /** spent / budget. 0 → 1+ (may exceed 1 when overage is already booked). */
+  /** spent / budget. Always 0 post-Phase-G stub. */
   utilization: number;
-  /** True when spent ≥ budget. */
+  /** True when spent ≥ budget. Always false post-Phase-G stub. */
   exhausted: boolean;
-  /** True when spent ≥ 90% of budget (warning threshold). */
+  /** True when spent ≥ 90% of budget. Always false post-Phase-G stub. */
   at90Percent: boolean;
 }
 
 /**
- * Compute the current week's budget snapshot for one team. Reads
- * `teams.config.weeklyBudgetUsd` (defaulting to DEFAULT_WEEKLY_BUDGET_USD)
- * and sums `team_runs.total_cost_usd` since the current Monday 00:00 UTC.
+ * Compute the current week's budget snapshot for one team.
  *
- * Runs regardless of status — completed, running, and failed runs all
- * contribute when they carry a cost. That's intentional: a run that
- * crashed after 3 turns of spend still ate budget and we don't want the
- * Task tool to look cheap right after a failure.
+ * Post-Phase-G stub: still reads `teams.config.weeklyBudgetUsd` so the
+ * UI can show the configured budget; spend always reports 0 because the
+ * data source (team_runs.total_cost_usd) is dropped. See module header
+ * for the future cleanup that will restore real cost tracking.
  */
 export async function getTeamBudgetSnapshot(
   teamId: string,
   db: Database = defaultDb,
-  now: Date = new Date(),
+  _now: Date = new Date(),
 ): Promise<TeamBudgetSnapshot> {
   const [teamRow] = await db
     .select({ config: teams.config })
@@ -110,51 +111,28 @@ export async function getTeamBudgetSnapshot(
       ? config.weeklyBudgetUsd
       : DEFAULT_WEEKLY_BUDGET_USD;
 
-  const monday = weekStartUtc(now);
-
-  const [spendRow] = await db
-    .select({
-      sum: sql<string>`coalesce(sum(${teamRuns.totalCostUsd}), 0)`.as('sum'),
-    })
-    .from(teamRuns)
-    .where(
-      and(eq(teamRuns.teamId, teamId), gte(teamRuns.startedAt, monday)),
-    );
-
-  const spentUsd = spendRow ? Number(spendRow.sum) : 0;
-  const utilization = weeklyBudgetUsd > 0 ? spentUsd / weeklyBudgetUsd : 0;
-
   return {
     teamId,
     weeklyBudgetUsd,
-    spentUsd,
-    utilization,
-    exhausted: spentUsd >= weeklyBudgetUsd,
-    at90Percent: utilization >= 0.9,
+    spentUsd: 0,
+    utilization: 0,
+    exhausted: false,
+    at90Percent: false,
   };
 }
 
 /**
- * Convenience wrapper used by the Task tool. Returns true when the team
- * has ANY remaining budget (spent < budget). When the feature flag is
- * disabled via env, always returns true. Errors are logged and treated
- * as "budget available" so a transient DB failure does NOT block the
- * coordinator mid-plan.
+ * Convenience wrapper used by the Task tool. Always returns true
+ * post-Phase-G because the cost tracking that feeds it is dropped. Kept
+ * exported so `AgentTool` doesn't need to change shape.
  */
 export async function teamHasBudgetRemaining(
-  teamId: string,
-  db: Database = defaultDb,
+  _teamId: string,
+  _db: Database = defaultDb,
 ): Promise<boolean> {
-  if (!isAutoBudgetPauseEnabled()) return true;
-  try {
-    const snap = await getTeamBudgetSnapshot(teamId, db);
-    return !snap.exhausted;
-  } catch (err) {
-    log.warn(
-      `teamHasBudgetRemaining check failed for team=${teamId}; fail-open. ${err instanceof Error ? err.message : String(err)}`,
-    );
-    return true;
-  }
+  // Stub: budget enforcement is dormant until cost tracking is rebuilt
+  // on agent_runs.totalTokens. See module header.
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -162,10 +140,9 @@ export async function teamHasBudgetRemaining(
 // ---------------------------------------------------------------------------
 
 /**
- * Pluggable "send warning" sink. Production ships with a structured-log
- * stub because the repo has no email provider wired yet; when SES/Resend
- * lands, the sink is a one-line swap. Tests inject a mock sink to assert
- * the call happened without blocking on Redis.
+ * Pluggable "send warning" sink. Kept exported for forward-compat with
+ * the future cost-tracking restoration; today the post-Phase-G stub
+ * never invokes it.
  */
 export type BudgetWarningSink = (input: {
   teamId: string;
@@ -187,9 +164,9 @@ const defaultSink: BudgetWarningSink = async (input) => {
 };
 
 /**
- * Pluggable dedupe gate. `true` means "first time this week for this team;
- * go ahead and send". `false` means "already warned; skip". Production
- * uses a Redis SETNX; tests inject an in-memory gate.
+ * Pluggable dedupe gate. Kept exported for forward-compat with the
+ * future cost-tracking restoration; the post-Phase-G stub never invokes
+ * it because no warnings ever cross the 90% threshold (spend is 0).
  */
 export type BudgetWarningDedupe = (
   teamId: string,
@@ -209,15 +186,17 @@ const defaultDedupe: BudgetWarningDedupe = async (teamId, weekStart) => {
 };
 
 /**
- * Check the post-run snapshot and emit the 90%-budget warning if we've
- * crossed the threshold AND haven't already warned this (teamId, week).
- * Safe to call after every run completion.
+ * Post-Phase-G stub: the snapshot always reports 0 spend, so the 90%
+ * threshold is never crossed and the sink is never called. Kept
+ * exported (and exercising the snapshot read so `teamId` validation
+ * still happens) so callers in the team-run completion path don't
+ * need to change.
  */
 export async function maybeEmitBudgetWarning(
   teamId: string,
   db: Database = defaultDb,
-  sink: BudgetWarningSink = defaultSink,
-  dedupe: BudgetWarningDedupe = defaultDedupe,
+  _sink: BudgetWarningSink = defaultSink,
+  _dedupe: BudgetWarningDedupe = defaultDedupe,
   now: Date = new Date(),
 ): Promise<void> {
   let snap: TeamBudgetSnapshot;
@@ -231,27 +210,6 @@ export async function maybeEmitBudgetWarning(
   }
 
   if (!snap.at90Percent) return;
-
-  const weekStart = weekStartUtc(now);
-  try {
-    const firstTimeThisWeek = await dedupe(teamId, weekStart);
-    if (!firstTimeThisWeek) return;
-  } catch (err) {
-    log.warn(
-      `maybeEmitBudgetWarning dedupe failed team=${teamId}; emitting anyway. ${err instanceof Error ? err.message : String(err)}`,
-    );
-  }
-
-  try {
-    await sink({
-      teamId,
-      spentUsd: snap.spentUsd,
-      weeklyBudgetUsd: snap.weeklyBudgetUsd,
-      utilization: snap.utilization,
-    });
-  } catch (err) {
-    log.warn(
-      `maybeEmitBudgetWarning sink failed team=${teamId}. ${err instanceof Error ? err.message : String(err)}`,
-    );
-  }
+  // Unreachable in the stub (at90Percent is always false), but kept
+  // for type-narrowing parity with the original implementation.
 }

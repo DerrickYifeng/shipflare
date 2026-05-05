@@ -1,15 +1,14 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import {
   teams,
-  teamRuns,
   teamTasks,
   teamMembers,
   teamConversations,
 } from '@/lib/db/schema';
-import { enqueueTeamRun } from '@/lib/queue/team-run';
+import { spawnMemberAgentRun } from '@/lib/team/spawn-member-agent-run';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('api:team:task:retry');
@@ -43,20 +42,23 @@ export async function POST(
   const userId = session.user.id;
   const { taskId } = await params;
 
+  // UI-A Task 3: ownership chain is now teamTasks → teamMembers → teams.
+  // Phase E removed teamRuns from the read path; team_tasks has no
+  // conversationId column of its own, so the parent conversation is
+  // resolved separately below as the team's most recent conversation
+  // (mirrors `agent-run.ts:resolvePrimaryConversation`).
   const rows = await db
     .select({
       taskId: teamTasks.id,
-      runId: teamTasks.runId,
       teamId: teams.id,
       prompt: teamTasks.prompt,
       description: teamTasks.description,
       input: teamTasks.input,
       taskStatus: teamTasks.status,
-      parentConversationId: teamRuns.conversationId,
     })
     .from(teamTasks)
-    .innerJoin(teamRuns, eq(teamRuns.id, teamTasks.runId))
-    .innerJoin(teams, eq(teams.id, teamRuns.teamId))
+    .innerJoin(teamMembers, eq(teamMembers.id, teamTasks.memberId))
+    .innerJoin(teams, eq(teams.id, teamMembers.teamId))
     .where(and(eq(teamTasks.id, taskId), eq(teams.userId, userId)))
     .limit(1);
 
@@ -83,7 +85,7 @@ export async function POST(
   // carries `subagent_type` — we map that to the team_members row with
   // the matching agent_type. If the team doesn't have one (e.g., the
   // original task was run by a coordinator-direct tool), fall back to
-  // the coordinator so the retry still has a valid rootMemberId.
+  // the coordinator so the retry still has a valid agent target.
   const inputObj =
     task.input && typeof task.input === 'object' && !Array.isArray(task.input)
       ? (task.input as Record<string, unknown>)
@@ -99,13 +101,18 @@ export async function POST(
     .where(eq(teamMembers.teamId, task.teamId));
 
   const byAgentType = new Map(members.map((m) => [m.agentType, m.id]));
-  const rootMemberId =
+  const targetMemberId =
     (subagentType ? byAgentType.get(subagentType) : null) ??
     byAgentType.get('coordinator') ??
     members[0]?.id ??
     null;
+  const targetAgentDefName =
+    (subagentType && byAgentType.has(subagentType)) ? subagentType :
+    byAgentType.has('coordinator') ? 'coordinator' :
+    members[0] ? members[0].agentType :
+    null;
 
-  if (!rootMemberId) {
+  if (!targetMemberId || !targetAgentDefName) {
     return NextResponse.json(
       { error: 'no_root_member_available' },
       { status: 400 },
@@ -117,11 +124,19 @@ export async function POST(
     task.description ||
     `Retry subtask ${task.taskId.slice(0, 8)}`;
 
-  // Chat refactor: the retry attaches to the same conversation the
-  // parent run belonged to. If for some reason the parent has no
-  // conversation (shouldn't happen post-migration), mint a fresh one
-  // so the retry still has a valid home.
-  let conversationId: string | null = task.parentConversationId ?? null;
+  // Chat refactor: the retry attaches to the team's primary (most
+  // recent) conversation — same convention as
+  // `agent-run.ts:resolvePrimaryConversation`. If the team has no
+  // conversation yet, mint a fresh one so the retry still has a valid
+  // home.
+  const primaryConvRows = await db
+    .select({ id: teamConversations.id })
+    .from(teamConversations)
+    .where(eq(teamConversations.teamId, task.teamId))
+    .orderBy(desc(teamConversations.createdAt))
+    .limit(1);
+
+  let conversationId: string | null = primaryConvRows[0]?.id ?? null;
   if (!conversationId) {
     const [created] = await db
       .insert(teamConversations)
@@ -130,20 +145,36 @@ export async function POST(
     conversationId = created!.id;
   }
 
-  const { runId, traceId, alreadyRunning } = await enqueueTeamRun({
-    teamId: task.teamId,
-    trigger: 'daily',
-    goal,
-    rootMemberId,
-    conversationId,
-  });
+  // Phase E Task 11: spawn an agent_runs row directly for the target
+  // specialist (mirrors Task tool's `launchAsyncTeammate` shape). The
+  // legacy `alreadyRunning` flag is gone — wake() is idempotent within a
+  // 1-second BullMQ jobId window, so duplicate retry clicks collapse
+  // before reaching the worker.
+  const { agentId: runId, messageId } = await spawnMemberAgentRun(
+    {
+      teamId: task.teamId,
+      memberId: targetMemberId,
+      agentDefName: targetAgentDefName,
+      conversationId,
+      prompt: goal,
+      description: `Retry of ${task.taskId.slice(0, 8)}`,
+      trigger: 'task_retry',
+    },
+    db,
+  );
 
   log.info(
-    `POST /api/team/task/${task.taskId}/retry user=${userId} → new runId=${runId} already=${alreadyRunning}`,
+    `POST /api/team/task/${task.taskId}/retry user=${userId} → spawned agent=${runId} msg=${messageId}`,
   );
 
   return NextResponse.json(
-    { taskId: task.taskId, runId, traceId, alreadyRunning, conversationId },
-    { status: alreadyRunning ? 200 : 202 },
+    {
+      taskId: task.taskId,
+      runId,
+      traceId: runId,
+      alreadyRunning: false,
+      conversationId,
+    },
+    { status: 202 },
   );
 }

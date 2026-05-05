@@ -1,17 +1,48 @@
 import Link from 'next/link';
-import { desc, and, eq, gte, sql, type SQL } from 'drizzle-orm';
+import {
+  desc,
+  and,
+  eq,
+  gte,
+  isNull,
+  isNotNull,
+  sql,
+  type SQL,
+} from 'drizzle-orm';
 import { db } from '@/lib/db';
-import { teamRuns, teams } from '@/lib/db/schema';
+import { teamMessages, teams, users } from '@/lib/db/schema';
 
 /**
- * /admin/team-runs — read-only list of recent team_runs across all teams.
- * Auth is gated by src/app/(app)/admin/layout.tsx (ADMIN_EMAILS env var).
+ * /admin/team-runs — Phase G rewrite (per-request view).
+ *
+ * Each row is a single "request" — a `team_messages` row representing a
+ * founder/external-origin user_prompt sent to the team's lead. All
+ * subsequent activity (agent_text / tool_call / tool_result / etc.) is
+ * grouped by `runId = user_prompt.id`. The legacy `team_runs` table was
+ * dropped in migration 0016_drop_team_runs (Phase G cleanup); see
+ * docs/superpowers/plans/2026-05-03-drop-team-runs-c2.md for the full
+ * migration story.
+ *
+ * URL stays at /admin/team-runs for stability — bookmarks survive.
+ *
+ * Auth gated by src/app/(app)/admin/layout.tsx (ADMIN_EMAILS env var).
  *
  * Query params:
- *   ?status=running|completed|failed  — filter by status
- *   ?teamId=<id>                      — filter by team
- *   ?minCost=0.50                     — only runs with cost >= threshold
- *   ?sinceDays=7                      — only runs in the last N days
+ *   ?teamId=<id>      — filter by team
+ *   ?sinceDays=<n>    — restrict to the last N days (default 7). The
+ *                       default exists because rows written before
+ *                       commit 5ca8887 carry NULL runId and show up as
+ *                       orphan singletons. 7 days is comfortably after
+ *                       Phase G shipped.
+ *
+ * Dropped vs the team_runs era (no per-row equivalent post-Phase-E):
+ *   - status filter (`?status=`)  → status is now derived per-row
+ *   - cost filter   (`?minCost=`) → no per-message cost; will return
+ *                                   when team-budget moves to
+ *                                   agent_runs.totalTokens-based tracking
+ *   - trigger col / filter         → no per-request trigger column;
+ *                                   the user_prompt content carries the
+ *                                   intent inline
  */
 export default async function AdminTeamRunsPage({
   searchParams,
@@ -19,53 +50,107 @@ export default async function AdminTeamRunsPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = await searchParams;
-  const status = typeof params.status === 'string' ? params.status : null;
-  const teamIdFilter = typeof params.teamId === 'string' ? params.teamId : null;
-  const minCost =
-    typeof params.minCost === 'string' ? Number(params.minCost) : null;
-  const sinceDays =
+  const teamIdFilter =
+    typeof params.teamId === 'string' ? params.teamId : null;
+  const sinceDaysRaw =
     typeof params.sinceDays === 'string' ? Number(params.sinceDays) : null;
+  // Default to 7 days. The default is what hides pre-5ca8887 rows whose
+  // runId is NULL — see file-header comment.
+  const sinceDays =
+    sinceDaysRaw && Number.isFinite(sinceDaysRaw) && sinceDaysRaw > 0
+      ? sinceDaysRaw
+      : 7;
+  const since = new Date(Date.now() - sinceDays * 24 * 60 * 60 * 1000);
 
-  const filters: SQL[] = [];
-  if (status) filters.push(eq(teamRuns.status, status));
-  if (teamIdFilter) filters.push(eq(teamRuns.teamId, teamIdFilter));
-  if (sinceDays && sinceDays > 0 && Number.isFinite(sinceDays)) {
-    const since = new Date(Date.now() - sinceDays * 24 * 60 * 60 * 1000);
-    filters.push(gte(teamRuns.startedAt, since));
-  }
-  if (minCost && Number.isFinite(minCost) && minCost > 0) {
-    filters.push(sql`${teamRuns.totalCostUsd} >= ${String(minCost)}`);
-  }
+  // The "request" filter: a user_prompt with messageType='message',
+  // originating from outside the team (fromMemberId IS NULL — the founder
+  // / external sender), targeting a specific agent (toAgentId IS NOT NULL,
+  // typically the lead). task_notification rows ALSO carry type='user_prompt'
+  // but are messageType='task_notification' (excluded by the eq below).
+  const filters: SQL[] = [
+    eq(teamMessages.type, 'user_prompt'),
+    eq(teamMessages.messageType, 'message'),
+    isNull(teamMessages.fromMemberId),
+    isNotNull(teamMessages.toAgentId),
+    gte(teamMessages.createdAt, since),
+  ];
+  if (teamIdFilter) filters.push(eq(teamMessages.teamId, teamIdFilter));
 
-  const where = filters.length > 0 ? and(...filters) : undefined;
+  // Subquery aggregates. The correlation column is the user_prompt's id
+  // — every downstream row carries it on `runId` (post-5ca8887).
+  // `lastActivityAt` is the max(created_at) of activity rows.
+  //
+  // Note on raw column references: we use literal SQL ("act"."created_at")
+  // for the inner subquery columns instead of `${teamMessages.createdAt}`
+  // because drizzle interpolates the column reference relative to the
+  // FROM table (team_messages), not the inner alias. That would generate
+  // `max("team_messages"."created_at")` referring to the OUTER table —
+  // Postgres rejects that as "column must appear in GROUP BY". The outer
+  // correlation `act.run_id = "team_messages"."id"` IS what we want
+  // referencing the outer row, so we keep that one as a drizzle column ref.
+  const lastActivityAt = sql<Date | null>`(
+    SELECT max("act"."created_at") FROM ${teamMessages} AS "act"
+    WHERE "act"."run_id" = ${teamMessages.id}
+  )`;
+  const totalTurns = sql<number>`(
+    SELECT count(*)::int FROM ${teamMessages} AS "act"
+    WHERE "act"."run_id" = ${teamMessages.id}
+      AND "act"."type" = 'agent_text'
+  )`;
+  const errorCount = sql<number>`(
+    SELECT count(*)::int FROM ${teamMessages} AS "act"
+    WHERE "act"."run_id" = ${teamMessages.id}
+      AND "act"."type" = 'tool_result'
+      AND ("act"."metadata"->>'is_error')::boolean = true
+  )`;
 
   const rows = await db
     .select({
-      id: teamRuns.id,
-      teamId: teamRuns.teamId,
+      requestId: teamMessages.id,
+      teamId: teamMessages.teamId,
       teamName: teams.name,
-      trigger: teamRuns.trigger,
-      status: teamRuns.status,
-      startedAt: teamRuns.startedAt,
-      completedAt: teamRuns.completedAt,
-      totalCostUsd: teamRuns.totalCostUsd,
-      totalTurns: teamRuns.totalTurns,
-      traceId: teamRuns.traceId,
+      ownerEmail: users.email,
+      goal: teamMessages.content,
+      startedAt: teamMessages.createdAt,
+      lastActivityAt,
+      totalTurns,
+      errorCount,
     })
-    .from(teamRuns)
-    .leftJoin(teams, eq(teams.id, teamRuns.teamId))
-    .where(where)
-    .orderBy(desc(teamRuns.startedAt))
+    .from(teamMessages)
+    .leftJoin(teams, eq(teams.id, teamMessages.teamId))
+    .leftJoin(users, eq(users.id, teams.userId))
+    .where(and(...filters))
+    .orderBy(desc(teamMessages.createdAt))
     .limit(100);
 
   return (
     <div>
-      <FilterBar
-        status={status}
-        teamIdFilter={teamIdFilter}
-        minCost={minCost}
-        sinceDays={sinceDays}
-      />
+      <div style={{ marginBottom: 14 }}>
+        <h1
+          style={{
+            fontSize: 18,
+            fontWeight: 500,
+            letterSpacing: '-0.18px',
+            margin: 0,
+          }}
+        >
+          Recent requests
+        </h1>
+        <p
+          style={{
+            fontSize: 11.5,
+            color: 'var(--sf-fg-4)',
+            marginTop: 4,
+            letterSpacing: '-0.1px',
+          }}
+        >
+          One row per founder→lead user_prompt. Activity (agent_text /
+          tool_call / tool_result) groups by <code>runId =
+          user_prompt.id</code>.
+        </p>
+      </div>
+
+      <FilterBar teamIdFilter={teamIdFilter} sinceDays={sinceDays} />
 
       <table
         style={{
@@ -77,30 +162,41 @@ export default async function AdminTeamRunsPage({
         <thead>
           <tr style={{ textAlign: 'left', color: 'var(--sf-fg-3)' }}>
             <Th>Team</Th>
-            <Th>Trigger</Th>
+            <Th>Goal</Th>
             <Th>Status</Th>
             <Th>Started</Th>
             <Th>Duration</Th>
-            <Th align="right">Cost</Th>
             <Th align="right">Turns</Th>
+            <Th align="right">Trace</Th>
           </tr>
         </thead>
         <tbody>
           {rows.map((row) => {
+            const status = deriveStatus({
+              startedAt: row.startedAt,
+              lastActivityAt: row.lastActivityAt,
+              totalTurns: row.totalTurns,
+              errorCount: row.errorCount,
+            });
             const durationMs =
-              row.completedAt && row.startedAt
-                ? row.completedAt.getTime() - row.startedAt.getTime()
+              row.lastActivityAt && row.startedAt
+                ? new Date(row.lastActivityAt).getTime() -
+                  row.startedAt.getTime()
                 : null;
+            const goalPreview =
+              row.goal && row.goal.length > 120
+                ? `${row.goal.slice(0, 120).trim()}…`
+                : (row.goal ?? '—');
             return (
               <tr
-                key={row.id}
+                key={row.requestId}
                 style={{
                   borderTop: '1px solid var(--sf-border-1)',
                 }}
               >
                 <Td>
                   <Link
-                    href={`/admin/team-runs/${row.id}`}
+                    href={`/admin/team-runs/${row.requestId}`}
                     style={{
                       color: 'var(--sf-link)',
                       textDecoration: 'none',
@@ -108,19 +204,53 @@ export default async function AdminTeamRunsPage({
                   >
                     {row.teamName ?? row.teamId.slice(0, 8)}
                   </Link>
+                  {row.ownerEmail ? (
+                    <div
+                      style={{
+                        fontSize: 11,
+                        color: 'var(--sf-fg-4)',
+                        marginTop: 2,
+                      }}
+                    >
+                      {row.ownerEmail}
+                    </div>
+                  ) : null}
                 </Td>
-                <Td>{row.trigger}</Td>
                 <Td>
-                  <StatusPill status={row.status} />
+                  <span
+                    style={{
+                      color: 'var(--sf-fg-2)',
+                      fontSize: 12.5,
+                      lineHeight: 1.4,
+                      display: '-webkit-box',
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: 'vertical',
+                      overflow: 'hidden',
+                    }}
+                    title={row.goal ?? undefined}
+                  >
+                    {goalPreview}
+                  </span>
+                </Td>
+                <Td>
+                  <StatusPill status={status} />
                 </Td>
                 <Td>{row.startedAt ? formatTime(row.startedAt) : '—'}</Td>
                 <Td>{durationMs !== null ? formatDuration(durationMs) : '—'}</Td>
+                <Td align="right">{row.totalTurns ?? 0}</Td>
                 <Td align="right">
-                  {row.totalCostUsd != null
-                    ? `$${Number(row.totalCostUsd).toFixed(4)}`
-                    : '—'}
+                  <Link
+                    href={`/admin/team-runs/${row.requestId}`}
+                    style={{
+                      color: 'var(--sf-link)',
+                      textDecoration: 'none',
+                      fontSize: 12,
+                      fontFamily: 'var(--sf-font-mono, monospace)',
+                    }}
+                  >
+                    {row.requestId.slice(0, 8)} →
+                  </Link>
                 </Td>
-                <Td align="right">{row.totalTurns ?? '—'}</Td>
               </tr>
             );
           })}
@@ -134,7 +264,8 @@ export default async function AdminTeamRunsPage({
                   color: 'var(--sf-fg-4)',
                 }}
               >
-                No team_runs match these filters.
+                No requests in the last {sinceDays} day
+                {sinceDays === 1 ? '' : 's'}.
               </td>
             </tr>
           )}
@@ -149,25 +280,64 @@ export default async function AdminTeamRunsPage({
           letterSpacing: '-0.12px',
         }}
       >
-        Showing up to 100 most recent rows. Filters compose — add
-        <code
-          style={{ padding: '0 4px', background: 'var(--sf-bg-secondary)' }}
-        >
-          ?status=failed&sinceDays=3
-        </code>{' '}
-        to narrow.
+        Showing up to 100 most recent rows in the last {sinceDays} day
+        {sinceDays === 1 ? '' : 's'}. Cost / trigger columns retired with
+        the dropped <code>team_runs</code> table — see migration{' '}
+        <code>0016_drop_team_runs</code>.
       </p>
     </div>
   );
 }
 
-function Th({
-  children,
-  align = 'left',
-}: {
+// ---------------------------------------------------------------------------
+// Status heuristic (v1 — derived from team_messages, not a column)
+// ---------------------------------------------------------------------------
+
+type DerivedStatus = 'pending' | 'running' | 'completed' | 'failed';
+
+const RUNNING_INACTIVITY_MS = 60_000;
+
+interface DeriveStatusInput {
+  startedAt: Date;
+  lastActivityAt: Date | string | null;
+  totalTurns: number;
+  errorCount: number;
+}
+
+function deriveStatus(input: DeriveStatusInput): DerivedStatus {
+  if (input.errorCount > 0) return 'failed';
+
+  const last = input.lastActivityAt
+    ? new Date(input.lastActivityAt)
+    : null;
+  // No activity at all → still pending. (The user_prompt itself shares
+  // the runId in the subquery so an empty activity row count means the
+  // worker hasn't even started writing rows. Realistically this is a
+  // sub-second window because wake() is fast, but the state exists.)
+  if (input.totalTurns === 0 && (!last || last.getTime() === input.startedAt.getTime())) {
+    return 'pending';
+  }
+  // Last activity within the inactivity window → still actively running.
+  if (last && Date.now() - last.getTime() < RUNNING_INACTIVITY_MS) {
+    return 'running';
+  }
+  // Otherwise: we've seen activity AND it's been quiet for a while.
+  // Treat as completed. Real terminal-event detection (e.g. an
+  // agent_runs.status='completed' join) is a v2 follow-up; this
+  // heuristic gets the common cases right.
+  return 'completed';
+}
+
+// ---------------------------------------------------------------------------
+// Presentation primitives
+// ---------------------------------------------------------------------------
+
+interface ThProps {
   children: React.ReactNode;
   align?: 'left' | 'right';
-}) {
+}
+
+function Th({ children, align = 'left' }: ThProps) {
   return (
     <th
       style={{
@@ -184,19 +354,19 @@ function Th({
   );
 }
 
-function Td({
-  children,
-  align = 'left',
-}: {
+interface TdProps {
   children: React.ReactNode;
   align?: 'left' | 'right';
-}) {
+}
+
+function Td({ children, align = 'left' }: TdProps) {
   return (
     <td
       style={{
         padding: '10px 8px',
         textAlign: align,
         color: 'var(--sf-fg-2)',
+        verticalAlign: 'top',
       }}
     >
       {children}
@@ -204,7 +374,11 @@ function Td({
   );
 }
 
-function StatusPill({ status }: { status: string }) {
+interface StatusPillProps {
+  status: DerivedStatus;
+}
+
+function StatusPill({ status }: StatusPillProps) {
   const color =
     status === 'completed'
       ? 'var(--sf-success)'
@@ -250,17 +424,12 @@ function formatDuration(ms: number): string {
   return `${m}m ${rem}s`;
 }
 
-function FilterBar({
-  status,
-  teamIdFilter,
-  minCost,
-  sinceDays,
-}: {
-  status: string | null;
+interface FilterBarProps {
   teamIdFilter: string | null;
-  minCost: number | null;
-  sinceDays: number | null;
-}) {
+  sinceDays: number;
+}
+
+function FilterBar({ teamIdFilter, sinceDays }: FilterBarProps) {
   // GET form so filters survive a reload + are shareable URLs.
   return (
     <form
@@ -273,20 +442,6 @@ function FilterBar({
         marginBottom: 18,
       }}
     >
-      <FilterField label="Status">
-        <select
-          name="status"
-          defaultValue={status ?? ''}
-          style={filterStyle()}
-        >
-          <option value="">any</option>
-          <option value="running">running</option>
-          <option value="completed">completed</option>
-          <option value="failed">failed</option>
-          <option value="cancelled">cancelled</option>
-          <option value="pending">pending</option>
-        </select>
-      </FilterField>
       <FilterField label="Team ID">
         <input
           name="teamId"
@@ -296,24 +451,13 @@ function FilterBar({
           placeholder="uuid"
         />
       </FilterField>
-      <FilterField label="Min cost (USD)">
-        <input
-          name="minCost"
-          type="number"
-          step="0.01"
-          min="0"
-          defaultValue={minCost ?? ''}
-          style={filterStyle()}
-        />
-      </FilterField>
       <FilterField label="Since (days)">
         <input
           name="sinceDays"
           type="number"
           min="1"
-          defaultValue={sinceDays ?? ''}
+          defaultValue={sinceDays}
           style={filterStyle()}
-          placeholder="7"
         />
       </FilterField>
       <button
@@ -321,12 +465,13 @@ function FilterBar({
         style={{
           height: 30,
           padding: '0 14px',
-          border: '1px solid var(--sf-border-1)',
+          border: '1px solid var(--sf-fg-1)',
           borderRadius: 6,
-          background: 'var(--sf-bg-primary)',
+          background: 'var(--sf-fg-1)',
+          color: 'var(--sf-bg-1)',
           cursor: 'pointer',
           fontSize: 12,
-          color: 'var(--sf-fg-1)',
+          fontWeight: 500,
         }}
       >
         Apply
@@ -335,13 +480,12 @@ function FilterBar({
   );
 }
 
-function FilterField({
-  label,
-  children,
-}: {
+interface FilterFieldProps {
   label: string;
   children: React.ReactNode;
-}) {
+}
+
+function FilterField({ label, children }: FilterFieldProps) {
   return (
     <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
       <span

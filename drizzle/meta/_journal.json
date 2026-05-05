@@ -92,6 +92,62 @@
       "when": 1779700012000,
       "tag": "0012_drafts_one_pending_per_thread",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1779700013000,
+      "tag": "0013_plan_item_drafting_state",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1779700014000,
+      "tag": "0014_stiff_phil_sheldon",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1779700015000,
+      "tag": "0015_colorful_human_cannonball",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1779700016000,
+      "tag": "0016_drop_team_runs",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1779700017000,
+      "tag": "0017_threads_can_mention_product",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1779700018000,
+      "tag": "0018_rename_agent_types",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1779700019000,
+      "tag": "0019_threads_author_bio",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1779700020000,
+      "tag": "0020_classy_marten_broadcloak",
+      "breakpoints": true
     }
   ]
 }

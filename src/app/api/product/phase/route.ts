@@ -9,7 +9,7 @@ import { validateLaunchDates } from '@/lib/launch-date-rules';
 import { acquireRateLimit } from '@/lib/rate-limit';
 import { getUserChannels } from '@/lib/user-channels';
 import { ensureTeamExists } from '@/lib/team-provisioner';
-import { enqueueTeamRun } from '@/lib/queue/team-run';
+import { dispatchLeadMessage } from '@/lib/team/dispatch-lead-message';
 import { createAutomationConversation } from '@/lib/team-conversation-helpers';
 import { weekBounds } from '@/lib/week-bounds';
 import { createLogger, loggerForRequest } from '@/lib/logger';
@@ -39,10 +39,10 @@ const requestBodySchema = z.object({
  *   3. Supersede this week's pre-approval `plan_items` so the Today UI
  *      clears stale entries immediately.
  *   4. Enqueue a team-run with `trigger='phase_transition'`. The
- *      coordinator delegates to growth-strategist (to write the new
- *      strategic path) then content-planner (to write the new week's
- *      plan_items). Both land via their domain tools; this route returns
- *      immediately with a runId.
+ *      coordinator dispatches the `generating-strategy` skill (to write
+ *      the new strategic path) then content-planner (to write the new
+ *      week's plan_items). Both land via their domain tools; this route
+ *      returns immediately with a runId.
  *
  * Phase E Day 3: replaces the legacy strategic + tactical chain. The
  * team-run is async — the client should subscribe to
@@ -136,7 +136,8 @@ export async function POST(request: NextRequest): Promise<Response> {
   // Commit the pre-team-run state atomically: update product, supersede
   // this week's pre-approval items, deactivate the active strategic_path.
   // The team-run writes the NEW strategic_path + plan_items on its own
-  // timeline via growth-strategist + content-planner tool calls.
+  // timeline via the generating-strategy skill + content-planner tool
+  // calls.
   const { weekStart, weekEnd } = weekBounds(new Date());
   let itemsSuperseded = 0;
   try {
@@ -180,12 +181,14 @@ export async function POST(request: NextRequest): Promise<Response> {
     );
   }
 
-  // Enqueue the team-run. Growth-strategist writes the new strategic_path
-  // via write_strategic_path (which activates it on insert); content-planner
+  // Enqueue the team-run. The coordinator dispatches the
+  // generating-strategy skill, which writes the new strategic_path via
+  // write_strategic_path (activates it on insert); content-planner
   // writes the week's plan_items via add_plan_item.
   let runId: string;
   try {
     const { teamId, memberIds } = await ensureTeamExists(userId, product.id);
+    void memberIds; // resolved upstream for validation; lead is the sole recipient
     const phaseNow = new Date();
     const goal =
       `Phase change for ${product.name}: the user updated their launch situation. ` +
@@ -194,19 +197,21 @@ export async function POST(request: NextRequest): Promise<Response> {
       (launchDate ? `Launch date: ${launchDate.toISOString().slice(0, 10)}. ` : '') +
       (launchedAt ? `Launched: ${launchedAt.toISOString().slice(0, 10)}. ` : '') +
       `Active channels: ${activeChannels.join(', ')}. ` +
-      `Write a new strategic path reflecting the new phase (anchor thesisArc[0].weekStart to ${weekStart.toISOString().slice(0, 10)}), then plan the coming week. Pass weekStart + now to content-planner verbatim in its spawn prompt.`;
+      `Write a new strategic path reflecting the new phase by dispatching the generating-strategy skill (anchor thesisArc[0].weekStart to ${weekStart.toISOString().slice(0, 10)}), then plan the coming week. Pass weekStart + now to content-planner verbatim in its spawn prompt.`;
 
     const conversationId = await createAutomationConversation(
       teamId,
       'phase_transition',
     );
-    const enqueued = await enqueueTeamRun({
-      teamId,
-      trigger: 'phase_transition',
-      goal,
-      rootMemberId: memberIds.coordinator,
-      conversationId,
-    });
+    const enqueued = await dispatchLeadMessage(
+      {
+        teamId,
+        conversationId,
+        goal,
+        trigger: 'phase_transition',
+      },
+      db,
+    );
     runId = enqueued.runId;
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);

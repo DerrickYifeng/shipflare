@@ -56,6 +56,37 @@ export default defineConfig({
       timeout: 180_000,
       use: { baseURL: process.env.BASE_URL ?? 'http://localhost:3000' },
     },
+    // `live-smoke` runs real-browser regression specs against the
+    // founder's actual authenticated session — real GitHub/X OAuth,
+    // real product, real LLM. Spec files match `*.live-smoke.ts` and
+    // each one begins with a `test.skip(!fs.existsSync('.auth/founder.json'), ...)`
+    // so `pnpm test:e2e` (the seeded suite) doesn't break when the
+    // auth file isn't present.
+    //
+    // One-time setup to capture `.auth/founder.json` (gitignored):
+    //   1. Run the dev server: `bun run dev`
+    //   2. `mkdir -p .auth`
+    //   3. `pnpm playwright codegen --save-storage=.auth/founder.json http://localhost:3000`
+    //   4. In the Codegen window, complete the GitHub sign-in flow,
+    //      wait for /team or /today to load, then close the window.
+    //   5. `.auth/founder.json` now contains the real session. DO NOT commit it.
+    //
+    // Run live-smoke specs with `pnpm test:e2e:live` (headed by
+    // default — watch the real account get driven) or
+    // `pnpm test:e2e:live:ci` (headless, for CI / unattended runs).
+    {
+      name: 'live-smoke',
+      testMatch: /.*\.live-smoke\.ts/,
+      retries: 0,
+      // LLM round-trips can be slow — give each spec ample headroom.
+      timeout: 120_000,
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: { width: 1440, height: 900 },
+        storageState: '.auth/founder.json',
+        baseURL: process.env.BASE_URL ?? 'http://localhost:3000',
+      },
+    },
   ],
 
   webServer: {

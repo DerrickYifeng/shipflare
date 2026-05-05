@@ -11,7 +11,8 @@
 import { z } from 'zod';
 
 // ---------------------------------------------------------------------------
-// Strategic path (growth-strategist writes, coordinator + content-planner read)
+// Strategic path (generating-strategy skill writes, coordinator +
+// content-planner read)
 // ---------------------------------------------------------------------------
 
 /**
@@ -78,9 +79,9 @@ export const strategicChannelCadenceSchema = z.object({
 });
 
 /**
- * Output schema for the growth-strategist agent / `write_strategic_path` tool.
- * Mirrors the `strategic_paths` table's jsonb columns so the caller can write
- * directly without remapping.
+ * Output schema for the `generating-strategy` skill / `write_strategic_path`
+ * tool. Mirrors the `strategic_paths` table's jsonb columns so the caller
+ * can write directly without remapping.
  */
 export const strategicPathSchema = z.object({
   narrative: z.string().min(200).max(2400),
@@ -166,7 +167,11 @@ export type PlanItemInput = z.infer<typeof planItemInputSchema>;
  */
 export const contentPostParamsSchema = z
   .object({
-    pillar: z
+    // Content FORMAT classification (5-value enum). Distinct from the
+    // strategic-path's `contentPillars` (free-form TOPIC strings like
+    // 'build-in-public', 'marketing-debt'). Topic ≠ format. Renamed
+    // from `pillar` (2026-05-04) after LLM planner conflated them.
+    format: z
       .enum([
         'milestone',
         'lesson',

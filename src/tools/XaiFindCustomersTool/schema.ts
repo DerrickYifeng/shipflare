@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MENTION_SIGNALS } from '@/skills/judging-thread-quality/schema';
 
 /**
  * Shape of one tweet returned by xAI's structured-outputs response.
@@ -28,8 +29,27 @@ export const tweetCandidateSchema = z.object({
   original_author_username: z.string().nullable(),
   /** Reposter handles when is_repost; null when !is_repost. */
   surfaced_via: z.array(z.string()).nullable(),
+  /** Outer is a quote-tweet → the quoted post body, verbatim. Null when not a quote. */
+  quoted_text: z.string().nullable().optional(),
+  /** Outer is a quote-tweet → quoted post author handle (no @). Null when not a quote. */
+  quoted_author: z.string().nullable().optional(),
+  /** Outer is a reply → parent post body, verbatim. Null when not a reply. */
+  in_reply_to_text: z.string().nullable().optional(),
+  /** Outer is a reply → parent post author handle (no @). Null when not a reply. */
+  in_reply_to_author: z.string().nullable().optional(),
   confidence: z.number().min(0).max(1),
   reason: z.string().min(1),
+  /**
+   * Whether the product can be tastefully name-dropped in a reply.
+   * Optional for back-compat; persist tool defaults to `false` when omitted.
+   */
+  can_mention_product: z.boolean().optional(),
+  /**
+   * Why the mention is/isn't appropriate. Enforced against the MENTION_SIGNALS
+   * enum from judging-thread-quality so producer drift surfaces at parse time.
+   * Optional for back-compat; persist tool defaults to `'no_fit'` when omitted.
+   */
+  mention_signal: z.enum(MENTION_SIGNALS).optional(),
 });
 
 export type TweetCandidate = z.infer<typeof tweetCandidateSchema>;

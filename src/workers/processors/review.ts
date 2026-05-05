@@ -1,9 +1,26 @@
+/**
+ * Draft review BullMQ processor.
+ *
+ * **CURRENTLY UNFED** — all enqueueReview() call sites in DraftReplyTool +
+ * engagement.ts were removed (see commit history). The processor + queue
+ * are kept in place so re-enabling validation is a one-line change at the
+ * persist sites.
+ *
+ * Trade-off recorded in CLAUDE.md "## Primitive Boundaries — Hard rules":
+ * batch tools (process_replies_batch, process_posts_batch) and the
+ * draft persist path intentionally skip the LLM-validation fork. Drafter
+ * skills self-audit in-fork via their `Self-audit` SKILL.md sections;
+ * founder reviews in /today / /briefing.
+ *
+ * If you re-enable: also restore the corresponding test cases in
+ * DraftReplyTool / engagement test files that asserted the enqueue.
+ */
 import type { Job } from 'bullmq';
 import { db } from '@/lib/db';
 import { drafts, threads, products, channels, userPreferences } from '@/lib/db/schema';
 import { eq, and, gte, sql } from 'drizzle-orm';
 import { runForkSkill } from '@/skills/run-fork-skill';
-import { reviewingDraftsOutputSchema } from '@/skills/reviewing-drafts/schema';
+import { validatingDraftOutputSchema } from '@/skills/validating-draft/schema';
 import { publishUserEvent } from '@/lib/redis';
 import { enqueueDream, enqueuePosting } from '@/lib/queue';
 import type { ReviewJobData } from '@/lib/queue/types';
@@ -75,28 +92,34 @@ export async function processReview(job: Job<ReviewJobData>) {
     });
 
     const { result, usage } = await runForkSkill(
-      'reviewing-drafts',
+      'validating-draft',
       args,
-      reviewingDraftsOutputSchema,
+      validatingDraftOutputSchema,
     );
     await addCost(traceId, usage);
 
     log.info(`Review verdict: ${result.verdict}, score=${result.score.toFixed(2)}, cost=$${usage.costUsd.toFixed(4)}`);
 
-    // Apply verdict
+    // Apply verdict: keep verdict + score as OBSERVABILITY metadata only.
+    // Per Plan-2 follow-up (recall > precision): the founder sees ALL
+    // drafts in /briefing regardless of verdict; UI may render a slop-flag
+    // badge based on reviewVerdict but the draft stays visible & sendable.
+    // The drafter self-audits in-fork; this async review is observability +
+    // auto-approve gate only — it does NOT mutate `status` on FAIL/REVISE.
     const updateData: Record<string, unknown> = {
       reviewVerdict: result.verdict,
       reviewScore: result.score,
-      reviewJson: { checks: result.checks, issues: result.issues, suggestions: result.suggestions },
+      reviewJson: {
+        checks: result.checks,
+        issues: result.issues,
+        suggestions: result.suggestions,
+        slopFingerprint: result.slopFingerprint ?? [],
+      },
       updatedAt: new Date(),
     };
 
-    if (result.verdict === 'FAIL') {
-      updateData.status = 'flagged';
-    } else if (result.verdict === 'REVISE') {
-      updateData.status = 'needs_revision';
-    }
-    // PASS: check auto-approve, otherwise keep as 'pending'
+    // PASS: check auto-approve, otherwise keep as 'pending'.
+    // FAIL / REVISE: keep as 'pending' too — verdict is metadata, not a gate.
 
     let autoApproved = false;
 

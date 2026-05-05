@@ -65,6 +65,27 @@ vi.mock('@/core/query-loop', async () => {
   };
 });
 
+// ---------------------------------------------------------------------------
+// Mock the Phase B async-branch deps BEFORE importing AgentTool. The async
+// branch uses `wake()` to enqueue the agent-run BullMQ job — mocked so the
+// test stays self-contained. (Phase G removed the SHIPFLARE_AGENT_TEAMS
+// feature flag, so there is no flag to mock.)
+// ---------------------------------------------------------------------------
+
+vi.mock('@/workers/processors/lib/wake', () => ({
+  wake: vi.fn(async () => undefined),
+}));
+
+// UI-D: the Task tool's async branch now calls cacheTeammateSpawn after
+// the agent_runs insert. Stub it out so the test stays self-contained
+// (the real helper opens a Redis connection that the test env can't
+// reach, blocking the call indefinitely under maxRetriesPerRequest:null).
+vi.mock('@/workers/processors/lib/team-state-writethrough', () => ({
+  cacheTeammateSpawn: vi.fn(async () => undefined),
+  cacheTeammateStatus: vi.fn(async () => undefined),
+  cacheLeadStatus: vi.fn(async () => undefined),
+}));
+
 // Import *after* vi.mock so the stub is installed before the real module
 // binds runAgent via module resolution.
 import {
@@ -78,6 +99,7 @@ import {
   __resetAgentRegistry,
   getAvailableAgents,
 } from '../registry';
+import { wake } from '@/workers/processors/lib/wake';
 
 // ---------------------------------------------------------------------------
 // Test harness
@@ -310,5 +332,187 @@ describe('buildTaskDescription — roster + teaching composition', () => {
     // Still embeds the teaching block so the delegator learns the rules even
     // before any specialists are registered.
     expect(desc).toMatch(/When NOT to delegate/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase B — async branch: `run_in_background:true` flag-gated lifecycle
+// ---------------------------------------------------------------------------
+
+interface AsyncInsert {
+  table: string;
+  row: Record<string, unknown>;
+}
+
+const asyncInserts: AsyncInsert[] = [];
+
+function makeFakeAsyncDb() {
+  return {
+    insert(table: unknown) {
+      const name =
+        (table as { _?: { name?: string } })?._?.name ??
+        (table as { name?: string })?.name ??
+        String(table);
+      return {
+        values(row: Record<string, unknown>) {
+          asyncInserts.push({ table: name, row });
+          return Promise.resolve();
+        },
+      };
+    },
+    // Sync-fallback path records team_tasks completion via db.update — make
+    // the chain a no-op so the sync path can finish cleanly.
+    update() {
+      const builder = {
+        set() {
+          return builder;
+        },
+        where() {
+          return Promise.resolve();
+        },
+      };
+      return builder;
+    },
+    // Async branch never selects, but the budget check on the sync path may.
+    // Provide a no-op select so it short-circuits if it ever fires.
+    select() {
+      const builder = {
+        from() {
+          return builder;
+        },
+        where() {
+          return builder;
+        },
+        limit() {
+          return Promise.resolve([]);
+        },
+        orderBy() {
+          return builder;
+        },
+      };
+      return builder;
+    },
+  };
+}
+
+function makeTeamRunCtx(
+  deps: Record<string, unknown> = {},
+): ToolContext {
+  const ac = new AbortController();
+  const merged = {
+    db: makeFakeAsyncDb(),
+    teamId: 'team-async-1',
+    currentMemberId: 'mem-lead',
+    runId: 'run-async-1',
+    ...deps,
+  };
+  return {
+    abortSignal: ac.signal,
+    get<V>(key: string): V {
+      if (key in merged) return merged[key as keyof typeof merged] as V;
+      throw new Error(`no dep ${key}`);
+    },
+  };
+}
+
+describe('Task tool — async branch (Phase B)', () => {
+  beforeEach(() => {
+    asyncInserts.length = 0;
+    vi.mocked(wake).mockClear();
+  });
+
+  it('returns immediately with {agentId, status:"async_launched"} when run_in_background:true and team context present', async () => {
+    const result = await taskTool.execute(
+      {
+        subagent_type: 'test-agent',
+        prompt: 'Draft 3 reply variations for the latest mention.',
+        description: 'Async draft',
+        run_in_background: true,
+      },
+      makeTeamRunCtx(),
+    );
+
+    expect(result.status).toBe('async_launched');
+    expect(typeof result.agentId).toBe('string');
+    expect(result.agentId!.length).toBeGreaterThan(0);
+    expect(result.cost).toBe(0);
+    expect(result.duration).toBe(0);
+    expect(result.turns).toBe(0);
+    expect(wake).toHaveBeenCalledOnce();
+    expect(wake).toHaveBeenCalledWith(result.agentId);
+
+    // Sanity: the async branch did NOT go down the sync path that calls runAgent.
+    expect(runAgentCalls).toHaveLength(0);
+
+    // Two inserts: agent_runs (queued) + team_messages (initial prompt mailbox).
+    expect(asyncInserts).toHaveLength(2);
+    const agentRunRow = asyncInserts[0]!.row;
+    const mailboxRow = asyncInserts[1]!.row;
+    expect(agentRunRow.id).toBe(result.agentId);
+    expect(agentRunRow.teamId).toBe('team-async-1');
+    expect(agentRunRow.memberId).toBe('mem-lead');
+    expect(agentRunRow.agentDefName).toBe('test-agent');
+    expect(agentRunRow.parentAgentId).toBeNull();
+    expect(agentRunRow.status).toBe('queued');
+    expect(mailboxRow.teamId).toBe('team-async-1');
+    expect(mailboxRow.toAgentId).toBe(result.agentId);
+    expect(mailboxRow.fromMemberId).toBe('mem-lead');
+    expect(mailboxRow.content).toBe(
+      'Draft 3 reply variations for the latest mention.',
+    );
+    expect(mailboxRow.summary).toBe('Async draft');
+    expect(mailboxRow.type).toBe('user_prompt');
+    expect(mailboxRow.messageType).toBe('message');
+  });
+
+  it('sets parentAgentId from callerAgentId when the agent-run ctx provides it (Phase E Task 7)', async () => {
+    const result = await taskTool.execute(
+      {
+        subagent_type: 'test-agent',
+        prompt: 'Spawn me with a parent.',
+        description: 'Parent-aware async draft',
+        run_in_background: true,
+      },
+      makeTeamRunCtx({ callerAgentId: 'agent-lead-7' }),
+    );
+
+    expect(result.status).toBe('async_launched');
+    expect(typeof result.agentId).toBe('string');
+
+    // The first insert is into agent_runs — parent_agent_id should be the
+    // callerAgentId from ctx, NOT null (Phase B kludge removed).
+    const agentRunRow = asyncInserts[0]!.row;
+    expect(agentRunRow.id).toBe(result.agentId);
+    expect(agentRunRow.parentAgentId).toBe('agent-lead-7');
+  });
+
+  it('falls back to sync path when run_in_background is unset', async () => {
+    runAgentImpl = async () => ({
+      result: 'sync-default',
+      usage: {
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        costUsd: 0.0002,
+        model: 'test',
+        turns: 1,
+      },
+    });
+
+    const result = await taskTool.execute(
+      {
+        subagent_type: 'test-agent',
+        prompt: 'hello',
+        description: 'no flag set',
+      },
+      makeTeamRunCtx(),
+    );
+
+    expect(result.status).toBeUndefined();
+    expect(result.agentId).toBeUndefined();
+    expect(result.result).toBe('sync-default');
+    expect(wake).not.toHaveBeenCalled();
+    expect(runAgentCalls).toHaveLength(1);
   });
 });

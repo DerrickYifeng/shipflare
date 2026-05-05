@@ -120,6 +120,88 @@ describe('SkillTool integration — end-to-end', () => {
     expect(runAgentMock).toHaveBeenCalledTimes(1);
   });
 
+  it('fork mode: wraps parent onEvent with spawnMeta so child events attribute to the fork specialist (regression — without the wrap fork-skill events attribute to the lead instead of the spawn, and SSE subscribers would also lose tool events entirely without forwarding)', async () => {
+    runAgentMock.mockResolvedValue({
+      result: 'OK',
+      cost: 0,
+      duration: 0,
+      turns: 0,
+    });
+
+    const parentOnEvent = vi.fn();
+    const fakeCtxWithOnEvent = {
+      abortSignal: new AbortController().signal,
+      get: <V>(key: string) => {
+        if (key === 'onEvent') return parentOnEvent as unknown as V;
+        return null as unknown as V;
+      },
+    };
+
+    await skillTool.execute(
+      { skill: '_demo-echo-fork', args: 'forwarded' },
+      fakeCtxWithOnEvent as never,
+    );
+
+    // runAgent receives onEvent as its 8th positional arg (0-indexed 7) per spawn.ts.
+    const lastCall = runAgentMock.mock.calls.at(-1);
+    expect(lastCall).toBeDefined();
+    const wrappedOnEvent = lastCall?.[7] as
+      | ((event: import('@/core/types').StreamEvent) => void | Promise<void>)
+      | undefined;
+    // Forwarding still lands a callable: SSE subscribers (e.g.
+    // /api/onboarding/plan) require a function to receive child events.
+    expect(typeof wrappedOnEvent).toBe('function');
+    // After the wrap, the forwarded function is NOT the raw parent
+    // callback — it's a closure that injects spawnMeta on the way
+    // through. The deleted assertion `lastCall?.[7]).toBe(parentOnEvent)`
+    // checked that *some* function was forwarded; the new assertions
+    // below preserve that intent (it must reach the parent) AND verify
+    // the new contract (it carries spawnMeta).
+    expect(wrappedOnEvent).not.toBe(parentOnEvent);
+
+    // Drive a tool_start through the wrapper. The parent must receive
+    // the event with spawnMeta.fromMemberId / agentName attached, so
+    // the worker's persist+publish layer can attribute the row to the
+    // fork specialist instead of stamping the lead's memberId.
+    await wrappedOnEvent!({
+      type: 'tool_start',
+      toolName: 'reddit_search',
+      toolUseId: 'toolu_fork_child_1',
+      input: { query: 'inside-fork' },
+    });
+
+    expect(parentOnEvent).toHaveBeenCalledTimes(1);
+    const forwardedEvent = parentOnEvent.mock.calls[0]?.[0] as {
+      spawnMeta?: import('@/core/types').StreamEventSpawnMeta;
+    };
+    expect(forwardedEvent.spawnMeta).toBeDefined();
+    // agentName comes from the SKILL.md `name` so the UI can label the
+    // delegation card "skill_<name>" without a registry round-trip.
+    expect(forwardedEvent.spawnMeta!.agentName).toBe('skill__demo-echo-fork');
+    // fakeCtx returns null for db/teamId so resolveSpecialistMemberId
+    // can't look up a real row — the wrap must still fire (with a null
+    // memberId fallback) so the parentToolUseId / agentName attribution
+    // still reaches the worker.
+    expect(forwardedEvent.spawnMeta!.fromMemberId).toBeNull();
+  });
+
+  it('fork mode: omits onEvent when parent ctx has none (non-team-scoped callers run quietly)', async () => {
+    runAgentMock.mockResolvedValue({
+      result: 'OK',
+      cost: 0,
+      duration: 0,
+      turns: 0,
+    });
+
+    await skillTool.execute(
+      { skill: '_demo-echo-fork', args: 'no-events' },
+      fakeCtx() as never,
+    );
+
+    const lastCall = runAgentMock.mock.calls.at(-1);
+    expect(lastCall?.[7]).toBeUndefined();
+  });
+
   it('throws on unknown skill', async () => {
     await expect(
       skillTool.execute(

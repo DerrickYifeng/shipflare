@@ -113,12 +113,28 @@ function parseFrontmatter(raw: string): {
   return { frontmatter: result, body };
 }
 
+async function resolveSharedReference(
+  entry: string,
+  sharedDir: string,
+): Promise<string> {
+  const normalized = entry.endsWith('.md') ? entry : `${entry}.md`;
+  return fs.readFile(path.join(sharedDir, normalized), 'utf8');
+}
+
+interface LoadSkillOptions {
+  /** Override shared-references directory (used by tests). Defaults to `src/references/`. */
+  sharedReferencesDir?: string;
+}
+
 /**
  * Load a single skill from a directory containing SKILL.md.
  * Returns null if no SKILL.md exists at the given path.
  * Throws if SKILL.md is present but malformed (missing required fields).
  */
-export async function loadSkill(skillDir: string): Promise<SkillCommand | null> {
+export async function loadSkill(
+  skillDir: string,
+  opts: LoadSkillOptions = {},
+): Promise<SkillCommand | null> {
   const skillMdPath = path.join(skillDir, 'SKILL.md');
   let raw: string;
   try {
@@ -146,6 +162,24 @@ export async function loadSkill(skillDir: string): Promise<SkillCommand | null> 
       );
     }
     inlinedBody = inlineReference(inlinedBody, entry, content);
+  }
+
+  const sharedRefs = validated['shared-references'] ?? [];
+  if (sharedRefs.length > 0) {
+    const sharedDir =
+      opts.sharedReferencesDir ??
+      path.resolve(process.cwd(), 'src/references');
+    for (const entry of sharedRefs) {
+      let content: string;
+      try {
+        content = await resolveSharedReference(entry, sharedDir);
+      } catch (err) {
+        throw new Error(
+          `Skill "${validated.name}" shared-references missing file "${entry}" under ${sharedDir}: ${(err as Error).message}`,
+        );
+      }
+      inlinedBody = inlineReference(inlinedBody, entry, content);
+    }
   }
 
   const cmd: SkillCommand = {

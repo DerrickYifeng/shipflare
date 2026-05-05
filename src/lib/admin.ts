@@ -27,3 +27,23 @@ export function isAdminEmail(email: string | null | undefined): boolean {
   const allow = parseAllowlist();
   return allow.has(email.toLowerCase());
 }
+
+/**
+ * Server-side admin gate for server actions. Layouts already gate via
+ * `(app)/admin/layout.tsx`, but server actions execute outside of the
+ * layout tree — they MUST call this before mutating anything.
+ *
+ * Returns the admin's normalized email on success. Throws on rejection
+ * so the action exits with an error response (Next.js shows the user
+ * the same not-found page as direct nav).
+ */
+export async function requireAdmin(): Promise<string> {
+  const { auth } = await import('@/lib/auth');
+  const session = await auth();
+  const email = session?.user?.email ?? null;
+  if (!isAdminEmail(email)) {
+    // Same UX as the layout — opaque rather than 403.
+    throw new Error('not_found');
+  }
+  return email!.toLowerCase();
+}

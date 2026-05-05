@@ -1102,8 +1102,15 @@ function ItemCard({ item }: { item: CalendarItem }) {
 function StateDot({
   spec,
 }: {
-  spec: { color: string; fill: 'solid' | 'ring' | 'pulse' };
+  spec: { color: string; fill: 'solid' | 'ring' | 'pulse' } | undefined;
 }) {
+  // Defensive guard. `stateDotStyles(s)` is exhaustive over the
+  // PlanItemState union declared in lib/calendar-layout.ts, but at
+  // runtime a plan_item row from the DB can carry a state outside that
+  // union (e.g. a value added server-side without a UI sync), in which
+  // case the switch falls through and returns `undefined`. Returning
+  // null here is preferable to the React crash on `spec.fill`.
+  if (!spec) return null;
   if (spec.fill === 'ring') {
     return (
       <span
@@ -1271,6 +1278,13 @@ function stateDotStyles(s: PlanItemState): {
     case 'planned':
     case 'superseded':
     case 'stale':
+      return { color: 'rgba(0,0,0,0.24)', fill: 'ring' };
+    default:
+      // PlanItemState is exhaustive at compile time, but the DB can
+      // surface values not yet synced to the UI union (legacy rows or
+      // a server-side state added without a client sync). Fall back to
+      // the same neutral ring used for planned/stale rather than
+      // returning undefined and crashing StateDot at runtime.
       return { color: 'rgba(0,0,0,0.24)', fill: 'ring' };
   }
 }

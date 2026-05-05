@@ -1,3 +1,14 @@
+/**
+ * Phase G cleanup (migration 0016_drop_team_runs): the team_runs table
+ * is gone and `getTeamBudgetSnapshot` / `teamHasBudgetRemaining` /
+ * `maybeEmitBudgetWarning` are now no-op stubs that report 0 spend and
+ * "always has budget". The pure helpers (`weekStartUtc`,
+ * `isAutoBudgetPauseEnabled`) keep their behavioural tests; the
+ * cost-tracking tests are retired with a TODO pointing at the future
+ * agent_runs.totalTokens-based reimplementation. See module header in
+ * `src/lib/team-budget.ts` and git history of this file for the legacy
+ * cost-tracking fixtures.
+ */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   weekStartUtc,
@@ -6,7 +17,7 @@ import {
 } from '@/lib/team-budget';
 
 // ---------------------------------------------------------------------------
-// weekStartUtc — pure fn
+// weekStartUtc — pure fn (unchanged)
 // ---------------------------------------------------------------------------
 
 describe('weekStartUtc', () => {
@@ -34,7 +45,7 @@ describe('weekStartUtc', () => {
 });
 
 // ---------------------------------------------------------------------------
-// isAutoBudgetPauseEnabled — env flag
+// isAutoBudgetPauseEnabled — env flag (unchanged)
 // ---------------------------------------------------------------------------
 
 describe('isAutoBudgetPauseEnabled', () => {
@@ -72,127 +83,60 @@ describe('isAutoBudgetPauseEnabled', () => {
 });
 
 // ---------------------------------------------------------------------------
-// getTeamBudgetSnapshot + teamHasBudgetRemaining + maybeEmitBudgetWarning
+// Stubbed cost-tracking helpers — confirm Phase G shape
 //
-// In-memory db mock — covers the tiny surface these helpers use.
+// TODO(perf-cleanup-2026-XX): when cost tracking is rebuilt on
+// `agent_runs.totalTokens × model rate`, restore the legacy spend tests
+// (sum across the week, exhaustion threshold, 90% warning dedupe). See
+// git history of this file for the fixtures.
 // ---------------------------------------------------------------------------
 
 interface TeamRow {
   id: string;
   config: Record<string, unknown>;
 }
-interface RunRow {
-  id: string;
-  teamId: string;
-  totalCostUsd: string | null;
-  startedAt: Date;
-}
 
-// `vi.mock` factories are hoisted above top-level const declarations; use
-// `vi.hoisted` so the table symbols + row arrays are available when the
-// factory runs. See https://vitest.dev/api/vi.html#vi-hoisted.
 const hoisted = vi.hoisted(() => {
   const teamsTable: symbol = Symbol('teams');
-  const teamRunsTable: symbol = Symbol('teamRuns');
   const teamRowsStore: unknown[] = [];
-  const runRowsStore: unknown[] = [];
-  return { teamsTable, teamRunsTable, teamRowsStore, runRowsStore };
+  return { teamsTable, teamRowsStore };
 });
-const { teamsTable, teamRunsTable, teamRowsStore, runRowsStore } = hoisted;
+const { teamsTable, teamRowsStore } = hoisted;
 
 const getTeamRows = (): TeamRow[] => teamRowsStore as TeamRow[];
-const getRunRows = (): RunRow[] => runRowsStore as RunRow[];
 
 function resetTables() {
   teamRowsStore.length = 0;
-  runRowsStore.length = 0;
 }
 
 vi.mock('drizzle-orm', async () => {
   const actual =
     await vi.importActual<typeof import('drizzle-orm')>('drizzle-orm');
-  function makeSqlFragment(marker: string) {
-    return {
-      __sql: marker,
-      as: (alias: string) => ({ __sqlAlias: alias, marker }),
-    };
-  }
   return {
     ...actual,
     eq: (col: unknown, value: unknown) => ({ __eq: { col, value } }),
-    gte: (col: unknown, value: unknown) => ({ __gte: { col, value } }),
-    and: (...parts: unknown[]) => ({ __and: parts }),
-    sql: Object.assign(
-      (strings: TemplateStringsArray, ..._values: unknown[]) =>
-        makeSqlFragment(strings.join('?')),
-      { raw: () => makeSqlFragment('raw') },
-    ),
   };
 });
 
 vi.mock('@/lib/db/schema', () => ({
   teams: hoisted.teamsTable,
-  teamRuns: hoisted.teamRunsTable,
 }));
 
 vi.mock('@/lib/db', () => {
-  interface EqSentinel { __eq: { col: unknown; value: unknown } }
-  interface GteSentinel { __gte: { col: unknown; value: unknown } }
-  interface AndSentinel { __and: unknown[] }
-  type Filter = EqSentinel | GteSentinel | AndSentinel;
-
-  function flatten(cond: unknown): Array<{ op: string; value: unknown }> {
-    if (!cond) return [];
-    const c = cond as Filter;
-    if ('__and' in c) return c.__and.flatMap((x) => flatten(x));
-    if ('__eq' in c) return [{ op: 'eq', value: c.__eq.value }];
-    if ('__gte' in c) return [{ op: 'gte', value: c.__gte.value }];
-    return [];
+  interface EqSentinel {
+    __eq: { col: unknown; value: unknown };
   }
 
-  function matchesTeam(row: TeamRow, f: Array<{ op: string; value: unknown }>): boolean {
-    return f.every(({ op, value }) => {
-      if (op === 'eq') return row.id === value;
-      return true;
-    });
-  }
-
-  function matchesRun(row: RunRow, f: Array<{ op: string; value: unknown }>): boolean {
-    return f.every(({ op, value }) => {
-      if (op === 'eq') return row.teamId === value;
-      if (op === 'gte') return row.startedAt.getTime() >= (value as Date).getTime();
-      return true;
-    });
-  }
-
-  function selectForTable(cols: Record<string, unknown>) {
+  function selectForTable(_cols: Record<string, unknown>) {
     return {
       from: (table: symbol) => ({
         where: (cond: unknown) => {
-          const f = flatten(cond);
-          if (table === hoisted.teamsTable) {
-            const matched = (hoisted.teamRowsStore as TeamRow[]).filter((r) =>
-              matchesTeam(r, f),
+          if (table === teamsTable) {
+            const c = cond as EqSentinel;
+            const value = c?.__eq?.value;
+            const matched = (teamRowsStore as TeamRow[]).filter(
+              (r) => r.id === value,
             );
-            return {
-              limit: (n: number) => Promise.resolve(matched.slice(0, n)),
-              then: (cb: (v: unknown) => unknown) =>
-                Promise.resolve(matched).then(cb),
-            };
-          }
-          if (table === hoisted.teamRunsTable) {
-            const matched = (hoisted.runRowsStore as RunRow[]).filter((r) =>
-              matchesRun(r, f),
-            );
-            // getTeamBudgetSnapshot asks for sum(total_cost_usd).
-            if ('sum' in cols) {
-              const total = matched.reduce(
-                (acc: number, r: RunRow) =>
-                  acc + Number(r.totalCostUsd ?? 0),
-                0,
-              );
-              return Promise.resolve([{ sum: String(total) }]);
-            }
             return {
               limit: (n: number) => Promise.resolve(matched.slice(0, n)),
               then: (cb: (v: unknown) => unknown) =>
@@ -221,7 +165,7 @@ vi.mock('@/lib/logger', () => ({
   }),
 }));
 
-describe('getTeamBudgetSnapshot', () => {
+describe('getTeamBudgetSnapshot (Phase G stub)', () => {
   beforeEach(() => resetTables());
 
   it('uses DEFAULT_WEEKLY_BUDGET_USD when teams.config.weeklyBudgetUsd is absent', async () => {
@@ -244,154 +188,36 @@ describe('getTeamBudgetSnapshot', () => {
     expect(snap.weeklyBudgetUsd).toBe(20);
   });
 
-  it('sums team_runs.total_cost_usd since the current Monday', async () => {
+  it('always reports zero spend (Phase G stub)', async () => {
     getTeamRows().push({ id: 't-1', config: { weeklyBudgetUsd: 10 } });
-    // Pick a fixed "now" (Tuesday) and seed runs before/after the week start.
-    const now = new Date('2026-04-21T14:00:00Z'); // Tuesday
-    getRunRows().push({
-      id: 'r-old',
-      teamId: 't-1',
-      totalCostUsd: '100', // should NOT count — before monday 2026-04-20
-      startedAt: new Date('2026-04-13T10:00:00Z'),
-    });
-    getRunRows().push({
-      id: 'r-new-1',
-      teamId: 't-1',
-      totalCostUsd: '2.50',
-      startedAt: new Date('2026-04-20T08:00:00Z'), // monday this week
-    });
-    getRunRows().push({
-      id: 'r-new-2',
-      teamId: 't-1',
-      totalCostUsd: '1.75',
-      startedAt: new Date('2026-04-21T09:00:00Z'),
-    });
     const { getTeamBudgetSnapshot } = await import('@/lib/team-budget');
-    const snap = await getTeamBudgetSnapshot('t-1', undefined, now);
-    expect(snap.spentUsd).toBeCloseTo(4.25, 2);
+    const snap = await getTeamBudgetSnapshot('t-1');
+    expect(snap.spentUsd).toBe(0);
+    expect(snap.utilization).toBe(0);
     expect(snap.exhausted).toBe(false);
     expect(snap.at90Percent).toBe(false);
   });
-
-  it('flags exhausted + at90Percent correctly', async () => {
-    getTeamRows().push({ id: 't-1', config: { weeklyBudgetUsd: 5 } });
-    const now = new Date('2026-04-21T14:00:00Z');
-    getRunRows().push({
-      id: 'r-1',
-      teamId: 't-1',
-      totalCostUsd: '4.60', // 92% — at90Percent but not exhausted
-      startedAt: new Date('2026-04-20T08:00:00Z'),
-    });
-    const { getTeamBudgetSnapshot } = await import('@/lib/team-budget');
-    const snap = await getTeamBudgetSnapshot('t-1', undefined, now);
-    expect(snap.at90Percent).toBe(true);
-    expect(snap.exhausted).toBe(false);
-
-    // Push over 100%.
-    getRunRows().push({
-      id: 'r-2',
-      teamId: 't-1',
-      totalCostUsd: '1.00',
-      startedAt: new Date('2026-04-21T08:00:00Z'),
-    });
-    const snap2 = await getTeamBudgetSnapshot('t-1', undefined, now);
-    expect(snap2.exhausted).toBe(true);
-  });
 });
 
-describe('teamHasBudgetRemaining', () => {
-  const originalEnv = process.env.SHIPFLARE_TEAM_AUTO_BUDGET_PAUSE;
-
-  beforeEach(() => {
-    resetTables();
-    delete process.env.SHIPFLARE_TEAM_AUTO_BUDGET_PAUSE;
-  });
-
-  afterEach(() => {
-    if (originalEnv === undefined) {
-      delete process.env.SHIPFLARE_TEAM_AUTO_BUDGET_PAUSE;
-    } else {
-      process.env.SHIPFLARE_TEAM_AUTO_BUDGET_PAUSE = originalEnv;
-    }
-  });
-
-  it('returns true when budget remains', async () => {
-    getTeamRows().push({ id: 't-1', config: { weeklyBudgetUsd: 10 } });
-    const { teamHasBudgetRemaining } = await import('@/lib/team-budget');
-    expect(await teamHasBudgetRemaining('t-1')).toBe(true);
-  });
-
-  it('returns false when budget is exhausted', async () => {
-    getTeamRows().push({ id: 't-1', config: { weeklyBudgetUsd: 1 } });
-    // Today's spend exceeds budget.
-    const today = new Date();
-    getRunRows().push({
-      id: 'r-1',
-      teamId: 't-1',
-      totalCostUsd: '5.00',
-      startedAt: today,
-    });
-    const { teamHasBudgetRemaining } = await import('@/lib/team-budget');
-    expect(await teamHasBudgetRemaining('t-1')).toBe(false);
-  });
-
-  it('always returns true when feature flag is disabled', async () => {
-    process.env.SHIPFLARE_TEAM_AUTO_BUDGET_PAUSE = 'false';
-    getTeamRows().push({ id: 't-1', config: { weeklyBudgetUsd: 1 } });
-    getRunRows().push({
-      id: 'r-1',
-      teamId: 't-1',
-      totalCostUsd: '5.00',
-      startedAt: new Date(),
-    });
-    const { teamHasBudgetRemaining } = await import('@/lib/team-budget');
-    expect(await teamHasBudgetRemaining('t-1')).toBe(true);
-  });
-});
-
-describe('maybeEmitBudgetWarning', () => {
+describe('teamHasBudgetRemaining (Phase G stub)', () => {
   beforeEach(() => resetTables());
 
-  it('calls sink once when over 90%, and dedupes on second call', async () => {
-    getTeamRows().push({ id: 't-1', config: { weeklyBudgetUsd: 5 } });
-    const now = new Date('2026-04-21T14:00:00Z');
-    getRunRows().push({
-      id: 'r-1',
-      teamId: 't-1',
-      totalCostUsd: '4.80', // 96%
-      startedAt: new Date('2026-04-20T08:00:00Z'),
-    });
-
-    const sink = vi.fn(async () => {});
-    const dedupeState = new Set<string>();
-    const dedupe = vi.fn(async (teamId: string, week: Date) => {
-      const key = `${teamId}:${week.toISOString()}`;
-      if (dedupeState.has(key)) return false;
-      dedupeState.add(key);
-      return true;
-    });
-
-    const { maybeEmitBudgetWarning } = await import('@/lib/team-budget');
-    await maybeEmitBudgetWarning('t-1', undefined, sink, dedupe, now);
-    expect(sink).toHaveBeenCalledTimes(1);
-
-    await maybeEmitBudgetWarning('t-1', undefined, sink, dedupe, now);
-    expect(sink).toHaveBeenCalledTimes(1); // dedupe held
+  it('always returns true (cost tracking dormant until perf-cleanup-2026-XX)', async () => {
+    getTeamRows().push({ id: 't-1', config: { weeklyBudgetUsd: 1 } });
+    const { teamHasBudgetRemaining } = await import('@/lib/team-budget');
+    expect(await teamHasBudgetRemaining('t-1')).toBe(true);
   });
+});
 
-  it('does not call sink below 90%', async () => {
+describe('maybeEmitBudgetWarning (Phase G stub)', () => {
+  beforeEach(() => resetTables());
+
+  it('never invokes the sink because the stub snapshot reports 0 spend', async () => {
     getTeamRows().push({ id: 't-1', config: { weeklyBudgetUsd: 5 } });
-    const now = new Date('2026-04-21T14:00:00Z');
-    getRunRows().push({
-      id: 'r-1',
-      teamId: 't-1',
-      totalCostUsd: '2.00', // 40%
-      startedAt: new Date('2026-04-20T08:00:00Z'),
-    });
     const sink = vi.fn(async () => {});
     const dedupe = vi.fn(async () => true);
     const { maybeEmitBudgetWarning } = await import('@/lib/team-budget');
-    await maybeEmitBudgetWarning('t-1', undefined, sink, dedupe, now);
+    await maybeEmitBudgetWarning('t-1', undefined, sink, dedupe);
     expect(sink).not.toHaveBeenCalled();
   });
 });

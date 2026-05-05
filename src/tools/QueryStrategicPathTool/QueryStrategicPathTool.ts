@@ -1,7 +1,7 @@
 // query_strategic_path — read the active strategic_paths row for the
 // current (userId, productId). Zero-arg; scoped to ctx.
 //
-// Called by: coordinator, growth-strategist, content-planner.
+// Called by: coordinator, content-planner, generating-strategy skill.
 // Returns: the strategicPathSchema-shaped object, or null if no row
 // exists yet (onboarding hasn't run).
 

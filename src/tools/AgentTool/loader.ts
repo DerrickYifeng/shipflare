@@ -1,8 +1,9 @@
 // Ported from engine/tools/AgentTool/loadAgentsDir.ts parseAgent() (Claude Code);
 // validators for hooks/mcpServers/permissionMode/isolation/initialPrompt/memory/
-// omitClaudeMd/requiredMcpServers/background are intentionally dropped — ShipFlare
-// agents live in-process under our own BullMQ worker, not CC's CLI runtime.
+// omitClaudeMd/requiredMcpServers are intentionally dropped — ShipFlare agents
+// live in-process under our own BullMQ worker, not CC's CLI runtime.
 // `skills` is parsed as a first-class field (see AgentDefinition.skills).
+// `disallowedTools` and `background` are restored Phase A (Agent Teams spec §5).
 
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
@@ -15,19 +16,43 @@ const log = createLogger('tools:agent-loader');
 // Public types
 // ---------------------------------------------------------------------------
 
-export interface AgentDefinition {
+export type AgentRole = 'lead' | 'member';
+
+interface BaseAgentDefinition {
   name: string;
   description: string;
+  role: AgentRole;             // Phase A — primary input to four-layer tool filter (Agent Teams spec §5)
   tools: string[];
+  disallowedTools: string[];   // restored Phase A — see Agent Teams spec §5
   skills: string[];
+  requires: string[];          // NEW — Phase A; DSL: 'channel:x', 'product:has_description'
+  background: boolean;         // restored Phase A — semantics adapted, see Agent Teams spec §5
   model?: string;
   maxTurns: number;
   color?: string;
   /** Markdown body + inlined references + inlined shared-references. */
   systemPrompt: string;
+}
+
+export interface BuiltInAgentDefinition extends BaseAgentDefinition {
+  source: 'built-in';
   /** Absolute path to the AGENT.md file that produced this definition. */
   sourcePath: string;
 }
+
+// Forward-declaration for Phase 2+ — user-defined agents stored in the DB
+// (see Agent Teams spec §5.5). Declared now so the discriminated union
+// compiles cleanly and so reviewers who grep for `'custom'` can see the
+// reserved branch. The loader path that produces this lands later when
+// DB-stored custom agents become user-facing; until then, no code should
+// construct one.
+export interface CustomAgentDefinition extends BaseAgentDefinition {
+  source: 'custom';
+  ownerId: string;
+  storedAt: 'db';
+}
+
+export type AgentDefinition = BuiltInAgentDefinition | CustomAgentDefinition;
 
 // ---------------------------------------------------------------------------
 // Frontmatter shape
@@ -38,7 +63,10 @@ export interface AgentDefinition {
 // file listing the dropped keys so ported AGENT.md files don't silently carry
 // CC-runtime config that has no effect.
 
-const DEFAULT_MAX_TURNS = 25;
+// Match Claude Code's FORK_AGENT.maxTurns (engine/tools/AgentTool/forkSubagent.ts:65).
+// This is a circuit breaker for runaway loops, NOT a natural-termination
+// bound — agents should hit StructuredOutput / end_turn long before this.
+const DEFAULT_MAX_TURNS = 200;
 
 const AGENT_NAME_PATTERN = /^[a-z][a-z0-9_-]*$/;
 
@@ -55,6 +83,10 @@ const frontmatterSchema = z
       .string({ required_error: 'description is required' })
       .min(1, 'description cannot be empty'),
     tools: z.array(z.string()).optional(),
+    disallowedTools: z.array(z.string()).optional(),
+    background: z.boolean().optional(),
+    role: z.enum(['lead', 'member']).optional(),
+    requires: z.array(z.string()).optional(),
     skills: z.array(z.string()).optional(),
     model: z.string().min(1).optional(),
     maxTurns: z.number().int().positive().optional(),
@@ -76,8 +108,8 @@ const DROPPED_FIELDS = [
   'memory',
   'omitClaudeMd',
   'requiredMcpServers',
-  'background',
-  'disallowedTools',
+  // disallowedTools restored Phase A — see Agent Teams spec §5
+  // background restored Phase A — see Agent Teams spec §5
   'effort',
 ] as const;
 
@@ -369,7 +401,7 @@ interface LoadOptions {
 export async function loadAgent(
   agentDirPath: string,
   options: LoadOptions = {},
-): Promise<AgentDefinition> {
+): Promise<BuiltInAgentDefinition> {
   const agentMdPath = path.join(agentDirPath, 'AGENT.md');
   const source = await fs.readFile(agentMdPath, 'utf8');
 
@@ -424,10 +456,15 @@ export async function loadAgent(
   }
 
   return {
+    source: 'built-in' as const,
     name: parsed.name,
     description: parsed.description,
+    role: parsed.role ?? 'member',
     tools: parsed.tools ?? [],
+    disallowedTools: parsed.disallowedTools ?? [],
     skills: parsed.skills ?? [],
+    requires: parsed.requires ?? [],
+    background: parsed.background ?? false,
     ...(parsed.model !== undefined ? { model: parsed.model } : {}),
     maxTurns: parsed.maxTurns ?? DEFAULT_MAX_TURNS,
     ...(parsed.color !== undefined ? { color: parsed.color } : {}),
@@ -439,7 +476,7 @@ export async function loadAgent(
 export async function loadAgentsDir(
   rootDir: string,
   options: LoadOptions = {},
-): Promise<AgentDefinition[]> {
+): Promise<BuiltInAgentDefinition[]> {
   const agentDirs = await discoverAgentDirs(rootDir);
   const loaded = await Promise.all(
     agentDirs.map((dir) => loadAgent(dir, options)),

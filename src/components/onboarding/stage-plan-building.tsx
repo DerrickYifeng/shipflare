@@ -1,15 +1,20 @@
-// Stage 6 — Plan building. Reuses SixStepAnimator while POST /api/onboarding/plan
-// streams SSE events in parallel. Advances on `strategic_done` with the
-// strategic path only — tactical drafting is deferred to a background worker
-// kicked off by /api/onboarding/commit, with progress shown on /today.
-// 180s timeout → error state with "Continue with manual plan" fallback.
+// Stage 6 — Plan building. Renders a /team-style chat transcript while
+// POST /api/onboarding/plan streams SSE events. Advances on
+// `strategic_done` with the strategic path only — tactical drafting is
+// deferred to a background worker kicked off by /api/onboarding/commit,
+// with progress shown on /today. 180s timeout → error state with
+// "Continue with manual plan" fallback.
 
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
 import { OnbMono } from './_shared/onb-mono';
-import { SixStepAnimator } from './_shared/six-step-animator';
 import { OnbButton } from './_shared/onb-button';
+import { SyntheticChatConversation } from './_shared/synthetic-chat-conversation';
+import {
+  synthesizeStrategyConversation,
+  type ToolProgressEvent,
+} from './_shared/synthesize-strategy-conversation';
 import { COPY } from './_copy';
 import type { StrategicPath } from '@/tools/schemas';
 import type { DraftState, ProductState } from './OnboardingFlow';
@@ -60,11 +65,21 @@ interface PlanEventError {
   error: string;
 }
 
+interface PlanEventToolProgress {
+  type: 'tool_progress';
+  phase: 'start' | 'done' | 'error';
+  toolName: string;
+  toolUseId: string;
+  durationMs?: number;
+  errorMessage?: string;
+}
+
 // Tolerant shape — backend may emit progress pings, keepalives, or events we
 // don't care about. We switch on `type` and ignore anything else.
 type PlanEvent =
   | PlanEventStrategicDone
   | PlanEventError
+  | PlanEventToolProgress
   | { type: string; [key: string]: unknown };
 
 interface StagePlanBuildingProps {
@@ -92,10 +107,45 @@ export function StagePlanBuilding({
   onCancel,
   onFallback,
 }: StagePlanBuildingProps) {
-  const [realCallComplete, setRealCallComplete] = useState(false);
+  const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Append-only log of `tool_progress` SSE frames emitted by the
+  // generating-strategy skill. Drives the synthetic chat hook; the
+  // ordering here matches arrival order from the server, which is
+  // the order the user should see in the subtask card.
+  const [toolProgressEvents, setToolProgressEvents] = useState<
+    readonly ToolProgressEvent[]
+  >([]);
+  // Wall-clock now, ticked once per second so the RUNNING pill keeps
+  // counting up without the chat hook needing its own clock.
+  const [now, setNow] = useState(() => Date.now());
+  const startedAtRef = useRef<number>(Date.now());
   const responseRef = useRef<PlanStrategicResult | null>(null);
   const stateLabel = draft.productState ?? 'launching';
+
+  useEffect(() => {
+    if (done || error) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [done, error]);
+
+  const conversationState = synthesizeStrategyConversation({
+    toolProgressEvents,
+    done,
+    error,
+    startedAt: startedAtRef.current,
+    now,
+  });
+
+  // Auto-advance once the response has resolved. The previous
+  // SixStepAnimator design waited for an internal animation timer
+  // before calling `onComplete`; with the synthetic chat we have no
+  // timer to wait on, so step forward immediately on `strategic_done`.
+  useEffect(() => {
+    if (!done) return;
+    const r = responseRef.current;
+    if (r) onGenerated(r);
+  }, [done, onGenerated]);
 
   // Read draft + channels via refs so the effect below can be a one-shot
   // on mount. Using them as useEffect deps would rerun + abort the planner
@@ -170,8 +220,8 @@ export function StagePlanBuilding({
         let buffer = '';
         let resolved = false;
         while (!resolved) {
-          const { value, done } = await reader.read();
-          if (done) break;
+          const { value, done: streamDone } = await reader.read();
+          if (streamDone) break;
           buffer += decoder.decode(value, { stream: true });
           const parts = buffer.split('\n\n');
           buffer = parts.pop() ?? '';
@@ -190,10 +240,24 @@ export function StagePlanBuilding({
               const ev = parsed as PlanEventError;
               throw new Error(ev.error || 'Plan generation failed');
             }
+            if (parsed.type === 'tool_progress') {
+              const ev = parsed as PlanEventToolProgress;
+              setToolProgressEvents((prev) => [
+                ...prev,
+                {
+                  toolName: ev.toolName,
+                  phase: ev.phase,
+                  toolUseId: ev.toolUseId,
+                  durationMs: ev.durationMs,
+                  errorMessage: ev.errorMessage,
+                },
+              ]);
+              continue;
+            }
             if (parsed.type === 'strategic_done') {
               const ev = parsed as PlanEventStrategicDone;
               responseRef.current = { path: ev.path, plan: null };
-              setRealCallComplete(true);
+              setDone(true);
               resolved = true;
               // Keep the connection open so the server can finish flushing
               // other events without erroring, but stop consuming — the
@@ -221,18 +285,7 @@ export function StagePlanBuilding({
     return () => {
       clearTimeout(timeout);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const handleComplete = () => {
-    const r = responseRef.current;
-    if (r) onGenerated(r);
-  };
-
-  const steps = COPY.stage6.steps.map((s) => ({
-    ...s,
-    target: s.target.replace('{STATE}', stateLabel),
-  }));
 
   return (
     <div>
@@ -297,15 +350,15 @@ export function StagePlanBuilding({
         <span>{COPY.stage6.durationCaption}</span>
       </p>
 
-      <SixStepAnimator
-        steps={steps}
-        agentName={COPY.stage6.agentName}
-        cancelLabel="Cancel"
-        onCancel={onCancel}
-        realCallComplete={realCallComplete}
-        realCallError={error}
-        onComplete={handleComplete}
-      />
+      <SyntheticChatConversation state={conversationState} />
+
+      {!error && !done && (
+        <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end' }}>
+          <OnbButton variant="ghost" onClick={onCancel}>
+            Cancel
+          </OnbButton>
+        </div>
+      )}
 
       {error && (
         <div

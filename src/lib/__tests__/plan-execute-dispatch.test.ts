@@ -6,11 +6,12 @@ import {
 
 describe('dispatchPlanItem — happy paths', () => {
   it('routes content_post + x to null draft / posting execute / approve', () => {
-    // The writer branch in plan-execute owns the DRAFT phase for content_post
-    // (spawns post-writer via team-run; the writer reads `plan_items.channel`
-    // to pick the right platform guide). The dispatch table's draftSkill for
-    // content_post is intentionally null; only the execute path (posting) is
-    // still consulted here.
+    // Phase J Task 2: the plan-execute-sweeper owns the DRAFT phase for
+    // content_post (it batches due rows into a single
+    // content-manager(post_batch) team-run per user; the agent reads
+    // `plan_items.channel` to pick the right platform guide). The
+    // dispatch table's draftSkill for content_post is intentionally
+    // null; only the execute path (posting) is consulted here.
     const route = dispatchPlanItem({ kind: 'content_post', channel: 'x' });
     expect(route).not.toBeNull();
     expect(route!.draftSkill).toBeNull();
@@ -20,8 +21,8 @@ describe('dispatchPlanItem — happy paths', () => {
 
   it('routes content_reply + x to null draft / posting execute / approve', () => {
     // Phase 6 (agent-cleanup) deleted the draft-single-reply skill —
-    // community-manager owns reply drafting end-to-end via the discovery
-    // → community-manager Task fan-out. The dispatch route still
+    // content-manager owns reply drafting end-to-end via the discovery
+    // → content-manager Task fan-out. The dispatch route still
     // resolves so the state machine keeps flowing; only the execute
     // path (posting) is consulted from here.
     const route = dispatchPlanItem({ kind: 'content_reply', channel: 'x' });

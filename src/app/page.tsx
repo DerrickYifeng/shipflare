@@ -8,6 +8,7 @@ import { ThreadsSection } from '@/components/marketing/threads-section';
 import { SafetySection } from '@/components/marketing/safety-section';
 import { CTASection } from '@/components/marketing/cta-section';
 import { FooterStrip } from '@/components/marketing/footer-strip';
+import { AccessDeniedBanner } from '@/components/marketing/access-denied-banner';
 
 /**
  * Marketing landing — strict alternating ink ↔ paper rhythm:
@@ -18,9 +19,15 @@ import { FooterStrip } from '@/components/marketing/footer-strip';
  * Do NOT wrap this page in `.app-dark` — that would remap `--sf-bg-primary`.
  * Dark sections set their own bg + on-dark fg, so this works without theme.
  */
-export default async function HomePage() {
+export default async function HomePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string }>;
+}) {
   const session = await auth();
   const isAuthenticated = !!session?.user?.id;
+  const sp = await searchParams;
+  const accessDenied = sp.error === 'AccessDenied';
 
   return (
     <main
@@ -28,6 +35,7 @@ export default async function HomePage() {
       style={{ background: 'var(--sf-bg-dark)' }}
     >
       <GlassNav isAuthenticated={isAuthenticated} />
+      {accessDenied ? <AccessDeniedBanner /> : null}
       <HeroDemo isAuthenticated={isAuthenticated} />
       <HowItWorks />
       <VideoSection />

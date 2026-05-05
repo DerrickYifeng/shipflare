@@ -18,32 +18,30 @@
  * per BaseAgentType so `plan-execute` / `team-run` callers can route
  * without reading the config.
  *
- * Phase 6 (agent-cleanup) dropped `reply-drafter` from the baseline —
- * community-manager now owns reply drafting end-to-end (drafts the body
- * inline + self-checks against the slop / anchor / length / stats rules
- * in its references), so the standalone reply-drafter teammate is gone.
+ * Plan 3 (2026-05-04 collapse): the marketing-side specialists
+ * (`content-manager`, `content-planner`, `discovery-agent`) were merged
+ * into a single `social-media-manager` — the real industry job title for
+ * someone who owns X (and later Reddit / LinkedIn / HN / Discord)
+ * end-to-end. The strategic-path / plan-item generation that used to
+ * live in `content-planner` was absorbed by the coordinator (chief of
+ * staff scope at solo-founder scale).
  */
-export type BaseAgentType =
-  | 'coordinator'
-  | 'growth-strategist'
-  | 'content-planner';
+export type BaseAgentType = 'coordinator';
 
 /**
- * Writer + community agents layered on top of the baseline by preset.
- * `post-writer` is a single channel-aware writer — `plan_items.channel`
- * (`x` or `reddit`) decides the platform tone via the writer's reference
- * docs at draft time, so we no longer split the roster by platform.
- * `community-manager` owns the entire reply pipeline post-Phase-6.
+ * Specialist agents layered on top of the baseline by preset.
+ * `social-media-manager` owns the full social pipeline: discovery,
+ * judging, reply drafting, and original-post drafting + scheduling
+ * across every connected channel. Replaces the legacy
+ * `content-manager` + `discovery-agent` pair retired in Plan 3.
  */
-export type WriterAgentType =
-  | 'post-writer'
-  | 'community-manager';
+export type SocialAgentType = 'social-media-manager';
 
 /**
  * Full agent type set. Must match AGENT.md `name` under
  * `src/tools/AgentTool/agents/<agent_type>`.
  */
-export type AgentType = BaseAgentType | WriterAgentType;
+export type AgentType = BaseAgentType | SocialAgentType;
 
 // ---------------------------------------------------------------------------
 // Presets + category mapping
@@ -75,23 +73,17 @@ export type ProductCategory =
 
 export interface DisplayNameMap {
   coordinator: string;
-  'growth-strategist': string;
-  'content-planner': string;
-  'post-writer': string;
-  'community-manager': string;
+  'social-media-manager': string;
 }
 
 /**
  * Default display names used by the provisioner and the "Meet your team"
  * onboarding card. Role labels (not personal names) so copy reads honestly —
- * "Post Writer" instead of "Jordan".
+ * "Social Media Manager" instead of "Jordan".
  */
 export const DEFAULT_DISPLAY_NAMES: DisplayNameMap = {
   coordinator: 'Chief of Staff',
-  'growth-strategist': 'Head of Growth',
-  'content-planner': 'Head of Content',
-  'post-writer': 'Post Writer',
-  'community-manager': 'Community Manager',
+  'social-media-manager': 'Social Media Manager',
 };
 
 /**
@@ -119,22 +111,23 @@ export function pickPresetByCategory(
 
 /**
  * The roster for a preset. Order matters for deterministic insertion +
- * the Meet-your-team card. The 3-role baseline always comes first.
+ * the Meet-your-team card. The baseline always comes first.
+ *
+ * Plan 3 (2026-05-04): every category-specific preset layers a single
+ * `social-media-manager` onto the coordinator baseline. `default-squad`
+ * stays at the baseline alone (no platform connected, nothing for the
+ * social specialist to work).
  */
 export function getTeamCompositionForPreset(preset: TeamPreset): AgentType[] {
-  const base: AgentType[] = [
-    'coordinator',
-    'growth-strategist',
-    'content-planner',
-  ];
+  const base: AgentType[] = ['coordinator'];
   switch (preset) {
     case 'dev-squad':
-      return [...base, 'post-writer', 'community-manager'];
+      return [...base, 'social-media-manager'];
     case 'saas-squad':
-      return [...base, 'post-writer', 'community-manager'];
+      return [...base, 'social-media-manager'];
     case 'consumer-squad':
-      return [...base, 'post-writer', 'community-manager'];
+      return [...base, 'social-media-manager'];
     case 'default-squad':
-      return [...base, 'post-writer'];
+      return [...base];
   }
 }

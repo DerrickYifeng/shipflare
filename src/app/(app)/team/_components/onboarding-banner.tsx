@@ -51,7 +51,7 @@ export function OnboardingBanner(): React.ReactElement | null {
       <p style={text}>
         <strong>Your team just got the brief.</strong>
         {' '}Watch them plan your first week, scan X for live conversations,
-        and draft replies — drafts land in <a href="/today">/today</a> for your approval.
+        and draft replies — drafts land in <a href="/briefing">/briefing</a> for your approval.
       </p>
       <button
         type="button"

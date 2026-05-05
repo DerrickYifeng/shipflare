@@ -23,7 +23,6 @@ vi.mock('@/lib/logger', () => ({
     error: () => {},
   }),
 }));
-
 import { draftReplyTool } from '../DraftReplyTool';
 import { drafts, threads } from '@/lib/db/schema';
 
@@ -60,6 +59,7 @@ function makeCtx(
 
 let store: InMemoryStore;
 beforeEach(() => {
+  vi.clearAllMocks();
   store = createInMemoryStore();
   store.register<ThreadRow>(threads, [
     { id: 't-1', userId: 'user-1', platform: 'x' },
@@ -153,7 +153,7 @@ describe('draftReplyTool', () => {
   });
 
   it('updates the existing pending draft instead of inserting a duplicate on the same thread', async () => {
-    // Two community-manager invocations against the same thread used to
+    // Two content-manager invocations against the same thread used to
     // produce two pending drafts joined to the same threads row, which
     // surfaced as a duplicate tweet card in /today. The tool is now
     // idempotent on (userId, threadId, status='pending'): the second call
@@ -230,3 +230,7 @@ describe('draftReplyTool', () => {
     expect(fresh.replyBody).toBe('a fresh draft for the same thread');
   });
 });
+
+// The legacy `draft_reply enqueueReview wire-up` describe block was
+// removed as of 2026-05-03 — DraftReplyTool no longer enqueues review
+// jobs. See review.ts header comment for context.

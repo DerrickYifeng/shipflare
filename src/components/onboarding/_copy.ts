@@ -228,8 +228,8 @@ export const COPY = {
     subSuffix:
       ' You can edit anything — this is a starting point, not a contract.',
     tabs: [
-      { id: 'about', label: 'A · About your product' },
-      { id: 'timeline', label: 'B · Timeline' },
+      { id: 'timeline', label: 'A · Timeline' },
+      { id: 'about', label: 'B · About your product' },
     ] as const,
     aboutLabels: {
       name: 'Name',

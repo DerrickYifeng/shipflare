@@ -149,6 +149,190 @@ Add `skill` to the agent's `AGENT.md` `tools:` list. Optionally declare
 agent's initial conversation (useful for agents that always need the
 same playbook).
 
+## Primitive Boundaries — Tool / Skill / Agent
+
+ShipFlare's multi-agent system has three primitives. The boundary
+between them is enforced by the rules below — code review should
+reject violations. Full rationale and the agent-by-agent migration
+plan live in `docs/superpowers/specs/2026-05-01-agent-skill-tool-decomposition-design.md`.
+
+### Decision rule
+
+When adding new functionality, answer two questions:
+
+1. **Does this require LLM judgment?**
+   - No → **Tool** (deterministic function, regex, DB write, API
+     call, or thin LLM wrapper that carries no business rules).
+2. **Does this require cross-turn decisions, branching based on
+   prior turns, SendMessage, or spawning sub-agents?**
+   - No → **Skill** (single fork call, rules in markdown references).
+   - Yes → **Agent** (multi-turn loop, orchestration only).
+
+A multi-turn agent is justified only when the loop itself is the
+work — conversational refinement, goal decomposition, cross-channel
+allocation with feedback signals. "A 12-turn agent that writes one
+artifact" is a skill in agent clothing; convert it.
+
+### Hard rules
+
+1. **AGENT.md contains no embedded business rules.** No banned
+   vocabulary lists, voice descriptions, slop pattern enumerations,
+   or "the real X is Y is forbidden" prose. AGENT.md answers
+   "*how do I orchestrate?*", not "*what is good content?*". All
+   rules live in `src/skills/<name>/references/*.md` or as regex in
+   tools.
+
+2. **Each rule has exactly one owner.** A given pattern lives in
+   exactly one place — one skill reference, or one tool's regex.
+   Cross-references between docs are fine; copies are not. Before
+   adding a rule, grep for prior art and extend the existing owner.
+
+3. **When you DO validate, drafting and validating run in different
+   fork calls** (approval bias mitigation — same fork tends to approve
+   its own output). But validation is OPTIONAL per pipeline; the reply /
+   post batch tools (`process_replies_batch`, `process_posts_batch`)
+   intentionally skip the LLM-validation fork after empirical recall <
+   precision: the drafting skill self-audits via its prompt
+   (drafting-reply / drafting-post Self-audit section), persists
+   directly after the mechanical `validate_draft` tool, and lets the
+   founder review in `/today` rather than filtering server-side.
+   The `validating-draft` skill remains available for callers that
+   genuinely need a second-fork audit (post-review worker, ad-hoc
+   audits) — but do not gate batch drafting on it.
+
+### Per-artifact cost ceiling
+
+Counted in fork-skill calls; the orchestrating agent's own loop
+turns are amortized across artifacts in a sweep.
+
+- **Default: 1 fork-skill call** (drafting only) for reply / post pipelines.
+  Mechanical `validate_draft` runs as a tool (no LLM cost). Drafting
+  skill's prompt enforces slop rules + self-audit in-fork.
+- **With validation (e.g. post-publication review): 2 fork-skill calls
+  max** (drafting + validating). REVISE retries are no longer used.
+- The judging skill at discovery time is the only gate; one judge per
+  thread, no double-check downstream.
+- Sweeps multiply per artifact.
+
+### When in doubt, default to skill
+
+If you are considering adding a new agent: first ask whether 1
+existing agent + 1-2 new skills could express the same work. The
+default answer is yes.
+
+## Agent Teams Architecture
+
+The multi-agent runtime (Phases A→G, landed 2026-05-02) follows engine
+PDF §3.5.1 and §9 invariants. **The following architectural rules are
+non-negotiable** — code review must reject violations.
+
+### Tool routing — four-layer SSOT
+
+`assembleToolPool(role, def, registry)` in
+`src/tools/AgentTool/assemble-tool-pool.ts` is the SINGLE place that
+decides "what tools does agent X see". Layers in order:
+
+1. Global registry pool
+2. Role whitelist (`src/tools/AgentTool/role-tools.ts`)
+3. Role blacklist (`src/tools/AgentTool/blacklists.ts`) — architecture-level
+   invariants (`INTERNAL_TEAMMATE_TOOLS` / `INTERNAL_SUBAGENT_TOOLS`)
+4. AgentDefinition `tools:` allow + `disallowedTools:` subtract
+
+**Any code that does role-based tool filtering OUTSIDE this function is a
+review reject.** No `if (role === 'lead')` ad-hoc gating; everything
+flows through `assembleToolPool`.
+
+### Messages are the conversation
+
+Worker-to-worker / lead-to-worker / system-to-lead communication ALL flows
+through `team_messages`:
+- Worker results: `messageType='task_notification'`, `type='user_prompt'`
+  — appears as user-role message in parent's transcript
+- Inter-teammate DM: `messageType='message'`
+- Coordinator commands: `messageType='shutdown_request'`,
+  `'plan_approval_response'`, `'broadcast'`
+- Founder UI input: same shape, `toAgentId=lead.agentId`
+
+`agent-run` is the SOLE driver for both lead and teammate (Phase E).
+The legacy `team-run.ts` was deleted.
+
+### Critical invariants (review-reject if violated)
+
+1. **Teammates cannot fan out**: `INTERNAL_TEAMMATE_TOOLS` includes
+   `Task` (sync subagent spawning) — teammates can only spawn via
+   forbidden routes. Removing `Task` from this set is a review reject.
+2. **`SyntheticOutputTool` is system-only**: `isEnabled()` returns false;
+   tool is in `INTERNAL_TEAMMATE_TOOLS`. Adding it to a whitelist or
+   removing the isEnabled gate is a review reject.
+3. **Peer-DM shadow MUST NOT call `wake()`**: peer DMs (teammate↔teammate
+   `type:message`) insert a summary-only shadow to lead's mailbox via
+   `peer-dm-shadow.ts`. The lead picks it up on its NEXT NATURAL wake
+   (task notification or founder message). Adding `wake()` to peer-DM
+   would burn the lead's API budget on every chatter.
+4. **`agent_runs.role` is immutable**: changing role requires deleting
+   the row and spawning fresh. The role is part of the teammate's
+   contract; changing mid-run breaks blacklist invariants.
+5. **`<task-notification>` XML is synthesized in ONE place**:
+   `src/workers/processors/lib/synthesize-notification.ts`. When engine
+   evolves the schema, only this file changes. No inline XML construction
+   anywhere else.
+6. **`delivered_at` is the only mailbox idempotency key**: drainMailbox
+   uses `for update` row lock + `delivered_at` marker. No in-memory
+   deduping. Bypassing this allows double-delivery.
+7. **`assembleToolPool` is the SSOT** (re-stating for emphasis): never
+   compute "agent X's tools" anywhere else.
+
+### When adding a new agent
+
+1. Create `src/tools/AgentTool/agents/<name>/AGENT.md` with `role: lead`
+   or `role: member` declared
+2. Add the agent's `agentType` to `team_members` table seed/migration
+3. The 4-layer filter handles tool resolution automatically — no code
+   change needed unless you also need a new tool
+
+### When adding a new tool
+
+1. Add the tool name constant to its tool file
+2. Decide: should `member` agents have it? If NO, add to
+   `INTERNAL_TEAMMATE_TOOLS` in `blacklists.ts`
+3. Should sync `subagent` invocations have it? If NO, add to
+   `INTERNAL_SUBAGENT_TOOLS`
+4. Register the tool in `src/tools/registry.ts` (or `registry-team.ts`)
+5. Update the relevant AGENT.md `tools:` allow-list to include the new
+   tool by name (optional — only needed if you want the agent to default-have it)
+
+### Async lifecycle quick reference
+
+- `Task({subagent_type, prompt})` → sync subagent (await result)
+- `Task({subagent_type, prompt, run_in_background: true})` → async
+  teammate (returns `{agentId}`; result later as `<task-notification>`)
+- `SendMessage({type, to, content})` → continue / DM / broadcast / etc.
+- `TaskStop({task_id})` → graceful shutdown (lead-only)
+- `Sleep({duration_ms})` → yield BullMQ slot until duration or
+  `SendMessage` arrives (member only — not subagents)
+
+The `agent-run` BullMQ worker drives all teammate lifecycles. Each
+teammate's transcript is persisted to `team_messages` per assistant turn
+for resume-from-sleep continuity.
+
+### Founder UI mental model
+
+The team-lead is **always present** as a sleeping `agent_runs` row. Founders
+don't "start runs" — they send messages to the lead. Each message wakes
+the lead; the lead processes (potentially spawning parallel teammates),
+replies, and goes back to sleep.
+
+UI implications:
+- The "Start a run" CTA is replaced with "Send a message"
+- The lead's status pill is always visible (sleeping/running/resuming)
+- Teammates appear in the roster sidebar when spawned, disappear when terminal
+- Activity feed shows cross-agent events (peer-DM, status changes, completions)
+- Cancel = SendMessage with type='shutdown_request' (eventually consistent;
+  takes seconds to propagate, not synchronous)
+- Per-teammate cancel button POSTs to /api/team/agent/[agentId]/cancel
+  (lead-only restriction is enforced separately by SendMessage's runtime
+  validation when the cancel comes from inside an agent context)
+
 ## Security TODO
 
 Tracking pending security hardening beyond what `feat/security-hardening` already shipped.

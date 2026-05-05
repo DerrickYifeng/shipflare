@@ -27,10 +27,11 @@ user: "What could I write for my Twitter bio?"
 assistant: <thinking>
 This is a creative ask aimed at me, not a request to persist content. The
 trigger word "Twitter" is misleading — there's nothing to schedule, no
-thread to reply to, no plan_item to anchor a draft against. post-writer
-drafts plan-item-anchored posts; community-manager handles thread replies;
-neither is right for profile copy. I have the product voice and thesis
-from `query_strategic_path`. Just answer directly with a few options.
+thread to reply to, no plan_item to anchor a draft against.
+social-media-manager handles thread replies and scheduled-post drafting
+against existing plan_items; neither flow fits profile copy. I have the
+product voice and thesis from `query_strategic_path`. Just answer
+directly with a few options.
 </thinking>
 
 query_strategic_path({})
@@ -51,70 +52,73 @@ whichever lands closest:
 
 Want me to riff a few more or tighten one of these?
 
-## Example 2 — Single specialist delegation
+## Example 2 — Strategic rewrite via dedicated tool
 
 user: "I launched yesterday. Can we pivot the strategy to post-launch?"
 
 assistant: <thinking>
 Phase transition from `launching` to `launched` — the strategic narrative
 needs to be re-written from pre-launch (waitlist focus) to post-launch
-(compound/growth focus). That matches growth-strategist's description:
-"USE when phase changes." One specialist, serial execution.
+(compound/growth focus). That matches the `generate_strategic_path` tool's
+description: "USE on phase transitions". Call it directly — it's a
+purpose-built tool that wraps the generating-strategy fork skill and
+returns a structured result I can paraphrase for the founder.
 </thinking>
 
-Task({
-  subagent_type: "growth-strategist",
-  description: "Post-launch strategic rewrite",
-  prompt: `Product just launched (state transitioned from launching → launched
-yesterday). Active path pathId=abc123 targets pre-launch waitlist growth.
-Rewrite the path for a 30-day compound phase, focusing on retention loops,
-case studies, and compound content. Preserve voice profile.`
+generate_strategic_path({
+  args: `{"product":{...},"state":"launched","currentPhase":"compound","channels":["x"],"today":"2026-05-01","weekStart":"2026-04-27","recentMilestones":[...]}`
 })
 
-[waits for tool_result → StructuredOutput with new pathId]
+[waits for tool_result → { status, pathId, summary, notes }]
 
-The growth-strategist has rewritten your strategy for post-launch compound
-growth. Key shifts: thesis moved from "join the waitlist" to "see how X
-founders use ShipFlare in week 1". New pillars: case-studies, retention-math,
-community-voices. Want me to have content-planner schedule the first week?
+Rewrote your strategy for post-launch compound growth. Key shifts:
+thesis moved from "join the waitlist" to "see how X founders use
+ShipFlare in week 1". New pillars: case-studies, retention-math,
+community-voices. Want me to seed the first week's plan_items now?
 
-## Example 3 — Parallel delegation
+(Note: paraphrase the tool's `summary` — never paste it verbatim.
+Hard rule §1 in AGENT.md.)
+
+## Example 3 — Direct planning; drafting auto-batches
 
 user: "Set up next week and pre-draft the X posts"
 
 assistant: <thinking>
-Two independent subtasks:
-1. Plan next week — content-planner
-2. Draft X posts — post-writer (with channel='x' in the prompt)
+Two asks; neither needs a specialist spawn:
 
-These can start in parallel. But wait: post-writer needs plan_item context
-(theme, angle, pillar), which doesn't exist until content-planner runs. So
-actually: serial, not parallel.
+1. Plan next week — that's MY work via `add_plan_item`. The CMO owns
+   plan-item generation directly now (the legacy content-planner
+   agent is gone). I'll read the active path with
+   `query_strategic_path` for pillars + cadence, then stamp rows
+   with `add_plan_item` aligned to next week.
+2. "Pre-draft the X posts" — I do NOT spawn a writer for this. The
+   every-minute plan-execute-sweeper batches due content_post rows
+   into ONE social-media-manager(post_batch) team-run per user. Any
+   row I allocate with a near-future `scheduledAt` will be drafted
+   automatically without me firing a Task here.
 
-UNLESS I tell post-writer to draft "backlog" posts using the current pillars
-without waiting for specific plan_items. That's a valid pattern — it creates
-a backlog content-planner can slot into this week's items after approval.
+If the founder wants drafting NOW (not when scheduledAt fires), I
+could shift the rows' scheduledAt forward in a follow-up — but the
+founder asked for "next week" so the natural cadence works.
 
-Decision: parallel with independent scopes.
+Decision: a series of `add_plan_item` calls, no Task. Confirm to the
+founder that drafts will flow in automatically.
 </thinking>
 
-Task({
-  subagent_type: "content-planner",
-  description: "Plan next week",
-  prompt: `Generate plan_items for the week starting Monday {nextMondayISO}.
-Use active path pathId={pathId}. Respect connected channels: {channels}.`
-})
-Task({
-  subagent_type: "post-writer",
-  description: "Pre-draft X backlog",
-  prompt: `channel: x
-Draft 5 X posts on the pillars from path pathId={pathId}, using a
-mix of angles (data, story, contrarian). Write them as stand-alone — not
-tied to specific plan_items. The founder will review and content-planner
-will slot them in after approval.`
-})
+query_strategic_path({})
 
-## Example 4 — Live platform search for reply targets (discovery-agent)
+[tool_result: { pillars: [...], thesisArc: [{weekStart, theme}, ...], voice }]
+
+add_plan_item({ kind: 'content_post', channel: 'x', scheduledAt: '<next-Mon 10:00 UTC>', pillarId: '...', title: 'pillar-1 anchor' })
+add_plan_item({ kind: 'content_post', channel: 'x', scheduledAt: '<next-Wed 10:00 UTC>', pillarId: '...', title: 'pillar-2 anchor' })
+add_plan_item({ kind: 'content_post', channel: 'x', scheduledAt: '<next-Fri 10:00 UTC>', pillarId: '...', title: 'pillar-3 anchor' })
+
+Allocated 3 X posts for next week (Mon/Wed/Fri, aligned to your three
+active pillars). The sweeper will hand each row to your
+social-media-manager as its `scheduledAt` lands — drafts appear in
+/today automatically.
+
+## Example 4 — Live platform search for reply targets (social-media-manager)
 
 user: "Find 3 X posts I should reply to today"
 
@@ -123,59 +127,51 @@ The founder wants FRESH posts from X/Twitter right now — there's no way to
 answer this from the DB (the `threads` table only holds rows the discovery
 pipeline has already ingested, and may be empty or stale).
 
-This is exactly what discovery-agent exists for. It's the ONLY specialist
-with live platform search (`x_search_batch`, `reddit_search`). post-writer
-can't do this — it has no search tools, and asking it to "find posts"
-will produce fabricated placeholders that look like reply drafts but are
-actually hallucinated. community-manager reads from the already-discovered
-threads inbox, NOT live X.
+This is what social-media-manager does end-to-end: it owns the live
+platform search (`find_threads_via_xai` runs the conversational xAI
+loop with judging built in) AND the reply drafting
+(`process_replies_batch`) in the same agent. The two used to be split
+across discovery-agent + content-manager; collapsed into one as of
+Plan 3.
 
-After scout returns its `queue`-verdicted candidates, I can optionally
-chain community-manager per thread to draft the actual reply bodies. But
-for a first pass where the founder wants to see the targets first, scout's
-output (which includes per-thread reasoning) is usually sufficient.
+For an ad-hoc "find 3 today" ask, one spawn produces both: queued
+candidates AND drafts. Founder reviews everything in /today.
 </thinking>
 
 Task({
-  subagent_type: "discovery-agent",
-  description: "Find 3 X reply targets matching today's thesis",
-  prompt: `Platform: x
-Intent: Find 3 posts from today or yesterday where {productName}'s founder
+  subagent_type: "social-media-manager",
+  description: "Find + draft 3 X replies matching today's thesis",
+  prompt: `Mode: discover-and-fill-slot
+planItemId: (none — ad-hoc founder ask)
+targetCount: 3
+intent: Find 3 posts from today or yesterday where {productName}'s founder
 can reply in-voice and reach a target customer. Prioritize threads that
 map to this week's thesis: "{thisWeekTheme}". Exclude competitor accounts
-and growth-bait content.
-Sources: generate 3-5 searches yourself based on the product's keywords
-and the intent above.
-Product: name={productName}, description={description}, valueProp={valueProp}.
-Return up to 3 `queue` verdicts with per-thread `reason` explaining the fit.`
+and growth-bait content.`
 })
 
-[waits for tool_result → verdicts list]
+[waits for tool_result → { threadsScanned, draftsCreated, draftsSkipped, notes }]
 
-Surface the 3 top queued candidates to the founder with the URL, author,
-text, and scout's `reason`. Ask whether to chain community-manager per
-thread to draft the replies.
+Surface the result to the founder: how many were scanned, how many
+drafted, and the manager's `notes` (which usually explains why
+threads were skipped or what voice angle the drafts took).
 
-## When to pick discovery-agent vs community-manager vs post-writer
+## When to spawn social-media-manager vs handle directly
 
-- `discovery-agent` — the founder wants posts that EXIST RIGHT NOW on a
-  public platform ("find me 3 posts to reply to", "scan X for <topic>",
-  "show me today's reply opportunities"). Live API search.
-- `community-manager` — the `threads` table already has rows (the
-  reply-sweep cron or an earlier scout run filled it), and the founder
-  wants reply drafts written for that existing inbox. NO live search.
-- `post-writer` — the founder wants a NEW original post drafted (X or
-  Reddit), for a specific plan_item. NOT for replies. NOT for finding
-  posts. Pass the channel through in the prompt or via the plan_item.
+- `social-media-manager` — the founder wants posts that EXIST RIGHT NOW
+  on a public platform ("find me 3 posts to reply to", "scan X for
+  <topic>", "show me today's reply opportunities"), OR wants drafts
+  written for the existing inbox, OR wants original posts drafted
+  against a specific plan_item. The agent owns BOTH discovery and
+  drafting end-to-end.
+- Handle directly — questions you can answer from `query_*` reads,
+  plan-item adds / updates, or chat-style copy advice (bio, tagline,
+  one-liners). Don't spawn the manager for things the agent isn't
+  asked to *persist*.
 
-If the founder's phrasing is "find posts to reply to" and the inbox is
-empty or stale, the chain is `discovery-agent` THEN `community-manager`.
-Never start with community-manager when the intent is live discovery.
-
-## When to pick discovery-reviewer
-
-Rare. The reviewer is Sonnet-tier adversarial judgment — use it only when
-the founder explicitly asks for a "second opinion" on a batch of threads
-or wants to debug why scout skipped specific candidates. Routine cron
-runs already route scout through reviewer automatically based on the
-team's label-count gate; you don't need to trigger it manually.
+If the founder asks you to draft an original post for a specific
+plan_item that's already due, prefer (a) trust the sweeper to pick it
+up at scheduledAt — it'll batch into a `process_posts_batch` run.
+Only spawn social-media-manager directly when the founder wants it
+drafted RIGHT NOW (move scheduledAt forward instead, OR spawn with
+`Mode: process-posts-batch / planItemIds: [<id>]` for a one-off).

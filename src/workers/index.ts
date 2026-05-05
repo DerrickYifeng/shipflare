@@ -1,5 +1,15 @@
 import { Queue, Worker } from 'bullmq';
 import { getBullMQConnection } from '@/lib/redis';
+// CRITICAL: side-effect import. registry-team.ts calls registerDeferredTools
+// at module load to register Task / SendMessage / Skill / TaskStop / Sleep
+// (deferred to break a module-init cycle). Without this import the worker
+// process boots with those tools unregistered, and `resolveAgentTools`
+// throws "Agent ... declares unknown tool(s): Task, SendMessage" the first
+// time agent-run picks up the lead. Tests catch this per-file by importing
+// registry-team themselves; the worker boot needs an explicit pull.
+// Phase E Task 11 deleted team-run.ts which had been the implicit transitive
+// importer; this line re-establishes the registration trigger.
+import '@/tools/registry-team';
 import { processReview } from './processors/review';
 import { processPosting } from './processors/posting';
 import { processHealthScore } from './processors/health-score';
@@ -13,8 +23,9 @@ import { processPlanExecute } from './processors/plan-execute';
 import { processPlanExecuteSweeper } from './processors/plan-execute-sweeper';
 import { processStaleSweeper } from './processors/stale-sweeper';
 import { processWeeklyReplan } from './processors/weekly-replan';
-import { processTeamRun, getTeamRunConcurrency } from './processors/team-run';
-import { TEAM_RUN_QUEUE_NAME, type TeamRunJobData } from '@/lib/queue/team-run';
+import { processReconcileMailbox } from './processors/reconcile-mailbox';
+import { processAgentRun } from './processors/agent-run';
+import { AGENT_RUN_QUEUE_NAME, type AgentRunJobData } from '@/lib/queue/agent-run';
 import { dreamQueue, discoveryScanQueue, metricsQueue, analyticsQueue, codeScanQueue } from '@/lib/queue';
 import type { PlanExecuteJobData } from '@/lib/queue';
 import { createLogger, loggerForJob } from '@/lib/logger';
@@ -59,6 +70,22 @@ const weeklyReplanQueue = new Queue<Record<string, never>>(
       // in case of a transient DB hiccup reading strategic_paths.
       attempts: 2,
       backoff: { type: 'exponential', delay: 30_000 },
+    },
+  },
+);
+
+// Reconcile-mailbox cron (Phase B Task 13) — durable backstop for wake()
+// failures. Every minute, finds agent_runs with undelivered messages older
+// than 30 seconds and re-enqueues them. Single attempt: if a tick fails the
+// next minute's tick will catch the same orphans.
+const reconcileMailboxQueue = new Queue<Record<string, never>>(
+  'reconcile-mailbox',
+  {
+    connection: getBullMQConnection(),
+    defaultJobOptions: {
+      removeOnComplete: { count: 10 },
+      removeOnFail: { count: 50 },
+      attempts: 1,
     },
   },
 );
@@ -136,7 +163,7 @@ const analyticsWorker = new Worker<AnalyticsJobData>(
 // enqueues one coordinator-rooted team-run with trigger='daily',
 // rooted in the per-team rolling 'Discovery' conversation. The
 // coordinator's `daily` playbook handles the per-slot
-// discovery → community-manager loop and falls back to default
+// discovery → content-manager loop and falls back to default
 // drafting when no slots exist (shouldn't happen in practice — onboarding
 // pre-fills plan_items). The BullMQ queue name stays 'discovery-scan'
 // for Redis stability with the live repeat schedule.
@@ -172,15 +199,42 @@ const weeklyReplanWorker = new Worker<Record<string, never>>(
   { ...BASE_OPTS, concurrency: 1 },
 );
 
-// AI Team Platform — coordinator main-loop runner.
-// Lock duration accommodates a multi-turn coordinator run with delegated
-// subagents; each subagent is synchronous from the worker's POV and the full
-// chain ceiling is ~10 minutes (spec §15.3 alert threshold).
-const teamRunWorker = new Worker<TeamRunJobData>(
-  TEAM_RUN_QUEUE_NAME,
-  async (job) => processTeamRun(job),
-  { ...BASE_OPTS, concurrency: getTeamRunConcurrency(), lockDuration: 15 * 60_000 },
+const reconcileMailboxWorker = new Worker<Record<string, never>>(
+  'reconcile-mailbox',
+  async () => {
+    await processReconcileMailbox();
+  },
+  { ...BASE_OPTS, concurrency: 1 },
 );
+
+// AI Team Platform — single-shot agent-run runner (Phase B async lifecycle).
+// Phase E Task 11: replaces the old team-run worker. The lead is now a
+// regular agent_runs row driven by this worker; founder UI input enters
+// via team_messages + wake() instead of a BullMQ team-run job.
+// Each job processes one agent turn (drain mailbox → fork skill → persist
+// outputs). Lock duration is 10 min — well above the per-turn ceiling but
+// short enough that a crashed worker frees the job for another consumer.
+const agentRunWorker = new Worker<AgentRunJobData>(
+  AGENT_RUN_QUEUE_NAME,
+  async (job) => {
+    const jobLog = loggerForJob(log, job);
+    jobLog.info(`agent-run start agentId=${job.data.agentId}`);
+    await processAgentRun(job);
+    jobLog.info(`agent-run done agentId=${job.data.agentId}`);
+  },
+  { ...BASE_OPTS, concurrency: 4, lockDuration: 600_000 },
+);
+
+// Explicit failed handler for agent-run (the shared loop below also covers
+// it via the workers array, but the per-worker handler keeps the lifecycle
+// log line in shape with the `agent-run start` / `agent-run done` pair).
+agentRunWorker.on('failed', (job, err) => {
+  if (job) {
+    loggerForJob(log, job).error(`agent-run failed agentId=${job.data.agentId}: ${err.message}`);
+  } else {
+    log.error(`agent-run failed (no job ref): ${err.message}`);
+  }
+});
 
 const workers = [
   reviewWorker, postingWorker,
@@ -192,7 +246,8 @@ const workers = [
   planExecuteWorker, planExecuteSweeperWorker,
   staleSweeperWorker, weeklyReplanWorker,
   // AI Team Platform
-  teamRunWorker,
+  agentRunWorker,
+  reconcileMailboxWorker,
 ];
 
 // Log events — bind traceId / jobId / queue into the child logger so lifecycle
@@ -324,6 +379,21 @@ async function scheduleWeeklyReplan() {
   );
 }
 
+// Schedule reconcile-mailbox: every minute. Finds agent_runs with
+// undelivered team_messages older than 30s and re-enqueues their
+// agent-run job via wake(). Durable backstop for transient wake()
+// failures from SendMessage / Sleep / Task async paths.
+async function scheduleReconcileMailbox() {
+  await reconcileMailboxQueue.add(
+    'tick',
+    {},
+    {
+      repeat: { pattern: '* * * * *' }, // every minute
+      jobId: 'reconcile-mailbox-tick',
+    },
+  );
+}
+
 Promise.all([
   scheduleNightlyDream(),
   scheduleCodeDiff(),
@@ -333,11 +403,12 @@ Promise.all([
   schedulePlanExecuteSweeper(),
   scheduleStaleSweeper(),
   scheduleWeeklyReplan(),
+  scheduleReconcileMailbox(),
 ]).catch((err) => {
   log.error('Failed to schedule cron jobs:', err.message);
 });
 
-log.info('All workers started: review, posting, health-score, dream, code-scan, daily-run, engagement, metrics, analytics, plan-execute, plan-execute-sweeper, stale-sweeper, weekly-replan, team-run. daily-run daily 13:00 UTC, plan-execute-sweeper every 1m, stale-sweeper every 1h, weekly-replan Monday 00:00 UTC, all others daily.');
+log.info('All workers started: review, posting, health-score, dream, code-scan, daily-run, engagement, metrics, analytics, plan-execute, plan-execute-sweeper, stale-sweeper, weekly-replan, team-run, agent-run, reconcile-mailbox. daily-run daily 13:00 UTC, plan-execute-sweeper every 1m, stale-sweeper every 1h, weekly-replan Monday 00:00 UTC, reconcile-mailbox every 1m, all others daily.');
 
 // Graceful shutdown
 async function shutdown() {

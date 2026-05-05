@@ -76,7 +76,7 @@ export function GlassNav({ isAuthenticated }: GlassNavProps) {
           </a>
           {isAuthenticated ? (
             <Link
-              href="/today"
+              href="/briefing"
               style={{
                 fontSize: 'var(--sf-text-sm)',
                 color: 'var(--sf-fg-on-dark-1)',
@@ -89,7 +89,7 @@ export function GlassNav({ isAuthenticated }: GlassNavProps) {
               }}
               className="inline-flex items-center"
             >
-              Today
+              Briefing
             </Link>
           ) : (
             <button

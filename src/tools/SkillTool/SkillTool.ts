@@ -11,10 +11,17 @@
 
 import { z } from 'zod';
 import { buildTool } from '@/core/tool-system';
-import type { ToolDefinition } from '@/core/types';
+import type {
+  StreamEventSpawnMeta,
+  ToolDefinition,
+} from '@/core/types';
 import { createLogger } from '@/lib/logger';
-import { spawnSubagent } from '@/tools/AgentTool/spawn';
+import { spawnSubagent, type SpawnCallbacks } from '@/tools/AgentTool/spawn';
 import type { AgentDefinition } from '@/tools/AgentTool/loader';
+import {
+  resolveSpecialistMemberId,
+  wrapOnEventWithSpawnMeta,
+} from '@/tools/AgentTool/AgentTool';
 import { DEFAULT_SKILL_FORK_MAX_TURNS, SKILL_TOOL_NAME } from './constants';
 import { getAllSkills } from './registry';
 
@@ -81,9 +88,14 @@ export const skillTool: ToolDefinition<SkillToolInput, SkillToolOutput> = buildT
     );
 
     const subAgentDef: AgentDefinition = {
+      source: 'built-in' as const,
       name: `skill_${cmd.name}`,
       description: cmd.description,
       tools: cmd.allowedTools,
+      disallowedTools: [],
+      background: false,
+      role: 'member',
+      requires: [],
       skills: [],  // skills cannot recursively preload skills (Phase 1)
       model: cmd.model,
       maxTurns: cmd.maxTurns ?? DEFAULT_SKILL_FORK_MAX_TURNS,
@@ -91,12 +103,71 @@ export const skillTool: ToolDefinition<SkillToolInput, SkillToolOutput> = buildT
       sourcePath: cmd.sourcePath ?? `<bundled:${cmd.name}>`,
     };
 
+    // Forward the parent's onEvent (if provided via ToolContext) to the
+    // fork so the skill's tool_start / tool_done events land on the same
+    // team_messages channel as the parent's. The team-run worker stashes
+    // its onEvent under ctx.get('onEvent'); callers that aren't
+    // team-scoped won't have it, in which case we pass undefined and the
+    // fork runs quietly. Mirrors AgentTool's wiring (AgentTool.ts:580).
+    //
+    // Without this, fork-mode tool calls (e.g. write_strategic_path
+    // inside generating-strategy) never publish to the channel that
+    // /api/onboarding/plan's SSE subscriber listens on, and the route
+    // times out with "team-run completed without a strategic path"
+    // even though the tool actually persisted the row.
+    let onEventFn: SpawnCallbacks['onEvent'] | undefined;
+    try {
+      const fromCtx = ctx.get<SpawnCallbacks['onEvent'] | null>('onEvent');
+      if (typeof fromCtx === 'function') onEventFn = fromCtx;
+    } catch {
+      onEventFn = undefined;
+    }
+
+    // Task 1 (2026-05-03 plan): wrap the forwarded onEvent with
+    // spawnMeta so child events attribute to the spawned fork specialist
+    // instead of the lead. Mirrors AgentTool.ts (lines 580-603); the
+    // only behavioral difference is `parentTaskId: null` — skills don't
+    // allocate a `team_tasks` row, so the worker persists only
+    // parent_tool_use_id + agent_name in metadata for fork-skill events.
+    //
+    // resolveSpecialistMemberId may return null when the ctx isn't
+    // team-scoped (CLI / tests / non-team callers); the wrap still
+    // injects parentToolUseId + agentName so the UI's delegation card
+    // can nest by tool_use_id even without a member id. Same fallback
+    // contract as the Task tool's wiring.
+    let wrappedOnEvent: SpawnCallbacks['onEvent'] | undefined = onEventFn;
+    if (onEventFn) {
+      const specialistMemberId = await resolveSpecialistMemberId(
+        ctx,
+        subAgentDef.name,
+      );
+      let parentToolUseId = '';
+      try {
+        const fromCtx = ctx.get<string | null | undefined>('toolUseId');
+        if (typeof fromCtx === 'string' && fromCtx.length > 0) {
+          parentToolUseId = fromCtx;
+        }
+      } catch {
+        parentToolUseId = '';
+      }
+      const spawnMeta: StreamEventSpawnMeta = {
+        parentTaskId: null,
+        parentToolUseId,
+        fromMemberId: specialistMemberId,
+        agentName: subAgentDef.name,
+      };
+      wrappedOnEvent = wrapOnEventWithSpawnMeta(onEventFn, spawnMeta);
+    }
+    const callbacks: SpawnCallbacks | undefined = wrappedOnEvent
+      ? { onEvent: wrappedOnEvent }
+      : undefined;
+
     const result = await spawnSubagent<unknown>(
       subAgentDef,
       input.args ?? '',
       ctx,
-      undefined,  // no callbacks at the SkillTool layer
-      undefined,  // no outputSchema
+      callbacks,
+      undefined, // no outputSchema
     );
 
     const resultText =

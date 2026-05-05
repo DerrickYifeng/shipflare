@@ -4,7 +4,7 @@ import { planItems, products, strategicPaths } from '@/lib/db/schema';
 import { derivePhase, type ProductState } from '@/lib/launch-phase';
 import { getUserChannels } from '@/lib/user-channels';
 import { ensureTeamExists } from '@/lib/team-provisioner';
-import { enqueueTeamRun } from '@/lib/queue/team-run';
+import { dispatchLeadMessage } from '@/lib/team/dispatch-lead-message';
 import { createAutomationConversation } from '@/lib/team-conversation-helpers';
 import { weekBounds } from '@/lib/week-bounds';
 import { createLogger } from '@/lib/logger';
@@ -232,17 +232,19 @@ export async function runTacticalReplan(
   });
 
   // Ensure the team exists (idempotent) and enqueue a team-run. The
-  // coordinator's goal prompt seeds the delegation to content-planner.
+  // coordinator generates plan_items directly via its `generate_strategic_path`
+  // + `add_plan_item` tools (Plan 3 absorbed the legacy content-planner spawn).
   let runId: string;
   try {
     const { teamId, memberIds } = await ensureTeamExists(userId, row.productId);
+    void memberIds; // resolved upstream; lead is the sole recipient (Phase E)
     const replanNow = new Date();
     const goal =
       `Re-plan week ${weekStart.toISOString().slice(0, 10)} for ${row.productName}. ` +
       `weekStart=${weekStart.toISOString()} now=${replanNow.toISOString()}. ` +
       `State: ${state}. Phase: ${currentPhase}. ` +
       `Channels: ${channels.join(', ')}. ` +
-      `Pass weekStart + now to content-planner verbatim in its spawn prompt. ` +
+      `Generate plan_items directly with your add_plan_item tool — pass weekStart + now verbatim. ` +
       (trigger === 'weekly'
         ? 'Monday cron replan — produce fresh plan_items for the coming 7 days.'
         : 'Manual replan — previous week items have been superseded; produce fresh plan_items for the coming 7 days.');
@@ -250,13 +252,15 @@ export async function runTacticalReplan(
     const replanConvId = await createAutomationConversation(teamId, 'weekly');
     // Both manual and cron replan share the coordinator's `weekly` playbook;
     // the goal text already distinguishes the source for observability.
-    const enqueued = await enqueueTeamRun({
-      teamId,
-      trigger: 'weekly',
-      goal,
-      rootMemberId: memberIds.coordinator,
-      conversationId: replanConvId,
-    });
+    const enqueued = await dispatchLeadMessage(
+      {
+        teamId,
+        conversationId: replanConvId,
+        goal,
+        trigger: 'weekly',
+      },
+      db,
+    );
     runId = enqueued.runId;
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);

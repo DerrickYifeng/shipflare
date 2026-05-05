@@ -5,7 +5,7 @@
  * The OAuth provider's `redirect_uri` is registered server-side and can't
  * carry per-request state, so we stash the desired return path in an
  * httpOnly cookie alongside the CSRF state. The callback reads it and
- * redirects there; default fallback is `/today`.
+ * redirects there; default fallback is `/briefing`.
  *
  * Validation prevents open-redirect: only same-origin internal paths
  * starting with a single `/` are accepted.
@@ -14,7 +14,7 @@
 import type { NextResponse, NextRequest } from 'next/server';
 
 export const OAUTH_RETURN_COOKIE = 'oauth_return_to';
-export const DEFAULT_OAUTH_RETURN = '/today';
+export const DEFAULT_OAUTH_RETURN = '/briefing';
 
 /**
  * Accept only same-origin paths: must start with a single `/` and contain

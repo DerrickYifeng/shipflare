@@ -3,9 +3,28 @@ import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { teams, teamMembers, teamConversations, products } from '@/lib/db/schema';
-import { enqueueTeamRun, type TeamRunTrigger } from '@/lib/queue/team-run';
+import {
+  teams,
+  teamMembers,
+  teamMessages,
+  teamConversations,
+  products,
+} from '@/lib/db/schema';
+import { ensureLeadAgentRun } from '@/lib/team/spawn-lead';
+import { wake } from '@/workers/processors/lib/wake';
 import { createLogger } from '@/lib/logger';
+
+/**
+ * Inlined from the deleted `@/lib/queue/team-run` module (Phase G cleanup,
+ * migration 0016_drop_team_runs). The route narrows to a 4-value subset
+ * (matches `requestSchema.trigger` below) — the legacy `'kickoff'` and
+ * `'draft_post'` triggers from the team_runs era are no longer accepted.
+ */
+type TeamRunTrigger =
+  | 'daily'
+  | 'onboarding'
+  | 'weekly'
+  | 'phase_transition';
 
 const log = createLogger('api:team:run');
 
@@ -88,7 +107,7 @@ export function deriveGoalFromTrigger(
         `Connected platforms: ${channelList}. ` +
         `Trigger: daily. Source: manual. ` +
         `Follow your daily playbook: load today's content_reply plan_items ` +
-        `and run the per-slot discovery → community-manager loop, falling ` +
+        `and run the per-slot discovery → content-manager loop, falling ` +
         `back to default top-3 drafting if no slots exist.`
       );
   }
@@ -97,9 +116,20 @@ export function deriveGoalFromTrigger(
 /**
  * POST /api/team/run
  *
- * Body: { teamId, goal, trigger?, rootMemberId? }
+ * Body: { teamId, goal, trigger?, rootMemberId?, conversationId }
  * Auth: session user must own the team.
- * Effect: creates a team_runs row (pending) + enqueues the BullMQ job.
+ *
+ * Phase E (Agent Teams): no longer enqueues a BullMQ team-run job.
+ * Instead:
+ *   1. ensureLeadAgentRun(teamId) → leadAgentId (idempotent)
+ *   2. Insert team_messages row (type='user_prompt',
+ *      messageType='message', toAgentId=leadAgentId, content=goal)
+ *   3. wake(leadAgentId) — single BullMQ enqueue point for agent-run
+ *
+ * Response shape preserved for downstream consumers: `runId` is the
+ * inserted message id (acts as a polling handle), `traceId` is the
+ * lead agent_runs.id (log correlation), `alreadyRunning` is always
+ * false because wake() is idempotent (no race-detection needed).
  */
 export async function POST(request: NextRequest): Promise<Response> {
   const session = await auth();
@@ -225,20 +255,52 @@ export async function POST(request: NextRequest): Promise<Response> {
     );
   }
 
-  const { runId, traceId, alreadyRunning } = await enqueueTeamRun({
+  // Phase E: insert + wake instead of enqueueTeamRun. The lead is now a
+  // regular agent_runs row driven by the unified agent-run worker.
+  // `rootMemberId` and `trigger` are still resolved/derived above for
+  // request validation + goal templating, but they no longer route the
+  // run — the lead is the sole entry point and discovers the rest via
+  // its mailbox.
+  void rootMemberId; // resolved for validation only; lead is the recipient
+  void trigger; // used to derive `goal`; no longer flows to a BullMQ job
+
+  const { agentId: leadAgentId } = await ensureLeadAgentRun(body.teamId, db);
+
+  const messageId = crypto.randomUUID();
+  await db.insert(teamMessages).values({
+    id: messageId,
     teamId: body.teamId,
-    goal,
-    trigger,
-    rootMemberId,
     conversationId: body.conversationId,
+    fromMemberId: null, // user-originated
+    toMemberId: null, // routing is by toAgentId in the Agent Teams protocol
+    toAgentId: leadAgentId,
+    type: 'user_prompt',
+    messageType: 'message',
+    content: goal,
+    contentBlocks: [{ type: 'text', text: goal }],
+    summary: goal.slice(0, 80),
   });
 
+  await wake(leadAgentId);
+
+  // Response shape preserved for downstream consumers:
+  //   - `runId`     → messageId (polling handle, replaces the old team_runs.id)
+  //   - `traceId`   → leadAgentId (log correlation, replaces the old trace id)
+  //   - `alreadyRunning` → always false; wake() is idempotent within a
+  //     1-second window via BullMQ jobId dedupe, so race-detection
+  //     happens at the queue layer and we never see a duplicate.
   log.info(
-    `POST /api/team/run user=${userId} team=${body.teamId} runId=${runId} already=${alreadyRunning}`,
+    `POST /api/team/run user=${userId} team=${body.teamId} ` +
+      `messageId=${messageId} leadAgentId=${leadAgentId}`,
   );
 
   return NextResponse.json(
-    { runId, traceId, alreadyRunning, conversationId: body.conversationId },
-    { status: alreadyRunning ? 200 : 202 },
+    {
+      runId: messageId,
+      traceId: leadAgentId,
+      alreadyRunning: false,
+      conversationId: body.conversationId,
+    },
+    { status: 202 },
   );
 }

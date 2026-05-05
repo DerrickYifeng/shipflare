@@ -1,8 +1,10 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { and, eq } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { teams, teamMembers, teamRuns } from '@/lib/db/schema';
+import { teams, teamMembers } from '@/lib/db/schema';
+import { getTeamState } from '@/lib/team/team-state-cache';
+import { getKeyValueClient } from '@/lib/redis';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -12,6 +14,12 @@ export const dynamic = 'force-dynamic';
  *
  * Returns a snapshot of the team: members + the currently-running team_run
  * (if any). The `/team` UI calls this on mount before opening the SSE stream.
+ *
+ * UI-D Task 3: `activeRun` is now derived from the Redis-first team state
+ * cache (`getTeamState`) instead of a direct `agent_runs` SELECT. The
+ * cache module owns the DB fallback / write-through coherence story; the
+ * route just maps the cached shape into the UI's existing
+ * `{ runId, status, lastActiveAt }` envelope so consumers stay unchanged.
  */
 export async function GET(request: NextRequest): Promise<Response> {
   const session = await auth();
@@ -51,18 +59,23 @@ export async function GET(request: NextRequest): Promise<Response> {
     .from(teamMembers)
     .where(eq(teamMembers.teamId, teamId));
 
-  const activeRows = await db
-    .select({
-      runId: teamRuns.id,
-      goal: teamRuns.goal,
-      trigger: teamRuns.trigger,
-      startedAt: teamRuns.startedAt,
-      turns: teamRuns.totalTurns,
-      cost: teamRuns.totalCostUsd,
-    })
-    .from(teamRuns)
-    .where(and(eq(teamRuns.teamId, teamId), eq(teamRuns.status, 'running')))
-    .limit(1);
+  // Phase E retired team_runs as the source of truth for "is the lead
+  // currently running"; the lead's own row in agent_runs (agentDefName
+  // = 'coordinator') now carries that state. UI-D Task 3 routes that
+  // read through the team-state cache so /api/team/status is a Redis
+  // GET on the hot path. We preserve the response field name `runId`
+  // for UI compat — semantics changed from team_runs.id to
+  // agent_runs.id (the lead's). Legacy fields
+  // (goal/trigger/startedAt/turns/cost) live on derived sources now.
+  const teamState = await getTeamState(teamId, db, getKeyValueClient());
+  const activeRun =
+    teamState.leadStatus === 'running' || teamState.leadStatus === 'resuming'
+      ? {
+          runId: teamState.leadAgentId,
+          status: teamState.leadStatus,
+          lastActiveAt: teamState.leadLastActiveAt,
+        }
+      : null;
 
   return NextResponse.json({
     team: {
@@ -71,6 +84,6 @@ export async function GET(request: NextRequest): Promise<Response> {
       createdAt: teamRow[0].createdAt,
     },
     members,
-    activeRun: activeRows[0] ?? null,
+    activeRun,
   });
 }

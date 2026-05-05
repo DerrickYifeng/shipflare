@@ -52,7 +52,7 @@ export const drafts = pgTable(
     ftcDisclosure: text('ftc_disclosure'),
     reviewVerdict: text('review_verdict'), // 'PASS' | 'FAIL' | 'REVISE'
     reviewScore: real('review_score'),
-    reviewJson: jsonb('review_json'), // { checks, issues, suggestions }
+    reviewJson: jsonb('review_json'), // { checks, issues, suggestions, slopFingerprint }
     engagementDepth: integer('engagement_depth').notNull().default(0),
     planItemId: text('plan_item_id').references(() => planItems.id, {
       onDelete: 'set null',

@@ -1,11 +1,34 @@
+'use client';
+
+import { useEffect, useRef } from 'react';
+
 /**
- * HeroVideo — auto-playing 16:9 brand video for the landing hero.
+ * HeroVideo — 16:9 brand video for the landing hero.
+ * Plays when scrolled into view, pauses when out of view.
  * Source: marketing-video/out/hero-wide.mp4 (rendered via Remotion).
- *
- * Borderless: video blends into the dark hero, only the rounded corners
- * keep it bounded. No shadow / no border / no surface bg.
  */
 export function HeroVideo() {
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          void video.play().catch(() => {});
+        } else {
+          video.pause();
+        }
+      },
+      { threshold: 0.35 },
+    );
+
+    observer.observe(video);
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <div
       style={{
@@ -16,12 +39,12 @@ export function HeroVideo() {
       }}
     >
       <video
+        ref={videoRef}
         src="/hero-demo.mp4"
-        autoPlay
         muted
         loop
         playsInline
-        preload="auto"
+        preload="metadata"
         aria-label="ShipFlare in action — finding threads, drafting replies, converting"
         style={{
           width: '100%',

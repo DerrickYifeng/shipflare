@@ -61,11 +61,13 @@ const ROUTES: ReadonlyArray<
   }
 > = [
   // --- content_post ---
-  // plan-execute's writer branch owns the DRAFT phase for content_post +
-  // x/reddit (post-writer spawned via team-run). The EXECUTE phase still
-  // flows through dispatch → posting, since posting is an actual
-  // runtime-loaded skill (src/skills/posting) that the execute branch uses
-  // as a string label to advance the state machine.
+  // The plan-execute-sweeper owns the DRAFT phase for content_post +
+  // x/reddit (Phase J Task 2: it batches due rows into a single
+  // content-manager(post_batch) team-run per user per tick). The
+  // EXECUTE phase still flows through dispatch → posting, since
+  // posting is an actual runtime-loaded skill (src/skills/posting)
+  // that the execute branch uses as a string label to advance the
+  // state machine.
   {
     kind: 'content_post',
     channel: 'x',
@@ -76,12 +78,14 @@ const ROUTES: ReadonlyArray<
     },
   },
   // --- content_reply ---
-  // Reply drafting is owned end-to-end by the community-manager team-run
+  // Reply drafting is owned end-to-end by the content-manager team-run
   // agent (Phase 6 of the agent-cleanup migration absorbed the
-  // `draft-single-reply` skill + the `reply-drafter` Task teammate). The
-  // dispatch route stays so plan_items still flow through the state
-  // machine — but `draftSkill` is null because the actual draft comes
-  // from the discovery → community-manager Task fan-out, not from a
+  // `draft-single-reply` skill + the `reply-drafter` Task teammate;
+  // Phase J renamed the agent from `community-manager` to
+  // `content-manager` and added the post_batch flow). The dispatch
+  // route stays so plan_items still flow through the state machine —
+  // but `draftSkill` is null because the actual draft comes from the
+  // discovery → content-manager Task fan-out, not from a
   // dispatcher-routed skill.
   {
     kind: 'content_reply',

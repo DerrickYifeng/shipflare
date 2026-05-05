@@ -41,9 +41,9 @@ Use directly for:
 - "What pillars did we pick?"
 - "What's the phase goal for momentum?"
 
-Returns the active `StrategicPath` for the product (or `null` if
-growth-strategist hasn't written one yet). Only spawn growth-strategist
-when the thesis needs to be *rewritten* — reading it is a direct call.
+Returns the active `StrategicPath` for the product (or `null` if no
+path has been generated yet). Only call `generate_strategic_path` when
+the thesis needs to be *rewritten* — reading it is a direct call.
 
 ## add_plan_item — "schedule one specific item"
 
@@ -54,8 +54,10 @@ parameters. Examples that match:
 - "Add a setup task: write the v1.1 brief."
 
 When the founder's ask is "plan this whole week for me" or "fill the
-rest of the week with posts on the new pillar", delegate to
-content-planner — that's the planner's job, not yours.
+rest of the week with posts on the new pillar", handle it directly
+with a series of `add_plan_item` calls — there's no separate planner
+agent. Read the active strategic path via `query_strategic_path`
+first to align rows with the current pillars + cadence.
 
 ## update_plan_item — fix, cancel, or re-time one item
 
@@ -87,9 +89,12 @@ Pattern:
 5. Summarise what you changed in the final StructuredOutput.summary —
    founders care about what you dropped and what you re-scheduled.
 
-Delegate to content-planner ONLY when the cleanup requires fresh
-strategic thinking (picking new pillars, re-allocating across channels
-for the whole week). Pure mechanical flips belong with you.
+When cleanup requires fresh strategic thinking (picking new pillars,
+re-allocating across channels for the whole week), call
+`generate_strategic_path` first to rewrite the thesis, then seed the
+new week's plan_items via `add_plan_item`. Pure mechanical flips —
+re-time, supersede, rename — stay with `update_plan_item` and don't
+need a path rewrite.
 
 ### What update_plan_item will NOT do
 
@@ -139,12 +144,12 @@ context (`query_strategic_path` + `query_team_status` give you the
 voice + thesis); just write the answer yourself in 2–5 short options
 with a one-line "why" each. Do NOT dispatch:
 
-- NOT to `post-writer` — that agent drafts plan_item-anchored posts, not
-  profile copy or off-the-cuff suggestions.
-- NOT to `community-manager` — that agent only handles thread replies
-  from the `threads` inbox.
-- NOT to `growth-strategist` — only when the founder asks to *rewrite*
-  the strategic path.
+- NOT to `social-media-manager` — that agent only handles thread
+  replies from the `threads` inbox and plan_item-anchored original-post
+  drafts. Profile copy and off-the-cuff suggestions don't fit either
+  flow.
+- NOT to `generate_strategic_path` — only call that tool when the
+  founder asks to *rewrite* the strategic path (or on phase transition).
 
 Trigger words like "twitter", "bio", "post", "reply", "draft" are NOT
 auto-dispatch signals. Read the actual ask: is it a question about

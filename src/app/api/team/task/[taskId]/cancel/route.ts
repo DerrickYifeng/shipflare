@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { and, eq, inArray, not } from 'drizzle-orm';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { teams, teamRuns, teamTasks } from '@/lib/db/schema';
+import { teams, teamMembers, teamTasks } from '@/lib/db/schema';
 import { getPubSubPublisher } from '@/lib/redis';
 import { teamMessagesChannel } from '@/tools/SendMessageTool/SendMessageTool';
 import { createLogger } from '@/lib/logger';
@@ -39,6 +39,11 @@ export async function POST(
   const userId = session.user.id;
   const { taskId } = await params;
 
+  // UI-A Task 4: ownership chain is now teamTasks → teamMembers → teams.
+  // Phase E removed teamRuns from the read path; cancel only needs the
+  // task row + the owning team. The legacy `teamTasks.runId` value is
+  // still echoed in the published SSE payload for client correlation,
+  // but is no longer used as a join key.
   const rows = await db
     .select({
       taskId: teamTasks.id,
@@ -49,8 +54,8 @@ export async function POST(
       ownerId: teams.userId,
     })
     .from(teamTasks)
-    .innerJoin(teamRuns, eq(teamRuns.id, teamTasks.runId))
-    .innerJoin(teams, eq(teams.id, teamRuns.teamId))
+    .innerJoin(teamMembers, eq(teamMembers.id, teamTasks.memberId))
+    .innerJoin(teams, eq(teams.id, teamMembers.teamId))
     .where(and(eq(teamTasks.id, taskId), eq(teams.userId, userId)))
     .limit(1);
 

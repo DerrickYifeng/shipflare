@@ -149,8 +149,20 @@ export function StageSource({
       setUrlError(COPY.stage1.urlError);
       return;
     }
+    // Accept bare domains (e.g. `shipflare.ai`); the scraper's
+    // `new URL()` requires a scheme, so default to https://.
+    const withScheme = /^https?:\/\//i.test(trimmed)
+      ? trimmed
+      : `https://${trimmed}`;
+    try {
+      // Confirm it parses; throws on invalid input.
+      new URL(withScheme);
+    } catch {
+      setUrlError(COPY.stage1.urlError);
+      return;
+    }
     setUrlError(null);
-    onScanUrl(trimmed);
+    onScanUrl(withScheme);
   };
 
   return (
@@ -300,9 +312,11 @@ export function StageSource({
               }}
               placeholder={COPY.stage1.urlPlaceholder}
               invalid={!!urlError}
-              type="url"
+              type="text"
               inputMode="url"
               autoComplete="url"
+              spellCheck={false}
+              autoCapitalize="off"
             />
           </Field>
           <ActionBar

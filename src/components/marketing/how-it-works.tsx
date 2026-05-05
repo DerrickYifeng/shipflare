@@ -9,34 +9,34 @@ interface AgentEntry {
 
 const AGENTS: AgentEntry[] = [
   {
-    name: 'CMO',
+    name: 'Chief Marketing Officer',
     role: 'Strategy & coordination',
     detail: 'plans · briefs · approvals · weekly review',
     live: true,
   },
   {
-    name: 'SOCIAL',
+    name: 'Social Media Manager',
     role: 'Cadence & community',
     detail: 'x · linkedin · reddit · hn · discord',
     live: true,
   },
   {
-    name: 'SEARCH',
-    role: 'SEO + GEO unified',
+    name: 'SEO Manager',
+    role: 'Organic search + GEO',
     detail: 'keywords · on-page · llms.txt · citations',
   },
   {
-    name: 'PERFORMANCE',
+    name: 'Performance Marketing Manager',
     role: 'Paid media',
     detail: 'meta · google · tiktok · x · reddit ads',
   },
   {
-    name: 'CONTENT',
+    name: 'Content Marketing Manager',
     role: 'Long-form & lifecycle',
     detail: 'blogs · newsletters · changelogs · copy',
   },
   {
-    name: 'ANALYTICS',
+    name: 'Marketing Analytics Manager',
     role: 'Funnel & attribution',
     detail: 'posthog · stripe · ga4 · experiments',
   },
@@ -74,7 +74,7 @@ export function HowItWorks() {
         <div
           className="grid"
           style={{
-            gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
             background: 'var(--sf-bg-secondary)',
             borderRadius: 'var(--sf-radius-lg)',
             overflow: 'hidden',

@@ -1,4 +1,9 @@
 export { users, accounts, sessions, verificationTokens, userPreferences } from './users';
+export {
+  allowedEmails,
+  type AllowedEmail,
+  type NewAllowedEmail,
+} from './allowed-emails';
 export { products } from './products';
 export { channels, threads } from './channels';
 export {
@@ -54,19 +59,19 @@ export {
   teams,
   teamMembers,
   teamConversations,
-  teamRuns,
   teamMessages,
   teamTasks,
+  agentRuns,
   type Team,
   type NewTeam,
   type TeamMember,
   type NewTeamMember,
   type TeamConversation,
   type NewTeamConversation,
-  type TeamRun,
-  type NewTeamRun,
   type TeamMessage,
   type NewTeamMessage,
   type TeamTask,
   type NewTeamTask,
+  type AgentRun,
+  type NewAgentRun,
 } from './team';

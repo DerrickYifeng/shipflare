@@ -12,6 +12,8 @@ import { xGetMentionsTool } from './XGetMentionsTool/XGetMentionsTool';
 // Registering them here makes them discoverable by AGENT.md `tools: [...]`
 // allowlists via the central registry.
 import { writeStrategicPathTool } from './WriteStrategicPathTool/WriteStrategicPathTool';
+import { generateStrategicPathTool } from './GenerateStrategicPathTool/GenerateStrategicPathTool';
+import { readMemoryTool } from './ReadMemoryTool/ReadMemoryTool';
 import { queryStrategicPathTool } from './QueryStrategicPathTool/QueryStrategicPathTool';
 import { addPlanItemTool } from './AddPlanItemTool/AddPlanItemTool';
 import { updatePlanItemTool } from './UpdatePlanItemTool/UpdatePlanItemTool';
@@ -27,6 +29,9 @@ import { draftPostTool } from './DraftPostTool/DraftPostTool';
 import { findThreadsTool } from './FindThreadsTool/FindThreadsTool';
 import { draftReplyTool } from './DraftReplyTool/DraftReplyTool';
 import { validateDraftTool } from './ValidateDraftTool/ValidateDraftTool';
+import { processRepliesBatchTool } from './ProcessRepliesBatchTool/ProcessRepliesBatchTool';
+import { processPostsBatchTool } from './ProcessPostsBatchTool/ProcessPostsBatchTool';
+import { findThreadsViaXaiTool } from './FindThreadsViaXaiTool/FindThreadsViaXaiTool';
 
 /**
  * Central tool registry for ShipFlare agents.
@@ -56,6 +61,8 @@ registry.register(xGetMentionsTool);
 // read + write scoped DB state only — so they register inline here.
 // ---------------------------------------------------------------------------
 registry.register(writeStrategicPathTool);
+registry.register(generateStrategicPathTool);
+registry.register(readMemoryTool);
 registry.register(queryStrategicPathTool);
 registry.register(addPlanItemTool);
 registry.register(updatePlanItemTool);
@@ -72,11 +79,12 @@ registry.register(queryProductContextTool);
 // Phase E drafting tools (spec §9.1 + §11 Phase E). Flat snake_case
 // identifiers; agents opt in via AGENT.md `tools: [...]`.
 //
-// Day 1: post-writer calls `draft_post` to generate + persist body text on
-// an existing plan_item — the plan_item row is the source of truth for
-// channel + context, the tool is the side-effect gate.
+// Day 1: content-manager calls `draft_post` (in post_batch mode) to
+// persist body text on an existing plan_item — the plan_item row is the
+// source of truth for channel + context, the tool is the side-effect
+// gate. Pre-Phase-J the caller was the now-retired post-writer agent.
 //
-// Day 2: community-manager calls `find_threads` (read-only inbox scan) +
+// Day 2: content-manager calls `find_threads` (read-only inbox scan) +
 // `draft_reply` (INSERT drafts with status='pending') for the reply-guy
 // workflow. find_threads is concurrency-safe read-only; draft_reply is
 // concurrency-safe writes (each draft is its own row).
@@ -91,22 +99,51 @@ registry.register(draftReplyTool);
 // the source of truth for ShipFlare style warnings (hashtag count, links
 // in body/reply, anchor token).
 registry.register(validateDraftTool);
+// process_replies_batch — pipeline-to-tools Plan 2 Task 2. The Tool's
+// execute() owns the reply pipeline (drafting-reply → validate_draft
+// → draft_reply). The LLM-validation fork was intentionally dropped:
+// recall < precision when validating-draft was gating, so the
+// drafting skill's prompt now self-audits in-fork and surviving
+// drafts go straight to the founder's /today review.
+registry.register(processRepliesBatchTool);
+// process_posts_batch — pipeline-to-tools Plan 2 Task 3. Mirror of
+// process_replies_batch for the post path: drafting-post →
+// validate_draft → draft_post. NO judging step (allocation is the
+// gate) and NO LLM-validation fork (drafting-post self-audits in
+// its own fork, see SKILL.md Self-audit section).
+registry.register(processPostsBatchTool);
+// find_threads_via_xai — pipeline-to-tools Plan 2 Task 4. The Tool's
+// execute() owns the conversational xAI Grok discovery loop:
+// composes the first-turn message from product context + ICP rubric,
+// fans out to judging-thread-quality per candidate (Promise.allSettled
+// so one judging fork's exception doesn't lose the round), aggregates
+// rejection signals into mechanical refinement nudges, escalates to
+// the reasoning Grok variant ONCE after 2 unsuccessful refines, caps
+// at 10 rounds, and persists the deduped keepers via
+// persist_queue_threads. Replaces the multi-step xAI loop prose
+// formerly inside discovery-agent AGENT.md.
+registry.register(findThreadsViaXaiTool);
 
 export { registry };
 
 /**
- * Register Team runtime tools (Task, SendMessage, Skill). These are split
- * out of the top-level registration to avoid a module cycle:
- * `AgentTool/spawn.ts` imports `registry` so its tool resolution can look
- * up by name. Eagerly registering `taskTool` (or `skillTool`, which itself
- * imports `spawnSubagent`) in that same module would make the tool exist
- * before its dependencies finished loading.
+ * Register Team runtime tools (Task, SendMessage, Skill, TaskStop, Sleep).
+ * These are split out of the top-level registration to avoid a module
+ * cycle: `AgentTool/spawn.ts` imports `registry` so its tool resolution
+ * can look up by name. Eagerly registering `taskTool` (or `skillTool`,
+ * which itself imports `spawnSubagent`) in that same module would make
+ * the tool exist before its dependencies finished loading.
+ * `taskStopTool` and `sleepTool` are folded in via the same channel
+ * because they are referenced by `AgentTool/blacklists.ts` (closing the
+ * same import cycle).
  *
  * Callers that need these tools available (the team-run worker + the
  * integration tests) must import `./registry-team` for its side effect.
  * StructuredOutput is intentionally NOT registered — it's synthesized
  * per-agent from the caller's Zod outputSchema inside runAgent
  * (see src/tools/StructuredOutputTool/StructuredOutputTool.ts).
+ * SyntheticOutput is intentionally NOT registered — it is system-only
+ * (see src/tools/SyntheticOutputTool/SyntheticOutputTool.ts).
  *
  * Skill primitive — see src/skills/ + src/tools/SkillTool/.
  * Agents that want skill access add `skill` to their AGENT.md tools: list.
@@ -115,10 +152,14 @@ export function registerDeferredTools(tools: {
   taskTool: typeof import('./AgentTool/AgentTool').taskTool;
   sendMessageTool: typeof import('./SendMessageTool/SendMessageTool').sendMessageTool;
   skillTool: typeof import('./SkillTool/SkillTool').skillTool;
+  taskStopTool: typeof import('./TaskStopTool/TaskStopTool').taskStopTool;
+  sleepTool: typeof import('./SleepTool/SleepTool').sleepTool;
 }): void {
   registry.register(tools.taskTool);
   registry.register(tools.sendMessageTool);
   registry.register(tools.skillTool);
+  registry.register(tools.taskStopTool);
+  registry.register(tools.sleepTool);
 }
 
 /**

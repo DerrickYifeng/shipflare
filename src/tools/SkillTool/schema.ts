@@ -32,6 +32,7 @@ export const SkillFrontmatterSchema = z
     'argument-hint': z.string().optional(),
     paths: z.array(z.string()).optional(),
     references: z.array(z.string()).optional(),
+    'shared-references': z.array(z.string()).optional(),
   })
   .passthrough();
 
