@@ -187,9 +187,12 @@ describe('buildSnapshotFrame — pure helper', () => {
     expect(meta.tool_name).toBe('searching');
     expect(meta.agent_name).toBe('Team Lead');
     expect(meta.tool_input).toEqual({
-      subagent_type: 'Content Specialist',
+      agent: 'Content Specialist',
       description: 'find threads',
     });
+    // Adversarial: the bare key `subagent_type` must not appear anywhere
+    // in the wire payload — that string fingerprints Anthropic's Task tool.
+    expect(serialized).not.toContain('subagent_type');
     expect(frame.createdAt).toBe('2026-05-04T01:00:00.000Z');
   });
 
@@ -388,6 +391,8 @@ describe('GET /api/team/events — snapshot redaction reaches the wire', () => {
     expect(buf).not.toContain('Mode: discover-and-fill-slot');
     expect(buf).not.toContain('tool_output');
     expect(buf).not.toContain('secret playbook');
+    // The bare key `subagent_type` fingerprints Anthropic's Task tool.
+    expect(buf).not.toContain('subagent_type');
 
     // Positive labels reach the wire.
     expect(buf).toContain('"snapshot"');

@@ -134,8 +134,11 @@ function redactToolInput(raw: unknown): Record<string, unknown> {
   if (typeof r.description === 'string') {
     out.description = r.description.slice(0, MAX_DESCRIPTION_LEN);
   }
+  // Rename `subagent_type` → `agent` on the wire. The raw key reveals
+  // Anthropic's Task tool primitive; `agent` is a founder-friendly
+  // shape that doesn't fingerprint the underlying SDK.
   if (typeof r.subagent_type === 'string') {
-    out.subagent_type = publicAgentLabel(r.subagent_type);
+    out.agent = publicAgentLabel(r.subagent_type);
   }
   return out;
 }

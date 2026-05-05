@@ -192,11 +192,15 @@ describe('GET /api/team/activity — redaction', () => {
     expect(m.metadata.tool_name).toBe('delegating');
     expect(m.metadata.agent_name).toBe('Team Lead');
 
-    // tool_input is sanitized: only `description` and friendly subagent_type remain.
+    // tool_input is sanitized: only `description` and friendly `agent` remain.
+    // The wire key is `agent`, NOT `subagent_type` — that bare key would
+    // fingerprint Anthropic's Task tool primitive (see redact-for-client.ts).
     expect(m.metadata.tool_input).toEqual({
-      subagent_type: 'Content Specialist',
+      agent: 'Content Specialist',
       description: 'fill reply slot',
     });
+    // Adversarial: the bare key string must not appear anywhere in the body.
+    expect(serialized).not.toContain('subagent_type');
 
     // Shape preserved: `from`/`to` rename and createdAt as ISO string.
     expect(m.from).toBe('member-1');

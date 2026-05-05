@@ -132,7 +132,9 @@ describe('stitchLeadMessages — nested progress under in-tool ProgressItems', (
         metadata: {
           toolName: 'Task',
           toolUseId: TASK_USE_ID,
-          input: { subagent_type: 'social-media-manager', description: 'Find threads' },
+          // Wire shape: redactor renames `subagent_type` → `agent` and maps the
+          // raw type to the founder-facing label (see redact-for-client.ts).
+          input: { agent: 'Content Specialist', description: 'Find threads' },
         },
         createdAt: '2026-05-03T10:00:01.000Z',
       }),

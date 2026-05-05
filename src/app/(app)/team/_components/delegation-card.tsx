@@ -39,7 +39,7 @@ export function DelegationCard({
 }: DelegationCardProps) {
   if (tasks.length === 0) return null;
 
-  // Secondary index for the `subagent_type → member` fallback. Tool_call
+  // Secondary index for the `agent → member` fallback. Tool_call
   // rows land with `to_member_id = null`, so without this we'd label
   // every subtask "Specialist". Building the index once per render keeps
   // the per-card lookup O(1).

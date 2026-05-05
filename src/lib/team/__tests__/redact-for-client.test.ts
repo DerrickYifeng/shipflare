@@ -143,12 +143,26 @@ describe('redactMetadataForClient', () => {
       tool_use_id: 'tu_1',
       tool_name: 'delegating',
       tool_input: {
-        subagent_type: 'Content Specialist',
+        agent: 'Content Specialist',
         description: 'fill reply slot abc-123',
       },
       parent_tool_use_id: null,
       agent_name: 'Team Lead',
     });
+  });
+
+  it('renames subagent_type to agent on the wire (Anthropic-fingerprint suppression)', () => {
+    const out = redactMetadataForClient({
+      tool_name: 'Task',
+      tool_input: { subagent_type: 'social-media-manager', description: 'fill reply slot' },
+    });
+    // The wire key is `agent`, not `subagent_type`
+    expect((out!.tool_input as Record<string, unknown>)).toEqual({
+      description: 'fill reply slot',
+      agent: 'Content Specialist',
+    });
+    // Adversarial: bare key `subagent_type` must not appear anywhere
+    expect(JSON.stringify(out)).not.toContain('subagent_type');
   });
 
   it('redacts xai-flavored tool name + drops raw prompt', () => {
@@ -166,7 +180,7 @@ describe('redactMetadataForClient', () => {
     expect(out).toEqual({
       tool_use_id: 'tu_2',
       tool_name: 'searching',
-      tool_input: {}, // no description / subagent_type
+      tool_input: {}, // no description / agent
     });
 
     // The raw query string MUST NOT appear anywhere in the output
@@ -327,7 +341,7 @@ describe('redactContentBlocksForClient', () => {
     expect(JSON.stringify(out)).not.toContain('xai');
   });
 
-  it('redacts Task tool_use: keeps description + maps subagent_type', () => {
+  it('redacts Task tool_use: keeps description + maps subagent_type → agent', () => {
     const blocks = [
       {
         type: 'tool_use',
@@ -348,9 +362,26 @@ describe('redactContentBlocksForClient', () => {
         type: 'tool_use',
         id: 'tu_2',
         name: 'delegating',
-        input: { subagent_type: 'Content Specialist', description: 'fill reply slot' },
+        input: { agent: 'Content Specialist', description: 'fill reply slot' },
       },
     ]);
+  });
+
+  it('renames tool_use input.subagent_type to input.agent on the wire', () => {
+    const blocks = [
+      {
+        type: 'tool_use',
+        id: 'tu_1',
+        name: 'Task',
+        input: { subagent_type: 'social-media-manager', description: 'fill slot' },
+      },
+    ];
+    const out = redactContentBlocksForClient(blocks) as Array<Record<string, unknown>>;
+    expect((out[0].input as Record<string, unknown>)).toEqual({
+      agent: 'Content Specialist',
+      description: 'fill slot',
+    });
+    expect(JSON.stringify(out)).not.toContain('subagent_type');
   });
 
   it('redacts tool_result blocks: keeps id + is_error, drops content', () => {
