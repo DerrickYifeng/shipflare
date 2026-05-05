@@ -135,7 +135,7 @@ describe('stitchLeadMessages — nested progress under in-tool ProgressItems', (
           // The reducer sees this redacted shape from the API.
           toolName: 'delegating',
           toolUseId: TASK_USE_ID,
-          input: { agent: 'Content Specialist', description: 'Find threads' },
+          input: { agent: 'Social Media Manager', description: 'Find threads' },
         },
         createdAt: '2026-05-03T10:00:01.000Z',
       }),

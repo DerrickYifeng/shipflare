@@ -78,7 +78,7 @@ export function publicToolLabel(rawName: string | null | undefined): PublicToolL
 
 const AGENT_DISPLAY_NAMES: Record<string, string> = {
   coordinator: 'Team Lead',
-  'social-media-manager': 'Content Specialist',
+  'social-media-manager': 'Social Media Manager',
 };
 
 export function publicAgentLabel(rawType: string | null | undefined): string {

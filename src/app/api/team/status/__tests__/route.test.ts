@@ -222,6 +222,6 @@ describe('GET /api/team/status', () => {
     expect(serialized).not.toContain('coordinator');
     expect(serialized).not.toContain('social-media-manager');
     expect(json.members[0].agent_type).toBe('Team Lead');
-    expect(json.members[1].agent_type).toBe('Content Specialist');
+    expect(json.members[1].agent_type).toBe('Social Media Manager');
   });
 });

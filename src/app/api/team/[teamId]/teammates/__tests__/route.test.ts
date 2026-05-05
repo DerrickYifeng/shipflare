@@ -199,7 +199,7 @@ describe('GET /api/team/[teamId]/teammates', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     // Raw agent types are replaced with founder-facing labels: known
-    // types map to a friendly name ('Content Specialist'); unknown types
+    // types map to a friendly name ('Social Media Manager'); unknown types
     // fall back to the generic 'agent' label. The substring assertions
     // target raw agentDefName values that should never reach the wire —
     // 'social-media-manager' is a known leak; we don't substring-check
@@ -210,7 +210,7 @@ describe('GET /api/team/[teamId]/teammates', () => {
     expect(body.teammates).toHaveLength(2);
     expect(body.teammates[0]).toMatchObject({
       agentId: 'agent-2',
-      agentDefName: 'Content Specialist',
+      agentDefName: 'Social Media Manager',
       status: 'running',
       displayName: 'Author',
     });

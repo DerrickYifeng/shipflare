@@ -184,7 +184,7 @@ describe('GET /api/team/activity — redaction', () => {
     expect(serialized).not.toContain('plan-123');
 
     // member envelope: raw agentType is replaced with the founder-facing label.
-    expect(body.member.agentType).toBe('Content Specialist');
+    expect(body.member.agentType).toBe('Social Media Manager');
 
     // Semantic label substitutions surface in the payload.
     expect(body.messages).toHaveLength(1);
@@ -196,7 +196,7 @@ describe('GET /api/team/activity — redaction', () => {
     // The wire key is `agent`, NOT `subagent_type` — that bare key would
     // fingerprint Anthropic's Task tool primitive (see redact-for-client.ts).
     expect(m.metadata.tool_input).toEqual({
-      agent: 'Content Specialist',
+      agent: 'Social Media Manager',
       description: 'fill reply slot',
     });
     // Adversarial: the bare key string must not appear anywhere in the body.

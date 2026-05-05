@@ -187,7 +187,7 @@ describe('buildSnapshotFrame — pure helper', () => {
     expect(meta.tool_name).toBe('searching');
     expect(meta.agent_name).toBe('Team Lead');
     expect(meta.tool_input).toEqual({
-      agent: 'Content Specialist',
+      agent: 'Social Media Manager',
       description: 'find threads',
     });
     // Adversarial: the bare key `subagent_type` must not appear anywhere
@@ -398,7 +398,7 @@ describe('GET /api/team/events — snapshot redaction reaches the wire', () => {
     expect(buf).toContain('"snapshot"');
     expect(buf).toContain('"snapshot_end"');
     expect(buf).toContain('"searching"');
-    expect(buf).toContain('Content Specialist');
+    expect(buf).toContain('Social Media Manager');
     expect(buf).toContain('Team Lead');
   });
 

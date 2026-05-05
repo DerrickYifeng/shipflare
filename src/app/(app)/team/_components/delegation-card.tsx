@@ -102,17 +102,22 @@ export function DelegationCard({
   };
 
   const specialistCount = tasks.length;
-  // Header label: when there's exactly one dispatch, show the specialist's
-  // name (or their public role label) so the founder sees who's working.
-  // When there are multiple parallel dispatches, summarize with a count
-  // because the names won't fit on one line.
-  const headerTarget =
-    specialistCount === 1
-      ? (() => {
-          const single = resolveMember(tasks[0]);
-          return single?.displayName ?? 'Specialist';
-        })()
-      : `${specialistCount} specialists in parallel`;
+  // Header label: list each specialist's role label by name. When all
+  // parallel dispatches went to the same role, collapse to "N × Role" so
+  // the header doesn't read as a stutter. When the roles are mixed, join
+  // the distinct labels with ` + `. `task.subagentType` is the
+  // post-redaction founder-facing string (e.g. "Social Media Manager").
+  const headerTarget = (() => {
+    if (specialistCount === 1) {
+      return tasks[0].subagentType ?? 'Specialist';
+    }
+    const labels = tasks.map((t) => t.subagentType ?? 'Specialist');
+    const uniqueLabels = Array.from(new Set(labels));
+    if (uniqueLabels.length === 1) {
+      return `${specialistCount} × ${uniqueLabels[0]}`;
+    }
+    return labels.join(' + ');
+  })();
 
   return (
     <section style={wrap} aria-label="Dispatched subtasks">
@@ -190,7 +195,10 @@ function SubtaskCard({
     return () => window.removeEventListener('sf:task-focus', handler);
   }, [task.messageId]);
 
-  const agentType = member?.agentType ?? 'coordinator';
+  // `member.agentType` is the redacted founder-facing label (e.g.
+  // 'Social Media Manager'). When the lookup fails (orphan task with no
+  // resolved member), fall through to the unknown-label gradient.
+  const agentType = member?.agentType ?? task.subagentType ?? '';
   const accent = accentForAgentType(agentType);
   const borderColor = accent?.solid ?? colorHexForAgentType(agentType);
   const memberName = member?.displayName ?? 'Specialist';

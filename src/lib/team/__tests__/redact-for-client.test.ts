@@ -97,7 +97,7 @@ describe('publicToolLabel', () => {
 describe('publicAgentLabel', () => {
   it.each([
     ['coordinator', 'Team Lead'],
-    ['social-media-manager', 'Content Specialist'],
+    ['social-media-manager', 'Social Media Manager'],
   ])('maps %s -> %s', (raw, label) => {
     expect(publicAgentLabel(raw)).toBe(label);
   });
@@ -144,7 +144,7 @@ describe('redactMetadataForClient', () => {
       tool_use_id: 'tu_1',
       tool_name: 'delegating',
       tool_input: {
-        agent: 'Content Specialist',
+        agent: 'Social Media Manager',
         description: 'fill reply slot abc-123',
       },
       parent_tool_use_id: null,
@@ -160,7 +160,7 @@ describe('redactMetadataForClient', () => {
     // The wire key is `agent`, not `subagent_type`
     expect((out!.tool_input as Record<string, unknown>)).toEqual({
       description: 'fill reply slot',
-      agent: 'Content Specialist',
+      agent: 'Social Media Manager',
     });
     // Adversarial: bare key `subagent_type` must not appear anywhere
     expect(JSON.stringify(out)).not.toContain('subagent_type');
@@ -271,7 +271,7 @@ describe('redactMetadataForClient', () => {
       toolName: 'searching',
       toolInput: { description: 'searching for leads' },
       parentToolUseId: 'tu_3',
-      agentName: 'Content Specialist',
+      agentName: 'Social Media Manager',
     });
   });
 
@@ -363,7 +363,7 @@ describe('redactContentBlocksForClient', () => {
         type: 'tool_use',
         id: 'tu_2',
         name: 'delegating',
-        input: { agent: 'Content Specialist', description: 'fill reply slot' },
+        input: { agent: 'Social Media Manager', description: 'fill reply slot' },
       },
     ]);
   });
@@ -379,7 +379,7 @@ describe('redactContentBlocksForClient', () => {
     ];
     const out = redactContentBlocksForClient(blocks) as Array<Record<string, unknown>>;
     expect((out[0].input as Record<string, unknown>)).toEqual({
-      agent: 'Content Specialist',
+      agent: 'Social Media Manager',
       description: 'fill slot',
     });
     expect(JSON.stringify(out)).not.toContain('subagent_type');

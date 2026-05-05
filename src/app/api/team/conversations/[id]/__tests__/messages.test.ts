@@ -173,7 +173,7 @@ describe('GET /api/team/conversations/[id]/messages — redaction', () => {
     expect(body.messages).toHaveLength(1);
     const m = body.messages[0];
     expect(m.metadata.tool_name).toBe('searching');
-    expect(m.metadata.agent_name).toBe('Content Specialist');
+    expect(m.metadata.agent_name).toBe('Social Media Manager');
 
     // tool_input is sanitized: only `description` should remain (capped).
     expect(m.metadata.tool_input).toEqual({
