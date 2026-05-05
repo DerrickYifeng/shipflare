@@ -155,8 +155,37 @@ export function redactMetadataForClient(
   return out;
 }
 
-export function redactContentBlocksForClient(_blocks: unknown): unknown {
-  throw new Error('not implemented');
+interface AnthropicBlock {
+  type: string;
+  [key: string]: unknown;
+}
+
+function redactBlock(block: AnthropicBlock): AnthropicBlock {
+  if (block.type === 'tool_use') {
+    return {
+      type: 'tool_use',
+      id: block.id,
+      name: publicToolLabel(block.name as string),
+      input: redactToolInput(block.input),
+    };
+  }
+  if (block.type === 'tool_result') {
+    return {
+      type: 'tool_result',
+      tool_use_id: block.tool_use_id,
+      is_error: block.is_error ?? false,
+      content: '[redacted]',
+    };
+  }
+  // text, image, document, etc. — pass through
+  return block;
+}
+
+export function redactContentBlocksForClient(blocks: unknown): unknown {
+  if (!Array.isArray(blocks)) return blocks;
+  return blocks.map((b) =>
+    typeof b === 'object' && b !== null ? redactBlock(b as AnthropicBlock) : b,
+  );
 }
 
 export interface MessageRowForClient {

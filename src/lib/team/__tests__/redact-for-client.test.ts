@@ -270,3 +270,112 @@ describe('redactMetadataForClient', () => {
     expect((out!.tool_input as { description: string }).description.length).toBe(200);
   });
 });
+
+describe('redactContentBlocksForClient', () => {
+  it('passes through plain text blocks', () => {
+    const blocks = [{ type: 'text', text: 'Hello, founder!' }];
+    expect(redactContentBlocksForClient(blocks)).toEqual(blocks);
+  });
+
+  it('redacts tool_use block input + maps name', () => {
+    const blocks = [
+      {
+        type: 'tool_use',
+        id: 'tu_1',
+        name: 'find_threads_via_xai',
+        input: { query: 'secret query string', from_date: '2026-01-01' },
+      },
+    ];
+
+    const out = redactContentBlocksForClient(blocks);
+
+    expect(out).toEqual([
+      {
+        type: 'tool_use',
+        id: 'tu_1',
+        name: 'searching',
+        input: {},
+      },
+    ]);
+    expect(JSON.stringify(out)).not.toContain('secret query');
+    expect(JSON.stringify(out)).not.toContain('xai');
+  });
+
+  it('redacts Task tool_use: keeps description + maps subagent_type', () => {
+    const blocks = [
+      {
+        type: 'tool_use',
+        id: 'tu_2',
+        name: 'Task',
+        input: {
+          subagent_type: 'social-media-manager',
+          description: 'fill reply slot',
+          prompt: 'Mode: discover-and-fill-slot\n...',
+        },
+      },
+    ];
+
+    const out = redactContentBlocksForClient(blocks);
+
+    expect(out).toEqual([
+      {
+        type: 'tool_use',
+        id: 'tu_2',
+        name: 'delegating',
+        input: { subagent_type: 'Content Specialist', description: 'fill reply slot' },
+      },
+    ]);
+  });
+
+  it('redacts tool_result blocks: keeps id + is_error, drops content', () => {
+    const blocks = [
+      {
+        type: 'tool_result',
+        tool_use_id: 'tu_1',
+        is_error: false,
+        content: 'REJECT: tone mismatch — cf rubric §3.2',
+      },
+    ];
+
+    const out = redactContentBlocksForClient(blocks);
+
+    expect(out).toEqual([
+      {
+        type: 'tool_result',
+        tool_use_id: 'tu_1',
+        is_error: false,
+        content: '[redacted]',
+      },
+    ]);
+  });
+
+  it('returns input unchanged for non-array', () => {
+    expect(redactContentBlocksForClient(null)).toBeNull();
+    expect(redactContentBlocksForClient(undefined)).toBeUndefined();
+    expect(redactContentBlocksForClient('plain string')).toBe('plain string');
+  });
+
+  it('mixed blocks: redacts only the dangerous ones', () => {
+    const blocks = [
+      { type: 'text', text: 'I am thinking...' },
+      {
+        type: 'tool_use',
+        id: 'tu_3',
+        name: 'judging-thread-quality',
+        input: { thread_id: 't1' },
+      },
+      { type: 'text', text: 'Done.' },
+    ];
+
+    const out = redactContentBlocksForClient(blocks) as Array<Record<string, unknown>>;
+
+    expect(out[0]).toEqual({ type: 'text', text: 'I am thinking...' });
+    expect(out[1]).toEqual({
+      type: 'tool_use',
+      id: 'tu_3',
+      name: 'tool', // judging-thread-quality is not a registered Anthropic tool name
+      input: {},
+    });
+    expect(out[2]).toEqual({ type: 'text', text: 'Done.' });
+  });
+});
