@@ -20,7 +20,7 @@ import { eq } from 'drizzle-orm';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { agentRuns, teams } from '@/lib/db/schema';
-import { loadAgentRunHistory } from '@/workers/processors/lib/agent-run-history';
+import { loadAgentRunHistoryRedactedForClient } from '@/workers/processors/lib/agent-run-history-for-client';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -82,7 +82,7 @@ export async function GET(
   // so the drawer doesn't have to reinvent the structured-block renderer
   // — the typical case (plain text) is preserved verbatim and richer
   // shapes round-trip through JSON.stringify.
-  const raw = await loadAgentRunHistory(agentId, db);
+  const raw = await loadAgentRunHistoryRedactedForClient(agentId, db);
   const messages: TranscriptMessage[] = raw.map((m) => ({
     role: m.role,
     content:
