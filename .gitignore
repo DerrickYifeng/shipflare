@@ -71,3 +71,7 @@ marketing-video/
 # `live-smoke` project (see playwright.config.ts). Never commit; it
 # carries the founder's authenticated session cookies.
 .auth/
+
+# Internal design assets must never live in /public — see CSO finding 2026-05-04
+/public/*Design System*
+/public/*design-system*
