@@ -203,11 +203,19 @@ export async function POST(request: NextRequest): Promise<Response> {
       teamId,
       'phase_transition',
     );
+    // Founder-facing summary persisted into metadata.publicContent. The
+    // redactor at the API boundary swaps this into `content` when serving
+    // the row to the browser; the raw `goal` (with internal architecture
+    // details — generating-strategy skill, content-planner, strategic_path
+    // mentions) stays server-side for the lead's agent-run replay. See
+    // dispatchLeadMessage docs.
+    const publicSummary = `Updating your strategy for the ${currentPhase} phase of ${product.name}.`;
     const enqueued = await dispatchLeadMessage(
       {
         teamId,
         conversationId,
         goal,
+        publicSummary,
         trigger: 'phase_transition',
       },
       db,
