@@ -547,4 +547,105 @@ describe('redactMessageRowForClient', () => {
       { type: 'tool_use', id: 'tu_1', name: 'searching', input: {} },
     ]);
   });
+
+  it('substitutes friendly default for internal trigger without publicContent (kickoff)', () => {
+    const row = {
+      id: 'm1',
+      runId: 'r1',
+      teamId: 't1',
+      type: 'user_prompt',
+      content:
+        'First-visit kickoff for Acme. Strategic path... Follow your kickoff playbook ' +
+        'end-to-end (plan → social-media-manager): (1) Generate week-1 plan items...',
+      contentBlocks: null,
+      metadata: { trigger: 'kickoff' }, // ← no publicContent (historical row)
+      createdAt: new Date('2026-05-04T00:00:00Z'),
+    };
+    const out = redactMessageRowForClient(row);
+    expect(out.content).toBe('Setting up your team.');
+    expect(out.content).not.toContain('social-media-manager');
+    expect(out.content).not.toContain('playbook');
+    expect(out.content).not.toContain('Strategic path');
+  });
+
+  it.each([
+    ['phase_transition', 'Updating your strategy for the new product phase.'],
+    ['daily', 'Running your daily automation.'],
+    ['weekly', 'Running your weekly automation.'],
+    ['onboarding', 'Working through onboarding.'],
+    ['task_retry', 'Retrying a previously failed task.'],
+  ])('substitutes default for trigger=%s without publicContent', (trigger, expected) => {
+    const row = {
+      id: 'm1',
+      runId: 'r1',
+      teamId: 't1',
+      type: 'user_prompt',
+      content: 'Internal goal with secret architecture references...',
+      contentBlocks: null,
+      metadata: { trigger },
+      createdAt: new Date(),
+    };
+    const out = redactMessageRowForClient(row);
+    expect(out.content).toBe(expected);
+  });
+
+  it('falls back to generic default for unknown internal trigger', () => {
+    const row = {
+      id: 'm1',
+      runId: 'r1',
+      teamId: 't1',
+      type: 'user_prompt',
+      content: 'A leaky internal goal',
+      contentBlocks: null,
+      metadata: { trigger: 'some_future_internal_trigger' },
+      createdAt: new Date(),
+    };
+    const out = redactMessageRowForClient(row);
+    expect(out.content).toBe('Working on automated work.');
+  });
+
+  it('preserves raw content for user-facing trigger (conversation_message)', () => {
+    const row = {
+      id: 'm1',
+      runId: 'r1',
+      teamId: 't1',
+      type: 'user_prompt',
+      content: 'Hey team, what should I post today?',
+      contentBlocks: null,
+      metadata: { trigger: 'conversation_message' },
+      createdAt: new Date(),
+    };
+    const out = redactMessageRowForClient(row);
+    expect(out.content).toBe('Hey team, what should I post today?'); // verbatim
+  });
+
+  it('passes content through for assistant turn (no trigger field)', () => {
+    const row = {
+      id: 'm1',
+      runId: 'r1',
+      teamId: 't1',
+      type: 'assistant_text',
+      content: "I'll start by reviewing your context.",
+      contentBlocks: null,
+      metadata: { tool_use_id: 'tu_1', is_error: false }, // no trigger
+      createdAt: new Date(),
+    };
+    const out = redactMessageRowForClient(row);
+    expect(out.content).toBe("I'll start by reviewing your context.");
+  });
+
+  it('publicContent overrides trigger default when both present', () => {
+    const row = {
+      id: 'm1',
+      runId: 'r1',
+      teamId: 't1',
+      type: 'user_prompt',
+      content: 'raw internal goal',
+      contentBlocks: null,
+      metadata: { trigger: 'kickoff', publicContent: 'Custom summary for this kickoff.' },
+      createdAt: new Date(),
+    };
+    const out = redactMessageRowForClient(row);
+    expect(out.content).toBe('Custom summary for this kickoff.'); // publicContent wins
+  });
 });

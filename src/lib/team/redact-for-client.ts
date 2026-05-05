@@ -93,6 +93,37 @@ export function publicSkillLabel(_rawName: string | null | undefined): string {
 
 const MAX_DESCRIPTION_LEN = 200;
 
+/**
+ * Triggers that mean the founder typed this message themselves.
+ * Content for these rows displays verbatim — must NOT be replaced
+ * with a friendly default, because the user's own input is the
+ * point. Allowlist; everything else is treated as internal automation.
+ */
+const USER_FACING_TRIGGERS = new Set<string>(['conversation_message']);
+
+/**
+ * Default founder-friendly content for known internal triggers when
+ * `metadata.publicContent` isn't set. Defense in depth: any new caller
+ * that forgets `publicSummary`, plus historical rows from before
+ * publicSummary support was added, fall back to one of these instead
+ * of leaking the raw goal text.
+ */
+const TRIGGER_DEFAULTS: Record<string, string> = {
+  kickoff: 'Setting up your team.',
+  phase_transition: 'Updating your strategy for the new product phase.',
+  daily: 'Running your daily automation.',
+  weekly: 'Running your weekly automation.',
+  onboarding: 'Working through onboarding.',
+  task_retry: 'Retrying a previously failed task.',
+};
+
+/**
+ * The fallback when a row has an unknown internal trigger and no
+ * publicContent. Generic enough to be useful, vague enough to not
+ * fingerprint the system.
+ */
+const UNKNOWN_INTERNAL_TRIGGER_DEFAULT = 'Working on automated work.';
+
 interface NormalizedKeys {
   toolUseIdKey: 'tool_use_id' | 'toolUseId' | null;
   toolNameKey: 'tool_name' | 'toolName' | null;
@@ -228,9 +259,26 @@ export function redactMessageRowForClient<T extends MessageRowForClient>(row: T)
       ? meta.publicContent
       : null;
 
+  const trigger =
+    meta && typeof meta === 'object' && typeof meta.trigger === 'string'
+      ? meta.trigger
+      : null;
+
+  let resolvedContent: string | null = row.content;
+  if (publicContent) {
+    // Explicit override — caller provided a friendly summary.
+    resolvedContent = publicContent;
+  } else if (trigger && !USER_FACING_TRIGGERS.has(trigger)) {
+    // Internal trigger without an explicit publicSummary. Substitute
+    // a generic default so the raw goal text never reaches the wire.
+    resolvedContent = TRIGGER_DEFAULTS[trigger] ?? UNKNOWN_INTERNAL_TRIGGER_DEFAULT;
+  }
+  // else: no trigger (assistant/tool turns) OR user-facing trigger
+  //       (founder's own message) — display content as-is.
+
   return {
     ...row,
-    content: publicContent ?? row.content,
+    content: resolvedContent,
     contentBlocks: row.contentBlocks
       ? redactContentBlocksForClient(row.contentBlocks)
       : row.contentBlocks,
