@@ -167,8 +167,9 @@ export async function ensureKickoffEnqueued(args: {
   // the row to the browser; the raw `goal` (with internal architecture
   // details — playbook, agent names, mode strings) stays server-side
   // for the lead's agent-run replay. See dispatchLeadMessage docs.
-  const publicSummary =
-    `Setting up your week-1 plan${pathId ? ' and content drafts' : ''} for ${productRow.name}.`;
+  const publicSummary = pathId
+    ? `Building ${productRow.name}'s first-week plan and drafting your first reply candidates.`
+    : `Building ${productRow.name}'s first-week plan.`;
   try {
     const { runId } = await dispatchLeadMessage(
       {

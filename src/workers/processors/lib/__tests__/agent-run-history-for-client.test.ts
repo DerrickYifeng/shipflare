@@ -256,7 +256,7 @@ describe('loadAgentRunHistoryRedactedForClient', () => {
     expect(messages).toHaveLength(1);
     expect(messages[0]).toEqual({
       role: 'user',
-      content: 'Setting up your team.',
+      content: 'Building your first-week plan and drafting your first reply candidates.',
     });
     const json = JSON.stringify(messages);
     expect(json).not.toContain('social-media-manager');

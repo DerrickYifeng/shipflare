@@ -563,7 +563,7 @@ describe('redactMessageRowForClient', () => {
       createdAt: new Date('2026-05-04T00:00:00Z'),
     };
     const out = redactMessageRowForClient(row);
-    expect(out.content).toBe('Setting up your team.');
+    expect(out.content).toBe('Building your first-week plan and drafting your first reply candidates.');
     expect(out.content).not.toContain('social-media-manager');
     expect(out.content).not.toContain('playbook');
     expect(out.content).not.toContain('Strategic path');
@@ -688,9 +688,9 @@ describe('redactMessageRowForClient', () => {
       createdAt: new Date(),
     };
     const out = redactMessageRowForClient(row);
-    expect(out.content).toBe('Setting up your team.');
+    expect(out.content).toBe('Building your first-week plan and drafting your first reply candidates.');
     expect(out.contentBlocks).toEqual([
-      { type: 'text', text: 'Setting up your team.' },
+      { type: 'text', text: 'Building your first-week plan and drafting your first reply candidates.' },
     ]);
     expect(JSON.stringify(out)).not.toContain('social-media-manager');
   });
@@ -722,7 +722,7 @@ describe('resolveOverrideContent', () => {
 
   it('returns trigger default when no publicContent', () => {
     expect(resolveOverrideContent({ trigger: 'kickoff' })).toBe(
-      'Setting up your team.',
+      'Building your first-week plan and drafting your first reply candidates.',
     );
   });
 

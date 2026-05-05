@@ -109,7 +109,7 @@ const USER_FACING_TRIGGERS = new Set<string>(['conversation_message']);
  * of leaking the raw goal text.
  */
 const TRIGGER_DEFAULTS: Record<string, string> = {
-  kickoff: 'Setting up your team.',
+  kickoff: 'Building your first-week plan and drafting your first reply candidates.',
   phase_transition: 'Updating your strategy for the new product phase.',
   daily: 'Running your daily automation.',
   weekly: 'Running your weekly automation.',
