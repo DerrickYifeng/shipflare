@@ -20,6 +20,24 @@ export interface DelegationCardProps {
 
 const SUMMARY_COLLAPSED_CHARS = 180;
 
+// Cap the visible scroll so a 30-thread sweep doesn't push the rest of
+// the conversation off the page. Older events fold into a `+N earlier`
+// row at the top; the newest items always render so live text streaming
+// keeps the perceived progress feel.
+const MAX_VISIBLE_PROGRESS_ITEMS = 12;
+
+function capProgressItems(
+  items: readonly ProgressItem[],
+): { visible: readonly ProgressItem[]; hiddenCount: number } {
+  if (items.length <= MAX_VISIBLE_PROGRESS_ITEMS) {
+    return { visible: items, hiddenCount: 0 };
+  }
+  return {
+    visible: items.slice(-MAX_VISIBLE_PROGRESS_ITEMS),
+    hiddenCount: items.length - MAX_VISIBLE_PROGRESS_ITEMS,
+  };
+}
+
 /**
  * Top-level dispatch container rendered inline beneath a `LeadNode` that
  * has one or more Task tool_calls stitched to it. Visual layout mirrors
@@ -140,6 +158,7 @@ export function DelegationCard({
               member={member}
               active={!!activeMemberId && !!member && member.id === activeMemberId}
               onSelectMember={onSelectMember}
+              isSoloDispatch={specialistCount === 1}
             />
           );
         })}
@@ -153,6 +172,13 @@ interface SubtaskCardProps {
   member: DelegationCardMember | null;
   active: boolean;
   onSelectMember: (memberId: string) => void;
+  /**
+   * True when this is the only subtask in the parent DelegationCard.
+   * The card header already prints "Team Lead → <Specialist>" so the
+   * per-card meta row drops the specialist name and just shows
+   * "Subtask" — otherwise the same label appears twice in the same card.
+   */
+  isSoloDispatch: boolean;
 }
 
 function SubtaskCard({
@@ -160,6 +186,7 @@ function SubtaskCard({
   member,
   active,
   onSelectMember: _onSelectMember,
+  isSoloDispatch,
 }: SubtaskCardProps) {
   const [hover, setHover] = useState(false);
   // Default: expand on RUNNING (user wants to see live progress),
@@ -341,15 +368,21 @@ function SubtaskCard({
           <ExpandChevron expanded={expanded} />
         </div>
         <div style={metaRow}>
-          <span style={memberStyle}>{memberName}</span>
-          <span aria-hidden="true">·</span>
+          {isSoloDispatch ? null : (
+            <>
+              <span style={memberStyle}>{memberName}</span>
+              <span aria-hidden="true">·</span>
+            </>
+          )}
           <span style={subtaskStyle}>Subtask</span>
         </div>
       </button>
 
       {/* Body: progress feed + thinking placeholder + summary. Expanded
-          renders the full progressItems list; collapsed shows only the
-          final summary as a one-liner (if any). */}
+          renders the full progressItems list (capped to the most recent
+          N events; older fold into a `+N earlier events` row at the top
+          so the streaming text keeps the live-progress feel). Collapsed
+          shows only the final summary as a one-liner (if any). */}
       {expanded ? (
         <div style={{ marginTop: 2 }}>
           {hasProgress ? (
@@ -415,9 +448,27 @@ function ProgressList({
     gap: 2,
     padding: '6px 0 4px',
   };
+  const overflow: CSSProperties = {
+    display: 'flex',
+    alignItems: 'baseline',
+    gap: 6,
+    fontFamily: 'var(--sf-font-mono)',
+    fontSize: 11,
+    color: 'var(--sf-fg-4)',
+    lineHeight: 1.5,
+  };
+  const { visible, hiddenCount } = capProgressItems(items);
   return (
     <div style={list} aria-label="Subagent progress">
-      {items.map((item) => (
+      {hiddenCount > 0 ? (
+        <div style={overflow}>
+          <span aria-hidden="true">└</span>
+          <span>
+            +{hiddenCount} earlier {hiddenCount === 1 ? 'event' : 'events'}
+          </span>
+        </div>
+      ) : null}
+      {visible.map((item) => (
         <ProgressRow key={item.id} item={item} accentColor={accentColor} />
       ))}
     </div>
@@ -543,9 +594,21 @@ function NestedProgressList({
     gap: 2,
     opacity: 0.92,
   };
+  const overflow: CSSProperties = {
+    fontFamily: 'var(--sf-font-mono)',
+    fontSize: 11,
+    color: 'var(--sf-fg-4)',
+    lineHeight: 1.5,
+  };
+  const { visible, hiddenCount } = capProgressItems(items);
   return (
     <div style={wrap} aria-label="Nested tool progress">
-      {items.map((item) => (
+      {hiddenCount > 0 ? (
+        <div style={overflow}>
+          +{hiddenCount} earlier {hiddenCount === 1 ? 'event' : 'events'}
+        </div>
+      ) : null}
+      {visible.map((item) => (
         <ProgressRow key={item.id} item={item} accentColor={accentColor} />
       ))}
     </div>

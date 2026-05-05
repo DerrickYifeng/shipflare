@@ -24,12 +24,6 @@ vi.mock('@/lib/team-conversation-helpers', () => ({
   createAutomationConversation: vi.fn().mockResolvedValue('conv-1'),
 }));
 
-vi.mock('@/lib/onboarding-run-finalizer', () => ({
-  finalizePendingOnboardingRuns: vi
-    .fn()
-    .mockResolvedValue({ finalized: 0, runIds: [] }),
-}));
-
 import { ensureKickoffEnqueued } from '../team-kickoff';
 import { createAutomationConversation } from '@/lib/team-conversation-helpers';
 import { dispatchLeadMessage } from '@/lib/team/dispatch-lead-message';

@@ -145,7 +145,7 @@ You do NOT spawn a planner — that work is yours. If a fresh strategic path is 
 ```
 Task({
   subagent_type: 'social-media-manager',
-  description: 'fill reply slot <planItemId>',
+  description: 'fill reply slot',
   prompt: 'Mode: discover-and-fill-slot\nplanItemId: <uuid>\ntargetCount: <N>'
 })
 ```
@@ -180,7 +180,7 @@ properly onboarded user there will be 1+ slots:
    ```
    Task({
      subagent_type: 'social-media-manager',
-     description: 'fill reply slot <planItemId>',
+     description: 'fill reply slot',
      prompt: 'Mode: discover-and-fill-slot\nplanItemId: <uuid>\ntargetCount: <slot.targetCount>'
    })
    ```

@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import type { CSSProperties } from 'react';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { and, desc, eq, gte, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import {
@@ -15,7 +15,6 @@ import {
   products,
 } from '@/lib/db/schema';
 import { EmptyState } from '@/components/ui/empty-state';
-import { getTeamBudgetSnapshot } from '@/lib/team-budget';
 import { ensureKickoffEnqueued } from '@/lib/team-kickoff';
 import {
   publicAgentLabel,
@@ -26,7 +25,6 @@ import type {
   TeamMessageType,
 } from '@/hooks/use-team-events';
 import { TeamDesk, type TeamDeskMember } from './_components/team-desk';
-import type { BudgetSegment } from './_components/token-budget';
 import type {
   TaskLookup,
   TaskLookupEntry,
@@ -44,16 +42,6 @@ export const metadata: Metadata = {
 export const dynamic = 'force-dynamic';
 
 const INITIAL_MESSAGE_WINDOW = 100;
-
-function startOfIsoWeek(now: Date = new Date()): Date {
-  const d = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
-  );
-  const day = d.getUTCDay();
-  const diff = (day + 6) % 7;
-  d.setUTCDate(d.getUTCDate() - diff);
-  return d;
-}
 
 function isoOrNull(value: Date | null): string | null {
   return value instanceof Date ? value.toISOString() : null;
@@ -141,7 +129,6 @@ export default async function TeamPage({
     activeRunRows,
     lastRunRows,
     rawMessages,
-    memberCostRows,
     taskRows,
     conversationRows,
   ] = await Promise.all([
@@ -223,23 +210,6 @@ export default async function TeamPage({
       )
       .orderBy(desc(teamMessages.createdAt))
       .limit(INITIAL_MESSAGE_WINDOW),
-    // Weekly per-member spend: validate team membership via
-    // teamMembers (Phase E), no teamRuns join. `costUsd` lives on
-    // team_tasks already.
-    db
-      .select({
-        memberId: teamTasks.memberId,
-        sum: sql<string>`coalesce(sum(${teamTasks.costUsd}), 0)`.as('sum'),
-      })
-      .from(teamTasks)
-      .innerJoin(teamMembers, eq(teamMembers.id, teamTasks.memberId))
-      .where(
-        and(
-          eq(teamMembers.teamId, team.id),
-          gte(teamTasks.startedAt, startOfIsoWeek()),
-        ),
-      )
-      .groupBy(teamTasks.memberId),
     // Recent-tasks list: same migration — chain via teamMembers.
     // Onboarding-trigger filter dropped (the new dispatch path doesn't
     // create teamTasks for onboarding kickoffs anyway).
@@ -322,31 +292,6 @@ export default async function TeamPage({
     status: m.status,
     taskCount: openTaskCountByMember.get(m.id) ?? 0,
   }));
-
-  const memberCostMap = new Map<string, number>();
-  for (const row of memberCostRows) {
-    memberCostMap.set(row.memberId, Number(row.sum) || 0);
-  }
-
-  const budgetSnap = await getTeamBudgetSnapshot(team.id);
-
-  const budgetSegments: BudgetSegment[] = specialists.map((m) => ({
-    memberId: m.id,
-    agentType: m.agentType,
-    displayName: m.displayName,
-    spentUsd: memberCostMap.get(m.id) ?? 0,
-  }));
-  if (teamLead) {
-    const leadSpend = memberCostMap.get(teamLead.id) ?? 0;
-    if (leadSpend > 0) {
-      budgetSegments.unshift({
-        memberId: teamLead.id,
-        agentType: teamLead.agentType,
-        displayName: teamLead.displayName,
-        spentUsd: leadSpend,
-      });
-    }
-  }
 
   // Pass every team_messages row through the same redactor that the
   // /api/team/* routes use, so the SSR/RSC payload matches what the
@@ -492,9 +437,6 @@ export default async function TeamPage({
       teamLead={teamLead}
       specialists={specialists}
       initialMessages={initialMessages}
-      spentUsd={budgetSnap.spentUsd}
-      weeklyBudgetUsd={budgetSnap.weeklyBudgetUsd}
-      budgetSegments={budgetSegments}
       activeRunId={activeRun?.id ?? null}
       activeRunStartedAt={isoOrNull(activeRun?.startedAt ?? null)}
       isLive={isLive}
