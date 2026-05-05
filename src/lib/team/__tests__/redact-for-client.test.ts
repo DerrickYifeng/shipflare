@@ -379,3 +379,86 @@ describe('redactContentBlocksForClient', () => {
     expect(out[2]).toEqual({ type: 'text', text: 'Done.' });
   });
 });
+
+describe('redactMessageRowForClient', () => {
+  const baseRow = {
+    id: 'm1',
+    runId: 'r1',
+    teamId: 't1',
+    type: 'tool_call',
+    content: null,
+    contentBlocks: null,
+    metadata: null,
+    createdAt: new Date('2026-05-04T00:00:00Z'),
+  };
+
+  it('redacts metadata + leaves identifiers intact', () => {
+    const row = {
+      ...baseRow,
+      metadata: {
+        tool_use_id: 'tu_1',
+        tool_name: 'find_threads_via_xai',
+        tool_input: { query: 'secret' },
+      },
+    };
+    const out = redactMessageRowForClient(row);
+    expect(out.id).toBe('m1');
+    expect(out.runId).toBe('r1');
+    expect(out.metadata).toEqual({
+      tool_use_id: 'tu_1',
+      tool_name: 'searching',
+      tool_input: {},
+    });
+  });
+
+  it('swaps content with metadata.publicContent if present', () => {
+    const row = {
+      ...baseRow,
+      type: 'user_prompt',
+      content:
+        'First-visit kickoff for Acme. Strategic path pathId=... weekStart=... ' +
+        'Follow your kickoff playbook end-to-end (plan → social-media-manager): ...',
+      metadata: {
+        trigger: 'kickoff',
+        publicContent: 'Setting up your week-1 plan and content for Acme.',
+      },
+    };
+    const out = redactMessageRowForClient(row);
+    expect(out.content).toBe('Setting up your week-1 plan and content for Acme.');
+    expect(out.metadata).toEqual({ trigger: 'kickoff' }); // publicContent dropped
+    expect(out.content).not.toContain('social-media-manager');
+    expect(out.content).not.toContain('playbook');
+  });
+
+  it('passes content through when publicContent absent', () => {
+    const row = {
+      ...baseRow,
+      type: 'user_prompt',
+      content: 'Hey team, what should I post today?',
+      metadata: { trigger: 'conversation_message' },
+    };
+    const out = redactMessageRowForClient(row);
+    expect(out.content).toBe('Hey team, what should I post today?');
+  });
+
+  it('redacts contentBlocks if present', () => {
+    const row = {
+      ...baseRow,
+      type: 'assistant_text',
+      contentBlocks: [
+        { type: 'text', text: 'Thinking...' },
+        {
+          type: 'tool_use',
+          id: 'tu_1',
+          name: 'find_threads_via_xai',
+          input: { query: 'secret' },
+        },
+      ],
+    };
+    const out = redactMessageRowForClient(row);
+    expect(out.contentBlocks).toEqual([
+      { type: 'text', text: 'Thinking...' },
+      { type: 'tool_use', id: 'tu_1', name: 'searching', input: {} },
+    ]);
+  });
+});

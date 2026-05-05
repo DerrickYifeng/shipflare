@@ -205,6 +205,19 @@ export interface MessageRowForClient {
   createdAt: Date | string;
 }
 
-export function redactMessageRowForClient<T extends MessageRowForClient>(_row: T): T {
-  throw new Error('not implemented');
+export function redactMessageRowForClient<T extends MessageRowForClient>(row: T): T {
+  const meta = row.metadata ?? null;
+  const publicContent =
+    meta && typeof meta === 'object' && typeof meta.publicContent === 'string'
+      ? meta.publicContent
+      : null;
+
+  return {
+    ...row,
+    content: publicContent ?? row.content,
+    contentBlocks: row.contentBlocks
+      ? redactContentBlocksForClient(row.contentBlocks)
+      : row.contentBlocks,
+    metadata: redactMetadataForClient(meta),
+  };
 }
