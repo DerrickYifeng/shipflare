@@ -162,12 +162,20 @@ export async function ensureKickoffEnqueued(args: {
   }
 
   void coordinator; // resolved for misconfiguration check; lead is the sole recipient
+  // Founder-facing summary persisted into metadata.publicContent. The
+  // redactor at the API boundary swaps this into `content` when serving
+  // the row to the browser; the raw `goal` (with internal architecture
+  // details — playbook, agent names, mode strings) stays server-side
+  // for the lead's agent-run replay. See dispatchLeadMessage docs.
+  const publicSummary =
+    `Setting up your week-1 plan${pathId ? ' and content drafts' : ''} for ${productRow.name}.`;
   try {
     const { runId } = await dispatchLeadMessage(
       {
         teamId,
         conversationId,
         goal,
+        publicSummary,
         trigger: 'kickoff',
       },
       db,
