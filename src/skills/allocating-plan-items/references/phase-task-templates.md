@@ -10,6 +10,15 @@ by phase. Each template carries a
 shape — the planner should fill in product-specific strings, not emit
 the template verbatim.
 
+> **`format` is a closed enum, not a free-form tag.** `content_post`
+> templates fix `params.format` to one of
+> `milestone | lesson | hot_take | behind_the_scenes | question` (see
+> `allocation-rules.md` § "The 5 formats"). The strategic-path's
+> `contentPillars` (e.g. `build-in-public`, `solo-dev-ops`) are
+> account-level TOPICS that feed `params.theme`, never `params.format`.
+> Out-of-vocab values are hard-rejected by `add_plan_item`. (Renamed
+> from `pillar` 2026-05-04 to eliminate the topic/format naming collision.)
+
 ## skillName reality check (Phase E Day 3)
 
 The `skillName: '...'` hints in the templates below reflect the v2
@@ -91,7 +100,7 @@ Goal: de-risk positioning + plant audience seeds.
 - `channel`: 'x'
 - `userAction`: 'approve'
 - `skillName`: null  # content_post routes to content-manager(post_batch) via channel
-- `params`: `{ angle: 'story', pillar: '{contentPillars[0]}' }`
+- `params`: `{ angle: 'story', format: 'behind_the_scenes' }`
 
 ### 6. email_send — Waitlist welcome drip
 - `title`: "Welcome email draft for waitlist signups"
@@ -118,7 +127,7 @@ Goal: de-risk positioning + plant audience seeds.
 - `channel`: 'x'
 - `userAction`: 'approve'
 - `skillName`: null  # content_post routes to content-manager(post_batch) via channel
-- `params`: `{ angle: 'contrarian', pillar: '{contentPillars[1]}' }`
+- `params`: `{ angle: 'contrarian', format: 'hot_take' }`
 
 ### 9. setup_task — Seed waitlist with 10 founders
 - `title`: "Seed waitlist with 10 founders from your network"
@@ -142,7 +151,7 @@ Goal: build launch-ready audience. Weekly rhythm matters most here.
 - `channel`: 'x'
 - `userAction`: 'approve'
 - `skillName`: null  # content_post routes to content-manager(post_batch) via channel
-- `params`: `{ angle: 'data', pillar: '{contentPillars[0]}' }`
+- `params`: `{ angle: 'data', format: 'milestone' }`
 
 ### 2. content_post — Howto playbook post
 - `title`: "Howto post: the 5-step workflow {product.name} enables"
@@ -151,7 +160,7 @@ Goal: build launch-ready audience. Weekly rhythm matters most here.
 - `channel`: 'x'
 - `userAction`: 'approve'
 - `skillName`: null  # content_post routes to content-manager(post_batch) via channel
-- `params`: `{ angle: 'howto', pillar: '{contentPillars[1]}' }`
+- `params`: `{ angle: 'howto', format: 'lesson' }`
 
 ### 3. content_reply — Daily reply slot (one per day per channel)
 - `title`: "Reply session: ${targetCount} replies"  # use the
@@ -213,7 +222,7 @@ Goal: build launch-ready audience. Weekly rhythm matters most here.
 - `channel`: 'x'
 - `userAction`: 'approve'
 - `skillName`: null  # content_post routes to content-manager(post_batch) via channel
-- `params`: `{ angle: 'case', pillar: '{contentPillars[2]}' }`
+- `params`: `{ angle: 'case', format: 'milestone' }`
 
 ### 9. launch_asset — Community hot-posts scan
 - `title`: "Read hot posts in target subreddits"
@@ -351,7 +360,7 @@ Goal: convert launch-day audience into retention + second wave.
 - `channel`: 'x'
 - `userAction`: 'approve'
 - `skillName`: null  # content_post routes to content-manager(post_batch) via channel
-- `params`: `{ angle: 'data', pillar: 'retro' }`
+- `params`: `{ angle: 'data', format: 'lesson' }`
 
 ### 2. email_send — Thank-you email to top supporters
 - `title`: "Personal thank-you emails to top 10 supporters"
@@ -448,4 +457,6 @@ Goal: durable rhythm. No panic moves.
 Strings containing `{product.name}`, `{contentPillars[N]}`,
 `{recentMilestone.title}`, etc. get filled at emit time. If a
 referenced field is missing, omit the placeholder rather than emit
-`{...}` literally.
+`{...}` literally. `{contentPillars[N]}` only appears in free-form
+strings (titles, descriptions, `params.theme`) — never in
+`params.format`, which is a closed enum (see top of this file).

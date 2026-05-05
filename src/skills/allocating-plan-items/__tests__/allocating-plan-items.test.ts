@@ -88,7 +88,7 @@ describe('allocating-plan-items schema', () => {
           title: 'Day 1: shipping the pricing page',
           description: 'Anchor post for the week.',
           scheduledAt: '2026-05-04T13:00:00Z',
-          params: { pillar: 'milestone' },
+          params: { format: 'milestone' },
           skillName: null,
         },
       ],

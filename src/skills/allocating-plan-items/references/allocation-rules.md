@@ -59,8 +59,10 @@ For each channel the user has connected (X / Reddit / Email):
   the week — not all on one day.
 - Use `channelMix[channel].preferredHours` to pick `scheduledAt` UTC
   times. Spread across the list — don't stack two items in the same hour.
-- Rotate through `contentPillars` — don't emit three posts on the same
-  pillar back-to-back.
+- Rotate through `contentPillars` (TOPIC pillars) for `params.theme` —
+  don't emit three posts on the same TOPIC back-to-back. (Note: this
+  is `theme` rotation. `format` rotation is governed separately by the
+  5-format cap below.)
 - Spread items across **all 7 days** of the week, not just 3-5. Aim for
   roughly 1 item per day on average (0-2 per day is fine). If you have
   9 items, spreading them across 7 days is better than clumping into 5 —
@@ -133,7 +135,7 @@ interview, not fewer. Exception: only skip if
 insensitive title overlap), or if `signals.stalledItems` /
 `signals.lastWeekCompletions` already contains a matching title.
 
-### Foundation & audience phases: pillar mix clamp (HARD)
+### Foundation & audience phases: format mix clamp (HARD)
 
 In any 7-day window at `foundation` or `audience` phase:
 
@@ -213,7 +215,7 @@ For every scheduled item:
   - `analytics_summary`, `metrics_compute` → `skillName: null`
     (manual-completion; analytics pipeline is deferred).
 - Fill `params` with the minimum the downstream consumer needs. For
-  `content_post` that's `{ angle, topic, anchor_theme, pillar }` — the
+  `content_post` that's `{ angle, topic, anchor_theme, format }` — the
   writer agent reads these when it runs. For email, `{ emailType,
   recipient }` so the founder can draft off-platform.
 - Write a `title` and `description` the founder will see on the Today
@@ -274,16 +276,16 @@ rather than stamping a duplicate). Report the count in your `notes`.
 - No active path — STOP. Return `planItems: []` and put the gap into
   `notes` so the caller can SendMessage back to the coordinator.
 
-## Pillar mix and metaphor ban
+## Format mix and metaphor ban
 
 The planner balances the week's `content_post` items across a closed
-**5-pillar vocabulary** AND derives a per-item `metaphor_ban` from the
+**5-format vocabulary** AND derives a per-item `metaphor_ban` from the
 founder's recent X timeline so consecutive posts don't recycle the
 same idea wearing different hats.
 
-### The 5 pillars
+### The 5 formats
 
-| Pillar | What it is | When to pick |
+| Format | What it is | When to pick |
 |---|---|---|
 | `milestone` | Concrete shipped thing or revenue/user number with proof. | Real numbers exist this week (revenue update, user count, feature shipped, fundraise). |
 | `lesson` | One specific takeaway from a recent failure / win, generalizable to other founders. | Founder hit something that generalizes. |
@@ -291,15 +293,17 @@ same idea wearing different hats.
 | `behind_the_scenes` | Process / workflow / decision the audience doesn't normally see. | Build state, kill decisions, hiring, tooling choices. |
 | `question` | Genuine ask the founder needs answered, audience can reply usefully. | Real choice in front of the founder. |
 
-**Hard rule — pillar cap:** at most **≤ 2 of any pillar per channel**
+**Hard rule — format cap:** at most **≤ 2 of any format per channel**
 in a 7-day window. X and Reddit are independent audiences, so running
-`milestone` twice on each is fine. The cap is `≤ 2 per pillar`, NOT
-`≥ 1 of each` — empty pillars are fine when input is missing.
+`milestone` twice on each is fine. The cap is `≤ 2 per format`, NOT
+`≥ 1 of each` — empty formats are fine when input is missing.
 
-**Naming note:** plan_item `pillar` (this 5-cluster vocabulary, drives
-post shape) is distinct from `strategic_paths.contentPillars` (3-4
-free-form narrative themes set during onboarding, drives `theme`
-selection). Both can coexist on a plan_item.
+**Naming note:** plan_item `params.format` (this 5-cluster FORMAT
+vocabulary, drives post shape) is distinct from
+`strategic_paths.contentPillars` (3-4 free-form TOPIC pillars set
+during onboarding, drives `params.theme` selection). Both can coexist
+on a plan_item. Renamed from `pillar` to `format` 2026-05-04 because
+the LLM planner conflated the topic and format vocabularies.
 
 ### Diversity inputs from `signals.recentXPosts`
 
@@ -322,11 +326,12 @@ If `signals.recentXPosts` is absent or empty:
 
 For each plan_item to be added this week:
 
-- Pick `pillar` from `{milestone | lesson | hot_take |
-  behind_the_scenes | question}`. **Hard cap: max 2 of any pillar per
+- Pick `format` from `{milestone | lesson | hot_take |
+  behind_the_scenes | question}`. **Hard cap: max 2 of any format per
   channel** across the week's content_post items. Use the
-  strategic-path's `contentPillars` library as a HINT for `theme`
-  selection, NOT as a substitute for `pillar` selection.
+  strategic-path's `contentPillars` (TOPIC pillars) as a HINT for
+  `theme` selection, NOT as a substitute for `format` selection. A
+  topic string like `marketing-debt` is NEVER a valid `format` value.
 - Pick `theme`: a concrete topic phrase (e.g. "first paying customer
   story", "killing feature X", "Stripe webhook gotcha"). Each item
   this week gets a distinct theme.
@@ -341,7 +346,7 @@ For each plan_item to be added this week:
 
 Emit each as a `planItems` entry — the caller's `add_plan_item`
 validates the new `params` fields against `contentPostParamsSchema`
-(out-of-vocab pillars and oversized arrays are hard rejects there).
+(out-of-vocab formats and oversized arrays are hard rejects there).
 
 ### What to ban specifically
 

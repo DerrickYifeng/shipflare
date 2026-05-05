@@ -40,6 +40,25 @@ If a critical field is missing (no `strategicPath`, no
 `targetWeekStart`), return `planItems: []` and explain the gap in
 `notes` — do NOT fabricate schedule data.
 
+### TOPIC vs FORMAT — DO NOT CONFLATE
+
+Two distinct vocabularies meet inside this skill. Mixing them is the
+single most common bug. Read this before writing any output.
+
+| Concept | Lives in | Vocabulary | Examples |
+|---|---|---|---|
+| **TOPIC pillar** | `strategicPath.contentPillars` (input) → `params.theme` (output) | Free-form strings the product credibly owns | `build-in-public`, `marketing-debt`, `solo-dev-ops`, `user-rituals` |
+| **FORMAT** | `params.format` (output only) | Closed 5-value enum | `milestone`, `lesson`, `hot_take`, `behind_the_scenes`, `question` |
+
+Concretely:
+
+- The TOPIC for a post comes from rotating through `strategicPath.contentPillars` and lands in `params.theme` (free-form string).
+- The FORMAT for a post is a content-type classification you pick to vary the post shape across the week, and lands in `params.format` (must be one of the 5 enum values).
+- **Never write a `contentPillars` value (e.g. `'marketing-debt'`) into `params.format`.** That fails the schema and the entire `add_plan_item` call rejects.
+- **Never write a format enum value into `params.theme`.** That works mechanically but discards the actual topic.
+
+If the input only has TOPIC pillars and you need a FORMAT, pick from the 5 enum values yourself based on the angle: `data` → `milestone`, `howto` → `lesson`, `contrarian` → `hot_take`, `story` → `behind_the_scenes`, anything else → `question`.
+
 ## Your workflow
 
 Apply every rule in the **allocation-rules** reference below. The
@@ -57,7 +76,7 @@ The reference also covers:
 - Hard rules (rejection conditions — never violate).
 - Stalled-item carryover (emit into `stalledCarriedOver`, not
   `planItems`).
-- Pillar mix and metaphor ban (5 pillars, 14-day timeline read).
+- Format mix and metaphor ban (5 formats, 14-day timeline read).
 - Behavior when inputs are thin or the X timeline is empty.
 
 ## Output
@@ -77,7 +96,7 @@ Return a single JSON object — no markdown fences, no prose. Start
       "description": "...",
       "scheduledAt": "2026-05-04T13:00:00Z",
       "skillName": null,
-      "params": { "anchor_theme": "...", "pillar": "milestone", "theme": "...", "metaphor_ban": [] }
+      "params": { "anchor_theme": "...", "format": "milestone", "theme": "<one of strategicPath.contentPillars>", "metaphor_ban": [] }
     }
   ],
   "stalledCarriedOver": [

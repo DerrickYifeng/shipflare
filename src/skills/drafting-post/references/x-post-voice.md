@@ -164,9 +164,9 @@ accepted; map them to the closest cluster (e.g. "data-led" → `terse_shipper`,
 ## 5. By-phase playbook
 
 **Planner-supplied params override.** When the plan_item's
-`params.pillar` is set (one of `milestone | lesson | hot_take |
+`params.format` is set (one of `milestone | lesson | hot_take |
 behind_the_scenes | question`), narrow this section's post-type list
-to that pillar. When `params.theme` is set, that's the topic —
+to that format. When `params.theme` is set, that's the topic —
 don't drift. When `params.metaphor_ban` is set, treat each phrase as
 a hard exclusion plus close synonyms. These planner inputs are
 HARD inputs, not suggestions; the per-phase rules below apply
@@ -210,7 +210,7 @@ breakouts at this stage have media).
 - **Generalized claims about how the world works.** A foundation
   founder writing `the real problem is X` / `most solo devs Y` /
   `winners do Z` reads as posturing — there's no track record yet
-  to cash the claim against. When the pillar is `lesson` or
+  to cash the claim against. When the format is `lesson` or
   `hot_take` at this phase, the post MUST be a first-person
   observation (`this week I noticed X about my own build`), NOT a
   pronouncement about the industry. If the brief asks for a

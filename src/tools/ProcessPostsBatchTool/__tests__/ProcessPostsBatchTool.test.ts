@@ -304,7 +304,7 @@ describe('processPostsBatchTool', () => {
       {
         id: 'p1',
         phase: 'compound',
-        params: { pillar: 'milestone', theme: 'first revenue' },
+        params: { format: 'milestone', theme: 'first revenue' },
       },
     ]);
     runForkSkillMock.mockResolvedValueOnce({

@@ -44,7 +44,7 @@ The `content-safety` reference applies to both channels: no sibling-platform men
 
 ## Phase + planner-supplied params
 
-Read `params.pillar` if present (one of `milestone | lesson | hot_take | behind_the_scenes | question`) — narrow the post-type list to that pillar. Read `params.theme` if present — that's the topic; do NOT drift. Read `params.metaphor_ban` if present — treat each phrase as a hard exclusion. Read `params.cross_refs` if present — lead with a callback to the named plan_item.
+Read `params.format` if present (one of `milestone | lesson | hot_take | behind_the_scenes | question`) — narrow the post-type list to that format. (Note: `params.format` is the content FORMAT classification; the strategic-path's `contentPillars` are TOPIC pillars and arrive via `params.theme`, never via `params.format`.) Read `params.theme` if present — that's the topic; do NOT drift. Read `params.metaphor_ban` if present — treat each phrase as a hard exclusion. Read `params.cross_refs` if present — lead with a callback to the named plan_item.
 
 When `params` is empty, fall back to the lifecycle defaults from the per-phase playbook.
 
@@ -93,8 +93,8 @@ Before emitting your JSON, run this checklist on your own draft:
    and reserve product mention for the bottom). Verify by counting.
 
 5. **Phase + voice check** — does the draft match the resolved phase's
-   voice cluster from the per-phase playbook? If `params.pillar` is
-   set, does the post live within that pillar (milestone vs hot_take vs
+   voice cluster from the per-phase playbook? If `params.format` is
+   set, does the post live within that format (milestone vs hot_take vs
    behind_the_scenes etc.)? If `params.theme` is set, does the post
    stay on-theme without drifting? If `params.metaphor_ban` is set,
    does the post avoid every banned phrase? If any answer is no, REWRITE.

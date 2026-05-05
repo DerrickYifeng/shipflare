@@ -130,7 +130,7 @@ describe('addPlanItemTool', () => {
     expect(parse.success).toBe(false);
   });
 
-  it('rejects content_post params with an invalid pillar enum value', async () => {
+  it('rejects content_post params with an invalid format enum value', async () => {
     const ctx = makeCtx(store, { userId: 'user-1', productId: 'prod-1' });
     await expect(
       addPlanItemTool.execute(
@@ -141,13 +141,38 @@ describe('addPlanItemTool', () => {
           channel: 'x',
           scheduledAt: '2026-05-01T09:00:00Z',
           skillName: 'draft-single-post',
-          params: { pillar: 'definitely_not_a_pillar' },
+          params: { format: 'definitely_not_a_format' },
           title: 'Test',
           description: null,
         },
         ctx,
       ),
-    ).rejects.toThrow(/pillar|invalid/i);
+    ).rejects.toThrow(/format|invalid/i);
+  });
+
+  it('rejects content_post params that conflate topic pillar (legacy bug, 2026-05-04)', async () => {
+    const ctx = makeCtx(store, { userId: 'user-1', productId: 'prod-1' });
+    // The LLM planner used to write `params.pillar` with strategic-path topic
+    // strings like 'marketing-debt' — same word, two concepts. Schema renamed
+    // to `format` so the topic value can no longer slot into the format field.
+    await expect(
+      addPlanItemTool.execute(
+        {
+          kind: 'content_post',
+          userAction: 'approve',
+          phase: 'audience',
+          channel: 'x',
+          scheduledAt: '2026-05-01T09:00:00Z',
+          skillName: 'draft-single-post',
+          // `format` with a topic string is rejected; `pillar` is now an
+          // unknown key and silently passes through (passthrough schema).
+          params: { format: 'marketing-debt' },
+          title: 'Test',
+          description: null,
+        },
+        ctx,
+      ),
+    ).rejects.toThrow(/format|invalid/i);
   });
 
   it('rejects content_post params with metaphor_ban over the 20-item cap', async () => {
@@ -172,7 +197,7 @@ describe('addPlanItemTool', () => {
     ).rejects.toThrow();
   });
 
-  it('accepts content_post params with valid pillar + theme + metaphor_ban', async () => {
+  it('accepts content_post params with valid format + theme + metaphor_ban', async () => {
     // Pre-seed a plan row so resolvePlanId succeeds.
     store.register<PlanRow>(plans, [
       {
@@ -192,7 +217,7 @@ describe('addPlanItemTool', () => {
         scheduledAt: '2026-05-01T09:00:00Z',
         skillName: 'draft-single-post',
         params: {
-          pillar: 'lesson',
+          format: 'lesson',
           theme: 'first paying customer story',
           metaphor_ban: ['debt', 'compound', 'owe'],
         },
@@ -204,7 +229,7 @@ describe('addPlanItemTool', () => {
     expect(result.planItemId).toBeTruthy();
     const rows = store.get<PlanItemRow>(planItems);
     expect(rows[0]!.params).toMatchObject({
-      pillar: 'lesson',
+      format: 'lesson',
       theme: 'first paying customer story',
       metaphor_ban: ['debt', 'compound', 'owe'],
     });
@@ -220,7 +245,7 @@ describe('addPlanItemTool', () => {
       },
     ]);
     const ctx = makeCtx(store, { userId: 'user-1', productId: 'prod-1' });
-    // setup_task with arbitrary params — pillar enum should NOT be enforced.
+    // setup_task with arbitrary params — format enum should NOT be enforced.
     const result = await addPlanItemTool.execute(
       {
         kind: 'setup_task',
@@ -229,7 +254,7 @@ describe('addPlanItemTool', () => {
         channel: null,
         scheduledAt: '2026-05-01T09:00:00Z',
         skillName: null,
-        params: { foo: 'bar', pillar: 'definitely_not_a_pillar' },
+        params: { foo: 'bar', format: 'definitely_not_a_format' },
         title: 'Setup',
         description: null,
       },
