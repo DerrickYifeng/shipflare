@@ -92,3 +92,28 @@ describe('publicToolLabel', () => {
     expect(publicToolLabel('')).toBe('tool');
   });
 });
+
+describe('publicAgentLabel', () => {
+  it.each([
+    ['coordinator', 'Team Lead'],
+    ['social-media-manager', 'Content Specialist'],
+  ])('maps %s -> %s', (raw, label) => {
+    expect(publicAgentLabel(raw)).toBe(label);
+  });
+
+  it('returns "agent" for unknown / null', () => {
+    expect(publicAgentLabel(null)).toBe('agent');
+    expect(publicAgentLabel(undefined)).toBe('agent');
+    expect(publicAgentLabel('')).toBe('agent');
+    expect(publicAgentLabel('some-future-internal-agent')).toBe('agent');
+  });
+});
+
+describe('publicSkillLabel', () => {
+  it('always returns "skill" — gerund names never leak', () => {
+    expect(publicSkillLabel('drafting-post')).toBe('skill');
+    expect(publicSkillLabel('judging-thread-quality')).toBe('skill');
+    expect(publicSkillLabel('validating-draft')).toBe('skill');
+    expect(publicSkillLabel(null)).toBe('skill');
+  });
+});

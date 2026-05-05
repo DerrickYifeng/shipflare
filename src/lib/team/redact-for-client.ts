@@ -72,12 +72,18 @@ export function publicToolLabel(rawName: string | null | undefined): PublicToolL
   return TOOL_LABEL_MAP[rawName] ?? 'tool';
 }
 
-export function publicAgentLabel(_rawType: string | null | undefined): string {
-  throw new Error('not implemented');
+const AGENT_DISPLAY_NAMES: Record<string, string> = {
+  coordinator: 'Team Lead',
+  'social-media-manager': 'Content Specialist',
+};
+
+export function publicAgentLabel(rawType: string | null | undefined): string {
+  if (!rawType) return 'agent';
+  return AGENT_DISPLAY_NAMES[rawType] ?? 'agent';
 }
 
 export function publicSkillLabel(_rawName: string | null | undefined): string {
-  throw new Error('not implemented');
+  return 'skill';
 }
 
 export function redactMetadataForClient(
