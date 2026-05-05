@@ -100,8 +100,12 @@ async function seedLeakyMessages(
   const now = Date.now();
 
   await db.insert(teamMessages).values([
-    // (1) Kickoff user_prompt — raw playbook prose lives in `content`.
-    //     Redactor reads metadata.publicContent and substitutes it.
+    // (1) Kickoff user_prompt — raw playbook prose lives in `content`
+    //     AND in `contentBlocks` (dispatchLeadMessage writes BOTH).
+    //     Redactor reads metadata.publicContent and must swap BOTH the
+    //     top-level `content` AND the contentBlocks[0].text — otherwise
+    //     consumers preferring contentBlocks (transcript history,
+    //     future SSE projections) leak the raw goal verbatim.
     {
       id: crypto.randomUUID(),
       teamId,
@@ -113,7 +117,12 @@ async function seedLeakyMessages(
       messageType: 'message',
       content:
         'Run the discover-and-fill-slot kickoff playbook for this week. Spawn social-media-manager to draft posts.',
-      contentBlocks: null,
+      contentBlocks: [
+        {
+          type: 'text',
+          text: 'Run the discover-and-fill-slot kickoff playbook for this week. Spawn social-media-manager to draft posts.',
+        },
+      ],
       metadata: {
         publicContent: 'Find a slot to fill this week and draft content.',
         trigger: 'kickoff',
