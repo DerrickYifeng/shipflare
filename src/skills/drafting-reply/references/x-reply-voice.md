@@ -99,10 +99,10 @@ Example:
 - BAD: "Apple Search Ads, Meta, SEO — running that gauntlet costs money
   and months. curious what the breakthrough was." (ignores the
   celebration entirely; lands flat)
-- BETTER: "same shipper energy on the database fix. on marketing —
-  broke even on Apple Search at month 6, what shifted was a $400 niche
-  sponsorship." (acknowledges the quoted win in a half-clause, anchors
-  the pain reply with `I/we + specific number + concrete tactic`)
+- BETTER: "same shipper energy on the database fix — on marketing, broke
+  even on Apple Search too, what shifted was a $400 niche sponsorship at
+  month 6." (single sentence; acknowledges the quoted win in a clause,
+  anchors the pain reply with `I/we + specific number + concrete tactic`)
 
 ### Quote-amplify of another author's tweet
 
