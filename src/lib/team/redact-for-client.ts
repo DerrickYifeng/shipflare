@@ -11,7 +11,11 @@
  * All functions are pure: no DB, no I/O, no globals.
  */
 
-export type PublicToolLabel = string;
+export type PublicToolLabel =
+  | 'searching' | 'drafting' | 'reviewing' | 'posting' | 'planning'
+  | 'reading-plan' | 'reading-context' | 'reading-team' | 'reading-metrics'
+  | 'reading-history' | 'monitoring' | 'verifying' | 'batching' | 'queueing'
+  | 'delegating' | 'messaging' | 'sleeping' | 'cancelling' | 'skill' | 'tool';
 
 const TOOL_LABEL_MAP: Record<string, PublicToolLabel> = {
   // Platform actions
@@ -82,6 +86,7 @@ export function publicAgentLabel(rawType: string | null | undefined): string {
   return AGENT_DISPLAY_NAMES[rawType] ?? 'agent';
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- skill gerund names are intentionally hidden; the parameter exists to document accepted input type
 export function publicSkillLabel(_rawName: string | null | undefined): string {
   return 'skill';
 }
@@ -96,6 +101,13 @@ interface NormalizedKeys {
   agentKey: 'agent_name' | 'agentName' | null;
 }
 
+/**
+ * Detects which casing variant of each metadata key is present.
+ *
+ * Priority: snake_case > camelCase. If a row has both `tool_name` and
+ * `toolName`, the snake_case value wins (canonical DB column name).
+ * The other variant is silently dropped.
+ */
 function detectKeys(meta: Record<string, unknown>): NormalizedKeys {
   return {
     toolUseIdKey:
@@ -147,7 +159,8 @@ export function redactMetadataForClient(
     out[keys.agentKey] = publicAgentLabel(metadata[keys.agentKey] as string);
   }
 
-  // Pass-through scalars (no IP value).
+  // Pass-through scalars: low-IP values needed by founder UI grouping.
+  // trigger is an enum like 'kickoff' | 'daily' | 'weekly' — no architectural detail.
   if ('is_error' in metadata) out.is_error = metadata.is_error;
   if ('duration_ms' in metadata) out.duration_ms = metadata.duration_ms;
   if ('trigger' in metadata) out.trigger = metadata.trigger;

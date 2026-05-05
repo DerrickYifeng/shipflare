@@ -260,6 +260,32 @@ describe('redactMetadataForClient', () => {
     });
   });
 
+  it('prefers snake_case over camelCase when both present', () => {
+    const out = redactMetadataForClient({
+      tool_name: 'x_post',
+      toolName: 'find_threads_via_xai',
+    });
+    expect(out?.tool_name).toBe('posting');
+    expect(out).not.toHaveProperty('toolName');
+  });
+
+  it('does not truncate description at exactly 200 chars', () => {
+    const at200 = 'x'.repeat(200);
+    const out = redactMetadataForClient({
+      tool_name: 'Task',
+      tool_input: { description: at200, subagent_type: 'social-media-manager' },
+    });
+    expect((out!.tool_input as { description: string }).description).toBe(at200);
+  });
+
+  it('preserves empty description', () => {
+    const out = redactMetadataForClient({
+      tool_name: 'Task',
+      tool_input: { description: '', subagent_type: 'social-media-manager' },
+    });
+    expect((out!.tool_input as { description: string }).description).toBe('');
+  });
+
   it('truncates description longer than 200 chars', () => {
     const longDesc = 'x'.repeat(500);
     const input = {
@@ -355,6 +381,19 @@ describe('redactContentBlocksForClient', () => {
     expect(redactContentBlocksForClient('plain string')).toBe('plain string');
   });
 
+  it('returns [] for empty array input', () => {
+    expect(redactContentBlocksForClient([])).toEqual([]);
+  });
+
+  it('redacts tool_use block with undefined name to "tool"', () => {
+    const blocks = [
+      { type: 'tool_use', id: 'tu_x', name: undefined as unknown as string, input: {} },
+    ];
+    expect(redactContentBlocksForClient(blocks)).toEqual([
+      { type: 'tool_use', id: 'tu_x', name: 'tool', input: {} },
+    ]);
+  });
+
   it('mixed blocks: redacts only the dangerous ones', () => {
     const blocks = [
       { type: 'text', text: 'I am thinking...' },
@@ -439,6 +478,22 @@ describe('redactMessageRowForClient', () => {
     };
     const out = redactMessageRowForClient(row);
     expect(out.content).toBe('Hey team, what should I post today?');
+  });
+
+  it('handles row with metadata = undefined', () => {
+    const row = {
+      id: 'm1',
+      runId: null,
+      teamId: 't1',
+      type: 'assistant_text',
+      content: 'plain text',
+      contentBlocks: null,
+      metadata: undefined as unknown as Record<string, unknown> | null,
+      createdAt: new Date('2026-05-04T00:00:00Z'),
+    };
+    const out = redactMessageRowForClient(row);
+    expect(out.metadata).toBeNull();
+    expect(out.content).toBe('plain text');
   });
 
   it('redacts contentBlocks if present', () => {
