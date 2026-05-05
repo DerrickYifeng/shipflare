@@ -86,10 +86,73 @@ export function publicSkillLabel(_rawName: string | null | undefined): string {
   return 'skill';
 }
 
+const MAX_DESCRIPTION_LEN = 200;
+
+interface NormalizedKeys {
+  toolUseIdKey: 'tool_use_id' | 'toolUseId' | null;
+  toolNameKey: 'tool_name' | 'toolName' | null;
+  toolInputKey: 'tool_input' | 'toolInput' | null;
+  parentKey: 'parent_tool_use_id' | 'parentToolUseId' | null;
+  agentKey: 'agent_name' | 'agentName' | null;
+}
+
+function detectKeys(meta: Record<string, unknown>): NormalizedKeys {
+  return {
+    toolUseIdKey:
+      'tool_use_id' in meta ? 'tool_use_id' : 'toolUseId' in meta ? 'toolUseId' : null,
+    toolNameKey:
+      'tool_name' in meta ? 'tool_name' : 'toolName' in meta ? 'toolName' : null,
+    toolInputKey:
+      'tool_input' in meta ? 'tool_input' : 'toolInput' in meta ? 'toolInput' : null,
+    parentKey:
+      'parent_tool_use_id' in meta
+        ? 'parent_tool_use_id'
+        : 'parentToolUseId' in meta
+          ? 'parentToolUseId'
+          : null,
+    agentKey:
+      'agent_name' in meta ? 'agent_name' : 'agentName' in meta ? 'agentName' : null,
+  };
+}
+
+function redactToolInput(raw: unknown): Record<string, unknown> {
+  if (!raw || typeof raw !== 'object') return {};
+  const r = raw as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  if (typeof r.description === 'string') {
+    out.description = r.description.slice(0, MAX_DESCRIPTION_LEN);
+  }
+  if (typeof r.subagent_type === 'string') {
+    out.subagent_type = publicAgentLabel(r.subagent_type);
+  }
+  return out;
+}
+
 export function redactMetadataForClient(
-  _metadata: Record<string, unknown> | null | undefined,
+  metadata: Record<string, unknown> | null | undefined,
 ): Record<string, unknown> | null {
-  throw new Error('not implemented');
+  if (!metadata) return null;
+  const keys = detectKeys(metadata);
+  const out: Record<string, unknown> = {};
+
+  if (keys.toolUseIdKey) out[keys.toolUseIdKey] = metadata[keys.toolUseIdKey];
+  if (keys.toolNameKey) {
+    out[keys.toolNameKey] = publicToolLabel(metadata[keys.toolNameKey] as string);
+  }
+  if (keys.toolInputKey) {
+    out[keys.toolInputKey] = redactToolInput(metadata[keys.toolInputKey]);
+  }
+  if (keys.parentKey) out[keys.parentKey] = metadata[keys.parentKey];
+  if (keys.agentKey) {
+    out[keys.agentKey] = publicAgentLabel(metadata[keys.agentKey] as string);
+  }
+
+  // Pass-through scalars (no IP value).
+  if ('is_error' in metadata) out.is_error = metadata.is_error;
+  if ('duration_ms' in metadata) out.duration_ms = metadata.duration_ms;
+  if ('trigger' in metadata) out.trigger = metadata.trigger;
+
+  return out;
 }
 
 export function redactContentBlocksForClient(_blocks: unknown): unknown {
