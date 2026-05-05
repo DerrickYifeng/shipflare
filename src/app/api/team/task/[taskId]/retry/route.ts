@@ -150,6 +150,11 @@ export async function POST(
   // legacy `alreadyRunning` flag is gone — wake() is idempotent within a
   // 1-second BullMQ jobId window, so duplicate retry clicks collapse
   // before reaching the worker.
+  //
+  // The original prompt may contain raw routing instructions / agent
+  // names — pass a founder-friendly `publicSummary` so the redactor
+  // doesn't have to fall back to the generic trigger default.
+  const publicSummary = `Retrying a previously failed task.`;
   const { agentId: runId, messageId } = await spawnMemberAgentRun(
     {
       teamId: task.teamId,
@@ -159,6 +164,7 @@ export async function POST(
       prompt: goal,
       description: `Retry of ${task.taskId.slice(0, 8)}`,
       trigger: 'task_retry',
+      publicSummary,
     },
     db,
   );

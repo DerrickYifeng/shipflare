@@ -36,6 +36,14 @@ export interface SpawnMemberInput {
   description: string;
   /** Trigger label — preserved on metadata for observability. */
   trigger: string;
+  /**
+   * Optional founder-friendly summary persisted into metadata.publicContent.
+   * The redactor at the API boundary swaps this into the `content` field
+   * when serving the row to the browser. The raw `prompt` stays in `content`
+   * (worker reads it for agent replay). Use for any prompt text that exposes
+   * internal architecture details or routing instructions.
+   */
+  publicSummary?: string;
 }
 
 export interface SpawnMemberResult {
@@ -84,6 +92,10 @@ export async function spawnMemberAgentRun(
   // 2. Initial prompt as the FIRST mailbox message addressed to the new
   //    agentId. The agent-run processor reads it via drainMailbox.
   const messageId = crypto.randomUUID();
+  const metadata: Record<string, unknown> = { trigger: input.trigger };
+  if (input.publicSummary) {
+    metadata.publicContent = input.publicSummary;
+  }
   await db.insert(teamMessages).values({
     id: messageId,
     teamId: input.teamId,
@@ -95,7 +107,7 @@ export async function spawnMemberAgentRun(
     content: input.prompt,
     contentBlocks: [{ type: 'text', text: input.prompt }],
     summary: input.description.slice(0, 80),
-    metadata: { trigger: input.trigger },
+    metadata,
   });
 
   // 3. Wake the agent-run worker. Idempotent within a 1-second jobId window.
