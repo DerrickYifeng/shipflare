@@ -472,36 +472,45 @@ describe('POST /api/onboarding/plan (SSE, direct skill)', () => {
     expect(firstProgressIdx).toBeLessThan(terminalIdx);
 
     // tool_start translates to phase=start; tool_done to phase=done.
+    // Raw tool names are redacted to public semantic labels before they
+    // hit the SSE wire (security/redact-internal-metadata-from-client) —
+    // `query_recent_milestones` → `reading-context`,
+    // `write_strategic_path` → `planning`.
     expect(progressEvents).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           type: 'tool_progress',
           phase: 'start',
-          toolName: 'query_recent_milestones',
+          toolName: 'reading-context',
           toolUseId: 'use-1',
         }),
         expect.objectContaining({
           type: 'tool_progress',
           phase: 'done',
-          toolName: 'query_recent_milestones',
+          toolName: 'reading-context',
           toolUseId: 'use-1',
           durationMs: 42,
         }),
         expect.objectContaining({
           type: 'tool_progress',
           phase: 'start',
-          toolName: 'write_strategic_path',
+          toolName: 'planning',
           toolUseId: 'use-2',
         }),
         expect.objectContaining({
           type: 'tool_progress',
           phase: 'done',
-          toolName: 'write_strategic_path',
+          toolName: 'planning',
           toolUseId: 'use-2',
           durationMs: 117,
         }),
       ]),
     );
+    // Raw tool names must NEVER appear on the wire.
+    for (const ev of progressEvents) {
+      expect(ev.toolName).not.toBe('query_recent_milestones');
+      expect(ev.toolName).not.toBe('write_strategic_path');
+    }
   });
 
   it('emits tool_progress with phase=error when the agent reports an is_error tool result', async () => {
@@ -542,13 +551,21 @@ describe('POST /api/onboarding/plan (SSE, direct skill)', () => {
       (e) => e.type === 'tool_progress' && e.phase === 'error',
     );
     expect(errorProgress).toBeTruthy();
-    expect(errorProgress?.toolName).toBe('write_strategic_path');
-    expect(String(errorProgress?.errorMessage)).toContain('thesisArc');
+    // Raw tool name is redacted; raw error content is collapsed to a
+    // stable label so DevTools onlookers don't see internal validation /
+    // stack messages.
+    expect(errorProgress?.toolName).toBe('planning');
+    expect(String(errorProgress?.errorMessage)).not.toContain('thesisArc');
+    expect(errorProgress?.errorMessage).toBe('planning_failed');
+    // Raw content length is preserved as a non-leaky signal.
+    expect(errorProgress?.errorMessageLength).toBe(
+      'thesisArc length must be >= 4'.length,
+    );
   });
 
-  it('streams an error event when the skill rejects', async () => {
+  it('streams an error event when the skill rejects (error message redacted)', async () => {
     forkSkillBehavior = {
-      reject: new Error('skill exploded'),
+      reject: new Error('skill exploded with detailed internal stack'),
     };
     const { POST } = await import('../route');
     const res = await POST(makeRequest(validBody));
@@ -557,14 +574,19 @@ describe('POST /api/onboarding/plan (SSE, direct skill)', () => {
     const events = await readSSEEvents(res);
     const terminal = events.find((e) => e.type === 'error');
     expect(terminal).toBeTruthy();
-    expect(String(terminal?.error)).toContain('skill exploded');
+    // Raw err.message is NEVER on the wire — the route emits a stable,
+    // non-leaky label so DevTools onlookers can't see "Failed query: ..."
+    // / driver detail / stack info.
+    expect(String(terminal?.error)).not.toContain('skill exploded');
+    expect(String(terminal?.error)).not.toContain('detailed internal');
+    expect(terminal?.error).toBe('PlanGenerationError');
 
     expect(recordPipelineEventMock).toHaveBeenCalledWith(
       expect.objectContaining({ stage: 'launch_plan_failed' }),
     );
   });
 
-  it('streams an error when the skill reports status=failed', async () => {
+  it('streams a redacted error when the skill reports status=failed', async () => {
     forkSkillBehavior = {
       resolve: {
         result: {
@@ -582,10 +604,14 @@ describe('POST /api/onboarding/plan (SSE, direct skill)', () => {
     const events = await readSSEEvents(res);
     const terminal = events.find((e) => e.type === 'error');
     expect(terminal).toBeTruthy();
-    expect(String(terminal?.error)).toContain('status=failed');
+    // The internal "generating-strategy skill returned status=failed"
+    // message must not surface — only the stable label.
+    expect(String(terminal?.error)).not.toContain('status=failed');
+    expect(String(terminal?.error)).not.toContain('generating-strategy');
+    expect(terminal?.error).toBe('PlanGenerationError');
   });
 
-  it('streams an error when the persisted strategic_paths row is missing', async () => {
+  it('streams a redacted error when the persisted strategic_paths row is missing', async () => {
     strategicPathRow = null;
     forkSkillBehavior = {
       resolve: {
@@ -604,7 +630,11 @@ describe('POST /api/onboarding/plan (SSE, direct skill)', () => {
     const events = await readSSEEvents(res);
     const terminal = events.find((e) => e.type === 'error');
     expect(terminal).toBeTruthy();
-    expect(String(terminal?.error)).toContain('strategic_paths row not found');
+    // The internal "strategic_paths row not found" message reveals the
+    // schema name — must be redacted to the stable label.
+    expect(String(terminal?.error)).not.toContain('strategic_paths');
+    expect(String(terminal?.error)).not.toContain('row not found');
+    expect(terminal?.error).toBe('PlanGenerationError');
   });
 
   it('rejects an unknown launchChannel value', async () => {
@@ -613,5 +643,116 @@ describe('POST /api/onboarding/plan (SSE, direct skill)', () => {
       makeRequest({ ...validBody, launchChannel: 'tiktok' }),
     );
     expect(res.status).toBe(400);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Pure unit tests for streamEventToProgress redaction
+// ---------------------------------------------------------------------------
+
+describe('streamEventToProgress redaction', () => {
+  it('maps raw query_recent_milestones → reading-context on tool_start', async () => {
+    const { streamEventToProgress } = await import('../route');
+    const frame = streamEventToProgress({
+      type: 'tool_start',
+      toolName: 'query_recent_milestones',
+      toolUseId: 'tu_1',
+      input: { query: 'secret' },
+    } as StreamEvent);
+    expect(frame).toMatchObject({
+      type: 'tool_progress',
+      phase: 'start',
+      toolName: 'reading-context',
+      toolUseId: 'tu_1',
+    });
+    // Raw name must NOT appear anywhere on the frame.
+    expect(JSON.stringify(frame)).not.toContain('query_recent_milestones');
+  });
+
+  it('maps raw write_strategic_path → planning on tool_start', async () => {
+    const { streamEventToProgress } = await import('../route');
+    const frame = streamEventToProgress({
+      type: 'tool_start',
+      toolName: 'write_strategic_path',
+      toolUseId: 'tu_2',
+      input: {},
+    } as StreamEvent);
+    expect(frame?.toolName).toBe('planning');
+    expect(JSON.stringify(frame)).not.toContain('write_strategic_path');
+  });
+
+  it('maps raw query_metrics → reading-metrics and query_strategic_path → reading-plan', async () => {
+    const { streamEventToProgress } = await import('../route');
+    const m = streamEventToProgress({
+      type: 'tool_start',
+      toolName: 'query_metrics',
+      toolUseId: 'tu_3',
+      input: {},
+    } as StreamEvent);
+    const p = streamEventToProgress({
+      type: 'tool_start',
+      toolName: 'query_strategic_path',
+      toolUseId: 'tu_4',
+      input: {},
+    } as StreamEvent);
+    expect(m?.toolName).toBe('reading-metrics');
+    expect(p?.toolName).toBe('reading-plan');
+  });
+
+  it('falls back to "tool" for unknown raw names (deny-by-default)', async () => {
+    const { streamEventToProgress } = await import('../route');
+    const frame = streamEventToProgress({
+      type: 'tool_start',
+      toolName: 'super_secret_internal_tool',
+      toolUseId: 'tu_5',
+      input: {},
+    } as StreamEvent);
+    expect(frame?.toolName).toBe('tool');
+    expect(JSON.stringify(frame)).not.toContain('super_secret_internal_tool');
+  });
+
+  it('redacts tool_result error content into a stable label and preserves length', async () => {
+    const { streamEventToProgress } = await import('../route');
+    const rawErrorContent =
+      'Internal error: TypeError at validate_path (path.ts:42)\n' +
+      'Stack: at runAgent (agent.ts:99)\n' +
+      '  at runForkSkill (run-fork-skill.ts:55)';
+    const frame = streamEventToProgress({
+      type: 'tool_done',
+      toolName: 'write_strategic_path',
+      toolUseId: 'tu_6',
+      result: {
+        tool_use_id: 'tu_6',
+        content: rawErrorContent,
+        is_error: true,
+      },
+      durationMs: 12,
+    } as StreamEvent);
+    expect(frame?.phase).toBe('error');
+    expect(frame?.toolName).toBe('planning');
+    expect(frame?.errorMessage).toBe('planning_failed');
+    // Sensitive content must NOT appear anywhere on the frame.
+    const serialized = JSON.stringify(frame);
+    expect(serialized).not.toContain('Internal error');
+    expect(serialized).not.toContain('TypeError');
+    expect(serialized).not.toContain('Stack:');
+    expect(serialized).not.toContain('runForkSkill');
+    expect(serialized).not.toContain('write_strategic_path');
+    // Length is a non-leaky signal the UI can use for "long error" vs
+    // "short error" framing without revealing content.
+    expect(frame?.errorMessageLength).toBe(rawErrorContent.length);
+  });
+
+  it('returns null for non-tool stream events (no internal chatter on the wire)', async () => {
+    const { streamEventToProgress } = await import('../route');
+    expect(
+      streamEventToProgress({ type: 'turn_start' } as unknown as StreamEvent),
+    ).toBeNull();
+    expect(
+      streamEventToProgress({
+        type: 'text_delta',
+        text: 'partial',
+      } as unknown as StreamEvent),
+    ).toBeNull();
   });
 });
