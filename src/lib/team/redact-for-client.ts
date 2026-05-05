@@ -252,36 +252,61 @@ export interface MessageRowForClient {
   createdAt: Date | string;
 }
 
+/**
+ * Given a row's metadata, return the founder-friendly content if one
+ * applies (publicContent override OR internal-trigger fallback). Returns
+ * null if the row's own content should be displayed verbatim
+ * (assistant/tool turns OR user-facing triggers like
+ * `conversation_message`).
+ *
+ * Exported so the transcript history loader can apply the same swap
+ * rule when projecting `Anthropic.MessageParam` shape — the loader
+ * builds messages directly from rows without going through
+ * `redactMessageRowForClient`, so without this helper it would
+ * silently bypass the kickoff override.
+ */
+export function resolveOverrideContent(
+  metadata: Record<string, unknown> | null | undefined,
+): string | null {
+  if (!metadata || typeof metadata !== 'object') return null;
+  const publicContent =
+    typeof metadata.publicContent === 'string' ? metadata.publicContent : null;
+  if (publicContent) return publicContent;
+  const trigger =
+    typeof metadata.trigger === 'string' ? metadata.trigger : null;
+  if (trigger && !USER_FACING_TRIGGERS.has(trigger)) {
+    return TRIGGER_DEFAULTS[trigger] ?? UNKNOWN_INTERNAL_TRIGGER_DEFAULT;
+  }
+  return null;
+}
+
 export function redactMessageRowForClient<T extends MessageRowForClient>(row: T): T {
   const meta = row.metadata ?? null;
-  const publicContent =
-    meta && typeof meta === 'object' && typeof meta.publicContent === 'string'
-      ? meta.publicContent
-      : null;
+  const override = resolveOverrideContent(meta);
 
-  const trigger =
-    meta && typeof meta === 'object' && typeof meta.trigger === 'string'
-      ? meta.trigger
-      : null;
+  const resolvedContent: string | null = override ?? row.content;
 
-  let resolvedContent: string | null = row.content;
-  if (publicContent) {
-    // Explicit override — caller provided a friendly summary.
-    resolvedContent = publicContent;
-  } else if (trigger && !USER_FACING_TRIGGERS.has(trigger)) {
-    // Internal trigger without an explicit publicSummary. Substitute
-    // a generic default so the raw goal text never reaches the wire.
-    resolvedContent = TRIGGER_DEFAULTS[trigger] ?? UNKNOWN_INTERNAL_TRIGGER_DEFAULT;
+  // When `content` is replaced (kickoff / internal-trigger fallback /
+  // explicit publicContent), the `contentBlocks` array would otherwise
+  // still carry the raw goal text — `dispatchLeadMessage` writes BOTH
+  // `content` AND `contentBlocks: [{ type: 'text', text: <goal> }]`,
+  // so a UI consumer that prefers contentBlocks (e.g., transcript
+  // assembly that hands rows straight to Anthropic.MessageParam) would
+  // see the raw text. Synthesize a single text block matching the
+  // redacted content so both shapes carry the same swapped value.
+  let resolvedContentBlocks: unknown;
+  if (override !== null) {
+    resolvedContentBlocks = [{ type: 'text', text: override }];
+  } else if (row.contentBlocks) {
+    resolvedContentBlocks = redactContentBlocksForClient(row.contentBlocks);
+  } else {
+    resolvedContentBlocks = row.contentBlocks;
   }
-  // else: no trigger (assistant/tool turns) OR user-facing trigger
-  //       (founder's own message) — display content as-is.
 
   return {
     ...row,
     content: resolvedContent,
-    contentBlocks: row.contentBlocks
-      ? redactContentBlocksForClient(row.contentBlocks)
-      : row.contentBlocks,
+    contentBlocks: resolvedContentBlocks,
     metadata: redactMetadataForClient(meta),
   };
 }

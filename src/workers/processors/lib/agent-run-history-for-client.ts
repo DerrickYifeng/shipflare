@@ -14,20 +14,25 @@
 //   - chronological order (createdAt ASC)
 //
 // Redaction rules (all delegated to redact-for-client helpers):
-//   - contentBlocks present → redactContentBlocksForClient strips raw
-//     tool names, tool_use inputs, and tool_result content
-//   - metadata.publicContent present → swap raw row.content for the
-//     founder-facing summary (e.g. kickoff prompts → "Setting up
-//     your week-1 plan...")
-//   - plain row.content with no contentBlocks and no publicContent →
-//     pass through as-is
+//   - resolveOverrideContent (publicContent OR internal-trigger
+//     fallback) wins over BOTH contentBlocks and row.content. This
+//     mirrors redactMessageRowForClient — without it, kickoff rows
+//     whose contentBlocks carry the raw goal text would leak verbatim
+//     here even though the /api/team/* routes redact correctly.
+//   - contentBlocks present (no override) → redactContentBlocksForClient
+//     strips raw tool names, tool_use inputs, and tool_result content
+//   - plain row.content with no contentBlocks and no override → pass
+//     through as-is
 //   - rows with both contentBlocks and content null are skipped
 
 import type Anthropic from '@anthropic-ai/sdk';
 import { and, asc, eq, isNotNull, or } from 'drizzle-orm';
 import type { Database } from '@/lib/db';
 import { teamMessages } from '@/lib/db/schema';
-import { redactContentBlocksForClient } from '@/lib/team/redact-for-client';
+import {
+  redactContentBlocksForClient,
+  resolveOverrideContent,
+} from '@/lib/team/redact-for-client';
 
 export async function loadAgentRunHistoryRedactedForClient(
   agentId: string,
@@ -59,18 +64,20 @@ export async function loadAgentRunHistoryRedactedForClient(
       row.fromAgentId === agentId ? 'assistant' : 'user';
 
     const meta = (row.metadata as Record<string, unknown> | null) ?? null;
-    const publicContent =
-      meta && typeof meta.publicContent === 'string'
-        ? meta.publicContent
-        : null;
+    const override = resolveOverrideContent(meta);
 
     let content: Anthropic.Messages.MessageParam['content'];
-    if (Array.isArray(row.contentBlocks)) {
+    if (override !== null) {
+      // Override always wins — covers publicContent + internal-trigger
+      // fallback. Required because dispatchLeadMessage writes BOTH
+      // `content` and `contentBlocks` for kickoff rows; preferring
+      // contentBlocks here would leak the raw goal text even though
+      // metadata.publicContent is set.
+      content = override;
+    } else if (Array.isArray(row.contentBlocks)) {
       content = redactContentBlocksForClient(
         row.contentBlocks,
       ) as Anthropic.Messages.ContentBlockParam[];
-    } else if (publicContent) {
-      content = publicContent;
     } else if (typeof row.content === 'string') {
       content = row.content;
     } else {

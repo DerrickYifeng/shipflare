@@ -194,4 +194,72 @@ describe('loadAgentRunHistoryRedactedForClient', () => {
     expect(spies.where).toHaveBeenCalledTimes(1);
     expect(spies.orderBy).toHaveBeenCalledTimes(1);
   });
+
+  // Regression for the SSR/transcript leak: dispatchLeadMessage writes
+  // BOTH `content` and `contentBlocks: [{type:'text', text: <goal>}]`,
+  // so a loader that prefers contentBlocks over publicContent would
+  // leak the raw goal text even though the column-level publicContent
+  // override is set.
+  it('publicContent overrides contentBlocks for kickoff rows', async () => {
+    const rawGoal =
+      'First-visit kickoff for ShipFlare. Follow playbook end-to-end (plan → social-media-manager)...';
+    const { db } = makeDb([
+      {
+        fromAgentId: null,
+        toAgentId: 'agent-1',
+        content: rawGoal,
+        contentBlocks: [{ type: 'text', text: rawGoal }],
+        metadata: {
+          trigger: 'kickoff',
+          publicContent: 'Setting up your week-1 plan.',
+        },
+      },
+    ]);
+
+    const messages = await loadAgentRunHistoryRedactedForClient(
+      'agent-1',
+      db as never,
+    );
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toEqual({
+      role: 'user',
+      content: 'Setting up your week-1 plan.',
+    });
+    const json = JSON.stringify(messages);
+    expect(json).not.toContain('social-media-manager');
+    expect(json).not.toContain('playbook');
+    expect(json).toContain('Setting up your week-1 plan');
+  });
+
+  // Same regression but for the trigger-fallback path: the kickoff row
+  // has no explicit `publicContent` (historical rows / forgotten
+  // caller). The trigger default must still beat the contentBlocks.
+  it('trigger fallback overrides contentBlocks when publicContent absent', async () => {
+    const rawGoal =
+      'Strategic path... Follow your kickoff playbook end-to-end (plan → social-media-manager)...';
+    const { db } = makeDb([
+      {
+        fromAgentId: null,
+        toAgentId: 'agent-1',
+        content: rawGoal,
+        contentBlocks: [{ type: 'text', text: rawGoal }],
+        metadata: { trigger: 'kickoff' },
+      },
+    ]);
+
+    const messages = await loadAgentRunHistoryRedactedForClient(
+      'agent-1',
+      db as never,
+    );
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toEqual({
+      role: 'user',
+      content: 'Setting up your team.',
+    });
+    const json = JSON.stringify(messages);
+    expect(json).not.toContain('social-media-manager');
+    expect(json).not.toContain('playbook');
+  });
 });

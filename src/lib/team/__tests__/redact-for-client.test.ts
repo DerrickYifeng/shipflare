@@ -6,6 +6,7 @@ import {
   redactMetadataForClient,
   redactContentBlocksForClient,
   redactMessageRowForClient,
+  resolveOverrideContent,
 } from '../redact-for-client';
 
 describe('redact-for-client module exports', () => {
@@ -647,5 +648,112 @@ describe('redactMessageRowForClient', () => {
     };
     const out = redactMessageRowForClient(row);
     expect(out.content).toBe('Custom summary for this kickoff.'); // publicContent wins
+  });
+
+  it('swaps contentBlocks to match swapped content (publicContent path)', () => {
+    const row = {
+      id: 'm1',
+      runId: 'r1',
+      teamId: 't1',
+      type: 'user_prompt',
+      content: 'raw kickoff goal with social-media-manager',
+      contentBlocks: [
+        { type: 'text', text: 'raw kickoff goal with social-media-manager' },
+      ],
+      metadata: {
+        trigger: 'kickoff',
+        publicContent: 'Setting up your week-1 plan.',
+      },
+      createdAt: new Date(),
+    };
+    const out = redactMessageRowForClient(row);
+    expect(out.content).toBe('Setting up your week-1 plan.');
+    expect(out.contentBlocks).toEqual([
+      { type: 'text', text: 'Setting up your week-1 plan.' },
+    ]);
+    expect(JSON.stringify(out)).not.toContain('social-media-manager');
+  });
+
+  it('swaps contentBlocks to match trigger fallback (no publicContent)', () => {
+    const row = {
+      id: 'm1',
+      runId: 'r1',
+      teamId: 't1',
+      type: 'user_prompt',
+      content: 'raw kickoff goal with social-media-manager',
+      contentBlocks: [
+        { type: 'text', text: 'raw kickoff goal with social-media-manager' },
+      ],
+      metadata: { trigger: 'kickoff' }, // no publicContent (historical row)
+      createdAt: new Date(),
+    };
+    const out = redactMessageRowForClient(row);
+    expect(out.content).toBe('Setting up your team.');
+    expect(out.contentBlocks).toEqual([
+      { type: 'text', text: 'Setting up your team.' },
+    ]);
+    expect(JSON.stringify(out)).not.toContain('social-media-manager');
+  });
+
+  it('preserves contentBlocks for assistant turns (no override)', () => {
+    const row = {
+      id: 'm1',
+      runId: 'r1',
+      teamId: 't1',
+      type: 'assistant_text',
+      content: "I'll help with that.",
+      contentBlocks: [{ type: 'text', text: "I'll help with that." }],
+      metadata: { tool_use_id: 'tu_1' },
+      createdAt: new Date(),
+    };
+    const out = redactMessageRowForClient(row);
+    expect(out.contentBlocks).toEqual([
+      { type: 'text', text: "I'll help with that." },
+    ]);
+  });
+});
+
+describe('resolveOverrideContent', () => {
+  it('returns publicContent when set', () => {
+    expect(resolveOverrideContent({ trigger: 'kickoff', publicContent: 'X' })).toBe(
+      'X',
+    );
+  });
+
+  it('returns trigger default when no publicContent', () => {
+    expect(resolveOverrideContent({ trigger: 'kickoff' })).toBe(
+      'Setting up your team.',
+    );
+  });
+
+  it('returns null for user-facing trigger', () => {
+    expect(resolveOverrideContent({ trigger: 'conversation_message' })).toBeNull();
+  });
+
+  it('returns generic fallback for unknown internal trigger', () => {
+    expect(resolveOverrideContent({ trigger: 'mystery' })).toBe(
+      'Working on automated work.',
+    );
+  });
+
+  it('returns null for null metadata', () => {
+    expect(resolveOverrideContent(null)).toBeNull();
+  });
+
+  it('returns null for undefined metadata', () => {
+    expect(resolveOverrideContent(undefined)).toBeNull();
+  });
+
+  it('returns null for assistant turn (no trigger)', () => {
+    expect(resolveOverrideContent({ tool_use_id: 'tu_1' })).toBeNull();
+  });
+
+  it('publicContent wins over trigger fallback', () => {
+    expect(
+      resolveOverrideContent({
+        trigger: 'kickoff',
+        publicContent: 'Custom override.',
+      }),
+    ).toBe('Custom override.');
   });
 });
