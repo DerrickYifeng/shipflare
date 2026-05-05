@@ -35,6 +35,15 @@ export interface DispatchLeadInput {
   goal: string;
   /** Trigger label — preserved on metadata for observability. */
   trigger: string;
+  /**
+   * Optional founder-friendly summary persisted into metadata.publicContent.
+   * The redactor at the API boundary swaps this into the `content` field
+   * when serving the row to the browser. The raw `goal` stays in `content`
+   * (worker reads it for agent replay). Use for any goal text that exposes
+   * internal architecture details — kickoff playbook, cron-trigger details,
+   * routing instructions, etc.
+   */
+  publicSummary?: string;
 }
 
 export interface DispatchLeadResult {
@@ -57,6 +66,10 @@ export async function dispatchLeadMessage(
   const { agentId: leadAgentId } = await ensureLeadAgentRun(input.teamId, db);
 
   const messageId = crypto.randomUUID();
+  const metadata: Record<string, unknown> = { trigger: input.trigger };
+  if (input.publicSummary) {
+    metadata.publicContent = input.publicSummary;
+  }
   await db.insert(teamMessages).values({
     id: messageId,
     teamId: input.teamId,
@@ -69,7 +82,7 @@ export async function dispatchLeadMessage(
     content: input.goal,
     contentBlocks: [{ type: 'text', text: input.goal }],
     summary: input.goal.slice(0, 80),
-    metadata: { trigger: input.trigger },
+    metadata,
   });
 
   await wake(leadAgentId);
