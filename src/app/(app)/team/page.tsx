@@ -17,6 +17,10 @@ import {
 import { EmptyState } from '@/components/ui/empty-state';
 import { getTeamBudgetSnapshot } from '@/lib/team-budget';
 import { ensureKickoffEnqueued } from '@/lib/team-kickoff';
+import {
+  publicAgentLabel,
+  redactMessageRowForClient,
+} from '@/lib/team/redact-for-client';
 import type {
   TeamActivityMessage,
   TeamMessageType,
@@ -294,10 +298,17 @@ export default async function TeamPage({
     }
   }
 
+  // Redact agentType at the SSR → client boundary so the founder UI
+  // never sees raw architectural names (`coordinator`,
+  // `social-media-manager`). The /api/team/activity and
+  // /api/team/[teamId]/teammates routes already do this; symmetry here
+  // keeps SSR and live SSE / fetch results consistent. Internal lookups
+  // above (find coordinator by agentType === 'coordinator') still
+  // operate on the raw value so the team-lead resolution stays correct.
   const teamLead: TeamDeskMember | null = coordinator
     ? {
         id: coordinator.id,
-        agentType: coordinator.agentType,
+        agentType: publicAgentLabel(coordinator.agentType),
         displayName: coordinator.displayName,
         status: coordinator.status,
         taskCount: openTaskCountByMember.get(coordinator.id) ?? 0,
@@ -306,7 +317,7 @@ export default async function TeamPage({
 
   const specialists: TeamDeskMember[] = specialistsRaw.map((m) => ({
     id: m.id,
-    agentType: m.agentType,
+    agentType: publicAgentLabel(m.agentType),
     displayName: m.displayName,
     status: m.status,
     taskCount: openTaskCountByMember.get(m.id) ?? 0,
@@ -337,26 +348,44 @@ export default async function TeamPage({
     }
   }
 
+  // Pass every team_messages row through the same redactor that the
+  // /api/team/* routes use, so the SSR/RSC payload matches what the
+  // live SSE feed and active fetches return. Without this, kickoff
+  // rows leak the raw goal text ("First-visit kickoff for ShipFlare.
+  // Strategic path... Follow your kickoff playbook end-to-end (plan
+  // → social-media-manager): ...") in the initial render even though
+  // every subsequent fetch is clean.
   const initialMessages: TeamActivityMessage[] = [...rawMessages]
     .reverse()
-    .map((m) => ({
-      id: m.id,
-      runId: m.runId,
-      conversationId: m.conversationId ?? null,
-      teamId: m.teamId,
-      from: m.fromMemberId,
-      to: m.toMemberId,
-      type: m.type as TeamMessageType,
-      content: m.content,
-      metadata:
-        typeof m.metadata === 'object' && m.metadata !== null
-          ? (m.metadata as Record<string, unknown>)
-          : null,
-      createdAt:
-        m.createdAt instanceof Date
-          ? m.createdAt.toISOString()
-          : String(m.createdAt),
-    }));
+    .map((m) => {
+      const redacted = redactMessageRowForClient({
+        id: m.id,
+        runId: m.runId,
+        teamId: m.teamId,
+        conversationId: m.conversationId ?? null,
+        fromMemberId: m.fromMemberId,
+        toMemberId: m.toMemberId,
+        type: m.type,
+        content: m.content,
+        metadata: m.metadata as Record<string, unknown> | null,
+        createdAt: m.createdAt,
+      });
+      return {
+        id: redacted.id,
+        runId: redacted.runId,
+        conversationId: redacted.conversationId ?? null,
+        teamId: redacted.teamId,
+        from: redacted.fromMemberId ?? null,
+        to: redacted.toMemberId ?? null,
+        type: redacted.type as TeamMessageType,
+        content: redacted.content,
+        metadata: redacted.metadata,
+        createdAt:
+          redacted.createdAt instanceof Date
+            ? redacted.createdAt.toISOString()
+            : String(redacted.createdAt),
+      };
+    });
 
   // Dual-key lookup: the coordinator's Task tool_call metadata carries
   // the LLM-issued `toolUseId`, but `team_tasks` rows are keyed by a

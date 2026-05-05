@@ -12,6 +12,10 @@ import {
   type ActivityLogMemberRef,
 } from '../_components/activity-log';
 import { avatarGradientForAgentType } from '../_components/agent-accent';
+import {
+  publicAgentLabel,
+  redactMessageRowForClient,
+} from '@/lib/team/redact-for-client';
 import type {
   TeamActivityMessage,
   TeamMessageType,
@@ -134,28 +138,50 @@ export default async function TeamMemberPage({ params }: TeamMemberPageProps) {
       .limit(INITIAL_MESSAGE_WINDOW),
   ]);
 
+  // Redact agentType at the SSR → client boundary so the founder UI
+  // never sees raw architectural names. Mirrors /api/team/activity
+  // (which already wraps `agentType` via publicAgentLabel) so that the
+  // SSR snapshot and the live SSE/refetch payload describe members
+  // identically.
   const rosterRefs: ActivityLogMemberRef[] = roster.map((m) => ({
     id: m.id,
-    agentType: m.agentType,
+    agentType: publicAgentLabel(m.agentType),
     displayName: m.displayName,
   }));
 
-  const initialMessages: TeamActivityMessage[] = initialMessageRows.map((m) => ({
-    id: m.id,
-    runId: m.runId,
-    conversationId: m.conversationId ?? null,
-    teamId: m.teamId,
-    from: m.fromMemberId,
-    to: m.toMemberId,
-    type: m.type as TeamMessageType,
-    content: m.content,
-    metadata:
-      typeof m.metadata === 'object' && m.metadata !== null
-        ? (m.metadata as Record<string, unknown>)
-        : null,
-    createdAt:
-      m.createdAt instanceof Date ? m.createdAt.toISOString() : String(m.createdAt),
-  }));
+  // Pass every team_messages row through the redactor so kickoff
+  // user_prompt rows don't leak the raw goal text into the initial
+  // RSC payload. /api/team/* handles this at the API boundary; this
+  // file is the second of two SSR paths that bypassed the redactor.
+  const initialMessages: TeamActivityMessage[] = initialMessageRows.map((m) => {
+    const redacted = redactMessageRowForClient({
+      id: m.id,
+      runId: m.runId,
+      teamId: m.teamId,
+      conversationId: m.conversationId ?? null,
+      fromMemberId: m.fromMemberId,
+      toMemberId: m.toMemberId,
+      type: m.type,
+      content: m.content,
+      metadata: m.metadata as Record<string, unknown> | null,
+      createdAt: m.createdAt,
+    });
+    return {
+      id: redacted.id,
+      runId: redacted.runId,
+      conversationId: redacted.conversationId ?? null,
+      teamId: redacted.teamId,
+      from: redacted.fromMemberId ?? null,
+      to: redacted.toMemberId ?? null,
+      type: redacted.type as TeamMessageType,
+      content: redacted.content,
+      metadata: redacted.metadata,
+      createdAt:
+        redacted.createdAt instanceof Date
+          ? redacted.createdAt.toISOString()
+          : String(redacted.createdAt),
+    };
+  });
 
   const mainStyle: CSSProperties = {
     padding: 'var(--sf-space-2xl) var(--sf-space-xl)',
@@ -239,9 +265,14 @@ export default async function TeamMemberPage({ params }: TeamMemberPageProps) {
   const statusKey = member.status in STATUS_VARIANT ? member.status : 'idle';
   const statusVariant = STATUS_VARIANT[statusKey];
   const statusLabel = STATUS_LABEL[statusKey] ?? statusKey;
+  // The role blurb lookup keys on the raw agentType (it's a curated
+  // table — see AGENT_ROLE_BLURB above). Fallback prose must not echo
+  // the raw type back at the user, since that's the leak we're
+  // closing — substitute the founder-facing label instead.
+  const publicType = publicAgentLabel(member.agentType);
   const blurb =
     AGENT_ROLE_BLURB[member.agentType] ??
-    `Specialist for ${member.agentType}.`;
+    `Specialist for ${publicType}.`;
 
   return (
     <main style={mainStyle}>
@@ -258,7 +289,7 @@ export default async function TeamMemberPage({ params }: TeamMemberPageProps) {
             <h1 style={nameStyle}>{member.displayName}</h1>
             <Badge variant={statusVariant}>{statusLabel}</Badge>
           </div>
-          <span style={typeStyle}>{member.agentType}</span>
+          <span style={typeStyle}>{publicType}</span>
           <p style={blurbStyle}>{blurb}</p>
         </div>
       </header>
