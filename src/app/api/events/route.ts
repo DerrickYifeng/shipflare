@@ -3,6 +3,7 @@ import { auth } from '@/lib/auth';
 import { createPubSubSubscriber } from '@/lib/redis';
 import type { UserEventChannel } from '@/lib/redis';
 import { createLogger } from '@/lib/logger';
+import { publicToolLabel } from '@/lib/team/redact-for-client';
 
 const log = createLogger('api:events');
 
@@ -26,6 +27,44 @@ function parseChannel(value: string | null): UserEventChannel | 'all' {
   // Unknown values fall back to 'all' so a client typo doesn't silently
   // subscribe them to a dead channel that never sees a message.
   return 'all';
+}
+
+/**
+ * Redact tool-progress events on the wire. The `agents` Redis pubsub
+ * channel carries `tool_progress` envelopes with raw `toolName` (e.g.
+ * `'xai_find_customers'`, `'add_plan_item'`). The /api/events SSE
+ * forwarder is the trust boundary into the browser, so we apply
+ * `publicToolLabel` here. Non-tool-progress messages are passed
+ * through unchanged.
+ *
+ * Robust against malformed JSON (passes through) and missing fields
+ * (passes through) — the contract is "if it's structured tool_progress
+ * with a toolName, redact it; otherwise leave alone."
+ *
+ * NOTE: `metadata.mode` (e.g. `'calibrated'`) is preserved as-is for now.
+ * It's a low-IP signal compared to the raw tool name, but if it ever
+ * needs to be hidden the redaction belongs here too.
+ */
+export function redactPubSubMessage(message: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(message);
+  } catch {
+    return message;
+  }
+  if (
+    !parsed ||
+    typeof parsed !== 'object' ||
+    (parsed as Record<string, unknown>).type !== 'tool_progress'
+  ) {
+    return message;
+  }
+  const obj = parsed as Record<string, unknown>;
+  if (typeof obj.toolName !== 'string') {
+    return message;
+  }
+  const redacted = { ...obj, toolName: publicToolLabel(obj.toolName) };
+  return JSON.stringify(redacted);
 }
 
 /**
@@ -82,7 +121,7 @@ export async function GET(request: NextRequest) {
       });
 
       subscriber.on('message', (_ch: string, message: string) => {
-        send(message);
+        send(redactPubSubMessage(message));
       });
 
       // Heartbeat every 30s to keep connection alive
