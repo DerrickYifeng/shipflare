@@ -8,6 +8,7 @@ import { eq, and } from 'drizzle-orm';
 import { createLogger } from '@/lib/logger';
 import { provisionTeamForProduct } from '@/lib/team-provisioner';
 import { readReturnToCookie, clearReturnToCookie } from '@/lib/oauth-return';
+import { appUrl } from '@/lib/app-url';
 
 const log = createLogger('api:x');
 
@@ -17,7 +18,7 @@ const log = createLogger('api:x');
 export async function GET(request: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.redirect(new URL('/', request.url));
+    return NextResponse.redirect(appUrl('/'));
   }
 
   const { searchParams } = new URL(request.url);
@@ -29,25 +30,19 @@ export async function GET(request: NextRequest) {
   const storedState = request.cookies.get('x_oauth_state')?.value;
   if (!state || state !== storedState) {
     log.warn('X OAuth state mismatch');
-    return NextResponse.redirect(
-      new URL('/onboarding?x_error=state_mismatch', request.url),
-    );
+    return NextResponse.redirect(appUrl('/onboarding?x_error=state_mismatch'));
   }
 
   if (error || !code) {
     log.warn(`X OAuth denied: ${error ?? 'no code'}`);
-    return NextResponse.redirect(
-      new URL('/onboarding?x_error=denied', request.url),
-    );
+    return NextResponse.redirect(appUrl('/onboarding?x_error=denied'));
   }
 
   // Retrieve PKCE code_verifier from cookie
   const codeVerifier = request.cookies.get('x_code_verifier')?.value;
   if (!codeVerifier) {
     log.error('X OAuth: missing code_verifier cookie');
-    return NextResponse.redirect(
-      new URL('/onboarding?x_error=pkce_missing', request.url),
-    );
+    return NextResponse.redirect(appUrl('/onboarding?x_error=pkce_missing'));
   }
 
   const clientId = process.env.X_CLIENT_ID!;
@@ -72,9 +67,7 @@ export async function GET(request: NextRequest) {
   if (!tokenResponse.ok) {
     const errText = await tokenResponse.text().catch(() => '');
     log.error(`X token exchange failed: ${tokenResponse.status} ${errText}`);
-    return NextResponse.redirect(
-      new URL('/onboarding?x_error=token_exchange', request.url),
-    );
+    return NextResponse.redirect(appUrl('/onboarding?x_error=token_exchange'));
   }
 
   const tokens = (await tokenResponse.json()) as {
@@ -226,7 +219,7 @@ export async function GET(request: NextRequest) {
   // initiated from (set via `?returnTo=` on /api/x/connect). Defaults
   // to /today when no return path was supplied.
   const returnTo = readReturnToCookie(request);
-  const response = NextResponse.redirect(new URL(returnTo, request.url));
+  const response = NextResponse.redirect(appUrl(returnTo));
   response.cookies.delete('x_code_verifier');
   response.cookies.delete('x_oauth_state');
   return clearReturnToCookie(response);
