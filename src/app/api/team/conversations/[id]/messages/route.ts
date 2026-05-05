@@ -30,6 +30,7 @@ import {
 import { getPubSubPublisher } from '@/lib/redis';
 import { teamMessagesChannel } from '@/tools/SendMessageTool/SendMessageTool';
 import { ensureLeadAgentRun } from '@/lib/team/spawn-lead';
+import { redactMessageRowForClient } from '@/lib/team/redact-for-client';
 import { wake } from '@/workers/processors/lib/wake';
 import { createLogger } from '@/lib/logger';
 
@@ -285,10 +286,27 @@ export async function GET(
       conversationId,
       title: conv.title,
       updatedAt: conv.updatedAt.toISOString(),
-      messages: messages.map((m) => ({
-        ...m,
-        createdAt: m.createdAt.toISOString(),
-      })),
+      messages: messages.map((m) => {
+        const redacted = redactMessageRowForClient({
+          id: m.id,
+          runId: m.runId,
+          teamId: conv.teamId,
+          fromMemberId: m.fromMemberId,
+          toMemberId: m.toMemberId,
+          type: m.type,
+          content: m.content,
+          contentBlocks: m.contentBlocks,
+          metadata: m.metadata as Record<string, unknown> | null,
+          createdAt: m.createdAt,
+        });
+        return {
+          ...redacted,
+          createdAt:
+            redacted.createdAt instanceof Date
+              ? redacted.createdAt.toISOString()
+              : String(redacted.createdAt),
+        };
+      }),
     },
     { status: 200 },
   );
