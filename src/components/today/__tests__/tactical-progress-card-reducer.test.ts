@@ -11,10 +11,10 @@ const empty: ToolProgressViewState = {
 };
 
 describe('reduceToolProgress', () => {
-  it('routes xai_find_customers events to the discovery map keyed by platform', () => {
+  it('routes searching (redacted from xai_find_customers) events to the discovery map keyed by platform', () => {
     const event: ToolProgressEventInput = {
       type: 'tool_progress',
-      toolName: 'xai_find_customers',
+      toolName: 'searching',
       callId: 'c2',
       message: 'Searching x with 12 inline queries',
       metadata: { platform: 'x', queryCount: 12, mode: 'inline' },
@@ -28,7 +28,7 @@ describe('reduceToolProgress', () => {
   it('drops out-of-order events for the same toolName + callId', () => {
     const newer: ToolProgressEventInput = {
       type: 'tool_progress',
-      toolName: 'xai_find_customers',
+      toolName: 'searching',
       callId: 'c1',
       message: 'second pass',
       metadata: { platform: 'x' },
@@ -36,7 +36,7 @@ describe('reduceToolProgress', () => {
     };
     const older: ToolProgressEventInput = {
       type: 'tool_progress',
-      toolName: 'xai_find_customers',
+      toolName: 'searching',
       callId: 'c1',
       message: 'first pass',
       metadata: { platform: 'x' },

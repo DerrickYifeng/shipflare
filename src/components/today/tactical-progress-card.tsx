@@ -114,7 +114,14 @@ export function deriveTacticalFromMessages(
     if (
       msg.type === 'tool_call' &&
       typeof msg.metadata?.toolName === 'string' &&
-      msg.metadata.toolName === 'add_plan_item'
+      // The redactor at the team-events SSE boundary maps
+      // `'add_plan_item'` (and other plan-edit tools) → `'planning'`.
+      // We accept a small over-count (update_plan_item, write_strategic_path,
+      // generate_strategic_path also map to 'planning') because in practice
+      // during plan generation `add_plan_item` is the dominant tool and the
+      // alternatives fire 0–1 times per kickoff. The slight inflation is
+      // tolerable for a progress-only widget.
+      msg.metadata.toolName === 'planning'
     ) {
       itemCount += 1;
       continue;
