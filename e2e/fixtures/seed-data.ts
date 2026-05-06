@@ -8,37 +8,67 @@ const EVENT_TYPES = [
   'health_score_updated',
 ];
 
-export function makeThread(userId: string, index: number) {
+export function makeThread(
+  userId: string,
+  index: number,
+  overrides: Partial<{
+    id: string;
+    externalId: string;
+    platform: 'reddit' | 'x';
+    community: string;
+    author: string;
+    discoveredAt: Date;
+  }> = {},
+) {
   const subreddit = SUBREDDITS[index % SUBREDDITS.length];
   return {
-    id: crypto.randomUUID(),
+    id: overrides.id ?? crypto.randomUUID(),
     userId,
-    externalId: `t3_test${index}`,
-    platform: 'reddit' as const,
-    community: subreddit,
+    externalId: overrides.externalId ?? `t3_test${index}`,
+    platform: overrides.platform ?? ('reddit' as const),
+    community: overrides.community ?? subreddit,
     title: `How do you handle ${['SEO', 'marketing', 'user acquisition', 'pricing', 'onboarding'][index % 5]} for your SaaS?`,
     url: `https://reddit.com/r/${subreddit}/comments/test${index}`,
     body: `Looking for advice on ${subreddit} strategies.`,
-    author: `user${index}`,
+    author: overrides.author ?? `user${index}`,
     upvotes: 10 + index * 5,
     commentCount: 3 + index,
     relevanceScore: 0.6 + (index % 4) * 0.1,
-    discoveredAt: new Date(),
+    discoveredAt: overrides.discoveredAt ?? new Date(),
   };
 }
 
-export function makeDraft(userId: string, threadId: string, index: number) {
+export function makeDraft(
+  userId: string,
+  threadId: string,
+  index: number,
+  overrides: Partial<{
+    id: string;
+    status:
+      | 'pending'
+      | 'approved'
+      | 'skipped'
+      | 'posted'
+      | 'failed'
+      | 'flagged'
+      | 'needs_revision'
+      | 'handed_off';
+    createdAt: Date;
+    updatedAt: Date;
+  }> = {},
+) {
+  const createdAt = overrides.createdAt ?? new Date();
   return {
-    id: crypto.randomUUID(),
+    id: overrides.id ?? crypto.randomUUID(),
     userId,
     threadId,
-    status: 'pending' as const,
+    status: overrides.status ?? ('pending' as const),
     replyBody: `Great question! I built ShipFlare to help with exactly this. Here's what worked for us: focus on organic Reddit engagement to drive qualified traffic. Happy to share more details if helpful.`,
     confidenceScore: 0.7 + (index % 3) * 0.05,
     whyItWorks: `This reply addresses the user's specific pain point about ${['SEO', 'marketing', 'growth'][index % 3]} and naturally introduces the product as a solution without being pushy.`,
     ftcDisclosure: 'Disclosure: I built ShipFlare',
-    createdAt: new Date(),
-    updatedAt: new Date(),
+    createdAt,
+    updatedAt: overrides.updatedAt ?? createdAt,
   };
 }
 
