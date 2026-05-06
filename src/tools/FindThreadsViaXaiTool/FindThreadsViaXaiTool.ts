@@ -383,12 +383,21 @@ export const findThreadsViaXaiTool = buildTool({
 
     const rubric = await loadRubric(userId, productId);
 
-    const excludeAuthors = await listRecentEngagedAuthors(db, {
-      userId,
-      platform: 'x',
-      withinDays: getReplyAuthorCooldownDays('x'),
-      limit: 80, // headroom over the prompt cap of 50; refinement caps at 10
-    });
+    let excludeAuthors: string[] = [];
+    try {
+      excludeAuthors = await listRecentEngagedAuthors(db, {
+        userId,
+        platform: 'x',
+        withinDays: getReplyAuthorCooldownDays('x'),
+        limit: 80, // headroom over the prompt cap of 50; refinement caps at 10
+      });
+    } catch (err) {
+      log.warn(
+        `reply-throttle list fetch failed; proceeding without exclude list: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
 
     const productContext = {
       name: product.name,
