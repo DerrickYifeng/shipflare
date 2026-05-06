@@ -14,7 +14,7 @@ plan-execute dispatcher can run them.
 
 A bad plan under-schedules (3 items for a week → the founder drifts) or
 over-schedules (40 items for a week → the approval queue becomes a
-second job). A good plan is specific enough that Monday's Today page
+second job). A good plan is specific enough that Monday's Briefing page
 renders without the founder wondering "what does this mean?".
 
 ## Inputs you have
@@ -100,7 +100,7 @@ For each channel where `channelMix[channel].repliesPerDay > 0`:
     actual integer)
   - `description`: explain that the daily reply automation will run
     discovery + drafting and surface up to `targetCount` reply drafts
-    on the Today page for approval.
+    on the Briefing page for approval.
 
 If `channelMix.x.repliesPerDay` is null/0/omitted, skip this step
 entirely — reply automation is opt-in per channel. The cap of one
@@ -202,7 +202,7 @@ For every scheduled item:
     `content_reply` row's `params.targetCount`, runs discovery-agent +
     content-manager up to 3 inner attempts until the target is
     drafted, then transitions the row to `state='drafted'` (drafts
-    surface on the Today page for the founder to approve).
+    surface on the Briefing page for the founder to approve).
   - `email_send` → `skillName: null`. Manual-completion until a future
     phase wires an email agent.
   - `interview` → `skillName: null` (founder runs the interview manually).

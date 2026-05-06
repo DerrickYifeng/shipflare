@@ -12,11 +12,11 @@ import { TabNav } from '../tab-nav';
 describe('<TabNav>', () => {
   afterEach(cleanup);
 
-  it('marks Today active when pathname is /briefing', () => {
+  it('marks Briefing active when pathname is /briefing', () => {
     pathname = '/briefing';
     render(<TabNav />);
-    const todayLink = screen.getByRole('link', { name: 'Today' });
-    expect(todayLink.getAttribute('aria-current')).toBe('page');
+    const briefingLink = screen.getByRole('link', { name: 'Briefing' });
+    expect(briefingLink.getAttribute('aria-current')).toBe('page');
     const planLink = screen.getByRole('link', { name: 'Plan' });
     expect(planLink.getAttribute('aria-current')).toBeNull();
   });
@@ -28,12 +28,24 @@ describe('<TabNav>', () => {
     expect(planLink.getAttribute('aria-current')).toBe('page');
   });
 
-  it('Today link points to /briefing, Plan link points to /briefing/plan', () => {
+  it('marks History active when pathname starts with /briefing/history', () => {
+    pathname = '/briefing/history';
+    render(<TabNav />);
+    const historyLink = screen.getByRole('link', { name: 'History' });
+    expect(historyLink.getAttribute('aria-current')).toBe('page');
+    const briefingLink = screen.getByRole('link', { name: 'Briefing' });
+    expect(briefingLink.getAttribute('aria-current')).toBeNull();
+  });
+
+  it('Briefing → /briefing, History → /briefing/history, Plan → /briefing/plan', () => {
     pathname = '/briefing';
     render(<TabNav />);
     expect(
-      screen.getByRole('link', { name: 'Today' }).getAttribute('href'),
+      screen.getByRole('link', { name: 'Briefing' }).getAttribute('href'),
     ).toBe('/briefing');
+    expect(
+      screen.getByRole('link', { name: 'History' }).getAttribute('href'),
+    ).toBe('/briefing/history');
     expect(
       screen.getByRole('link', { name: 'Plan' }).getAttribute('href'),
     ).toBe('/briefing/plan');

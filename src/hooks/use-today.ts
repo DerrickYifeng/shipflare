@@ -87,7 +87,9 @@ export type TodoOptimisticStatus =
   /** Server confirmed the post is queued for posting. UI shows "Post now". */
   | 'queued'
   /** X reply intent URL was opened in a new tab. UI shows "Opened in X". */
-  | 'handed_off';
+  | 'handed_off'
+  /** Reply was posted via API (Reddit). History view only. */
+  | 'posted';
 
 /**
  * Mirror of `PlanItemState` from the SM. We don't import the worker-side
@@ -380,6 +382,28 @@ export function useToday() {
     [mutate],
   );
 
+  /**
+   * Path B handoff: the user clicked the X-intent button in the card,
+   * which already opened the compose tab synchronously inside the click
+   * handler. We just need to record that on the server so the next feed
+   * poll moves the card from Briefing → History.
+   *
+   * Fire-and-forget by design — the window has already opened; if the
+   * /approve POST drops we'll record on the next user click or skip
+   * surfacing the move silently. We optimistically flip the local status
+   * so the dim/disable styling kicks in immediately, then a 30s poll
+   * picks up the server's `handed_off` and the row leaves the feed.
+   */
+  const handoff = useCallback(
+    (id: string) => {
+      mutate(markPending(id, 'handed_off'), { revalidate: false });
+      void fetch(`/api/today/${id}/approve`, { method: 'PATCH' }).catch(() => {
+        // Swallow — the poll-based reconciliation will catch up next tick.
+      });
+    },
+    [markPending, mutate],
+  );
+
   const reschedule = useCallback(
     async (id: string, scheduledFor: string) => {
       const snapshot = data;
@@ -422,6 +446,7 @@ export function useToday() {
     postNow,
     skip,
     edit,
+    handoff,
     reschedule,
     mutate,
   };

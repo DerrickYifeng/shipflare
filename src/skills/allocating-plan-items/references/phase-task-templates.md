@@ -36,7 +36,7 @@ content-planner:
   row's `params.targetCount`, runs discovery-agent + content-manager
   in a retry loop until the target is filled (max 3 inner attempts),
   and transitions the row to `state='drafted'` so the drafts surface
-  on the Today page.
+  on the Briefing page.
 - **Every template's `skillName` is currently retired** — leave `null`
   and the plan-execute dispatcher will route via the shell-route table
   (manual / auto completion) until a future phase rewires the kind to
