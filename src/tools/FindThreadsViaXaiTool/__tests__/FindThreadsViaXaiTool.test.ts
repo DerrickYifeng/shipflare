@@ -660,11 +660,11 @@ describe('composeRefinementMessage helper', () => {
       ['advice_giver', 2],
       ['political', 1],
     ]);
-    const msg = composeRefinementMessage(sigs, [
-      'https://x.com/a',
-      'https://x.com/b',
-      'https://x.com/c',
-    ]);
+    const msg = composeRefinementMessage(
+      sigs,
+      ['https://x.com/a', 'https://x.com/b', 'https://x.com/c'],
+      [],
+    );
     expect(msg).toContain('drop accounts whose bios mention competing tools');
     expect(msg).toContain('engagement-pod');
     expect(msg).toContain('teaching, not asking');
@@ -678,7 +678,7 @@ describe('composeRefinementMessage helper', () => {
       ['unknown_signal_xyz', 9],
       ['competitor_bio', 1],
     ]);
-    const msg = composeRefinementMessage(sigs, []);
+    const msg = composeRefinementMessage(sigs, [], []);
     // unknown_signal_xyz has no SIGNAL_NUDGE entry, so its nudge is dropped.
     // competitor_bio remains.
     expect(msg).toContain('competing tools');
@@ -686,7 +686,7 @@ describe('composeRefinementMessage helper', () => {
   });
 
   it('handles empty rejection map and empty strong list gracefully', () => {
-    const msg = composeRefinementMessage(new Map(), []);
+    const msg = composeRefinementMessage(new Map(), [], []);
     expect(msg).toContain('Found 0 strong matches');
   });
 });
@@ -705,6 +705,7 @@ describe('buildFirstTurnMessage helper', () => {
       'RUBRIC_BODY',
       'focus on indie hackers',
       10,
+      [],
     );
     expect(msg).toContain('Name: P');
     expect(msg).toContain('Value prop: V');
@@ -728,6 +729,7 @@ describe('buildFirstTurnMessage helper', () => {
       '',
       undefined,
       5,
+      [],
     );
     expect(msg).toContain('Value prop: (not specified)');
     expect(msg).toContain('Target audience: (not specified)');
@@ -749,6 +751,7 @@ describe('buildFirstTurnMessage helper', () => {
       '',
       undefined,
       10,
+      [],
     );
     expect(msg).toContain('quoted_text');
     expect(msg).toContain('quoted_author');
@@ -769,7 +772,56 @@ describe('buildFirstTurnMessage helper', () => {
       '',
       undefined,
       10,
+      [],
     );
     expect(msg).toContain('Reposts ARE valuable signal');
+  });
+});
+
+describe('buildFirstTurnMessage exclude-authors', () => {
+  const baseProduct = {
+    id: 'p1',
+    name: 'TestProduct',
+    description: 'd',
+    valueProp: null,
+    targetAudience: null,
+    keywords: [],
+  };
+
+  it('omits the exclude block when no authors are throttled', () => {
+    const msg = buildFirstTurnMessage(baseProduct, '', undefined, 10, []);
+    expect(msg).not.toMatch(/Do NOT surface tweets/i);
+  });
+
+  it('includes a Do-NOT line listing throttled authors', () => {
+    const msg = buildFirstTurnMessage(baseProduct, '', undefined, 10, [
+      'alice',
+      'bob_dev',
+      'charlie123',
+    ]);
+    expect(msg).toMatch(/Do NOT surface tweets authored by/i);
+    expect(msg).toContain('@alice');
+    expect(msg).toContain('@bob_dev');
+    expect(msg).toContain('@charlie123');
+  });
+
+  it('truncates long lists with an "and others" tail to keep the prompt bounded', () => {
+    const many = Array.from({ length: 75 }, (_, i) => `user${i}`);
+    const msg = buildFirstTurnMessage(baseProduct, '', undefined, 10, many);
+    const matches = msg.match(/@user\d+/g) ?? [];
+    expect(matches.length).toBeLessThanOrEqual(50);
+    expect(msg).toMatch(/and others.*skip authors that look like/i);
+  });
+});
+
+describe('composeRefinementMessage exclude-authors reinforcement', () => {
+  it('appends "Still skip ..." when authors are present', () => {
+    const m = composeRefinementMessage(new Map(), [], ['alice', 'bob']);
+    expect(m).toMatch(/skip @alice, @bob/i);
+  });
+
+  it('omits the reinforcement when the list is empty', () => {
+    const m = composeRefinementMessage(new Map(), [], []);
+    expect(m).not.toMatch(/skip @/i);
   });
 });
