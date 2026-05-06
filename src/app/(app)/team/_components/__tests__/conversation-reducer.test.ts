@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { stitchLeadMessages } from '../conversation-reducer';
+import { groupByRun, stitchLeadMessages } from '../conversation-reducer';
+import type {
+  ConversationNode,
+  UserNode,
+  LeadNode,
+} from '../conversation-reducer';
 import type { TeamActivityMessage } from '@/hooks/use-team-events';
 
 function msg(
@@ -321,5 +326,63 @@ describe('stitchLeadMessages — fork progress fallback', () => {
     if (node?.kind !== 'activity') throw new Error('expected activity node');
     // No [skill-name] prefix — primary toolName match hit, no fork involved.
     expect(node.progress).toEqual(['tokens in/out=48367/2501']);
+  });
+});
+
+describe('groupByRun — orphan DM placement (regression)', () => {
+  function user(id: string, runId: string | null, at: string): UserNode {
+    return { kind: 'user', id, createdAt: at, runId, text: id };
+  }
+  function lead(id: string, runId: string, at: string): LeadNode {
+    return {
+      kind: 'lead',
+      id,
+      createdAt: at,
+      runId,
+      fromMemberId: 'coord',
+      text: id,
+      delegation: [],
+      phase: 'PLAN',
+    };
+  }
+
+  it('opens a fresh orphan group when a DM follows a run group', () => {
+    // Founder sends msg-1 (no run yet), lead spins up R1 and replies,
+    // founder sends msg-2 mid-conversation, lead spins R2 and replies.
+    // Bug pre-fix: msg-1 + msg-2 collapsed into one __no_run__ bucket
+    // at the top of the thread; msg-2 visually preceded R1 even though
+    // it was sent later. Fix: msg-2 starts a new orphan bucket so it
+    // renders between R1 and R2 in chronological order.
+    const nodes: ConversationNode[] = [
+      user('msg-1', null, '2026-05-05T21:40:00.000Z'),
+      lead('R1-plan', 'R1', '2026-05-05T21:42:00.000Z'),
+      lead('R1-synth', 'R1', '2026-05-05T21:44:00.000Z'),
+      user('msg-2', null, '2026-05-05T21:45:00.000Z'),
+      lead('R2-plan', 'R2', '2026-05-05T21:46:00.000Z'),
+    ];
+    const groups = groupByRun(nodes);
+
+    expect(groups.map((g) => g.key)).toEqual([
+      '__no_run__',
+      'R1',
+      '__no_run__:1',
+      'R2',
+    ]);
+    expect(groups[0].nodes.map((n) => n.id)).toEqual(['msg-1']);
+    expect(groups[2].nodes.map((n) => n.id)).toEqual(['msg-2']);
+  });
+
+  it('coalesces consecutive orphan DMs into the same bucket', () => {
+    // Two DMs sent back-to-back before any run starts should still
+    // group together — the bucket only splits on a run boundary.
+    const nodes: ConversationNode[] = [
+      user('msg-a', null, '2026-05-05T21:40:00.000Z'),
+      user('msg-b', null, '2026-05-05T21:40:30.000Z'),
+      lead('R1', 'R1', '2026-05-05T21:42:00.000Z'),
+    ];
+    const groups = groupByRun(nodes);
+
+    expect(groups.map((g) => g.key)).toEqual(['__no_run__', 'R1']);
+    expect(groups[0].nodes.map((n) => n.id)).toEqual(['msg-a', 'msg-b']);
   });
 });

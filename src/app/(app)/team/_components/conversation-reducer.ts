@@ -1134,24 +1134,47 @@ function assignPhases(nodes: ConversationNode[]): void {
 const NO_RUN_KEY = '__no_run__';
 
 /**
- * Fold `ConversationNode[]` into `SessionGroup[]`, one group per runId
- * (plus a sentinel group for messages whose runId is null). Groups keep
- * the chronological order of their first message, which matches the
- * ordering of runs themselves (oldest-first). Within a group, nodes
- * stay in their stitched order.
+ * Fold `ConversationNode[]` into `SessionGroup[]`, one group per runId.
+ * Orphan messages (runId=null — typically founder DMs to the lead that
+ * arrive between runs) start a NEW group every time they appear after
+ * a run group. Without that split, a DM sent mid-conversation collapses
+ * back into the first orphan bucket at the top of the thread, making
+ * "interactive" replies look like a stack of upfront prompts.
+ *
+ * Groups keep the chronological order of their first message — Map
+ * preserves insertion order, so the natural input ordering carries.
  */
 export function groupByRun(
   nodes: readonly ConversationNode[],
   runLookup: TeamRunLookup = new Map(),
 ): SessionGroup[] {
   const groups = new Map<string, SessionGroup>();
+  let lastKey: string | null = null;
+  let orphanSeq = 0;
+
   for (const node of nodes) {
     const runId = node.runId ?? null;
     const run = runId ? runLookup.get(runId) ?? null : null;
     // Defensive: drop onboarding groups in case a server-rendered page
     // forgot to filter them at the DB boundary.
     if (run && run.trigger === 'onboarding') continue;
-    const key = runId ?? NO_RUN_KEY;
+
+    let key: string;
+    if (runId) {
+      key = runId;
+    } else {
+      // Open a fresh orphan bucket whenever the previous group wasn't
+      // an orphan, so a DM that interrupts a run later in the timeline
+      // renders where it was actually sent rather than at the top.
+      // Consecutive orphan messages still coalesce into one bucket.
+      const prevWasOrphan =
+        lastKey !== null && lastKey.startsWith(NO_RUN_KEY);
+      if (lastKey !== null && !prevWasOrphan) {
+        orphanSeq += 1;
+      }
+      key = orphanSeq === 0 ? NO_RUN_KEY : `${NO_RUN_KEY}:${orphanSeq}`;
+    }
+
     let group = groups.get(key);
     if (!group) {
       group = {
@@ -1163,6 +1186,7 @@ export function groupByRun(
       groups.set(key, group);
     }
     group.nodes.push(node);
+    lastKey = key;
   }
   return Array.from(groups.values());
 }
