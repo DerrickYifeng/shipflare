@@ -46,10 +46,6 @@ function formatQueuedEta(delayMs: number | undefined): string {
   return `Posting at ${fireAt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}`;
 }
 
-function getPostCap(platform: string): number {
-  return PLATFORMS[platform]?.maxCharLength.post ?? 10_000;
-}
-
 function platformDisplay(platform: string): string {
   return PLATFORMS[platform]?.displayName ?? platform;
 }
@@ -95,10 +91,8 @@ export function PostCard({
   const rootRef = useRef<HTMLElement>(null);
 
   const isEditing = localEditing || forceEditing;
-  const cap = getPostCap(item.platform);
   const activeBody = isEditing ? editBody : item.draftBody ?? '';
   const len = activeBody.length;
-  const over = len > cap;
 
   useEffect(() => {
     if (isActive) {
@@ -369,13 +363,8 @@ export function PostCard({
               <>
                 <Button
                   size="sm"
-                  disabled={over || !item.draftBody}
+                  disabled={!item.draftBody}
                   onClick={handleClick}
-                  title={
-                    over
-                      ? `Post is ${len - cap} chars over the ${cap} cap`
-                      : undefined
-                  }
                 >
                   {hasOpenedX ? 'Post now' : 'Schedule'}
                 </Button>
@@ -414,12 +403,7 @@ export function PostCard({
               <Button
                 size="sm"
                 onClick={() => onApprove(item.id)}
-                disabled={over || isInFlight}
-                title={
-                  over
-                    ? `Post is ${len - cap} chars over the ${cap} cap`
-                    : undefined
-                }
+                disabled={isInFlight}
               >
                 {isInFlight
                   ? 'Scheduling…'
@@ -459,12 +443,11 @@ export function PostCard({
           className="sf-mono"
           style={{
             fontSize: 'var(--sf-text-xs)',
-            color: over ? 'var(--sf-error)' : 'var(--sf-fg-4)',
+            color: 'var(--sf-fg-4)',
             letterSpacing: 'var(--sf-track-mono)',
           }}
         >
           {len}
-          {cap < 10_000 ? ` / ${cap}` : ''}
         </span>
       </div>
     </article>

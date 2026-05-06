@@ -28,7 +28,6 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Ops } from '@/components/ui/ops';
 import { Toggle } from '@/components/ui/toggle';
-import { getPlatformCharLimits, PLATFORMS } from '@/lib/platform-config';
 import type { TodoItem } from '@/hooks/use-today';
 import { PlatformGlyph } from './platform-glyph';
 
@@ -61,12 +60,6 @@ function formatQueuedEta(delayMs: number | undefined): string {
   if (minutes < 60) return `Posting in ${minutes}m`;
   const fireAt = new Date(Date.now() + delayMs);
   return `Posting at ${fireAt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}`;
-}
-
-function getReplyCap(platform: string): number {
-  return PLATFORMS[platform]
-    ? getPlatformCharLimits(platform, 'reply')
-    : 10_000;
 }
 
 function relativeTime(iso: string | null): string | null {
@@ -230,10 +223,8 @@ export function ReplyCard({
   const rootRef = useRef<HTMLElement>(null);
 
   const isEditing = localEditing || forceEditing;
-  const cap = getReplyCap(item.platform);
   const activeBody = isEditing ? editBody : item.draftBody ?? '';
   const len = activeBody.length;
-  const over = len > cap;
   const conf = item.confidence != null ? Math.round(item.confidence * 100) : null;
   const confTone: 'success' | 'accent' | 'default' =
     conf == null ? 'default' : conf >= 80 ? 'success' : conf >= 65 ? 'accent' : 'default';
@@ -453,36 +444,16 @@ export function ReplyCard({
           }}
         >
           <Ops>Your draft reply</Ops>
-          <div
+          <span
+            className="sf-mono"
             style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
+              fontSize: 'var(--sf-text-xs)',
+              color: 'var(--sf-fg-4)',
+              letterSpacing: 'var(--sf-track-mono)',
             }}
           >
-            {over ? (
-              <span
-                style={{
-                  fontSize: 'var(--sf-text-xs)',
-                  color: 'var(--sf-error)',
-                  fontWeight: 500,
-                }}
-              >
-                Too long — edit to shorten
-              </span>
-            ) : null}
-            <span
-              className="sf-mono"
-              style={{
-                fontSize: 'var(--sf-text-xs)',
-                color: over ? 'var(--sf-error)' : 'var(--sf-fg-4)',
-                letterSpacing: 'var(--sf-track-mono)',
-              }}
-            >
-              {len}
-              {cap < 10_000 ? ` / ${cap}` : ''}
-            </span>
-          </div>
+            {len}
+          </span>
         </div>
 
         {!isEditing && item.draftBody ? (
@@ -607,7 +578,7 @@ export function ReplyCard({
             <>
               <Button
                 size="sm"
-                disabled={over || !item.draftBody}
+                disabled={!item.draftBody}
                 onClick={() => {
                   if (typeof window !== 'undefined') {
                     window.open(
@@ -622,11 +593,6 @@ export function ReplyCard({
                   // the move (next manual refresh / 30s tick still records).
                   onHandoff?.(item.id);
                 }}
-                title={
-                  over
-                    ? `Reply is ${len - cap} chars over the ${cap} cap`
-                    : undefined
-                }
               >
                 Send reply
               </Button>
@@ -656,12 +622,7 @@ export function ReplyCard({
               <Button
                 size="sm"
                 onClick={() => onApprove(item.id)}
-                disabled={over || !item.draftBody || item.status === 'pending_approval'}
-                title={
-                  over
-                    ? `Reply is ${len - cap} chars over the ${cap} cap`
-                    : undefined
-                }
+                disabled={!item.draftBody || item.status === 'pending_approval'}
               >
                 {item.status === 'pending_approval' ? 'Sending…' : 'Send reply'}
               </Button>
