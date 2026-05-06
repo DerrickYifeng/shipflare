@@ -1,0 +1,1 @@
+CREATE INDEX "threads_user_platform_author_idx" ON "threads" USING btree ("user_id","platform","author");

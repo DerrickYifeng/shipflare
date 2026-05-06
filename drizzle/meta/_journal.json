@@ -148,6 +148,13 @@
       "when": 1779700020000,
       "tag": "0020_classy_marten_broadcloak",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1779700021000,
+      "tag": "0021_normal_deadpool",
+      "breakpoints": true
     }
   ]
 }
