@@ -2,6 +2,7 @@ import { testWithProduct, expect } from '../fixtures/auth';
 import { getTestDb } from '../fixtures/db';
 import * as schema from '../../src/lib/db/schema';
 import { hasRecentReplyToAuthor } from '../../src/lib/reply-throttle';
+import { getReplyAuthorCooldownDays } from '../../src/lib/platform-config';
 import { makeThread, makeDraft } from '../fixtures/seed-data';
 
 /**
@@ -61,7 +62,7 @@ testWithProduct('author reply throttle hides additional threads from a recently-
     userId: testUser.id,
     platform: 'x',
     author: 'alice_throttle_test',
-    withinDays: 7,
+    withinDays: getReplyAuthorCooldownDays('x'),
   });
   expect(wouldThrottle).toBe(true);
 
