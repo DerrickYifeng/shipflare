@@ -15,6 +15,8 @@ import { and, eq, or } from 'drizzle-orm';
 import { buildTool } from '@/core/tool-system';
 import type { ToolDefinition } from '@/core/types';
 import { drafts, threads } from '@/lib/db/schema';
+import { getReplyAuthorCooldownDays } from '@/lib/platform-config';
+import { hasRecentReplyToAuthor } from '@/lib/reply-throttle';
 import { readDomainDeps } from '@/tools/context-helpers';
 
 export const DRAFT_REPLY_TOOL_NAME = 'draft_reply';
@@ -49,11 +51,20 @@ export const draftReplyInputSchema = z
 
 export type DraftReplyInput = z.infer<typeof draftReplyInputSchema>;
 
-export interface DraftReplyResult {
-  draftId: string;
-  threadId: string;
-  platform: string;
-}
+export type DraftReplyResult =
+  | {
+      draftId: string;
+      threadId: string;
+      platform: string;
+      skipped?: false;
+    }
+  | {
+      skipped: true;
+      reason: 'author_throttled';
+      threadId: string;
+      platform: string;
+      author: string | null;
+    };
 
 export const draftReplyTool: ToolDefinition<DraftReplyInput, DraftReplyResult> =
   buildTool({
@@ -89,6 +100,7 @@ export const draftReplyTool: ToolDefinition<DraftReplyInput, DraftReplyResult> =
           id: threads.id,
           userId: threads.userId,
           platform: threads.platform,
+          author: threads.author,
         })
         .from(threads)
         .where(
@@ -107,6 +119,27 @@ export const draftReplyTool: ToolDefinition<DraftReplyInput, DraftReplyResult> =
         throw new Error(
           `draft_reply: thread ${input.threadId} not found for user ${userId} (tried internal id + externalId match)`,
         );
+      }
+
+      // Last-mile author throttle. find_threads (Task 4) and
+      // find_threads_via_xai (Task 5) already filter; this guard catches
+      // plan-execute / resumed-sweep paths that pass a threadId without
+      // going through discovery.
+      const cooldown = getReplyAuthorCooldownDays(thread.platform);
+      const throttled = await hasRecentReplyToAuthor(db, {
+        userId,
+        platform: thread.platform,
+        author: thread.author,
+        withinDays: cooldown,
+      });
+      if (throttled) {
+        return {
+          skipped: true,
+          reason: 'author_throttled',
+          threadId: thread.id,
+          platform: thread.platform,
+          author: thread.author,
+        };
       }
 
       // Idempotency on (userId, threadId, status='pending'). A re-spawn
