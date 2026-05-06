@@ -812,6 +812,24 @@ describe('buildFirstTurnMessage exclude-authors', () => {
     expect(matches.length).toBeLessThanOrEqual(50);
     expect(msg).toMatch(/and others.*skip authors that look like/i);
   });
+
+  it('preserves the empty-list output verbatim (no collapsed blank lines)', () => {
+    const baseProduct = {
+      id: 'p1',
+      name: 'TestProduct',
+      description: 'd',
+      valueProp: null,
+      targetAudience: null,
+      keywords: [],
+    };
+    const msg = buildFirstTurnMessage(baseProduct, '', undefined, 10, []);
+
+    // Paragraph break between intro and PRODUCT header.
+    expect(msg).toMatch(/solves\.\n\nPRODUCT/);
+    // Paragraph break between Keywords and Constraints (since both
+    // intent and rubric are absent, the joined section evaluates to '').
+    expect(msg).toMatch(/Keywords: \(none\)\n\nConstraints/);
+  });
 });
 
 describe('composeRefinementMessage exclude-authors reinforcement', () => {

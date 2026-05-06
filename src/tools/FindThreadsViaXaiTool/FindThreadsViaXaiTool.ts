@@ -198,7 +198,7 @@ export function buildFirstTurnMessage(
     'Constraints',
     '- Posted in last 7 days',
     `- Up to ${maxResults * 2} candidates this pass — quality over quota`,
-    excludeLine,
+    ...(excludeLine ? [excludeLine] : []),
     '- For each tweet include: url, author_username, author_bio, author_followers,',
     '  body, posted_at, likes_count, reposts_count, replies_count, views_count,',
     '  is_repost, original_url, original_author_username, surfaced_via,',
@@ -216,9 +216,7 @@ export function buildFirstTurnMessage(
     '  null. A self-quote (quoted_author == author_username) is allowed and common —',
     '  surface it.',
     "- Empty `tweets` is allowed if you genuinely find nothing — don't pad.",
-  ]
-    .filter(Boolean)
-    .join('\n');
+  ].join('\n');
 }
 
 /**
