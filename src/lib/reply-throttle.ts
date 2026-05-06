@@ -17,11 +17,13 @@
  * unit tests doesn't merge rows across `innerJoin`, so two queries are
  * both correct in production AND testable.
  */
-import { and, eq, gte, inArray } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray } from 'drizzle-orm';
 import { drafts, threads } from '@/lib/db/schema';
 import type { db as Db } from '@/lib/db';
 
 export type ThrottleAwareDb = typeof Db;
+
+const MS_PER_DAY = 86_400_000;
 
 export interface HasRecentReplyToAuthorInput {
   userId: string;
@@ -41,7 +43,7 @@ export async function hasRecentReplyToAuthor(
   if (!input.author) return false;
   if (input.withinDays <= 0) return false;
 
-  const cutoff = new Date(Date.now() - input.withinDays * 86_400_000);
+  const cutoff = new Date(Date.now() - input.withinDays * MS_PER_DAY);
 
   const matchingThreads = await db
     .select({ id: threads.id })
@@ -98,7 +100,7 @@ export async function listRecentEngagedAuthors(
 ): Promise<string[]> {
   if (input.withinDays <= 0 || input.limit <= 0) return [];
 
-  const cutoff = new Date(Date.now() - input.withinDays * 86_400_000);
+  const cutoff = new Date(Date.now() - input.withinDays * MS_PER_DAY);
 
   const recentDrafts = await db
     .select({ threadId: drafts.threadId })
@@ -109,27 +111,38 @@ export async function listRecentEngagedAuthors(
         gte(drafts.createdAt, cutoff),
         inArray(drafts.status, BLOCKING_STATUSES),
       ),
-    );
+    )
+    .orderBy(desc(drafts.createdAt));
 
   if (recentDrafts.length === 0) return [];
 
-  const threadIds = Array.from(new Set(recentDrafts.map((d) => d.threadId)));
+  const orderedThreadIds = Array.from(
+    new Set(recentDrafts.map((d) => d.threadId)),
+  );
 
   const matchingThreads = await db
-    .select({ author: threads.author })
+    .select({ id: threads.id, author: threads.author })
     .from(threads)
     .where(
       and(
         eq(threads.userId, input.userId),
         eq(threads.platform, input.platform),
-        inArray(threads.id, threadIds),
+        inArray(threads.id, orderedThreadIds),
       ),
     );
 
+  // Build id→author lookup so we can walk threadIds in their recency order
+  // (Postgres doesn't guarantee ordering on IN queries; the inner SELECT may
+  // return rows in any order, so we cannot rely on `matchingThreads`' order).
+  const authorByThreadId = new Map<string, string | null>();
+  for (const row of matchingThreads) {
+    authorByThreadId.set(row.id, row.author ?? null);
+  }
+
   const distinct: string[] = [];
   const seen = new Set<string>();
-  for (const row of matchingThreads) {
-    const author = row.author;
+  for (const threadId of orderedThreadIds) {
+    const author = authorByThreadId.get(threadId);
     if (typeof author !== 'string' || author.length === 0) continue;
     if (seen.has(author)) continue;
     seen.add(author);
