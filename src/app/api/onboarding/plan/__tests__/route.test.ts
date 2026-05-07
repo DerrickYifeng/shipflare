@@ -415,13 +415,13 @@ describe('POST /api/onboarding/plan (SSE, direct skill)', () => {
       emitEvents: [
         {
           type: 'tool_start',
-          toolName: 'query_recent_milestones',
+          toolName: 'query_code_changes',
           toolUseId: 'use-1',
           input: {},
         },
         {
           type: 'tool_done',
-          toolName: 'query_recent_milestones',
+          toolName: 'query_code_changes',
           toolUseId: 'use-1',
           result: {
             tool_use_id: 'use-1',
@@ -474,7 +474,7 @@ describe('POST /api/onboarding/plan (SSE, direct skill)', () => {
     // tool_start translates to phase=start; tool_done to phase=done.
     // Raw tool names are redacted to public semantic labels before they
     // hit the SSE wire (security/redact-internal-metadata-from-client) —
-    // `query_recent_milestones` → `reading-context`,
+    // `query_code_changes` → `reading-context`,
     // `write_strategic_path` → `planning`.
     expect(progressEvents).toEqual(
       expect.arrayContaining([
@@ -508,7 +508,7 @@ describe('POST /api/onboarding/plan (SSE, direct skill)', () => {
     );
     // Raw tool names must NEVER appear on the wire.
     for (const ev of progressEvents) {
-      expect(ev.toolName).not.toBe('query_recent_milestones');
+      expect(ev.toolName).not.toBe('query_code_changes');
       expect(ev.toolName).not.toBe('write_strategic_path');
     }
   });
@@ -651,11 +651,11 @@ describe('POST /api/onboarding/plan (SSE, direct skill)', () => {
 // ---------------------------------------------------------------------------
 
 describe('streamEventToProgress redaction', () => {
-  it('maps raw query_recent_milestones → reading-context on tool_start', async () => {
+  it('maps raw query_code_changes → reading-context on tool_start', async () => {
     const { streamEventToProgress } = await import('../route');
     const frame = streamEventToProgress({
       type: 'tool_start',
-      toolName: 'query_recent_milestones',
+      toolName: 'query_code_changes',
       toolUseId: 'tu_1',
       input: { query: 'secret' },
     } as StreamEvent);
@@ -666,7 +666,7 @@ describe('streamEventToProgress redaction', () => {
       toolUseId: 'tu_1',
     });
     // Raw name must NOT appear anywhere on the frame.
-    expect(JSON.stringify(frame)).not.toContain('query_recent_milestones');
+    expect(JSON.stringify(frame)).not.toContain('query_code_changes');
   });
 
   it('maps raw write_strategic_path → planning on tool_start', async () => {
