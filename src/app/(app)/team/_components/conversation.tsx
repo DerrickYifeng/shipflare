@@ -207,11 +207,27 @@ export function Conversation({
   // (detected via messages[0]?.id changing in a layout effect below), we
   // restore `scrollTop` so the visible content doesn't jump upward by the
   // height of the new batch. Standard infinite-scroll-up anchor pattern.
+  //
+  // All four refs declared together up front so every effect below has a
+  // resolved binding and `react-hooks/immutability` is satisfied.
   const pendingPrependRef = useRef<{
     scrollHeight: number;
     scrollTop: number;
     prevFirstId: string | null;
   } | null>(null);
+  const hasOlderRef = useRef(hasOlder);
+  const loadingOlderRef = useRef(loadingOlder);
+  const messagesRef = useRef(messages);
+
+  // Mirror the latest props onto refs in an effect (render-time `.current`
+  // writes trip the react-hooks/immutability rule). Runs every render so
+  // the scroll handler — registered once per onLoadOlder identity — always
+  // sees fresh values without re-binding.
+  useEffect(() => {
+    hasOlderRef.current = hasOlder;
+    loadingOlderRef.current = loadingOlder;
+    messagesRef.current = messages;
+  });
 
   useEffect(() => {
     const el = threadRef.current;
@@ -242,31 +258,29 @@ export function Conversation({
     return () => el.removeEventListener('scroll', checkAndTrigger);
   }, [onLoadOlder]);
 
-  // Mirror the latest props onto refs so the scroll handler above (which
-  // is intentionally registered once per onLoadOlder identity) sees fresh
-  // values without re-binding.
-  const hasOlderRef = useRef(hasOlder);
-  const loadingOlderRef = useRef(loadingOlder);
-  const messagesRef = useRef(messages);
-  hasOlderRef.current = hasOlder;
-  loadingOlderRef.current = loadingOlder;
-  messagesRef.current = messages;
-
   // Restore scroll after a prepend lands: when the captured `prevFirstId`
   // is no longer at the top (i.e., older messages were prepended ahead
   // of it), shift `scrollTop` by the growth in `scrollHeight` so the
-  // user's visible cursor stays exactly where it was.
+  // user's visible cursor stays exactly where it was. If `messages`
+  // changed for a non-prepend reason (an SSE message appended at the
+  // tail), prevFirstId still matches and we early-return, leaving the
+  // anchor in place for the eventual prepend.
+  //
+  // The trailing `pendingPrependRef.current = null` write is intentional:
+  // standard infinite-scroll-up "consume the anchor on success" pattern.
+  // react-hooks/immutability over-fires on this read-then-clear shape
+  // (likely because we deep-read .current.scrollTop / .scrollHeight /
+  // .prevFirstId before the clear), so it's disabled at the assignment.
   useLayoutEffect(() => {
     const el = threadRef.current;
     if (!el) return;
-    const pending = pendingPrependRef.current;
-    if (!pending) return;
-    const currentFirstId = messages[0]?.id ?? null;
-    if (currentFirstId === pending.prevFirstId) return; // not yet
-    const delta = el.scrollHeight - pending.scrollHeight;
+    if (!pendingPrependRef.current) return;
+    if (messages[0]?.id === pendingPrependRef.current.prevFirstId) return;
+    const delta = el.scrollHeight - pendingPrependRef.current.scrollHeight;
     if (delta > 0) {
-      el.scrollTop = pending.scrollTop + delta;
+      el.scrollTop = pendingPrependRef.current.scrollTop + delta;
     }
+    // eslint-disable-next-line react-hooks/immutability -- consume-on-success anchor pattern; see comment above.
     pendingPrependRef.current = null;
   }, [messages]);
 
