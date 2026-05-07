@@ -16,17 +16,15 @@ vi.mock('node:util', () => ({
 }));
 
 const dbSelectMock = vi.fn();
-vi.mock('@/lib/db', () => ({
-  db: {
-    select: () => ({
-      from: () => ({
-        where: () => ({
-          limit: () => dbSelectMock(),
-        }),
+const fakeDb = {
+  select: () => ({
+    from: () => ({
+      where: () => ({
+        limit: () => dbSelectMock(),
       }),
     }),
-  },
-}));
+  }),
+};
 
 const getGitHubTokenMock = vi.fn();
 vi.mock('@/lib/github', () => ({
@@ -66,14 +64,12 @@ const ctx = (): ToolContext => {
   const deps: Record<string, unknown> = {
     userId: 'user-1',
     productId: 'prod-1',
+    db: fakeDb,
   };
   return {
     abortSignal: new AbortController().signal,
     get<V>(key: string): V {
       if (key in deps) return deps[key] as V;
-      // db is read directly via @/lib/db mock; if a tool asks for it through
-      // the context, fall through to the global mock too.
-      if (key === 'db') return {} as V;
       throw new Error(`no dep ${key}`);
     },
   };
@@ -191,11 +187,24 @@ describe('query_code_changes', () => {
     ).rejects.toThrow(/no_github_token/);
   });
 
-  it('cleans up clone on error', async () => {
+  it('cleans up clone in finally — cleanup runs AFTER the failing git call, before the rejection propagates', async () => {
     dbSelectMock.mockResolvedValueOnce([{ repoFullName: 'org/repo' }]);
     getGitHubTokenMock.mockResolvedValueOnce('ghp_xxx');
     cloneRepoMock.mockResolvedValueOnce('/tmp/clone');
-    execFileAsyncMock.mockRejectedValueOnce(new Error('git crash'));
+
+    // Record the order of execFile (which throws) vs cleanupClone. A correct
+    // `finally` clause runs cleanup AFTER execFile threw, BEFORE the promise
+    // rejection surfaces to the test. A broken implementation that puts the
+    // cleanup outside the try/finally (or after a `return`) would either skip
+    // cleanup entirely or run it in the wrong order.
+    const callOrder: string[] = [];
+    execFileAsyncMock.mockImplementationOnce(async () => {
+      callOrder.push('execFile-throw');
+      throw new Error('git crash');
+    });
+    cleanupCloneMock.mockImplementationOnce(async (dir: string) => {
+      callOrder.push(`cleanup:${dir}`);
+    });
 
     const { queryCodeChangesTool } = await import('../QueryCodeChangesTool');
     await expect(
@@ -203,7 +212,9 @@ describe('query_code_changes', () => {
         { sinceISO: '2026-05-04T00:00:00Z' },
         ctx(),
       ),
-    ).rejects.toThrow();
-    expect(cleanupCloneMock).toHaveBeenCalledWith('/tmp/clone');
+    ).rejects.toThrow(/git crash/);
+
+    expect(callOrder).toEqual(['execFile-throw', 'cleanup:/tmp/clone']);
+    expect(cleanupCloneMock).toHaveBeenCalledTimes(1);
   });
 });

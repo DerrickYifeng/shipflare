@@ -8,6 +8,11 @@
 //
 // Replaces the misnamed `query_recent_milestones`. Same userId/productId
 // scoping; entirely different data path (live git instead of stale DB).
+//
+// Default-branch scope: commits returned are scoped to the repo's default
+// branch because `cloneRepo` (src/services/code-scanner.ts) clones with
+// `--single-branch --depth 1`. Founders working on a feature branch will
+// see zero results from this tool until they merge to the default branch.
 
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -15,7 +20,6 @@ import { z } from 'zod';
 import { and, eq } from 'drizzle-orm';
 import { buildTool } from '@/core/tool-system';
 import type { ToolDefinition } from '@/core/types';
-import { db } from '@/lib/db';
 import { codeSnapshots } from '@/lib/db/schema';
 import { readDomainDeps } from '@/tools/context-helpers';
 import { cloneRepo, cleanupClone } from '@/services/code-scanner';
@@ -86,8 +90,20 @@ export const queryCodeChangesTool: ToolDefinition<
   inputSchema: queryCodeChangesInputSchema,
   isConcurrencySafe: true,
   isReadOnly: true,
+  /**
+   * Returns up to 50 commits within the requested window for the current
+   * user + product. Reads `code_snapshots.repoFullName` (DB) → resolves the
+   * GitHub OAuth token → shallow-clones the repo → runs `git log`.
+   *
+   * Default-branch scope: `cloneRepo` clones with `--single-branch --depth 1`
+   * (see `src/services/code-scanner.ts`), so `git log` only sees the repo's
+   * default branch history. Founders working on a feature branch will see
+   * zero results here until they merge to the default branch — that's a
+   * known limitation, not a bug. Widening the scope means changing
+   * `cloneRepo` itself, which is out of scope for this tool.
+   */
   async execute(input, ctx): Promise<CodeChangeRow[]> {
-    const { userId, productId } = readDomainDeps(ctx);
+    const { db, userId, productId } = readDomainDeps(ctx);
 
     const [snap] = await db
       .select({ repoFullName: codeSnapshots.repoFullName })
