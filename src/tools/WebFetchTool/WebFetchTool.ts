@@ -94,9 +94,16 @@ export const webFetchTool: ToolDefinition<WebFetchInput, WebFetchOutput> = build
       error: result.error,
       durationMs,
     };
-    log.info(
-      `web_fetch url=${input.url} status=${result.status} bytes=${out.bytes} duration=${durationMs.toFixed(0)}ms`,
-    );
+    if (result.status === 'success' || result.status === 'thin_content') {
+      log.info(
+        `web_fetch url=${input.url} status=${result.status} bytes=${out.bytes} duration=${durationMs.toFixed(0)}ms`,
+      );
+    } else {
+      const detail = result.error ? ` error=${result.error.slice(0, 200)}` : '';
+      log.warn(
+        `web_fetch url=${input.url} status=${result.status} duration=${durationMs.toFixed(0)}ms${detail}`,
+      );
+    }
     return out;
   },
 });
