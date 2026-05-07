@@ -78,6 +78,41 @@ When `thread.authorBio` is present and names a project or specific stack,
 you may anchor on it ("you mentioned Postgres — same boat: ..."). Never
 fabricate a bio reference that isn't in the bio.
 
+## Product mention (X-specific)
+
+Only when the caller passes `canMentionProduct: true`. See SKILL.md
+for the full rule set; this section adds X-specific phrasing.
+
+X is brutal on length — 240 chars hard cap, 40–140 target. The
+substantive answer plus a product-mention sentence usually only fits
+when both halves are tight.
+
+Phrasing pattern (lowercase OK, no exclamation):
+
+`<personal-anchor answer that lands the OP's specific situation>. this is why we built <product.name> — <one-clause description>.`
+
+Examples:
+
+- "tried 3 freelancers in 6 months, burned $4k, no traction. this is
+  why we built ShipFlare — an AI marketing team for solo founders."
+  (≈ 150 chars; personal anchor + name + one-clause description)
+- "got the same way burnt out drafting reddit replies daily. we built
+  ShipFlare for exactly this — drafts the replies you'd actually send."
+  (≈ 165 chars; pivot via shared experience)
+
+Counter-examples (REWRITE):
+
+- "ShipFlare can help with that!" — opener mention, no anchor, sounds
+  like an ad.
+- "...this is why we built ShipFlare 🚀 — try it free at shipflare.com"
+  — emoji + link + CTA all violate hard rules.
+- "...this is why we built ShipFlare — the AI marketing team that
+  leverages cutting-edge LLMs to seamlessly automate every channel."
+  — banned vocab (`leverages`, `seamlessly`), feature monologue.
+
+If the answer alone already sits at 200+ chars, drop the mention.
+A clean ≤ 240-char answer beats a truncated pitch every time.
+
 ## Conversation context (quote tweets and reply chains)
 
 When `thread.quotedText` or `thread.inReplyToText` is set, the surfaced
