@@ -26,7 +26,7 @@ import { processWeeklyReplan } from './processors/weekly-replan';
 import { processReconcileMailbox } from './processors/reconcile-mailbox';
 import { processAgentRun } from './processors/agent-run';
 import { AGENT_RUN_QUEUE_NAME, type AgentRunJobData } from '@/lib/queue/agent-run';
-import { dreamQueue, discoveryScanQueue, metricsQueue, analyticsQueue, codeScanQueue } from '@/lib/queue';
+import { dreamQueue, discoveryScanQueue, metricsQueue, analyticsQueue } from '@/lib/queue';
 import type { PlanExecuteJobData } from '@/lib/queue';
 import { createLogger, loggerForJob } from '@/lib/logger';
 import type { ReviewJobData, PostingJobData, HealthScoreJobData, DreamJobData, CodeScanJobData, DiscoveryScanJobData, EngagementJobData, MetricsJobData, AnalyticsJobData } from '@/lib/queue/types';
@@ -306,18 +306,6 @@ async function scheduleAnalytics() {
   );
 }
 
-// Schedule daily code diff: 2am UTC (before metrics at 3am)
-async function scheduleCodeDiff() {
-  await codeScanQueue.add(
-    'daily-diff',
-    { userId: '__all__', repoFullName: '', repoUrl: '', githubToken: '', isDailyDiff: true },
-    {
-      repeat: { pattern: '0 2 * * *' },
-      jobId: 'code-diff-cron',
-    },
-  );
-}
-
 // Schedule daily-run cron: daily at 13:00 UTC. Single canonical
 // fan-out — the processor iterates all users with a channel + product
 // and enqueues one coordinator-rooted team-run per user
@@ -396,7 +384,6 @@ async function scheduleReconcileMailbox() {
 
 Promise.all([
   scheduleNightlyDream(),
-  scheduleCodeDiff(),
   scheduleDailyRun(),
   scheduleMetrics(),
   scheduleAnalytics(),

@@ -86,8 +86,6 @@ export const codeScanJobSchema = z.object({
   repoFullName: z.string().min(1),
   repoUrl: z.string().min(1),
   githubToken: z.string().min(1),
-  /** When true, perform incremental diff instead of full scan. */
-  isDailyDiff: z.boolean().optional(),
 });
 export type CodeScanJobData = z.input<typeof codeScanJobSchema>;
 

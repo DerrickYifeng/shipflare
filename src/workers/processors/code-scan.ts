@@ -1,17 +1,14 @@
 import type { Job } from 'bullmq';
-import { eq, isNotNull } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { db } from '@/lib/db';
-import { products, codeSnapshots, channels } from '@/lib/db/schema';
+import { products, codeSnapshots } from '@/lib/db/schema';
 import { getPubSubPublisher } from '@/lib/redis';
-import { codeScanQueue } from '@/lib/queue';
-import { createLogger, loggerForJob, type Logger } from '@/lib/logger';
-import { getGitHubToken } from '@/lib/github';
+import { createLogger, loggerForJob } from '@/lib/logger';
 import {
   cloneRepo,
   cleanupClone,
   scanRepo,
   getCommitSha,
-  diffRepo,
 } from '@/services/code-scanner';
 import type { CodeScanJobData } from '@/lib/queue/types';
 import type { ScanResult } from '@/types/code-scanner';
@@ -71,120 +68,12 @@ function isPlausibleHomepage(url: string): boolean {
 const baseLog = createLogger('worker:code-scan');
 
 /**
- * Daily diff: clone the repo and compare HEAD against the stored snapshot.
- * Updates diffSummary and changesDetected on the code_snapshots row.
- */
-async function processDailyDiff(
-  snapshot: { id: string; repoFullName: string; commitSha: string | null; userId: string },
-  githubToken: string,
-  log: Logger,
-): Promise<void> {
-  let cloneDir: string | null = null;
-  try {
-    cloneDir = await cloneRepo(snapshot.repoFullName, githubToken);
-    const result = await diffRepo(cloneDir, snapshot.commitSha);
-
-    if (result.hasMeaningfulChanges) {
-      await db
-        .update(codeSnapshots)
-        .set({
-          commitSha: result.newCommitSha,
-          diffSummary: result.diffSummary,
-          changesDetected: true,
-          lastDiffAt: new Date(),
-          scannedAt: new Date(),
-        })
-        .where(eq(codeSnapshots.id, snapshot.id));
-      log.info(`Daily diff for ${snapshot.repoFullName}: meaningful changes detected`);
-    } else {
-      await db
-        .update(codeSnapshots)
-        .set({
-          commitSha: result.newCommitSha ?? snapshot.commitSha,
-          changesDetected: false,
-          lastDiffAt: new Date(),
-        })
-        .where(eq(codeSnapshots.id, snapshot.id));
-      log.info(`Daily diff for ${snapshot.repoFullName}: no meaningful changes`);
-    }
-  } finally {
-    if (cloneDir) await cleanupClone(cloneDir);
-  }
-}
-
-/**
- * Cron fan-out: enqueue daily diff jobs for all users with code snapshots.
- */
-async function fanOutDailyDiff(log: Logger): Promise<void> {
-  // Find all code snapshots that have a repo linked
-  const snapshots = await db
-    .select({
-      id: codeSnapshots.id,
-      userId: codeSnapshots.userId,
-      repoFullName: codeSnapshots.repoFullName,
-      commitSha: codeSnapshots.commitSha,
-    })
-    .from(codeSnapshots)
-    .where(isNotNull(codeSnapshots.repoFullName));
-
-  log.info(`Daily diff fan-out: ${snapshots.length} repos to check`);
-
-  for (const snap of snapshots) {
-    const accessToken = await getGitHubToken(snap.userId);
-    if (!accessToken) {
-      log.warn(`No GitHub token for user ${snap.userId}, skipping daily diff`);
-      continue;
-    }
-
-    await codeScanQueue.add(
-      'daily-diff',
-      {
-        userId: snap.userId,
-        repoFullName: snap.repoFullName,
-        repoUrl: '',
-        githubToken: accessToken,
-        isDailyDiff: true,
-      },
-      { jobId: `daily-diff-${snap.id}-${Date.now()}` },
-    );
-  }
-}
-
-/**
  * Worker processor: clone a GitHub repo, scan it, save the snapshot.
  * Publishes progress + result via Redis pub/sub for SSE streaming.
  */
 export async function processCodeScan(job: Job<CodeScanJobData>): Promise<void> {
   const log = loggerForJob(baseLog, job);
-  const { userId, repoFullName, repoUrl, githubToken, isDailyDiff } = job.data;
-
-  // Cron fan-out: enqueue individual diff jobs for all users
-  if (isDailyDiff && userId === '__all__') {
-    await fanOutDailyDiff(log);
-    return;
-  }
-
-  // Individual daily diff: compare HEAD against stored snapshot
-  if (isDailyDiff) {
-    const [snap] = await db
-      .select({
-        id: codeSnapshots.id,
-        repoFullName: codeSnapshots.repoFullName,
-        commitSha: codeSnapshots.commitSha,
-        userId: codeSnapshots.userId,
-      })
-      .from(codeSnapshots)
-      .where(eq(codeSnapshots.userId, userId))
-      .limit(1);
-
-    if (!snap) {
-      log.warn(`No code snapshot for user ${userId}, skipping daily diff`);
-      return;
-    }
-
-    await processDailyDiff(snap, githubToken, log);
-    return;
-  }
+  const { userId, repoFullName, repoUrl, githubToken } = job.data;
 
   // Full scan (onboarding flow)
   const channel = `code-scan:${userId}`;
