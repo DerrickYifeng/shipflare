@@ -86,7 +86,13 @@ export interface ConversationalRequest {
   /** xAI model id, e.g. `grok-4.20-non-reasoning` or `grok-4.20-reasoning`. */
   model: string;
   messages: ConversationalMessage[];
-  tools?: Array<{ type: 'x_search' | 'web_search' }>;
+  /**
+   * xAI server-side search tools. Each entry is `{ type: 'x_search' }`,
+   * `{ type: 'web_search', filters?: { allowed_domains?: string[]; ... } }`,
+   * or any other tool type xAI accepts. We pass the array through to the
+   * Responses API as-is — xAI's surface defines what's valid, not us.
+   */
+  tools?: Array<Record<string, unknown>>;
   responseFormat?: ConversationalResponseFormat;
   signal?: AbortSignal;
 }

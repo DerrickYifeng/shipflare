@@ -15,6 +15,57 @@
 // the moderation pipeline needs. maxItems: 20 — Reddit signal is
 // noisier than X so we tighten the cap.
 
+import { z } from 'zod';
+
+/**
+ * One Reddit thread row returned by xAI Grok web_search (reddit.com).
+ *
+ * Mirrors `REDDIT_THREAD_SEARCH_SCHEMA` below — the JSON schema is the
+ * one xAI sees for structured-output validation; this Zod schema is
+ * what we re-validate the parsed JSON against on our side. Keeping
+ * the two in sync is intentional duplication: xAI's strict mode
+ * accepts only static JSON schema, but our caller wants Zod's
+ * `safeParse` ergonomics.
+ *
+ * `external_id` is the reddit base-36 thread ID (the segment after
+ * `/comments/` in the URL) so persist-time dedup keys remain stable.
+ */
+export const redditThreadCandidateSchema = z.object({
+  external_id: z.string().min(1),
+  url: z.string().url(),
+  subreddit: z.string().min(1),
+  author_username: z.string().min(1),
+  author_karma: z.number().int().nullable(),
+  title: z.string(),
+  body: z.string(),
+  posted_at: z.string(),
+  score: z.number().int(),
+  num_comments: z.number().int(),
+  num_crossposts: z.number().int(),
+  is_self: z.boolean(),
+  link_url: z.string().nullable(),
+  over_18: z.boolean(),
+  locked: z.boolean(),
+  archived: z.boolean(),
+  confidence: z.number().min(0).max(1),
+  reason: z.string().min(1),
+});
+
+export type RedditThreadCandidate = z.infer<typeof redditThreadCandidateSchema>;
+
+/**
+ * Outer envelope for the Reddit discovery response. Mirrors the
+ * shape `REDDIT_THREAD_SEARCH_SCHEMA` declares: `{ threads, notes }`.
+ */
+export const redditThreadSearchResponseSchema = z.object({
+  threads: z.array(redditThreadCandidateSchema).max(20),
+  notes: z.string(),
+});
+
+export type RedditThreadSearchResponse = z.infer<
+  typeof redditThreadSearchResponseSchema
+>;
+
 export const X_TWEET_SEARCH_SCHEMA = {
   type: 'object',
   additionalProperties: false,

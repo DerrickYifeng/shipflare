@@ -13,6 +13,14 @@ export const PERSIST_QUEUE_THREADS_TOOL_NAME = 'persist_queue_threads';
 
 const inputSchema = z.object({
   threads: z.array(tweetCandidateSchema).min(0).max(50),
+  /**
+   * Optional platform tag — passed through by FindThreadsViaXaiTool so
+   * Task 2c can branch the persist mapping for Reddit. Today the tool
+   * only handles X (the schema's `tweetCandidateSchema` is X-shaped);
+   * the field is accepted but ignored until 2c lands. Defaults to
+   * `'x'` to keep all existing call sites working unchanged.
+   */
+  platform: z.enum(['x', 'reddit']).default('x'),
 });
 
 export interface PersistQueueThreadsResult {

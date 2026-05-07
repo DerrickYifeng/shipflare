@@ -19,10 +19,10 @@
 // so the coordinator's downstream dispatch logic doesn't change.
 
 import { z } from 'zod';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { buildTool } from '@/core/tool-system';
 import type { ToolContext } from '@/core/types';
-import { products } from '@/lib/db/schema';
+import { channels, products } from '@/lib/db/schema';
 import { readDomainDeps } from '@/tools/context-helpers';
 import { runForkSkill } from '@/skills/run-fork-skill';
 import { xaiFindCustomersTool } from '@/tools/XaiFindCustomersTool/XaiFindCustomersTool';
@@ -36,8 +36,17 @@ import {
 import { MemoryStore } from '@/memory/store';
 import { createLogger } from '@/lib/logger';
 import { listRecentEngagedAuthors } from '@/lib/reply-throttle';
-import { getReplyAuthorCooldownDays } from '@/lib/platform-config';
-import { buildXFirstTurnMessage } from './prompt-builders';
+import { getReplyAuthorCooldownDays, PLATFORMS } from '@/lib/platform-config';
+import {
+  buildRedditFirstTurnMessage,
+  buildXFirstTurnMessage,
+} from './prompt-builders';
+import {
+  REDDIT_THREAD_SEARCH_SCHEMA,
+  X_TWEET_SEARCH_SCHEMA,
+  redditThreadSearchResponseSchema,
+  type RedditThreadCandidate,
+} from './schemas';
 
 const log = createLogger('tool:find_threads_via_xai');
 
@@ -47,7 +56,10 @@ const inputSchema = z.object({
   trigger: z.enum(['kickoff', 'daily']).default('daily'),
   intent: z.string().optional(),
   maxResults: z.number().int().min(1).max(50).default(10),
+  platform: z.enum([PLATFORMS.x.id, PLATFORMS.reddit.id] as ['x', 'reddit']).default(PLATFORMS.x.id as 'x'),
 });
+
+type DiscoveryPlatform = 'x' | 'reddit';
 
 
 export interface FindThreadsViaXaiTopQueued {
@@ -119,14 +131,35 @@ interface XaiUsage {
 }
 
 /**
+ * Platform-tagged discovery candidate. The judging fan-out and the
+ * persist call both need to handle either shape, so we tag at the
+ * boundary and discriminate on `platform`.
+ */
+type DiscoveryCandidate =
+  | { platform: 'x'; row: TweetCandidate }
+  | { platform: 'reddit'; row: RedditThreadCandidate };
+
+/**
  * One judged candidate plus the verdict the skill returned. We carry
- * BOTH the original tweet and the skill output so we can construct the
- * full TweetCandidate row to persist (with canMentionProduct +
- * mentionSignal) without re-judging.
+ * BOTH the original row and the skill output so we can construct the
+ * full persist-time row (with canMentionProduct + mentionSignal)
+ * without re-judging.
  */
 interface JudgedCandidate {
-  tweet: TweetCandidate;
+  candidate: DiscoveryCandidate;
   verdict: JudgingThreadQualityOutput;
+}
+
+/** Stable external_id accessor — the field name happens to match on
+ *  both X and Reddit candidate shapes, but the discriminator keeps
+ *  TS happy. */
+function externalId(c: DiscoveryCandidate): string {
+  return c.row.external_id;
+}
+
+/** Stable url accessor for the refinement message + topQueued. */
+function candidateUrl(c: DiscoveryCandidate): string {
+  return c.row.url;
 }
 
 /**
@@ -148,23 +181,35 @@ function xaiUsageToCostUsd(u: XaiUsage): number {
 }
 
 /**
- * Engagement-weighted score — same formula the persist tool uses so
- * `topQueued` ordering matches the threads-table insertion order.
+ * Engagement-weighted score — same formula the persist tool uses on X
+ * so `topQueued` ordering matches the threads-table insertion order.
+ *
+ * Both platforms use `confidence × log10(1 + weighted_engagement)`.
+ *   - X: likes + 5×reposts (a public endorsement is meaningfully
+ *     stronger signal than a passive like).
+ *   - Reddit: score (net upvotes) + 5×num_comments (a comment is
+ *     meaningfully stronger participation signal than a passive
+ *     upvote).
  */
-function engagementScore(t: TweetCandidate): number {
-  const likes = t.likes_count ?? 0;
-  const reposts = t.reposts_count ?? 0;
-  return t.confidence * Math.log10(1 + likes + 5 * reposts);
+function engagementScore(c: DiscoveryCandidate): number {
+  if (c.platform === 'x') {
+    const likes = c.row.likes_count ?? 0;
+    const reposts = c.row.reposts_count ?? 0;
+    return c.row.confidence * Math.log10(1 + likes + 5 * reposts);
+  }
+  const score = c.row.score;
+  const comments = c.row.num_comments;
+  return c.row.confidence * Math.log10(1 + score + 5 * comments);
 }
 
 /**
- * Build the first-turn xAI user message from product + rubric + intent.
- *
- * Thin delegate to `buildXFirstTurnMessage` in `prompt-builders.ts`,
- * preserved here so the existing in-file call site (and the existing
- * unit tests) keep working until Task 2b wires the platform branch
- * directly into `execute()`. Self-handle injection is not yet plumbed
- * through, so we pass `null`.
+ * Thin X-platform delegate to `buildXFirstTurnMessage` in
+ * `prompt-builders.ts`. Preserved as the canonical export for the
+ * existing in-file call site and the existing unit tests. Reddit
+ * discovery skips this and calls `buildRedditFirstTurnMessage`
+ * directly. Self-handle injection now flows through the platform
+ * branch in `execute()`; this helper passes `null` so legacy callers
+ * (and the existing tests) see no behavioral change.
  */
 export function buildFirstTurnMessage(
   product: ProductForLoop,
@@ -254,27 +299,60 @@ async function loadRubric(
  * nulls out before treating the result as a JudgedCandidate.
  */
 async function judgeCandidate(
-  tweet: TweetCandidate,
+  candidate: DiscoveryCandidate,
   product: ProductForLoop,
   ctx: ToolContext,
 ): Promise<JudgedCandidate | null> {
-  const args = {
-    candidate: {
-      title: tweet.body.slice(0, 80),
-      body: tweet.body,
-      author: tweet.author_username,
-      authorBio: tweet.author_bio,
-      authorFollowers: tweet.author_followers,
-      url: tweet.url,
-      platform: 'x' as const,
-      postedAt: tweet.posted_at,
-    },
-    product: {
-      name: product.name,
-      description: product.description,
-      ...(product.valueProp ? { valueProp: product.valueProp } : {}),
-    },
-  };
+  // Build the judging-thread-quality candidate args from either
+  // platform's row. The skill itself accepts a generic shape (title,
+  // body, author, authorBio, authorFollowers, url, platform, postedAt)
+  // — we map Reddit's `score` / null bio onto the same fields.
+  const args =
+    candidate.platform === 'x'
+      ? {
+          candidate: {
+            title: candidate.row.body.slice(0, 80),
+            body: candidate.row.body,
+            author: candidate.row.author_username,
+            authorBio: candidate.row.author_bio,
+            authorFollowers: candidate.row.author_followers,
+            url: candidate.row.url,
+            platform: 'x' as const,
+            postedAt: candidate.row.posted_at,
+          },
+          product: {
+            name: product.name,
+            description: product.description,
+            ...(product.valueProp ? { valueProp: product.valueProp } : {}),
+          },
+        }
+      : {
+          candidate: {
+            // Reddit threads ARE titled — use the real title (not a
+            // body-prefix slice).
+            title: candidate.row.title,
+            body: candidate.row.body,
+            author: candidate.row.author_username,
+            // Reddit doesn't expose an author bio via web_search;
+            // pass null so the judging skill's competitor-bio filter
+            // simply doesn't fire on Reddit candidates (recall over
+            // precision — confirmed in Reddit handoff design).
+            authorBio: null,
+            // Approximate "follower scale" with author_karma (sitewide
+            // karma is a comparable order-of-magnitude signal for the
+            // small/large account voice calibration the drafting skill
+            // does downstream).
+            authorFollowers: candidate.row.author_karma,
+            url: candidate.row.url,
+            platform: 'reddit' as const,
+            postedAt: candidate.row.posted_at,
+          },
+          product: {
+            name: product.name,
+            description: product.description,
+            ...(product.valueProp ? { valueProp: product.valueProp } : {}),
+          },
+        };
   const { result } = await runForkSkill(
     'judging-thread-quality',
     JSON.stringify(args),
@@ -284,11 +362,13 @@ async function judgeCandidate(
   const parsed = judgingThreadQualityOutputSchema.safeParse(result);
   if (!parsed.success) {
     log.warn(
-      `judging-thread-quality returned invalid output for ${tweet.external_id}: ${parsed.error.message}`,
+      `judging-thread-quality returned invalid output for ${externalId(
+        candidate,
+      )}: ${parsed.error.message}`,
     );
     return null;
   }
-  return { tweet, verdict: parsed.data };
+  return { candidate, verdict: parsed.data };
 }
 
 export const findThreadsViaXaiTool = buildTool({
@@ -314,6 +394,9 @@ export const findThreadsViaXaiTool = buildTool({
     // sees them as possibly-undefined here.
     const trigger = input.trigger ?? 'daily';
     const maxResults = input.maxResults ?? 10;
+    const platform: DiscoveryPlatform =
+      (input.platform as DiscoveryPlatform | undefined) ??
+      (PLATFORMS.x.id as 'x');
     void trigger; // currently informational; reserved for future telemetry
 
     // Load product + rubric. The agent's old prose ran read_memory then
@@ -347,12 +430,35 @@ export const findThreadsViaXaiTool = buildTool({
 
     const rubric = await loadRubric(userId, productId);
 
+    // Look up the founder's own handle on this platform so we can tell
+    // xAI not to surface their own posts as reply targets. Projection
+    // limited to `username` so we never pull encrypted token columns
+    // through this read path. Missing channel → null → no self-line in
+    // the prompt (the founder hasn't connected this platform yet).
+    let excludeSelfHandle: string | null = null;
+    try {
+      const ownChannelRows = await db
+        .select({ username: channels.username })
+        .from(channels)
+        .where(
+          and(eq(channels.userId, userId), eq(channels.platform, platform)),
+        )
+        .limit(1);
+      excludeSelfHandle = ownChannelRows[0]?.username ?? null;
+    } catch (err) {
+      log.warn(
+        `channel self-handle lookup failed; proceeding without self-exclude: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+
     let excludeAuthors: string[] = [];
     try {
       excludeAuthors = await listRecentEngagedAuthors(db, {
         userId,
-        platform: 'x',
-        withinDays: getReplyAuthorCooldownDays('x'),
+        platform,
+        withinDays: getReplyAuthorCooldownDays(platform),
         limit: 80, // headroom over the prompt cap of 50; refinement caps at 10
       });
     } catch (err) {
@@ -371,18 +477,54 @@ export const findThreadsViaXaiTool = buildTool({
       keywords: product.keywords,
     };
 
+    // Branch search tool, prompt builder, and JSON schema by platform.
+    // X uses xAI's first-class `x_search` tool. Reddit uses generic
+    // `web_search` restricted to reddit.com (xAI doesn't expose a
+    // Reddit-specific search tool, but the search engine indexes
+    // reddit.com richly enough that this works in practice — see the
+    // Reddit handoff design doc for the validation findings).
+    const xaiTools =
+      platform === 'reddit'
+        ? [
+            {
+              type: 'web_search' as const,
+              filters: { allowed_domains: ['reddit.com'] as string[] },
+            },
+          ]
+        : [{ type: 'x_search' as const }];
+
+    const firstTurnContent =
+      platform === 'reddit'
+        ? buildRedditFirstTurnMessage(
+            product,
+            rubric,
+            input.intent,
+            maxResults,
+            excludeAuthors,
+            excludeSelfHandle,
+          )
+        : buildXFirstTurnMessage(
+            product,
+            rubric,
+            input.intent,
+            maxResults,
+            excludeAuthors,
+            excludeSelfHandle,
+          );
+
+    const responseFormatSchema =
+      platform === 'reddit' ? REDDIT_THREAD_SEARCH_SCHEMA : X_TWEET_SEARCH_SCHEMA;
+    const responseFormatName =
+      platform === 'reddit'
+        ? 'reddit_thread_search_result'
+        : 'tweet_search_result';
+
     // Conversational state — we OWN this. xAI is stateless server-side;
     // every call carries the full prior turns.
     const messages: XaiMessage[] = [
       {
         role: 'user',
-        content: buildFirstTurnMessage(
-          product,
-          rubric,
-          input.intent,
-          maxResults,
-          excludeAuthors,
-        ),
+        content: firstTurnContent,
       },
     ];
 
@@ -440,6 +582,9 @@ export const findThreadsViaXaiTool = buildTool({
             messages,
             productContext,
             reasoning: callReasoning,
+            tools: xaiTools,
+            responseFormatSchema,
+            responseFormatName,
           },
           ctx,
         );
@@ -460,11 +605,40 @@ export const findThreadsViaXaiTool = buildTool({
       // agent's prior workflow.
       messages.push(xaiResult.assistantMessage);
 
-      // Filter out tweets we've already judged in a prior round.
-      const fresh = xaiResult.tweets.filter(
-        (t) => !seen.has(t.external_id),
+      // Normalize the per-round response into a uniform candidate
+      // array. X path uses `xaiResult.tweets` (Zod-validated by the
+      // inner tool). Reddit path goes through the inner tool's custom-
+      // schema branch — `tweets` is empty and the raw JSON is in
+      // `output`; we re-validate against `redditThreadSearchResponseSchema`.
+      let roundCandidates: DiscoveryCandidate[] = [];
+      if (platform === 'x') {
+        roundCandidates = xaiResult.tweets.map((t) => ({
+          platform: 'x' as const,
+          row: t,
+        }));
+      } else {
+        const parsed = redditThreadSearchResponseSchema.safeParse(
+          xaiResult.output,
+        );
+        if (!parsed.success) {
+          log.warn(
+            `find_threads_via_xai round ${round + 1} (reddit): output ` +
+              `failed reddit-thread schema validation: ${parsed.error.message}`,
+          );
+        } else {
+          if (parsed.data.notes) lastXaiNotes = parsed.data.notes;
+          roundCandidates = parsed.data.threads.map((t) => ({
+            platform: 'reddit' as const,
+            row: t,
+          }));
+        }
+      }
+
+      // Filter out candidates we've already judged in a prior round.
+      const fresh = roundCandidates.filter(
+        (c) => !seen.has(externalId(c)),
       );
-      for (const t of fresh) seen.add(t.external_id);
+      for (const c of fresh) seen.add(externalId(c));
 
       if (fresh.length === 0) {
         consecutiveEmptyRounds += 1;
@@ -478,7 +652,7 @@ export const findThreadsViaXaiTool = buildTool({
         unsuccessfulRefines += 1;
         const refinement = composeRefinementMessage(
           accumulatedRejectionSignals,
-          [...strong.values()].map((j) => j.tweet.url),
+          [...strong.values()].map((j) => candidateUrl(j.candidate)),
           excludeAuthors,
         );
         messages.push({
@@ -499,10 +673,10 @@ export const findThreadsViaXaiTool = buildTool({
       // judging fork's exception doesn't lose the whole round. Also
       // tolerates malformed verdicts (judgeCandidate returns null when
       // safeParse fails) so a single bad LLM hiccup doesn't crash the
-      // round. Bounded parallelism: xAI returns ≤50 (schema cap) per
-      // call, typically 10-20, which is fine without chunking.
+      // round. Bounded parallelism: xAI returns ≤50 (X) / ≤20 (Reddit)
+      // per call, typically 10-20, which is fine without chunking.
       const settled = await Promise.allSettled(
-        fresh.map((t) => judgeCandidate(t, product, ctx)),
+        fresh.map((c) => judgeCandidate(c, product, ctx)),
       );
       const judged: JudgedCandidate[] = [];
       for (let i = 0; i < settled.length; i++) {
@@ -512,7 +686,7 @@ export const findThreadsViaXaiTool = buildTool({
         } else if (s.status === 'rejected') {
           log.warn(
             `judging-thread-quality fork rejected for ${
-              fresh[i]?.external_id
+              fresh[i] ? externalId(fresh[i]!) : 'unknown'
             }: ${
               s.reason instanceof Error ? s.reason.message : String(s.reason)
             }`,
@@ -528,7 +702,7 @@ export const findThreadsViaXaiTool = buildTool({
       let rejectedInThisRound = 0;
       for (const j of judged) {
         if (j.verdict.keep && j.verdict.score >= STRONG_SCORE_THRESHOLD) {
-          strong.set(j.tweet.external_id, j);
+          strong.set(externalId(j.candidate), j);
           strongInThisRound += 1;
         } else if (!j.verdict.keep) {
           rejectedInThisRound += 1;
@@ -579,7 +753,7 @@ export const findThreadsViaXaiTool = buildTool({
       }
       const refinement = composeRefinementMessage(
         accumulatedRejectionSignals,
-        [...strong.values()].map((j) => j.tweet.url),
+        [...strong.values()].map((j) => candidateUrl(j.candidate)),
         excludeAuthors,
       );
       messages.push({
@@ -594,41 +768,84 @@ export const findThreadsViaXaiTool = buildTool({
     // when xAI was generous.
     const ranked = [...strong.values()]
       .sort(
-        (a, b) => engagementScore(b.tweet) - engagementScore(a.tweet),
+        (a, b) => engagementScore(b.candidate) - engagementScore(a.candidate),
       )
       .slice(0, maxResults);
 
-    const threadsToPersist: TweetCandidate[] = ranked.map((j) => ({
-      ...j.tweet,
-      can_mention_product: j.verdict.canMentionProduct,
-      mention_signal: j.verdict.mentionSignal as MentionSignal,
-    }));
-
+    // X path: build TweetCandidate rows and pass them straight through
+    // to persist_queue_threads (existing X persist behavior).
+    // Reddit path: persist mapping lives in PersistQueueThreadsTool's
+    // Reddit branch (Task 2c) — for now pass the platform tag through
+    // so 2c has a hook to read. Until 2c lands, the Reddit branch of
+    // the persist call is a no-op (the tool's input schema today only
+    // accepts X tweet rows; we therefore only call persist on X).
     let inserted = 0;
-    if (threadsToPersist.length > 0) {
-      ctx.emitProgress?.(
-        FIND_THREADS_VIA_XAI_TOOL_NAME,
-        `Persisting ${threadsToPersist.length} thread${threadsToPersist.length === 1 ? '' : 's'}…`,
-        { count: threadsToPersist.length },
+    if (platform === 'x') {
+      const xRanked = ranked.filter(
+        (j): j is JudgedCandidate & {
+          candidate: { platform: 'x'; row: TweetCandidate };
+        } => j.candidate.platform === 'x',
       );
-      const persistResult = await persistQueueThreadsTool.execute(
-        { threads: threadsToPersist },
-        ctx,
+      const threadsToPersist: TweetCandidate[] = xRanked.map((j) => ({
+        ...j.candidate.row,
+        can_mention_product: j.verdict.canMentionProduct,
+        mention_signal: j.verdict.mentionSignal as MentionSignal,
+      }));
+      if (threadsToPersist.length > 0) {
+        ctx.emitProgress?.(
+          FIND_THREADS_VIA_XAI_TOOL_NAME,
+          `Persisting ${threadsToPersist.length} thread${threadsToPersist.length === 1 ? '' : 's'}…`,
+          { count: threadsToPersist.length },
+        );
+        const persistResult = await persistQueueThreadsTool.execute(
+          { threads: threadsToPersist, platform },
+          ctx,
+        );
+        inserted = persistResult.inserted;
+      }
+    } else {
+      // Reddit persist mapping lands in Task 2c. For now we skip the
+      // persist call (PersistQueueThreadsTool today only knows the X
+      // tweet shape) and surface the count via scoutNotes so the
+      // caller sees that discovery worked but persistence was deferred.
+      log.info(
+        `find_threads_via_xai (reddit) skipping persist — Task 2c not yet wired. ` +
+          `strong=${ranked.length} user=${userId}`,
       );
-      inserted = persistResult.inserted;
     }
 
     const topQueued: FindThreadsViaXaiTopQueued[] = ranked
       .slice(0, TOP_QUEUED_CAP)
-      .map((j) => ({
-        externalId: j.tweet.external_id,
-        url: j.tweet.url,
-        authorUsername: j.tweet.author_username,
-        body: j.tweet.body,
-        likesCount: j.tweet.likes_count,
-        repostsCount: j.tweet.reposts_count,
-        confidence: j.verdict.score,
-      }));
+      .map((j) => {
+        const url = candidateUrl(j.candidate);
+        const externalIdValue = externalId(j.candidate);
+        if (j.candidate.platform === 'x') {
+          return {
+            externalId: externalIdValue,
+            url,
+            authorUsername: j.candidate.row.author_username,
+            body: j.candidate.row.body,
+            likesCount: j.candidate.row.likes_count,
+            repostsCount: j.candidate.row.reposts_count,
+            confidence: j.verdict.score,
+          };
+        }
+        // Reddit: TopQueued shape carries `likesCount` / `repostsCount`
+        // as nullable so we can reuse the same row type for both
+        // platforms. The `/today` UI doesn't render Reddit threads
+        // through this same shape today (Task 4 wires that in); the
+        // numbers below are kept as null so no caller renders an
+        // X-shaped engagement number for a Reddit thread by accident.
+        return {
+          externalId: externalIdValue,
+          url,
+          authorUsername: j.candidate.row.author_username,
+          body: j.candidate.row.body || j.candidate.row.title,
+          likesCount: null,
+          repostsCount: null,
+          confidence: j.verdict.score,
+        };
+      });
 
     const scoutNotes = composeScoutNotes({
       reachedTarget,

@@ -42,11 +42,44 @@ const inputSchema = z.object({
   /** Default false → fast non-reasoning Grok variant. Agent escalates to
    *  true after 2 weak rounds. See discovery-agent AGENT.md. */
   reasoning: z.boolean().default(false),
+  /**
+   * Optional override for xAI's `tools` array. Defaults to
+   * `[{ type: 'x_search' }]` (the original X/Twitter discovery
+   * behavior). Reddit discovery passes a `web_search` tool with a
+   * reddit.com domain filter. Caller-supplied; we do not validate the
+   * shape — xAI's API surface defines what is accepted.
+   */
+  tools: z.array(z.unknown()).optional(),
+  /**
+   * Optional override for the structured-output JSON schema. Defaults
+   * to the X-tweet schema (derived from `xaiFindCustomersResponseSchema`
+   * via `toXaiJsonSchema`). When supplied alongside
+   * `responseFormatName`, the tool skips Zod validation against the
+   * X-tweet shape and returns the raw parsed JSON in `output` so the
+   * caller can validate against its own schema.
+   */
+  responseFormatSchema: z.unknown().optional(),
+  /** Stable JSON schema name xAI sees in the response_format envelope.
+   *  Defaults to `'CustomerTweets'` (X path). Required when caller
+   *  supplies `responseFormatSchema`. */
+  responseFormatName: z.string().optional(),
 });
 
 export interface XaiFindCustomersResult {
+  /**
+   * Parsed `tweets` array — populated only on the default (X) path
+   * where the response was Zod-validated against the X-tweet schema.
+   * Empty when caller passed a custom `responseFormatSchema`.
+   */
   tweets: TweetCandidate[];
   notes: string;
+  /**
+   * Raw parsed JSON output from xAI. Always populated when xAI
+   * honored `response_format` (i.e. not a degraded prose response).
+   * Caller validates against its own schema when using a custom
+   * `responseFormatSchema`.
+   */
+  output: unknown;
   assistantMessage: ConversationalMessage;
   /** Token usage so the agent / observability layer can report. */
   usage: {
@@ -112,11 +145,31 @@ export const xaiFindCustomersTool = buildTool({
       { model, reasoning: input.reasoning, messageCount: input.messages.length },
     );
 
+    // Caller can override the search tool (X uses `x_search`; Reddit
+    // uses `web_search` with a reddit.com filter) and the JSON schema
+    // (X uses the tweet shape; Reddit uses the thread shape). When NOT
+    // overridden we keep the original X behavior so existing call
+    // sites are unchanged.
+    const callTools: Array<Record<string, unknown>> =
+      input.tools && input.tools.length > 0
+        ? (input.tools as Array<Record<string, unknown>>)
+        : [{ type: 'x_search' }];
+
+    const usingCustomSchema =
+      input.responseFormatSchema !== undefined &&
+      input.responseFormatSchema !== null;
+    const schemaForFormat = usingCustomSchema
+      ? (input.responseFormatSchema as object)
+      : toXaiJsonSchema(xaiFindCustomersResponseSchema);
+    const formatName = usingCustomSchema
+      ? input.responseFormatName ?? RESPONSE_FORMAT_NAME
+      : RESPONSE_FORMAT_NAME;
+
     const responseFormat = {
       type: 'json_schema' as const,
       json_schema: {
-        name: RESPONSE_FORMAT_NAME,
-        schema: toXaiJsonSchema(xaiFindCustomersResponseSchema),
+        name: formatName,
+        schema: schemaForFormat,
         strict: true,
       },
     };
@@ -124,20 +177,21 @@ export const xaiFindCustomersTool = buildTool({
     const result = await getClient().respondConversational({
       model,
       messages: input.messages,
-      tools: [{ type: 'x_search' }],
+      tools: callTools,
       responseFormat,
       signal: ctx.abortSignal,
     });
 
     // Degraded path: Grok ignored response_format and returned prose.
-    // Empirically common when x_search finds nothing — Grok writes a
+    // Empirically common when search finds nothing — Grok writes a
     // sentence like "No strong matches found." instead of returning
-    // `{ tweets: [], notes: ... }`. Synthesize the equivalent so the
-    // agent still has a structured response to reason about.
+    // `{ tweets: [], notes: ... }` (or `{ threads: [], ... }`).
+    // Synthesize the equivalent so the agent still has a structured
+    // response to reason about.
     if (result.output === null) {
       log.warn(
         `xai_find_customers (${modeLabel}): xAI returned non-JSON; ` +
-          `synthesizing { tweets: [], notes: <prose> }. parseError=${result.parseError ?? 'unknown'}`,
+          `synthesizing empty result + prose-as-notes. parseError=${result.parseError ?? 'unknown'}`,
       );
       ctx.emitProgress?.(
         'xai_find_customers',
@@ -152,6 +206,55 @@ export const xaiFindCustomersTool = buildTool({
       return {
         tweets: [],
         notes: result.assistantMessage.content.slice(0, 1000),
+        output: null,
+        assistantMessage: result.assistantMessage,
+        usage: result.usage,
+      };
+    }
+
+    // Custom-schema path: caller (e.g. Reddit discovery) passed its own
+    // JSON schema. We don't know the shape so we skip the X-Zod check
+    // and surface the raw parsed JSON via `output`. The caller is
+    // responsible for downstream validation. We still try to extract a
+    // string `notes` field (both schemas use `notes`) for a friendlier
+    // result envelope.
+    if (usingCustomSchema) {
+      const rawOutput = result.output as Record<string, unknown> | unknown;
+      const candidateCount =
+        rawOutput && typeof rawOutput === 'object' && rawOutput !== null
+          ? Object.entries(rawOutput).reduce<number>((acc, [, v]) => {
+              if (Array.isArray(v) && acc === 0) return v.length;
+              return acc;
+            }, 0)
+          : 0;
+      const extractedNotes =
+        rawOutput &&
+        typeof rawOutput === 'object' &&
+        rawOutput !== null &&
+        typeof (rawOutput as Record<string, unknown>).notes === 'string'
+          ? ((rawOutput as Record<string, unknown>).notes as string)
+          : '';
+
+      log.info(
+        `xai_find_customers (${modeLabel}, model=${model}, custom-schema=${formatName}): ` +
+          `${candidateCount} candidates · ` +
+          `tokens in/out=${result.usage.inputTokens}/${result.usage.outputTokens}`,
+      );
+
+      ctx.emitProgress?.(
+        'xai_find_customers',
+        `Got ${candidateCount} candidate${candidateCount === 1 ? '' : 's'}`,
+        {
+          candidateCount,
+          inputTokens: result.usage.inputTokens,
+          outputTokens: result.usage.outputTokens,
+        },
+      );
+
+      return {
+        tweets: [],
+        notes: extractedNotes,
+        output: rawOutput,
         assistantMessage: result.assistantMessage,
         usage: result.usage,
       };
@@ -186,6 +289,7 @@ export const xaiFindCustomersTool = buildTool({
     return {
       tweets: parsed.data.tweets,
       notes: parsed.data.notes,
+      output: result.output,
       assistantMessage: result.assistantMessage,
       usage: result.usage,
     };
