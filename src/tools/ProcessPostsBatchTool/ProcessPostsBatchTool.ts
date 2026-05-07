@@ -41,7 +41,11 @@ type ProcessPostsBatchInput = z.infer<typeof inputSchema>;
 
 interface BatchItemResult {
   planItemId: string;
-  status: 'persisted' | 'rejected_mechanical' | 'errored';
+  status:
+    | 'persisted'
+    | 'rejected_mechanical'
+    | 'skipped_subreddit_rule_conflict'
+    | 'errored';
   reason?: string;
 }
 
@@ -198,6 +202,19 @@ async function processOne(
     };
   }
 
+  // Safe-skip: drafting skill flagged a subreddit rule conflict (Reddit
+  // self-promo / no-AI / no-founders rule). The skill returns
+  // `{ draftBody: '', flagged: true, flagReason }` — we MUST short-circuit
+  // BEFORE validate_draft, which would otherwise reject the empty body
+  // with a cryptic Zod error. The founder will see the skip in /today.
+  if (draft.flagged === true) {
+    return {
+      planItemId: item.id,
+      status: 'skipped_subreddit_rule_conflict',
+      reason: draft.flagReason ?? 'subreddit rule conflict',
+    };
+  }
+
   // Step 2: mechanical validate (deterministic — length, banned vocab regex)
   const channel = item.channel ?? '';
   const mech = await validateDraftTool.execute(
@@ -245,6 +262,27 @@ async function draftOnce(
   input: ProcessPostsBatchInput,
   ctx: ToolContext,
 ): Promise<DraftSkillOutput | null> {
+  // Plumb the target subreddit (Reddit-only) up to the top-level
+  // `targetSubreddit` slot the drafting-post skill schema expects, so
+  // `get_subreddit_rules` runs against the real subreddit. The planner
+  // stores it on `params.subreddit` (per `reddit-post-voice.md` and the
+  // legacy free-form params shape); we also accept `params.targetSubreddit`
+  // as an alias to match the drafting-post schema field name.
+  const params = (item.params ?? {}) as {
+    subreddit?: unknown;
+    targetSubreddit?: unknown;
+  };
+  const rawSubreddit =
+    typeof params.subreddit === 'string'
+      ? params.subreddit
+      : typeof params.targetSubreddit === 'string'
+        ? params.targetSubreddit
+        : undefined;
+  const targetSubreddit =
+    item.channel === 'reddit' && rawSubreddit && rawSubreddit.length > 0
+      ? rawSubreddit
+      : undefined;
+
   const args = {
     planItem: {
       id: item.id,
@@ -263,6 +301,7 @@ async function draftOnce(
     },
     channel: item.channel ?? '',
     phase: item.phase,
+    ...(targetSubreddit ? { targetSubreddit } : {}),
     ...(input.voice ? { voice: input.voice } : {}),
     ...(input.founderVoiceBlock
       ? { founderVoiceBlock: input.founderVoiceBlock }

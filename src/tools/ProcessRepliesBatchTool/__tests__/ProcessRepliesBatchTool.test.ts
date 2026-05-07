@@ -469,6 +469,36 @@ describe('processRepliesBatchTool', () => {
     expect(draftReplyExecMock).not.toHaveBeenCalled();
   });
 
+  it('short-circuits to skipped_subreddit_rule_conflict when drafting flags the thread (no validate_draft)', async () => {
+    seedThreads(store, [{ id: 't1', platform: 'reddit', community: 'SaaS' }]);
+    runForkSkillMock.mockResolvedValueOnce({
+      result: {
+        draftBody: '',
+        whyItWorks: 'no_self_promotion',
+        confidence: 0,
+        flagged: true,
+        flagReason: 'subreddit rule conflict',
+      },
+      usage: {},
+    });
+
+    const result = await processRepliesBatchTool.execute(
+      { threadIds: ['t1'] },
+      makeCtx(store, { userId: 'user-1', productId: 'prod-1' }),
+    );
+
+    expect(result.draftsCreated).toBe(0);
+    expect(result.draftsSkipped).toBe(1);
+    expect(result.details[0]?.status).toBe('skipped_subreddit_rule_conflict');
+    expect(result.details[0]?.reason).toBe('subreddit rule conflict');
+    // Critical: validate_draft must NOT be called on the empty body —
+    // its Zod input rejects empty text with a cryptic message that
+    // would surface as `errored` instead of the safe-skip status.
+    expect(validateDraftExecMock).not.toHaveBeenCalled();
+    expect(draftReplyExecMock).not.toHaveBeenCalled();
+    expect(runForkSkillMock).toHaveBeenCalledOnce();
+  });
+
   it('emits live progress at start and finish so UI tool card updates in real-time', async () => {
     seedThreads(store, [{ id: 't1' }]);
     runForkSkillMock.mockResolvedValueOnce({

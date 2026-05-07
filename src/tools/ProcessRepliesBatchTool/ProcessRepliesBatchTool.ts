@@ -47,6 +47,7 @@ interface BatchItemResult {
     | 'rejected_mechanical'
     | 'skipped_legacy_unjudged'
     | 'skipped_author_throttled'
+    | 'skipped_subreddit_rule_conflict'
     | 'errored';
   reason?: string;
 }
@@ -210,6 +211,19 @@ async function processOne(
       threadId: thread.id,
       status: 'errored',
       reason: 'drafting-reply returned invalid output',
+    };
+  }
+
+  // Safe-skip: drafting skill flagged a subreddit rule conflict (Reddit
+  // self-promo / no-AI / no-founders rule). The skill returns
+  // `{ draftBody: '', flagged: true, flagReason }` — we MUST short-circuit
+  // BEFORE validate_draft, which would otherwise reject the empty body
+  // with a cryptic Zod error. The founder will see the skip in /today.
+  if (draft.flagged === true) {
+    return {
+      threadId: thread.id,
+      status: 'skipped_subreddit_rule_conflict',
+      reason: draft.flagReason ?? 'subreddit rule conflict',
     };
   }
 
