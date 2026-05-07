@@ -66,7 +66,7 @@ returns a structured result I can paraphrase for the founder.
 </thinking>
 
 generate_strategic_path({
-  args: `{"product":{...},"state":"launched","currentPhase":"compound","channels":["x"],"today":"2026-05-01","weekStart":"2026-04-27","recentMilestones":[...]}`
+  args: `{"product":{...},"state":"launched","currentPhase":"compound","channels":["x"],"today":"2026-05-01","weekStart":"2026-04-27"}`
 })
 
 [waits for tool_result → { status, pathId, summary, notes }]
