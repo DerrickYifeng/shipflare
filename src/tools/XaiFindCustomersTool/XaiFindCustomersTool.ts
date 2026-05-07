@@ -215,37 +215,30 @@ export const xaiFindCustomersTool = buildTool({
     // Custom-schema path: caller (e.g. Reddit discovery) passed its own
     // JSON schema. We don't know the shape so we skip the X-Zod check
     // and surface the raw parsed JSON via `output`. The caller is
-    // responsible for downstream validation. We still try to extract a
-    // string `notes` field (both schemas use `notes`) for a friendlier
-    // result envelope.
+    // responsible for downstream validation, including computing the
+    // candidate count from its known shape — we DON'T try to infer it
+    // here because the previous heuristic ("first array-typed value
+    // anywhere on the object") was brittle and silently wrong on
+    // schemas with multiple arrays. We still extract `notes` opportu-
+    // nistically because both shipped schemas use that field name.
     if (usingCustomSchema) {
-      const rawOutput = result.output as Record<string, unknown> | unknown;
-      const candidateCount =
-        rawOutput && typeof rawOutput === 'object' && rawOutput !== null
-          ? Object.entries(rawOutput).reduce<number>((acc, [, v]) => {
-              if (Array.isArray(v) && acc === 0) return v.length;
-              return acc;
-            }, 0)
-          : 0;
+      const rawOutput = result.output;
       const extractedNotes =
-        rawOutput &&
-        typeof rawOutput === 'object' &&
         rawOutput !== null &&
+        typeof rawOutput === 'object' &&
         typeof (rawOutput as Record<string, unknown>).notes === 'string'
           ? ((rawOutput as Record<string, unknown>).notes as string)
           : '';
 
       log.info(
         `xai_find_customers (${modeLabel}, model=${model}, custom-schema=${formatName}): ` +
-          `${candidateCount} candidates · ` +
           `tokens in/out=${result.usage.inputTokens}/${result.usage.outputTokens}`,
       );
 
       ctx.emitProgress?.(
         'xai_find_customers',
-        `Got ${candidateCount} candidate${candidateCount === 1 ? '' : 's'}`,
+        `Got xAI response (custom schema=${formatName})`,
         {
-          candidateCount,
           inputTokens: result.usage.inputTokens,
           outputTokens: result.usage.outputTokens,
         },

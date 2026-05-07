@@ -1047,11 +1047,15 @@ describe('platform: reddit', () => {
 
     expect(runForkSkillMock).toHaveBeenCalledTimes(2);
     expect(result.scanned).toBe(2);
-    // Reddit persist mapping is Task 2c — for now persist is skipped
-    // (the inner persist tool only knows the X tweet shape). queued = 0
-    // and persistExecMock not called.
-    expect(result.queued).toBe(0);
-    expect(persistExecMock).not.toHaveBeenCalled();
+    // Task 2c wired Reddit persist — the call now fires with platform=reddit.
+    expect(persistExecMock).toHaveBeenCalledTimes(1);
+    const persistArg = persistExecMock.mock.calls[0]![0] as {
+      platform: string;
+      threads: Array<{ external_id: string }>;
+    };
+    expect(persistArg.platform).toBe('reddit');
+    expect(persistArg.threads).toHaveLength(2);
+    expect(result.queued).toBe(2);
     // topQueued surfaces both threads with confidence from judging.
     expect(result.topQueued).toHaveLength(2);
     expect(result.topQueued[0]!.confidence).toBe(0.85);

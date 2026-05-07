@@ -1,38 +1,21 @@
-// find_threads_via_xai — owns the conversational xAI Grok discovery loop
-// that used to live as prose inside `discovery-agent/AGENT.md`. The
-// Tool's `execute()` IS the orchestrator: it tracks the xAI message
-// history, calls `xai_find_customers` per round, fans out to
-// `judging-thread-quality` for per-candidate verdicts, aggregates
-// rejection signals into mechanical refinement nudges, escalates to
-// the reasoning-enabled Grok variant after two unsuccessful refines,
-// caps at MAX_ROUNDS, and persists the deduped keepers via
-// `persist_queue_threads`.
-//
-// Per CLAUDE.md primitive boundaries:
-//   - The control-flow logic (when to refine, when to escalate, when to
-//     persist) is deterministic — no LLM in the loop's branch points.
-//   - LLM judgment lives ONLY inside the leaf fork-skill calls
-//     (judging-thread-quality) and the xAI tool itself.
-//   - Refinement message composition is mechanical (SIGNAL_NUDGE table).
-//
-// Returns the same StructuredOutput shape discovery-agent emits today
-// so the coordinator's downstream dispatch logic doesn't change.
+// find_threads_via_xai — owns the conversational xAI Grok discovery loop.
+// `execute()` IS the orchestrator: tracks message history, calls
+// xai_find_customers per round, fans out to judging-thread-quality,
+// aggregates rejection signals into mechanical refinement nudges,
+// escalates to the reasoning Grok variant after 2 unsuccessful refines,
+// caps at MAX_ROUNDS, persists keepers via persist_queue_threads.
+// Per CLAUDE.md primitive boundaries: control flow is deterministic;
+// LLM judgment lives ONLY in the leaf fork-skill calls + the xAI tool.
 
 import { z } from 'zod';
 import { and, eq } from 'drizzle-orm';
 import { buildTool } from '@/core/tool-system';
-import type { ToolContext } from '@/core/types';
 import { channels, products } from '@/lib/db/schema';
 import { readDomainDeps } from '@/tools/context-helpers';
-import { runForkSkill } from '@/skills/run-fork-skill';
 import { xaiFindCustomersTool } from '@/tools/XaiFindCustomersTool/XaiFindCustomersTool';
 import { persistQueueThreadsTool } from '@/tools/PersistQueueThreadsTool/PersistQueueThreadsTool';
 import type { TweetCandidate } from '@/tools/XaiFindCustomersTool/schema';
-import {
-  judgingThreadQualityOutputSchema,
-  type JudgingThreadQualityOutput,
-  type MentionSignal,
-} from '@/skills/judging-thread-quality/schema';
+import { type MentionSignal } from '@/skills/judging-thread-quality/schema';
 import { MemoryStore } from '@/memory/store';
 import { createLogger } from '@/lib/logger';
 import { listRecentEngagedAuthors } from '@/lib/reply-throttle';
@@ -47,6 +30,17 @@ import {
   redditThreadSearchResponseSchema,
   type RedditThreadCandidate,
 } from './schemas';
+import {
+  judgeCandidate,
+  type DiscoveryCandidate,
+  type JudgedCandidate,
+} from './judge-candidate';
+import {
+  toTopQueued,
+  type FindThreadsViaXaiTopQueued,
+} from './top-queued';
+
+export type { FindThreadsViaXaiTopQueued } from './top-queued';
 
 const log = createLogger('tool:find_threads_via_xai');
 
@@ -60,17 +54,6 @@ const inputSchema = z.object({
 });
 
 type DiscoveryPlatform = 'x' | 'reddit';
-
-
-export interface FindThreadsViaXaiTopQueued {
-  externalId: string;
-  url: string;
-  authorUsername: string;
-  body: string;
-  likesCount: number | null;
-  repostsCount: number | null;
-  confidence: number;
-}
 
 export interface FindThreadsViaXaiResult {
   queued: number;
@@ -128,26 +111,6 @@ interface XaiUsage {
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
-}
-
-/**
- * Platform-tagged discovery candidate. The judging fan-out and the
- * persist call both need to handle either shape, so we tag at the
- * boundary and discriminate on `platform`.
- */
-type DiscoveryCandidate =
-  | { platform: 'x'; row: TweetCandidate }
-  | { platform: 'reddit'; row: RedditThreadCandidate };
-
-/**
- * One judged candidate plus the verdict the skill returned. We carry
- * BOTH the original row and the skill output so we can construct the
- * full persist-time row (with canMentionProduct + mentionSignal)
- * without re-judging.
- */
-interface JudgedCandidate {
-  candidate: DiscoveryCandidate;
-  verdict: JudgingThreadQualityOutput;
 }
 
 /** Stable external_id accessor — the field name happens to match on
@@ -282,93 +245,6 @@ async function loadRubric(
     );
     return '';
   }
-}
-
-/**
- * Score a single candidate via the judging-thread-quality skill.
- *
- * Wraps runForkSkill so the per-round Promise.allSettled fan-out has
- * a stable promise shape. The output schema is passed through so
- * runAgent synthesizes the StructuredOutput tool with strict shape
- * validation; we ALSO safeParse defensively — the LLM can still
- * return partial output on a hiccup, and skipping a malformed
- * verdict is preferable to crashing the whole loop on
- * `j.verdict.signals` undefined access.
- *
- * Returns null when the fork's output is malformed; callers filter
- * nulls out before treating the result as a JudgedCandidate.
- */
-async function judgeCandidate(
-  candidate: DiscoveryCandidate,
-  product: ProductForLoop,
-  ctx: ToolContext,
-): Promise<JudgedCandidate | null> {
-  // Build the judging-thread-quality candidate args from either
-  // platform's row. The skill itself accepts a generic shape (title,
-  // body, author, authorBio, authorFollowers, url, platform, postedAt)
-  // — we map Reddit's `score` / null bio onto the same fields.
-  const args =
-    candidate.platform === 'x'
-      ? {
-          candidate: {
-            title: candidate.row.body.slice(0, 80),
-            body: candidate.row.body,
-            author: candidate.row.author_username,
-            authorBio: candidate.row.author_bio,
-            authorFollowers: candidate.row.author_followers,
-            url: candidate.row.url,
-            platform: 'x' as const,
-            postedAt: candidate.row.posted_at,
-          },
-          product: {
-            name: product.name,
-            description: product.description,
-            ...(product.valueProp ? { valueProp: product.valueProp } : {}),
-          },
-        }
-      : {
-          candidate: {
-            // Reddit threads ARE titled — use the real title (not a
-            // body-prefix slice).
-            title: candidate.row.title,
-            body: candidate.row.body,
-            author: candidate.row.author_username,
-            // Reddit doesn't expose an author bio via web_search;
-            // pass null so the judging skill's competitor-bio filter
-            // simply doesn't fire on Reddit candidates (recall over
-            // precision — confirmed in Reddit handoff design).
-            authorBio: null,
-            // Approximate "follower scale" with author_karma (sitewide
-            // karma is a comparable order-of-magnitude signal for the
-            // small/large account voice calibration the drafting skill
-            // does downstream).
-            authorFollowers: candidate.row.author_karma,
-            url: candidate.row.url,
-            platform: 'reddit' as const,
-            postedAt: candidate.row.posted_at,
-          },
-          product: {
-            name: product.name,
-            description: product.description,
-            ...(product.valueProp ? { valueProp: product.valueProp } : {}),
-          },
-        };
-  const { result } = await runForkSkill(
-    'judging-thread-quality',
-    JSON.stringify(args),
-    judgingThreadQualityOutputSchema,
-    ctx,
-  );
-  const parsed = judgingThreadQualityOutputSchema.safeParse(result);
-  if (!parsed.success) {
-    log.warn(
-      `judging-thread-quality returned invalid output for ${externalId(
-        candidate,
-      )}: ${parsed.error.message}`,
-    );
-    return null;
-  }
-  return { candidate, verdict: parsed.data };
 }
 
 export const findThreadsViaXaiTool = buildTool({
@@ -780,7 +656,7 @@ export const findThreadsViaXaiTool = buildTool({
     // the persist call is a no-op (the tool's input schema today only
     // accepts X tweet rows; we therefore only call persist on X).
     let inserted = 0;
-    if (platform === 'x') {
+    if (platform === PLATFORMS.x.id) {
       const xRanked = ranked.filter(
         (j): j is JudgedCandidate & {
           candidate: { platform: 'x'; row: TweetCandidate };
@@ -798,54 +674,49 @@ export const findThreadsViaXaiTool = buildTool({
           { count: threadsToPersist.length },
         );
         const persistResult = await persistQueueThreadsTool.execute(
-          { threads: threadsToPersist, platform },
+          { platform: PLATFORMS.x.id as 'x', threads: threadsToPersist },
           ctx,
         );
         inserted = persistResult.inserted;
       }
     } else {
-      // Reddit persist mapping lands in Task 2c. For now we skip the
-      // persist call (PersistQueueThreadsTool today only knows the X
-      // tweet shape) and surface the count via scoutNotes so the
-      // caller sees that discovery worked but persistence was deferred.
-      log.info(
-        `find_threads_via_xai (reddit) skipping persist — Task 2c not yet wired. ` +
-          `strong=${ranked.length} user=${userId}`,
+      // Reddit persist (Task 2c). Reddit's RedditThreadCandidate Zod
+      // schema doesn't carry can_mention_product/mention_signal — we
+      // spread the verdict's flags onto the row anyway because the
+      // persist mapper reads them off the row defensively.
+      const redditRanked = ranked.filter(
+        (j): j is JudgedCandidate & {
+          candidate: { platform: 'reddit'; row: RedditThreadCandidate };
+        } => j.candidate.platform === 'reddit',
       );
+      const redditThreadsToPersist: RedditThreadCandidate[] = redditRanked.map(
+        (j) =>
+          ({
+            ...j.candidate.row,
+            can_mention_product: j.verdict.canMentionProduct,
+            mention_signal: j.verdict.mentionSignal as MentionSignal,
+          }) as RedditThreadCandidate,
+      );
+      if (redditThreadsToPersist.length > 0) {
+        ctx.emitProgress?.(
+          FIND_THREADS_VIA_XAI_TOOL_NAME,
+          `Persisting ${redditThreadsToPersist.length} thread${redditThreadsToPersist.length === 1 ? '' : 's'}…`,
+          { count: redditThreadsToPersist.length },
+        );
+        const persistResult = await persistQueueThreadsTool.execute(
+          {
+            platform: PLATFORMS.reddit.id as 'reddit',
+            threads: redditThreadsToPersist,
+          },
+          ctx,
+        );
+        inserted = persistResult.inserted;
+      }
     }
 
     const topQueued: FindThreadsViaXaiTopQueued[] = ranked
       .slice(0, TOP_QUEUED_CAP)
-      .map((j) => {
-        const url = candidateUrl(j.candidate);
-        const externalIdValue = externalId(j.candidate);
-        if (j.candidate.platform === 'x') {
-          return {
-            externalId: externalIdValue,
-            url,
-            authorUsername: j.candidate.row.author_username,
-            body: j.candidate.row.body,
-            likesCount: j.candidate.row.likes_count,
-            repostsCount: j.candidate.row.reposts_count,
-            confidence: j.verdict.score,
-          };
-        }
-        // Reddit: TopQueued shape carries `likesCount` / `repostsCount`
-        // as nullable so we can reuse the same row type for both
-        // platforms. The `/today` UI doesn't render Reddit threads
-        // through this same shape today (Task 4 wires that in); the
-        // numbers below are kept as null so no caller renders an
-        // X-shaped engagement number for a Reddit thread by accident.
-        return {
-          externalId: externalIdValue,
-          url,
-          authorUsername: j.candidate.row.author_username,
-          body: j.candidate.row.body || j.candidate.row.title,
-          likesCount: null,
-          repostsCount: null,
-          confidence: j.verdict.score,
-        };
-      });
+      .map(toTopQueued);
 
     const scoutNotes = composeScoutNotes({
       reachedTarget,
