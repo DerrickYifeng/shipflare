@@ -1,0 +1,76 @@
+name: Sync dev with main
+
+# Every push to main (which is always a PR merge — main is protected)
+# fast-forwards or merges main back into dev. Without this, dev keeps
+# falling 1 commit behind every dev→main merge because GitHub creates
+# the merge commit on main only, and the next dev→main PR shows the
+# "This branch is out-of-date with the base branch" banner.
+#
+# Strategy:
+#   - If dev is an ancestor of main (no new commits on dev since the
+#     last merge): fast-forward dev to main. No new commit.
+#   - If dev has diverged (new work landed on dev between merges): do
+#     a real `git merge main` on dev. The merge commit's tree is
+#     identical to dev's tip (main introduces no file changes since
+#     dev was the source of truth), so it's always a clean no-conflict
+#     merge in normal flow.
+#   - If a real conflict somehow happens: fail loudly. The next push
+#     to main will retry; meanwhile the dev branch stays whole.
+
+on:
+  push:
+    branches:
+      - main
+
+# Serialize sync runs so two back-to-back merges to main don't race
+# into a non-fast-forward push rejection.
+concurrency:
+  group: sync-dev-with-main
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout dev with full history
+        uses: actions/checkout@v4
+        with:
+          ref: dev
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+          # Persist the token so the post-merge `git push` reuses it
+          # without an extra remote setup step.
+          persist-credentials: true
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch main
+        run: git fetch origin main
+
+      - name: Sync dev to main
+        run: |
+          set -euo pipefail
+          if git merge-base --is-ancestor HEAD origin/main; then
+            echo "dev is an ancestor of main — fast-forwarding"
+            git merge --ff-only origin/main
+          else
+            echo "dev has diverged from main — merging main into dev"
+            # --no-ff because we want the merge commit recorded; --no-edit
+            # uses the default "Merge branch 'main' into dev" message.
+            if ! git merge --no-ff --no-edit origin/main; then
+              echo "::error::Merge conflict syncing main into dev. Resolve manually." >&2
+              git merge --abort || true
+              exit 1
+            fi
+          fi
+
+      - name: Push dev
+        run: git push origin dev
