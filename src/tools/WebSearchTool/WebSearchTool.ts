@@ -93,18 +93,29 @@ export const webSearchTool: ToolDefinition<WebSearchInput, WebSearchOutput> =
           : {}),
       };
 
-      const response = await client.messages.create({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 1024,
-        system: SYSTEM_PROMPT,
-        messages: [
-          {
-            role: 'user',
-            content: `Perform a web search for the query: ${input.query}`,
-          },
-        ],
-        tools: [webSearchToolConfig],
-      });
+      let response;
+      try {
+        response = await client.messages.create({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 1024,
+          system: SYSTEM_PROMPT,
+          messages: [
+            {
+              role: 'user',
+              content: `Perform a web search for the query: ${input.query}`,
+            },
+          ],
+          tools: [webSearchToolConfig],
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        log.warn(`web_search API call failed: ${message}`);
+        return {
+          query: input.query,
+          results: [`Web search failed: ${message}`],
+          durationSeconds: (performance.now() - start) / 1000,
+        };
+      }
 
       const results: Array<WebSearchResultBlock | string> = [];
       let textAcc = '';
@@ -114,15 +125,9 @@ export const webSearchTool: ToolDefinition<WebSearchInput, WebSearchOutput> =
       // [text]?, (server_tool_use, web_search_tool_result, [text|citation]+)+
       // Walk linearly, buffering contiguous text into one chunk and
       // pushing each web_search_tool_result as a structured entry.
-      // The SDK's ContentBlock union is wider than what we actually
-      // care about here (it includes container upload, code execution,
-      // etc.) — narrow via `unknown` so TS lets us index by `type`.
-      const blocks = ((response.content ?? []) as unknown) as Array<{
-        type: string;
-        [k: string]: unknown;
-      }>;
-
-      for (const block of blocks) {
+      // The SDK's ContentBlock union is a discriminated union on `type`,
+      // so iterating directly lets TS narrow each branch.
+      for (const block of response.content) {
         if (block.type === 'server_tool_use') {
           if (inText) {
             inText = false;
@@ -133,34 +138,31 @@ export const webSearchTool: ToolDefinition<WebSearchInput, WebSearchOutput> =
         }
 
         if (block.type === 'web_search_tool_result') {
-          const content = block.content;
-          if (!Array.isArray(content)) {
-            const errorCode =
-              (content as { error_code?: string } | undefined)?.error_code ??
-              'unknown';
-            results.push(`Web search error: ${errorCode}`);
+          // block.content narrows to WebSearchToolResultBlockContent —
+          // either Array<WebSearchResultBlock> on success or
+          // WebSearchToolResultError on failure.
+          if (!Array.isArray(block.content)) {
+            results.push(`Web search error: ${block.content.error_code}`);
             continue;
           }
           results.push({
-            tool_use_id: String(block.tool_use_id),
-            content: (content as Array<{ title: string; url: string }>).map(
-              (r) => ({ title: r.title, url: r.url }),
-            ),
+            tool_use_id: block.tool_use_id,
+            content: block.content.map((r) => ({ title: r.title, url: r.url })),
           });
           continue;
         }
 
         if (block.type === 'text') {
           if (inText) {
-            textAcc += String(block.text ?? '');
+            textAcc += block.text;
           } else {
             inText = true;
-            textAcc = String(block.text ?? '');
+            textAcc = block.text;
           }
         }
       }
 
-      if (textAcc.length > 0) results.push(textAcc.trim());
+      if (textAcc.trim().length > 0) results.push(textAcc.trim());
 
       const durationSeconds = (performance.now() - start) / 1000;
       log.info(

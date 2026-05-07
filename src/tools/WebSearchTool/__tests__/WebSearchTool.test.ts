@@ -107,4 +107,18 @@ describe('web_search', () => {
       true,
     );
   });
+
+  it('returns soft error when Anthropic API call throws', async () => {
+    messagesCreateMock.mockRejectedValueOnce(new Error('connection reset'));
+    const { webSearchTool } = await import('../WebSearchTool');
+    const result = await webSearchTool.execute({ query: 'q' }, {} as never);
+    expect(result.query).toBe('q');
+    expect(
+      result.results.some(
+        (r) =>
+          typeof r === 'string' && r.includes('Web search failed') && r.includes('connection reset'),
+      ),
+    ).toBe(true);
+    expect(result.durationSeconds).toBeGreaterThanOrEqual(0);
+  });
 });
