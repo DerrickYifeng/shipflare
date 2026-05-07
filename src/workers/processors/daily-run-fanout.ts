@@ -1,13 +1,16 @@
 // Daily 13:00 UTC fanout. For each user with at least one connected
-// channel AND a product, enqueue one coordinator-rooted team-run with
-// `trigger='daily'`. The coordinator's `daily` playbook handles the
-// per-slot discovery → content-manager loop (driven by today's
-// `content_reply` plan_items emitted by content-planner) and falls back
-// to default top-3 drafting when no slots exist.
+// channel AND a product, ensure the team exists and dispatch a single
+// "daily playbook" lead message via the shared `ensureDailyRunEnqueued`
+// helper. The coordinator's daily playbook handles per-slot
+// discovery → content-manager loop (driven by today's `content_reply`
+// plan_items emitted by content-planner) and falls back to default
+// drafting when no slots exist.
 //
-// /api/automation/run uses the same trigger so manual kickoffs and cron
-// runs share one playbook — there is no separate `manual` /
-// `discovery_cron` / `reply_sweep` trigger anymore.
+// This is the SOLE entry point for daily automation runs — there is no
+// manual trigger anymore. Every system-driven run goes through the same
+// path the kickoff helper uses (insert team_message → wake lead), so the
+// runtime model stays uniform with CLAUDE.md's "Founder UI mental model"
+// (the lead is always sleeping; messages are the only wake source).
 //
 // The BullMQ queue name stays `discovery-scan` for Redis stability with
 // the existing repeat schedule; only the processor name changed.
@@ -16,10 +19,8 @@ import type { Job } from 'bullmq';
 import { eq } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import { channels, products } from '@/lib/db/schema';
-import { isStopRequested } from '@/lib/automation-stop';
 import { ensureTeamExists } from '@/lib/team-provisioner';
-import { dispatchLeadMessage } from '@/lib/team/dispatch-lead-message';
-import { resolveRollingConversation } from '@/lib/team-rolling-conversation';
+import { ensureDailyRunEnqueued } from '@/lib/team-daily-run';
 import { createLogger, loggerForJob } from '@/lib/logger';
 import type { DiscoveryScanJobData } from '@/lib/queue/types';
 import { isFanoutJob, getTraceId } from '@/lib/queue/types';
@@ -53,8 +54,6 @@ export async function processDailyRunFanout(
 
   let enqueued = 0;
   for (const [userId, platformSet] of userPlatforms) {
-    if (await isStopRequested(userId)) continue;
-
     const [product] = await db
       .select({ id: products.id, name: products.name })
       .from(products)
@@ -64,33 +63,14 @@ export async function processDailyRunFanout(
 
     try {
       const { teamId } = await ensureTeamExists(userId, product.id);
-
-      const conversationId = await resolveRollingConversation(
+      const result = await ensureDailyRunEnqueued({
+        userId,
+        productId: product.id,
         teamId,
-        'Discovery',
-      );
-      const platforms = Array.from(platformSet).join(', ');
-      const goal =
-        `Daily automation run for ${product.name}. ` +
-        `Connected platforms: ${platforms}. ` +
-        `Trigger: daily. Source: cron. ` +
-        `Follow your daily playbook: load today's content_reply plan_items ` +
-        `for this user, dispatch ONE social-media-manager per slot (it runs ` +
-        `discovery + judging + drafting internally), and update_plan_item ` +
-        `state='drafted' when each slot terminates. If no slots are found, ` +
-        `fall back to a single social-media-manager dispatch with mode ` +
-        `discover-and-fill-slot for the primary connected channel.`;
-
-      await dispatchLeadMessage(
-        {
-          teamId,
-          conversationId,
-          goal,
-          trigger: 'daily',
-        },
-        db,
-      );
-      enqueued++;
+        platforms: Array.from(platformSet),
+        source: 'cron',
+      });
+      if (result.fired) enqueued++;
     } catch (err) {
       log.warn(
         `daily-run-fanout: failed to enqueue for user=${userId}: ${

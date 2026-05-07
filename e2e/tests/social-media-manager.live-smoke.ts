@@ -61,10 +61,10 @@ test('Plan 3 collapse — Social Media Manager visible everywhere, deleted agent
   await expect(page.getByText('Social Media Manager').first()).toBeVisible();
   await expect(page.getByText('Chief Marketing Officer').first()).toBeVisible();
 
-  // ── trigger automation, confirm /briefing renders cleanly ──
-  const triggerResp = await page.request.post('/api/automation/run');
-  expect(triggerResp.ok()).toBeTruthy();
-
+  // ── confirm /briefing renders cleanly ──
+  // (Daily automation runs are cron-triggered now; there's no manual
+  // POST /api/automation/run anymore. We just verify the page renders
+  // against whatever drafts already exist.)
   await page.goto('/briefing');
   await expect(page).toHaveURL(/\/briefing(\/)?$/);
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible();

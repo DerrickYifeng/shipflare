@@ -7,13 +7,13 @@
  *     cron-driven post batches. Reply path goes through processRepliesBatchTool
  *     when content-manager is triggered by the lead.
  *
- * Conservative on purpose: the goal is "page renders, automation route
- * triggers, no console errors" — NOT "specific draft content lands in 90s"
- * (LLM workloads fail for unrelated reasons all the time).
+ * Conservative on purpose: the goal is "page renders, no console errors"
+ * — NOT "specific draft content lands in 90s" (LLM workloads fail for
+ * unrelated reasons all the time). Triggering work is the cron's job
+ * now, not this test.
  *
  * Verifies:
  *   - /briefing renders with the BriefingHeader H1
- *   - POST /api/automation/run returns 2xx (BullMQ work runs async)
  *   - Plan and Today tabs navigate without crashing
  *   - No real console errors during the flow (favicon/font noise filtered)
  *
@@ -60,19 +60,16 @@ test('discovery → draft pipeline produces drafts after Plan 1 merge', async ({
   await expect(page).toHaveURL(/\/briefing(\/)?$/);
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
 
-  // Step 2: trigger automation. The route returns quickly; the actual
-  // discovery → draft work runs in BullMQ workers. We don't wait for
-  // drafts to land here — that's flaky across LLM rate limits.
-  const triggerResp = await page.request.post('/api/automation/run');
-  expect(triggerResp.ok()).toBeTruthy();
-
-  // Step 3: navigate around briefing tabs to verify nothing crashes.
+  // Step 2: navigate around briefing tabs to verify nothing crashes.
+  // (Daily automation runs are cron-triggered now — there's no manual
+  // POST /api/automation/run anymore. The smoke test just exercises the
+  // briefing UI renders against whatever drafts already exist.)
   await page.getByRole('link', { name: 'Plan' }).click();
   await expect(page).toHaveURL(/\/briefing\/plan/);
   await page.getByRole('link', { name: 'Today' }).click();
   await expect(page).toHaveURL(/\/briefing(\/)?$/);
 
-  // Step 4: assert no console errors during the flow. Filter common
+  // Step 3: assert no console errors during the flow. Filter common
   // harmless noise (favicon 404s, font preload warnings).
   await page.waitForLoadState('networkidle');
   const realErrors = consoleErrors.filter(
