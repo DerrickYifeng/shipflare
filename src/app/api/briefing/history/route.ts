@@ -152,24 +152,27 @@ export async function GET() {
     .orderBy(desc(planItems.completedAt));
 
   // Best-effort externalUrl lookup from activity_events (post_published)
-  // keyed by planItemId. The inline post path writes this; the queue
-  // worker also writes this. Posts that pre-date the activity_events
-  // instrumentation won't have a URL, in which case externalUrl stays
-  // null and the History card body still renders.
+  // keyed by planItemId. Both the inline post path and the queue worker
+  // write `planItemId` + `externalUrl` to the event metadata. Posts that
+  // pre-date the activity_events instrumentation won't have a URL, in
+  // which case externalUrl stays null and the History card body still
+  // renders. PG's `->>` operator returns `text` (nullable) — annotate
+  // honestly and let the runtime guard below filter null pairs.
   const planItemIds = planRows.map((r) => r.id);
   const eventRows =
     planItemIds.length === 0
       ? []
       : await db
           .select({
-            planItemId: sql<string>`(${activityEvents.metadataJson} ->> 'planItemId')`,
-            externalUrl: sql<string>`(${activityEvents.metadataJson} ->> 'externalUrl')`,
+            planItemId: sql<string | null>`(${activityEvents.metadataJson} ->> 'planItemId')`,
+            externalUrl: sql<string | null>`(${activityEvents.metadataJson} ->> 'externalUrl')`,
           })
           .from(activityEvents)
           .where(
             and(
               eq(activityEvents.userId, userId),
               eq(activityEvents.eventType, 'post_published'),
+              gte(activityEvents.createdAt, since),
             ),
           );
   const externalUrlByPlanItem = new Map<string, string>();

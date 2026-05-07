@@ -372,7 +372,13 @@ export async function processPosting(job: Job<PostingJobData>) {
     });
   }
 
-  // Log activity
+  // Log activity. `planItemId` + `externalUrl` are the keys the
+  // /api/briefing/history route looks up to surface a "View on X" link
+  // for queue-worker-shipped posts. Mirror the inline post-now path
+  // (src/app/api/today/[id]/post-now/route.ts) so both code paths
+  // produce the same metadata shape. Both fields are best-effort:
+  // `planItemId` is null when the draft wasn't created from a plan_item,
+  // and `externalUrl` is null when the post failed.
   await db.insert(activityEvents).values({
     userId,
     eventType: result.success ? 'post_published' : 'post_failed',
@@ -385,6 +391,8 @@ export async function processPosting(job: Job<PostingJobData>) {
       shadowbanned: result.shadowbanned,
       error: result.error,
       cost: usage.costUsd,
+      planItemId: draft.planItemId ?? null,
+      externalUrl,
     },
   });
 
