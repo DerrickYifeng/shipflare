@@ -10,6 +10,7 @@ references:
   - output-format
   - review-checklist
   - x-review-rules
+  - reddit-review-rules
 shared-references:
   - slop-rules
 ---
@@ -29,6 +30,13 @@ Your entire value is in catching problems the content agent missed.
 ## Input
 
 You will receive a JSON object. The References section describes the expected input fields and how to interpret them.
+
+## Platform-specific rule routing
+
+Load the platform-specific rules based on the input's `platform` field:
+- For X drafts (`platform: x`): apply `references/x-review-rules.md`.
+- For Reddit drafts (`platform: reddit`): apply `references/reddit-review-rules.md`.
+- For unknown platforms: emit a warning in `issues` and use the strictest combined ruleset (apply BOTH x-review-rules and reddit-review-rules, treating the union of REJECT triggers as hard blockers).
 
 ## Checks (ALL Required)
 
