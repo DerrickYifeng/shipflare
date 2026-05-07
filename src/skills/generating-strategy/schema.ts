@@ -1,11 +1,11 @@
 // Phase F — generating-strategy skill schemas.
 //
 // Mirrors the contract the legacy growth-strategist agent fulfilled:
-// the skill receives product + recent shipping context + the calendar
-// anchors (today + weekStart) the onboarding/phase-change caller has
-// pre-computed, calls the `write_strategic_path` tool to persist the
-// 30-day arc, and terminates with `{ status, pathId, summary, notes }`
-// for the caller (onboarding API route, /api/product/phase, etc.).
+// the skill receives product + the calendar anchors (today + weekStart)
+// the onboarding/phase-change caller has pre-computed, calls the
+// `write_strategic_path` tool to persist the 30-day arc, and terminates
+// with `{ status, pathId, summary, notes }` for the caller (onboarding
+// API route, /api/product/phase, etc.).
 //
 // The strategic-path payload itself is validated by `strategicPathSchema`
 // inside the `write_strategic_path` tool — this file only defines the
@@ -16,15 +16,6 @@ import { z } from 'zod';
 // ---------------------------------------------------------------------------
 // Input
 // ---------------------------------------------------------------------------
-
-const milestoneSourceEnum = z.enum(['commit', 'pr', 'release']);
-
-const recentMilestoneSchema = z.object({
-  title: z.string().min(1),
-  summary: z.string().min(1),
-  source: milestoneSourceEnum,
-  atISO: z.string().min(1),
-});
 
 const productCategoryEnum = z.enum([
   'dev_tool',
@@ -63,8 +54,6 @@ export const generatingStrategyInputSchema = z.object({
   channels: z.array(channelEnum).min(1),
   launchDate: z.string().nullable().optional(),
   launchedAt: z.string().nullable().optional(),
-  recentMilestones: z.array(recentMilestoneSchema).optional(),
-  voiceProfile: z.string().nullable().optional(),
   /** UTC date the skill anchors the thesis arc on (YYYY-MM-DD). */
   today: z.string().min(1),
   /** Monday 00:00 UTC of the ISO week containing `today` (YYYY-MM-DD). */

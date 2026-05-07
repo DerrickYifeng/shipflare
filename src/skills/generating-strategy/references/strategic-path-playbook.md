@@ -94,6 +94,16 @@ Each milestone carries a `phase`: one of
 content-planner surfaces milestones whose phase matches the current
 launch phase.
 
+Before writing a numeric milestone, consider whether your training-data
+prior is reliable for this product's category and stage. If you're
+setting a number ("waitlist >= 200", "MRR >= $500"), use `web_search`
+to verify against real-world baselines for similar indie products in
+this stage. If a search hit looks promising, use `web_fetch` to read
+the page directly.
+
+This is guidance, not a mandate — the model decides when training-data
+priors are reliable enough to skip the search.
+
 ## Step 5 — Recommend channel mix
 
 For each entry in the input `channels` array, emit an entry in
@@ -168,9 +178,9 @@ summary + notes for the coordinator.
 
 ## When inputs are thin
 
-- `recentMilestones: []` → set the thesis off the product's value prop
-  alone; note in the narrative that the first week's theme may want to
-  rotate once shipping signals return.
+- No shipping context available → set the thesis off the product's
+  value prop alone; note in the narrative that the first week's theme
+  may want to rotate once shipping signals return.
 - `launchDate: null` AND `state != 'launched'` → plan against a
   foundation arc assuming launch is 6+ weeks out.
 - Category is `other` → write a narrower path that hedges on

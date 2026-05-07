@@ -444,7 +444,7 @@ interface RunStrategicPathSkillArgs {
  * (turn_start / text_delta / etc.) so the route doesn't leak internal
  * agent-loop chatter into the UI.
  *
- * Redaction: raw tool names (`write_strategic_path`, `query_recent_milestones`,
+ * Redaction: raw tool names (`write_strategic_path`, `query_strategic_path`,
  * etc.) are replaced with semantic public labels (`planning`, `reading-context`,
  * etc.) via `publicToolLabel` before they hit the wire — a new user opening
  * DevTools during onboarding must not see the internal tool surface.
@@ -524,15 +524,14 @@ async function runStrategicPathSkill(
     channels: body.channels,
     launchDate: body.launchDate ?? null,
     launchedAt: body.launchedAt ?? null,
-    recentMilestones: body.recentMilestones ?? [],
     today: todayIso,
     weekStart: week1Start,
   };
 
   // Forward parent abort into the skill's child agent so a client cancel
   // cascades through the runAgent loop. The deps record carries everything
-  // the skill's tools need (write_strategic_path, query_recent_milestones,
-  // query_strategic_path) plus an `onEvent` hook that runForkSkill reads
+  // the skill's tools need (write_strategic_path, query_strategic_path,
+  // web_search, web_fetch) plus an `onEvent` hook that runForkSkill reads
   // off the synthesized ToolContext.
   const aborted = (): boolean => abortSignal.aborted;
 

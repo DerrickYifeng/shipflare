@@ -6,9 +6,9 @@ model: claude-sonnet-4-6
 maxTurns: 10
 allowed-tools:
   - write_strategic_path
-  - query_recent_milestones
-  - query_metrics
   - query_strategic_path
+  - web_search
+  - web_fetch
 references:
   - base-guidelines
   - 7-angles
@@ -36,16 +36,13 @@ proceeding. Expected fields:
 - **`currentPhase`** — foundation | audience | momentum | launch | compound | steady.
 - **`launchDate`** + **`launchedAt`** dates (nullable).
 - **`channels`** — connected channels (array).
-- **`voiceProfile`** — markdown, nullable.
-- **`recentMilestones`** — last 14 days of commits/PRs/releases.
 
 $ARGUMENTS
 
-Anything the input leaves out — fetch it with `query_recent_milestones`
-or `query_strategic_path` (to compare against the previous path if one
-exists). Don't fabricate product context; if a critical field is
-missing, fail fast with a clear `failed` StructuredOutput rather than
-guessing.
+Anything the input leaves out — fetch it with `query_strategic_path`
+(to compare against the previous path if one exists). Don't fabricate
+product context; if a critical field is missing, fail fast with a
+clear `failed` StructuredOutput rather than guessing.
 
 ## Your workflow
 
