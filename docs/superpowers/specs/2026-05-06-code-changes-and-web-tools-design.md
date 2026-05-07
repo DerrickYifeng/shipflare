@@ -38,7 +38,7 @@ The decision-to-call philosophy mirrors engine `WebSearchTool`: the tool descrip
 3. **`web_fetch` is intentionally raw.** The engine version uses a small fast model to extract per-prompt. We skip that layer — the calling skill (sonnet-4-6) gets the markdown and extracts itself. Saves a Haiku call per fetch; trades some context budget. The model is told to be selective.
 4. **`scrapeWebsite()` already exists** in `src/services/web-scraper.ts`, ported from engine `WebFetchTool`, with full SSRF defenses, same-origin-only redirect handling, 60s timeout, 10MB body cap, 100K markdown cap. `web_fetch` is an ~80-line tool wrapper, not new infrastructure.
 5. **`code_snapshots` is no longer a milestones cache.** After this change, the table's only writer is the onboarding full-scan path; its only readers are itself (upsert check) and the `DELETE /api/product/code-snapshot` endpoint. The `techStack` / `fileTree` / `keyFiles` / `scanSummary` / `commitSha` / `repoFullName` / `repoUrl` columns stay (re-deriving them from a fresh clone is expensive); the three diff-related columns drop.
-6. **Each tool has one home.** `query_code_changes` is for the **content-planner agent** (used at weekly-replan). `web_search` and `web_fetch` are for the **`generating-strategy` skill** (used at onboarding and phase-change). No cross-pollination this sprint.
+6. **Each tool has one home.** `query_code_changes` is for the **coordinator agent** (used at weekly-replan time — the legacy `content-planner` agent has been folded into coordinator, which now handles plan-item seeding directly). `web_search` and `web_fetch` are for the **`generating-strategy` skill** (used at onboarding and phase-change). No cross-pollination this sprint.
 
 ## Approaches considered
 
@@ -111,7 +111,7 @@ Array<{
 | `clone_failed` | Network / auth / repo deleted | `is_error: true`, includes git's stderr |
 | `git_log_failed` | git binary error | `is_error: true` |
 
-The skill's caller (content-planner) is expected to fail soft on `is_error: true` — emit plan_items without the code-change context rather than aborting the replan.
+The caller (coordinator agent at weekly-replan, or generating-strategy skill at strategic-path rewrite) is expected to fail soft on `is_error: true` — emit plan_items / write the strategic path without the code-change context rather than aborting.
 
 **Concurrency:** `isConcurrencySafe: true`. Each call clones to a unique tmpdir.
 
@@ -282,11 +282,12 @@ The migration is non-breaking: no live readers, no live writers post this PR. Ex
 
 - Update each `recentMilestones` reference to `recentCodeChanges`. Conceptually identical, just renamed.
 
-**Content-planner agent's `tools:` allow-list:**
+**Coordinator agent's `tools:` allow-list:**
 
-- Locate the AGENT.md (likely `src/tools/AgentTool/agents/content-planner/AGENT.md` or similar — confirmed during exploration: `src/tools/AgentTool/agents/coordinator/references/decision-examples.md` references it).
-- Add `query_code_changes` to its `tools:` block.
-- Remove `query_recent_milestones` if present.
+- The legacy `content-planner` agent has been folded into `coordinator`; its tactical-playbook now lives in `src/skills/allocating-plan-items/references/allocation-rules.md` (a fork-skill, not an agent). The coordinator handles weekly-replan plan-item seeding directly via `add_plan_item`.
+- Edit `src/tools/AgentTool/agents/coordinator/AGENT.md`: add `query_code_changes` to the `tools:` block.
+- Update coordinator's playbook (likely `src/tools/AgentTool/agents/coordinator/references/decision-examples.md` or a tactical-replan-specific reference) to call `query_code_changes(sinceISO=last_monday)` before invoking `add_plan_item` during weekly-replan, and pass the result into `allocating-plan-items` input as `signals.recentCodeChanges`.
+- Stale comments in `src/skills/allocating-plan-items/{schema.ts,SKILL.md}` reference "content-planner agent" — update to "coordinator agent" as part of this change.
 
 **`src/lib/team/redact-for-client.ts`:**
 
@@ -330,8 +331,8 @@ User updates state in Settings → POST /api/product/phase
 Monday 00:00 UTC weekly-replan-cron
   → processWeeklyReplan: per-user runTacticalReplan(userId, 'weekly')
   → enqueues team-run trigger='weekly_replan'
-  → coordinator dispatches content-planner agent
-  → content-planner calls:
+  → coordinator handles weekly-replan directly (no separate content-planner)
+  → coordinator calls:
     - query_strategic_path (existing)
     - query_stalled_items (existing)
     - query_last_week_completions (existing)
@@ -347,7 +348,7 @@ The same agent path applies to manual `/api/plan/replan` (trigger='manual') and 
 
 | Failure | Behavior |
 |---|---|
-| `query_code_changes` `no_repo` / `no_github_token` | Tool returns `is_error: true`. content-planner sees it, proceeds with `recentCodeChanges: []`. Replan succeeds. |
+| `query_code_changes` `no_repo` / `no_github_token` | Tool returns `is_error: true`. Coordinator sees it, proceeds with `recentCodeChanges: []` passed into `allocating-plan-items`. Replan succeeds. |
 | `query_code_changes` `clone_failed` | Same — fail soft, `recentCodeChanges: []`. Log at warn level for ops visibility. |
 | `web_search` Anthropic API timeout / error | Tool returns `is_error: true`. generating-strategy proceeds with whatever it knows from training data. The skill must not abort — `web_search` is a supplement, not a hard dependency. |
 | `web_fetch` 404 / 403 / network error | Returns success-shaped output with `status: 'error'` and a message. Skill reads the status, may try another URL. |
@@ -368,18 +369,18 @@ The same agent path applies to manual `/api/plan/replan` (trigger='manual') and 
 ### Integration tests
 
 - **`generating-strategy` with mocked `web_search` / `web_fetch`:** snapshot test — given a synthetic input, verify the skill makes ≥1 `web_search` call when the playbook hint applies. (Soft check; failure should warn, not break, since the spec philosophy is description-driven not mandate.)
-- **`content-planner` weekly-replan path:** verify `query_code_changes` is invoked with sane `sinceISO` (last Monday). Use a fixture repo via mocked `cloneRepo`.
+- **Coordinator weekly-replan path:** verify `query_code_changes` is invoked with sane `sinceISO` (last Monday) and that the result threads through into `allocating-plan-items`'s `signals.recentCodeChanges` input. Use a fixture repo via mocked `cloneRepo`.
 
 ### Manual smoke
 
 - Onboarding with a real GitHub repo end-to-end: verify the strategic path mentions a baseline number (anecdotal — we're checking the model's behavior, not asserting it).
-- A weekly-replan run on dev: verify content-planner logs `query_code_changes` execution and the resulting plan_items are sane.
+- A weekly-replan run on dev: verify coordinator logs `query_code_changes` execution and the resulting plan_items are sane.
 
 ## Migration / deploy
 
 1. Drizzle migration drops the three columns. Non-breaking — no live reader.
 2. Code change ships as one PR (or two if we want the migration in its own PR for rollback ease).
-3. After deploy: the Monday weekly-replan cron triggers the new tool path. If `query_code_changes` errors at scale, content-planner's fail-soft means replans still write plan_items, just without code-change context.
+3. After deploy: the Monday weekly-replan cron triggers the new tool path. If `query_code_changes` errors at scale, coordinator's fail-soft means replans still write plan_items, just without code-change context.
 4. Rollback path: revert PR. The dropped columns can be re-added by an inverse migration; in-flight production data lost, which is acceptable.
 
 ## Out of scope
