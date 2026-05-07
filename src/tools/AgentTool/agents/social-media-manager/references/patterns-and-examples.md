@@ -16,6 +16,13 @@ You: I'll source threads first, then draft replies for the strongest 3.
 
 You (StructuredOutput): Sourced 5 threads, drafted replies for 3. All in /briefing for review.
 
+**Reddit variant.** When `Channels connected` lists Reddit and the slot is for Reddit replies, pass `platform: 'reddit'` so discovery uses xAI `web_search` against reddit.com instead of `x_search`:
+
+  find_threads_via_xai({ trigger: 'daily', maxResults: 6, platform: 'reddit' })
+  → { queued: 4, scanned: 9, topQueued: [{threadId, url: 'https://reddit.com/r/SaaS/...', ...} × 4], scoutNotes: 'r/SaaS + r/indiehackers strong; r/Entrepreneur thinner' }
+
+  process_replies_batch({ threadIds: ['t-r1', 't-r2', 't-r3'] })  // batch tool reads channel from each thread row
+
 ### Pattern: thread list already provided
 
 The founder DM'd a thread URL through the CMO, OR the coordinator's daily playbook handed you topQueued from a prior discovery. No discovery needed — straight to drafting.
