@@ -50,7 +50,10 @@ describe('drafting-post skill loader', () => {
     expect(skill).not.toBeNull();
     expect(skill!.name).toBe('drafting-post');
     expect(skill!.context).toBe('fork');
-    expect(skill!.allowedTools).toEqual([]);
+    // get_subreddit_rules: drafting fetches sub-specific norms (no
+    // self-promo, no AI tools) before drafting Reddit posts. See
+    // SKILL.md "Reddit-specific drafting" section.
+    expect(skill!.allowedTools).toEqual(['get_subreddit_rules']);
   });
 
   it('produces a body referencing both channel voice files', async () => {

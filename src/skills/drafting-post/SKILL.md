@@ -5,6 +5,7 @@ context: fork
 model: claude-sonnet-4-6
 maxTurns: 1
 allowed-tools:
+  - get_subreddit_rules
 references:
   - x-post-voice
   - reddit-post-voice
@@ -105,6 +106,15 @@ Before emitting your JSON, run this checklist on your own draft:
    inputs you were given.
 
 If any check fails, REWRITE before outputting. You only get one shot.
+
+## Reddit-specific drafting
+
+If `channel === 'reddit'`:
+1. Call `get_subreddit_rules` with the thread's `targetSubreddit` BEFORE writing the draft.
+2. If the returned rules contain text matching "no self-promotion", "no AI tools", or "no founders": flag the draft as `flagged` with reason "subreddit rule conflict" and DO NOT generate a draft. Set `draftBody` to an empty string and `confidence` to 0.0; put the conflicting rule's `short_name` in `whyItWorks` so the founder knows why this slot was skipped.
+3. Otherwise, include the relevant rules verbatim in your prompt context. Match tone and avoid any pattern explicitly forbidden.
+
+If `get_subreddit_rules` returns `[]` (network error or no rules), proceed with drafting as normal — the tool degrades gracefully and the absence of rules is not a block.
 
 ## Output
 

@@ -3,6 +3,7 @@ import { redditSearchTool } from './RedditSearchTool/RedditSearchTool';
 import { redditPostTool } from './RedditPostTool/RedditPostTool';
 import { redditVerifyTool } from './RedditVerifyTool/RedditVerifyTool';
 import { redditSubmitPostTool } from './RedditSubmitPostTool/RedditSubmitPostTool';
+import { getSubredditRulesTool } from './GetSubredditRulesTool/GetSubredditRulesTool';
 import { xPostTool } from './XPostTool/XPostTool';
 import { xaiFindCustomersTool } from './XaiFindCustomersTool/XaiFindCustomersTool';
 import { persistQueueThreadsTool } from './PersistQueueThreadsTool/PersistQueueThreadsTool';
@@ -47,6 +48,12 @@ registry.register(redditSearchTool);
 registry.register(redditPostTool);
 registry.register(redditVerifyTool);
 registry.register(redditSubmitPostTool);
+// get_subreddit_rules — read-only public API (no OAuth needed). Drafting
+// skills call this BEFORE writing Reddit content to fetch sub-specific
+// rules ("no self-promotion", "no AI tools", etc.) and either flag the
+// draft or fold the rules verbatim into the prompt context. Failures
+// degrade to [] so drafting proceeds without rules rather than failing.
+registry.register(getSubredditRulesTool);
 
 // X tools
 registry.register(xPostTool);
