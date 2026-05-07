@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, jsonb, boolean, index } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, jsonb, index } from 'drizzle-orm/pg-core';
 import { users } from './users';
 import { products } from './products';
 
@@ -22,9 +22,6 @@ export const codeSnapshots = pgTable(
     keyFiles: jsonb('key_files').notNull(),
     scanSummary: text('scan_summary'),
     commitSha: text('commit_sha'),
-    diffSummary: text('diff_summary'),
-    changesDetected: boolean('changes_detected').default(false),
-    lastDiffAt: timestamp('last_diff_at', { mode: 'date' }),
     scannedAt: timestamp('scanned_at', { mode: 'date' }).defaultNow().notNull(),
   },
   (t) => [index('code_snapshots_user_idx').on(t.userId)],
