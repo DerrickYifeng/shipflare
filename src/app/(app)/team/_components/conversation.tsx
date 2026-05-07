@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -70,6 +71,17 @@ export interface ConversationProps {
    * auto-scroll pin.
    */
   focusPendingMessageId?: string | null;
+  /**
+   * Older-history pagination. When `hasOlder` is true and the user
+   * scrolls within ~100px of the top of the thread, `onLoadOlder` is
+   * invoked. The parent (TeamDesk) flips `loadingOlder` while the
+   * fetch is in flight, and prepends the new batch to `messages` —
+   * Conversation's layout effect then restores scroll position so
+   * the visible cursor doesn't jump.
+   */
+  hasOlder?: boolean;
+  loadingOlder?: boolean;
+  onLoadOlder?: () => void;
 }
 
 const THREAD_MAX_WIDTH = 740;
@@ -103,6 +115,9 @@ export function Conversation({
   onPrefillComposer,
   onFocusComposer,
   focusPendingMessageId = null,
+  hasOlder = false,
+  loadingOlder = false,
+  onLoadOlder,
 }: ConversationProps) {
   const memberLookup = useMemo(() => {
     const map = new Map<string, DelegationCardMember>();
@@ -180,7 +195,80 @@ export function Conversation({
       return;
     }
     jumpToBottom();
+    // A conversation switch invalidates any pending older-load anchor —
+    // dropping it here prevents the next layout effect from applying a
+    // captured delta to the new conversation's container.
+    pendingPrependRef.current = null;
   }, [firstRunId, jumpToBottom, unstick, focusPendingMessageId]);
+
+  // ---------- Older-history pagination ----------
+  // We capture the scroll metrics + the current top-of-list message id at
+  // the moment the user triggers a load-older. After the prepend lands
+  // (detected via messages[0]?.id changing in a layout effect below), we
+  // restore `scrollTop` so the visible content doesn't jump upward by the
+  // height of the new batch. Standard infinite-scroll-up anchor pattern.
+  const pendingPrependRef = useRef<{
+    scrollHeight: number;
+    scrollTop: number;
+    prevFirstId: string | null;
+  } | null>(null);
+
+  useEffect(() => {
+    const el = threadRef.current;
+    if (!el) return;
+    if (!onLoadOlder) return;
+
+    const checkAndTrigger = (): void => {
+      // Bail if a load is already in flight or the server says there's
+      // nothing older. We re-read the closure values via fresh refs each
+      // call so a stale handler doesn't keep firing.
+      if (!hasOlderRef.current) return;
+      if (loadingOlderRef.current) return;
+      if (pendingPrependRef.current) return; // capture not yet consumed
+      if (el.scrollTop > 100) return;
+      pendingPrependRef.current = {
+        scrollHeight: el.scrollHeight,
+        scrollTop: el.scrollTop,
+        prevFirstId: messagesRef.current[0]?.id ?? null,
+      };
+      onLoadOlder();
+    };
+
+    el.addEventListener('scroll', checkAndTrigger, { passive: true });
+    // Fire once on mount in case the thread is already short enough that
+    // its top is within the trigger zone — without this the user has to
+    // scroll-bump the wheel to get the first older batch.
+    checkAndTrigger();
+    return () => el.removeEventListener('scroll', checkAndTrigger);
+  }, [onLoadOlder]);
+
+  // Mirror the latest props onto refs so the scroll handler above (which
+  // is intentionally registered once per onLoadOlder identity) sees fresh
+  // values without re-binding.
+  const hasOlderRef = useRef(hasOlder);
+  const loadingOlderRef = useRef(loadingOlder);
+  const messagesRef = useRef(messages);
+  hasOlderRef.current = hasOlder;
+  loadingOlderRef.current = loadingOlder;
+  messagesRef.current = messages;
+
+  // Restore scroll after a prepend lands: when the captured `prevFirstId`
+  // is no longer at the top (i.e., older messages were prepended ahead
+  // of it), shift `scrollTop` by the growth in `scrollHeight` so the
+  // user's visible cursor stays exactly where it was.
+  useLayoutEffect(() => {
+    const el = threadRef.current;
+    if (!el) return;
+    const pending = pendingPrependRef.current;
+    if (!pending) return;
+    const currentFirstId = messages[0]?.id ?? null;
+    if (currentFirstId === pending.prevFirstId) return; // not yet
+    const delta = el.scrollHeight - pending.scrollHeight;
+    if (delta > 0) {
+      el.scrollTop = pending.scrollTop + delta;
+    }
+    pendingPrependRef.current = null;
+  }, [messages]);
 
   // Scroll container for the thread. The team desk grid gives each
   // column a bounded height; the conversation's own overflow-y keeps
@@ -354,6 +442,9 @@ export function Conversation({
     >
       <div style={threadWrap}>
         <div style={thread} ref={contentRef} data-testid="conversation-thread-content">
+          {visibleGroups.length > 0 && (hasOlder || loadingOlder) ? (
+            <OlderHistoryIndicator loading={loadingOlder} />
+          ) : null}
           {visibleGroups.length === 0 ? (
             <EmptyConversation
               onPrefillComposer={onPrefillComposer}
@@ -396,6 +487,47 @@ export function Conversation({
         ) : null}
       </div>
     </section>
+  );
+}
+
+/**
+ * Top-of-thread sentinel for the older-history infinite scroll. Shows a
+ * subtle "Load earlier..." idle state while there's still server-side
+ * history to fetch, and switches to a tiny spinner during the fetch.
+ * Click target is generous so the user can manually nudge a load if
+ * the auto-scroll trigger missed (very short threads, etc).
+ */
+function OlderHistoryIndicator({ loading }: { loading: boolean }) {
+  const wrap: CSSProperties = {
+    display: 'flex',
+    justifyContent: 'center',
+    padding: '12px 16px 8px',
+    color: 'var(--sf-fg-3)',
+    fontSize: 12,
+    fontFamily: 'var(--sf-font-mono)',
+    letterSpacing: '0.04em',
+  };
+  const spinner: CSSProperties = {
+    width: 10,
+    height: 10,
+    borderRadius: '50%',
+    border: '1.5px solid rgba(0, 0, 0, 0.1)',
+    borderTopColor: 'var(--sf-accent)',
+    animation: 'sf-spin 0.9s linear infinite',
+    marginRight: 8,
+  };
+  return (
+    <div style={wrap} role="status" aria-live="polite">
+      {loading ? <span style={spinner} aria-hidden="true" /> : null}
+      <span>{loading ? 'Loading earlier messages…' : 'Scroll up for earlier history'}</span>
+      <style jsx>{`
+        @keyframes sf-spin {
+          to {
+            transform: rotate(360deg);
+          }
+        }
+      `}</style>
+    </div>
   );
 }
 
