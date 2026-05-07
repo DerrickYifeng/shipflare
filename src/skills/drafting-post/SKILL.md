@@ -110,8 +110,8 @@ If any check fails, REWRITE before outputting. You only get one shot.
 ## Reddit-specific drafting
 
 If `channel === 'reddit'`:
-1. Call `get_subreddit_rules` with the thread's `targetSubreddit` BEFORE writing the draft.
-2. If the returned rules contain text matching "no self-promotion", "no AI tools", or "no founders": flag the draft as `flagged` with reason "subreddit rule conflict" and DO NOT generate a draft. Set `draftBody` to an empty string and `confidence` to 0.0; put the conflicting rule's `short_name` in `whyItWorks` so the founder knows why this slot was skipped.
+1. Call `get_subreddit_rules` with the top-level `targetSubreddit` BEFORE writing the draft.
+2. If the returned rules contain text matching "no self-promotion", "no AI tools", or "no founders": DO NOT generate a draft. Emit the safe-skip output shape: `draftBody: ""`, `flagged: true`, `flagReason: "subreddit rule conflict"`, `confidence: 0.0`, and put the conflicting rule's `short_name` in `whyItWorks` so the founder knows why this slot was skipped.
 3. Otherwise, include the relevant rules verbatim in your prompt context. Match tone and avoid any pattern explicitly forbidden.
 
 If `get_subreddit_rules` returns `[]` (network error or no rules), proceed with drafting as normal — the tool degrades gracefully and the absence of rules is not a block.
@@ -127,3 +127,15 @@ If `get_subreddit_rules` returns `[]` (network error or no rules), proceed with 
 ```
 
 For X drafts, `whyItWorks` MUST identify the resolved phase, voice cluster, and template ID per the X reference's templates section.
+
+Safe-skip output shape (Reddit rule conflict only — see "Reddit-specific drafting" above):
+
+```json
+{
+  "draftBody": "",
+  "whyItWorks": "<short_name of the conflicting rule>",
+  "confidence": 0.0,
+  "flagged": true,
+  "flagReason": "subreddit rule conflict"
+}
+```
