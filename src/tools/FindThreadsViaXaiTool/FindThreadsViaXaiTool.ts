@@ -37,6 +37,7 @@ import { MemoryStore } from '@/memory/store';
 import { createLogger } from '@/lib/logger';
 import { listRecentEngagedAuthors } from '@/lib/reply-throttle';
 import { getReplyAuthorCooldownDays } from '@/lib/platform-config';
+import { buildXFirstTurnMessage } from './prompt-builders';
 
 const log = createLogger('tool:find_threads_via_xai');
 
@@ -97,7 +98,7 @@ const SIGNAL_NUDGE: Record<string, string> = {
   no_fit: 'broaden the keyword set — current query is too narrow',
 };
 
-interface ProductForLoop {
+export interface ProductForLoop {
   id: string;
   name: string;
   description: string;
@@ -156,7 +157,15 @@ function engagementScore(t: TweetCandidate): number {
   return t.confidence * Math.log10(1 + likes + 5 * reposts);
 }
 
-/** Build the first-turn xAI user message from product + rubric + intent. */
+/**
+ * Build the first-turn xAI user message from product + rubric + intent.
+ *
+ * Thin delegate to `buildXFirstTurnMessage` in `prompt-builders.ts`,
+ * preserved here so the existing in-file call site (and the existing
+ * unit tests) keep working until Task 2b wires the platform branch
+ * directly into `execute()`. Self-handle injection is not yet plumbed
+ * through, so we pass `null`.
+ */
 export function buildFirstTurnMessage(
   product: ProductForLoop,
   rubric: string,
@@ -164,59 +173,14 @@ export function buildFirstTurnMessage(
   maxResults: number,
   excludeAuthors: readonly string[],
 ): string {
-  const keywords =
-    product.keywords.length > 0 ? product.keywords.join(', ') : '(none)';
-  const intentLine = intent ? `\nFOUNDER INTENT\n${intent}\n` : '';
-  const rubricSection = rubric
-    ? `\nICP RUBRIC (from onboarding)\n${rubric}\n`
-    : '';
-
-  const PROMPT_AUTHOR_LIMIT = 50;
-  const trimmed = excludeAuthors.slice(0, PROMPT_AUTHOR_LIMIT);
-  const tail =
-    excludeAuthors.length > PROMPT_AUTHOR_LIMIT
-      ? ' and others — when in doubt, skip authors that look like our prior reply targets'
-      : '';
-  const excludeLine =
-    trimmed.length > 0
-      ? `- Do NOT surface tweets authored by: ${trimmed
-          .map((h) => '@' + h)
-          .join(', ')}${tail}. We have already engaged with them recently and another reply would feel like reply-guy harassment.`
-      : '';
-
-  return [
-    "I'm looking for X/Twitter posts where potential customers of my product",
-    'are publicly expressing problems the product solves.',
-    '',
-    'PRODUCT',
-    `- Name: ${product.name}`,
-    `- Description: ${product.description}`,
-    `- Value prop: ${product.valueProp ?? '(not specified)'}`,
-    `- Target audience: ${product.targetAudience ?? '(not specified)'}`,
-    `- Keywords: ${keywords}`,
-    intentLine + rubricSection,
-    'Constraints',
-    '- Posted in last 7 days',
-    `- Up to ${maxResults * 2} candidates this pass — quality over quota`,
-    ...(excludeLine ? [excludeLine] : []),
-    '- For each tweet include: url, author_username, author_bio, author_followers,',
-    '  body, posted_at, likes_count, reposts_count, replies_count, views_count,',
-    '  is_repost, original_url, original_author_username, surfaced_via,',
-    '  confidence (your 0-1 assessment), reason (1 sentence, product-specific)',
-    '- Reposts ARE valuable signal — when a relevant person reposts a thread on',
-    "  the product's pain, that thread is a strong reply target. Include reposts;",
-    '  do NOT filter them out as noise. The reply target for a repost is the',
-    '  ORIGINAL author (set original_url + original_author_username; surfaced_via',
-    '  carries the reposter handle).',
-    '- If the tweet QUOTES another tweet, include `quoted_text` (the quoted post',
-    "  body, verbatim) and `quoted_author` (the quoted author's @handle, no @).",
-    '  If the tweet is a REPLY in a thread, include `in_reply_to_text` (the parent',
-    "  post body, verbatim) and `in_reply_to_author` (parent author's @handle).",
-    '  Leave any of these null when not applicable. A standalone tweet has all four',
-    '  null. A self-quote (quoted_author == author_username) is allowed and common —',
-    '  surface it.',
-    "- Empty `tweets` is allowed if you genuinely find nothing — don't pad.",
-  ].join('\n');
+  return buildXFirstTurnMessage(
+    product,
+    rubric,
+    intent,
+    maxResults,
+    excludeAuthors,
+    null,
+  );
 }
 
 /**
