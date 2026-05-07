@@ -6,11 +6,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 // Types
 // ---------------------------------------------------------------------------
 
-// v3 agent identifiers emitted by /api/events. v1's 'scout' was remapped
-// to 'discovery' when the automation/run route started publishing the
-// agent_start event with the new name; v1's 'content-batch' is gone (the
-// draft-single-* skills stream under 'content' via monitor.ts /
-// plan-execute.ts).
+// v3 agent identifiers emitted by /api/events. v1's 'scout' was renamed
+// to 'discovery' when the multi-agent runtime took over; v1's
+// 'content-batch' is gone (the draft-single-* skills stream under
+// 'content' via monitor.ts / plan-execute.ts).
 // SSE feed labels for the user-visible activity stream. NOT agent registry
 // names — 'review' and 'posting' map to the validating-draft and
 // posting-to-platform fork-skills (post-migration 2026-04-30). Kept stable

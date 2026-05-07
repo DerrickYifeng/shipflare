@@ -105,6 +105,11 @@ export const threads = pgTable(
   },
   (t) => [
     index('threads_user_discovered_idx').on(t.userId, desc(t.discoveredAt)),
+    index('threads_user_platform_author_idx').on(
+      t.userId,
+      t.platform,
+      t.author,
+    ),
     uniqueIndex('threads_user_platform_external_uq').on(
       t.userId,
       t.platform,

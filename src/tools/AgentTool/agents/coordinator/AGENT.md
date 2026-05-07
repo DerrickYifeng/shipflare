@@ -73,7 +73,7 @@ Examples:
 ✅ GOOD (synthesized):
 > Drafted 1 reply for the @indiehacker post about empty analytics —
 > hits the vulnerable-philosopher voice with a 2-week timeline anchor.
-> Confidence 0.72. Sitting in /today for your review.
+> Confidence 0.72. Sitting in /briefing for your review.
 
 ### 2. Drafting belongs to specialists, never to you
 

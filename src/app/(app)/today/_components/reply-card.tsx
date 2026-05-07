@@ -28,7 +28,6 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Ops } from '@/components/ui/ops';
 import { Toggle } from '@/components/ui/toggle';
-import { getPlatformCharLimits, PLATFORMS } from '@/lib/platform-config';
 import type { TodoItem } from '@/hooks/use-today';
 import { PlatformGlyph } from './platform-glyph';
 
@@ -39,10 +38,21 @@ interface ReplyCardProps {
   onPostNow?: (id: string) => void;
   onSkip: (id: string) => void;
   onEdit: (id: string, body: string) => void;
+  /** Fire-and-forget marker that the user clicked the X-intent button.
+   *  When provided, used after window.open() so the server records the
+   *  handoff and the next feed poll drops the card from Today (it then
+   *  reappears in Briefing → History where the user can re-open it). */
+  onHandoff?: (id: string) => void;
   isActive?: boolean;
   forceEditing?: boolean;
   onEditDone?: () => void;
 }
+
+/** Final post-action statuses surfaced by Briefing → History. The card
+ *  renders these as a read-only "you already replied" footer with an
+ *  "Open X again" / "View on platform" link instead of the
+ *  Send / Edit / Skip cluster. */
+const SETTLED_STATUSES = new Set(['handed_off', 'posted']);
 
 function formatQueuedEta(delayMs: number | undefined): string {
   if (delayMs === undefined || delayMs <= 30_000) return 'Posting now';
@@ -50,12 +60,6 @@ function formatQueuedEta(delayMs: number | undefined): string {
   if (minutes < 60) return `Posting in ${minutes}m`;
   const fireAt = new Date(Date.now() + delayMs);
   return `Posting at ${fireAt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}`;
-}
-
-function getReplyCap(platform: string): number {
-  return PLATFORMS[platform]
-    ? getPlatformCharLimits(platform, 'reply')
-    : 10_000;
 }
 
 function relativeTime(iso: string | null): string | null {
@@ -209,23 +213,18 @@ export function ReplyCard({
   onPostNow,
   onSkip,
   onEdit,
+  onHandoff,
   isActive = false,
   forceEditing = false,
   onEditDone,
 }: ReplyCardProps) {
   const [localEditing, setLocalEditing] = useState(false);
   const [editBody, setEditBody] = useState(item.draftBody ?? '');
-  // Tracks whether the user has already opened the X compose tab. Drives
-  // the "Send reply" → "Open X again" label swap. Local-only — resets on
-  // hard refresh; the card stays in the feed regardless.
-  const [hasOpenedX, setHasOpenedX] = useState(false);
   const rootRef = useRef<HTMLElement>(null);
 
   const isEditing = localEditing || forceEditing;
-  const cap = getReplyCap(item.platform);
   const activeBody = isEditing ? editBody : item.draftBody ?? '';
   const len = activeBody.length;
-  const over = len > cap;
   const conf = item.confidence != null ? Math.round(item.confidence * 100) : null;
   const confTone: 'success' | 'accent' | 'default' =
     conf == null ? 'default' : conf >= 80 ? 'success' : conf >= 65 ? 'accent' : 'default';
@@ -236,7 +235,10 @@ export function ReplyCard({
     }
   }, [isActive]);
 
-  const isOptimistic = item.status !== 'pending';
+  // Settled: user already acted (history view). NOT optimistic — let the
+  // user click the "Open X again" / "View on platform" link.
+  const isSettled = SETTLED_STATUSES.has(item.status);
+  const isOptimistic = !isSettled && item.status !== 'pending';
   // `posting` = the 5s undo window after approval. Matches INTERACTIONS.md §6
   // (pending → posting → posted). The parent toast keeps a 5000ms timer; we
   // mirror that here with a visible countdown bar so the affordance doesn't
@@ -442,36 +444,16 @@ export function ReplyCard({
           }}
         >
           <Ops>Your draft reply</Ops>
-          <div
+          <span
+            className="sf-mono"
             style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
+              fontSize: 'var(--sf-text-xs)',
+              color: 'var(--sf-fg-4)',
+              letterSpacing: 'var(--sf-track-mono)',
             }}
           >
-            {over ? (
-              <span
-                style={{
-                  fontSize: 'var(--sf-text-xs)',
-                  color: 'var(--sf-error)',
-                  fontWeight: 500,
-                }}
-              >
-                Too long — edit to shorten
-              </span>
-            ) : null}
-            <span
-              className="sf-mono"
-              style={{
-                fontSize: 'var(--sf-text-xs)',
-                color: over ? 'var(--sf-error)' : 'var(--sf-fg-4)',
-                letterSpacing: 'var(--sf-track-mono)',
-              }}
-            >
-              {len}
-              {cap < 10_000 ? ` / ${cap}` : ''}
-            </span>
-          </div>
+            {len}
+          </span>
         </div>
 
         {!isEditing && item.draftBody ? (
@@ -557,11 +539,13 @@ export function ReplyCard({
             background: 'var(--sf-bg-tertiary)',
           }}
         >
-          {item.xIntentUrl ? (
-            <>
+          {isSettled ? (
+            // History view: user already acted. Single re-open affordance,
+            // no Edit/Skip. X handoffs re-use the prebuilt intent URL;
+            // posted Reddit replies link to the source thread.
+            item.xIntentUrl ? (
               <Button
                 size="sm"
-                disabled={over || !item.draftBody}
                 onClick={() => {
                   if (typeof window !== 'undefined') {
                     window.open(
@@ -570,15 +554,47 @@ export function ReplyCard({
                       'noopener,noreferrer',
                     );
                   }
-                  setHasOpenedX(true);
                 }}
-                title={
-                  over
-                    ? `Reply is ${len - cap} chars over the ${cap} cap`
-                    : undefined
-                }
               >
-                {hasOpenedX ? 'Open X again' : 'Send reply'}
+                Open X again
+              </Button>
+            ) : item.threadUrl ? (
+              <Button
+                size="sm"
+                onClick={() => {
+                  if (typeof window !== 'undefined') {
+                    window.open(
+                      item.threadUrl!,
+                      '_blank',
+                      'noopener,noreferrer',
+                    );
+                  }
+                }}
+              >
+                View on {item.platform === 'reddit' ? 'Reddit' : 'platform'}
+              </Button>
+            ) : null
+          ) : item.xIntentUrl ? (
+            <>
+              <Button
+                size="sm"
+                disabled={!item.draftBody}
+                onClick={() => {
+                  if (typeof window !== 'undefined') {
+                    window.open(
+                      item.xIntentUrl!,
+                      '_blank',
+                      'noopener,noreferrer',
+                    );
+                  }
+                  // Record handoff server-side so the next feed poll moves
+                  // the card from Briefing → History. Fire-and-forget; the
+                  // window has already opened so failure here only delays
+                  // the move (next manual refresh / 30s tick still records).
+                  onHandoff?.(item.id);
+                }}
+              >
+                Send reply
               </Button>
               <TextAction onClick={() => setLocalEditing(true)}>Edit</TextAction>
               <TextAction onClick={() => onSkip(item.id)}>Skip</TextAction>
@@ -606,12 +622,7 @@ export function ReplyCard({
               <Button
                 size="sm"
                 onClick={() => onApprove(item.id)}
-                disabled={over || !item.draftBody || item.status === 'pending_approval'}
-                title={
-                  over
-                    ? `Reply is ${len - cap} chars over the ${cap} cap`
-                    : undefined
-                }
+                disabled={!item.draftBody || item.status === 'pending_approval'}
               >
                 {item.status === 'pending_approval' ? 'Sending…' : 'Send reply'}
               </Button>

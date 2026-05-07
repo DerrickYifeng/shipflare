@@ -17,7 +17,7 @@
  * routing becomes trivial and race-free.
  */
 import { NextResponse, type NextRequest } from 'next/server';
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, lt } from 'drizzle-orm';
 import { z } from 'zod';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
@@ -233,6 +233,45 @@ export async function POST(
 // GET — list messages for this conversation
 // ---------------------------------------------------------------------------
 
+const DEFAULT_LIMIT = 100;
+const MAX_LIMIT = 500;
+
+function parseLimit(raw: string | null): number {
+  if (raw === null) return DEFAULT_LIMIT;
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n) || n <= 0) return DEFAULT_LIMIT;
+  return Math.min(n, MAX_LIMIT);
+}
+
+function parseBefore(raw: string | null): Date | null {
+  if (raw === null || raw.length === 0) return null;
+  const t = Date.parse(raw);
+  if (!Number.isFinite(t)) return null;
+  return new Date(t);
+}
+
+/**
+ * Cursor-paginated message reader.
+ *
+ * Query params:
+ *   - `limit`  (default 100, capped at 500): max messages to return.
+ *   - `before` (ISO timestamp, optional): return messages strictly older
+ *     than this cursor. When omitted, returns the latest `limit` messages
+ *     in this conversation.
+ *
+ * Response:
+ *   {
+ *     conversationId, title, updatedAt,
+ *     messages: [...],   // sorted ASC (oldest → newest) for direct prepend
+ *     hasMore: boolean,  // true if at least one message is older than messages[0]
+ *   }
+ *
+ * Implementation pulls `limit + 1` rows in DESC order, slices the extra
+ * sentinel to compute `hasMore`, then reverses to ASC for the client. Tie
+ * breaks at identical timestamps are tolerated — the team-desk client
+ * dedupes by id when merging fetched + live messages, so any boundary
+ * row that gets re-fetched is collapsed silently.
+ */
 export async function GET(
   request: NextRequest,
   ctx: RouteContext,
@@ -243,6 +282,9 @@ export async function GET(
   }
   const userId = session.user.id;
   const { id: conversationId } = await ctx.params;
+
+  const limit = parseLimit(request.nextUrl.searchParams.get('limit'));
+  const before = parseBefore(request.nextUrl.searchParams.get('before'));
 
   // Join to teams through conversation for ownership check in one query.
   const [conv] = await db
@@ -265,7 +307,14 @@ export async function GET(
     );
   }
 
-  const messages = await db
+  const whereClause = before
+    ? and(
+        eq(teamMessages.conversationId, conversationId),
+        lt(teamMessages.createdAt, before),
+      )
+    : eq(teamMessages.conversationId, conversationId);
+
+  const rows = await db
     .select({
       id: teamMessages.id,
       runId: teamMessages.runId,
@@ -278,15 +327,22 @@ export async function GET(
       createdAt: teamMessages.createdAt,
     })
     .from(teamMessages)
-    .where(eq(teamMessages.conversationId, conversationId))
-    .orderBy(asc(teamMessages.createdAt));
+    .where(whereClause)
+    .orderBy(desc(teamMessages.createdAt))
+    .limit(limit + 1);
+
+  const hasMore = rows.length > limit;
+  const sliced = hasMore ? rows.slice(0, limit) : rows;
+  // DESC → ASC for client consumption (oldest → newest).
+  const ordered = [...sliced].reverse();
 
   return NextResponse.json(
     {
       conversationId,
       title: conv.title,
       updatedAt: conv.updatedAt.toISOString(),
-      messages: messages.map((m) => {
+      hasMore,
+      messages: ordered.map((m) => {
         const redacted = redactMessageRowForClient({
           id: m.id,
           runId: m.runId,

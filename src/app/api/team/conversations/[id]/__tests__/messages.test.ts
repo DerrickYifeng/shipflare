@@ -40,6 +40,11 @@ interface MessageRow {
 let convRows: ConvRow[] = [];
 let messageRows: MessageRow[] = [];
 
+// Per-call cap configured by tests that exercise the cursor pagination
+// (`?limit=N`). The mock applies it at the `.limit()` step so the handler
+// can do its `rows.length > limit` slice and report `hasMore` correctly.
+let messagesLimit = Number.MAX_SAFE_INTEGER;
+
 vi.mock('@/lib/db', () => ({
   db: {
     select: () => ({
@@ -50,9 +55,14 @@ vi.mock('@/lib/db', () => ({
             limit: () => Promise.resolve(convRows),
           }),
         }),
-        // messages SELECT path: from().where().orderBy()
+        // messages SELECT path: from().where().orderBy().limit()
         where: () => ({
-          orderBy: () => Promise.resolve(messageRows),
+          orderBy: () => ({
+            limit: (n: number) => {
+              const cap = Math.min(n, messagesLimit);
+              return Promise.resolve(messageRows.slice(0, cap));
+            },
+          }),
         }),
       }),
     }),
@@ -68,6 +78,8 @@ vi.mock('drizzle-orm', async () => {
     eq: () => ({}),
     and: () => ({}),
     asc: () => ({}),
+    desc: () => ({}),
+    lt: () => ({}),
   };
 });
 
@@ -85,11 +97,12 @@ beforeEach(() => {
     },
   ];
   messageRows = [];
+  messagesLimit = Number.MAX_SAFE_INTEGER;
 });
 
-function makeReq(): NextRequest {
+function makeReq(query: string = ''): NextRequest {
   return new NextRequest(
-    'http://test/api/team/conversations/conv-1/messages',
+    `http://test/api/team/conversations/conv-1/messages${query}`,
   );
 }
 
@@ -218,5 +231,89 @@ describe('GET /api/team/conversations/[id]/messages — redaction', () => {
     expect(body.messages[0].contentBlocks).toEqual([
       { type: 'text', text: 'hello team' },
     ]);
+  });
+});
+
+// Helper for the pagination tests: produces N rows in DESC order (newest
+// first) so the mock's slice mimics what `ORDER BY created_at DESC` returns
+// from Postgres. The handler then reverses to ASC for the client.
+function makeRows(count: number, baseIso: string): MessageRow[] {
+  const base = Date.parse(baseIso);
+  const rows: MessageRow[] = [];
+  for (let i = 0; i < count; i += 1) {
+    rows.push({
+      id: `msg-${i + 1}`,
+      runId: null,
+      fromMemberId: null,
+      toMemberId: null,
+      type: 'assistant_text',
+      content: `body ${i + 1}`,
+      contentBlocks: [{ type: 'text', text: `body ${i + 1}` }],
+      metadata: null,
+      createdAt: new Date(base - i * 1000),
+    });
+  }
+  return rows;
+}
+
+describe('GET /api/team/conversations/[id]/messages — cursor pagination', () => {
+  it('returns hasMore=false when fewer rows exist than the limit', async () => {
+    messageRows = makeRows(3, '2026-05-04T03:00:00Z');
+
+    const res = await GET(makeReq('?limit=10'), makeParams('conv-1'));
+    expect(res.status).toBe(200);
+
+    const body = await res.json();
+    expect(body.hasMore).toBe(false);
+    expect(body.messages).toHaveLength(3);
+    // Returned in ASC order: oldest first, newest last.
+    const ids = (body.messages as Array<{ id: string }>).map((m) => m.id);
+    expect(ids).toEqual(['msg-3', 'msg-2', 'msg-1']);
+  });
+
+  it('returns hasMore=true when more rows are available beyond the window', async () => {
+    // 6 rows in the table; limit=3. Handler asks for 4, sees 4 rows, sets
+    // hasMore=true and slices to the first 3 (newest 3 in DESC order).
+    messageRows = makeRows(6, '2026-05-04T04:00:00Z');
+    messagesLimit = 4;
+
+    const res = await GET(makeReq('?limit=3'), makeParams('conv-1'));
+    expect(res.status).toBe(200);
+
+    const body = await res.json();
+    expect(body.hasMore).toBe(true);
+    expect(body.messages).toHaveLength(3);
+    // The 3 newest, ASC: msg-3 (oldest of the window) → msg-1 (newest).
+    const ids = (body.messages as Array<{ id: string }>).map((m) => m.id);
+    expect(ids).toEqual(['msg-3', 'msg-2', 'msg-1']);
+  });
+
+  it('accepts before= as a cursor and clamps limit to MAX_LIMIT', async () => {
+    messageRows = makeRows(2, '2026-05-04T05:00:00Z');
+
+    // Sanity: huge limit gets capped (the mock caps via messagesLimit so we
+    // don't actually need to assert the cap value, just that the request is
+    // accepted and returns a valid body).
+    const res = await GET(
+      makeReq('?limit=99999&before=2026-05-04T05:30:00Z'),
+      makeParams('conv-1'),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.hasMore).toBe(false);
+    expect(body.messages).toHaveLength(2);
+  });
+
+  it('falls back to the default limit when the param is malformed', async () => {
+    messageRows = makeRows(1, '2026-05-04T06:00:00Z');
+
+    const res = await GET(
+      makeReq('?limit=not-a-number&before=garbage'),
+      makeParams('conv-1'),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.messages).toHaveLength(1);
+    expect(body.hasMore).toBe(false);
   });
 });

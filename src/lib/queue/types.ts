@@ -170,14 +170,13 @@ export type AnalyticsJobData = z.input<typeof analyticsJobSchema>;
 // ---------------------------------------------------------------------------
 
 /**
- * Top-level scan orchestrator job. Runs the discovery-agent
- * The discovery-scan queue is now fanout-only: a daily cron drops one
- * fanout job and the processor (`discovery-cron-fanout.ts`) iterates
- * every user with at least one channel + product and enqueues a
- * coordinator-rooted team-run for each. The pre-team-run per-user
- * `kind: 'user'` shape (and its `enqueueDiscoveryScan` helper) is
- * retired — manual "scan now" buttons enqueue team-runs directly via
- * the `/api/discovery/{trigger,scan}` and `/api/automation/run` routes.
+ * Top-level scan orchestrator job. The discovery-scan queue is
+ * fanout-only: a daily cron drops one fanout job and the processor
+ * (`daily-run-fanout.ts`) iterates every user with at least one channel
+ * + product and dispatches a daily-playbook lead message via
+ * `ensureDailyRunEnqueued`. The pre-team-run per-user `kind: 'user'`
+ * shape (and its `enqueueDiscoveryScan` helper) is retired — there is
+ * no manual API trigger anymore.
  */
 export const discoveryScanJobSchema = z.object({
   kind: z.literal('fanout'),

@@ -81,6 +81,7 @@ describe('draftReplyTool', () => {
       ctx,
     );
 
+    if (result.skipped) throw new Error('expected draft to persist');
     expect(result.draftId).toMatch(/[0-9a-f-]{36}/);
     expect(result.threadId).toBe('t-1');
     expect(result.platform).toBe('x');
@@ -170,6 +171,7 @@ describe('draftReplyTool', () => {
       },
       ctx,
     );
+    if (first.skipped) throw new Error('expected first draft to persist');
     expect(store.get<DraftRow>(drafts)).toHaveLength(1);
 
     const second = await draftReplyTool.execute(
@@ -182,6 +184,7 @@ describe('draftReplyTool', () => {
       ctx,
     );
 
+    if (second.skipped) throw new Error('expected second draft to persist');
     // Same draftId — the second call updated the first row in place.
     expect(second.draftId).toBe(first.draftId);
 
@@ -191,6 +194,64 @@ describe('draftReplyTool', () => {
     expect(rows[0]!.replyBody).toBe('second take, sharper');
     expect(rows[0]!.confidenceScore).toBe(0.78);
     expect(rows[0]!.whyItWorks).toBe('tightened');
+  });
+
+  it('skips with author_throttled when a recent reply to the same author exists', async () => {
+    const NOW = new Date('2026-05-05T12:00:00Z');
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+
+    // Two threads from author 'alice'; one already has a posted draft.
+    store.tables.set(threads, [
+      {
+        id: 't_old',
+        userId: 'user-1',
+        externalId: 'ext_old',
+        platform: 'x',
+        author: 'alice',
+      },
+      {
+        id: 't_new',
+        userId: 'user-1',
+        externalId: 'ext_new',
+        platform: 'x',
+        author: 'alice',
+      },
+    ] as never);
+    store.tables.set(drafts, [
+      {
+        id: 'd_old',
+        userId: 'user-1',
+        threadId: 't_old',
+        status: 'posted',
+        draftType: 'reply',
+        replyBody: 'earlier reply',
+        confidenceScore: 0.7,
+        whyItWorks: null,
+        engagementDepth: 0,
+        createdAt: new Date(NOW.getTime() - 2 * 86_400_000),
+      },
+    ] as never);
+
+    const ctx = makeCtx(store, { userId: 'user-1', productId: 'prod-1' });
+    const out = await draftReplyTool.execute(
+      { threadId: 't_new', draftBody: 'hello again', confidence: 0.7 },
+      ctx,
+    );
+
+    expect(out).toMatchObject({
+      skipped: true,
+      reason: 'author_throttled',
+      threadId: 't_new',
+      platform: 'x',
+      author: 'alice',
+    });
+
+    // No new draft was inserted for t_new.
+    const draftsAfter = store.get<DraftRow>(drafts);
+    expect(draftsAfter.find((d) => d.threadId === 't_new')).toBeUndefined();
+
+    vi.useRealTimers();
   });
 
   it('does NOT update a non-pending draft — terminal drafts on the same thread are immutable', async () => {
@@ -221,6 +282,7 @@ describe('draftReplyTool', () => {
       ctx,
     );
 
+    if (result.skipped) throw new Error('expected draft to persist');
     expect(result.draftId).not.toBe('d-old-posted');
     const rows = store.get<DraftRow>(drafts);
     expect(rows).toHaveLength(2);

@@ -115,13 +115,28 @@ export function TeamDesk({
     string | null
   >(null);
 
-  // Per-conversation message fetches. When the user clicks an older
-  // conversation whose rows fell off the initial snapshot window, we
-  // load them here; SSE messages are merged on top via `allMessages`.
+  // Per-conversation message fetches. When the user clicks a conversation,
+  // we load its latest window here; SSE messages are merged on top via
+  // `allMessages`. The window expands when the user scrolls to the top of
+  // the thread (see `handleLoadOlder` below).
   const [fetchedMessages, setFetchedMessages] = useState<
     TeamActivityMessage[]
   >([]);
-  const loadedConversationIdsRef = useRef<Set<string>>(new Set());
+  // Per-conversation pagination state — the oldest message timestamp we've
+  // fetched so far (cursor) and whether the server says there are more
+  // older rows. `undefined` means "never loaded" — that's how the initial
+  // fetch effect knows to fire.
+  type ConvWindow = {
+    oldestAt: string | null;
+    hasMore: boolean;
+    loadingOlder: boolean;
+  };
+  const [convWindowMap, setConvWindowMap] = useState<
+    Record<string, ConvWindow>
+  >({});
+  // In-flight guard so a slow initial fetch doesn't get fired twice if
+  // the user hops between conversations (and so load-older can't stack).
+  const inFlightFetchRef = useRef<Set<string>>(new Set());
 
   const composerRef = useRef<StickyComposerHandle | null>(null);
 
@@ -172,17 +187,23 @@ export function TeamDesk({
   const deferredToolInputPartials = useDeferredValue(toolInputPartials);
 
   // ---------- Fetch historical messages when a conversation is focused ----------
+  // Initial fetch: load the latest window for this conversation. We pull
+  // the most recent 100 messages and let the user scroll up to load older
+  // batches via `handleLoadOlder` below. This replaces the previous
+  // "fetch ALL messages on click" behaviour, which was pleasant for short
+  // conversations but melted memory on multi-thousand-row threads.
   useEffect(() => {
     if (!selectedConversationId) return;
-    if (loadedConversationIdsRef.current.has(selectedConversationId)) return;
-
     const cid = selectedConversationId;
-    loadedConversationIdsRef.current.add(cid);
+    if (convWindowMap[cid]) return; // already loaded once
+    if (inFlightFetchRef.current.has(cid)) return;
+    inFlightFetchRef.current.add(cid);
     let cancelled = false;
 
-    fetch(`/api/team/conversations/${encodeURIComponent(cid)}/messages`, {
-      credentials: 'same-origin',
-    })
+    fetch(
+      `/api/team/conversations/${encodeURIComponent(cid)}/messages?limit=100`,
+      { credentials: 'same-origin' },
+    )
       .then(async (res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
@@ -198,6 +219,7 @@ export function TeamDesk({
           metadata: Record<string, unknown> | null;
           createdAt: string;
         }>;
+        hasMore?: boolean;
       }) => {
         if (cancelled || !Array.isArray(body.messages)) return;
         const mapped: TeamActivityMessage[] = body.messages.map((m) => ({
@@ -218,22 +240,127 @@ export function TeamDesk({
           const keep = prev.filter((m) => m.conversationId !== cid);
           return [...keep, ...mapped];
         });
+        setConvWindowMap((prev) => ({
+          ...prev,
+          [cid]: {
+            // Server returns ASC, so messages[0] is the oldest in this batch.
+            oldestAt: mapped[0]?.createdAt ?? null,
+            hasMore: Boolean(body.hasMore),
+            loadingOlder: false,
+          },
+        }));
       })
       .catch((err) => {
-        // Allow retry on next click by removing from the loaded set.
-        loadedConversationIdsRef.current.delete(cid);
+        // Don't pin convWindowMap so a retry click can re-fetch.
         toast(
           err instanceof Error
             ? `Couldn't load conversation history: ${err.message}`
             : 'Network error loading conversation history.',
           'error',
         );
+      })
+      .finally(() => {
+        inFlightFetchRef.current.delete(cid);
       });
 
     return () => {
       cancelled = true;
     };
-  }, [selectedConversationId, teamId, toast]);
+  }, [selectedConversationId, teamId, toast, convWindowMap]);
+
+  // ---------- Load older messages on scroll-up ----------
+  // Called by Conversation when the user scrolls within ~100px of the
+  // top. Pulls the next 100 rows older than `oldestAt` and prepends them
+  // into `fetchedMessages`. The conversation component captures the pre-
+  // load scroll metrics so the visible cursor doesn't jump after the
+  // prepend lands. This callback's identity is stable across renders.
+  const handleLoadOlder = useCallback(
+    (cid: string): void => {
+      const win = convWindowMap[cid];
+      if (!win || !win.hasMore || !win.oldestAt) return;
+      if (win.loadingOlder) return;
+      if (inFlightFetchRef.current.has(`older:${cid}`)) return;
+      inFlightFetchRef.current.add(`older:${cid}`);
+
+      setConvWindowMap((prev) =>
+        prev[cid]
+          ? { ...prev, [cid]: { ...prev[cid], loadingOlder: true } }
+          : prev,
+      );
+
+      fetch(
+        `/api/team/conversations/${encodeURIComponent(
+          cid,
+        )}/messages?limit=100&before=${encodeURIComponent(win.oldestAt)}`,
+        { credentials: 'same-origin' },
+      )
+        .then(async (res) => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          return res.json();
+        })
+        .then((body: {
+          messages?: Array<{
+            id: string;
+            runId: string | null;
+            fromMemberId: string | null;
+            toMemberId: string | null;
+            type: string;
+            content: string | null;
+            metadata: Record<string, unknown> | null;
+            createdAt: string;
+          }>;
+          hasMore?: boolean;
+        }) => {
+          if (!Array.isArray(body.messages)) return;
+          const mapped: TeamActivityMessage[] = body.messages.map((m) => ({
+            id: m.id,
+            runId: m.runId,
+            conversationId: cid,
+            teamId,
+            from: m.fromMemberId,
+            to: m.toMemberId,
+            type: m.type,
+            content: m.content,
+            metadata: m.metadata,
+            createdAt: m.createdAt,
+          }));
+          if (mapped.length > 0) {
+            setFetchedMessages((prev) => [...prev, ...mapped]);
+          }
+          setConvWindowMap((prev) => {
+            const cur = prev[cid];
+            if (!cur) return prev;
+            const newOldest =
+              mapped.length > 0 ? mapped[0].createdAt : cur.oldestAt;
+            return {
+              ...prev,
+              [cid]: {
+                oldestAt: newOldest,
+                hasMore: Boolean(body.hasMore),
+                loadingOlder: false,
+              },
+            };
+          });
+        })
+        .catch((err) => {
+          setConvWindowMap((prev) =>
+            prev[cid]
+              ? { ...prev, [cid]: { ...prev[cid], loadingOlder: false } }
+              : prev,
+          );
+          toast(
+            err instanceof Error
+              ? `Couldn't load older messages: ${err.message}`
+              : 'Network error loading older messages.',
+            'error',
+          );
+        })
+        .finally(() => {
+          inFlightFetchRef.current.delete(`older:${cid}`);
+        });
+    },
+    [convWindowMap, teamId, toast],
+  );
 
   // ---------- Sidebar reconciliation ----------
   // Hydrate from server props.
@@ -753,6 +880,21 @@ export function TeamDesk({
             onPrefillComposer={prefillComposer}
             onFocusComposer={focusComposer}
             focusPendingMessageId={pendingFocusMessageId}
+            hasOlder={
+              selectedConversationId
+                ? convWindowMap[selectedConversationId]?.hasMore ?? false
+                : false
+            }
+            loadingOlder={
+              selectedConversationId
+                ? convWindowMap[selectedConversationId]?.loadingOlder ?? false
+                : false
+            }
+            onLoadOlder={
+              selectedConversationId
+                ? () => handleLoadOlder(selectedConversationId)
+                : undefined
+            }
           />
         </div>
 

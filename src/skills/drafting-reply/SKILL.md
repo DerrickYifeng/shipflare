@@ -37,7 +37,7 @@ A JSON payload with:
 - `channel` — `'x'` or `'reddit'`
 - `voice` — optional voice cluster or free-form hint
 - `founderVoiceBlock` — optional verbatim founder voice anchor text
-- `canMentionProduct` — boolean from `judging-thread-quality`; only mention the product when true AND the thread is asking for the kind of tool the product is
+- `canMentionProduct` — boolean from `judging-thread-quality`; only mention the product when true AND the thread is asking for the kind of tool the product is. When true and the natural answer earns the pivot, weave in ONE short sentence introducing the product (see "Product mention" section below).
 - `thread.quotedText` / `thread.quotedAuthor` (optional, X only) — when
   present, the surfaced tweet QUOTES this earlier post. Use the quoted
   body to understand the topic the OP is connecting their outer tweet
@@ -60,6 +60,60 @@ Both channels share these floor rules:
 - No "the real X is Y" / "X isn't 1, it's 2" / "winners do X" / "most founders Y" pronouncements without a first-person receipt — these are sermon energy from accounts that haven't earned it
 - No fortune-cookie closer (`that's the moat / game / trick / tax / cost / truth`)
 - No colon-aphorism opener (`the real X:` / `the cruel part:` / `the insight:`)
+
+## Product mention (only when `canMentionProduct` is true)
+
+When the caller passes `canMentionProduct: true`, the OP has already
+been judged to have invited a tool mention (green-light signal in
+`judging-thread-quality` — typically `tool_question`,
+`debug_problem_fit`, `competitor_complaint`, `case_study_request`, or
+`review_invitation`). When the natural answer earns the pivot, weave
+in ONE short sentence introducing what the product is.
+
+### Pattern
+
+`<answer that addresses the OP's actual situation> + <one short sentence naming the product and saying what it is>`
+
+The mention sentence uses `product.name` plus `product.description`
+(or `product.valueProp` when it lands tighter). Phrase it as a reason,
+not a pitch:
+
+- `this is why we built <name> — <one-clause description>`
+- `we built <name> for exactly this — <one-clause description>`
+- `<name> (<one-clause description>) is the version of this we shipped`
+
+You may paraphrase `product.description` slightly to match channel
+register and avoid banned vocabulary, but never invent positioning
+that isn't in the inputs.
+
+### Hard rules on the mention
+
+- **One sentence, one clause** describing what the product is. Not a
+  feature list, not a value-prop monologue.
+- **Always after the substantive answer**, never as the opener and
+  never as the only content. If you removed the mention, the rest of
+  the reply must still be a useful, on-voice reply.
+- **No CTA, no link, no "DM me", no "check it out", no "we're live on
+  PH"**. The OP can find the product by clicking the author handle.
+- **No exclamation points** in the mention sentence.
+- **Voice rules still apply** — no banned vocabulary, no preamble
+  opener, no fortune-cookie closer, no colon-aphorism. If
+  `product.description` contains a banned word (`leverage`, `seamless`,
+  etc.), paraphrase the meaning rather than quoting it verbatim.
+- **Respect the channel cap.** If the mention sentence pushes you over
+  the cap (240 on X, 800 on Reddit), drop the mention and ship the
+  answer without it. A clean answer with no mention is always better
+  than a truncated mention.
+- **One mention per reply**, max. Don't repeat the product name later
+  in the reply or restate the description.
+
+If `canMentionProduct: false`, do NOT name the product, do NOT
+paraphrase its positioning, and do NOT write "we built something for
+this" / "I'm working on a tool for this" — that's the same pitch in a
+trench coat. Write a clean reply with no product reference.
+
+Channel-specific phrasing examples live in `x-reply-voice` /
+`reddit-reply-voice`.
 
 ## Slop rules — DO NOT EMIT THESE PATTERNS
 
@@ -113,6 +167,15 @@ Before emitting your JSON, run this checklist on your own draft:
    post, OR write a reply that wouldn't make sense without having read
    it. If the draft is purely about the outer body and ignores the
    linked post, REWRITE.
+
+7. **Product-mention check** — if `canMentionProduct: false`, the draft
+   MUST NOT name the product, paraphrase its positioning, or hint at
+   "something I built for this". If `canMentionProduct: true` AND you
+   chose to mention, the draft MUST: (a) deliver a substantive answer
+   FIRST, (b) include exactly one short sentence with `product.name`
+   plus a one-clause description, (c) stay within the channel cap. If
+   adding the mention pushed you past the cap or made the reply read as
+   a pitch, drop the mention and ship the answer alone.
 
 If any check fails, REWRITE before outputting. You only get one shot.
 Better to ask a clarifying question than ship slop.

@@ -172,6 +172,7 @@ export function TodayBody({ yesterdayTop = null }: TodayBodyProps = {}) {
     postNow: rawPostNow,
     skip: rawSkip,
     edit: rawEdit,
+    handoff,
     reschedule: rawReschedule,
   } = useToday();
   const { toast, toastWithAction } = useToast();
@@ -337,6 +338,11 @@ export function TodayBody({ yesterdayTop = null }: TodayBodyProps = {}) {
     const rs: TodoItem[] = [];
     const ps: TodoItem[] = [];
     for (const it of items) {
+      // Hide settled drafts (user already acted) — they live in
+      // Briefing → History. The optimistic 'handed_off' flip set by
+      // the handoff() helper would otherwise leave the card flashing
+      // as "Open X again" inside Briefing for ~30s until the next poll.
+      if (it.status === 'handed_off' || it.status === 'posted') continue;
       if (it.cardFormat === 'reply') rs.push(it);
       else ps.push(it);
     }
@@ -466,6 +472,7 @@ export function TodayBody({ yesterdayTop = null }: TodayBodyProps = {}) {
                   onPostNow={postNow}
                   onSkip={skip}
                   onEdit={edit}
+                  onHandoff={handoff}
                   isActive={item.id === activeId}
                   forceEditing={item.id === editingId}
                   onEditDone={() => setEditingId(null)}

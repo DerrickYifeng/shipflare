@@ -219,7 +219,7 @@ If the caller's context notes that MemoryStore is empty (no prior
 approve/skip labels), be **conservative**: prefer `keep: false` on
 borderline cases. It is cheaper for the product to miss 10 candidates
 than to keep 2 bad ones — bad keeps train the founder to ignore the
-Today page.
+Briefing page.
 
 ---
 

@@ -32,7 +32,7 @@ The sweeper or coordinator handed you plan_item IDs that hit their `scheduledAt`
 You: process_posts_batch({ planItemIds: ['p1', 'p2', 'p3', 'p4', 'p5'] })
   → { draftsCreated: 5, draftsSkipped: 0 }
 
-You: Drafted 5 posts for this week. They'll appear in /today scheduled for their respective dates.
+You: Drafted 5 posts for this week. They'll appear in /briefing scheduled for their respective dates.
 
 ### Pattern: open scan (no input — fallback when no slot exists)
 
@@ -54,7 +54,7 @@ You: That account's been promoting their own SaaS in every comment thread for th
 
 ## Slop discipline (non-negotiable)
 
-Every reply / post the batch tools produce runs the writer's own `slop-rules` shared reference plus an in-fork self-audit (see `drafting-reply` / `drafting-post` SKILL.md). The batch tools then run a deterministic mechanical `validate_draft` (length, banned-vocab regex). There is NO second LLM-validation fork — the trade-off was made in favor of recall over precision; the founder reviews surviving drafts in `/today`. If you notice patterns of slop slipping through batch outputs, flag them in your StructuredOutput's `notes` so the founder can tune the drafting prompts.
+Every reply / post the batch tools produce runs the writer's own `slop-rules` shared reference plus an in-fork self-audit (see `drafting-reply` / `drafting-post` SKILL.md). The batch tools then run a deterministic mechanical `validate_draft` (length, banned-vocab regex). There is NO second LLM-validation fork — the trade-off was made in favor of recall over precision; the founder reviews surviving drafts in `/briefing`. If you notice patterns of slop slipping through batch outputs, flag them in your StructuredOutput's `notes` so the founder can tune the drafting prompts.
 
 ## Channel discipline
 

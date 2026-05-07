@@ -158,15 +158,15 @@ const analyticsWorker = new Worker<AnalyticsJobData>(
   { ...BASE_OPTS, concurrency: 1 },
 );
 
-// Daily-run fan-out — single canonical entry that mirrors
-// /api/automation/run. Walks every user with a team + product and
-// enqueues one coordinator-rooted team-run with trigger='daily',
-// rooted in the per-team rolling 'Discovery' conversation. The
-// coordinator's `daily` playbook handles the per-slot
-// discovery → content-manager loop and falls back to default
-// drafting when no slots exist (shouldn't happen in practice — onboarding
-// pre-fills plan_items). The BullMQ queue name stays 'discovery-scan'
-// for Redis stability with the live repeat schedule.
+// Daily-run fan-out — sole entry point for daily automation runs.
+// Walks every user with a team + product and dispatches one daily-playbook
+// lead message via `ensureDailyRunEnqueued`, rooted in the per-team
+// rolling 'Discovery' conversation. The coordinator's `daily` playbook
+// handles the per-slot discovery → content-manager loop and falls back
+// to default drafting when no slots exist (shouldn't happen in
+// practice — onboarding pre-fills plan_items). The BullMQ queue name
+// stays 'discovery-scan' for Redis stability with the live repeat
+// schedule.
 const dailyRunWorker = new Worker<DiscoveryScanJobData>(
   'discovery-scan',
   async (job) => processDailyRunFanout(job),

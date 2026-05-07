@@ -116,7 +116,7 @@ add_plan_item({ kind: 'content_post', channel: 'x', scheduledAt: '<next-Fri 10:0
 Allocated 3 X posts for next week (Mon/Wed/Fri, aligned to your three
 active pillars). The sweeper will hand each row to your
 social-media-manager as its `scheduledAt` lands — drafts appear in
-/today automatically.
+/briefing automatically.
 
 ## Example 4 — Live platform search for reply targets (social-media-manager)
 
@@ -135,7 +135,7 @@ across discovery-agent + content-manager; collapsed into one as of
 Plan 3.
 
 For an ad-hoc "find 3 today" ask, one spawn produces both: queued
-candidates AND drafts. Founder reviews everything in /today.
+candidates AND drafts. Founder reviews everything in /briefing.
 </thinking>
 
 Task({

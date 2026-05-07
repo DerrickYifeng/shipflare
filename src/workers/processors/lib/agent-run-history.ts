@@ -12,7 +12,13 @@
 // Mapping to Anthropic.Messages.MessageParam:
 //   - fromAgentId === self → role: 'assistant' (the agent's prior turn)
 //   - toAgentId === self   → role: 'user'      (an incoming message)
-//   - rows with null content are skipped (no transcript text to replay)
+//   - rows with null OR empty/whitespace content are skipped. The
+//     Anthropic API rejects `{role:'user', content:''}` with a 400
+//     "messages.N: user messages must have non-empty content", so a
+//     stray blank row in team_messages would otherwise wedge the agent.
+//     The root-cause writer (most likely a synthesized notification or
+//     SendMessage with an empty string body) should be hardened
+//     separately; this guard keeps the worker resilient.
 
 import type Anthropic from '@anthropic-ai/sdk';
 import { and, asc, eq, isNotNull, or } from 'drizzle-orm';
@@ -55,6 +61,11 @@ export async function loadAgentRunHistory(
   const messages: Anthropic.Messages.MessageParam[] = [];
   for (const row of rows) {
     if (row.content === null) continue;
+    // Anthropic rejects empty user messages with a 400. Treat
+    // whitespace-only content as "no transcript to replay" too — there's
+    // nothing for the model to reason against and replaying it would
+    // wedge the worker.
+    if (row.content.trim().length === 0) continue;
     const role: 'assistant' | 'user' =
       row.fromAgentId === agentId ? 'assistant' : 'user';
     messages.push({ role, content: row.content });

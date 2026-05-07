@@ -5,7 +5,8 @@ import { usePathname } from 'next/navigation';
 import type { CSSProperties } from 'react';
 
 const TABS: ReadonlyArray<{ label: string; href: string; matchPrefix: string }> = [
-  { label: 'Today', href: '/briefing', matchPrefix: '/briefing' },
+  { label: 'Briefing', href: '/briefing', matchPrefix: '/briefing' },
+  { label: 'History', href: '/briefing/history', matchPrefix: '/briefing/history' },
   { label: 'Plan', href: '/briefing/plan', matchPrefix: '/briefing/plan' },
 ];
 
