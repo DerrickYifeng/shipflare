@@ -35,6 +35,8 @@ import {
 } from '@/skills/judging-thread-quality/schema';
 import { MemoryStore } from '@/memory/store';
 import { createLogger } from '@/lib/logger';
+import { listRecentEngagedAuthors } from '@/lib/reply-throttle';
+import { getReplyAuthorCooldownDays } from '@/lib/platform-config';
 
 const log = createLogger('tool:find_threads_via_xai');
 
@@ -160,6 +162,7 @@ export function buildFirstTurnMessage(
   rubric: string,
   intent: string | undefined,
   maxResults: number,
+  excludeAuthors: readonly string[],
 ): string {
   const keywords =
     product.keywords.length > 0 ? product.keywords.join(', ') : '(none)';
@@ -167,6 +170,20 @@ export function buildFirstTurnMessage(
   const rubricSection = rubric
     ? `\nICP RUBRIC (from onboarding)\n${rubric}\n`
     : '';
+
+  const PROMPT_AUTHOR_LIMIT = 50;
+  const trimmed = excludeAuthors.slice(0, PROMPT_AUTHOR_LIMIT);
+  const tail =
+    excludeAuthors.length > PROMPT_AUTHOR_LIMIT
+      ? ' and others — when in doubt, skip authors that look like our prior reply targets'
+      : '';
+  const excludeLine =
+    trimmed.length > 0
+      ? `- Do NOT surface tweets authored by: ${trimmed
+          .map((h) => '@' + h)
+          .join(', ')}${tail}. We have already engaged with them recently and another reply would feel like reply-guy harassment.`
+      : '';
+
   return [
     "I'm looking for X/Twitter posts where potential customers of my product",
     'are publicly expressing problems the product solves.',
@@ -181,6 +198,7 @@ export function buildFirstTurnMessage(
     'Constraints',
     '- Posted in last 7 days',
     `- Up to ${maxResults * 2} candidates this pass — quality over quota`,
+    ...(excludeLine ? [excludeLine] : []),
     '- For each tweet include: url, author_username, author_bio, author_followers,',
     '  body, posted_at, likes_count, reposts_count, replies_count, views_count,',
     '  is_repost, original_url, original_author_username, surfaced_via,',
@@ -209,6 +227,7 @@ export function buildFirstTurnMessage(
 export function composeRefinementMessage(
   rejectionSignals: Map<string, number>,
   strongUrls: string[],
+  excludeAuthors: readonly string[],
 ): string {
   const top = [...rejectionSignals.entries()]
     .sort((a, b) => b[1] - a[1])
@@ -220,10 +239,19 @@ export function composeRefinementMessage(
     strongUrls.length > 0
       ? `Find more like ${strongUrls.slice(0, 2).join(' / ')}.`
       : '';
+  const REFINEMENT_AUTHOR_LIMIT = 10;
+  const skipReminder =
+    excludeAuthors.length > 0
+      ? `Still skip ${excludeAuthors
+          .slice(0, REFINEMENT_AUTHOR_LIMIT)
+          .map((h) => '@' + h)
+          .join(', ')}.`
+      : '';
   return [
     `Found ${strongUrls.length} strong matches.`,
     nudges.length > 0 ? `Refine: ${nudges.join('; ')}.` : '',
     followLike,
+    skipReminder,
   ]
     .filter(Boolean)
     .join(' ');
@@ -355,6 +383,22 @@ export const findThreadsViaXaiTool = buildTool({
 
     const rubric = await loadRubric(userId, productId);
 
+    let excludeAuthors: string[] = [];
+    try {
+      excludeAuthors = await listRecentEngagedAuthors(db, {
+        userId,
+        platform: 'x',
+        withinDays: getReplyAuthorCooldownDays('x'),
+        limit: 80, // headroom over the prompt cap of 50; refinement caps at 10
+      });
+    } catch (err) {
+      log.warn(
+        `reply-throttle list fetch failed; proceeding without exclude list: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+
     const productContext = {
       name: product.name,
       description: product.description,
@@ -373,6 +417,7 @@ export const findThreadsViaXaiTool = buildTool({
           rubric,
           input.intent,
           maxResults,
+          excludeAuthors,
         ),
       },
     ];
@@ -470,6 +515,7 @@ export const findThreadsViaXaiTool = buildTool({
         const refinement = composeRefinementMessage(
           accumulatedRejectionSignals,
           [...strong.values()].map((j) => j.tweet.url),
+          excludeAuthors,
         );
         messages.push({
           role: 'user',
@@ -570,6 +616,7 @@ export const findThreadsViaXaiTool = buildTool({
       const refinement = composeRefinementMessage(
         accumulatedRejectionSignals,
         [...strong.values()].map((j) => j.tweet.url),
+        excludeAuthors,
       );
       messages.push({
         role: 'user',

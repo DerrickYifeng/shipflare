@@ -98,6 +98,12 @@ export interface PlatformConfig {
   externalIdPattern?: RegExp;
   /** Builds a user-facing URL for a piece of content on this platform. */
   buildContentUrl?: (username: string, contentId: string) => string;
+  /**
+   * Cooldown in days within which we will NOT draft another reply to the
+   * same external author (`threads.author`). Backs the throttle in
+   * `find_threads` + `draft_reply`. Set to 0 to disable. Default 7.
+   */
+  replyAuthorCooldownDays?: number;
   /** Pacing config for the direct API posting path. Optional — platforms
    *  without a posting code path (e.g. read-only sources) leave it unset. */
   posting?: PostingConfig;
@@ -113,6 +119,7 @@ export const PLATFORMS: Record<string, PlatformConfig> = {
     sourceLabel: 'subreddit',
     sourcePrefix: 'r/',
     replyWindowMinutes: 60,
+    replyAuthorCooldownDays: 7,
     maxCharLength: { post: 40_000, reply: 10_000 },
     charLimit: 10_000,
     supportsAnonymousRead: true,
@@ -136,6 +143,7 @@ export const PLATFORMS: Record<string, PlatformConfig> = {
     envGuard: 'XAI_API_KEY',
     sourceLabel: 'topic',
     replyWindowMinutes: 15,
+    replyAuthorCooldownDays: 7,
     // Both posts and replies share X's 280-char platform cap. Twitter
     // applies weighted counting (URLs = 23, emoji = 2, CJK = 2) — the
     // length validator uses `twitter-text.parseTweet` so this number is
@@ -220,4 +228,13 @@ export function buildContentUrl(
 ): string {
   const config = PLATFORMS[platform];
   return config?.buildContentUrl?.(username, contentId) ?? contentId;
+}
+
+/**
+ * Per-platform author-cooldown window in days. Falls back to 7 days when a
+ * platform leaves it unset.
+ */
+export function getReplyAuthorCooldownDays(platform: string): number {
+  const config = PLATFORMS[platform];
+  return config?.replyAuthorCooldownDays ?? 7;
 }

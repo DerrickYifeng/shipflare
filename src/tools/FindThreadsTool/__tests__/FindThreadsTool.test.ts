@@ -25,7 +25,7 @@ vi.mock('@/lib/logger', () => ({
 }));
 
 import { findThreadsTool } from '../FindThreadsTool';
-import { threads } from '@/lib/db/schema';
+import { drafts, threads } from '@/lib/db/schema';
 
 interface ThreadRow {
   id: string;
@@ -186,6 +186,110 @@ describe('findThreadsTool', () => {
     const row = result.threads.find((r) => r.threadId === 't-legacy-1');
     expect(row?.authorBio).toBeNull();
     expect(row?.authorFollowers).toBeNull();
+  });
+
+  it('excludes threads from authors replied to within the cooldown window', async () => {
+    const NOW = new Date('2026-05-05T12:00:00Z');
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+
+    const recent = new Date(NOW.getTime() - 2 * 86_400_000);
+    const USER = 'user-1';
+
+    // Build thread rows directly so we can control author + discoveredAt.
+    store.register<ThreadRow>(threads, [
+      {
+        id: 't_alice_old',
+        userId: USER,
+        externalId: 'e1',
+        platform: 'x',
+        community: '@x',
+        title: 'alice old',
+        url: 'https://x.com/alice/1',
+        body: null,
+        author: 'alice',
+        authorBio: null,
+        authorFollowers: null,
+        upvotes: null,
+        commentCount: null,
+        scoutConfidence: 0.9,
+        postedAt: null,
+        discoveredAt: NOW,
+        canMentionProduct: null,
+        mentionSignal: null,
+      },
+      {
+        id: 't_alice_new',
+        userId: USER,
+        externalId: 'e2',
+        platform: 'x',
+        community: '@x',
+        title: 'alice new',
+        url: 'https://x.com/alice/2',
+        body: null,
+        author: 'alice',
+        authorBio: null,
+        authorFollowers: null,
+        upvotes: null,
+        commentCount: null,
+        scoutConfidence: 0.9,
+        postedAt: null,
+        discoveredAt: NOW,
+        canMentionProduct: null,
+        mentionSignal: null,
+      },
+      {
+        id: 't_bob',
+        userId: USER,
+        externalId: 'e3',
+        platform: 'x',
+        community: '@x',
+        title: 'bob',
+        url: 'https://x.com/bob/1',
+        body: null,
+        author: 'bob',
+        authorBio: null,
+        authorFollowers: null,
+        upvotes: null,
+        commentCount: null,
+        scoutConfidence: 0.9,
+        postedAt: null,
+        discoveredAt: NOW,
+        canMentionProduct: null,
+        mentionSignal: null,
+      },
+    ]);
+
+    store.tables.set(drafts, [
+      {
+        id: 'd_alice_old',
+        userId: USER,
+        threadId: 't_alice_old',
+        status: 'posted',
+        draftType: 'reply',
+        replyBody: 'hello alice',
+        confidenceScore: 0.5,
+        whyItWorks: null,
+        ftcDisclosure: null,
+        reviewVerdict: null,
+        reviewScore: null,
+        reviewJson: null,
+        engagementDepth: 0,
+        planItemId: null,
+        media: [],
+        postTitle: null,
+        createdAt: recent,
+        updatedAt: recent,
+      },
+    ] as never);
+
+    const ctx = makeCtx(store, { userId: USER, productId: 'prod-1' });
+    const out = await findThreadsTool.execute({ platforms: ['x'] }, ctx);
+
+    const ids = out.threads.map((t) => t.threadId).sort();
+    expect(ids).toEqual(['t_bob']);
+
+    vi.useRealTimers();
   });
 
   it('serializes Date fields as ISO strings', async () => {

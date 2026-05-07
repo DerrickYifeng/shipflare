@@ -46,6 +46,7 @@ interface BatchItemResult {
     | 'persisted'
     | 'rejected_mechanical'
     | 'skipped_legacy_unjudged'
+    | 'skipped_author_throttled'
     | 'errored';
   reason?: string;
 }
@@ -230,8 +231,8 @@ async function processOne(
     };
   }
 
-  // Step 3: persist
-  await draftReplyTool.execute(
+  // Step 3: persist (or skip if last-mile throttle trips)
+  const persisted = await draftReplyTool.execute(
     {
       threadId: thread.id,
       draftBody: draft.draftBody,
@@ -240,6 +241,13 @@ async function processOne(
     },
     ctx,
   );
+  if (persisted.skipped) {
+    return {
+      threadId: thread.id,
+      status: 'skipped_author_throttled',
+      reason: `author=${persisted.author ?? 'unknown'}`,
+    };
+  }
   return {
     threadId: thread.id,
     status: 'persisted',

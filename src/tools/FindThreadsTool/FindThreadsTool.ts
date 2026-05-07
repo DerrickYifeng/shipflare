@@ -22,7 +22,12 @@ import { and, desc, eq, gte, inArray } from 'drizzle-orm';
 import { buildTool } from '@/core/tool-system';
 import type { ToolDefinition } from '@/core/types';
 import { threads } from '@/lib/db/schema';
+import { createLogger } from '@/lib/logger';
+import { getReplyAuthorCooldownDays } from '@/lib/platform-config';
+import { listRecentEngagedAuthors } from '@/lib/reply-throttle';
 import { readDomainDeps } from '@/tools/context-helpers';
+
+const log = createLogger('tool:find_threads');
 
 export const FIND_THREADS_TOOL_NAME = 'find_threads';
 
@@ -126,8 +131,42 @@ export const findThreadsTool: ToolDefinition<FindThreadsInput, { threads: Thread
         .orderBy(desc(threads.scoutConfidence), desc(threads.discoveredAt))
         .limit(limit * 2); // over-fetch so we can filter client-side
 
-      const kept = rows
-        .filter((r) => (r.scoutConfidence ?? 0) >= minRelevance)
+      const candidates = rows
+        .filter((r) => (r.scoutConfidence ?? 0) >= minRelevance);
+
+      // Author-reply throttle. Group candidates by platform so each
+      // platform applies its own cooldown window. ONE listing query per
+      // platform — never per-candidate (the N+1 trap).
+      const candidatePlatforms = new Set(candidates.map((c) => c.platform));
+      const blockedAuthorsByPlatform = new Map<string, Set<string>>();
+      for (const platform of candidatePlatforms) {
+        const cooldown = getReplyAuthorCooldownDays(platform);
+        try {
+          const list = await listRecentEngagedAuthors(db, {
+            userId,
+            platform,
+            withinDays: cooldown,
+            // Cap generously — the throttle truncation point is the prompt
+            // budget in find_threads_via_xai (Task 5), not here.
+            limit: 1000,
+          });
+          blockedAuthorsByPlatform.set(platform, new Set(list));
+        } catch (err) {
+          log.warn(
+            `reply-throttle list fetch failed for platform ${platform}; proceeding without exclude list: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+          blockedAuthorsByPlatform.set(platform, new Set());
+        }
+      }
+
+      const kept = candidates
+        .filter((c) => {
+          const blocked = blockedAuthorsByPlatform.get(c.platform);
+          if (!blocked) return true;
+          return c.author === null || !blocked.has(c.author);
+        })
         .slice(0, limit);
 
       const out: ThreadRow[] = kept.map((r) => ({

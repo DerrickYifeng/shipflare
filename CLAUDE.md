@@ -72,8 +72,36 @@ When adding a new channel (e.g., LinkedIn):
       array in its `src/skills/_catalog.ts` entry so the tactical planner
       selects it for plan items with `channel: '<new>'`.
 - [ ] Update `allowed-tools` in relevant SKILL.md frontmatters
+- [ ] Set `replyAuthorCooldownDays` in `PLATFORMS[id]` (omit to inherit 7-day default)
 - [ ] NO changes needed to: skill-runner, swarm, query-loop, schemas, core agent .md files,
       `full-scan.ts`, `discovery.ts`, `posting.ts`, or `/api/automation/run`
+
+### Author-Level Reply Throttle
+
+ShipFlare does not draft a second reply to the same external author
+within `replyAuthorCooldownDays` (default 7d, set per-platform in
+`src/lib/platform-config.ts`). Three layers enforce this; all call
+helpers in `src/lib/reply-throttle.ts`:
+
+1. **`find_threads_via_xai`** injects an exclude-authors list into
+   Grok's first-turn search prompt and refinement messages, so xAI
+   doesn't even surface tweets from authors we've engaged with. Uses
+   `listRecentEngagedAuthors()`.
+2. **`find_threads`** filters the inbox at discovery time so the agent
+   never sees throttled authors. Uses `hasRecentReplyToAuthor()`.
+3. **`draft_reply`** re-checks before INSERT and returns
+   `{ skipped: true, reason: 'author_throttled', ... }` instead of
+   creating a row. Catches plan-execute / resumed-sweep paths. Uses
+   `hasRecentReplyToAuthor()`.
+
+Statuses that count as "we engaged": `pending | approved | posted |
+handed_off`. Statuses that don't (no contact made): `skipped | failed |
+flagged | needs_revision`.
+
+When adding a new platform, set `replyAuthorCooldownDays` in its
+`PLATFORMS[id]` entry (omit to inherit the 7-day default). To extend
+the rule (e.g. include reactions/likes, not just replies), update
+`src/lib/reply-throttle.ts` — that file is the single source of truth.
 
 ### Skill Pattern (Reference Design)
 
