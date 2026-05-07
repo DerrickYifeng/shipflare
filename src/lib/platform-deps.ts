@@ -84,8 +84,8 @@ export function createClientFromChannel(
   platform: string,
   channel: {
     id: string;
-    oauthTokenEncrypted: string;
-    refreshTokenEncrypted: string;
+    oauthTokenEncrypted: string | null;
+    refreshTokenEncrypted: string | null;
     tokenExpiresAt: Date | null;
   },
 ): RedditClient | XClient | null {

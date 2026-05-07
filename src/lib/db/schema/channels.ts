@@ -25,8 +25,12 @@ export const channels = pgTable(
       .references(() => users.id, { onDelete: 'cascade' }),
     platform: text('platform').notNull().default('reddit'),
     username: text('username').notNull(),
-    oauthTokenEncrypted: text('oauth_token_encrypted').notNull(),
-    refreshTokenEncrypted: text('refresh_token_encrypted').notNull(),
+    // Nullable to support handoff-mode platforms (e.g. Reddit, where
+    // ShipFlare uses appOnly() reads + clipboard handoff for posting and
+    // never holds the founder's OAuth token). X / future OAuth-required
+    // platforms continue to populate both columns.
+    oauthTokenEncrypted: text('oauth_token_encrypted'),
+    refreshTokenEncrypted: text('refresh_token_encrypted'),
     tokenExpiresAt: timestamp('token_expires_at', { mode: 'date' }),
     createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),

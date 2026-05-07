@@ -99,13 +99,27 @@ export class RedditClient {
 
   /**
    * Create a RedditClient from a channel database record.
+   *
+   * Token columns are nullable in the schema (handoff-mode rows have no
+   * OAuth token; ShipFlare uses `appOnly()` for reads + clipboard handoff
+   * for writes). A handoff-mode channel must NOT reach this constructor —
+   * callers gate by checking `oauthTokenEncrypted` themselves and route
+   * to `appOnly()` instead. Calling `fromChannel` with null tokens throws
+   * so the gap is loud rather than silently producing a broken client.
+   * Task 4d (per the 2026-05-07 reddit-channel-handoff plan) makes the
+   * routing decision the responsibility of `platform-deps.ts`.
    */
   static fromChannel(channel: {
     id: string;
-    oauthTokenEncrypted: string;
-    refreshTokenEncrypted: string;
+    oauthTokenEncrypted: string | null;
+    refreshTokenEncrypted: string | null;
     tokenExpiresAt: Date | null;
   }): RedditClient {
+    if (!channel.oauthTokenEncrypted || !channel.refreshTokenEncrypted) {
+      throw new Error(
+        `RedditClient.fromChannel: channel ${channel.id} has no OAuth tokens (handoff-mode). Use RedditClient.appOnly() for reads.`,
+      );
+    }
     return new RedditClient(
       channel.id,
       channel.oauthTokenEncrypted,

@@ -11,7 +11,7 @@
  * `--commit` to actually write.
  */
 import 'dotenv/config';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, or, isNotNull } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import { accounts } from '@/lib/db/schema';
 import { encrypt, isEncrypted } from '@/lib/encryption';
@@ -20,7 +20,20 @@ const TOKEN_FIELDS = ['access_token', 'refresh_token', 'id_token'] as const;
 
 async function main() {
   const commit = process.argv.includes('--commit');
-  const rows = await db.select().from(accounts);
+  // Skip rows that have nothing to encrypt at the SQL layer instead of
+  // round-tripping every account through JS. Token columns are nullable
+  // (Auth.js Drizzle shape — see schema/users.ts) so a row with all
+  // three NULL contributes no work.
+  const rows = await db
+    .select()
+    .from(accounts)
+    .where(
+      or(
+        isNotNull(accounts.access_token),
+        isNotNull(accounts.refresh_token),
+        isNotNull(accounts.id_token),
+      ),
+    );
 
   let scanned = 0;
   let updated = 0;
