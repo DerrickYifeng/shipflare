@@ -1,8 +1,8 @@
 // Schema + loader smoke tests for the allocating-plan-items fork-mode
 // skill. The skill receives the strategic_path + this week's signals
-// (stalled items, last-week completions, recent milestones, X timeline
-// snapshots) and emits a JSON array of plan_item rows for the next 7
-// days. Pure transformation — no DB, no writes.
+// (stalled items, last-week completions, recent code changes, X
+// timeline snapshots) and emits a JSON array of plan_item rows for
+// the next 7 days. Pure transformation — no DB, no writes.
 
 import { describe, it, expect } from 'vitest';
 import * as path from 'node:path';
@@ -27,7 +27,7 @@ describe('allocating-plan-items schema', () => {
         signals: {
           stalledItems: [],
           lastWeekCompletions: [],
-          recentMilestones: [],
+          recentCodeChanges: [],
         },
         connectedChannels: ['x', 'reddit'],
         targetWeekStart: '2026-05-04',
@@ -56,7 +56,7 @@ describe('allocating-plan-items schema', () => {
       signals: {
         stalledItems: [{ id: 'plan_1', title: 'shipped feature' }],
         lastWeekCompletions: [{ id: 'plan_2', title: 'old post' }],
-        recentMilestones: [{ title: 'launched v1', source: 'release' }],
+        recentCodeChanges: [{ title: 'launched v1', source: 'release' }],
         recentXPosts: [{ body: 'shipped pricing today', metrics: { likes: 12 } }],
       },
       connectedChannels: ['x', 'email'],
@@ -70,7 +70,7 @@ describe('allocating-plan-items schema', () => {
   it('rejects an input missing required fields', () => {
     expect(() =>
       allocatingPlanItemsInputSchema.parse({
-        signals: { stalledItems: [], lastWeekCompletions: [], recentMilestones: [] },
+        signals: { stalledItems: [], lastWeekCompletions: [], recentCodeChanges: [] },
         connectedChannels: ['x'],
         targetWeekStart: '2026-05-04',
       }),

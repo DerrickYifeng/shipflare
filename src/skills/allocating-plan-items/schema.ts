@@ -1,13 +1,13 @@
 // allocating-plan-items skill — input + output schemas.
 //
 // The skill is the pure-transformation core that the multi-turn
-// content-planner agent calls once per week. The agent gathers signals
+// coordinator agent calls once per week. The agent gathers signals
 // (strategic_path, stalled items, last-week completions, recent
-// milestones, last-14-days X posts) using its own tool calls, packages
-// them into the input below, and the skill returns the week's
-// plan_items + a list of stalled rows to reschedule. The agent then
-// persists by calling `add_plan_item` / `update_plan_item` on each
-// returned entry.
+// code changes, last-14-days X posts) using its own tool calls,
+// packages them into the input below, and the skill returns the
+// week's plan_items + a list of stalled rows to reschedule. The agent
+// then persists by calling `add_plan_item` / `update_plan_item` on
+// each returned entry.
 //
 // Mirrors the planner-visible subset of `plan_items` — `kind`, `phase`,
 // `userAction`, `channel`, `scheduledAt`, `skillName`, `params`,
@@ -74,8 +74,8 @@ const signalsInputSchema = z.object({
   stalledItems: z.array(z.unknown()).default([]),
   /** `query_last_week_completions` output — finished items + engagement. */
   lastWeekCompletions: z.array(z.unknown()).default([]),
-  /** `query_recent_milestones` output — last 14 days of shipping signals. */
-  recentMilestones: z.array(z.unknown()).default([]),
+  /** `query_code_changes` output — commits in the past N days. */
+  recentCodeChanges: z.array(z.unknown()).default([]),
   /** Optional `query_recent_x_posts` output — drives metaphor_ban. */
   recentXPosts: z.array(z.unknown()).optional(),
 });

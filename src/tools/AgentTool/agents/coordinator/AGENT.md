@@ -11,6 +11,7 @@ tools:
   - query_plan_items
   - query_strategic_path
   - generate_strategic_path
+  - query_code_changes
   - add_plan_item
   - update_plan_item
   - StructuredOutput

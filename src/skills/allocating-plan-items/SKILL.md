@@ -1,6 +1,6 @@
 ---
 name: allocating-plan-items
-description: Given an active strategic_path and this week's signals (stalled items, last-week completions, recent milestones, recent X posts, connected channels), allocate plan_items for the coming 7 days with scheduledAt timestamps. Pure transformation — does not query the DB, does not write plan_items. The caller (content-planner agent) handles signal gathering and persistence.
+description: Given an active strategic_path and this week's signals (stalled items, last-week completions, recent code changes, recent X posts, connected channels), allocate plan_items for the coming 7 days with scheduledAt timestamps. Pure transformation — does not query the DB, does not write plan_items. The caller (coordinator agent) handles signal gathering and persistence.
 context: fork
 model: claude-sonnet-4-6
 maxTurns: 1
@@ -27,7 +27,7 @@ proceeding. Expected fields:
 - `strategicPath` — `{ thesis, phase, contentPillars, channelMix, thesisArc?, milestones?, phaseGoals? }`.
 - `signals.stalledItems` — last week's `planned`-but-undone items.
 - `signals.lastWeekCompletions` — last week's finished items + metrics.
-- `signals.recentMilestones` — last 14 days of shipping signals.
+- `signals.recentCodeChanges` — commits in the past N days.
 - `signals.recentXPosts` — optional 14-day X timeline snapshot.
 - `connectedChannels` — connected channels (`['x']`, `['x', 'email']`, …).
 - `targetWeekStart` — Monday 00:00 UTC of the week to plan (ISO).

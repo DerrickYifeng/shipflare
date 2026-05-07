@@ -29,7 +29,7 @@ The skill input carries:
 - `signals.stalledItems` — last week's `planned`-but-undone items.
 - `signals.lastWeekCompletions` — last week's finished items with their
   engagement metrics (where available).
-- `signals.recentMilestones` — last 14 days of shipping signals.
+- `signals.recentCodeChanges` — commits in the past N days.
 - `signals.recentXPosts` — last 14 days of the founder's X timeline,
   when available; absent or empty when the user has no X channel or
   the timeline is empty.
@@ -268,7 +268,7 @@ rather than stamping a duplicate). Report the count in your `notes`.
 
 ## When inputs are thin
 
-- `signals.recentMilestones: []` — still allocate the full `channelMix`
+- `signals.recentCodeChanges: []` — still allocate the full `channelMix`
   cadence. Pillars rotate without a fresh ship story.
 - `signals.stalledItems: [...]` — do NOT auto-reschedule everything;
   prefer writing a short `notes` line flagging them.

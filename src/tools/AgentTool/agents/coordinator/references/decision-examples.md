@@ -175,3 +175,14 @@ up at scheduledAt — it'll batch into a `process_posts_batch` run.
 Only spawn social-media-manager directly when the founder wants it
 drafted RIGHT NOW (move scheduledAt forward instead, OR spawn with
 `Mode: process-posts-batch / planItemIds: [<id>]` for a one-off).
+
+### Weekly tactical replan (trigger=weekly_replan)
+
+Before seeding plan_items via `add_plan_item`:
+
+1. Call `query_strategic_path({ pathId: <strategicPathId from goal preamble> })` to read the active arc + thesisArc[currentWeek].
+2. Call `query_code_changes({ sinceISO: <last Monday>, untilISO: <this Monday> })` to see what shipped in the past week. The result threads into `allocating-plan-items` as `signals.recentCodeChanges`. If the tool returns `is_error: true` (no repo connected, GitHub disconnected, clone failed), proceed with `recentCodeChanges: []` — the replan still ships, just without code-change context.
+3. Call `query_stalled_items` and `query_last_week_completions` for the other signals.
+4. Dispatch the `allocating-plan-items` skill with the gathered signals, then INSERT the returned plan_items via `add_plan_item`.
+
+For onboarding (trigger=onboarding) and phase change (trigger=phase_transition), `query_code_changes` is NOT useful — onboarding has no shipping history yet, and phase changes are about new direction not retro. Skip the call in those branches.
