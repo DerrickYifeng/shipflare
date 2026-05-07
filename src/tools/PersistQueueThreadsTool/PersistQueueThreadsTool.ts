@@ -143,11 +143,11 @@ function mapRedditCandidate(
     scoutReason: t.reason,
     postedAt: t.posted_at ? new Date(t.posted_at) : null,
     state: 'queued',
-    // Engagement columns: Reddit surfaces score (= upvotes), num_comments,
-    // num_crossposts. Map score → upvotes (legacy) AND likesCount (X
-    // semantic equivalence so cross-platform UI logic can read one
-    // column). num_crossposts → repostsCount. num_comments →
-    // repliesCount. viewsCount unavailable on Reddit's web_search.
+    // Engagement columns: Reddit's primary engagement signal is `score`
+    // (net upvotes) which we store in `upvotes` (above). likesCount and
+    // viewsCount are X-only and stay null on Reddit rows — cross-platform
+    // UI should read `upvotes` for Reddit and `likesCount` for X.
+    // num_crossposts → repostsCount; num_comments → repliesCount.
     likesCount: null,
     repostsCount: t.num_crossposts,
     repliesCount: t.num_comments,
