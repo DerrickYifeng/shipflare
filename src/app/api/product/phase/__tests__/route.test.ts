@@ -188,10 +188,16 @@ describe('POST /api/product/phase', () => {
   it('dispatches a lead message on success and returns { runId, phase, itemsSuperseded }', async () => {
     supersededIds = [{ id: 's1' }, { id: 's2' }, { id: 's3' }];
     const { POST } = await import('../route');
+    // Compute launchDate ~3 weeks out from "today" so the test doesn't
+    // decay as wall-clock time advances. derivePhase bands launching
+    // by daysToLaunch: <=7 momentum, <=28 audience, otherwise foundation.
+    const launchDate = new Date(
+      Date.now() + 21 * 24 * 60 * 60 * 1000,
+    ).toISOString();
     const res = await POST(
       makeReq({
         state: 'launching',
-        launchDate: '2026-05-14T00:00:00.000Z',
+        launchDate,
         launchedAt: null,
       }),
     );
@@ -219,11 +225,16 @@ describe('POST /api/product/phase', () => {
 
   it('passes the product name + phase + channels into the coordinator goal', async () => {
     const { POST } = await import('../route');
+    // launchedAt 14d ago keeps daysSince well under the 30-day compound
+    // boundary; computed from now so the fixture doesn't decay.
+    const launchedAt = new Date(
+      Date.now() - 14 * 24 * 60 * 60 * 1000,
+    ).toISOString();
     await POST(
       makeReq({
         state: 'launched',
         launchDate: null,
-        launchedAt: '2026-04-07T00:00:00.000Z',
+        launchedAt,
       }),
     );
     const goal = dispatchLeadMessageMock.mock.calls[0]?.[0]?.goal as string;
@@ -236,10 +247,13 @@ describe('POST /api/product/phase', () => {
 
   it('dispatches with a publicSummary that excludes architecture details', async () => {
     const { POST } = await import('../route');
+    const launchDate = new Date(
+      Date.now() + 21 * 24 * 60 * 60 * 1000,
+    ).toISOString();
     await POST(
       makeReq({
         state: 'launching',
-        launchDate: '2026-05-14T00:00:00.000Z',
+        launchDate,
         launchedAt: null,
       }),
     );
