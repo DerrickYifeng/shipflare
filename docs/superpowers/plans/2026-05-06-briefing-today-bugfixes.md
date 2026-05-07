@@ -2,9 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Fix four lifecycle bugs in `/briefing` (formerly `/today`): skip-on-reply 404s, posts don't appear in History, old reply drafts don't age out, and a likely-derivative bug where edit-then-send-reply ends up in X Drafts.
+**Goal:** Fix three lifecycle bugs in `/briefing` (formerly `/today`): skip-on-reply 404s, posts don't appear in History, and old reply drafts don't age out.
 
-**Architecture:** All four bugs share the same architectural root: the `/today` feed merges two data sources (`plan_items` and `drafts`) but several lifecycle paths only handle one side. f7ab610 fixed edit; this plan finishes the audit by giving skip a drafts fallback (Task 1), giving stale-sweeper drafts coverage (Task 2), giving history a plan_items branch (Task 3), and using post-deploy observation to confirm Task 2 also resolves the edit-then-send bug (Task 4).
+**Architecture:** All three bugs share the same architectural root: the `/today` feed merges two data sources (`plan_items` and `drafts`) but several lifecycle paths only handle one side. f7ab610 fixed edit; this plan finishes the audit by giving skip a drafts fallback (Task 1), giving stale-sweeper drafts coverage (Task 2), and giving history a plan_items branch (Task 3).
+
+A fourth bug ("edit-then-send-reply landed as standalone tweet, not threaded reply") was triaged on the same day and confirmed as Symptom B (`in_reply_to` lost from xIntentUrl). Other replies in the same session worked, so it's intermittent and not currently reproducible. Deferred — see auto-memory `project_deferred_bug_in_reply_to_drop.md` for repro hints if it recurs.
 
 **Tech Stack:** Next.js App Router (Route Handlers), Drizzle ORM (Postgres), Vitest, BullMQ workers.
 
@@ -14,10 +16,9 @@
 
 | Bug | Root cause | File of truth |
 |---|---|---|
-| 3. Skip on reply → `not_found` | `skip` route only calls `findOwnedPlanItem`; no drafts fallback. id is a `drafts.id` for reply cards | `src/app/api/today/[id]/skip/route.ts:39-45` |
-| 4. 2d+ old replies still in Today | `stale-sweeper` only marks `plan_items` stale; never sweeps `drafts` | `src/workers/processors/stale-sweeper.ts` (no drafts code at all) |
-| 2. Sent posts not in History | History API only queries `drafts` (`status IN handed_off, posted`); never queries completed `plan_items` | `src/app/api/briefing/history/route.ts` (file's own comment: "v1 = replies only") |
-| 1. Edit-then-send-reply → X Drafts | **Hypothesis** (Task 4): user is sending a >24h-old reply whose target tweet has been deleted/hidden, X compose silently drops to Drafts. Fixing Bug 4 (auto-skip drafts older than 24h) prevents the precondition | n/a |
+| Skip on reply → `not_found` | `skip` route only calls `findOwnedPlanItem`; no drafts fallback. id is a `drafts.id` for reply cards | `src/app/api/today/[id]/skip/route.ts:39-45` |
+| 2d+ old replies still in Today | `stale-sweeper` only marks `plan_items` stale; never sweeps `drafts` | `src/workers/processors/stale-sweeper.ts` (no drafts code at all) |
+| Sent posts not in History | History API only queries `drafts` (`status IN handed_off, posted`); never queries completed `plan_items` | `src/app/api/briefing/history/route.ts` (file's own comment: "v1 = replies only") |
 
 ---
 
@@ -30,9 +31,7 @@
 - `src/workers/processors/__tests__/stale-sweeper.test.ts` — add drafts cases (Task 2)
 - `src/app/api/briefing/history/route.ts` — add plan_items query + projection (Task 3)
 - `src/app/api/briefing/history/__tests__/route.test.ts` — add post-row case (Task 3)
-- `docs/superpowers/notes/` — observation note from Task 4
-
-**No new files / no schema migrations.** All four fixes operate on existing tables and existing route shapes.
+**No new files / no schema migrations.** All three fixes operate on existing tables and existing route shapes.
 
 ---
 
@@ -288,7 +287,7 @@ status='pending'), and update drafts.status='skipped' otherwise."
 
 ## Task 2: Bug 4 — `stale-sweeper` drafts coverage
 
-**Why second:** auto-skips 24h+ old reply drafts so they leave the feed; this is also the suspected root cause of Bug 1 (sending an old draft against a now-deleted target tweet causes X compose to drop to X Drafts). Closes the lifecycle hole that allowed Bug 1 to manifest.
+**Why second:** auto-skips 24h+ old reply drafts so they leave the feed.
 
 **Files:**
 - Modify: `src/workers/processors/stale-sweeper.ts`
@@ -688,90 +687,10 @@ desc."
 
 ---
 
-## Task 4: Bug 1 — observation gate
-
-**Why fourth:** Bug 1 is the most ambiguous of the four. The leading hypothesis (Task 2 captures it: stale drafts → deleted target → X Drafts auto-save) gets resolved by Task 2. After Task 2 deploys, observe whether Bug 1 still occurs. If it does, we triage with the user using the A/B/C taxonomy (X compose pre-fills with old text vs in_reply_to lost vs ShipFlare card stuck on Today).
-
-**Files:**
-- Create: `docs/superpowers/notes/2026-05-06-bug1-observation.md`
-
-This task ships nothing in code. It's an explicit gate so we don't accidentally claim Bug 1 is fixed without verification.
-
-### Steps
-
-- [ ] **Step 1: Create the observation note**
-
-Create `docs/superpowers/notes/2026-05-06-bug1-observation.md`:
-
-```markdown
-# Bug 1 — edit-then-send-reply → X Drafts: observation gate
-
-**Status as of 2026-05-06:** Tasks 1-3 of `2026-05-06-briefing-today-bugfixes.md`
-are merged. Bug 1's leading hypothesis is that the precondition (a
->24h-old draft against a deleted/hidden target tweet) was created by
-Bug 4 (no draft staleness sweep). Task 2's drafts sweep removes that
-precondition.
-
-## Observation window
-
-After Task 2 deploys, monitor for one full week (next Monday → following
-Monday). Specifically:
-
-- Watch the `worker:stale-sweeper` logs each hour: confirm `draftsMarked`
-  count is non-zero on at least one run.
-- Ask the user (or check session logs) whether they've seen the bug
-  recur. The bug is high-visibility for them — they reported it
-  immediately when it happened.
-
-## Triage decision tree (if Bug 1 recurs)
-
-Ask the user which of these matches:
-
-- **Symptom A:** "X compose opens with the OLD text I edited away from"
-  - Root cause: `handleSaveEdit` in `src/app/(app)/today/_components/reply-card.tsx:258`
-    is fire-and-forget — doesn't await the PATCH /edit. The user's
-    next click on Send reply opens an stale `xIntentUrl` baked from
-    pre-edit body.
-  - Fix: `await onEdit(...)` in `handleSaveEdit`, or disable the Send
-    button while the edit is in flight.
-
-- **Symptom B:** "X compose has the new text but the tweet on X.com is
-  a standalone post, not threaded under the parent"
-  - Root cause: `in_reply_to` query param missing from xIntentUrl. Check
-    `threadExternalId` post-edit and `URL.toString()` length.
-  - Fix: investigate `buildXIntentUrl` for length truncation; verify
-    `threads.externalId` not nulled by edit.
-
-- **Symptom C:** "X tweet went out fine, but ShipFlare keeps showing the
-  card on Today; never moves to History"
-  - Root cause: SWR race between edit's `mutate()` (revalidate) and
-    handoff's optimistic 'handed_off' update + delayed PATCH /approve.
-  - Fix: in `src/hooks/use-today.ts:edit`, await the PATCH AND skip
-    revalidate (mutate(undefined, { revalidate: false }) + manual
-    bumpVersion). Or: fold edit into the handoff flow so they share
-    one revalidation.
-
-If the user reports any of A/B/C, open a focused PR for that symptom
-only. Do not bundle.
-```
-
-- [ ] **Step 2: Commit the observation note**
-
-```bash
-git add docs/superpowers/notes/2026-05-06-bug1-observation.md
-git commit -m "docs: bug-1 observation gate after stale-sweeper fix
-
-Bug 1's leading hypothesis is that fixing Bug 4 (drafts staleness)
-removes the precondition for the X-Drafts-instead-of-reply symptom.
-This note captures the observation window + the A/B/C triage tree to
-use if the bug recurs after Task 2 deploys."
-```
-
----
-
 ## Self-review
 
-**Spec coverage:** All 4 bugs addressed, plus a follow-up gate for Bug 1. ✓
+**Spec coverage:** All 3 in-scope bugs addressed. The fourth (deferred) bug is
+documented in the Architecture section + auto-memory; no task needed. ✓
 
 **Placeholder scan:**
 - Task 2 Step 2 and Task 3 Step 2 use comment-style test bodies because the existing test mocks shape is not safe to inline without reading the file first. The instruction explicitly says "read first, then write asserts that fit" — this is a deliberate constraint, not a placeholder. ✓
@@ -780,9 +699,9 @@ use if the bug recurs after Task 2 deploys."
 **Type consistency:** `BriefingHistoryItem` is the existing exported type from `src/app/api/briefing/history/route.ts`. The Task 3 projection function returns that exact shape. ✓
 
 **Rationale:**
-- Task ordering 3→4→2→1 (in plan: Tasks 1, 2, 3, 4): smallest blast radius first; lifecycle root before history; observation gate last.
-- No schema migration: drafts.status='skipped' already exists in `draftStatusEnum`.
-- No new files except the observation note in Task 4.
+- Task ordering: smallest blast radius first (Task 1 = skip drafts fallback), then lifecycle (Task 2 = drafts sweep), then history (Task 3 = post projection).
+- No schema migration: `drafts.status='skipped'` already exists in `draftStatusEnum`.
+- No new files; all three fixes are edits to existing routes/workers/tests.
 
 ---
 
