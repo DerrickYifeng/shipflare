@@ -99,16 +99,31 @@ export function makeActivityEvent(userId: string, index: number) {
 
 export function makeChannel(
   userId: string,
-  overrides: Partial<{ username: string }> = {},
+  overrides: Partial<{
+    username: string;
+    platform: 'reddit' | 'x';
+    oauthTokenEncrypted: string | null;
+    refreshTokenEncrypted: string | null;
+    tokenExpiresAt: Date | null;
+  }> = {},
 ) {
   return {
     id: crypto.randomUUID(),
     userId,
-    platform: 'reddit' as const,
+    platform: overrides.platform ?? ('reddit' as const),
     username: overrides.username ?? 'testreddituser',
-    oauthTokenEncrypted: 'fake-encrypted-token',
-    refreshTokenEncrypted: 'fake-encrypted-refresh',
-    tokenExpiresAt: new Date(Date.now() + 3600_000),
+    oauthTokenEncrypted:
+      overrides.oauthTokenEncrypted === undefined
+        ? 'fake-encrypted-token'
+        : overrides.oauthTokenEncrypted,
+    refreshTokenEncrypted:
+      overrides.refreshTokenEncrypted === undefined
+        ? 'fake-encrypted-refresh'
+        : overrides.refreshTokenEncrypted,
+    tokenExpiresAt:
+      overrides.tokenExpiresAt === undefined
+        ? new Date(Date.now() + 3600_000)
+        : overrides.tokenExpiresAt,
   };
 }
 
