@@ -496,7 +496,7 @@ export class RedditClient {
   async getUserAboutPublic(
     username: string,
   ): Promise<{ name: string; total_karma: number; created_utc: number } | null> {
-    const handle = username.replace(/^u\//, '').trim();
+    const handle = username.replace(/^\/?u\//i, '').trim();
     if (!handle) {
       throw new Error('getUserAboutPublic: username is required');
     }

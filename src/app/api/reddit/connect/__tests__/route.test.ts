@@ -100,4 +100,18 @@ describe('POST /api/reddit/connect', () => {
     expect(conflictArg.set.username).toBe('founder123');
     expect(conflictArg.set.updatedAt).toBeInstanceOf(Date);
   });
+
+  it('strips leading u/ before persisting', async () => {
+    await POST(makeReq({ handle: 'u/founder123' }));
+    expect(
+      (valuesMock.mock.calls[0][0] as Record<string, unknown>).username,
+    ).toBe('founder123');
+  });
+
+  it('strips leading /U/ (case-insensitive) before persisting', async () => {
+    await POST(makeReq({ handle: '/U/founder123' }));
+    expect(
+      (valuesMock.mock.calls[0][0] as Record<string, unknown>).username,
+    ).toBe('founder123');
+  });
 });

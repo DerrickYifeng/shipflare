@@ -21,6 +21,8 @@ export function RedditHandleInput({
   const [handle, setHandle] = useState(initialHandle);
   const [verifyState, setVerifyState] = useState<VerifyState>({ phase: 'idle' });
   const [softBlockOpen, setSoftBlockOpen] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const onVerify = useCallback(async () => {
     if (!handle.trim()) return;
@@ -47,22 +49,39 @@ export function RedditHandleInput({
     }
   }, [handle]);
 
+  const submit = useCallback(
+    async (verified: boolean) => {
+      setSubmitting(true);
+      setSubmitError(null);
+      try {
+        await onSubmit(handle, verified);
+      } catch (err) {
+        setSubmitError(
+          err instanceof Error ? err.message : 'Could not save handle.',
+        );
+      } finally {
+        setSubmitting(false);
+      }
+    },
+    [handle, onSubmit],
+  );
+
   const onConnect = useCallback(() => {
     if (verifyState.phase === 'verified') {
-      void onSubmit(handle, true);
+      void submit(true);
       return;
     }
     if (verifyState.phase === 'not_found') {
       setSoftBlockOpen(true);
       return;
     }
-    void onSubmit(handle, false);
-  }, [handle, verifyState, onSubmit]);
+    void submit(false);
+  }, [verifyState, submit]);
 
   const onContinueAnyway = useCallback(() => {
     setSoftBlockOpen(false);
-    void onSubmit(handle, false);
-  }, [handle, onSubmit]);
+    void submit(false);
+  }, [submit]);
 
   return (
     <div className="space-y-4">
@@ -76,8 +95,9 @@ export function RedditHandleInput({
           type="text"
           value={handle}
           onChange={(e) => {
-            setHandle(e.target.value.replace(/^u\//, ''));
+            setHandle(e.target.value.replace(/^\/?u\//i, ''));
             setVerifyState({ phase: 'idle' });
+            setSubmitError(null);
           }}
           placeholder="founder123"
           className="flex-1 rounded-md border border-input px-3 py-2 text-sm"
@@ -118,11 +138,17 @@ export function RedditHandleInput({
       <button
         type="button"
         onClick={onConnect}
-        disabled={!handle.trim()}
+        disabled={!handle.trim() || submitting}
         className="rounded-md bg-primary px-4 py-2 text-primary-foreground"
       >
-        Connect
+        {submitting ? 'Saving…' : 'Connect'}
       </button>
+
+      {submitError && (
+        <p role="alert" className="text-sm text-error">
+          {submitError}
+        </p>
+      )}
 
       {softBlockOpen && (
         <div

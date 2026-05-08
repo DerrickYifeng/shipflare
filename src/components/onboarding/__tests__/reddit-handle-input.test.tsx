@@ -93,4 +93,44 @@ describe('RedditHandleInput', () => {
     fireEvent.click(screen.getByRole('button', { name: /^connect$/i }));
     expect(onSubmit).toHaveBeenCalledWith('foo', true);
   });
+
+  it('renders an alert when onSubmit rejects', async () => {
+    const onSubmit = vi.fn().mockRejectedValue(new Error('Save failed (500)'));
+    render(<RedditHandleInput onSubmit={onSubmit} />);
+    await userEvent.type(
+      screen.getByLabelText(/your reddit username/i),
+      'foo',
+    );
+    fireEvent.click(screen.getByRole('button', { name: /^connect$/i }));
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        /save failed \(500\)/i,
+      );
+    });
+  });
+
+  it('falls back to a generic message when onSubmit rejects with non-Error', async () => {
+    const onSubmit = vi.fn().mockRejectedValue('boom');
+    render(<RedditHandleInput onSubmit={onSubmit} />);
+    await userEvent.type(
+      screen.getByLabelText(/your reddit username/i),
+      'foo',
+    );
+    fireEvent.click(screen.getByRole('button', { name: /^connect$/i }));
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        /could not save handle/i,
+      );
+    });
+  });
+
+  it('strips a leading /u/ prefix as well', async () => {
+    const onSubmit = vi.fn();
+    render(<RedditHandleInput onSubmit={onSubmit} />);
+    const input = screen.getByLabelText(
+      /your reddit username/i,
+    ) as HTMLInputElement;
+    await userEvent.type(input, '/u/foo');
+    expect(input.value).toBe('foo');
+  });
 });

@@ -774,19 +774,25 @@ function IntegrationsSection({
   };
 
   const handleRedditSubmit = async (handle: string) => {
-    try {
-      const res = await fetch('/api/reddit/connect', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ handle }),
-      });
-      if (!res.ok) throw new Error(`Save failed (${res.status})`);
-      toast(`Reddit handle saved: u/${handle}`);
-      setRedditEditing(false);
-      router.refresh();
-    } catch (err) {
-      toast(err instanceof Error ? err.message : 'Could not save Reddit handle');
+    const res = await fetch('/api/reddit/connect', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ handle }),
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as
+        | { error?: string; detail?: string }
+        | null;
+      const detail =
+        body?.detail ?? body?.error ?? `Save failed (${res.status})`;
+      toast(detail);
+      // Re-throw so RedditHandleInput surfaces the error inline (parent
+      // owning toast doesn't replace child-level error feedback).
+      throw new Error(detail);
     }
+    toast(`Reddit handle saved: u/${handle}`);
+    setRedditEditing(false);
+    router.refresh();
   };
 
   const redditConn = connections.find((c) => c.platform === 'reddit');

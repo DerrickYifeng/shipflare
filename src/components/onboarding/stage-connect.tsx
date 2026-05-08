@@ -1,7 +1,7 @@
-// Stage 4 — Connect. Two OAuth cards (Reddit + X) whose state is derived
-// from /api/channels. Clicking Connect redirects to the existing OAuth
-// routes — on callback the user lands back at /onboarding and the Redis
-// draft resumes at this stage.
+// Stage 4 — Connect. Reddit uses the handle-input handoff flow (no OAuth);
+// X still uses OAuth. State is derived from /api/channels — on the X
+// callback the user lands back at /onboarding and the Redis draft resumes
+// at this stage.
 
 'use client';
 
@@ -13,9 +13,8 @@ import {
   AccountCard,
   type AccountCardState,
 } from './_shared/account-card';
-import { ArrowRight, Reddit, X } from './icons';
+import { ArrowRight, X } from './icons';
 import { COPY } from './_copy';
-import { REDDIT_DRAFT_ENABLED } from './_feature-flags';
 import { RedditHandleInput } from './reddit-handle-input';
 
 interface ChannelRow {
@@ -70,14 +69,52 @@ export function StageConnect({ onBack, onContinue }: StageConnectProps) {
     void refreshChannels();
   }, [refreshChannels]);
 
-  const connect = (platform: Platform) => {
+  const connectX = () => {
     setByPlatform((prev) => ({
       ...prev,
-      [platform]: { state: 'connecting', error: null },
+      x: { state: 'connecting', error: null },
     }));
-    // Redirect to the existing OAuth initiator route; the callback will
-    // write the channels row and bring us back to the onboarding flow.
-    window.location.href = `/api/${platform}/connect?returnTo=${encodeURIComponent('/onboarding')}`;
+    window.location.href = `/api/x/connect?returnTo=${encodeURIComponent('/onboarding')}`;
+  };
+
+  const submitRedditHandle = async (handle: string) => {
+    setByPlatform((prev) => ({
+      ...prev,
+      reddit: { state: 'connecting', error: null },
+    }));
+    try {
+      const res = await fetch('/api/reddit/connect', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ handle }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as
+          | { error?: string; detail?: string }
+          | null;
+        const detail = body?.detail ?? body?.error ?? `Save failed (${res.status})`;
+        setByPlatform((prev) => ({
+          ...prev,
+          reddit: { state: 'error', error: detail },
+        }));
+        throw new Error(detail);
+      }
+      await refreshChannels();
+    } catch (err) {
+      if (err instanceof Error) {
+        setByPlatform((prev) => ({
+          ...prev,
+          reddit: { state: 'error', error: err.message },
+        }));
+        throw err;
+      }
+      const fallback = COPY.stage4.errorReddit;
+      setByPlatform((prev) => ({
+        ...prev,
+        reddit: { state: 'error', error: fallback },
+      }));
+      throw new Error(fallback);
+    }
   };
 
   const disconnect = async (platform: Platform) => {
@@ -118,35 +155,18 @@ export function StageConnect({ onBack, onContinue }: StageConnectProps) {
         sub={COPY.stage4.sub}
       />
 
-      {REDDIT_DRAFT_ENABLED ? (
-        <RedditHandleInput
-          onSubmit={async (handle) => {
-            const res = await fetch('/api/reddit/connect', {
-              method: 'POST',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ handle }),
-            });
-            if (res.ok) {
-              await refreshChannels();
-            }
+      <RedditHandleInput onSubmit={submitRedditHandle} />
+      {byPlatform.reddit.state === 'error' && byPlatform.reddit.error && (
+        <p
+          role="alert"
+          style={{
+            marginTop: 8,
+            fontSize: 13,
+            color: 'var(--sf-error, #d33)',
           }}
-        />
-      ) : (
-        <AccountCard
-          state={byPlatform.reddit.state}
-          iconColor="#ff4500"
-          icon={<Reddit />}
-          title={COPY.stage4.cards.reddit.title}
-          desc={COPY.stage4.cards.reddit.desc}
-          sample={COPY.stage4.cards.reddit.sample}
-          errorMessage={byPlatform.reddit.error ?? COPY.stage4.errorReddit}
-          onConnect={() => connect('reddit')}
-          onDisconnect={() => void disconnect('reddit')}
-          onRetry={() => connect('reddit')}
-          comingSoon
-          comingSoonLabel={COPY.stage4.comingSoon}
-          comingSoonTooltip={COPY.stage4.comingSoonTooltip}
-        />
+        >
+          {byPlatform.reddit.error}
+        </p>
       )}
       <div style={{ height: 12 }} />
       <AccountCard
@@ -157,9 +177,9 @@ export function StageConnect({ onBack, onContinue }: StageConnectProps) {
         desc={COPY.stage4.cards.x.desc}
         sample={COPY.stage4.cards.x.sample}
         errorMessage={byPlatform.x.error ?? COPY.stage4.errorX}
-        onConnect={() => connect('x')}
+        onConnect={connectX}
         onDisconnect={() => void disconnect('x')}
-        onRetry={() => connect('x')}
+        onRetry={connectX}
       />
 
       <div

@@ -105,4 +105,14 @@ describe('POST /api/reddit/verify-handle', () => {
     await POST(makeReq({ handle: 'u/foo' }));
     expect(getUserAboutPublicMock).toHaveBeenCalledWith('foo');
   });
+
+  it('strips leading /U/ (case-insensitive) from handle', async () => {
+    getUserAboutPublicMock.mockResolvedValueOnce({
+      name: 'foo',
+      total_karma: 100,
+      created_utc: 0,
+    });
+    await POST(makeReq({ handle: '/U/foo' }));
+    expect(getUserAboutPublicMock).toHaveBeenCalledWith('foo');
+  });
 });

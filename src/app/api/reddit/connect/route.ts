@@ -11,12 +11,13 @@ const log = createLogger('api:reddit:connect');
 const bodySchema = z.object({
   handle: z
     .string()
-    .min(3)
-    .max(20)
-    .regex(
-      /^[A-Za-z0-9_-]+$/,
-      'Reddit handles use letters, digits, underscores, dashes only.',
-    ),
+    .min(1)
+    .max(40)
+    .transform((s) => s.replace(/^\/?u\//i, '').trim())
+    .refine((s) => /^[A-Za-z0-9_-]{3,20}$/.test(s), {
+      message:
+        'Reddit handles must be 3-20 chars: letters, digits, underscores, dashes only.',
+    }),
 });
 
 export async function POST(request: Request): Promise<Response> {

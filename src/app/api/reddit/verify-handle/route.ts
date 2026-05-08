@@ -11,7 +11,7 @@ const bodySchema = z.object({
     .string()
     .min(1)
     .max(40)
-    .transform((s) => s.replace(/^u\//, '').trim())
+    .transform((s) => s.replace(/^\/?u\//i, '').trim())
     .refine((s) => /^[A-Za-z0-9_-]{3,20}$/.test(s), {
       message: 'Reddit handles must be 3-20 chars: letters, digits, _ or -.',
     }),
