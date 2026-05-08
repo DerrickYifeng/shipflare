@@ -228,6 +228,197 @@ describe('stitchLeadMessages — nested progress under in-tool ProgressItems', (
   });
 });
 
+describe('stitchLeadMessages — async Task dispatch (run_in_background)', () => {
+  const TASK_USE_ID = 'toolu_async_001';
+  const AGENT_ID = 'agt-async-1';
+
+  function asyncDispatchScenario(): readonly TeamActivityMessage[] {
+    return [
+      msg({
+        id: 'm-coord-text',
+        type: 'agent_text',
+        from: 'coord-member',
+        content: 'Dispatching async sub-agents in parallel.',
+        createdAt: '2026-05-08T17:30:00.000Z',
+      }),
+      msg({
+        id: 'm-task-call',
+        type: 'tool_call',
+        from: 'coord-member',
+        metadata: {
+          toolName: 'delegating',
+          toolUseId: TASK_USE_ID,
+          input: { agent: 'Social Media Manager', description: 'fill x reply slot' },
+        },
+        createdAt: '2026-05-08T17:30:01.000Z',
+      }),
+      msg({
+        id: 'm-task-result',
+        type: 'tool_result',
+        from: 'coord-member',
+        // The Task tool's async-launched receipt — `result` is null because
+        // the spawned agent_runs row is QUEUED, not finished.
+        content: JSON.stringify({
+          result: null,
+          cost: 0,
+          duration: 0,
+          turns: 0,
+          agentId: AGENT_ID,
+          status: 'async_launched',
+        }),
+        metadata: { toolUseId: TASK_USE_ID },
+        createdAt: '2026-05-08T17:30:03.000Z',
+      }),
+    ];
+  }
+
+  it('async dispatch receipt does NOT flip task to DONE — keeps status=working and stamps agentId', () => {
+    const nodes = stitchLeadMessages(asyncDispatchScenario());
+    const lead = nodes.find((n): n is LeadNode => n.kind === 'lead');
+    expect(lead).toBeDefined();
+    expect(lead!.delegation).toHaveLength(1);
+    const task = lead!.delegation[0]!;
+    // The bug we're regressing-against: pre-fix the immediate tool_result
+    // flipped this to 'done' even though the spawned agent was queued.
+    expect(task.status).toBe('working');
+    expect(task.agentId).toBe(AGENT_ID);
+    // Elapsed should NOT be set yet — the task hasn't actually completed.
+    expect(task.elapsed).toBeNull();
+  });
+
+  it('matching task_notification with status=completed flips task to DONE with summary', () => {
+    const messages = [
+      ...asyncDispatchScenario(),
+      msg({
+        id: 'm-notif',
+        type: 'task_notification',
+        metadata: {
+          agentId: AGENT_ID,
+          status: 'completed',
+          summary: '8 replies drafted',
+          teammateName: 'Social Media Manager',
+        },
+        createdAt: '2026-05-08T17:34:12.000Z',
+      }),
+    ];
+    const nodes = stitchLeadMessages(messages);
+    const lead = nodes.find((n): n is LeadNode => n.kind === 'lead');
+    const task = lead!.delegation[0]!;
+    expect(task.status).toBe('done');
+    expect(task.progress).toBe(100);
+    expect(task.outputSummary).toBe('8 replies drafted');
+    // Elapsed should be measured against the originating tool_call,
+    // NOT against the immediate dispatch receipt.
+    expect(task.elapsed).not.toBeNull();
+  });
+
+  it('task_notification with status=failed flips task to FAILED', () => {
+    const messages = [
+      ...asyncDispatchScenario(),
+      msg({
+        id: 'm-notif-fail',
+        type: 'task_notification',
+        metadata: {
+          agentId: AGENT_ID,
+          status: 'failed',
+          summary: 'xAI rate-limited after 3 retries',
+        },
+        createdAt: '2026-05-08T17:34:12.000Z',
+      }),
+    ];
+    const nodes = stitchLeadMessages(messages);
+    const task = nodes.find((n): n is LeadNode => n.kind === 'lead')!.delegation[0]!;
+    expect(task.status).toBe('failed');
+  });
+
+  it('task_notification with status=killed flips task to FAILED', () => {
+    const messages = [
+      ...asyncDispatchScenario(),
+      msg({
+        id: 'm-notif-killed',
+        type: 'task_notification',
+        metadata: {
+          agentId: AGENT_ID,
+          status: 'killed',
+          summary: 'Cancelled by founder',
+        },
+        createdAt: '2026-05-08T17:34:12.000Z',
+      }),
+    ];
+    const nodes = stitchLeadMessages(messages);
+    const task = nodes.find((n): n is LeadNode => n.kind === 'lead')!.delegation[0]!;
+    expect(task.status).toBe('failed');
+  });
+
+  it('task_notification fields read from top-level wire (SSE spread) AND metadata', () => {
+    // SSE rebroadcast spreads the publisher's JSON onto the message — the
+    // fields land at top-level, not in metadata. Same code path as the
+    // activity feed's readField helper.
+    const messages = [
+      ...asyncDispatchScenario(),
+      // Top-level fields, no metadata.
+      {
+        ...msg({ id: 'm-notif-top', type: 'task_notification' }),
+        // Cast through unknown so we can attach SSE-shaped extra fields
+        // that aren't in the TeamActivityMessage type.
+        ...({
+          agentId: AGENT_ID,
+          status: 'completed',
+          summary: 'top-level fields work too',
+        } as Record<string, unknown>),
+      } as TeamActivityMessage,
+    ];
+    const nodes = stitchLeadMessages(messages);
+    const task = nodes.find((n): n is LeadNode => n.kind === 'lead')!.delegation[0]!;
+    expect(task.status).toBe('done');
+    expect(task.outputSummary).toBe('top-level fields work too');
+  });
+
+  it('REGRESSION: synchronous Task results still flip to DONE (does not break sync path)', () => {
+    const SYNC_USE_ID = 'toolu_sync_001';
+    const messages = [
+      msg({
+        id: 'm-coord-text',
+        type: 'agent_text',
+        from: 'coord-member',
+        content: 'Running sync sub-agent.',
+        createdAt: '2026-05-08T17:30:00.000Z',
+      }),
+      msg({
+        id: 'm-task-call',
+        type: 'tool_call',
+        from: 'coord-member',
+        metadata: {
+          toolName: 'delegating',
+          toolUseId: SYNC_USE_ID,
+          input: { agent: 'Researcher', description: 'one-shot lookup' },
+        },
+        createdAt: '2026-05-08T17:30:01.000Z',
+      }),
+      msg({
+        id: 'm-task-result',
+        type: 'tool_result',
+        from: 'coord-member',
+        // Sync Task: `status` is omitted (or 'completed'), result has data.
+        content: JSON.stringify({
+          result: { summary: 'found 3 papers' },
+          cost: 0.012,
+          duration: 8400,
+          turns: 5,
+          status: 'completed',
+        }),
+        metadata: { toolUseId: SYNC_USE_ID },
+        createdAt: '2026-05-08T17:30:09.400Z',
+      }),
+    ];
+    const nodes = stitchLeadMessages(messages);
+    const task = nodes.find((n): n is LeadNode => n.kind === 'lead')!.delegation[0]!;
+    expect(task.status).toBe('done');
+    expect(task.agentId).toBeNull();
+    expect(task.elapsed).not.toBeNull();
+  });
+});
+
 describe('stitchLeadMessages — fork progress fallback', () => {
   it('attaches fork-skill progress (mismatched toolName) to most-recent in-flight tool_call', () => {
     // Scenario: find_threads_via_xai is in flight; runForkSkill emits two

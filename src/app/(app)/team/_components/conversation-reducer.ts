@@ -49,6 +49,16 @@ export interface DelegationTask {
    */
   outputSummary: string | null;
   /**
+   * `agent_runs.id` when this task was dispatched in async mode
+   * (`Task({..., run_in_background: true})`). The Task tool returns a
+   * `tool_result` IMMEDIATELY with `{status: 'async_launched', agentId}`
+   * — that's a dispatch receipt, not completion. Real completion arrives
+   * later as a `task_notification` message keyed by this `agentId`, which
+   * `reconcileAsyncCompletion` uses to flip status. Null for synchronous
+   * Task calls (the immediate tool_result IS the completion).
+   */
+  agentId: string | null;
+  /**
    * Everything this subagent did during its spawn: text it streamed, tool
    * calls it made, tool results it received. Built from the
    * `progressByParentToolUse` lookup in stitchLeadMessages. Renderers
@@ -377,6 +387,9 @@ function buildDelegationTask(
     progress,
     elapsed,
     outputSummary: lookupEntry?.outputSummary ?? null,
+    // Populated by `reconcileDelegationCompletion` if this dispatch is an
+    // async launch — at build-time the tool_result hasn't been matched yet.
+    agentId: null,
     // Populated by `populateDelegationProgress` after stitching the full
     // message stream — at build-time we don't yet have the subagent's
     // downstream events in hand.
@@ -767,6 +780,7 @@ export function stitchLeadMessages(
 
   populateDelegationProgress(nodes, progressByParentToolUse, partials);
   reconcileDelegationCompletion(nodes, messages);
+  reconcileAsyncCompletion(nodes, messages);
   assignPhases(nodes);
   return nodes;
 }
@@ -1046,6 +1060,21 @@ function reconcileDelegationCompletion(
       // authoritative server state with our inferred one.
       if (task.status === 'done' || task.status === 'failed') continue;
 
+      // Async dispatch receipt — the Task tool was invoked with
+      // `run_in_background: true` and returned IMMEDIATELY with
+      // `{status: 'async_launched', agentId}`. That is NOT completion —
+      // the spawned agent_runs row is queued and the BullMQ wake is
+      // pending. Real completion arrives later as a `task_notification`
+      // message keyed by `agentId`, picked up by
+      // `reconcileAsyncCompletion`. Stash the agentId here so that pass
+      // can match, and leave status at `working` so the card keeps its
+      // RUNNING badge instead of falsely flipping to DONE.
+      const asyncDispatch = parseAsyncDispatchPayload(result.content);
+      if (asyncDispatch) {
+        task.agentId = asyncDispatch.agentId;
+        continue;
+      }
+
       const isError =
         result.metadata !== null &&
         (result.metadata as Record<string, unknown>)['isError'] === true;
@@ -1060,6 +1089,112 @@ function reconcileDelegationCompletion(
       }
     }
   }
+}
+
+/**
+ * Detect the Task tool's async dispatch receipt:
+ *   `{result: null, cost: 0, ..., agentId: "<uuid>", status: "async_launched"}`
+ *
+ * Returns the parsed `{agentId}` only when both `status === 'async_launched'`
+ * AND a non-empty `agentId` are present. Returns null for sync results, free-
+ * form strings, error payloads, or malformed JSON — all of which should fall
+ * through to the normal completion-flip path.
+ */
+function parseAsyncDispatchPayload(
+  content: string | null,
+): { agentId: string } | null {
+  if (!content) return null;
+  const trimmed = content.trim();
+  if (!trimmed.startsWith('{')) return null;
+  try {
+    const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+    if (parsed['status'] !== 'async_launched') return null;
+    const agentId = parsed['agentId'];
+    if (typeof agentId !== 'string' || agentId.length === 0) return null;
+    return { agentId };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Settle async-dispatched DelegationTasks when their `task_notification`
+ * arrives. The Task tool's immediate `tool_result` only proves the agent
+ * was QUEUED (see `reconcileDelegationCompletion`'s asyncDispatch branch);
+ * the durable terminal signal is a `team_messages` row of `messageType =
+ * 'task_notification'` published by `agent-run.ts publishTaskNotification`
+ * after the spawned teammate exits. That row carries `agentId`, `status`
+ * (`completed | failed | killed`), `summary`, and `teammateName` either
+ * at top-level or in `metadata`.
+ *
+ * We index notifications by `agentId` and walk every DelegationTask with
+ * a non-null `agentId`; on a hit we flip status, stamp elapsed against
+ * the originating `tool_call`, and back-fill the summary so the card
+ * shows the same line the activity feed does.
+ *
+ * Runs after `reconcileDelegationCompletion` so async dispatches stamped
+ * with `agentId` in that pass are visible here.
+ */
+function reconcileAsyncCompletion(
+  nodes: ConversationNode[],
+  messages: readonly TeamActivityMessage[],
+): void {
+  // Index task_notifications by the agentId they're about. Latest-wins on
+  // the off-chance the worker republishes for the same agent (idempotency
+  // is enforced upstream by `delivered_at`, but the wire is best-effort).
+  const notificationByAgentId = new Map<string, TeamActivityMessage>();
+  for (const msg of messages) {
+    if (msg.type !== 'task_notification') continue;
+    const agentId = readNotificationField(msg, 'agentId');
+    if (agentId) notificationByAgentId.set(agentId, msg);
+  }
+  if (notificationByAgentId.size === 0) return;
+
+  const toolCallByMessageId = new Map<string, TeamActivityMessage>();
+  for (const msg of messages) {
+    if (msg.type === 'tool_call') toolCallByMessageId.set(msg.id, msg);
+  }
+
+  for (const node of nodes) {
+    if (node.kind !== 'lead') continue;
+    if (node.delegation.length === 0) continue;
+    for (const task of node.delegation) {
+      if (!task.agentId) continue;
+      if (task.status === 'done' || task.status === 'failed') continue;
+      const notification = notificationByAgentId.get(task.agentId);
+      if (!notification) continue;
+
+      const status = readNotificationField(notification, 'status');
+      task.status = status === 'failed' || status === 'killed' ? 'failed' : 'done';
+      task.progress = 100;
+      const callMsg = toolCallByMessageId.get(task.messageId);
+      if (callMsg) {
+        task.elapsed = formatElapsed(callMsg.createdAt, notification.createdAt);
+      }
+      if (!task.outputSummary) {
+        task.outputSummary = readNotificationField(notification, 'summary');
+      }
+    }
+  }
+}
+
+/**
+ * task_notification payloads land with the relevant fields either at
+ * top-level (the SSE wire spreads the publisher's JSON onto the message
+ * shape) or under `metadata` (when serialized through the durable team_
+ * messages row). Read both and prefer the first non-empty.
+ */
+function readNotificationField(
+  msg: TeamActivityMessage,
+  key: string,
+): string | null {
+  const meta = msg.metadata as Record<string, unknown> | null;
+  const raw = msg as unknown as Record<string, unknown>;
+  const top = raw[key];
+  if (typeof top === 'string' && top.length > 0) return top;
+  const inMeta = meta?.[key];
+  if (typeof inMeta === 'string' && inMeta.length > 0) return inMeta;
+  return null;
 }
 
 /**
