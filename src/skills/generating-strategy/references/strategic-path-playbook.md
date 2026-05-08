@@ -87,22 +87,27 @@ after) + a title + a `successMetric` the founder can check.
 
 Every `successMetric` must be a number or a crisp yes/no the founder can
 answer without interpretation. Vague metrics ("get traction") fail the
-test; specific ones ("waitlist count >= 200") pass.
+test; specific ones pass.
 
 Each milestone carries a `phase`: one of
 `foundation | audience | momentum | launch | compound | steady`. The
 content-planner surfaces milestones whose phase matches the current
 launch phase.
 
-Before writing a numeric milestone, consider whether your training-data
-prior is reliable for this product's category and stage. If you're
-setting a number ("waitlist >= 200", "MRR >= $500"), use `web_search`
-to verify against real-world baselines for similar indie products in
-this stage. If a search hit looks promising, use `web_fetch` to read
-the page directly.
+**Numeric milestones MUST be grounded in real-world data, not training-data
+priors.** Run `web_search` BEFORE writing any number — query for
+benchmarks specific to this product's category, stage, and channel
+("indie SaaS pre-PMF waitlist month-1", "X reply-strategy follower
+growth 30 days", "r/SaaS new-account engagement realistic"). If a hit
+looks promising, `web_fetch` it. Set the number from what the search
+returns, not from what feels round. Bake the source into the metric
+string when space allows ("waitlist >= 25 (IH median month-1)") so the
+founder can re-evaluate later.
 
-This is guidance, not a mandate — the model decides when training-data
-priors are reliable enough to skip the search.
+Skip the search ONLY when 2+ queries return no relevant data. "I think
+I know this category" is not a valid skip reason — every product feels
+exceptional to its founder, and training-data priors systematically
+overshoot pre-PMF benchmarks.
 
 ## Step 5 — Recommend channel mix
 
