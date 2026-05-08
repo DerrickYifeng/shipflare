@@ -1,19 +1,25 @@
 /**
- * Daily-run dispatch helper. Mirrors `ensureKickoffEnqueued` in shape but
- * runs the COORDINATOR'S DAILY PLAYBOOK instead of the kickoff playbook —
- * intended for the recurring 13:00 UTC cron fan-out.
+ * Daily-run dispatch helper. Mirrors `ensureKickoffEnqueued` in shape
+ * but emits the daily goal preamble (built by `buildDailyGoalText`)
+ * instead of the kickoff one — intended for the recurring 13:00 UTC
+ * cron fan-out.
  *
  *   kickoff (one-shot, first /team visit):
- *     plan → social-media-manager (discovery + drafting per slot)
+ *     seed plan_items → spawn one social-media-manager per (channel × mode)
  *
  *   daily (every cron tick):
- *     load today's content_reply plan_items → social-media-manager per slot
+ *     load today's content_reply / content_post slots →
+ *     spawn one social-media-manager per (channel × mode), parallelized
+ *
+ * The full per-trigger logic lives in the goal preamble (see
+ * `buildDailyGoalText` below). AGENT.md no longer carries trigger
+ * playbooks — it only owns generic orchestration teaching.
  *
  * No idempotency check: the cron may legitimately enqueue multiple times
  * (BullMQ retry, missed-window catch-up, manual re-enqueue). The lead's
  * `wake()` collapses duplicate enqueues within a 1-second BullMQ jobId
- * window, and the coordinator's daily playbook is itself idempotent
- * (re-reading the same plan_items, dispatching the same agents).
+ * window, and the daily goal directives are themselves idempotent
+ * (re-reading the same slots, dispatching the same agents).
  *
  * Both kickoff and daily share `dispatchLeadMessage` so the runtime model
  * stays uniform: every founder-or-system trigger inserts a user_prompt
@@ -23,7 +29,7 @@
 
 import { eq } from 'drizzle-orm';
 import { db } from '@/lib/db';
-import { products } from '@/lib/db/schema';
+import { products, strategicPaths } from '@/lib/db/schema';
 import { dispatchLeadMessage } from '@/lib/team/dispatch-lead-message';
 import { resolveRollingConversation } from '@/lib/team-rolling-conversation';
 import { createLogger } from '@/lib/logger';
@@ -74,18 +80,31 @@ export async function ensureDailyRunEnqueued(args: {
     return { fired: false, reason: 'enqueue_failed' };
   }
 
-  const platformList = platforms.length > 0 ? platforms.join(', ') : 'none';
-  const sourceClause = source ? ` Source: ${source}.` : '';
-  const goal =
-    `Daily automation run for ${productRow.name}. ` +
-    `Connected platforms: ${platformList}. ` +
-    `Trigger: daily.${sourceClause} ` +
-    `Follow your daily playbook: load today's content_reply plan_items ` +
-    `for this user, dispatch ONE social-media-manager per slot (it runs ` +
-    `discovery + judging + drafting internally), and update_plan_item ` +
-    `state='drafted' when each slot terminates. If no slots are found, ` +
-    `fall back to a single social-media-manager dispatch with mode ` +
-    `discover-and-fill-slot for the primary connected channel.`;
+  // Read the active strategic path's channelMix so the goal preamble
+  // can carry per-channel repliesPerDay budgets verbatim. Daily does
+  // NOT add plan_items — kickoff + weekly-replan own that — but it
+  // does need to know each channel's reply budget so the spawn
+  // directives carry the right targetCount when no slot row exists
+  // (fallback path on misconfigured users).
+  const [activePath] = await db
+    .select({
+      id: strategicPaths.id,
+      channelMix: strategicPaths.channelMix,
+    })
+    .from(strategicPaths)
+    .where(eq(strategicPaths.userId, userId))
+    .orderBy(strategicPaths.generatedAt)
+    .limit(1);
+
+  const goal = buildDailyGoalText({
+    productName: productRow.name,
+    platforms,
+    source,
+    channelMix: (activePath?.channelMix ?? null) as Record<
+      string,
+      { repliesPerDay?: number | null } | null | undefined
+    > | null,
+  });
 
   const publicSummary = `Running your daily automation for ${productRow.name}.`;
 
@@ -110,4 +129,112 @@ export async function ensureDailyRunEnqueued(args: {
     );
     return { fired: false, reason: 'enqueue_failed', conversationId };
   }
+}
+
+interface DailyGoalArgs {
+  productName: string;
+  platforms: readonly string[];
+  source?: string;
+  channelMix: Record<
+    string,
+    { repliesPerDay?: number | null } | null | undefined
+  > | null;
+}
+
+/**
+ * Build the daily-run goal preamble. The coordinator reads this
+ * verbatim — every spawn directive lives here, not in AGENT.md.
+ *
+ * Daily does NOT add new plan_items (kickoff + weekly-replan own
+ * that). It dispatches drafting against existing slots:
+ *
+ *   1. For each connected channel where repliesPerDay > 0, spawn ONE
+ *      social-media-manager in (channel, reply) mode against today's
+ *      content_reply slot. The coordinator queries the slot's uuid
+ *      itself — we just tell it which channels to look at.
+ *   2. For each connected channel with content_post slots scheduled
+ *      today that aren't yet drafted, spawn ONE batch in (channel,
+ *      post) mode. The coordinator decides which slot uuids to pass.
+ *   3. Parallelize all spawns in a single assistant turn.
+ *
+ * Channels without budget for a given mode are silently skipped — no
+ * spawn directive is emitted.
+ */
+export function buildDailyGoalText(args: DailyGoalArgs): string {
+  const { productName, platforms, source, channelMix } = args;
+
+  const platformList = platforms.length > 0 ? platforms.join(', ') : 'none';
+  const sourceClause = source ? `Source: ${source}.` : '';
+
+  const repliesX = readDailyRepliesPerDay(channelMix, 'x');
+  const repliesReddit = readDailyRepliesPerDay(channelMix, 'reddit');
+  const xConnected = platforms.includes('x');
+  const redditConnected = platforms.includes('reddit');
+
+  const replySpawns: string[] = [];
+  if (xConnected && repliesX > 0) {
+    replySpawns.push(
+      `- (x, reply): Task({ subagent_type: 'social-media-manager', description: 'fill x reply slot', prompt: 'Mode: discover-and-fill-slot\\nplanItemId: <today's x content_reply uuid, or "(none)" if no slot exists>\\ntargetCount: ${repliesX}' })`,
+    );
+  }
+  if (redditConnected && repliesReddit > 0) {
+    replySpawns.push(
+      `- (reddit, reply): Task({ subagent_type: 'social-media-manager', description: 'fill reddit reply slot', prompt: 'Mode: discover-and-fill-slot\\nplanItemId: <today's reddit content_reply uuid, or "(none)" if no slot exists>\\ntargetCount: ${repliesReddit}' })`,
+    );
+  }
+
+  const postSpawns: string[] = [];
+  if (xConnected) {
+    postSpawns.push(
+      `- (x, post): if today's planned content_post rows for channel='x' exist, Task({ subagent_type: 'social-media-manager', description: 'draft x post batch', prompt: 'Mode: post-batch\\nplanItemIds: <today's x content_post uuids>' })`,
+    );
+  }
+  if (redditConnected) {
+    postSpawns.push(
+      `- (reddit, post): if today's planned content_post rows for channel='reddit' exist, Task({ subagent_type: 'social-media-manager', description: 'draft reddit post batch', prompt: 'Mode: post-batch\\nplanItemIds: <today's reddit content_post uuids>' })`,
+    );
+  }
+
+  const lines: string[] = [
+    `Daily automation run for ${productName}.`,
+    `Connected platforms: ${platformList}.`,
+    `Trigger: daily.${sourceClause ? ' ' + sourceClause : ''}`,
+    ``,
+    `Daily does NOT add new plan_items — kickoff + weekly-replan own that. Read today's slots, dispatch drafting, mark them drafted.`,
+    ``,
+    `Per-channel reply budget (read off the active strategic path):`,
+    `- x: ${repliesX} replies/day`,
+    `- reddit: ${repliesReddit} replies/day`,
+    ``,
+  ];
+
+  const allSpawns = [...replySpawns, ...postSpawns];
+  if (allSpawns.length > 0) {
+    lines.push(
+      `Step 1 — query_plan_items({ status: ['planned'] }) to find today's content_reply / content_post rows. Group by channel.`,
+      ``,
+      `Step 2 — Dispatch all of the following Task spawns IN A SINGLE ASSISTANT TURN (engine accepts multiple tool_use blocks per turn — parallelize). Skip any directive whose corresponding slot row doesn't exist for today:`,
+      ...allSpawns,
+      ``,
+      `Step 3 — As each <task-notification> arrives, call update_plan_item({ id: <touched uuid>, state: 'drafted' }) for the slot(s) that task drafted for.`,
+    );
+  } else {
+    lines.push(
+      `No connected channels with active reply or post budget. Skip dispatch and tell the founder which channel they should connect.`,
+    );
+  }
+
+  return lines.join('\n');
+}
+
+function readDailyRepliesPerDay(
+  channelMix: DailyGoalArgs['channelMix'],
+  ch: 'x' | 'reddit',
+): number {
+  if (!channelMix) return 0;
+  const entry = channelMix[ch];
+  if (!entry) return 0;
+  const v = entry.repliesPerDay;
+  if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) return 0;
+  return Math.floor(v);
 }

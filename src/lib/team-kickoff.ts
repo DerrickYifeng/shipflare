@@ -28,6 +28,8 @@ import { dispatchLeadMessage } from '@/lib/team/dispatch-lead-message';
 import { createAutomationConversation } from '@/lib/team-conversation-helpers';
 import { currentWeekStart } from '@/lib/week-bounds';
 import { createLogger } from '@/lib/logger';
+import { derivePerWeekPosts } from '@/lib/strategic-path-helpers';
+import type { StrategicPath } from '@/tools/schemas';
 
 const log = createLogger('lib:team-kickoff');
 
@@ -90,46 +92,56 @@ export async function ensureKickoffEnqueued(args: {
   }
 
   const channels = await getUserChannels(userId);
-  const primary = channels.includes('x') ? 'x' : channels[0] ?? 'x';
 
-  // Pre-compute the calendar anchor so coordinator can pass it verbatim
-  // to content-planner. Without `weekStart=` / `now=` in the goal the
-  // planner has to infer them from the model's clock and historically
-  // picked next Monday — leaving /today and /calendar empty until the
-  // following ISO week. See coordinator/AGENT.md `trigger: 'kickoff'`.
+  // Pre-compute the calendar anchor so the goal preamble can pass it
+  // verbatim to the coordinator. Without `weekStart=` / `now=` in the
+  // goal the coordinator infers them from the model's clock and
+  // historically picked next Monday — leaving /today and /calendar
+  // empty until the following ISO week.
   const kickoffNow = new Date();
   const kickoffWeekStart = currentWeekStart(kickoffNow).toISOString();
 
-  // Look up the active strategic path so content-planner can anchor its
-  // pillar selection. Optional — kickoff still fires if the path is
-  // missing (the planner will ask). The schema has only one path per
-  // user today, so a single SELECT with a generatedAt tiebreak picks
-  // the latest after any future replan.
+  // Look up the active strategic path so the goal preamble can carry
+  // week-1 post counts + per-channel reply budgets verbatim. Optional:
+  // kickoff still fires if the path is missing (degenerate case at
+  // launch — the goal degrades to "no plan to seed"). The schema has
+  // only one path per user today, so a single SELECT with a
+  // generatedAt tiebreak picks the latest after any future replan.
   const [activePath] = await db
-    .select({ id: strategicPaths.id })
+    .select({
+      id: strategicPaths.id,
+      thesisArc: strategicPaths.thesisArc,
+      channelMix: strategicPaths.channelMix,
+    })
     .from(strategicPaths)
     .where(eq(strategicPaths.userId, userId))
     .orderBy(strategicPaths.generatedAt)
     .limit(1);
   const pathId = activePath?.id ?? null;
 
-  // The kickoff playbook is in coordinator/AGENT.md (`trigger: 'kickoff'`).
-  // The goal text gives the coordinator just enough context to dispatch:
-  // calendar anchor for direct add_plan_item calls, social-media-manager
-  // for combined discovery + drafting, channel list for the skip-with-message
-  // branch. Detailed step ordering lives in the playbook so we can change
-  // it without redeploying API code.
-  const goal =
-    `First-visit kickoff for ${productRow.name}. ` +
-    (pathId ? `Strategic path pathId=${pathId}. ` : '') +
-    `weekStart=${kickoffWeekStart} now=${kickoffNow.toISOString()}. ` +
-    `Connected channels: ${channels.join(', ') || 'none'}. ` +
-    `Trigger: kickoff. ` +
-    `Follow your kickoff playbook end-to-end (plan → social-media-manager): ` +
-    `(1) Generate week-1 plan items directly with your add_plan_item tool — pass weekStart + now verbatim. ` +
-    `(2) Look up today's content_reply slot for the primary channel via query_plan_items (kind=content_reply, today's UTC scheduledAt) and read params.targetCount. ` +
-    `(3) Task({ subagent_type: 'social-media-manager', description: 'fill reply slot', prompt: 'Mode: discover-and-fill-slot\\nplanItemId: <uuid>\\ntargetCount: <slot.targetCount>' }) — the agent runs discovery + judging + drafting internally and returns one StructuredOutput. The description stays a short verb phrase (no UUID); the planItemId travels in the prompt body. ` +
-    `Skip steps 2-3 if no channels are connected.`;
+  // The goal preamble is the SOLE owner of kickoff dispatch logic
+  // (per coordinator/AGENT.md "Goal-driven dispatch"). We pre-compute
+  // the per-channel slot facts here — week-1 post counts via
+  // derivePerWeekPosts, and per-channel repliesPerDay budgets — so the
+  // coordinator can read concrete numbers off the goal instead of
+  // inferring or querying.
+  const goal = buildKickoffGoalText({
+    productName: productRow.name,
+    pathId,
+    weekStart: kickoffWeekStart,
+    now: kickoffNow.toISOString(),
+    channels,
+    week1Posts: activePath
+      ? derivePerWeekPosts(
+          activePath as Pick<StrategicPath, 'thesisArc' | 'channelMix'>,
+          0,
+        )
+      : null,
+    channelMix: (activePath?.channelMix ?? null) as Record<
+      string,
+      { repliesPerDay?: number | null } | null | undefined
+    > | null,
+  });
 
   let conversationId: string;
   try {
@@ -171,4 +183,133 @@ export async function ensureKickoffEnqueued(args: {
     );
     return { fired: false, reason: 'enqueue_failed', conversationId };
   }
+}
+
+interface KickoffGoalArgs {
+  productName: string;
+  pathId: string | null;
+  weekStart: string;
+  now: string;
+  channels: readonly string[];
+  /** Week-1 per-channel post counts; null when no strategic path. */
+  week1Posts: { x: number; reddit: number; email: number } | null;
+  /** Channel-mix object (read raw — passthrough lets `repliesPerDay` survive). */
+  channelMix: Record<
+    string,
+    { repliesPerDay?: number | null } | null | undefined
+  > | null;
+}
+
+/**
+ * Build the kickoff goal preamble. The coordinator reads this verbatim
+ * — every spawn directive, every plan-item directive, every channel ×
+ * mode pair lives here, not in AGENT.md. Adding a new channel = one
+ * branch in this function.
+ *
+ * The goal is structured in three steps:
+ *   1. Seed week-1 plan_items via add_plan_item (post + reply slots).
+ *   2. Spawn ONE Task per (channel × mode) where slots exist for today,
+ *      ALL IN THE SAME ASSISTANT TURN — engine accepts multiple tool_use
+ *      blocks per turn so 4 parallel spawns is one round-trip.
+ *   3. update_plan_item state='drafted' as <task-notification> arrives.
+ *
+ * Pairs with no slot are skipped silently — no spawn, no directive.
+ * Reddit-only setups emit 2 spawns; X+Reddit emit up to 4.
+ */
+export function buildKickoffGoalText(args: KickoffGoalArgs): string {
+  const { productName, pathId, weekStart, now, channels, week1Posts } = args;
+
+  // Pathological at kickoff: onboarding writes a path before /team mounts.
+  // Fall back to a minimal "no plan" goal so the coordinator just
+  // acknowledges and tells the founder what's missing.
+  if (!pathId || !week1Posts) {
+    return (
+      `First-visit kickoff for ${productName}. ` +
+      `weekStart=${weekStart} now=${now}. ` +
+      `Connected channels: ${channels.join(', ') || 'none'}. ` +
+      `Trigger: kickoff. ` +
+      `No active strategic path — acknowledge the founder and tell them ` +
+      `to finish onboarding so the team can seed their plan.`
+    );
+  }
+
+  // Per-channel reply budget. The strategic-path schema marks
+  // `repliesPerDay` as nullish; coerce to 0 when missing.
+  const repliesX = readRepliesPerDay(args.channelMix, 'x');
+  const repliesReddit = readRepliesPerDay(args.channelMix, 'reddit');
+
+  const xConnected = channels.includes('x');
+  const redditConnected = channels.includes('reddit');
+
+  // Build the spawn directives. Each (channel, mode) pair becomes one
+  // line in the goal IF the slot exists for today — pairs with zero
+  // budget are silently dropped so the coordinator doesn't spawn
+  // empty work.
+  const spawns: string[] = [];
+  if (xConnected && repliesX > 0) {
+    spawns.push(
+      `- (x, reply): Task({ subagent_type: 'social-media-manager', description: 'fill x reply slot', prompt: 'Mode: discover-and-fill-slot\\nplanItemId: <today's x content_reply uuid>\\ntargetCount: ${repliesX}' })`,
+    );
+  }
+  if (redditConnected && repliesReddit > 0) {
+    spawns.push(
+      `- (reddit, reply): Task({ subagent_type: 'social-media-manager', description: 'fill reddit reply slot', prompt: 'Mode: discover-and-fill-slot\\nplanItemId: <today's reddit content_reply uuid>\\ntargetCount: ${repliesReddit}' })`,
+    );
+  }
+  if (xConnected && week1Posts.x > 0) {
+    spawns.push(
+      `- (x, post): Task({ subagent_type: 'social-media-manager', description: 'draft x post batch', prompt: 'Mode: post-batch\\nplanItemIds: <today's x content_post uuids>' })`,
+    );
+  }
+  if (redditConnected && week1Posts.reddit > 0) {
+    spawns.push(
+      `- (reddit, post): Task({ subagent_type: 'social-media-manager', description: 'draft reddit post batch', prompt: 'Mode: post-batch\\nplanItemIds: <today's reddit content_post uuids>' })`,
+    );
+  }
+
+  const channelsLine = channels.join(', ') || 'none';
+  const lines: string[] = [
+    `First-visit kickoff for ${productName}.`,
+    `Strategic path pathId=${pathId}.`,
+    `weekStart=${weekStart} now=${now}.`,
+    `Connected channels: ${channelsLine}.`,
+    `Trigger: kickoff.`,
+    ``,
+    `Week-1 budget (read off the strategic path):`,
+    `- x: ${week1Posts.x} posts/week, ${repliesX} replies/day`,
+    `- reddit: ${week1Posts.reddit} posts/week, ${repliesReddit} replies/day`,
+    ``,
+    `Step 1 — Seed week-1 plan_items via add_plan_item (one call per row).`,
+    `For each channel above with posts/week > 0: add that many content_post rows for week 1, anchored to scheduledAt within this week's UTC days using preferredHours from channelMix.`,
+    `For each channel with replies/day > 0: add one content_reply row per day for week 1 with params.targetCount = repliesPerDay.`,
+    `Pass weekStart=${weekStart} and now=${now} verbatim — never let scheduledAt fall before now.`,
+    ``,
+  ];
+
+  if (spawns.length > 0) {
+    lines.push(
+      `Step 2 — Dispatch all of the following Task spawns IN A SINGLE ASSISTANT TURN (engine accepts multiple tool_use blocks per turn — parallelize). Reply slots use the planItemId you just added in step 1; post batches use the same-day content_post uuids:`,
+      ...spawns,
+      ``,
+      `Step 3 — As each <task-notification> arrives, call update_plan_item({ id: <touched uuid>, state: 'drafted' }) for the slot(s) that task drafted for. Don't wait for all to return before updating the first.`,
+    );
+  } else {
+    lines.push(
+      `Step 2 — No connected channels with active reply or post budget. Skip dispatch and tell the founder which channel they should connect to start drafting.`,
+    );
+  }
+
+  return lines.join('\n');
+}
+
+function readRepliesPerDay(
+  channelMix: KickoffGoalArgs['channelMix'],
+  ch: 'x' | 'reddit',
+): number {
+  if (!channelMix) return 0;
+  const entry = channelMix[ch];
+  if (!entry) return 0;
+  const v = entry.repliesPerDay;
+  if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) return 0;
+  return Math.floor(v);
 }
