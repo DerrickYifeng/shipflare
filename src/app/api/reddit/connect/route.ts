@@ -1,48 +1,55 @@
-import { NextResponse, type NextRequest } from 'next/server';
+import { NextResponse } from 'next/server';
+import { z } from 'zod';
 import { auth } from '@/lib/auth';
-import { randomBytes } from 'crypto';
+import { db } from '@/lib/db';
+import { channels } from '@/lib/db/schema';
 import { createLogger } from '@/lib/logger';
-import { readReturnToParam, setReturnToCookie } from '@/lib/oauth-return';
+import { PLATFORMS } from '@/lib/platform-config';
 
-const log = createLogger('api:reddit');
+const log = createLogger('api:reddit:connect');
 
-/**
- * Initiate Reddit OAuth flow.
- * Reddit is a CONNECTED ACCOUNT, not an auth provider.
- * Scopes: identity, submit, read, history (duration=permanent).
- */
-export async function GET(request: NextRequest) {
+const bodySchema = z.object({
+  handle: z
+    .string()
+    .min(3)
+    .max(20)
+    .regex(
+      /^[A-Za-z0-9_-]+$/,
+      'Reddit handles use letters, digits, underscores, dashes only.',
+    ),
+});
+
+export async function POST(request: Request): Promise<Response> {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  log.info('Reddit OAuth flow initiated');
-  const state = randomBytes(16).toString('hex');
+  const json = await request.json().catch(() => null);
+  const parsed = bodySchema.safeParse(json);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: 'invalid_handle', detail: parsed.error.message },
+      { status: 400 },
+    );
+  }
 
-  const params = new URLSearchParams({
-    client_id: process.env.REDDIT_CLIENT_ID!,
-    response_type: 'code',
-    state,
-    redirect_uri: process.env.REDDIT_REDIRECT_URI!,
-    duration: 'permanent',
-    scope: 'identity submit read history',
-  });
+  await db
+    .insert(channels)
+    .values({
+      userId: session.user.id,
+      platform: PLATFORMS.reddit.id,
+      username: parsed.data.handle,
+      oauthTokenEncrypted: null,
+      refreshTokenEncrypted: null,
+    })
+    .onConflictDoUpdate({
+      target: [channels.userId, channels.platform],
+      set: { username: parsed.data.handle, updatedAt: new Date() },
+    });
 
-  const url = `https://www.reddit.com/api/v1/authorize?${params.toString()}`;
-
-  // Store state in httpOnly cookie for CSRF validation in callback
-  const response = NextResponse.redirect(url);
-  response.cookies.set('reddit_oauth_state', state, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    maxAge: 600, // 10 minutes
-    path: '/',
-  });
-
-  const returnTo = readReturnToParam(request);
-  if (returnTo) setReturnToCookie(response, returnTo);
-
-  return response;
+  log.info(
+    `reddit channel connected for user ${session.user.id}: u/${parsed.data.handle}`,
+  );
+  return NextResponse.json({ success: true });
 }
