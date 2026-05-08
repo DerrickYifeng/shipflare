@@ -73,11 +73,26 @@ export default async function RedditHandoffPage({ params }: PageProps) {
   }
 
   // thread.url is stored relative ("/r/sub/comments/...") by the Reddit
-  // persistence path, but older rows may carry an absolute URL. Normalize
-  // both shapes to a https URL so window.open works either way.
-  const threadUrl = thread.url.startsWith('http')
-    ? thread.url
-    : `https://www.reddit.com${thread.url}`;
+  // persistence path, but older rows may carry an absolute URL. xAI Grok
+  // is also in the write path, so we cannot trust the host on absolute
+  // URLs — validate it before passing the value to window.open in the
+  // client component.
+  let absoluteUrl: URL;
+  try {
+    absoluteUrl = thread.url.startsWith('http')
+      ? new URL(thread.url)
+      : new URL(thread.url, 'https://www.reddit.com');
+  } catch {
+    redirect('/today?notice=invalid_thread_url');
+  }
+  if (
+    absoluteUrl.host !== 'www.reddit.com' &&
+    absoluteUrl.host !== 'reddit.com' &&
+    absoluteUrl.host !== 'old.reddit.com'
+  ) {
+    redirect('/today?notice=invalid_thread_url');
+  }
+  const threadUrl = absoluteUrl.toString();
 
   return (
     <main className="mx-auto max-w-2xl p-8">

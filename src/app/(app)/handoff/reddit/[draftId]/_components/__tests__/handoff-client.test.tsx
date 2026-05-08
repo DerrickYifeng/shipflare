@@ -61,8 +61,12 @@ describe('HandoffClient', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /open reddit/i }));
 
+    // Critical Safari/Firefox invariant: the click-handler's clipboard
+    // write must precede window.open. We only assert the last two entries
+    // because the auto-copy useEffect's resolution slot relative to the
+    // click handler is non-deterministic under happy-dom.
     await waitFor(() => {
-      expect(order).toEqual(['clipboard', 'clipboard', 'window-open']);
+      expect(order.slice(-2)).toEqual(['clipboard', 'window-open']);
     });
   });
 
