@@ -104,17 +104,21 @@ describe('createTeamPlatformDeps', () => {
     expect(hoisted.xaiCtor).not.toHaveBeenCalled();
   });
 
-  it('instantiates redditClient for a connected reddit channel', async () => {
+  it('instantiates redditClient via appOnly() for a connected reddit channel', async () => {
+    // Handoff-mode reddit channels never have tokens; the team-deps factory
+    // uses RedditClient.appOnly() instead of fromChannel() so it works for
+    // null-token rows. Direct-post code paths are unreachable for Reddit
+    // because dispatchApprove routes Reddit to handoff (Task 4b).
     hoisted.channelRows.push({
       id: 'ch-reddit',
       platform: 'reddit',
-      oauthTokenEncrypted: 't',
-      refreshTokenEncrypted: 'r',
+      oauthTokenEncrypted: '',
+      refreshTokenEncrypted: '',
       tokenExpiresAt: null,
     });
     const deps = await createTeamPlatformDeps('user-1', 'product-1');
     expect(deps.redditClient).toBeDefined();
-    expect(hoisted.redditFromChannel).toHaveBeenCalledOnce();
+    expect(hoisted.redditFromChannel).not.toHaveBeenCalled();
   });
 
   it('instantiates xClient for a connected x channel', async () => {
@@ -155,18 +159,18 @@ describe('createTeamPlatformDeps', () => {
   });
 
   it('skips platform clients silently when channel factory throws', async () => {
-    hoisted.redditFromChannel.mockImplementationOnce(() => {
+    hoisted.xFromChannel.mockImplementationOnce(() => {
       throw new Error('decrypt failed');
     });
     hoisted.channelRows.push({
-      id: 'ch-reddit',
-      platform: 'reddit',
+      id: 'ch-x',
+      platform: 'x',
       oauthTokenEncrypted: 't',
       refreshTokenEncrypted: 'r',
       tokenExpiresAt: null,
     });
     const deps = await createTeamPlatformDeps('user-1', 'product-1');
-    expect(deps.redditClient).toBeUndefined();
+    expect(deps.xClient).toBeUndefined();
   });
 
   it('includes memoryStore when productId is provided', async () => {

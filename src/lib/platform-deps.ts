@@ -90,9 +90,12 @@ export function createClientFromChannel(
   },
 ): RedditClient | XClient | null {
   switch (platform) {
-    case 'reddit':
-      return RedditClient.fromChannel(channel);
-    case 'x':
+    case PLATFORMS.reddit.id:
+      // Handoff-mode reddit channels have no tokens; clients are read-only
+      // via the public JSON API. Direct-post code paths are unreachable for
+      // Reddit because dispatchApprove routes Reddit to handoff (Task 4b).
+      return RedditClient.appOnly();
+    case PLATFORMS.x.id:
       return XClient.fromChannel(channel);
     default:
       return null;
