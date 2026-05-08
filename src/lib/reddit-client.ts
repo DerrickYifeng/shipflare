@@ -488,6 +488,41 @@ export class RedditClient {
   }
 
   /**
+   * Public profile lookup — does NOT require auth. Used by handle-verify
+   * during onboarding. Returns null on 404 (handle does not exist) and
+   * throws on network / 5xx so the caller can distinguish "not found"
+   * from "we couldn't check."
+   */
+  async getUserAboutPublic(
+    username: string,
+  ): Promise<{ name: string; total_karma: number; created_utc: number } | null> {
+    const handle = username.replace(/^u\//, '').trim();
+    if (!handle) {
+      throw new Error('getUserAboutPublic: username is required');
+    }
+    const url = `https://www.reddit.com/user/${encodeURIComponent(handle)}/about.json`;
+    const response = await fetch(url, {
+      headers: { 'User-Agent': 'ShipFlare/1.0.0' },
+      signal: AbortSignal.timeout(4000),
+    });
+    if (response.status === 404) return null;
+    if (!response.ok) {
+      throw new Error(
+        `getUserAboutPublic: HTTP ${response.status} for u/${handle}`,
+      );
+    }
+    const data = (await response.json()) as {
+      data?: { name?: string; total_karma?: number; created_utc?: number };
+    };
+    if (!data.data || !data.data.name) return null;
+    return {
+      name: data.data.name,
+      total_karma: data.data.total_karma ?? 0,
+      created_utc: data.data.created_utc ?? 0,
+    };
+  }
+
+  /**
    * Fetch a user's recent submissions (self-posts).
    */
   async getUserPosts(
