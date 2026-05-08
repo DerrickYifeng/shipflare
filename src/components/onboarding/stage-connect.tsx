@@ -16,6 +16,7 @@ import {
 import { ArrowRight, Reddit, X } from './icons';
 import { COPY } from './_copy';
 import { REDDIT_DRAFT_ENABLED } from './_feature-flags';
+import { RedditHandleInput } from './reddit-handle-input';
 
 interface ChannelRow {
   id: string;
@@ -117,21 +118,36 @@ export function StageConnect({ onBack, onContinue }: StageConnectProps) {
         sub={COPY.stage4.sub}
       />
 
-      <AccountCard
-        state={byPlatform.reddit.state}
-        iconColor="#ff4500"
-        icon={<Reddit />}
-        title={COPY.stage4.cards.reddit.title}
-        desc={COPY.stage4.cards.reddit.desc}
-        sample={COPY.stage4.cards.reddit.sample}
-        errorMessage={byPlatform.reddit.error ?? COPY.stage4.errorReddit}
-        onConnect={() => connect('reddit')}
-        onDisconnect={() => void disconnect('reddit')}
-        onRetry={() => connect('reddit')}
-        comingSoon={!REDDIT_DRAFT_ENABLED}
-        comingSoonLabel={COPY.stage4.comingSoon}
-        comingSoonTooltip={COPY.stage4.comingSoonTooltip}
-      />
+      {REDDIT_DRAFT_ENABLED ? (
+        <RedditHandleInput
+          onSubmit={async (handle) => {
+            const res = await fetch('/api/reddit/connect', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ handle }),
+            });
+            if (res.ok) {
+              await refreshChannels();
+            }
+          }}
+        />
+      ) : (
+        <AccountCard
+          state={byPlatform.reddit.state}
+          iconColor="#ff4500"
+          icon={<Reddit />}
+          title={COPY.stage4.cards.reddit.title}
+          desc={COPY.stage4.cards.reddit.desc}
+          sample={COPY.stage4.cards.reddit.sample}
+          errorMessage={byPlatform.reddit.error ?? COPY.stage4.errorReddit}
+          onConnect={() => connect('reddit')}
+          onDisconnect={() => void disconnect('reddit')}
+          onRetry={() => connect('reddit')}
+          comingSoon
+          comingSoonLabel={COPY.stage4.comingSoon}
+          comingSoonTooltip={COPY.stage4.comingSoonTooltip}
+        />
+      )}
       <div style={{ height: 12 }} />
       <AccountCard
         state={byPlatform.x.state}
