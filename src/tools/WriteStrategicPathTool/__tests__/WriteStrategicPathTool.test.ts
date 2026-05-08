@@ -96,12 +96,12 @@ function validPathInput() {
         weekStart: '2026-01-01',
         theme: 'Building in public matters more than polish',
         angleMix: ['claim', 'story'] as Array<'claim' | 'story'>,
+        posts: { x: 4 },
       },
     ],
     contentPillars: ['Pillar A', 'Pillar B', 'Pillar C'],
     channelMix: {
       x: {
-        perWeek: 7,
         preferredHours: [9, 13, 17],
       },
     },

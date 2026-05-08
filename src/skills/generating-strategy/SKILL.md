@@ -51,8 +51,9 @@ See the "strategic-path-playbook" section below for the six ordered steps
 phase goals + narrative). Also see:
 
 - "7-angles" — the strict enum of 7 angles you use when shaping `angleMix`
-- "channel-cadence" — the per-phase `perWeek` ranges (original posts) and
-  `repliesPerDay` ranges (X-only daily reply budget) for X / Reddit / Email
+- "channel-cadence" — the per-phase per-week post ranges (used when
+  setting `thesisArc[i].posts.{ch}`) and the `repliesPerDay` ranges
+  (X-only daily reply budget) for X / Reddit / Email
 
 ## Delivering your plan
 

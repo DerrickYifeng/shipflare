@@ -181,11 +181,12 @@ const validPath = {
       weekStart: '2026-04-20T00:00:00Z',
       theme: 'ShipFlare thesis',
       angleMix: ['claim', 'story'],
+      posts: { x: 4 },
     },
   ],
   contentPillars: ['build-in-public', 'solo-dev-ops', 'tooling'],
   channelMix: {
-    x: { perWeek: 4, preferredHours: [14, 17, 21] },
+    x: { preferredHours: [14, 17, 21] },
   },
   phaseGoals: { audience: 'grow waitlist' },
 };

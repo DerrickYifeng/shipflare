@@ -1,46 +1,51 @@
-<!-- Extracted from src/agents/strategic-planner.md step 5 (v2).
-     Shared by generating-strategy skill (sets `channelMix[ch].perWeek` +
-     `channelMix[ch].repliesPerDay`) and content-planner (allocates
-     plan_items across those slots). Phase C deletes the v2 source. -->
-
 # Channel cadence
 
-Per-phase cadence guidance for each supported channel. Two knobs per
-channel:
+Per-phase cadence guidance for each supported channel. Two knobs:
 
-- **`perWeek`** — number of ORIGINAL POSTS to schedule across the week.
-  The generating-strategy skill sets this; content-planner emits exactly that
-  many `kind: 'content_post'` plan_items, spread over the channel's
+- **Per-week post count (`thesisArc[i].posts.{ch}`)** — number of
+  ORIGINAL POSTS to schedule for THIS WEEK on this channel. Lives on
+  the thesis arc, NOT in `channelMix`, so each week can ramp
+  differently (foundation weeks small, momentum/launch weeks larger).
+  The content-planner emits exactly that many `kind: 'content_post'`
+  plan_items for the channel, spread over the channel's
   `preferredHours` and rotated across `contentPillars`.
-- **`repliesPerDay`** — daily REPLY budget. The generating-strategy skill sets
-  this; content-planner emits ONE `kind: 'content_reply'` plan_item per
-  day per channel with `params.targetCount = repliesPerDay`. The
-  daily reply-sweep cron walks those slots and runs
-  `discovery-agent` + `content-manager` until `targetCount` drafts
-  exist (max 3 inner attempts per session). Nullish/0 disables reply
-  automation for the channel — used for Reddit, where high reply volume
-  invites shadowbans.
+- **`channelMix[ch].repliesPerDay`** — daily REPLY budget. The
+  generating-strategy skill sets this; content-planner emits ONE
+  `kind: 'content_reply'` plan_item per day per channel with
+  `params.targetCount = repliesPerDay`. The daily reply-sweep cron
+  walks those slots and runs `discovery-agent` + `content-manager`
+  until `targetCount` drafts exist (max 3 inner attempts per session).
+  Nullish/0 disables reply automation for the channel — used for
+  Reddit, where high reply volume invites shadowbans.
+
+The tables below give per-phase RANGES; pick a value within the range
+when emitting `thesisArc[i].posts.{ch}` for the corresponding week.
 
 ## Hard rule
 
-**Never emit cadence for a channel the user has not connected.** If the
-input `channels` array is `['x']` only, the strategic path's
+**Never emit settings for a channel the user has not connected.** If
+the input `channels` array is `['x']` only, the strategic path's
 `channelMix` MUST include `x` only — drop `reddit` and `email` entries
-entirely. The content-planner applies the mirror rule when allocating
-items.
+entirely, and DO NOT emit `posts.reddit` / `posts.email` on any week.
+The content-planner applies the mirror rule when allocating items.
 
 ## X (Twitter)
 
-### `perWeek` (original posts)
+### Per-week posts (`thesisArc[i].posts.x`)
 
-| Phase       | perWeek range | Notes                                                   |
-|-------------|---------------|---------------------------------------------------------|
-| foundation  | 2-4           | More breaks voice. Cadence building, not reach yet.     |
-| audience    | 4-6           | Warm the audience for launch; pillar rotation matters.  |
-| momentum    | 5-7           | Increase the day the audience needs warming for launch. |
-| launch      | 2-4 per day   | Runsheet territory, but the cadence caps the baseline.  |
-| compound    | 3-5           | Case posts + retention data; not peak pre-launch noise. |
-| steady      | 3-5           | Durable rhythm. No panic moves.                         |
+| Phase       | per-week range | Notes                                                   |
+|-------------|----------------|---------------------------------------------------------|
+| foundation  | 2-4            | More breaks voice. Cadence building, not reach yet.     |
+| audience    | 4-6            | Warm the audience for launch; pillar rotation matters.  |
+| momentum    | 5-7            | Increase the day the audience needs warming for launch. |
+| launch      | 2-4 per day    | Runsheet territory, but the cadence caps the baseline.  |
+| compound    | 3-5            | Case posts + retention data; not peak pre-launch noise. |
+| steady      | 3-5            | Durable rhythm. No panic moves.                         |
+
+Pick a value within the phase range and emit it as
+`thesisArc[i].posts.x` for each week. Ramp across the arc — the first
+foundation week sits at the bottom of the range, the last at the top,
+or step through the phase changes as the arc moves toward launch.
 
 Preferred hours: pick 2-4 UTC hours from the set
 `[14, 15, 16, 17, 19, 21]` unless the voice profile specifies
@@ -70,11 +75,14 @@ not N per day.
 
 ## Reddit
 
-### `perWeek` (original posts)
+### Per-week posts (`thesisArc[i].posts.reddit`)
 
-| Phase       | perWeek range | Notes                                                   |
-|-------------|---------------|---------------------------------------------------------|
-| any phase   | 1-2           | More than this burns karma in every sub we target.      |
+| Phase       | per-week range | Notes                                                |
+|-------------|----------------|------------------------------------------------------|
+| any phase   | 1-2            | More than this burns karma in every sub we target.   |
+
+Pick a value within range and emit as `thesisArc[i].posts.reddit`. A
+ramp like `1, 1, 2, 2` across a 4-week arc is healthier than a flat 2.
 
 Preferred hours: `[15, 19]` are the two default UTC slots — late US
 afternoon and US evening — calibrated for the indie/dev subs we target.
@@ -92,14 +100,16 @@ drafting cadence stays human-driven.
 
 ## Email
 
-| Phase       | perWeek range | Notes                                                   |
-|-------------|---------------|---------------------------------------------------------|
-| foundation  | 0-1           | Only waitlist confirmations at this stage.              |
-| audience    | 1-2           | Weekly build-in-public email + drip cadence.            |
-| momentum    | 1-2           | T-1 reminder to waitlist is mandatory.                  |
-| launch      | 1-2           | T-0 launch email + T+3 retrospective.                   |
-| compound    | 1             | Weekly digest OR thank-you batches — not both.          |
-| steady      | 1             | Weekly digest max. Respect the inbox.                   |
+### Per-week sends (`thesisArc[i].posts.email`)
+
+| Phase       | per-week range | Notes                                                  |
+|-------------|----------------|--------------------------------------------------------|
+| foundation  | 0-1            | Only waitlist confirmations at this stage.             |
+| audience    | 1-2            | Weekly build-in-public email + drip cadence.           |
+| momentum    | 1-2            | T-1 reminder to waitlist is mandatory.                 |
+| launch      | 1-2            | T-0 launch email + T+3 retrospective.                  |
+| compound    | 1              | Weekly digest OR thank-you batches — not both.         |
+| steady      | 1              | Weekly digest max. Respect the inbox.                  |
 
 Preferred hours: email send-times aren't set on the strategic path —
 content-planner picks hours per item based on the user's timezone

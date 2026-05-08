@@ -35,15 +35,34 @@ One theme per week in the planning window. Each theme is a specific
 sub-claim or anchor for that week's content.
 
 Foundation windows are typically 6 weeks; compound/steady windows are
-typically 4 weeks. Each week has an `angleMix` — which content angles
-from the seven (`claim`, `story`, `contrarian`, `howto`, `data`, `case`,
-`synthesis`) that week should favor. See the "7-angles" reference for
-the strict enum + when-to-use guidance.
+typically 4 weeks. Each week has:
+
+- `theme` — the week's specific sub-claim.
+- `angleMix` — which content angles from the seven (`claim`, `story`,
+  `contrarian`, `howto`, `data`, `case`, `synthesis`) that week should
+  favor. See the "7-angles" reference.
+- `posts` — per-channel ORIGINAL POST counts for that week. Object
+  keyed by channel id: `{ "x": 3, "reddit": 1 }`. Channels with 0
+  posts MAY be omitted. Email weeks typically `{ "email": 1 }`.
 
 A foundation week might favor `story + contrarian` to build identity; a
 momentum week favors `data + case` to build credibility. The mix must
 hold across the week — the content-planner will spread your angleMix
 across the week's content items.
+
+**Ramp the `posts` allocation across the arc.** Weeks are NOT all
+identical — that's the whole point of having a thesis arc. Use the
+"channel-cadence" reference for per-phase ranges, but the principle is:
+
+- Foundation weeks: lower end (X 1-2, Reddit 1).
+- Audience / momentum weeks: middle of the range (X 2-4, Reddit 1-2).
+- Launch week: upper end of phase range; runsheet items live separately
+  so the per-week post quota stays in the same band.
+- Compound / steady weeks: tapered durable rhythm.
+
+Don't emit the same `posts` object on every week — that defeats the arc
+and makes the calendar feel mechanical. The strategic path is a curve,
+not a line.
 
 `weekStart` dates must be consecutive Mondays at 00:00 UTC. No gap weeks.
 
@@ -109,24 +128,29 @@ I know this category" is not a valid skip reason — every product feels
 exceptional to its founder, and training-data priors systematically
 overshoot pre-PMF benchmarks.
 
-## Step 5 — Recommend channel mix
+## Step 5 — Set channel posting settings (`channelMix`)
+
+`channelMix` carries per-channel CADENCE PREFERENCES and the reply
+budget. Post quotas live on `thesisArc[i].posts` (Step 2) — they are
+NOT in `channelMix`.
 
 For each entry in the input `channels` array, emit an entry in
 `channelMix` with:
 
-- `perWeek` — planned ORIGINAL POST count for the week.
 - `repliesPerDay` — daily REPLY budget. Set this for X using the
   ranges + follower-tier guidance in the "channel-cadence" reference.
   **Leave NULL/omit for Reddit** — reddit punishes high reply volume
   with shadowbans; reply automation is X-only at this stage.
-- `preferredHours` — 1-6 UTC hours.
+- `preferredHours` — 1-6 UTC hours the planner should pick post /
+  reply-session times from.
 
 For `reddit`, also include `preferredCommunities` — 2-4 subreddit names
 relevant to the category.
 
-See the "channel-cadence" reference for the per-phase `perWeek` and
-`repliesPerDay` ranges plus the hard rule: never emit a cadence entry
-for a channel the user has not connected.
+See the "channel-cadence" reference for the per-phase per-week post
+ranges (used when setting `thesisArc[i].posts`) and the `repliesPerDay`
+ranges, plus the hard rule: never emit a `channelMix` entry for a
+channel the user has not connected.
 
 ## Step 6 — Write the narrative (200-2400 chars)
 

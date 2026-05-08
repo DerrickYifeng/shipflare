@@ -36,8 +36,27 @@ export const strategicMilestoneSchema = z.object({
 });
 
 /**
+ * Per-week, per-channel ORIGINAL POST allocation. Lives on each
+ * `thesisArc[i]` so the strategic path can ramp a foundation week
+ * (1-2 posts) into a momentum/launch week (2-4 posts) explicitly,
+ * instead of repeating one global `perWeek` across all weeks.
+ *
+ * Only channels with non-zero allocation need to be present. A week
+ * absent of `posts` falls back (in the `derivePerWeekPosts` helper) to
+ * the legacy `channelMix.{ch}.perWeek` for back-compat with paths
+ * generated before this field landed.
+ */
+export const strategicThesisWeekPostsSchema = z.object({
+  x: z.number().int().min(0).max(14).optional(),
+  reddit: z.number().int().min(0).max(14).optional(),
+  email: z.number().int().min(0).max(14).optional(),
+});
+
+/**
  * One week of the thesis arc. Content-planner reads
- * `thesisArc[thisWeekIndex].theme` and anchors every content_post to it.
+ * `thesisArc[thisWeekIndex].theme` and anchors every content_post to it,
+ * and reads `thesisArc[i].posts.{ch}` to know how many posts each
+ * channel should produce that week.
  */
 export const strategicThesisWeekSchema = z.object({
   weekStart: z.string().min(1), // ISO, Monday 00:00 UTC
@@ -56,12 +75,22 @@ export const strategicThesisWeekSchema = z.object({
     )
     .min(1)
     .max(7),
+  /**
+   * Per-channel ORIGINAL POST counts for this week. Optional during
+   * migration: legacy paths predate this field and fall back to
+   * `channelMix.{ch}.perWeek` via `derivePerWeekPosts`. New paths from
+   * the generating-strategy skill MUST emit this on every week.
+   */
+  posts: strategicThesisWeekPostsSchema.optional(),
 });
 
 /**
- * Channel-level cadence.
+ * Channel-level posting settings (cadence preferences + reply budget).
  *
- * - `perWeek` is the planned ORIGINAL POST count for the week.
+ * Post-quota knob lives on `thesisArc[i].posts.{ch}` — see
+ * `strategicThesisWeekPostsSchema`. This object only carries the
+ * channel-wide rhythm settings:
+ *
  * - `repliesPerDay` is the planned REPLY count per day — the daily
  *   reply-sweep cron uses this as the `targetCount` to fill against
  *   `content_reply` plan_items. Nullish/0 disables reply automation
@@ -70,13 +99,26 @@ export const strategicThesisWeekSchema = z.object({
  * - `preferredHours` is a small list of UTC hours the planner should
  *   prefer when allocating post / reply-session slots.
  * - `preferredCommunities` applies to reddit only.
+ *
+ * `.passthrough()` lets legacy rows that still carry `perWeek` survive
+ * `parse` so `derivePerWeekPosts` can fall back to it. Once all paths
+ * are regenerated this can become `.strict()` and the fallback in
+ * `derivePerWeekPosts` can be removed.
  */
-export const strategicChannelCadenceSchema = z.object({
-  perWeek: z.number().int().min(0).max(21),
-  repliesPerDay: z.number().int().min(0).max(50).nullish(),
-  preferredHours: z.array(z.number().int().min(0).max(23)).min(1).max(6),
-  preferredCommunities: z.array(z.string().min(1)).nullish(),
-});
+export const strategicChannelSettingsSchema = z
+  .object({
+    repliesPerDay: z.number().int().min(0).max(50).nullish(),
+    preferredHours: z.array(z.number().int().min(0).max(23)).min(1).max(6),
+    preferredCommunities: z.array(z.string().min(1)).nullish(),
+  })
+  .passthrough();
+
+/**
+ * @deprecated Renamed to `strategicChannelSettingsSchema` once `perWeek`
+ * moved out to `thesisArc[i].posts`. Kept as an alias for callers that
+ * still import the old name.
+ */
+export const strategicChannelCadenceSchema = strategicChannelSettingsSchema;
 
 /**
  * Output schema for the `generating-strategy` skill / `write_strategic_path`
@@ -90,9 +132,9 @@ export const strategicPathSchema = z.object({
   contentPillars: z.array(z.string().min(1).max(60)).min(3).max(4),
   channelMix: z
     .object({
-      x: strategicChannelCadenceSchema.nullish(),
-      reddit: strategicChannelCadenceSchema.nullish(),
-      email: strategicChannelCadenceSchema.nullish(),
+      x: strategicChannelSettingsSchema.nullish(),
+      reddit: strategicChannelSettingsSchema.nullish(),
+      email: strategicChannelSettingsSchema.nullish(),
     })
     .refine((c) => Object.values(c).some((v) => v != null), {
       message: 'channelMix must include at least one active channel',
@@ -108,10 +150,15 @@ export const strategicPathSchema = z.object({
 });
 
 export type StrategicMilestone = z.infer<typeof strategicMilestoneSchema>;
-export type StrategicThesisWeek = z.infer<typeof strategicThesisWeekSchema>;
-export type StrategicChannelCadence = z.infer<
-  typeof strategicChannelCadenceSchema
+export type StrategicThesisWeekPosts = z.infer<
+  typeof strategicThesisWeekPostsSchema
 >;
+export type StrategicThesisWeek = z.infer<typeof strategicThesisWeekSchema>;
+export type StrategicChannelSettings = z.infer<
+  typeof strategicChannelSettingsSchema
+>;
+/** @deprecated Use `StrategicChannelSettings`. */
+export type StrategicChannelCadence = StrategicChannelSettings;
 export type StrategicPath = z.infer<typeof strategicPathSchema>;
 
 // ---------------------------------------------------------------------------

@@ -449,8 +449,9 @@ Goal: durable rhythm. No panic moves.
 - **momentum week** should have MOSTLY prep-focused `launch_asset`
   items, not net-new content.
 - **Any phase** — if `completedLastWeek` shows no posts, bump
-  `content_post` count by +1 above `channelMix.{ch}.perWeek`. The
-  founder skipped last week; re-plant cadence gently.
+  `content_post` count by +1 above this week's
+  `thesisArc[i].posts.{ch}` (or the legacy `channelMix.{ch}.perWeek`
+  fallback). The founder skipped last week; re-plant cadence gently.
 
 ## Placeholder substitution
 
