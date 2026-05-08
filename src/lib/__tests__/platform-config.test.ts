@@ -40,8 +40,8 @@ describe('platform-config', () => {
       }
     });
 
-    it('ships MVP defaults: Reddit disabled, X enabled', () => {
-      expect(PLATFORMS.reddit.enabled).toBe(false);
+    it('ships with Reddit and X both enabled', () => {
+      expect(PLATFORMS.reddit.enabled).toBe(true);
       expect(PLATFORMS.x.enabled).toBe(true);
     });
 
@@ -65,6 +65,7 @@ describe('platform-config', () => {
     });
 
     it('returns false for a registered-but-disabled platform', () => {
+      PLATFORMS.reddit.enabled = false;
       expect(isPlatformAvailable('reddit')).toBe(false);
     });
 
@@ -74,6 +75,8 @@ describe('platform-config', () => {
     });
 
     it('returns true when a platform is toggled back on', () => {
+      PLATFORMS.reddit.enabled = false;
+      expect(isPlatformAvailable('reddit')).toBe(false);
       PLATFORMS.reddit.enabled = true;
       expect(isPlatformAvailable('reddit')).toBe(true);
     });
@@ -85,6 +88,7 @@ describe('platform-config', () => {
 
   describe('listAvailablePlatforms', () => {
     it('omits disabled platforms while keeping them in listPlatforms()', () => {
+      PLATFORMS.reddit.enabled = false;
       expect(listPlatforms()).toContain('reddit');
       expect(listAvailablePlatforms()).not.toContain('reddit');
       expect(listAvailablePlatforms()).toContain('x');

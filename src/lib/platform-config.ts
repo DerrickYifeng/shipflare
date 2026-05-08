@@ -113,8 +113,7 @@ export const PLATFORMS: Record<string, PlatformConfig> = {
   reddit: {
     id: 'reddit',
     displayName: 'Reddit',
-    // MVP ships X-only. Flip to `true` to re-enable Reddit across the product.
-    enabled: false,
+    enabled: true,
     defaultSources: ['SideProject', 'startups', 'webdev'],
     sourceLabel: 'subreddit',
     sourcePrefix: 'r/',
