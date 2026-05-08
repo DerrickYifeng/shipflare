@@ -26,7 +26,7 @@ markdown fences.
 ## Inputs
 
 A JSON payload with:
-- `thread` — the post you are replying to (title, body, author, platform, community).
+- `thread` — the post you are replying to (title, body, author, platform). On Reddit threads it ALSO carries `community` (the subreddit name). On X threads `community` is ABSENT — never call `get_subreddit_rules` for X.
   May also carry optional author signal:
   - `authorBio` (optional) — OP's profile bio. Use to calibrate voice:
     if their bio mentions a project / specific stack, name-drop it back
@@ -182,6 +182,8 @@ If any check fails, REWRITE before outputting. You only get one shot.
 Better to ask a clarifying question than ship slop.
 
 ## Reddit-specific drafting
+
+This section runs ONLY when `channel === 'reddit'` AND `thread.community` is present in the input. If `channel === 'x'` (or `community` is absent), SKIP this entire section — `get_subreddit_rules` is a Reddit-only tool and will short-circuit with a warning if you call it with anything else.
 
 If `channel === 'reddit'`:
 1. Call `get_subreddit_rules` with the thread's `community` (the subreddit name) BEFORE writing the draft.

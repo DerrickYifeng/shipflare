@@ -115,4 +115,27 @@ describe('get_subreddit_rules', () => {
 
     expect(result).toEqual([]);
   });
+
+  it('short-circuits without hitting Reddit when subreddit is a platform id (e.g. "x")', async () => {
+    // Regression guard: drafting-reply was occasionally called with the
+    // X-thread `community: "x"` placeholder, which produced
+    // `Reddit GET /r/x/about/rules: 404` ERR rows in production logs.
+    const result = await getSubredditRulesTool.execute(
+      { subreddit: 'x' },
+      makeCtx(),
+    );
+    expect(result).toEqual([]);
+    expect(getSubredditRulesMock).not.toHaveBeenCalled();
+  });
+
+  it('short-circuit is case-insensitive ("X", "Reddit", "REDDIT" all skip the API)', async () => {
+    for (const id of ['X', 'Reddit', 'REDDIT']) {
+      const result = await getSubredditRulesTool.execute(
+        { subreddit: id },
+        makeCtx(),
+      );
+      expect(result).toEqual([]);
+    }
+    expect(getSubredditRulesMock).not.toHaveBeenCalled();
+  });
 });

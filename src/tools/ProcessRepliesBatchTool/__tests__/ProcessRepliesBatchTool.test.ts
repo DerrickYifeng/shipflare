@@ -63,7 +63,8 @@ interface ThreadRow {
   userId: string;
   externalId: string;
   platform: string;
-  community: string;
+  /** NULL for X threads (no Reddit-style subreddit equivalent). */
+  community: string | null;
   title: string;
   url: string;
   body: string | null;
@@ -108,7 +109,8 @@ function seedThreads(
     userId: r.userId ?? 'user-1',
     externalId: r.externalId ?? `ext-${i}`,
     platform: r.platform ?? 'x',
-    community: r.community ?? 'home',
+    // X threads default to NULL community; Reddit fixtures pass it explicitly.
+    community: r.community ?? null,
     title: r.title ?? `thread ${i}`,
     url: r.url ?? `https://x.com/u/status/${i}`,
     body: r.body ?? 'we tried railway and it broke',

@@ -21,7 +21,8 @@ interface ReplayRow {
   draftId: string;
   threadId: string;
   platform: string;
-  community: string;
+  /** NULL for X threads (no Reddit-style subreddit equivalent). */
+  community: string | null;
   draftType: string;
   replyBody: string;
   verdict: string;

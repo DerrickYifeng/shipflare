@@ -84,7 +84,10 @@ function mapXCandidate(
     userId,
     externalId: t.external_id,
     platform: PLATFORMS.x.id,
-    community: 'x',
+    // X has no analog for Reddit's subreddit. Stay NULL — historically we
+    // wrote 'x' here as a placeholder and the drafting LLM occasionally
+    // handed it to get_subreddit_rules, 404'ing the Reddit API.
+    community: null,
     title: '',
     url: t.url,
     body: t.body,

@@ -31,7 +31,10 @@ interface DirectModeArgs {
   draftType: 'reply' | 'original_post';
   draftText: string;
   threadExternalId: string | null;
-  threadCommunity: string;
+  /** NULL for X threads (no subreddit equivalent). REQUIRED for Reddit
+   *  original_post — the dispatcher inside `postViaDirectMode` throws
+   *  when missing on the Reddit submit path. */
+  threadCommunity: string | null;
   postTitle: string | null;
   client: XClient | RedditClient;
 }
@@ -88,6 +91,9 @@ export async function postViaDirectMode(
     if (!args.postTitle) {
       throw new Error('Reddit original_post requires postTitle');
     }
+    if (!args.threadCommunity) {
+      throw new Error('Reddit original_post requires threadCommunity (subreddit)');
+    }
     const r = await args.client.submitPost(args.threadCommunity, args.postTitle, args.draftText);
     return {
       success: true,
@@ -137,17 +143,23 @@ export async function processPosting(job: Job<PostingJobData>) {
   // The shadowban circuit breaker and subreddit quota are Reddit-shaped
   // concepts; X has no equivalent per-topic cap.
   if (thread.platform === PLATFORMS.reddit.id) {
+    if (!thread.community) {
+      throw new Error(
+        `Reddit thread ${thread.id} has no community (subreddit) — cannot post`,
+      );
+    }
+    const subreddit = thread.community;
     const breaker = await isCircuitBreakerTripped(userId);
     if (breaker.tripped) {
       log.warn(`Circuit breaker tripped for user ${userId}: ${breaker.reason}`);
       throw new Error(`Circuit breaker tripped: ${breaker.reason}`);
     }
 
-    const rateLimit = await canPostToSubreddit(userId, thread.community);
+    const rateLimit = await canPostToSubreddit(userId, subreddit);
     if (!rateLimit.allowed) {
-      log.warn(`Rate limited in r/${thread.community} for user ${userId}`);
+      log.warn(`Rate limited in r/${subreddit} for user ${userId}`);
       throw new Error(
-        `Rate limit: ${rateLimit.remaining} posts remaining in r/${thread.community}, resets at ${rateLimit.resetAt.toISOString()}`,
+        `Rate limit: ${rateLimit.remaining} posts remaining in r/${subreddit}, resets at ${rateLimit.resetAt.toISOString()}`,
       );
     }
   }
@@ -163,7 +175,10 @@ export async function processPosting(job: Job<PostingJobData>) {
   const isX = platform === PLATFORMS.x.id;
   const draftType = draft.draftType ?? 'reply';
 
-  // Build input for the posting skill
+  // Build input for the posting skill. `subreddit` is Reddit-only (and
+  // required there). `topic` was historically populated on X with the
+  // 'x' placeholder community; now that X threads carry NULL community,
+  // we only include `topic` when we genuinely have a label to pass.
   const input: Record<string, unknown> = {
     platform,
     draftType,
@@ -171,13 +186,13 @@ export async function processPosting(job: Job<PostingJobData>) {
     // Reddit-specific
     ...(isX ? {} : {
       threadFullname: `t3_${thread.externalId}`,
-      subreddit: thread.community,
+      subreddit: thread.community ?? '',
       postTitle: draft.postTitle ?? undefined,
     }),
     // X-specific
     ...(isX ? {
       tweetId: thread.externalId,
-      topic: thread.community,
+      ...(thread.community ? { topic: thread.community } : {}),
     } : {}),
   };
 
@@ -254,9 +269,16 @@ export async function processPosting(job: Job<PostingJobData>) {
       : result.url ?? null;
 
   if (result.success && externalId) {
-    log.info(`Posted ${draftType} ${externalId} to r/${thread.community}`);
+    // Reddit posts log "to r/<sub>"; X posts log "to <platform>" (no
+    // analog of subreddit). Single log line, conditional on community.
+    const destLabel = thread.community
+      ? `r/${thread.community}`
+      : thread.platform;
+    log.info(`Posted ${draftType} ${externalId} to ${destLabel}`);
 
-    // Insert post record
+    // Insert post record. `posts.community` is still NOT NULL (separate
+    // schema from threads — the posts table tracks where we posted, and
+    // historically uses the platform name as a fallback label for X).
     const [insertedPost] = await db
       .insert(posts)
       .values({
@@ -265,7 +287,7 @@ export async function processPosting(job: Job<PostingJobData>) {
         platform: thread.platform,
         externalId,
         externalUrl,
-        community: thread.community,
+        community: thread.community ?? thread.platform,
         status: result.verified ? 'verified' : 'posted',
       })
       .returning({ id: posts.id });

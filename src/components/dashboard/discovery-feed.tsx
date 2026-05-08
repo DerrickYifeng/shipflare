@@ -45,9 +45,11 @@ export function DiscoveryFeed() {
           <Badge mono variant={thread.relevanceScore >= 0.7 ? 'success' : 'default'}>
             {(thread.relevanceScore * 100).toFixed(0)}
           </Badge>
-          <span className="text-[14px] tracking-[-0.224px] text-sf-text-tertiary shrink-0">
-            {thread.community}
-          </span>
+          {thread.community ? (
+            <span className="text-[14px] tracking-[-0.224px] text-sf-text-tertiary shrink-0">
+              {thread.community}
+            </span>
+          ) : null}
           <span className="text-[14px] tracking-[-0.224px] text-sf-text-primary truncate">
             {thread.title}
           </span>

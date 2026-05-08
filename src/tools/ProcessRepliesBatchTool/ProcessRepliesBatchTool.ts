@@ -281,6 +281,11 @@ async function draftOnce(
   input: ProcessRepliesBatchInput,
   ctx: ToolContext,
 ): Promise<DraftSkillOutput | null> {
+  // `community` is Reddit-only. Including it for X threads (where it
+  // historically held the `'x'` placeholder) tempted the drafting LLM to
+  // hand the value to `get_subreddit_rules` and 404 against Reddit. Strip
+  // it on non-Reddit platforms so the field's presence in args is itself
+  // the channel signal.
   const args = {
     thread: {
       title: thread.title,
@@ -292,7 +297,9 @@ async function draftOnce(
       quotedAuthor: thread.quotedAuthor,
       inReplyToText: thread.inReplyToText,
       inReplyToAuthor: thread.inReplyToAuthor,
-      community: thread.community,
+      ...(thread.platform === 'reddit' && thread.community
+        ? { community: thread.community }
+        : {}),
       platform: thread.platform,
     },
     product: {

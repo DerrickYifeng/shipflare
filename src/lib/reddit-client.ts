@@ -663,7 +663,13 @@ export class RedditClient {
         throw new RateLimitError(`Reddit API rate limited on GET ${path}`);
       }
       if (!response.ok) {
-        log.error(`Reddit GET ${path}: ${response.status}`);
+        // 404 is a legitimate "no such subreddit" / "no such resource"
+        // signal — callers (e.g. get_subreddit_rules) catch and degrade
+        // gracefully. Don't pollute ERR logs with expected misses; reserve
+        // ERR for genuine server-side breakage (5xx) and unauthorized
+        // (4xx that signals a bug, not a user input).
+        const level = response.status === 404 ? 'warn' : 'error';
+        log[level](`Reddit GET ${path}: ${response.status}`);
         throw new Error(`Reddit API GET ${path}: ${response.status}`);
       }
       return response.json();

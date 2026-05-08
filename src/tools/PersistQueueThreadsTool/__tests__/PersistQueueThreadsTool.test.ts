@@ -105,8 +105,15 @@ describe('persist_queue_threads tool', () => {
     );
 
     expect(valuesCapture).toHaveBeenCalledTimes(1);
-    const rows = valuesCapture.mock.calls[0]![0] as Array<{ externalId: string }>;
+    const rows = valuesCapture.mock.calls[0]![0] as Array<{ externalId: string; community: string | null }>;
     expect(rows.map((r) => r.externalId)).toEqual(['high', 'med', 'low']);
+    // Regression: X threads must persist `community: null` (no Reddit-style
+    // subreddit equivalent). Pre-fix this column held the literal 'x'
+    // placeholder and the drafting LLM occasionally fed it to
+    // get_subreddit_rules, producing spurious Reddit 404s.
+    for (const r of rows) {
+      expect(r.community).toBeNull();
+    }
   });
 
   it('reports inserted vs deduped counts based on returning() length', async () => {

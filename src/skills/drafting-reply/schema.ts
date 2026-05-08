@@ -28,7 +28,15 @@ export const draftingReplyInputSchema = z.object({
     /** Parent post author handle (no @). */
     inReplyToAuthor: z.string().nullable().optional(),
     platform: channelEnum,
-    community: z.string(),
+    /**
+     * Reddit-only — the subreddit name (no `r/` prefix). Absent for X
+     * threads because X has no equivalent concept; including a placeholder
+     * value here invited the drafter to hand it to `get_subreddit_rules`,
+     * which then 404'd against Reddit. The skill body's
+     * "Reddit-specific drafting" section is the only place that may
+     * reference this field.
+     */
+    community: z.string().min(1).nullable().optional(),
     url: z.string().optional(),
   }),
   product: z.object({
