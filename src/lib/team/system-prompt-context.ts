@@ -300,10 +300,12 @@ export async function loadSystemPromptContext(
   }
 
   // 4. channels — dedupe in JS for portability across Drizzle dialect
-  //    quirks; identical output to a `selectDistinct`.
-  const uniquePlatforms = Array.from(
-    new Set(channelRows.map((r) => r.platform)),
-  );
+  //    quirks; identical output to a `selectDistinct`. Reddit is a
+  //    no-binding always-on channel (handoff dispatch + app-only reads),
+  //    so we always surface it in the agents' channel list regardless of
+  //    whether the user has a `channels` row for it.
+  const dbPlatforms = Array.from(new Set(channelRows.map((r) => r.platform)));
+  const uniquePlatforms = Array.from(new Set([...dbPlatforms, 'reddit']));
   const channelsStr =
     uniquePlatforms.length > 0 ? uniquePlatforms.join(', ') : '(none yet)';
 

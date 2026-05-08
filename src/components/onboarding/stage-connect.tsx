@@ -1,7 +1,8 @@
-// Stage 4 — Connect. Reddit uses the handle-input handoff flow (no OAuth);
-// X still uses OAuth. State is derived from /api/channels — on the X
-// callback the user lands back at /onboarding and the Redis draft resumes
-// at this stage.
+// Stage 4 — Connect. Only X uses OAuth; Reddit is a no-binding always-on
+// channel (handoff-only dispatch + RedditClient.appOnly() reads), so no
+// Connect step is required for it. State is derived from /api/channels —
+// on the X callback the user lands back at /onboarding and the Redis
+// draft resumes at this stage.
 
 'use client';
 
@@ -15,7 +16,6 @@ import {
 } from './_shared/account-card';
 import { ArrowRight, X } from './icons';
 import { COPY } from './_copy';
-import { RedditHandleInput } from './reddit-handle-input';
 
 interface ChannelRow {
   id: string;
@@ -28,40 +28,25 @@ interface StageConnectProps {
   onContinue: () => void;
 }
 
-type Platform = 'reddit' | 'x';
-
 interface PlatformState {
   state: AccountCardState;
   error: string | null;
 }
 
-const INITIAL: Record<Platform, PlatformState> = {
-  reddit: { state: 'idle', error: null },
-  x: { state: 'idle', error: null },
-};
+const INITIAL: PlatformState = { state: 'idle', error: null };
 
 export function StageConnect({ onBack, onContinue }: StageConnectProps) {
-  const [byPlatform, setByPlatform] =
-    useState<Record<Platform, PlatformState>>(INITIAL);
+  const [xState, setXState] = useState<PlatformState>(INITIAL);
 
   const refreshChannels = useCallback(async () => {
     try {
       const res = await fetch('/api/channels');
       if (!res.ok) return;
       const body = (await res.json()) as { channels: ChannelRow[] };
-      setByPlatform((prev) => {
-        const next = { ...prev };
-        const redditConn = body.channels.some((c) => c.platform === 'reddit');
-        const xConn = body.channels.some((c) => c.platform === 'x');
-        next.reddit = {
-          state: redditConn ? 'connected' : 'idle',
-          error: null,
-        };
-        next.x = { state: xConn ? 'connected' : 'idle', error: null };
-        return next;
-      });
+      const xConn = body.channels.some((c) => c.platform === 'x');
+      setXState({ state: xConn ? 'connected' : 'idle', error: null });
     } catch {
-      /* best effort — fall through with idle cards */
+      /* best effort — fall through with idle card */
     }
   }, []);
 
@@ -70,82 +55,24 @@ export function StageConnect({ onBack, onContinue }: StageConnectProps) {
   }, [refreshChannels]);
 
   const connectX = () => {
-    setByPlatform((prev) => ({
-      ...prev,
-      x: { state: 'connecting', error: null },
-    }));
+    setXState({ state: 'connecting', error: null });
     window.location.href = `/api/x/connect?returnTo=${encodeURIComponent('/onboarding')}`;
   };
 
-  const submitRedditHandle = async (handle: string) => {
-    setByPlatform((prev) => ({
-      ...prev,
-      reddit: { state: 'connecting', error: null },
-    }));
+  const disconnectX = async () => {
     try {
-      const res = await fetch('/api/reddit/connect', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ handle }),
-      });
-      if (!res.ok) {
-        const body = (await res.json().catch(() => null)) as
-          | { error?: string; detail?: string }
-          | null;
-        const detail = body?.detail ?? body?.error ?? `Save failed (${res.status})`;
-        setByPlatform((prev) => ({
-          ...prev,
-          reddit: { state: 'error', error: detail },
-        }));
-        throw new Error(detail);
-      }
-      await refreshChannels();
-    } catch (err) {
-      if (err instanceof Error) {
-        setByPlatform((prev) => ({
-          ...prev,
-          reddit: { state: 'error', error: err.message },
-        }));
-        throw err;
-      }
-      const fallback = COPY.stage4.errorReddit;
-      setByPlatform((prev) => ({
-        ...prev,
-        reddit: { state: 'error', error: fallback },
-      }));
-      throw new Error(fallback);
-    }
-  };
-
-  const disconnect = async (platform: Platform) => {
-    try {
-      const res = await fetch(`/api/${platform}/disconnect`, {
-        method: 'DELETE',
-      });
+      const res = await fetch('/api/x/disconnect', { method: 'DELETE' });
       if (!res.ok) throw new Error(`Disconnect failed (${res.status})`);
-      setByPlatform((prev) => ({
-        ...prev,
-        [platform]: { state: 'idle', error: null },
-      }));
+      setXState({ state: 'idle', error: null });
     } catch (err) {
-      setByPlatform((prev) => ({
-        ...prev,
-        [platform]: {
-          state: 'error',
-          error:
-            err instanceof Error
-              ? err.message
-              : platform === 'reddit'
-                ? COPY.stage4.errorReddit
-                : COPY.stage4.errorX,
-        },
-      }));
+      setXState({
+        state: 'error',
+        error: err instanceof Error ? err.message : COPY.stage4.errorX,
+      });
     }
   };
 
-  const anyConnected =
-    byPlatform.reddit.state === 'connected' ||
-    byPlatform.x.state === 'connected';
+  const xConnected = xState.state === 'connected';
 
   return (
     <div>
@@ -155,30 +82,16 @@ export function StageConnect({ onBack, onContinue }: StageConnectProps) {
         sub={COPY.stage4.sub}
       />
 
-      <RedditHandleInput onSubmit={submitRedditHandle} />
-      {byPlatform.reddit.state === 'error' && byPlatform.reddit.error && (
-        <p
-          role="alert"
-          style={{
-            marginTop: 8,
-            fontSize: 13,
-            color: 'var(--sf-error, #d33)',
-          }}
-        >
-          {byPlatform.reddit.error}
-        </p>
-      )}
-      <div style={{ height: 12 }} />
       <AccountCard
-        state={byPlatform.x.state}
+        state={xState.state}
         iconColor="#000"
         icon={<X />}
         title={COPY.stage4.cards.x.title}
         desc={COPY.stage4.cards.x.desc}
         sample={COPY.stage4.cards.x.sample}
-        errorMessage={byPlatform.x.error ?? COPY.stage4.errorX}
+        errorMessage={xState.error ?? COPY.stage4.errorX}
         onConnect={connectX}
-        onDisconnect={() => void disconnect('x')}
+        onDisconnect={() => void disconnectX()}
         onRetry={connectX}
       />
 
@@ -233,7 +146,7 @@ export function StageConnect({ onBack, onContinue }: StageConnectProps) {
           <OnbButton
             size="lg"
             variant="primary"
-            disabled={!anyConnected}
+            disabled={!xConnected}
             onClick={onContinue}
           >
             {COPY.stage4.nextCta}

@@ -217,7 +217,9 @@ describe('loadSystemPromptContext', () => {
     expect(ctx.productState).toBe('unknown');
     expect(ctx.currentPhase).toBe('unknown');
     expect(ctx.strategicPathId).toBe('(none yet)');
-    expect(ctx.channels).toBe('(none yet)');
+    // Reddit is a no-binding always-on channel — every team gets it in
+    // the channels list regardless of `channels` table state.
+    expect(ctx.channels).toBe('reddit');
     expect(ctx.itemCount).toBe(0);
     expect(ctx.statusBreakdown).toBe('(none)');
     expect(ctx.founderName).toBe('founder');

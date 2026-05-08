@@ -1,5 +1,4 @@
 import { testWithProduct, expect } from '../fixtures/auth';
-import { seedChannel } from '../fixtures/db';
 
 testWithProduct.describe('Settings', () => {
   testWithProduct('displays profile and connection status', async ({
@@ -15,25 +14,16 @@ testWithProduct.describe('Settings', () => {
     await expect(page.getByText(testUser.name)).toBeVisible();
     await expect(page.getByText(testUser.email)).toBeVisible();
 
-    // Verify Reddit not connected
-    await expect(page.getByText('Reddit')).toBeVisible();
-    await expect(page.getByText('Not connected')).toBeVisible();
+    // X is not connected by default; Connect button should be visible.
+    await expect(page.getByText('X / Twitter')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Connect' })).toBeVisible();
+
+    // Reddit appears as a read-only "Always on" tile (no-binding channel).
+    await expect(page.getByText('Reddit')).toBeVisible();
+    await expect(page.getByText(/always on/i)).toBeVisible();
 
     // Verify danger zone
     await expect(page.getByText('Danger zone')).toBeVisible();
-  });
-
-  testWithProduct('shows connected Reddit when channel exists', async ({
-    authenticatedPageWithProduct: page,
-    testUser,
-  }) => {
-    await seedChannel(testUser.id, { username: 'testreddituser' });
-    await page.goto('/settings');
-
-    await expect(page.getByText('Connected', { exact: true })).toBeVisible();
-    await expect(page.getByText('u/testreddituser')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Disconnect' })).toBeVisible();
   });
 
   testWithProduct('deletes account with DELETE confirmation', async ({

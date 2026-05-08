@@ -48,13 +48,15 @@ jobs:
       AUTH_SECRET: ci-test-secret-minimum-32-chars!!
       GITHUB_ID: fake-github-id
       GITHUB_SECRET: fake-github-secret
-      # REDDIT_* are required by src/lib/env.ts at module load. Build-time
-      # page-data collection for /api/reddit/callback transitively imports
-      # the env validator (via src/lib/app-url.ts → src/lib/env.ts), so
-      # missing values fail `next build` even though tests don't need them.
+      # REDDIT_* are still required by src/lib/env.ts at module load —
+      # RedditClient.ensureValidToken() reads CLIENT_ID/SECRET if a future
+      # OAuth refresh path is reintroduced. Reddit is currently a no-binding
+      # always-on channel (handoff dispatch + appOnly() reads), so these
+      # values are unused at runtime but the schema validator still gates
+      # `next build` on them.
       REDDIT_CLIENT_ID: fake-reddit-client-id
       REDDIT_CLIENT_SECRET: fake-reddit-client-secret
-      REDDIT_REDIRECT_URI: http://localhost:3000/api/reddit/callback
+      REDDIT_REDIRECT_URI: http://localhost:3000/unused-reddit-redirect
       ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
       ANTHROPIC_API_KEY: sk-ant-fake
       NEXT_PUBLIC_APP_URL: http://localhost:3000

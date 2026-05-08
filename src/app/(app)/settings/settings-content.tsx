@@ -22,7 +22,6 @@ import { FieldRow } from '@/components/ui/field-row';
 import { useToast } from '@/components/ui/toast';
 import { useTheme, type Theme } from '@/components/layout/theme-provider';
 import { usePreferences } from '@/hooks/use-preferences';
-import { RedditHandleInput } from '@/components/onboarding/reddit-handle-input';
 
 type SectionId = 'appearance' | 'account' | 'billing' | 'integrations' | 'safety';
 
@@ -46,7 +45,7 @@ export interface SettingsUser {
 }
 
 export interface SettingsConnection {
-  platform: 'reddit' | 'x';
+  platform: 'x';
   username: string | null;
   connected: boolean;
 }
@@ -756,13 +755,12 @@ function IntegrationsSection({
 }) {
   const { toast } = useToast();
   const router = useRouter();
-  const [redditEditing, setRedditEditing] = useState(false);
 
-  const handleDisconnect = async (platform: 'reddit' | 'x') => {
+  const handleDisconnectX = async () => {
     try {
-      const res = await fetch(`/api/${platform}/disconnect`, { method: 'DELETE' });
+      const res = await fetch('/api/x/disconnect', { method: 'DELETE' });
       if (!res.ok) throw new Error('Disconnect failed');
-      toast(`${platform} disconnected`);
+      toast('x disconnected');
       router.refresh();
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Could not disconnect');
@@ -773,49 +771,34 @@ function IntegrationsSection({
     window.location.href = `/api/x/connect`;
   };
 
-  const handleRedditSubmit = async (handle: string) => {
-    const res = await fetch('/api/reddit/connect', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ handle }),
-    });
-    if (!res.ok) {
-      const body = (await res.json().catch(() => null)) as
-        | { error?: string; detail?: string }
-        | null;
-      const detail =
-        body?.detail ?? body?.error ?? `Save failed (${res.status})`;
-      toast(detail);
-      // Re-throw so RedditHandleInput surfaces the error inline (parent
-      // owning toast doesn't replace child-level error feedback).
-      throw new Error(detail);
-    }
-    toast(`Reddit handle saved: u/${handle}`);
-    setRedditEditing(false);
-    router.refresh();
-  };
-
-  const redditConn = connections.find((c) => c.platform === 'reddit');
   const xConn = connections.find((c) => c.platform === 'x');
 
-  const integrations = [
+  // Reddit is intentionally absent from this list. It's a no-binding
+  // always-on channel (handoff dispatch + RedditClient.appOnly() reads),
+  // so there's no Connect / Disconnect surface for it — every user has
+  // Reddit drafts surfaced regardless.
+  const integrations: Array<{
+    name: string;
+    badge: string;
+    connected: boolean;
+    readOnly?: boolean;
+    onConnect?: () => void;
+    onDisconnect?: () => void;
+    icon: ReactNode;
+  }> = [
     {
       name: 'X / Twitter',
       badge: xConn?.username ? `@${xConn.username} · OAuth` : 'Not connected',
       connected: xConn?.connected ?? false,
       onConnect: handleConnectX,
-      onDisconnect: () => handleDisconnect('x'),
+      onDisconnect: () => void handleDisconnectX(),
       icon: <XTileIcon />,
     },
     {
       name: 'Reddit',
-      badge: redditConn?.username
-        ? `u/${redditConn.username} · handoff`
-        : 'Not connected',
-      connected: redditConn?.connected ?? false,
-      onConnect: () => setRedditEditing(true),
-      onEdit: () => setRedditEditing(true),
-      onDisconnect: () => handleDisconnect('reddit'),
+      badge: 'Always on · handoff',
+      connected: true,
+      readOnly: true,
       icon: <RedditTileIcon />,
     },
     {
@@ -844,106 +827,70 @@ function IntegrationsSection({
   return (
     <SettingsPanel title="Integrations" desc="Connect the rails. Disconnect anytime.">
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {integrations.map((it) => {
-          const isReddit = it.name === 'Reddit';
-          return (
-            <div
-              key={it.name}
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 12,
-                padding: 14,
-                borderRadius: 'var(--sf-radius-md)',
-                background: 'var(--sf-bg-tertiary)',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                <div
-                  style={{
-                    width: 36,
-                    height: 36,
-                    borderRadius: 8,
-                    background: 'var(--sf-bg-primary)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    border: '1px solid var(--sf-border-subtle)',
-                    flexShrink: 0,
-                  }}
-                >
-                  {it.icon}
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div
-                    style={{
-                      fontSize: 'var(--sf-text-sm)',
-                      fontWeight: 600,
-                      color: 'var(--sf-fg-1)',
-                    }}
-                  >
-                    {it.name}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 11,
-                      color: 'var(--sf-fg-3)',
-                      marginTop: 2,
-                      fontFamily: 'var(--sf-font-mono)',
-                      letterSpacing: 'var(--sf-track-mono)',
-                    }}
-                  >
-                    {it.badge}
-                  </div>
-                </div>
-                {it.readOnly ? (
-                  <Badge>{it.connected ? 'Active' : 'Locked'}</Badge>
-                ) : isReddit && it.connected ? (
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => it.onEdit?.()}
-                    >
-                      Edit
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={it.onDisconnect}>
-                      Disconnect
-                    </Button>
-                  </div>
-                ) : it.connected ? (
-                  <Button variant="ghost" size="sm" onClick={it.onDisconnect}>
-                    Disconnect
-                  </Button>
-                ) : (
-                  <Button size="sm" onClick={it.onConnect}>
-                    Connect
-                  </Button>
-                )}
+        {integrations.map((it) => (
+          <div
+            key={it.name}
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 12,
+              padding: 14,
+              borderRadius: 'var(--sf-radius-md)',
+              background: 'var(--sf-bg-tertiary)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+              <div
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 8,
+                  background: 'var(--sf-bg-primary)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  border: '1px solid var(--sf-border-subtle)',
+                  flexShrink: 0,
+                }}
+              >
+                {it.icon}
               </div>
-              {isReddit && redditEditing && (
+              <div style={{ flex: 1, minWidth: 0 }}>
                 <div
                   style={{
-                    paddingTop: 4,
-                    borderTop: '1px solid var(--sf-border-subtle)',
+                    fontSize: 'var(--sf-text-sm)',
+                    fontWeight: 600,
+                    color: 'var(--sf-fg-1)',
                   }}
                 >
-                  <RedditHandleInput
-                    initialHandle={redditConn?.username ?? ''}
-                    onSubmit={handleRedditSubmit}
-                  />
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setRedditEditing(false)}
-                  >
-                    Cancel
-                  </Button>
+                  {it.name}
                 </div>
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: 'var(--sf-fg-3)',
+                    marginTop: 2,
+                    fontFamily: 'var(--sf-font-mono)',
+                    letterSpacing: 'var(--sf-track-mono)',
+                  }}
+                >
+                  {it.badge}
+                </div>
+              </div>
+              {it.readOnly ? (
+                <Badge>{it.connected ? 'Active' : 'Locked'}</Badge>
+              ) : it.connected ? (
+                <Button variant="ghost" size="sm" onClick={it.onDisconnect}>
+                  Disconnect
+                </Button>
+              ) : (
+                <Button size="sm" onClick={it.onConnect}>
+                  Connect
+                </Button>
               )}
             </div>
-          );
-        })}
+          </div>
+        ))}
       </div>
     </SettingsPanel>
   );
