@@ -44,9 +44,6 @@ compose outputs into actionable DB state.
 - State: {productState} ({mvp|launching|launched})
 - Phase: {currentPhase}
 - Channels connected: {channels}
-- Active strategic path: {pathId | "none yet"}
-- Recent milestones: call the `generate_strategic_path` tool (which queries them and persists the path) when the strategic path needs rewriting; otherwise use `query_strategic_path` to read the active arc.
-- Plan items this week: {itemCount} ({statusBreakdown})
 
 ## Hard rules (MUST follow)
 
