@@ -24,9 +24,11 @@ export async function loadDispatchInputForDraft(
       draftType: drafts.draftType,
       replyBody: drafts.replyBody,
       planItemId: drafts.planItemId,
+      postTitle: drafts.postTitle,
       threadId: threads.id,
       threadPlatform: threads.platform,
       threadExternalId: threads.externalId,
+      threadCommunity: threads.community,
     })
     .from(drafts)
     .innerJoin(threads, eq(drafts.threadId, threads.id))
@@ -62,6 +64,8 @@ export async function loadDispatchInputForDraft(
       draftType: row.draftType === 'original_post' ? 'original_post' : 'reply',
       replyBody: row.replyBody,
       planItemId: row.planItemId,
+      postTitle: row.postTitle,
+      subreddit: row.threadCommunity,
     },
     thread: {
       id: row.threadId,
