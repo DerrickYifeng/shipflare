@@ -28,6 +28,7 @@ import {
   REDDIT_THREAD_SEARCH_SCHEMA,
   X_TWEET_SEARCH_SCHEMA,
   redditThreadSearchResponseSchema,
+  xTweetSearchResponseSchema,
   type RedditThreadCandidate,
 } from './schemas';
 import {
@@ -481,17 +482,27 @@ export const findThreadsViaXaiTool = buildTool({
       // agent's prior workflow.
       messages.push(xaiResult.assistantMessage);
 
-      // Normalize the per-round response into a uniform candidate
-      // array. X path uses `xaiResult.tweets` (Zod-validated by the
-      // inner tool). Reddit path goes through the inner tool's custom-
-      // schema branch — `tweets` is empty and the raw JSON is in
-      // `output`; we re-validate against `redditThreadSearchResponseSchema`.
+      // Normalize the per-round response into a uniform candidate array.
+      // Both platforms read from `xaiResult.output` (the raw JSON parsed
+      // against the platform's JSON schema literal) and re-validate via
+      // the matching Zod mirror declared in `./schemas.ts`. Symmetric
+      // handling here is what prevents the "wrong field, silent zero"
+      // class of regression that a prior X-only fast path introduced.
       let roundCandidates: DiscoveryCandidate[] = [];
       if (platform === 'x') {
-        roundCandidates = xaiResult.tweets.map((t) => ({
-          platform: 'x' as const,
-          row: t,
-        }));
+        const parsed = xTweetSearchResponseSchema.safeParse(xaiResult.output);
+        if (!parsed.success) {
+          log.warn(
+            `find_threads_via_xai round ${round + 1} (x): output ` +
+              `failed x-tweet schema validation: ${parsed.error.message}`,
+          );
+        } else {
+          if (parsed.data.notes) lastXaiNotes = parsed.data.notes;
+          roundCandidates = parsed.data.tweets.map((t) => ({
+            platform: 'x' as const,
+            row: t,
+          }));
+        }
       } else {
         const parsed = redditThreadSearchResponseSchema.safeParse(
           xaiResult.output,

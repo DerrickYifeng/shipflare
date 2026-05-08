@@ -53,10 +53,3 @@ export const tweetCandidateSchema = z.object({
 });
 
 export type TweetCandidate = z.infer<typeof tweetCandidateSchema>;
-
-export const xaiFindCustomersResponseSchema = z.object({
-  tweets: z.array(tweetCandidateSchema).max(50),
-  notes: z.string(),
-});
-
-export type XaiFindCustomersResponse = z.infer<typeof xaiFindCustomersResponseSchema>;

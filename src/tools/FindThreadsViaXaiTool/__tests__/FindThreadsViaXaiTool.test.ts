@@ -124,9 +124,15 @@ function makeTweet(overrides: Partial<TweetCandidate> = {}): TweetCandidate {
   };
 }
 
+/**
+ * Inner xAI tool result shape for the X branch. The X code path now
+ * reads from `output` (raw JSON parsed by xAI) via the Zod mirror in
+ * `schemas.ts`, symmetric with the Reddit branch — there is no longer
+ * a `tweets` field on the inner tool's result.
+ */
 function xaiResponse(tweets: TweetCandidate[], notes = 'ok') {
   return {
-    tweets,
+    output: { tweets, notes },
     notes,
     assistantMessage: { role: 'assistant' as const, content: 'json output' },
     usage: { inputTokens: 100, outputTokens: 200, totalTokens: 300 },
@@ -633,7 +639,7 @@ describe('findThreadsViaXaiTool', () => {
 
   it('reports rough costUsd from xAI usage tokens', async () => {
     xaiExecMock.mockResolvedValueOnce({
-      tweets: [makeTweet()],
+      output: { tweets: [makeTweet()], notes: '' },
       notes: '',
       assistantMessage: { role: 'assistant' as const, content: 'x' },
       usage: { inputTokens: 1_000_000, outputTokens: 1_000_000, totalTokens: 2_000_000 },
@@ -649,6 +655,43 @@ describe('findThreadsViaXaiTool', () => {
 
     // 1M in @ $5 + 1M out @ $15 = $20
     expect(result.costUsd).toBeCloseTo(20, 5);
+  });
+
+  /**
+   * REGRESSION GUARD — 2026-05-08
+   *
+   * Pre-fix bug: the X branch read `xaiResult.tweets` directly. After
+   * the 5/7 generalization that field was always `[]` because the
+   * inner xAI tool's caller-supplied-schema path returns data via
+   * `output`. Result: every X discovery silently scanned 0 tweets,
+   * judging never ran, the manager hallucinated reasons.
+   *
+   * This test mocks the inner tool's REAL contract (tweets data lives
+   * in `output`, no top-level `tweets` field) and asserts the X
+   * branch still surfaces candidates to the judge.
+   */
+  it('X branch reads candidates from xaiResult.output (regression guard for 5/7 silent-zero bug)', async () => {
+    xaiExecMock.mockResolvedValueOnce({
+      output: {
+        tweets: [makeTweet({ external_id: 'regress-1' })],
+        notes: 'one match',
+      },
+      notes: 'one match',
+      assistantMessage: { role: 'assistant' as const, content: 'json output' },
+      usage: { inputTokens: 100, outputTokens: 200, totalTokens: 300 },
+    });
+    runForkSkillMock.mockResolvedValueOnce(
+      judgingResponse({ keep: true, score: 0.8 }),
+    );
+
+    const result = await findThreadsViaXaiTool.execute(
+      { trigger: 'daily', maxResults: 1 },
+      makeCtx(store, { userId: 'user-1', productId: 'prod-1' }),
+    );
+
+    expect(result.scanned).toBe(1);
+    expect(result.queued).toBe(1);
+    expect(runForkSkillMock).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -908,15 +951,13 @@ function makeRedditThread(overrides: Partial<RedditThread> = {}): RedditThread {
 
 /**
  * Inner xAI tool result shape for the Reddit branch. The Reddit code
- * path reads from `output` (raw JSON parsed by xAI) and ignores
- * `tweets` — so we set tweets:[] and put the Reddit envelope in
- * `output`.
+ * path reads from `output` and re-validates against
+ * `redditThreadSearchResponseSchema`.
  */
 function xaiRedditResponse(threads: RedditThread[], notes = 'ok') {
   return {
-    tweets: [] as TweetCandidate[],
-    notes,
     output: { threads, notes },
+    notes,
     assistantMessage: { role: 'assistant' as const, content: 'json output' },
     usage: { inputTokens: 100, outputTokens: 200, totalTokens: 300 },
   };

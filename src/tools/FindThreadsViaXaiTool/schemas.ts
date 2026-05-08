@@ -5,17 +5,18 @@
 //   - `additionalProperties: false` on every object
 //   - no `$schema`, `$id`, `$ref`
 //
-// X schema mirrors `xaiFindCustomersResponseSchema`'s tweet-row fields
-// (the existing X tool derives an equivalent schema from Zod via
-// `toXaiJsonSchema`; this is the static/literal form FindThreadsViaXaiTool
-// will pass directly to xAI). maxItems: 50.
+// Each platform owns a paired schema:
+//   - JSON literal (sent to xAI as response_format)
+//   - Zod schema (used by the caller to safeParse `xaiResult.output`)
 //
-// Reddit schema is new — fields cover thread metadata, engagement
-// (score, num_comments, num_crossposts), and link/lock/over_18 flags
-// the moderation pipeline needs. maxItems: 20 — Reddit signal is
-// noisier than X so we tighten the cap.
+// The pair must stay in sync — adding a field to one without the other
+// will cause Grok to fill it but the caller to drop it (or vice versa).
+//
+// X tweet schema: maxItems 50.
+// Reddit thread schema: maxItems 20 (noisier signal, tighter cap).
 
 import { z } from 'zod';
+import { tweetCandidateSchema } from '../XaiFindCustomersTool/schema';
 
 /**
  * One Reddit thread row returned by xAI Grok web_search (reddit.com).
@@ -65,6 +66,19 @@ export const redditThreadSearchResponseSchema = z.object({
 export type RedditThreadSearchResponse = z.infer<
   typeof redditThreadSearchResponseSchema
 >;
+
+/**
+ * Outer envelope for the X discovery response. Mirrors `X_TWEET_SEARCH_SCHEMA`
+ * below — JSON schema goes to xAI for structured-output validation; this
+ * Zod schema re-validates the parsed JSON on our side. Caller (FindThreadsViaXaiTool)
+ * runs `safeParse(xaiResult.output)`.
+ */
+export const xTweetSearchResponseSchema = z.object({
+  tweets: z.array(tweetCandidateSchema).max(50),
+  notes: z.string(),
+});
+
+export type XTweetSearchResponse = z.infer<typeof xTweetSearchResponseSchema>;
 
 export const X_TWEET_SEARCH_SCHEMA = {
   type: 'object',
