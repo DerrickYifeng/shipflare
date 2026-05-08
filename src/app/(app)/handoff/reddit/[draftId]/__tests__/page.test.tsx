@@ -149,4 +149,24 @@ describe('RedditHandoffPage URL validation', () => {
     });
     await expect(callPage()).resolves.toBeDefined();
   });
+
+  it('accepts np.reddit.com host', async () => {
+    draftLookupMock.mockResolvedValueOnce({
+      id: 'd-1',
+      userId: 'user-1',
+      status: 'pending',
+      draftType: 'reply',
+      threadId: 't-1',
+      replyBody: 'hi',
+    });
+    threadLookupMock.mockResolvedValueOnce({
+      id: 't-1',
+      platform: 'reddit',
+      url: 'https://np.reddit.com/r/SaaS/comments/1abc/test',
+      title: 'x',
+      community: 'SaaS',
+      author: 'foo',
+    });
+    await expect(callPage()).resolves.toBeDefined();
+  });
 });

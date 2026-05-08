@@ -75,7 +75,7 @@ export function HandoffClient(props: HandoffClientProps) {
   }, [props.replyText, props.threadUrl, confirmHandoff]);
 
   const copyButtonLabel =
-    status === 'copied' || status === 'opened' ? '✓ Copied' : 'Copy reply';
+    status === 'copied' || status === 'opened' ? 'Copied' : 'Copy reply';
 
   return (
     <article className="space-y-8">

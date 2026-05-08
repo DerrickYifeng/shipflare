@@ -6,6 +6,19 @@ import { drafts, threads } from '@/lib/db/schema';
 import { PLATFORMS } from '@/lib/platform-config';
 import { HandoffClient } from './_components/handoff-client';
 
+// Reddit thread URLs may surface from xAI Grok with non-canonical hosts. We
+// allow all known commentable mirrors (canonical, old, new, np for "no
+// participation", mobile). Media subdomains (i.redd.it / v.redd.it) are
+// intentionally excluded — they are not commentable threads.
+const ALLOWED_REDDIT_HOSTS = new Set([
+  'www.reddit.com',
+  'reddit.com',
+  'old.reddit.com',
+  'new.reddit.com',
+  'np.reddit.com',
+  'm.reddit.com',
+]);
+
 interface PageProps {
   params: Promise<{ draftId: string }>;
 }
@@ -85,11 +98,7 @@ export default async function RedditHandoffPage({ params }: PageProps) {
   } catch {
     redirect('/today?notice=invalid_thread_url');
   }
-  if (
-    absoluteUrl.host !== 'www.reddit.com' &&
-    absoluteUrl.host !== 'reddit.com' &&
-    absoluteUrl.host !== 'old.reddit.com'
-  ) {
+  if (!ALLOWED_REDDIT_HOSTS.has(absoluteUrl.host)) {
     redirect('/today?notice=invalid_thread_url');
   }
   const threadUrl = absoluteUrl.toString();

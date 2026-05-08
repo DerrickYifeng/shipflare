@@ -35,7 +35,7 @@ describe('HandoffClient', () => {
     });
   });
 
-  it('shows ✓ Copied after auto-copy succeeds', async () => {
+  it('shows Copied after auto-copy succeeds', async () => {
     render(<HandoffClient {...baseProps} />);
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /copied/i })).toBeInTheDocument();

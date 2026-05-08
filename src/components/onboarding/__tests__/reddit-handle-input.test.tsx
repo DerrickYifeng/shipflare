@@ -61,7 +61,7 @@ describe('RedditHandleInput', () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it('Continue anyway calls onSubmit with verified=false', async () => {
+  it('Continue anyway calls onSubmit with the handle', async () => {
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
       json: async () => ({ exists: false }),
     });
@@ -75,10 +75,10 @@ describe('RedditHandleInput', () => {
     await waitFor(() => screen.getByText(/we couldn't find/i));
     fireEvent.click(screen.getByRole('button', { name: /^connect$/i }));
     fireEvent.click(screen.getByRole('button', { name: /continue anyway/i }));
-    expect(onSubmit).toHaveBeenCalledWith('foo', false);
+    expect(onSubmit).toHaveBeenCalledWith('foo');
   });
 
-  it('verified state submits with verified=true', async () => {
+  it('verified state submits with the handle', async () => {
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
       json: async () => ({ exists: true, karma: 100 }),
     });
@@ -89,9 +89,9 @@ describe('RedditHandleInput', () => {
       'foo',
     );
     fireEvent.click(screen.getByRole('button', { name: /verify/i }));
-    await waitFor(() => screen.getByText(/✓ verified/i));
+    await waitFor(() => screen.getByText(/verified/i));
     fireEvent.click(screen.getByRole('button', { name: /^connect$/i }));
-    expect(onSubmit).toHaveBeenCalledWith('foo', true);
+    expect(onSubmit).toHaveBeenCalledWith('foo');
   });
 
   it('renders an alert when onSubmit rejects', async () => {

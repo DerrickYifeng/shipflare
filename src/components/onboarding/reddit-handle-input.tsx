@@ -4,7 +4,7 @@ import { useState, useCallback } from 'react';
 
 interface RedditHandleInputProps {
   initialHandle?: string;
-  onSubmit: (handle: string, verified: boolean) => void | Promise<void>;
+  onSubmit: (handle: string) => void | Promise<void>;
 }
 
 type VerifyState =
@@ -49,38 +49,35 @@ export function RedditHandleInput({
     }
   }, [handle]);
 
-  const submit = useCallback(
-    async (verified: boolean) => {
-      setSubmitting(true);
-      setSubmitError(null);
-      try {
-        await onSubmit(handle, verified);
-      } catch (err) {
-        setSubmitError(
-          err instanceof Error ? err.message : 'Could not save handle.',
-        );
-      } finally {
-        setSubmitting(false);
-      }
-    },
-    [handle, onSubmit],
-  );
+  const submit = useCallback(async () => {
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      await onSubmit(handle);
+    } catch (err) {
+      setSubmitError(
+        err instanceof Error ? err.message : 'Could not save handle.',
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }, [handle, onSubmit]);
 
   const onConnect = useCallback(() => {
     if (verifyState.phase === 'verified') {
-      void submit(true);
+      void submit();
       return;
     }
     if (verifyState.phase === 'not_found') {
       setSoftBlockOpen(true);
       return;
     }
-    void submit(false);
+    void submit();
   }, [verifyState, submit]);
 
   const onContinueAnyway = useCallback(() => {
     setSoftBlockOpen(false);
-    void submit(false);
+    void submit();
   }, [submit]);
 
   return (
@@ -114,7 +111,7 @@ export function RedditHandleInput({
 
       {verifyState.phase === 'verified' && (
         <p className="text-sm text-success">
-          ✓ Verified — u/{handle} has {verifyState.karma.toLocaleString()} karma.
+          Verified — u/{handle} has {verifyState.karma.toLocaleString()} karma.
         </p>
       )}
       {verifyState.phase === 'not_found' && (

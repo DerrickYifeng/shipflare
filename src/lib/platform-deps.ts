@@ -51,9 +51,14 @@ export async function createPlatformDeps(
 
   switch (platform) {
     case 'reddit': {
+      // Reddit channels are handoff-mode (no OAuth tokens). Returns
+      // appOnly() for read access; the channel row exists for username +
+      // audit, not for client construction. Mirrors the same fix in
+      // createClientFromChannel (Task 4d) so any future caller of
+      // createPlatformDeps('reddit', ...) doesn't trip a null-token throw.
       if (!channel) throw new Error('No Reddit channel connected');
       return {
-        redditClient: RedditClient.fromChannel(channel),
+        redditClient: RedditClient.appOnly(),
         ...memoryDeps,
       };
     }

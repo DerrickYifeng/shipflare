@@ -44,8 +44,9 @@ export type DispatchResult =
  * - X reply        → handoff via X intent URL.    Caller flips to 'handed_off'.
  * - X post         → queued via posting.ts.       Caller flips to 'approved'.
  * - Reddit post    → handoff via submit URL.      Caller flips to 'handed_off'.
- * - Reddit reply   → handoff via handoff page.    Caller leaves as 'pending'.
- *                                                 Page flips to 'handed_off' on user action.
+ * - Reddit reply   → handoff via handoff page.    Caller flips to 'handed_off' on dispatch.
+ *                                                 Handoff-confirm endpoint is an idempotent
+ *                                                 ack on user action.
  *
  * NOTE: This function only computes the routing decision. The caller is
  * responsible for the matching DB writes (see status table above and

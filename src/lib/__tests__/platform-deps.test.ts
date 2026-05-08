@@ -76,6 +76,7 @@ vi.mock('@/memory/store', () => ({
 import {
   createClientFromChannel,
   createClientFromChannelById,
+  createPlatformDeps,
 } from '../platform-deps';
 
 beforeEach(() => {
@@ -146,5 +147,28 @@ describe('createClientFromChannelById — reddit', () => {
     hoisted.channelRow = null;
     const result = await createClientFromChannelById('nope');
     expect(result).toBeNull();
+  });
+});
+
+describe('createPlatformDeps — reddit', () => {
+  it('returns appOnly() for a connected reddit channel (no fromChannel call)', async () => {
+    hoisted.channelRow = {
+      id: 'ch-1',
+      platform: 'reddit',
+      oauthTokenEncrypted: '',
+      refreshTokenEncrypted: '',
+      tokenExpiresAt: null,
+    };
+    const deps = await createPlatformDeps('reddit', 'user-1');
+    expect(deps.redditClient).toBeDefined();
+    expect(hoisted.redditAppOnly).toHaveBeenCalledOnce();
+    expect(hoisted.redditFromChannel).not.toHaveBeenCalled();
+  });
+
+  it('throws "No Reddit channel connected" when no channel exists', async () => {
+    hoisted.channelRow = null;
+    await expect(createPlatformDeps('reddit', 'user-1')).rejects.toThrow(
+      /No Reddit channel connected/,
+    );
   });
 });
