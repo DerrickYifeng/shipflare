@@ -147,8 +147,15 @@ export async function ensureKickoffEnqueued(args: {
   try {
     conversationId = await createAutomationConversation(teamId, 'kickoff');
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const cause =
+      err instanceof Error && err.cause
+        ? err.cause instanceof Error
+          ? err.cause.message
+          : String(err.cause)
+        : null;
     log.warn(
-      `createAutomationConversation failed for kickoff team=${teamId}: ${err instanceof Error ? err.message : String(err)}`,
+      `createAutomationConversation failed for kickoff team=${teamId}: ${message}${cause ? ` | cause: ${cause}` : ''}`,
     );
     return { fired: false, reason: 'enqueue_failed' };
   }
@@ -178,8 +185,21 @@ export async function ensureKickoffEnqueued(args: {
     );
     return { fired: true, runId, conversationId };
   } catch (err) {
+    // Drizzle's Error.message renders only `Failed query: <SQL>\nparams: ...`
+    // and stashes the postgres-side reason on `err.cause`. Without surfacing
+    // the cause, every insert failure looks identical in the dev console
+    // (truncated SQL + params, no clue why). Fold both sides into the warn
+    // string so the next failure says e.g. `column "parent_tool_use_id" does
+    // not exist` instead of leaving the operator to guess.
+    const message = err instanceof Error ? err.message : String(err);
+    const cause =
+      err instanceof Error && err.cause
+        ? err.cause instanceof Error
+          ? err.cause.message
+          : String(err.cause)
+        : null;
     log.warn(
-      `dispatchLeadMessage failed for kickoff team=${teamId}: ${err instanceof Error ? err.message : String(err)}`,
+      `dispatchLeadMessage failed for kickoff team=${teamId}: ${message}${cause ? ` | cause: ${cause}` : ''}`,
     );
     return { fired: false, reason: 'enqueue_failed', conversationId };
   }

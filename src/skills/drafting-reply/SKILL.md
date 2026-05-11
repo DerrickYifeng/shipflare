@@ -3,7 +3,7 @@ name: drafting-reply
 description: Draft ONE reply body for a single thread. Receives the thread + product context + (optional) voice hint, returns a single draftBody + whyItWorks + confidence. Does not gate, does not validate, does not persist — pure transformation. Caller (content-manager or engagement worker) handles judging-thread-quality, validating-draft, and draft_reply persistence.
 context: fork
 model: claude-sonnet-4-6
-maxTurns: 1
+maxTurns: 100
 allowed-tools:
   - get_subreddit_rules
 references:

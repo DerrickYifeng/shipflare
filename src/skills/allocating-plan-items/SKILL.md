@@ -3,7 +3,7 @@ name: allocating-plan-items
 description: Given an active strategic_path and this week's signals (stalled items, last-week completions, recent code changes, recent X posts, connected channels), allocate plan_items for the coming 7 days with scheduledAt timestamps. Pure transformation — does not query the DB, does not write plan_items. The caller (coordinator agent) handles signal gathering and persistence.
 context: fork
 model: claude-sonnet-4-6
-maxTurns: 1
+maxTurns: 100
 allowed-tools:
 references:
   - allocation-rules
