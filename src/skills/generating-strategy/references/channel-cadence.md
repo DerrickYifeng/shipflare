@@ -89,14 +89,29 @@ afternoon and US evening — calibrated for the indie/dev subs we target.
 Pick `preferredCommunities` from 2-4 subreddits that match the
 `product.category`.
 
-### `repliesPerDay` — leave NULL or 0
+### `repliesPerDay` (daily reply budget)
 
-Reddit punishes volume reply posters with shadowbans and comment
-ghosting. Quality over quantity is the only durable strategy. **Do not
-set `channelMix.reddit.repliesPerDay`** — leave it null/undefined so
-the daily cron skips reddit reply automation. Reply opportunities on
-reddit are surfaced by the discovery pipeline as candidate threads, but
-drafting cadence stays human-driven.
+Reddit is lower-velocity than X. Mods notice repeat commenters and the
+same handle hitting many subs in a day is the spammer pattern. The
+shadowban risk is about **velocity per subreddit + low-effort drive-by
+replies**, not absolute count — quality replies in niche subs are how
+founders actually find customers there.
+
+| Phase       | range | Per-subreddit cap | Pick UPPER end if                       | Pick LOWER end if                          |
+|-------------|-------|-------------------|-----------------------------------------|--------------------------------------------|
+| foundation  | 2-3   | ≤1 / sub / day    | account >30d old, some karma            | brand-new account, <30d, low karma         |
+| audience    | 4-5   | ≤1 / sub / day    | active in 4+ relevant subs              | active in 1-2 subs                         |
+| momentum    | 5-7   | ≤2 / sub / day    | launch-week amplification               | mod-strict subs                            |
+| launch      | 3-5   | ≤2 / sub / day    | aggressive launch-week amplification    | conservative profile                       |
+| compound    | 2-4   | ≤1 / sub / day    | sustained presence                      | maintenance mode                           |
+| steady      | 1-3   | ≤1 / sub / day    | relationship maintenance                | low-touch ongoing rhythm                   |
+
+Pick a value within the range and emit as
+`channelMix.reddit.repliesPerDay`. The per-subreddit cap is enforced
+downstream by discovery + the existing `replyAuthorCooldownDays` (7d)
+so we never double-tap an author or flood a single sub. Foundation
+default is **3** unless the founder profile clearly signals
+brand-new / low-karma — drop to 2 in that case.
 
 ## Email
 

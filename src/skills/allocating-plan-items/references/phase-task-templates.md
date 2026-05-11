@@ -169,13 +169,16 @@ Goal: build launch-ready audience. Weekly rhythm matters most here.
   discovery-agent finds candidate threads, content-manager drafts up
   to ${targetCount} replies for your review. The session retries up to
   3 times within the day if the first scan comes up short."
-- `channel`: 'x'  # X only at this stage; reddit repliesPerDay stays null
+- `channel`: 'x' or 'reddit' (every channel whose
+  `channelMix[ch].repliesPerDay > 0` gets its own daily slot — emit
+  one row per channel × per day)
 - `userAction`: 'approve'
 - `skillName`: null  # daily reply-sweep cron owns this end-to-end
-- `params`: `{ targetCount: <channelMix.x.repliesPerDay> }`
+- `params`: `{ targetCount: <channelMix[channel].repliesPerDay> }`
 - `scheduledAt`: same UTC hour every day (use the first
-  `channelMix.x.preferredHours` entry — the daily cron fires once per
-  UTC day per user, so all seven slots share the same hour-of-day)
+  `channelMix[channel].preferredHours` entry — the daily cron fires
+  once per UTC day per user, so all seven slots share the same
+  hour-of-day)
 
 ### 4. setup_task — Identify and queue 20 hunters
 - `title`: "Build hunter target list for Product Hunt"

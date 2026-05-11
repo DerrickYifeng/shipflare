@@ -555,9 +555,19 @@ function TimelinePanel({
   const rows = useMemo(() => {
     // Combine thesisArc (weeks) with milestones for the timeline display.
     // Cap at 4 rows so the tab stays scannable.
+    // Replies don't vary per arc week (no per-week reply schedule), so
+    // weekly counts are a flat `repliesPerDay × 7` per channel for every
+    // row. Computed once outside the loop, reused per row.
+    const repliesPerWeek = {
+      x: (path.channelMix.x?.repliesPerDay ?? 0) * 7,
+      reddit: (path.channelMix.reddit?.repliesPerDay ?? 0) * 7,
+    };
     const arcRows = path.thesisArc.slice(0, 4).map((w, i) => {
       const milestone = path.milestones[i];
-      const allocation = formatWeekAllocation(derivePerWeekPosts(path, i));
+      const allocation = formatWeekAllocation(
+        derivePerWeekPosts(path, i),
+        repliesPerWeek,
+      );
       return {
         period: formatWeekStart(w.weekStart),
         title: w.theme,
@@ -704,20 +714,33 @@ function formatWeekStart(iso: string): string {
  * elsewhere in the founder UI and lumping it in with X+Reddit posts
  * confuses the read.
  */
-function formatWeekAllocation(allocation: {
-  x: number;
-  reddit: number;
-  email: number;
-}): string | null {
-  const parts: string[] = [];
-  if (allocation.x > 0) {
-    parts.push(`${allocation.x} X ${allocation.x === 1 ? 'post' : 'posts'}`);
-  }
-  if (allocation.reddit > 0) {
-    parts.push(
-      `${allocation.reddit} Reddit ${allocation.reddit === 1 ? 'post' : 'posts'}`,
-    );
-  }
+function formatWeekAllocation(
+  posts: { x: number; reddit: number; email: number },
+  repliesPerWeek: { x: number; reddit: number },
+): string | null {
+  const channelPart = (
+    label: string,
+    count: number,
+    replies: number,
+  ): string | null => {
+    if (count === 0 && replies === 0) return null;
+    const segments: string[] = [];
+    if (count > 0) {
+      segments.push(`${count} ${label} ${count === 1 ? 'post' : 'posts'}`);
+    }
+    if (replies > 0) {
+      segments.push(
+        `${replies} ${label} ${replies === 1 ? 'reply' : 'replies'}`,
+      );
+    }
+    return segments.join(' + ');
+  };
+
+  const parts = [
+    channelPart('X', posts.x, repliesPerWeek.x),
+    channelPart('Reddit', posts.reddit, repliesPerWeek.reddit),
+  ].filter((p): p is string => p !== null);
+
   if (parts.length === 0) return null;
   return parts.join(' · ');
 }
@@ -725,16 +748,16 @@ function formatWeekAllocation(allocation: {
 /**
  * Build the QUOTA footer lines. Returns one line per active channel so
  * the founder can see "X does N posts + M replies" separately from
- * "Reddit does P posts" — the old single-line `total * 5` math
- * collapsed both channels and falsely implied Reddit had auto-replies.
+ * "Reddit does P posts + Q replies" — the old single-line `total * 5`
+ * math collapsed both channels and was misleading.
  *
- * - X line: posts + (replies, only when `repliesPerDay` is set).
- *   Reply totals come from `channelMix.x.repliesPerDay * 7 * weeks`,
- *   NOT a hardcoded multiplier — Reddit reply automation is forbidden
- *   (shadowban risk) and the previous implementation conflated them.
- * - Reddit line: posts only.
- * - Period covers the full thesis arc length so the math represents
- *   the whole plan window, not a single week.
+ * Per-channel math: posts come from the thesis-arc sum;
+ * `replies = channelMix[channel].repliesPerDay * 7 * weeks` when set.
+ * The X-only reply gate was lifted 2026-05-08 — Reddit foundation
+ * default is 3/day with a 7d author cooldown + ≤1/sub/day cap (see
+ * src/skills/generating-strategy/references/channel-cadence.md).
+ * Period covers the full thesis arc so the math represents the whole
+ * plan window, not a single week.
  *
  * Returns at minimum one entry — `['—']` when nothing is active —
  * so the caller doesn't have to special-case empty.
@@ -744,10 +767,6 @@ function computeQuotaLabel(
   state: ProductState,
 ): string[] {
   const weeks = Math.max(1, path.thesisArc.length);
-  const xPosts = sumChannelPostsAcrossArc(path, 'x');
-  const redditPosts = sumChannelPostsAcrossArc(path, 'reddit');
-  const xRepliesPerDay = path.channelMix.x?.repliesPerDay ?? 0;
-  const xReplies = (xRepliesPerDay ?? 0) * 7 * weeks;
 
   const period =
     weeks === 1
@@ -756,26 +775,22 @@ function computeQuotaLabel(
         : 'this week'
       : `${weeks} wks`;
 
-  const lines: string[] = [];
-
-  if (xPosts > 0 || xReplies > 0) {
-    const xParts: string[] = [];
-    if (xPosts > 0) {
-      xParts.push(`${xPosts} ${xPosts === 1 ? 'post' : 'posts'}`);
+  const buildLine = (label: string, channel: 'x' | 'reddit'): string | null => {
+    const posts = sumChannelPostsAcrossArc(path, channel);
+    const repliesPerDay = path.channelMix[channel]?.repliesPerDay ?? 0;
+    const replies = repliesPerDay * 7 * weeks;
+    if (posts === 0 && replies === 0) return null;
+    const parts: string[] = [];
+    if (posts > 0) parts.push(`${posts} ${posts === 1 ? 'post' : 'posts'}`);
+    if (replies > 0) {
+      parts.push(`${replies} ${replies === 1 ? 'reply' : 'replies'}`);
     }
-    if (xReplies > 0) {
-      xParts.push(`${xReplies} ${xReplies === 1 ? 'reply' : 'replies'}`);
-    }
-    lines.push(`X: ${xParts.join(' + ')} / ${period}`);
-  }
+    return `${label}: ${parts.join(' + ')} / ${period}`;
+  };
 
-  if (redditPosts > 0) {
-    // Reddit is intentionally posts-only — high reply volume invites
-    // shadowbans, so reply automation is X-only at this stage.
-    lines.push(
-      `Reddit: ${redditPosts} ${redditPosts === 1 ? 'post' : 'posts'} / ${period}`,
-    );
-  }
+  const lines = [buildLine('X', 'x'), buildLine('Reddit', 'reddit')].filter(
+    (line): line is string => line !== null,
+  );
 
   return lines.length > 0 ? lines : ['—'];
 }

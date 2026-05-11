@@ -91,9 +91,9 @@ For each channel where `channelMix[channel].repliesPerDay > 0`:
   skip past dates per the "never schedule in the past" rule.)
 - Each slot:
   - `kind: 'content_reply'`
-  - `channel: <channel>` (X only at this stage; reddit's
-    `repliesPerDay` is null/omitted by the strategist, so this loop
-    naturally skips reddit.)
+  - `channel: <channel>` (loop over every channel whose
+    `repliesPerDay > 0`; today that's X and Reddit. The strategist
+    sets per-channel rates per `channel-cadence.md`.)
   - `userAction: 'approve'`
   - `skillName: null` (the daily reply-sweep cron + content-manager
     own this end-to-end)
@@ -108,10 +108,11 @@ For each channel where `channelMix[channel].repliesPerDay > 0`:
     discovery + drafting and surface up to `targetCount` reply drafts
     on the Briefing page for approval.
 
-If `channelMix.x.repliesPerDay` is null/0/omitted, skip this step
-entirely — reply automation is opt-in per channel. The cap of one
-slot per day per channel keeps the calendar uncluttered and matches
-the cron's "once per UTC day per user" throttle.
+If a channel's `repliesPerDay` is null/0/omitted, skip THAT channel
+in this step — reply automation is opt-in per channel. Other channels
+with `repliesPerDay > 0` still emit slots. The cap of one slot per day
+per channel keeps the calendar uncluttered and matches the cron's
+"once per UTC day per user" throttle.
 
 ## Step 3 — Schedule phase-appropriate setup_tasks / interviews
 
