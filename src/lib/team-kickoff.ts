@@ -300,9 +300,9 @@ export function buildKickoffGoalText(args: KickoffGoalArgs): string {
     `- reddit: ${week1Posts.reddit} posts/week, ${repliesReddit} replies/day`,
     ``,
     `Step 1 — Seed week-1 plan_items via add_plan_item (one call per row).`,
-    `For each channel above with posts/week > 0: add that many content_post rows for week 1, anchored to scheduledAt within this week's UTC days using preferredHours from channelMix.`,
-    `For each channel with replies/day > 0: add one content_reply row per day for week 1 with params.targetCount = repliesPerDay.`,
-    `Pass weekStart=${weekStart} and now=${now} verbatim — never let scheduledAt fall before now.`,
+    `For each channel above with posts/week > 0: add that many content_post rows for week 1, distributed across this week's UTC days. Set dueDate (YYYY-MM-DD) to the day; sortOrder increments per row on that day (0, 1, 2…).`,
+    `For each channel with replies/day > 0: add one content_reply row per day for week 1 with params.targetCount = repliesPerDay. sortOrder = 0 for replies.`,
+    `Pass weekStart=${weekStart} verbatim. dueDate must be >= today's date.`,
     ``,
   ];
 
