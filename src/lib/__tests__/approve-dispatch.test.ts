@@ -2,13 +2,11 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
 const {
   enqueuePosting,
-  computeNextSlot,
   buildXIntentUrl,
   buildRedditSubmitUrl,
   buildRedditHandoffPageUrl,
 } = vi.hoisted(() => {
   const enqueuePosting = vi.fn();
-  const computeNextSlot = vi.fn();
   const buildXIntentUrl = vi.fn((args: { text: string; inReplyToTweetId?: string }) => {
     return `https://x.com/intent/post?text=${encodeURIComponent(args.text)}`;
   });
@@ -22,7 +20,6 @@ const {
   );
   return {
     enqueuePosting,
-    computeNextSlot,
     buildXIntentUrl,
     buildRedditSubmitUrl,
     buildRedditHandoffPageUrl,
@@ -30,7 +27,6 @@ const {
 });
 
 vi.mock('@/lib/queue', () => ({ enqueuePosting }));
-vi.mock('@/lib/posting-pacer', () => ({ computeNextSlot }));
 vi.mock('@/lib/x-intent-url', () => ({ buildXIntentUrl }));
 vi.mock('@/lib/reddit-intent-url', () => ({ buildRedditSubmitUrl }));
 vi.mock('@/lib/reddit-handoff-url', () => ({ buildRedditHandoffPageUrl }));
@@ -39,7 +35,6 @@ import { dispatchApprove, type DispatchInput } from '../approve-dispatch';
 
 beforeEach(() => {
   enqueuePosting.mockReset();
-  computeNextSlot.mockReset();
   buildXIntentUrl.mockClear();
   buildRedditSubmitUrl.mockClear();
   buildRedditHandoffPageUrl.mockClear();
@@ -56,7 +51,6 @@ const baseInput: DispatchInput = {
   },
   thread: { id: 't1', platform: 'x', externalId: '12345' },
   channelId: 'c1',
-  connectedAgeDays: 60,
 };
 
 describe('dispatchApprove', () => {
@@ -74,42 +68,16 @@ describe('dispatchApprove', () => {
     });
   });
 
-  it('routes X original post to direct queue with pacer delay', async () => {
-    computeNextSlot.mockResolvedValueOnce({
-      deferred: false,
-      delayMs: 90_000,
-      reason: 'spaced',
-    });
+  it('routes X original post to direct queue immediately (no delay)', async () => {
+    enqueuePosting.mockResolvedValueOnce(undefined);
     const result = await dispatchApprove({
       ...baseInput,
       draft: { ...baseInput.draft, draftType: 'original_post' },
     });
     expect(result.kind).toBe('queued');
-    if (result.kind === 'queued') {
-      expect(result.delayMs).toBe(90_000);
-    }
     expect(enqueuePosting).toHaveBeenCalledWith(
       expect.objectContaining({ draftId: 'd1', mode: 'direct' }),
-      { delayMs: 90_000 },
     );
-  });
-
-  it('returns deferred when pacer says over_daily_cap (X post)', async () => {
-    computeNextSlot.mockResolvedValueOnce({
-      deferred: true,
-      reason: 'over_daily_cap',
-      delayMs: 4 * 60 * 60 * 1000,
-    });
-    const result = await dispatchApprove({
-      ...baseInput,
-      draft: { ...baseInput.draft, draftType: 'original_post' },
-    });
-    expect(result.kind).toBe('deferred');
-    if (result.kind === 'deferred') {
-      expect(result.reason).toBe('over_daily_cap');
-      expect(result.retryAfterMs).toBe(4 * 60 * 60 * 1000);
-    }
-    expect(enqueuePosting).not.toHaveBeenCalled();
   });
 });
 
@@ -138,7 +106,6 @@ describe('dispatchApprove — Reddit branches', () => {
       },
       thread: { id: 't-1', platform: 'reddit', externalId: '1abc' },
       channelId: 'ch-1',
-      connectedAgeDays: 30,
     });
 
     expect(result.kind).toBe('handoff');
@@ -165,7 +132,6 @@ describe('dispatchApprove — Reddit branches', () => {
       },
       thread: { id: 't-1', platform: 'reddit', externalId: '1abc' },
       channelId: 'ch-1',
-      connectedAgeDays: 30,
     });
 
     expect(result.kind).toBe('handoff');
@@ -189,7 +155,6 @@ describe('dispatchApprove — Reddit branches', () => {
         },
         thread: { id: 't-1', platform: 'reddit', externalId: '1' },
         channelId: 'ch-1',
-        connectedAgeDays: 30,
       }),
     ).rejects.toThrow(/subreddit/);
   });
@@ -209,12 +174,11 @@ describe('dispatchApprove — Reddit branches', () => {
         },
         thread: { id: 't-1', platform: 'reddit', externalId: '1' },
         channelId: 'ch-1',
-        connectedAgeDays: 30,
       }),
     ).rejects.toThrow(/postTitle/);
   });
 
-  it('does NOT call computeNextSlot for Reddit reply (skips pacer)', async () => {
+  it('does NOT enqueue for Reddit reply (handoff only)', async () => {
     await dispatchApprove({
       draft: {
         id: 'd-4',
@@ -226,13 +190,11 @@ describe('dispatchApprove — Reddit branches', () => {
       },
       thread: { id: 't-1', platform: 'reddit', externalId: '1' },
       channelId: 'ch-1',
-      connectedAgeDays: 30,
     });
-    expect(computeNextSlot).not.toHaveBeenCalled();
     expect(enqueuePosting).not.toHaveBeenCalled();
   });
 
-  it('does NOT call computeNextSlot for Reddit post (skips pacer)', async () => {
+  it('does NOT enqueue for Reddit post (handoff only)', async () => {
     await dispatchApprove({
       draft: {
         id: 'd-5',
@@ -246,9 +208,7 @@ describe('dispatchApprove — Reddit branches', () => {
       },
       thread: { id: 't-1', platform: 'reddit', externalId: '1' },
       channelId: 'ch-1',
-      connectedAgeDays: 30,
     });
-    expect(computeNextSlot).not.toHaveBeenCalled();
     expect(enqueuePosting).not.toHaveBeenCalled();
   });
 });

@@ -80,7 +80,8 @@ beforeEach(() => {
       state: 'completed',
       title: 'Completed row',
       description: null,
-      scheduledAt: new Date('2026-04-20T09:00:00.000Z'),
+      dueDate: new Date('2026-04-20'),
+      sortOrder: 0,
     },
     {
       id: 'pi-executing',
@@ -89,7 +90,8 @@ beforeEach(() => {
       state: 'executing',
       title: 'In flight',
       description: null,
-      scheduledAt: new Date('2026-04-23T09:00:00.000Z'),
+      dueDate: new Date('2026-04-23'),
+      sortOrder: 0,
     },
   ]);
 });

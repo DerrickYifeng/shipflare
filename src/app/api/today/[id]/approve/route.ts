@@ -30,8 +30,7 @@ const baseLog = createLogger('api:today:approve');
  *
  * Dispatcher outcomes:
  *   handoff  → 200 { success: true, browserHandoff: { intentUrl } }
- *   queued   → 200 { success: true, queued: { delayMs } }
- *   deferred → 202 { success: false, deferred: true, reason, retryAfterMs }
+ *   queued   → 200 { success: true }
  *
  * Error codes:
  *   400 invalid_id
@@ -138,25 +137,14 @@ async function applyDispatchResult(
       { headers: { 'x-trace-id': traceId } },
     );
   }
-  if (decision.kind === 'deferred') {
-    return NextResponse.json(
-      {
-        success: false,
-        deferred: true,
-        reason: decision.reason,
-        retryAfterMs: decision.retryAfterMs,
-      },
-      { status: 202, headers: { 'x-trace-id': traceId } },
-    );
-  }
   // queued
   await db
     .update(drafts)
     .set({ status: 'approved', updatedAt: new Date() })
     .where(eq(drafts.id, draftId));
-  log.info(`draft ${draftId} queued for posting (delay ${decision.delayMs}ms)`);
+  log.info(`draft ${draftId} queued for posting`);
   return NextResponse.json(
-    { success: true, queued: { delayMs: decision.delayMs } },
+    { success: true },
     { headers: { 'x-trace-id': traceId } },
   );
 }

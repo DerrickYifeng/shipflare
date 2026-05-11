@@ -96,15 +96,15 @@ export async function GET() {
       weekQueued: sql<number>`
         count(*) filter (
           where ${planItems.state} in ('planned', 'drafting', 'drafted', 'ready_for_review', 'approved', 'executing')
-            and ${planItems.scheduledAt} >= ${weekStartIso}
-            and ${planItems.scheduledAt} < ${weekEndIso}
+            and ${planItems.dueDate} >= ${weekStartIso}
+            and ${planItems.dueDate} < ${weekEndIso}
         )
       `.mapWith(Number),
       weekShipped: sql<number>`
         count(*) filter (
           where ${planItems.state} = 'completed'
-            and ${planItems.scheduledAt} >= ${weekStartIso}
-            and ${planItems.scheduledAt} < ${weekEndIso}
+            and ${planItems.dueDate} >= ${weekStartIso}
+            and ${planItems.dueDate} < ${weekEndIso}
         )
       `.mapWith(Number),
     })

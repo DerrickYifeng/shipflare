@@ -159,20 +159,15 @@ export async function enqueueReview(data: ReviewJobData): Promise<void> {
 }
 
 /**
- * Enqueue posting an approved draft. Caller controls timing via `delayMs`
- * (the pacer is responsible for computing this). 0 retries: never risk
- * duplicate posts.
+ * Enqueue posting an approved draft. 0 retries: never risk duplicate posts.
  */
 export async function enqueuePosting(
   data: PostingJobData,
-  opts: { delayMs?: number } = {},
 ): Promise<void> {
   const payload = postingJobSchema.parse(withEnvelope(data));
-  const delayMs = Math.max(0, opts.delayMs ?? 0);
-  log.debug(`Enqueued posting for draft ${payload.draftId} (delay ${Math.round(delayMs / 1000)}s, mode ${payload.mode})`);
+  log.debug(`Enqueued posting for draft ${payload.draftId} (mode ${payload.mode})`);
   await postingQueue.add('post', payload, {
     attempts: 1,
-    delay: delayMs,
   });
 }
 

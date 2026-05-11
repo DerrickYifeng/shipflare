@@ -174,9 +174,7 @@ export async function processPlanExecute(
     }
 
     // Dispatch FIRST so we only advance to 'executing' for outcomes that
-    // actually start posting. Handoff and deferred outcomes leave the row
-    // in 'approved' — both 'executing → approved' would be an illegal SM
-    // transition (only 'completed'/'failed' exit 'executing').
+    // actually start posting. Handoff outcomes leave the row in 'approved'.
     const decision = await dispatchApprove(dispatchInput);
 
     if (decision.kind === 'handoff') {
@@ -188,19 +186,10 @@ export async function processPlanExecute(
       return;
     }
 
-    if (decision.kind === 'deferred') {
-      log.info(
-        `plan_item ${planItemId}: pacer deferred (${decision.reason}) — leaving state at 'approved'; sweeper will retry`,
-      );
-      return;
-    }
-
     // queued — only NOW advance to 'executing'. The posting worker will
-    // write 'completed' or 'failed' (per Task 9) when the job finishes.
+    // write 'completed' or 'failed' when the job finishes.
     await writeState(current, 'executing');
-    // queued — posting worker will set plan_item.state = completed on success
-    // (per Task 9, posting.ts now writes back to plan_items).
-    log.info(`plan_item ${planItemId}: queued for posting (delay ${decision.delayMs}ms)`);
+    log.info(`plan_item ${planItemId}: queued for posting`);
     return;
   }
 

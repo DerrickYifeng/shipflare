@@ -246,7 +246,8 @@ interface SeedItem {
     | 'setup_task';
   userAction: 'auto' | 'approve' | 'manual';
   channel: string | null;
-  scheduledAt: Date;
+  dueDate: Date;
+  sortOrder: number;
   skillName: string | null;
   params: Record<string, unknown>;
   title: string;
@@ -261,12 +262,12 @@ function generatePlanItems(args: Args, weekStart: Date, phase: string): SeedItem
   const wantReddit = args.channels.includes('reddit');
   const wantEmail = args.channels.includes('email');
 
-  // Content posts spread across Mon-Thu 14:00 UTC, alternating channels.
+  // Content posts spread across Mon-Thu, alternating channels.
   const postDays = Math.min(4, args.days);
   for (let i = 0; i < postDays; i++) {
     const day = new Date(weekStart);
     day.setUTCDate(weekStart.getUTCDate() + i);
-    day.setUTCHours(14, 0, 0, 0);
+    day.setUTCHours(0, 0, 0, 0);
 
     const preferReddit = wantReddit && i === 1; // Tue = reddit
     const channel = preferReddit ? 'reddit' : wantX ? 'x' : args.channels[0];
@@ -276,7 +277,8 @@ function generatePlanItems(args: Args, weekStart: Date, phase: string): SeedItem
       kind: 'content_post',
       userAction: 'approve',
       channel,
-      scheduledAt: day,
+      dueDate: day,
+      sortOrder: 0,
       skillName: channel === 'x' ? 'draft-single-post' : null,
       params: { anchor_theme: anchor, pillar, angle: i === 0 ? 'claim' : 'story' },
       title: `Draft ${channel} post about ${pillar}`,
@@ -293,7 +295,8 @@ function generatePlanItems(args: Args, weekStart: Date, phase: string): SeedItem
       kind: 'email_send',
       userAction: 'approve',
       channel: 'email',
-      scheduledAt: monday,
+      dueDate: monday,
+      sortOrder: 0,
       skillName: 'draft-email',
       params: { emailType: 'welcome' },
       title: 'Welcome email for new waitlist signups',
@@ -303,12 +306,13 @@ function generatePlanItems(args: Args, weekStart: Date, phase: string): SeedItem
     if (args.days >= 5) {
       const friday = new Date(weekStart);
       friday.setUTCDate(weekStart.getUTCDate() + 4);
-      friday.setUTCHours(13, 0, 0, 0);
+      friday.setUTCHours(0, 0, 0, 0);
       items.push({
         kind: 'email_send',
         userAction: 'approve',
         channel: 'email',
-        scheduledAt: friday,
+        dueDate: friday,
+        sortOrder: 0,
         skillName: 'draft-email',
         params: { emailType: 'retro_week_1' },
         title: 'End-of-week retro email',
@@ -321,12 +325,13 @@ function generatePlanItems(args: Args, weekStart: Date, phase: string): SeedItem
   for (let i = 0; i < 2; i++) {
     const day = new Date(weekStart);
     day.setUTCDate(weekStart.getUTCDate() + (i === 0 ? 2 : 3));
-    day.setUTCHours(19, 0, 0, 0);
+    day.setUTCHours(0, 0, 0, 0);
     items.push({
       kind: 'interview',
       userAction: 'manual',
       channel: null,
-      scheduledAt: day,
+      dueDate: day,
+      sortOrder: i,
       skillName: null,
       params: { intent: 'discovery', targetCount: 1 },
       title: `Discovery interview #${i + 1}`,
@@ -350,12 +355,13 @@ function generatePlanItems(args: Args, weekStart: Date, phase: string): SeedItem
   for (let i = 0; i < setupTasks.length; i++) {
     const day = new Date(weekStart);
     day.setUTCDate(weekStart.getUTCDate() + i);
-    day.setUTCHours(10, 0, 0, 0);
+    day.setUTCHours(0, 0, 0, 0);
     items.push({
       kind: 'setup_task',
       userAction: 'manual',
       channel: null,
-      scheduledAt: day,
+      dueDate: day,
+      sortOrder: i,
       skillName: null,
       params: {},
       title: setupTasks[i].title,
@@ -511,8 +517,8 @@ async function main(): Promise<void> {
     .where(
       and(
         eq(planItems.userId, userId),
-        gte(planItems.scheduledAt, weekStart),
-        lt(planItems.scheduledAt, weekEnd),
+        gte(planItems.dueDate, weekStart),
+        lt(planItems.dueDate, weekEnd),
       ),
     );
 
@@ -542,7 +548,8 @@ async function main(): Promise<void> {
         userAction: item.userAction,
         phase: currentPhase as 'foundation' | 'audience' | 'momentum' | 'launch' | 'compound' | 'steady',
         channel: item.channel,
-        scheduledAt: item.scheduledAt,
+        dueDate: item.dueDate,
+        sortOrder: item.sortOrder,
         skillName: item.skillName,
         params: item.params,
         title: item.title,

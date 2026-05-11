@@ -1,5 +1,4 @@
 import { enqueuePosting } from '@/lib/queue';
-import { computeNextSlot } from '@/lib/posting-pacer';
 import { buildXIntentUrl } from '@/lib/x-intent-url';
 import { buildRedditSubmitUrl } from '@/lib/reddit-intent-url';
 import { buildRedditHandoffPageUrl } from '@/lib/reddit-handoff-url';
@@ -24,18 +23,11 @@ export interface DispatchInput {
     externalId: string | null;
   };
   channelId: string;
-  /** Days since the user connected this channel. Tier input for the pacer. */
-  connectedAgeDays: number;
 }
 
 export type DispatchResult =
   | { kind: 'handoff'; intentUrl: string }
-  | { kind: 'queued'; delayMs: number }
-  | {
-      kind: 'deferred';
-      reason: 'over_daily_cap' | 'no_pacer_config';
-      retryAfterMs: number;
-    };
+  | { kind: 'queued' };
 
 /**
  * Decide what to do when the user (or auto-approve) approves a draft.
@@ -45,12 +37,9 @@ export type DispatchResult =
  * - X post         → queued via posting.ts.       Caller flips to 'approved'.
  * - Reddit post    → handoff via submit URL.      Caller flips to 'handed_off'.
  * - Reddit reply   → handoff via handoff page.    Caller flips to 'handed_off' on dispatch.
- *                                                 Handoff-confirm endpoint is an idempotent
- *                                                 ack on user action.
  *
  * NOTE: This function only computes the routing decision. The caller is
- * responsible for the matching DB writes (see status table above and
- * transition plan_item state).
+ * responsible for the matching DB writes.
  */
 export async function dispatchApprove(
   input: DispatchInput,
@@ -110,30 +99,12 @@ export async function dispatchApprove(
     };
   }
 
-  const slot = await computeNextSlot({
+  await enqueuePosting({
     userId: input.draft.userId,
-    platform: input.thread.platform,
-    kind: input.draft.draftType === 'reply' ? 'reply' : 'post',
-    connectedAgeDays: input.connectedAgeDays,
+    draftId: input.draft.id,
+    channelId: input.channelId,
+    mode: 'direct',
   });
 
-  if (slot.deferred) {
-    return {
-      kind: 'deferred',
-      reason: slot.reason,
-      retryAfterMs: slot.delayMs,
-    };
-  }
-
-  await enqueuePosting(
-    {
-      userId: input.draft.userId,
-      draftId: input.draft.id,
-      channelId: input.channelId,
-      mode: 'direct',
-    },
-    { delayMs: slot.delayMs },
-  );
-
-  return { kind: 'queued', delayMs: slot.delayMs };
+  return { kind: 'queued' };
 }

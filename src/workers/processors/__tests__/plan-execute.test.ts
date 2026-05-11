@@ -113,7 +113,7 @@ vi.mock('@/lib/approve-loaders', () => ({
 
 // Default: returns 'queued'. Individual tests override as needed.
 const dispatchApproveMock = vi.fn(
-  async (_input: unknown): Promise<DispatchResult> => ({ kind: 'queued', delayMs: 0 }),
+  async (_input: unknown): Promise<DispatchResult> => ({ kind: 'queued' }),
 );
 vi.mock('@/lib/approve-dispatch', () => ({
   dispatchApprove: (input: unknown) => dispatchApproveMock(input),
@@ -151,7 +151,7 @@ beforeEach(() => {
   // Reset to default: no linked draft, dispatcher returns queued.
   findDraftIdForPlanItemMock.mockResolvedValue(null);
   loadDispatchInputForDraftMock.mockResolvedValue(null);
-  dispatchApproveMock.mockResolvedValue({ kind: 'queued', delayMs: 0 });
+  dispatchApproveMock.mockResolvedValue({ kind: 'queued' });
 });
 
 describe('processPlanExecute — draft phase', () => {
@@ -256,7 +256,7 @@ describe('processPlanExecute — execute phase', () => {
       channelId: 'ch-1',
       connectedAgeDays: 10,
     });
-    dispatchApproveMock.mockResolvedValueOnce({ kind: 'queued', delayMs: 500 });
+    dispatchApproveMock.mockResolvedValueOnce({ kind: 'queued' });
 
     await processPlanExecute(
       makeJob({ schemaVersion: 1, planItemId: 'item-4', userId: 'u-1', phase: 'execute' }),
@@ -354,7 +354,7 @@ describe('processPlanExecute — integration: full SM walk', () => {
       channelId: 'ch-1',
       connectedAgeDays: 5,
     });
-    dispatchApproveMock.mockResolvedValueOnce({ kind: 'queued', delayMs: 0 });
+    dispatchApproveMock.mockResolvedValueOnce({ kind: 'queued' });
 
     await processPlanExecute(
       makeJob({ schemaVersion: 1, planItemId: 'item-sm', userId: 'u-1', phase: 'execute' }),

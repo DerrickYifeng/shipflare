@@ -44,17 +44,12 @@ export async function loadDispatchInputForDraft(
   if (!row) return null;
 
   const [channelRow] = await db
-    .select({ id: channels.id, createdAt: channels.createdAt })
+    .select({ id: channels.id })
     .from(channels)
     .where(and(eq(channels.userId, userId), eq(channels.platform, row.threadPlatform)))
     .limit(1);
 
   if (!channelRow) return null;
-
-  const connectedAgeDays = Math.max(
-    0,
-    Math.floor((Date.now() - channelRow.createdAt.getTime()) / (24 * 60 * 60 * 1000)),
-  );
 
   return {
     draft: {
@@ -73,7 +68,6 @@ export async function loadDispatchInputForDraft(
       externalId: row.threadExternalId,
     },
     channelId: channelRow.id,
-    connectedAgeDays,
   };
 }
 
