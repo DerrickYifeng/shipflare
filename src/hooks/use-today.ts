@@ -104,7 +104,6 @@ export interface TodoItem {
   community: string | null;
   externalUrl: string | null;
   confidence: number | null;
-  scheduledFor: string | null;
   expiresAt: string;
   createdAt: string;
   // Joined from draft
@@ -135,7 +134,6 @@ export interface TodoItem {
   threadSurfacedVia: string[] | null;
   // Joined from calendar
   calendarContentType: string | null;
-  calendarScheduledAt: string | null;
   // Derived
   cardFormat: 'post' | 'reply';
 }

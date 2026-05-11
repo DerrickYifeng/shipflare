@@ -93,7 +93,6 @@ interface TodoItemRow {
   community: string | null;
   externalUrl: string | null;
   confidence: number | null;
-  scheduledFor: string | null;
   expiresAt: string;
   createdAt: string;
   draftBody: string | null;
@@ -119,7 +118,6 @@ interface TodoItemRow {
   threadOriginalAuthorUsername: string | null;
   threadSurfacedVia: string[] | null;
   calendarContentType: string | null;
-  calendarScheduledAt: string | null;
   /** Sort key (ms) — used only to merge the two sources into a stable
    *  order; not shipped to the client. */
   _sortKey: number;
@@ -371,7 +369,6 @@ export async function GET() {
       community: null,
       externalUrl: null,
       confidence: null,
-      scheduledFor: row.dueDate instanceof Date ? row.dueDate.toISOString().slice(0, 10) : String(row.dueDate),
       expiresAt: row.dueDate instanceof Date ? row.dueDate.toISOString().slice(0, 10) : String(row.dueDate),
       createdAt: row.createdAt.toISOString(),
       draftBody,
@@ -397,7 +394,6 @@ export async function GET() {
       threadOriginalAuthorUsername: null,
       threadSurfacedVia: null,
       calendarContentType: row.kind,
-      calendarScheduledAt: row.dueDate instanceof Date ? row.dueDate.toISOString().slice(0, 10) : String(row.dueDate),
       _sortKey: row.dueDate instanceof Date ? row.dueDate.getTime() + row.sortOrder : 0,
     }));
 
@@ -444,7 +440,6 @@ export async function GET() {
       community: row.threadCommunity,
       externalUrl: row.threadUrl,
       confidence: row.confidenceScore ?? null,
-      scheduledFor: null,
       expiresAt: row.draftCreatedAt.toISOString(),
       createdAt: row.draftCreatedAt.toISOString(),
       draftBody: row.replyBody,
@@ -472,7 +467,6 @@ export async function GET() {
       threadOriginalAuthorUsername: row.threadOriginalAuthorUsername,
       threadSurfacedVia: row.threadSurfacedVia,
       calendarContentType: null,
-      calendarScheduledAt: null,
       _sortKey: row.draftCreatedAt.getTime(),
     };
   });

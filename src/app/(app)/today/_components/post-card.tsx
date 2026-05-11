@@ -35,26 +35,6 @@ function platformDisplay(platform: string): string {
   return PLATFORMS[platform]?.displayName ?? platform;
 }
 
-function formatScheduledTime(iso: string | null): string | null {
-  if (!iso) return null;
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toLocaleTimeString('en-US', {
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
-  });
-}
-
-function formatLocalTime(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleString(undefined, {
-    weekday: 'short',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
-}
 
 export function PostCard({
   item,
@@ -80,7 +60,6 @@ export function PostCard({
   }, [isActive]);
 
   const isOptimistic = item.status !== 'pending';
-  const scheduledAt = formatScheduledTime(item.calendarScheduledAt);
   const contentType = item.calendarContentType ?? 'Original';
 
   const handleSaveEdit = () => {
@@ -121,7 +100,6 @@ export function PostCard({
 
   return (
     <article ref={rootRef} style={articleStyle} aria-busy={isOptimistic || undefined}>
-      {/* Header: glyph + type + scheduled pill */}
       <header
         style={{
           display: 'flex',
@@ -165,28 +143,6 @@ export function PostCard({
             </span>
           </div>
         </div>
-        {scheduledAt ? (
-          <span
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: '4px 10px',
-              borderRadius: 'var(--sf-radius-pill)',
-              fontSize: 'var(--sf-text-xs)',
-              fontWeight: 600,
-              fontFamily: 'var(--sf-font-mono)',
-              letterSpacing: 'var(--sf-track-mono)',
-              background: 'var(--sf-accent-light)',
-              color: 'var(--sf-link)',
-              whiteSpace: 'nowrap',
-              flexShrink: 0,
-            }}
-          >
-            <ClockGlyph />
-            {scheduledAt}
-          </span>
-        ) : null}
       </header>
 
       {/* Body — the star of the card */}
@@ -217,9 +173,6 @@ export function PostCard({
             }}
           >
             Drafted by your writer
-            {item.scheduledFor
-              ? ` · scheduled ${formatLocalTime(item.scheduledFor)}`
-              : ''}
           </div>
         ) : null}
 
@@ -409,22 +362,6 @@ export function PostCard({
 function capitalize(s: string): string {
   if (!s) return s;
   return s[0].toUpperCase() + s.slice(1);
-}
-
-/* ── Clock glyph ──────────────────────────────────────────────────── */
-
-function ClockGlyph() {
-  return (
-    <svg width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-      <circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeWidth="1.25" />
-      <path
-        d="M6 3.5V6l1.5 1.5"
-        stroke="currentColor"
-        strokeWidth="1.25"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
 }
 
 /* ── TextAction mirrors the ReplyCard one (kept local to avoid cycle) ── */

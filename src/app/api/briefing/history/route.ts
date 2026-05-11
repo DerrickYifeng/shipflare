@@ -37,7 +37,6 @@ export interface BriefingHistoryItem {
   community: string | null;
   externalUrl: string | null;
   confidence: number | null;
-  scheduledFor: null;
   /** Server-side `updated_at` of the underlying draft (or `completed_at`
    *  for posted plan_items) — when the user acted. */
   expiresAt: string;
@@ -65,7 +64,6 @@ export interface BriefingHistoryItem {
   threadOriginalAuthorUsername: string | null;
   threadSurfacedVia: string[] | null;
   calendarContentType: null;
-  calendarScheduledAt: null;
 }
 
 /** Extract `draft_body` from `plan_items.output` without trusting its shape. */
@@ -218,7 +216,6 @@ export async function GET() {
         community: row.threadCommunity,
         externalUrl: row.threadUrl,
         confidence: row.confidenceScore ?? null,
-        scheduledFor: null,
         expiresAt: row.draftUpdatedAt.toISOString(),
         createdAt: row.draftCreatedAt.toISOString(),
         draftBody: row.replyBody,
@@ -246,7 +243,6 @@ export async function GET() {
         threadOriginalAuthorUsername: row.threadOriginalAuthorUsername,
         threadSurfacedVia: row.threadSurfacedVia,
         calendarContentType: null,
-        calendarScheduledAt: null,
       };
     });
 
@@ -271,7 +267,6 @@ export async function GET() {
       community: null,
       externalUrl,
       confidence: null,
-      scheduledFor: null,
       expiresAt: completedAt.toISOString(),
       createdAt: completedAt.toISOString(),
       draftBody: body,
@@ -297,7 +292,6 @@ export async function GET() {
       threadOriginalAuthorUsername: null,
       threadSurfacedVia: null,
       calendarContentType: null,
-      calendarScheduledAt: null,
     };
   });
 
