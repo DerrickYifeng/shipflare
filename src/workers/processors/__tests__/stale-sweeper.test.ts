@@ -4,7 +4,7 @@
  * The sweeper is an hourly cron that ages out stale rows the founder
  * never acted on:
  *
- *   1. plan_items.state='planned' rows past `scheduledAt + 24h` get
+ *   1. plan_items.state='planned' rows whose dueDate < today get
  *      flipped to `state='stale'`.
  *   2. plan_items.state='approved' rows past the same window get
  *      flipped to `state='stale'` (an approved item that never
@@ -27,7 +27,7 @@ interface PlanItemRow {
   id: string;
   userId: string;
   state: string;
-  scheduledAt: Date;
+  dueDate: Date;
   [key: string]: unknown;
 }
 
@@ -202,11 +202,14 @@ vi.mock('@/lib/logger', () => ({
 // ---------------------------------------------------------------------------
 
 function seedPlanItem(init: Partial<PlanItemRow> & { id: string }): void {
+  // yesterday — past today's midnight cutoff.
+  const yesterday = new Date();
+  yesterday.setUTCHours(0, 0, 0, 0);
+  yesterday.setUTCDate(yesterday.getUTCDate() - 1);
   planItemRows.push({
     userId: 'u-1',
     state: 'planned',
-    // 2 days ago — well past the 24h cutoff.
-    scheduledAt: new Date(Date.now() - 48 * 60 * 60 * 1000),
+    dueDate: yesterday,
     ...init,
   });
 }
@@ -237,7 +240,7 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('stale-sweeper plan_items branch', () => {
-  it('marks planned plan_items past scheduledAt + 24h as stale', async () => {
+  it('marks planned plan_items whose dueDate < today as stale', async () => {
     seedPlanItem({ id: 'pi-1', state: 'planned' });
 
     const { processStaleSweeper } = await import('../stale-sweeper');
@@ -246,7 +249,7 @@ describe('stale-sweeper plan_items branch', () => {
     expect(planItemRows.find((r) => r.id === 'pi-1')!.state).toBe('stale');
   });
 
-  it('marks approved plan_items past scheduledAt + 24h as stale', async () => {
+  it('marks approved plan_items whose dueDate < today as stale', async () => {
     seedPlanItem({ id: 'pi-2', state: 'approved' });
 
     const { processStaleSweeper } = await import('../stale-sweeper');
@@ -268,11 +271,13 @@ describe('stale-sweeper plan_items branch', () => {
     expect(planItemRows.find((r) => r.id === 'pi-5')!.state).toBe('failed');
   });
 
-  it('does NOT touch planned plan_items still inside the 24h window', async () => {
+  it('does NOT touch planned plan_items whose dueDate is today or later', async () => {
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
     seedPlanItem({
       id: 'pi-fresh',
       state: 'planned',
-      scheduledAt: new Date(Date.now() - 1 * 60 * 60 * 1000), // 1h ago
+      dueDate: today, // today — not yet stale
     });
 
     const { processStaleSweeper } = await import('../stale-sweeper');

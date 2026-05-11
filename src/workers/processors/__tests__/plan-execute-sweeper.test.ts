@@ -36,7 +36,7 @@ interface PlanItemRow {
   state: string;
   userAction: string;
   channel: string | null;
-  scheduledAt: Date;
+  dueDate: Date;
   [key: string]: unknown;
 }
 
@@ -257,7 +257,7 @@ function seedPlanItem(init: Partial<PlanItemRow> & { id: string }): void {
     state: 'planned',
     userAction: 'approve',
     channel: 'x',
-    scheduledAt: new Date('2026-04-30T00:00:00Z'),
+    dueDate: new Date('2026-04-30'),
     ...init,
   });
 }
@@ -386,10 +386,10 @@ describe('plan-execute-sweeper — content_post batch dispatch via tool', () => 
     );
   });
 
-  it('does NOT batch content_post rows that are scheduled in the future', async () => {
+  it('does NOT batch content_post rows whose dueDate is in the future', async () => {
     seedPlanItem({
       id: 'pi-future',
-      scheduledAt: new Date('3000-01-01T00:00:00Z'),
+      dueDate: new Date('3000-01-01'),
     });
 
     const { processPlanExecuteSweeper } = await import(

@@ -340,7 +340,7 @@ async function schedulePlanExecuteSweeper() {
 }
 
 // Schedule stale-sweeper: every hour. Marks planned / approved rows
-// past scheduledAt + 24h as stale.
+// whose dueDate is before today as stale.
 async function scheduleStaleSweeper() {
   await staleSweeperQueue.add(
     'sweep',

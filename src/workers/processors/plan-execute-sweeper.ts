@@ -21,7 +21,7 @@ const MAX_PER_TICK = 200;
 /**
  * Every-minute sweeper. Finds plan_items whose state + userAction
  * combination means they're ready for the next plan-execute phase,
- * AND whose scheduledAt has passed.
+ * AND whose dueDate is today or earlier.
  *
  * Two dispatch paths from this sweep:
  *
@@ -37,7 +37,7 @@ const MAX_PER_TICK = 200;
  * 2. **per-row plan-execute jobs** — every other (kind, phase) combo:
  *    - state='planned' + userAction IN ('approve','auto') + due →
  *      `draft` or `execute` phase (per nextDispatchPhase).
- *    - state='approved' → `execute` phase (skip scheduledAt; the user
+ *    - state='approved' → `execute` phase (no date gate; the user
  *      already approved).
  *    - content_reply DRAFT phase is skipped here — daily-run's
  *      social-media-manager owns reply discovery + drafting. The
@@ -57,6 +57,9 @@ export async function processPlanExecuteSweeper(
 ): Promise<void> {
   const jlog = loggerForJob(log, job);
   const now = new Date();
+  // Date-only ceiling: treat any item due today or earlier as ready.
+  const todayDate = new Date(now);
+  todayDate.setUTCHours(23, 59, 59, 999);
 
   const perUser = new Map<string, number>();
 
@@ -67,7 +70,7 @@ export async function processPlanExecuteSweeper(
   // (userId, productId), atomically claims them via planned →
   // drafting, and invokes `processPostsBatchTool` once per group.
   // ------------------------------------------------------------------
-  const batchedDrafts = await dispatchContentPostBatch(now, jlog);
+  const batchedDrafts = await dispatchContentPostBatch(todayDate, jlog);
   for (const [userId, count] of batchedDrafts) {
     perUser.set(userId, (perUser.get(userId) ?? 0) + count);
   }
@@ -96,7 +99,7 @@ export async function processPlanExecuteSweeper(
         and(
           eq(planItems.state, 'planned'),
           inArray(planItems.userAction, ['approve', 'auto']),
-          lte(planItems.scheduledAt, now),
+          lte(planItems.dueDate, todayDate),
         ),
         eq(planItems.state, 'approved'),
       ),
@@ -185,7 +188,7 @@ function sum(values: Iterable<number>): number {
  * counts into the cross-path per-user aggregate.
  */
 async function dispatchContentPostBatch(
-  now: Date,
+  todayDate: Date,
   jlog: ReturnType<typeof loggerForJob>,
 ): Promise<Map<string, number>> {
   const dispatched = new Map<string, number>();
@@ -202,7 +205,7 @@ async function dispatchContentPostBatch(
         eq(planItems.kind, 'content_post'),
         eq(planItems.state, 'planned'),
         eq(planItems.userAction, 'approve'),
-        lte(planItems.scheduledAt, now),
+        lte(planItems.dueDate, todayDate),
       ),
     )
     .limit(MAX_PER_TICK);
