@@ -60,7 +60,7 @@ export const addPlanItemTool: ToolDefinition<PlanItemInput, AddPlanItemResult> =
     name: ADD_PLAN_ITEM_TOOL_NAME,
     description:
       'Create a single plan_items row. Supply kind + phase + userAction + ' +
-      'scheduledAt (ISO) + title; optionally channel / skillName / params / ' +
+      'dueDate (YYYY-MM-DD) + sortOrder + title; optionally channel / skillName / params / ' +
       "description. Attached to the current week's plan automatically. " +
       'Safe to call many times in parallel when planning a week.' +
       '\n\n' +
@@ -70,7 +70,8 @@ export const addPlanItemTool: ToolDefinition<PlanItemInput, AddPlanItemResult> =
       '  "userAction": "approve",\n' +
       '  "phase": "audience",\n' +
       '  "channel": "x",\n' +
-      '  "scheduledAt": "2026-04-28T09:00:00Z",\n' +
+      '  "dueDate": "2026-04-28",\n' +
+      '  "sortOrder": 0,\n' +
       '  "skillName": "draft-single-post",\n' +
       '  "params": { "angle": "contrarian", "theme": "CI cost pain" },\n' +
       '  "title": "Post: CI cost pain for solo devs",\n' +
@@ -113,7 +114,8 @@ export const addPlanItemTool: ToolDefinition<PlanItemInput, AddPlanItemResult> =
         userAction: input.userAction,
         phase: input.phase,
         channel: input.channel ?? null,
-        scheduledAt: new Date(input.scheduledAt),
+        dueDate: new Date(input.dueDate),
+        sortOrder: input.sortOrder,
         skillName: input.skillName ?? null,
         params: input.params,
         title: input.title,

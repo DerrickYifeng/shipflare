@@ -43,7 +43,8 @@ interface PlanItemRow {
   userAction: string;
   phase: string;
   channel: string | null;
-  scheduledAt: Date;
+  dueDate: Date;
+  sortOrder: number;
   skillName: string | null;
   params: unknown;
   title: string;
@@ -67,7 +68,8 @@ function validInput() {
     userAction: 'approve' as const,
     phase: 'foundation' as const,
     channel: 'x',
-    scheduledAt: '2026-04-22T09:00:00.000Z',
+    dueDate: '2026-04-22',
+    sortOrder: 0,
     skillName: null,
     params: { angle: 'claim' },
     title: 'Ship the write_strategic_path tool',
@@ -100,7 +102,8 @@ describe('addPlanItemTool', () => {
     expect(rows[0].userId).toBe('user-1');
     expect(rows[0].productId).toBe('prod-1');
     expect(rows[0].kind).toBe('content_post');
-    expect(rows[0].scheduledAt).toBeInstanceOf(Date);
+    expect(rows[0].dueDate).toBeInstanceOf(Date);
+    expect(rows[0].sortOrder).toBe(0);
     expect(rows[0].params).toEqual({ angle: 'claim' });
   });
 
@@ -139,7 +142,8 @@ describe('addPlanItemTool', () => {
           userAction: 'approve',
           phase: 'audience',
           channel: 'x',
-          scheduledAt: '2026-05-01T09:00:00Z',
+          dueDate: '2026-05-01',
+          sortOrder: 0,
           skillName: 'draft-single-post',
           params: { format: 'definitely_not_a_format' },
           title: 'Test',
@@ -152,9 +156,6 @@ describe('addPlanItemTool', () => {
 
   it('rejects content_post params that conflate topic pillar (legacy bug, 2026-05-04)', async () => {
     const ctx = makeCtx(store, { userId: 'user-1', productId: 'prod-1' });
-    // The LLM planner used to write `params.pillar` with strategic-path topic
-    // strings like 'marketing-debt' — same word, two concepts. Schema renamed
-    // to `format` so the topic value can no longer slot into the format field.
     await expect(
       addPlanItemTool.execute(
         {
@@ -162,10 +163,9 @@ describe('addPlanItemTool', () => {
           userAction: 'approve',
           phase: 'audience',
           channel: 'x',
-          scheduledAt: '2026-05-01T09:00:00Z',
+          dueDate: '2026-05-01',
+          sortOrder: 0,
           skillName: 'draft-single-post',
-          // `format` with a topic string is rejected; `pillar` is now an
-          // unknown key and silently passes through (passthrough schema).
           params: { format: 'marketing-debt' },
           title: 'Test',
           description: null,
@@ -184,7 +184,8 @@ describe('addPlanItemTool', () => {
           userAction: 'approve',
           phase: 'audience',
           channel: 'x',
-          scheduledAt: '2026-05-01T09:00:00Z',
+          dueDate: '2026-05-01',
+          sortOrder: 0,
           skillName: 'draft-single-post',
           params: {
             metaphor_ban: Array.from({ length: 21 }, (_, i) => `phrase${i}`),
@@ -198,7 +199,6 @@ describe('addPlanItemTool', () => {
   });
 
   it('accepts content_post params with valid format + theme + metaphor_ban', async () => {
-    // Pre-seed a plan row so resolvePlanId succeeds.
     store.register<PlanRow>(plans, [
       {
         id: 'plan-1',
@@ -214,7 +214,8 @@ describe('addPlanItemTool', () => {
         userAction: 'approve',
         phase: 'audience',
         channel: 'x',
-        scheduledAt: '2026-05-01T09:00:00Z',
+        dueDate: '2026-05-01',
+        sortOrder: 0,
         skillName: 'draft-single-post',
         params: {
           format: 'lesson',
@@ -245,14 +246,14 @@ describe('addPlanItemTool', () => {
       },
     ]);
     const ctx = makeCtx(store, { userId: 'user-1', productId: 'prod-1' });
-    // setup_task with arbitrary params — format enum should NOT be enforced.
     const result = await addPlanItemTool.execute(
       {
         kind: 'setup_task',
         userAction: 'manual',
         phase: 'foundation',
         channel: null,
-        scheduledAt: '2026-05-01T09:00:00Z',
+        dueDate: '2026-05-01',
+        sortOrder: 0,
         skillName: null,
         params: { foo: 'bar', format: 'definitely_not_a_format' },
         title: 'Setup',
