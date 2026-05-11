@@ -193,7 +193,8 @@ export const planItemInputSchema = z.object({
     'steady',
   ]),
   channel: z.string().nullable(),
-  scheduledAt: z.string().min(1), // ISO
+  dueDate: z.string().min(1), // YYYY-MM-DD (date only)
+  sortOrder: z.number().int().min(0).default(0),
   skillName: z.string().nullable(),
   params: z.record(z.string(), z.unknown()),
   title: z.string().min(1).max(200),
