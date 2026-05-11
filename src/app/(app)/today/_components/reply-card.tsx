@@ -34,8 +34,6 @@ import { PlatformGlyph } from './platform-glyph';
 interface ReplyCardProps {
   item: TodoItem;
   onApprove: (id: string) => void;
-  /** Re-enqueue an already-queued draft with delayMs=0. */
-  onPostNow?: (id: string) => void;
   onSkip: (id: string) => void;
   onEdit: (id: string, body: string) => void;
   /** Fire-and-forget marker that the user clicked the X-intent button.
@@ -53,14 +51,6 @@ interface ReplyCardProps {
  *  "Open X again" / "View on platform" link instead of the
  *  Send / Edit / Skip cluster. */
 const SETTLED_STATUSES = new Set(['handed_off', 'posted']);
-
-function formatQueuedEta(delayMs: number | undefined): string {
-  if (delayMs === undefined || delayMs <= 30_000) return 'Posting now';
-  const minutes = Math.round(delayMs / 60_000);
-  if (minutes < 60) return `Posting in ${minutes}m`;
-  const fireAt = new Date(Date.now() + delayMs);
-  return `Posting at ${fireAt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}`;
-}
 
 function relativeTime(iso: string | null): string | null {
   if (!iso) return null;
@@ -210,7 +200,6 @@ function threadTimestamp(
 export function ReplyCard({
   item,
   onApprove,
-  onPostNow,
   onSkip,
   onEdit,
   onHandoff,
@@ -597,24 +586,6 @@ export function ReplyCard({
                 Send reply
               </Button>
               <TextAction onClick={() => setLocalEditing(true)}>Edit</TextAction>
-              <TextAction onClick={() => onSkip(item.id)}>Skip</TextAction>
-            </>
-          ) : item.status === 'queued' && onPostNow ? (
-            <>
-              <Button size="sm" onClick={() => onPostNow(item.id)}>
-                Post now
-              </Button>
-              <span
-                className="sf-mono"
-                style={{
-                  fontSize: 'var(--sf-text-xs)',
-                  color: 'var(--sf-fg-3)',
-                  letterSpacing: 'var(--sf-track-mono)',
-                  marginLeft: 4,
-                }}
-              >
-                {formatQueuedEta(item.queuedDelayMs)}
-              </span>
               <TextAction onClick={() => onSkip(item.id)}>Skip</TextAction>
             </>
           ) : (

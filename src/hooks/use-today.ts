@@ -46,29 +46,7 @@ interface ApproveResponseBody {
   code?: string;
   platform?: string;
   browserHandoff?: { intentUrl: string };
-  queued?: { delayMs: number };
-  deferred?: boolean;
-  reason?: string;
-  retryAfterMs?: number;
-}
-
-/**
- * Build a terse, spec-like deferred message in the ShipFlare voice.
- * Examples:
- *   "Daily cap reached — queued for tomorrow"
- *   "Pacer not configured for this platform"
- */
-function formatDeferredMessage(reason: string, retryAfterMs: number): string {
-  if (reason === 'over_daily_cap') {
-    const hours = Math.round(retryAfterMs / (60 * 60 * 1000));
-    if (hours <= 1) return 'Daily cap reached — queued for the next slot';
-    if (hours < 24) return `Daily cap reached — queued in ${hours}h`;
-    return 'Daily cap reached — queued for tomorrow';
-  }
-  if (reason === 'no_pacer_config') {
-    return 'Pacer not configured for this platform';
-  }
-  return `Posting deferred (${reason})`;
+  queued?: boolean;
 }
 
 /**
@@ -83,12 +61,8 @@ export type TodoOptimisticStatus =
   | 'pending'
   | 'pending_approval'
   | 'pending_skip'
-  | 'pending_reschedule'
-  /** Server confirmed the post is queued for posting. UI shows "Post now". */
   | 'queued'
-  /** X reply intent URL was opened in a new tab. UI shows "Opened in X". */
   | 'handed_off'
-  /** Reply was posted via API (Reddit). History view only. */
   | 'posted';
 
 /**
@@ -118,8 +92,6 @@ export interface TodoItem {
   status: TodoOptimisticStatus;
   /** plan_items.state for calendar rows; null for reply drafts. */
   planState: PlanState | null;
-  /** When `status === 'queued'`, ms until the BullMQ job fires (best-effort). */
-  queuedDelayMs?: number;
   /**
    * Pre-built X compose intent URL. Non-null only for X drafts (replies and
    * original posts). When set, the card uses browser handoff instead of the
@@ -198,7 +170,7 @@ function deriveCardFormat(item: RawTodoItem): 'post' | 'reply' {
 export interface ReplySlot {
   id: string;
   channel: string;
-  scheduledAt: string;
+  dueDate: string;
   targetCount: number;
   draftedToday: number;
   state: 'planned' | 'drafted' | 'completed';
@@ -229,13 +201,13 @@ export function useToday() {
   // being removed). Keeps the list order stable so the card doesn't jump
   // out from under the user while the request is in flight.
   const markPending = useCallback(
-    (id: string, status: TodoOptimisticStatus, queuedDelayMs?: number) =>
+    (id: string, status: TodoOptimisticStatus) =>
       (prev: TodayResponse | undefined): TodayResponse | undefined => {
         if (!prev) return prev;
         return {
           ...prev,
           items: prev.items.map((i) =>
-            i.id === id ? { ...i, status, queuedDelayMs } : i,
+            i.id === id ? { ...i, status } : i,
           ),
         };
       },
@@ -256,18 +228,6 @@ export function useToday() {
           body = (await res.json()) as ApproveResponseBody;
         } catch {
           // Non-JSON response — leave body empty.
-        }
-
-        // 202 deferred: pacer pushed the post to a later slot. Restore the
-        // card and surface a terse toast so the user knows what happened.
-        if (res.status === 202 && body.deferred) {
-          mutate(snapshot, { revalidate: false });
-          throw new TodayActionError(
-            formatDeferredMessage(body.reason ?? 'pacer', body.retryAfterMs ?? 0),
-            'deferred',
-            undefined,
-            202,
-          );
         }
 
         if (!res.ok) {
@@ -295,52 +255,10 @@ export function useToday() {
           return;
         }
 
-        // Queued: server confirmed the post is in BullMQ. Mark the card
-        // 'queued' so the button swaps to "Post now" + ETA.
+        // Queued: server confirmed the post is in BullMQ.
         if (body.queued) {
-          mutate(markPending(id, 'queued', body.queued.delayMs), {
-            revalidate: false,
-          });
+          mutate(markPending(id, 'queued'), { revalidate: false });
           return;
-        }
-      } catch (err) {
-        // For non-deferred errors restore state; deferred path already did so.
-        if (!(err instanceof TodayActionError && err.code === 'deferred')) {
-          mutate(snapshot, { revalidate: false });
-        }
-        throw err;
-      }
-      mutate();
-    },
-    [data, markPending, mutate],
-  );
-
-  /**
-   * "Post now" — re-enqueue an already-approved draft with delayMs=0,
-   * bypassing the pacer's spacing/quiet-hours delay. Server keeps the
-   * worker idempotent (draft.status check) so even if the original
-   * delayed job later fires, it aborts cleanly.
-   */
-  const postNow = useCallback(
-    async (id: string) => {
-      const snapshot = data;
-      mutate(markPending(id, 'pending_approval'), { revalidate: false });
-      try {
-        const res = await fetch(`/api/today/${id}/post-now`, { method: 'POST' });
-        let body: { error?: string; code?: string } = {};
-        try {
-          body = await res.json();
-        } catch {
-          // ignore non-JSON
-        }
-        if (!res.ok) {
-          mutate(snapshot, { revalidate: false });
-          throw new TodayActionError(
-            body.error ?? `Request failed (${res.status})`,
-            body.code,
-            undefined,
-            res.status,
-          );
         }
       } catch (err) {
         mutate(snapshot, { revalidate: false });
@@ -404,26 +322,6 @@ export function useToday() {
     [markPending, mutate],
   );
 
-  const reschedule = useCallback(
-    async (id: string, scheduledFor: string) => {
-      const snapshot = data;
-
-      mutate(markPending(id, 'pending_reschedule'), { revalidate: false });
-      try {
-        await postJson(`/api/today/${id}/reschedule`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ scheduledFor }),
-        });
-      } catch (err) {
-        mutate(snapshot, { revalidate: false });
-        throw err;
-      }
-      mutate();
-    },
-    [data, markPending, mutate],
-  );
-
   const items: TodoItem[] = (data?.items ?? []).map((item) => ({
     ...item,
     cardFormat: deriveCardFormat(item),
@@ -443,11 +341,9 @@ export function useToday() {
     isLoading,
     error,
     approve,
-    postNow,
     skip,
     edit,
     handoff,
-    reschedule,
     mutate,
   };
 }

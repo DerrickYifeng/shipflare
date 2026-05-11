@@ -78,7 +78,7 @@ export function ReplySlotCard({ slot }: ReplySlotCardProps) {
     flexShrink: 0,
   };
 
-  const scheduled = formatScheduledHour(slot.scheduledAt);
+  const scheduled = formatScheduledHour(slot.dueDate);
 
   return (
     <article style={articleStyle} aria-label="Today's reply session">

@@ -24,26 +24,11 @@ import { PlatformGlyph } from './platform-glyph';
 interface PostCardProps {
   item: TodoItem;
   onApprove: (id: string) => void;
-  /** Re-enqueue an already-queued draft with delayMs=0. */
-  onPostNow?: (id: string) => void;
   onSkip: (id: string) => void;
   onEdit: (id: string, body: string) => void;
-  onReschedule?: (id: string, scheduledFor: string) => void;
   isActive?: boolean;
   forceEditing?: boolean;
   onEditDone?: () => void;
-}
-
-/**
- * Format a delay window into a terse, mono-friendly label.
- * "Posting now" / "Posting in 2m" / "Posting at 3:14 PM"
- */
-function formatQueuedEta(delayMs: number | undefined): string {
-  if (delayMs === undefined || delayMs <= 30_000) return 'Posting now';
-  const minutes = Math.round(delayMs / 60_000);
-  if (minutes < 60) return `Posting in ${minutes}m`;
-  const fireAt = new Date(Date.now() + delayMs);
-  return `Posting at ${fireAt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}`;
 }
 
 function platformDisplay(platform: string): string {
@@ -74,20 +59,14 @@ function formatLocalTime(iso: string): string {
 export function PostCard({
   item,
   onApprove,
-  onPostNow,
   onSkip,
   onEdit,
-  onReschedule,
   isActive = false,
   forceEditing = false,
   onEditDone,
 }: PostCardProps) {
   const [localEditing, setLocalEditing] = useState(false);
   const [editBody, setEditBody] = useState(item.draftBody ?? '');
-  // Tracks whether the user has already opened the X compose tab once.
-  // Drives the button label swap from "Schedule" → "Post now". Local-only
-  // so it resets on a hard refresh — the card itself stays in the feed.
-  const [hasOpenedX, setHasOpenedX] = useState(false);
   const rootRef = useRef<HTMLElement>(null);
 
   const isEditing = localEditing || forceEditing;
@@ -332,32 +311,18 @@ export function PostCard({
         {!isEditing ? (() => {
           // Three render modes by lifecycle:
           //   X handoff     — has xIntentUrl: open X compose pre-filled.
-          //                   Card stays in feed; user clicks Skip when done.
-          //                   Button toggles "Schedule" → "Post now" after
-          //                   the first click.
-          //   Queued (API)  — Reddit (or future API platforms) where the
-          //                   server queued via BullMQ; show "Post now" + ETA.
-          //   Default       — pre-click; show "Schedule" / "Approve".
+          //   X intent     — open X compose pre-filled; approve records handoff.
+          //   Queued (API) — server queued via BullMQ; show "Queued" label.
+          //   Default      — pre-click; show "Schedule" / "Approve".
           const isInFlight = item.status === 'pending_approval';
-          const isQueuedApi =
-            item.status === 'queued' ||
-            (item.planState === 'approved' && !!item.draftBody);
 
           if (item.xIntentUrl) {
             const intentUrl = item.xIntentUrl;
-            // First click ("Schedule") opens X compose pre-filled so the user
-            // can preview the post in X. Second click ("Post now") fires the
-            // X API directly via /api/today/:id/post-now. Two-step to give the
-            // user a visual safety check before publishing.
             const handleClick = () => {
-              if (hasOpenedX) {
-                onPostNow?.(item.id);
-              } else {
-                if (typeof window !== 'undefined') {
-                  window.open(intentUrl, '_blank', 'noopener,noreferrer');
-                }
-                setHasOpenedX(true);
+              if (typeof window !== 'undefined') {
+                window.open(intentUrl, '_blank', 'noopener,noreferrer');
               }
+              onApprove(item.id);
             };
             return (
               <>
@@ -366,7 +331,7 @@ export function PostCard({
                   disabled={!item.draftBody}
                   onClick={handleClick}
                 >
-                  {hasOpenedX ? 'Post now' : 'Schedule'}
+                  Schedule
                 </Button>
                 {item.draftBody ? (
                   <TextAction onClick={() => setLocalEditing(true)}>Edit</TextAction>
@@ -376,22 +341,18 @@ export function PostCard({
             );
           }
 
-          if (isQueuedApi && onPostNow) {
+          if (item.status === 'queued') {
             return (
               <>
-                <Button size="sm" onClick={() => onPostNow(item.id)}>
-                  Post now
-                </Button>
                 <span
                   className="sf-mono"
                   style={{
                     fontSize: 'var(--sf-text-xs)',
                     color: 'var(--sf-fg-3)',
                     letterSpacing: 'var(--sf-track-mono)',
-                    marginLeft: 4,
                   }}
                 >
-                  {formatQueuedEta(item.queuedDelayMs)}
+                  Queued
                 </span>
                 <TextAction onClick={() => onSkip(item.id)}>Skip</TextAction>
               </>
@@ -415,17 +376,6 @@ export function PostCard({
                 <TextAction onClick={() => setLocalEditing(true)}>Edit</TextAction>
               ) : null}
               <TextAction onClick={() => onSkip(item.id)}>Skip</TextAction>
-              {item.source === 'calendar' && onReschedule ? (
-                <TextAction
-                  onClick={() => {
-                    const next = new Date();
-                    next.setDate(next.getDate() + 1);
-                    onReschedule(item.id, next.toISOString());
-                  }}
-                >
-                  Tomorrow
-                </TextAction>
-              ) : null}
             </>
           );
         })() : (

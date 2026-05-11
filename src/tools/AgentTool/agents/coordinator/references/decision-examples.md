@@ -94,11 +94,11 @@ Two asks; neither needs a specialist spawn:
 2. "Pre-draft the X posts" — I do NOT spawn a writer for this. The
    every-minute plan-execute-sweeper batches due content_post rows
    into ONE social-media-manager(post_batch) team-run per user. Any
-   row I allocate with a near-future `scheduledAt` will be drafted
+   row I allocate with a near-future `dueDate` will be drafted
    automatically without me firing a Task here.
 
-If the founder wants drafting NOW (not when scheduledAt fires), I
-could shift the rows' scheduledAt forward in a follow-up — but the
+If the founder wants drafting NOW (not when dueDate fires), I
+could shift the rows' dueDate forward in a follow-up — but the
 founder asked for "next week" so the natural cadence works.
 
 Decision: a series of `add_plan_item` calls, no Task. Confirm to the
@@ -109,13 +109,13 @@ query_strategic_path({})
 
 [tool_result: { pillars: [...], thesisArc: [{weekStart, theme}, ...], voice }]
 
-add_plan_item({ kind: 'content_post', channel: 'x', scheduledAt: '<next-Mon 10:00 UTC>', pillarId: '...', title: 'pillar-1 anchor' })
-add_plan_item({ kind: 'content_post', channel: 'x', scheduledAt: '<next-Wed 10:00 UTC>', pillarId: '...', title: 'pillar-2 anchor' })
-add_plan_item({ kind: 'content_post', channel: 'x', scheduledAt: '<next-Fri 10:00 UTC>', pillarId: '...', title: 'pillar-3 anchor' })
+add_plan_item({ kind: 'content_post', channel: 'x', dueDate: '<next-Mon 10:00 UTC>', pillarId: '...', title: 'pillar-1 anchor' })
+add_plan_item({ kind: 'content_post', channel: 'x', dueDate: '<next-Wed 10:00 UTC>', pillarId: '...', title: 'pillar-2 anchor' })
+add_plan_item({ kind: 'content_post', channel: 'x', dueDate: '<next-Fri 10:00 UTC>', pillarId: '...', title: 'pillar-3 anchor' })
 
 Allocated 3 X posts for next week (Mon/Wed/Fri, aligned to your three
 active pillars). The sweeper will hand each row to your
-social-media-manager as its `scheduledAt` lands — drafts appear in
+social-media-manager as its `dueDate` lands — drafts appear in
 /briefing automatically.
 
 ## Example 4 — Live platform search for reply targets (social-media-manager)
@@ -171,9 +171,9 @@ threads were skipped or what voice angle the drafts took).
 
 If the founder asks you to draft an original post for a specific
 plan_item that's already due, prefer (a) trust the sweeper to pick it
-up at scheduledAt — it'll batch into a `process_posts_batch` run.
+up at dueDate — it'll batch into a `process_posts_batch` run.
 Only spawn social-media-manager directly when the founder wants it
-drafted RIGHT NOW (move scheduledAt forward instead, OR spawn with
+drafted RIGHT NOW (move dueDate forward instead, OR spawn with
 `Mode: process-posts-batch / planItemIds: [<id>]` for a one-off).
 
 ### Weekly tactical replan (trigger=weekly_replan)

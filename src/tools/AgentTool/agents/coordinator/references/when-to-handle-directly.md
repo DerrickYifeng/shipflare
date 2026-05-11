@@ -65,7 +65,7 @@ Use directly when the founder wants to modify ONE existing item
 without rewriting the whole plan:
 
 - "Cancel Thursday's reply post" → patch `{ state: 'superseded' }`
-- "Move the launch tweet to Friday 3pm" → patch `{ scheduledAt: '...' }`
+- "Move the launch tweet to Friday 3pm" → patch `{ dueDate: '...' }`
 - "This draft needs approval before it ships" → patch
   `{ userAction: 'approve' }`
 - "Rename the setup task to 'Write v1.2 brief'" → patch `{ title }`
@@ -84,7 +84,7 @@ Pattern:
 2. Decide which rows are duplicates / overdue / wrong-timed.
 3. For each row you're cancelling: `update_plan_item(id, { state:
    'superseded' })`. For each row you're re-timing: `update_plan_item(id,
-   { scheduledAt })`.
+   { dueDate })`.
 4. If new items are genuinely needed, `add_plan_item` them after.
 5. Summarise what you changed in the final StructuredOutput.summary —
    founders care about what you dropped and what you re-scheduled.

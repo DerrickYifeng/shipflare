@@ -169,11 +169,9 @@ export function TodayBody({ yesterdayTop = null }: TodayBodyProps = {}) {
     stats,
     isLoading,
     approve: rawApprove,
-    postNow: rawPostNow,
     skip: rawSkip,
     edit: rawEdit,
     handoff,
-    reschedule: rawReschedule,
   } = useToday();
   const { toast, toastWithAction } = useToast();
   const { mutate: globalMutate } = useSWRConfig();
@@ -262,18 +260,6 @@ export function TodayBody({ yesterdayTop = null }: TodayBodyProps = {}) {
     [rawSkip, toast, surfaceError],
   );
 
-  const postNow = useCallback(
-    async (id: string) => {
-      try {
-        await rawPostNow(id);
-        toast('Posting now', 'success');
-      } catch (err) {
-        surfaceError(err, 'Failed to post');
-      }
-    },
-    [rawPostNow, toast, surfaceError],
-  );
-
   const edit = useCallback(
     async (id: string, body: string) => {
       try {
@@ -284,18 +270,6 @@ export function TodayBody({ yesterdayTop = null }: TodayBodyProps = {}) {
       }
     },
     [rawEdit, toast, surfaceError],
-  );
-
-  const reschedule = useCallback(
-    async (id: string, scheduledFor: string) => {
-      try {
-        await rawReschedule(id, scheduledFor);
-        toast('Rescheduled', 'success');
-      } catch (err) {
-        surfaceError(err, 'Failed to reschedule');
-      }
-    },
-    [rawReschedule, toast, surfaceError],
   );
 
   // Keyboard shortcuts (j/k/a/e/s/?) ─────────────────────────────────
@@ -469,7 +443,6 @@ export function TodayBody({ yesterdayTop = null }: TodayBodyProps = {}) {
                   key={item.id}
                   item={item}
                   onApprove={approve}
-                  onPostNow={postNow}
                   onSkip={skip}
                   onEdit={edit}
                   onHandoff={handoff}
@@ -497,10 +470,8 @@ export function TodayBody({ yesterdayTop = null }: TodayBodyProps = {}) {
                   key={item.id}
                   item={item}
                   onApprove={approve}
-                  onPostNow={postNow}
                   onSkip={skip}
                   onEdit={edit}
-                  onReschedule={reschedule}
                   isActive={item.id === activeId}
                   forceEditing={item.id === editingId}
                   onEditDone={() => setEditingId(null)}

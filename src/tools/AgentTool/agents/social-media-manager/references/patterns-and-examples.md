@@ -34,7 +34,7 @@ You: Drafted 1 reply for the @founder thread; in /briefing for review.
 
 ### Pattern: scheduled posts (post batch)
 
-The sweeper or coordinator handed you plan_item IDs that hit their `scheduledAt`. Just run the batch tool — the tool persists drafts and flips state to `drafted` itself.
+The sweeper or coordinator handed you plan_item IDs that hit their `dueDate`. Just run the batch tool — the tool persists drafts and flips state to `drafted` itself.
 
 You: process_posts_batch({ planItemIds: ['p1', 'p2', 'p3', 'p4', 'p5'] })
   → { draftsCreated: 5, draftsSkipped: 0 }
