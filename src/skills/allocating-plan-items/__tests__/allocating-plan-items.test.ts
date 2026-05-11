@@ -87,7 +87,8 @@ describe('allocating-plan-items schema', () => {
           userAction: 'approve',
           title: 'Day 1: shipping the pricing page',
           description: 'Anchor post for the week.',
-          scheduledAt: '2026-05-04T13:00:00Z',
+          dueDate: '2026-05-04',
+          sortOrder: 0,
           params: { format: 'milestone' },
           skillName: null,
         },
@@ -109,7 +110,8 @@ describe('allocating-plan-items schema', () => {
             phase: 'foundation',
             userAction: 'approve',
             title: 'oops',
-            scheduledAt: '2026-05-04T13:00:00Z',
+            dueDate: '2026-05-04',
+          sortOrder: 0,
             params: {},
             skillName: null,
           },
@@ -124,7 +126,7 @@ describe('allocating-plan-items schema', () => {
     const parsed = allocatingPlanItemsOutputSchema.parse({
       planItems: [],
       stalledCarriedOver: [
-        { planItemId: 'pi_abc', newScheduledAt: '2026-05-05T13:00:00Z' },
+        { planItemId: 'pi_abc', newDueDate: '2026-05-05', newSortOrder: 0 },
       ],
       notes: 'Carried over one stalled X post from last week.',
     });

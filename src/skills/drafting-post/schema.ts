@@ -23,7 +23,7 @@ export const draftingPostInputSchema = z.object({
     title: z.string(),
     description: z.string().optional().default(''),
     channel: channelEnum,
-    scheduledAt: z.string().optional(),
+    dueDate: z.string().optional(),
     params: z.record(z.unknown()).optional().default({}),
   }),
   product: z.object({

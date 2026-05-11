@@ -10,7 +10,7 @@
 // each returned entry.
 //
 // Mirrors the planner-visible subset of `plan_items` — `kind`, `phase`,
-// `userAction`, `channel`, `scheduledAt`, `skillName`, `params`,
+// `userAction`, `channel`, `dueDate`, `sortOrder`, `skillName`, `params`,
 // `title`, `description` — see `src/lib/db/schema/plan-items.ts` and
 // `src/tools/schemas.ts#planItemInputSchema` for the canonical shapes.
 
@@ -113,20 +113,22 @@ const planItemRowSchema = z.object({
   userAction: userActionEnum,
   title: z.string().min(1).max(200),
   description: z.string().max(600).nullable().optional().default(null),
-  scheduledAt: z.string().min(1),
+  dueDate: z.string().min(1), // YYYY-MM-DD
+  sortOrder: z.number().int().min(0).default(0),
   skillName: z.string().nullable().optional().default(null),
   params: z.record(z.string(), z.unknown()).optional().default({}),
 });
 
 /**
  * Carryover instruction for a stalled `plan_items` row — the caller
- * agent translates this into an `update_plan_item({ id, scheduledAt })`
+ * agent translates this into an `update_plan_item({ id, dueDate, sortOrder })`
  * call rather than calling `add_plan_item` (which would create a
  * duplicate row).
  */
 const stalledCarryoverSchema = z.object({
   planItemId: z.string().min(1),
-  newScheduledAt: z.string().min(1),
+  newDueDate: z.string().min(1), // YYYY-MM-DD
+  newSortOrder: z.number().int().min(0).default(0),
 });
 
 export const allocatingPlanItemsOutputSchema = z.object({

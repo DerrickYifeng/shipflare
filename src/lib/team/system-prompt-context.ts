@@ -246,8 +246,8 @@ export async function loadSystemPromptContext(
       .where(
         and(
           eq(planItems.userId, team.userId),
-          gte(planItems.scheduledAt, week.start),
-          lt(planItems.scheduledAt, week.end),
+          gte(planItems.dueDate, week.start),
+          lt(planItems.dueDate, week.end),
         ),
       )
       .groupBy(planItems.state),
