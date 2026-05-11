@@ -1254,6 +1254,198 @@ describe('processAgentRun', () => {
     expect(terminal.teamId).toBe('team-term');
   });
 
+  it('async-spawned teammate (parentToolUseId set) stamps lead conversationId on agent_text rows', async () => {
+    // Regression: Task({run_in_background: true}) inserts an agent_runs
+    // row with `parentToolUseId = lead's Task tool_use_id`. The teammate's
+    // own agent-run worker MUST resolve the lead's conversationId and stamp
+    // it on every persisted stream event — otherwise team-desk.tsx:179
+    // (which filters allMessages by `m.conversationId === selected`) drops
+    // the row at the client, the reducer's `progressByParentToolUse` stays
+    // empty, and the DelegationCard renders "thinking…" forever even while
+    // the worker is actively producing tool_use blocks.
+    vi.mocked(db.query.agentRuns.findFirst).mockResolvedValue({
+      id: 'mate-async',
+      teamId: 'team-async',
+      memberId: 'mem-async',
+      agentDefName: 'content-manager',
+      parentAgentId: 'lead-async',
+      parentToolUseId: 'toolu_lead_dispatch_1',
+      status: 'queued',
+    } as never);
+
+    vi.mocked(resolveAgent).mockResolvedValueOnce({
+      source: 'built-in',
+      sourcePath: '/test',
+      name: 'content-manager',
+      description: 'mock teammate',
+      role: 'member',
+      tools: [],
+      disallowedTools: [],
+      skills: [],
+      requires: [],
+      background: false,
+      maxTurns: 10,
+      systemPrompt: 'You are a teammate.',
+    } as never);
+
+    // resolvePrimaryConversation must be called for teammates too when
+    // parentToolUseId is set, so their nested progress lands under the
+    // lead's conversation thread.
+    selectChain.limit.mockResolvedValueOnce([{ id: 'conv-async-parent' }]);
+
+    vi.mocked(drainMailbox).mockResolvedValueOnce([
+      {
+        id: 'msg-teammate-prompt',
+        toAgentId: 'mate-async',
+        type: 'user_prompt',
+        messageType: 'message',
+        content: 'Lead dispatched: draft posts.',
+        createdAt: new Date(),
+      },
+    ]);
+
+    runAgentHoisted.fn.mockImplementationOnce(async (...args: unknown[]) => {
+      const onEvent = getOnEventArg(args) as
+        | ((event: {
+            type: string;
+            messageId?: string;
+            turn?: number;
+            blockIndex?: number;
+            text?: string;
+          }) => void | Promise<void>)
+        | undefined;
+      if (onEvent) {
+        await onEvent({
+          type: 'assistant_text_stop',
+          messageId: 'm-async-1',
+          turn: 1,
+          blockIndex: 0,
+          text: 'Drafting reply.',
+        });
+      }
+      return {
+        result: 'done',
+        usage: {
+          inputTokens: 1,
+          outputTokens: 1,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          costUsd: 0,
+          model: 'claude-sonnet-4-6',
+          turns: 1,
+        },
+      };
+    });
+
+    await processAgentRun(makeJob('mate-async'));
+
+    // (a) The persisted agent_text row carries the lead's conversationId
+    // — without this, team-desk.tsx:179 drops the row and the
+    // DelegationCard's progressItems stays empty.
+    const insertedRows = insertChain.values.mock.calls.map(
+      (c) => (c as unknown as [Record<string, unknown>])[0],
+    );
+    const turnRow = insertedRows.find(
+      (r) => r.type === 'agent_text' && r.fromAgentId === 'mate-async',
+    );
+    expect(turnRow).toBeDefined();
+    expect(turnRow!.conversationId).toBe('conv-async-parent');
+
+    // (b) Sanity: the spawnMeta wrap (agent-run.ts:1006) is still tagging
+    // the row with parent_tool_use_id so the reducer's
+    // progressByParentToolUse can bucket it under the lead's Task
+    // DelegationCard.
+    const metadata = turnRow!.metadata as Record<string, unknown>;
+    expect(metadata.parent_tool_use_id).toBe('toolu_lead_dispatch_1');
+  });
+
+  it('orphan teammate (no parentToolUseId) keeps conversationId null', async () => {
+    // Teammates that are NOT spawned by a Task tool (e.g. legacy direct
+    // mailbox sends, peer DM shadows) have no DelegationCard to nest
+    // under, so their stream events MUST stay out of the lead's per-
+    // thread filter. The fix above gates conversationId resolution on
+    // parentToolUseId being set, so this case still falls through to null.
+    vi.mocked(db.query.agentRuns.findFirst).mockResolvedValue({
+      id: 'mate-orphan',
+      teamId: 'team-orphan',
+      memberId: 'mem-orphan',
+      agentDefName: 'content-manager',
+      parentAgentId: 'lead-orphan',
+      // No parentToolUseId — this is the orphan path.
+      status: 'queued',
+    } as never);
+
+    vi.mocked(resolveAgent).mockResolvedValueOnce({
+      source: 'built-in',
+      sourcePath: '/test',
+      name: 'content-manager',
+      description: 'mock teammate',
+      role: 'member',
+      tools: [],
+      disallowedTools: [],
+      skills: [],
+      requires: [],
+      background: false,
+      maxTurns: 10,
+      systemPrompt: 'You are a teammate.',
+    } as never);
+
+    vi.mocked(drainMailbox).mockResolvedValueOnce([
+      {
+        id: 'msg-orphan-prompt',
+        toAgentId: 'mate-orphan',
+        type: 'user_prompt',
+        messageType: 'message',
+        content: 'Direct DM, no parent Task.',
+        createdAt: new Date(),
+      },
+    ]);
+
+    runAgentHoisted.fn.mockImplementationOnce(async (...args: unknown[]) => {
+      const onEvent = getOnEventArg(args) as
+        | ((event: {
+            type: string;
+            messageId?: string;
+            turn?: number;
+            blockIndex?: number;
+            text?: string;
+          }) => void | Promise<void>)
+        | undefined;
+      if (onEvent) {
+        await onEvent({
+          type: 'assistant_text_stop',
+          messageId: 'm-orphan-1',
+          turn: 1,
+          blockIndex: 0,
+          text: 'Replying via DM.',
+        });
+      }
+      return {
+        result: 'done',
+        usage: {
+          inputTokens: 1,
+          outputTokens: 1,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          costUsd: 0,
+          model: 'claude-sonnet-4-6',
+          turns: 1,
+        },
+      };
+    });
+
+    await processAgentRun(makeJob('mate-orphan'));
+
+    const insertedRows = insertChain.values.mock.calls.map(
+      (c) => (c as unknown as [Record<string, unknown>])[0],
+    );
+    const turnRow = insertedRows.find(
+      (r) => r.type === 'agent_text' && r.fromAgentId === 'mate-orphan',
+    );
+    expect(turnRow).toBeDefined();
+    expect(turnRow!.conversationId).toBeNull();
+  });
+
   it('teammate (non-lead) does NOT publish a terminal SSE event', async () => {
     vi.mocked(db.query.agentRuns.findFirst).mockResolvedValue({
       id: 'mate-no-term',
@@ -1591,6 +1783,108 @@ describe('processAgentRun', () => {
       }
     });
     expect(sseToolCallTeammate).toBeUndefined();
+  });
+
+  it('async-spawned teammate (parentToolUseId set) publishes tool_call to the team SSE channel', async () => {
+    // Regression: tool events from async-dispatched teammates MUST
+    // publish to the live SSE channel so the founder UI's
+    // DelegationCard streams nested progress in real time. Without
+    // this publish the card sits at "thinking…" until a page refresh
+    // pulls the durable row via the snapshot endpoint. Pairs with the
+    // conversationId-stamping fix (same gate: parentToolUseId present
+    // ⇒ teammate is rendering under a DelegationCard, so it needs the
+    // live channel).
+    publishMock.mockClear();
+    insertChain.values.mockClear();
+    vi.mocked(db.query.agentRuns.findFirst).mockResolvedValueOnce({
+      id: 'mate-async-sse',
+      teamId: 'team-async-sse',
+      memberId: 'mem-async-sse',
+      agentDefName: 'content-manager',
+      parentAgentId: 'lead-async-sse',
+      parentToolUseId: 'toolu_lead_dispatch_sse',
+      status: 'queued',
+    } as never);
+    vi.mocked(resolveAgent).mockResolvedValueOnce({
+      source: 'built-in',
+      sourcePath: '/test',
+      name: 'content-manager',
+      description: 'mock teammate',
+      role: 'member',
+      tools: [],
+      disallowedTools: [],
+      skills: [],
+      requires: [],
+      background: false,
+      maxTurns: 10,
+      systemPrompt: 'You are a teammate.',
+    } as never);
+    // resolvePrimaryConversation is called for async teammates too.
+    selectChain.limit.mockResolvedValueOnce([{ id: 'conv-async-sse' }]);
+    runAgentHoisted.fn.mockImplementationOnce(async (...args: unknown[]) => {
+      runAgentHoisted.state.lastArgs = args;
+      const onEvent = getOnEventArg(args) as
+        | ((event: {
+            type: string;
+            toolName?: string;
+            toolUseId?: string;
+            input?: unknown;
+          }) => void | Promise<void>)
+        | undefined;
+      if (onEvent) {
+        await onEvent({
+          type: 'tool_start',
+          toolName: 'reddit_search',
+          toolUseId: 'toolu_mate_async_sse',
+          input: { query: 'find candidate threads' },
+        });
+      }
+      return {
+        result: 'ok',
+        usage: {
+          inputTokens: 1,
+          outputTokens: 1,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          costUsd: 0,
+          model: 'claude-sonnet-4-6',
+          turns: 1,
+        },
+      };
+    });
+
+    await processAgentRun(makeJob('mate-async-sse'));
+
+    // (a) Durable row stamped with the lead's conversationId.
+    const insertedRows = insertChain.values.mock.calls.map(
+      (c) => (c as unknown as [Record<string, unknown>])[0],
+    );
+    const dbToolCallRow = insertedRows.find(
+      (r) => r.type === 'tool_call' && r.fromAgentId === 'mate-async-sse',
+    );
+    expect(dbToolCallRow).toBeDefined();
+    expect(dbToolCallRow!.conversationId).toBe('conv-async-sse');
+
+    // (b) SSE publish lands on the team channel with the lead's
+    // conversationId so the founder UI's per-thread filter doesn't
+    // drop it.
+    const sseToolCallAsync = publishMock.mock.calls.find(([channel, raw]) => {
+      if (channel !== teamMessagesChannel('team-async-sse')) return false;
+      try {
+        return (
+          (JSON.parse(raw as string) as { type?: string }).type === 'tool_call'
+        );
+      } catch {
+        return false;
+      }
+    });
+    expect(sseToolCallAsync).toBeDefined();
+    const payload = JSON.parse(sseToolCallAsync![1] as string) as {
+      conversationId: string | null;
+      fromAgentId: string;
+    };
+    expect(payload.conversationId).toBe('conv-async-sse');
+    expect(payload.fromAgentId).toBe('mate-async-sse');
   });
 
   it('lead skips the tool_call SSE publish when the DB insert throws (no phantom row)', async () => {

@@ -312,6 +312,17 @@ export const agentRuns = pgTable(
       .references(() => teamMembers.id, { onDelete: 'cascade' }),
     agentDefName: text('agent_def_name').notNull(),
     parentAgentId: text('parent_agent_id'),
+    // Anthropic `tool_use_id` of the parent's `Task` call that spawned this
+    // teammate (async path only — `Task(run_in_background:true)`). Stamped at
+    // spawn time from `ctx.get('toolUseId')` so the agent-run worker can
+    // wrap the teammate's onEvent with a spawnMeta whose `parentToolUseId`
+    // matches the lead's Task tool_use_id. Without this, the teammate's
+    // own tool_call / agent_text rows land in `team_messages` with no
+    // `parent_tool_use_id`, the conversation-reducer's
+    // `progressByParentToolUse[task.toolUseId]` lookup misses, and the
+    // founder UI's DelegationCard renders "thinking…" forever even while
+    // the worker is producing tool_use blocks. Nullable for legacy rows.
+    parentToolUseId: text('parent_tool_use_id'),
     bullmqJobId: text('bullmq_job_id'),
     status: text('status').notNull().default('queued'),
     transcriptId: text('transcript_id'),

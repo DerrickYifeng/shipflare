@@ -39,6 +39,7 @@ import { agentRuns, teamConversations, teamMessages } from '@/lib/db/schema';
 import { TOOL_RESULT_TRUNCATION_LIMIT } from '@/lib/limits';
 import { runAgent } from '@/core/query-loop';
 import { resolveAgent } from '@/tools/AgentTool/registry';
+import { wrapOnEventWithSpawnMeta } from '@/tools/AgentTool/AgentTool';
 import { buildAgentConfigFromDefinition } from '@/tools/AgentTool/spawn';
 import { createTeamPlatformDeps } from '@/lib/platform-deps';
 import { synthesizeTaskNotification } from './lib/synthesize-notification';
@@ -499,9 +500,35 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
   // the SSE payloads MUST carry conversationId so the founder UI's
   // per-conversation thread filter (team-desk.tsx threadMessages) doesn't
   // drop them. Resolve once here and reuse below + at terminal-event time.
+  //
+  // Async-teammate fix (2026-05-08): teammates spawned via
+  // `Task(run_in_background:true)` ALSO need conversationId stamped on their
+  // stream events. Their parent_tool_use_id-tagged tool_call / agent_text
+  // rows are rendered as nested progress under the lead's DelegationCard
+  // (delegation-card.tsx ProgressList), but team-desk.tsx:179 filters by
+  // `m.conversationId === selectedConversationId` BEFORE feeding the
+  // reducer — so a null conversationId drops the row at the client and
+  // `progressByParentToolUse` stays empty. Result: card shows "thinking…"
+  // for the entire teammate run. Resolve the lead's conversation for any
+  // teammate whose row carries `parentToolUseId` (set at spawn time in
+  // AgentTool.ts:408 from the Task tool's own toolUseId).
   let leadConversationId: string | null = null;
-  if (isLead) {
+  const hasParentToolUseId =
+    typeof row.parentToolUseId === 'string' && row.parentToolUseId.length > 0;
+  // `publishLiveSse` controls whether stream events (agent_text partials,
+  // assistant_text_stop, tool_call, tool_result) get pushed onto the
+  // team-messages SSE channel. The lead always publishes (founder is
+  // watching their own thread). Async-spawned teammates publish too, so
+  // the DelegationCard streams progress live instead of sitting at
+  // "thinking…" until a page refresh pulls the durable rows. Orphan
+  // teammates (no parentToolUseId — peer DMs, direct mailbox sends) stay
+  // off the live channel; their output reaches the founder via
+  // task_notification mailbox routing only.
+  const publishLiveSse = isLead || hasParentToolUseId;
+  if (publishLiveSse) {
     leadConversationId = await resolvePrimaryConversation(row.teamId, db);
+  }
+  if (isLead) {
     if (leadConversationId) {
       priorMessages = await loadConversationHistory(row.teamId, {
         conversationId: leadConversationId,
@@ -657,7 +684,7 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
     // the live SSE feed. Failures are non-fatal; the durable row + final
     // assistant_text_stop branch (below) remain the source of truth.
     if (
-      def.role === 'lead' &&
+      publishLiveSse &&
       (event.type === 'assistant_text_start' ||
         event.type === 'assistant_text_delta' ||
         event.type === 'assistant_text_stop')
@@ -763,7 +790,10 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
           // Without conversationId the lead's reply would only show after a
           // full page refresh+reroute; meanwhile the typing indicator stays
           // pinned because no agent_text appears in the visible thread.
-          conversationId: isLead ? leadConversationId : null,
+          // 2026-05-08: leadConversationId is resolved for async-spawned
+          // teammates too (rows with parentToolUseId), so their nested
+          // progress shows under the DelegationCard instead of "thinking…".
+          conversationId: leadConversationId,
           type: 'agent_text',
           messageType: 'message',
           fromMemberId: resolveFromMemberId(event),
@@ -780,14 +810,16 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
         return;
       }
 
-      // Phase E Task 6: lead path additionally publishes to the team SSE
-      // channel so the founder UI can paint the assistant turn live.
-      // Teammates skip — their output reaches the lead via task_notification
-      // mailbox routing, not the team-messages SSE stream.
+      // Phase E Task 6 + 2026-05-08 async-teammate fix: publish to the
+      // team SSE channel so the founder UI can paint the assistant turn
+      // live. Lead always publishes; async-spawned teammates publish so
+      // their nested progress streams under the DelegationCard. Orphan
+      // teammates (no parentToolUseId) skip — their output reaches the
+      // lead via task_notification mailbox routing only.
       // Publish failures are non-fatal: the durable row already landed; SSE
       // is a best-effort live channel and a missed event triggers a refetch
       // on the client side.
-      if (def.role === 'lead') {
+      if (publishLiveSse) {
         try {
           const pub = getPubSubPublisher();
           await pub.publish(
@@ -887,10 +919,11 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
             // tool_call / tool_result rows group with their originating
             // user_prompt for per-request aggregation.
             runId: isLead && leadRequestId ? leadRequestId : agentId,
-            // Mirror assistant_text_stop: only stamp conversationId on
-            // the lead path so the founder UI's per-thread filter renders
-            // the row. Teammates have no conversation handle.
-            conversationId: isLead ? leadConversationId : null,
+            // Mirror assistant_text_stop: stamp conversationId so the
+            // founder UI's per-thread filter renders the row. Resolved
+            // for leads and async-spawned teammates (parentToolUseId set);
+            // null for orphan teammates with no conversation handle.
+            conversationId: leadConversationId,
             type: isCall ? 'tool_call' : 'tool_result',
             messageType: 'message',
             fromMemberId: resolveFromMemberId(event),
@@ -917,16 +950,19 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
           // non-Sleep tools, but the flag keeps the control flow honest
           // either way.
         }
-        // Lead path additionally publishes to the team SSE channel so
-        // the founder UI paints the tool card live. Teammates skip — the
-        // live SSE channel is for the founder-visible lead conversation;
-        // teammate tool activity reaches the lead only as
-        // <task-notification> summaries. Mirrors the agent_text envelope
-        // shape (incl. conversationId + runId) and the failure handling
-        // (publish failure is non-fatal — the durable row already landed).
-        // Skipped when the DB insert above failed so the live card always
-        // has a durable row to back it.
-        if (persisted && def.role === 'lead') {
+        // Publish to the team SSE channel so the founder UI paints the
+        // tool card live. Lead always publishes; async-spawned teammates
+        // (parentToolUseId set) publish so their tool activity nests
+        // under the DelegationCard's progress feed in real time. Orphan
+        // teammates skip — the founder doesn't have a card to show them
+        // under, so their tool activity reaches the lead only as
+        // <task-notification> summaries (2026-05-08).
+        // Mirrors the agent_text envelope shape (incl. conversationId +
+        // runId) and the failure handling (publish failure is non-fatal
+        // — the durable row already landed). Skipped when the DB insert
+        // above failed so the live card always has a durable row to
+        // back it.
+        if (persisted && publishLiveSse) {
           try {
             const pub = getPubSubPublisher();
             await pub.publish(
@@ -985,13 +1021,39 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
     }
   };
 
+  // Async-teammate fix (2026-05-08): when this run is a teammate spawned
+  // via `Task(run_in_background:true)`, `agent_runs.parentToolUseId`
+  // carries the lead's Task tool_use_id (stamped at spawn time in
+  // `spawnSubagent`). Wrap the teammate's onEvent so its OWN tool_call /
+  // agent_text events get tagged with `spawnMeta.parentToolUseId` —
+  // matching what the sync Task path's `wrapOnEventWithSpawnMeta` does
+  // at AgentTool.ts:586. Without this wrap the teammate's events land in
+  // `team_messages` with `parent_tool_use_id = null`, the founder UI's
+  // conversation-reducer can't bucket them under the DelegationCard's
+  // `task.toolUseId`, and the dispatch card renders "thinking…" forever
+  // even while the worker is producing tool_use blocks.
+  //
+  // Nested events (sub-spawn / fork-skill) already carry spawnMeta from
+  // their inner wrap; `wrapOnEventWithSpawnMeta` is a no-op when
+  // `event.spawnMeta !== undefined`, so this outer wrap doesn't clobber
+  // them.
+  const teammateStreamEvent =
+    !isLead && row.parentToolUseId && row.parentToolUseId.length > 0
+      ? wrapOnEventWithSpawnMeta(handleStreamEvent, {
+          parentTaskId: null,
+          parentToolUseId: row.parentToolUseId,
+          fromMemberId: row.memberId,
+          agentName: def.name,
+        })
+      : handleStreamEvent;
+
   // Phase E orphan fix (2026-05-03 plan, Task 2): with handleStreamEvent
   // now declared, wire it into the holder so `ctx.get('onEvent')` (read
   // by AgentTool / SkillTool when forwarding child spawn events) returns
   // the live handler. Sub-agent / fork-skill events from now on will
   // attribute themselves via spawnMeta and land in team_messages just
   // like the lead's own events.
-  onEventHolder.fn = handleStreamEvent;
+  onEventHolder.fn = teammateStreamEvent;
 
   // Phase C: background drain timer. Polls every DRAIN_POLL_INTERVAL_MS
   // for new mail addressed to this agent; on shutdown_request, sets
@@ -1086,10 +1148,12 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
       userId: team.userId,
       productId: team.productId,
       memberId: row.memberId,
-      // Lead carries the founder's primary thread id; teammates have no
-      // conversation handle (their output reaches the lead via
-      // task_notification mailbox routing, not the per-thread filter).
-      conversationId: isLead ? leadConversationId : null,
+      // Lead carries the founder's primary thread id. Async-spawned
+      // teammates (parentToolUseId set) inherit it too so their tool_call
+      // rows nest under the DelegationCard. Orphan teammates with no
+      // conversation handle stay null and reach the lead via
+      // task_notification mailbox routing instead of the per-thread filter.
+      conversationId: leadConversationId,
       // Lead's runId mirrors the user_prompt messageId the API route
       // advertises to SSE so the founder UI's working-indicator pairing
       // works. Teammates have no leadRequestId in scope — fall back to
@@ -1118,7 +1182,7 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
       undefined, // onProgress
       undefined, // prebuilt
       undefined, // onIdleReset
-      handleStreamEvent, // onEvent — Phase D Sleep early-exit + per-turn persist
+      teammateStreamEvent, // onEvent — Phase D Sleep early-exit + per-turn persist; teammates wrap with spawnMeta so events nest under the lead's Task card
       injectMessages,
       priorMessages, // Phase D: undefined for fresh runs, populated on resume
     );

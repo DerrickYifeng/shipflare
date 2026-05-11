@@ -377,6 +377,25 @@ async function launchAsyncTeammate(
   // agent_runs.parent_agent_id is nullable so this is safe.
   const parentAgentId = getCallerAgentId(ctx);
 
+  // Anthropic-issued `tool_use_id` of THIS Task call. tool-executor plumbs it
+  // through the per-call ctx proxy (same key the sync path reads at L573).
+  // The agent-run worker reads `agent_runs.parentToolUseId` at startup and
+  // wraps the teammate's onEvent with a `spawnMeta.parentToolUseId` so the
+  // founder UI's conversation-reducer can bucket the teammate's own
+  // tool_call / agent_text rows under the DelegationCard's task.toolUseId.
+  // Without this, the dispatch card renders "thinking…" forever even while
+  // the worker is producing tool_use blocks. Empty string (not null) when
+  // ctx lacks toolUseId — keeps legacy / test paths working.
+  let parentToolUseId = '';
+  try {
+    const fromCtx = ctx.get<string | null | undefined>('toolUseId');
+    if (typeof fromCtx === 'string' && fromCtx.length > 0) {
+      parentToolUseId = fromCtx;
+    }
+  } catch {
+    parentToolUseId = '';
+  }
+
   // 1. Queue the agent_runs row. The agent-run worker (Task 9) drains its
   //    mailbox and drives runAgent against `agentDefName`.
   const spawnedAt = new Date();
@@ -386,6 +405,7 @@ async function launchAsyncTeammate(
     memberId: currentMemberId,
     agentDefName: input.subagent_type,
     parentAgentId,
+    parentToolUseId: parentToolUseId.length > 0 ? parentToolUseId : null,
     status: 'queued',
   });
 
