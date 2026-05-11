@@ -39,6 +39,10 @@ const MAX_PER_TICK = 200;
  *      `draft` or `execute` phase (per nextDispatchPhase).
  *    - state='approved' → `execute` phase (skip scheduledAt; the user
  *      already approved).
+ *    - content_reply DRAFT phase is skipped here — daily-run's
+ *      social-media-manager owns reply discovery + drafting. The
+ *      sweeper still enqueues content_reply EXECUTE phase (posting
+ *      after approval).
  *
  * Manual-action rows are NOT swept — the user marks them complete
  * via API directly (Phase 8).
@@ -108,6 +112,13 @@ export async function processPlanExecuteSweeper(
     // for a recoverable reason. Either way the per-row queue has no
     // business firing for it.
     if (isContentPostDraftPhase(row.kind, phase)) continue;
+    // content_reply draft is owned by the daily-run social-media-manager
+    // (Mode: discover-and-fill-slot). plan-execute.ts has only a legacy
+    // stub for content_reply + draft phase that flips planned → drafted
+    // without doing any work — enqueuing it would burn the slot before
+    // the daily agent runs. The execute phase IS still enqueued (that's
+    // the post-after-approval path).
+    if (isContentReplyDraftPhase(row.kind, phase)) continue;
     try {
       await enqueuePlanExecute({
         schemaVersion: 1,
@@ -150,6 +161,13 @@ function isContentPostDraftPhase(
   phase: 'draft' | 'execute',
 ): boolean {
   return kind === 'content_post' && phase === 'draft';
+}
+
+function isContentReplyDraftPhase(
+  kind: string,
+  phase: 'draft' | 'execute',
+): boolean {
+  return kind === 'content_reply' && phase === 'draft';
 }
 
 function sum(values: Iterable<number>): number {

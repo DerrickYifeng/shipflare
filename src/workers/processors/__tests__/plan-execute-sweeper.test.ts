@@ -403,7 +403,7 @@ describe('plan-execute-sweeper — content_post batch dispatch via tool', () => 
     );
   });
 
-  it('does NOT short-circuit other-kind rows — content_reply still flows through per-row enqueue', async () => {
+  it('skips content_reply DRAFT phase — daily-run social-media-manager owns reply drafting', async () => {
     seedPlanItem({ id: 'pi-reply', kind: 'content_reply', channel: 'x' });
 
     const { processPlanExecuteSweeper } = await import(
@@ -413,13 +413,34 @@ describe('plan-execute-sweeper — content_post batch dispatch via tool', () => 
 
     // No tool invocation from the batch path (kind != content_post).
     expect(processPostsBatchExecuteMock).not.toHaveBeenCalled();
-    // Per-row enqueue runs as before for content_reply + planned + approve.
+    // content_reply + planned + approve maps to DRAFT phase, which the
+    // sweeper now skips so the legacy state-only stub in plan-execute
+    // can't burn the slot before daily-run's social-media-manager
+    // arrives to do real discovery + drafting.
+    expect(enqueuePlanExecuteMock).not.toHaveBeenCalled();
+  });
+
+  it('still enqueues content_reply EXECUTE phase for approved rows (posting after approval)', async () => {
+    seedPlanItem({
+      id: 'pi-reply-approved',
+      kind: 'content_reply',
+      channel: 'x',
+      state: 'approved',
+      userAction: 'approve',
+    });
+
+    const { processPlanExecuteSweeper } = await import(
+      '../plan-execute-sweeper'
+    );
+    await processPlanExecuteSweeper(makeJob());
+
+    expect(processPostsBatchExecuteMock).not.toHaveBeenCalled();
     expect(enqueuePlanExecuteMock).toHaveBeenCalledTimes(1);
     const call = enqueuePlanExecuteMock.mock.calls[0]?.[0] as {
       planItemId: string;
       phase: string;
     };
-    expect(call.planItemId).toBe('pi-reply');
-    expect(call.phase).toBe('draft');
+    expect(call.planItemId).toBe('pi-reply-approved');
+    expect(call.phase).toBe('execute');
   });
 });

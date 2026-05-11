@@ -16,9 +16,9 @@
 // the existing repeat schedule; only the processor name changed.
 
 import type { Job } from 'bullmq';
-import { eq } from 'drizzle-orm';
+import { and, eq, gte, like } from 'drizzle-orm';
 import { db } from '@/lib/db';
-import { channels, products } from '@/lib/db/schema';
+import { channels, products, teamConversations } from '@/lib/db/schema';
 import { ensureTeamExists } from '@/lib/team-provisioner';
 import { ensureDailyRunEnqueued } from '@/lib/team-daily-run';
 import { createLogger, loggerForJob } from '@/lib/logger';
@@ -52,7 +52,12 @@ export async function processDailyRunFanout(
     userPlatforms.get(c.userId)!.add(c.platform);
   }
 
+  // Compute today's UTC-midnight boundary once so the per-user dedup
+  // query uses a stable cutoff across the whole fanout pass.
+  const utcMidnight = startOfUtcDay(new Date());
+
   let enqueued = 0;
+  let skippedKickoff = 0;
   for (const [userId, platformSet] of userPlatforms) {
     const [product] = await db
       .select({ id: products.id, name: products.name })
@@ -63,6 +68,20 @@ export async function processDailyRunFanout(
 
     try {
       const { teamId } = await ensureTeamExists(userId, product.id);
+
+      // Kickoff/daily dedup: if the team already had a kickoff
+      // conversation today (UTC), skip the daily dispatch. Kickoff
+      // already spawned today's social-media-manager agents for every
+      // (channel × mode); firing daily on top would race the same
+      // plan_items and burn agent turns for no work.
+      if (await hadKickoffToday(teamId, utcMidnight)) {
+        skippedKickoff++;
+        log.info(
+          `daily-run-fanout: skipping user=${userId} team=${teamId} — kickoff already fired today`,
+        );
+        continue;
+      }
+
       const result = await ensureDailyRunEnqueued({
         userId,
         productId: product.id,
@@ -81,6 +100,41 @@ export async function processDailyRunFanout(
   }
 
   log.info(
-    `daily-run-fanout (trace=${traceId}): dispatched ${enqueued} lead messages`,
+    `daily-run-fanout (trace=${traceId}): dispatched ${enqueued} lead messages, skipped ${skippedKickoff} same-day-kickoff users`,
   );
+}
+
+/**
+ * UTC midnight at the start of the given date. Daily cron runs at 13:00
+ * UTC; clamping to UTC midnight gives a consistent "did kickoff fire
+ * today" window that's independent of the cron's exact fire time.
+ */
+function startOfUtcDay(d: Date): Date {
+  return new Date(
+    Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()),
+  );
+}
+
+/**
+ * Returns true iff `teamConversations` has a row for this team whose
+ * title was minted by `createAutomationConversation(_, 'kickoff')`
+ * (titles look like `"Kickoff — 2026-05-10 14:55"`) AND whose
+ * createdAt is on or after today's UTC midnight.
+ */
+async function hadKickoffToday(
+  teamId: string,
+  utcMidnight: Date,
+): Promise<boolean> {
+  const [row] = await db
+    .select({ id: teamConversations.id })
+    .from(teamConversations)
+    .where(
+      and(
+        eq(teamConversations.teamId, teamId),
+        like(teamConversations.title, 'Kickoff —%'),
+        gte(teamConversations.createdAt, utcMidnight),
+      ),
+    )
+    .limit(1);
+  return !!row;
 }

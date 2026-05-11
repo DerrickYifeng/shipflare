@@ -129,11 +129,13 @@ describe('ensureDailyRunEnqueued', () => {
     // Daily must NOT instruct add_plan_item — kickoff + weekly own seeding.
     expect(callArg.goal).not.toContain('add_plan_item');
 
-    // Both channels appear with explicit parallel spawn directives.
+    // Both channels appear with reply spawn directives. Post spawns are
+    // intentionally absent — plan-execute-sweeper owns content_post drafting.
     expect(callArg.goal).toContain('(x, reply)');
     expect(callArg.goal).toContain('(reddit, reply)');
-    expect(callArg.goal).toContain('(x, post)');
-    expect(callArg.goal).toContain('(reddit, post)');
+    expect(callArg.goal).not.toContain('(x, post)');
+    expect(callArg.goal).not.toContain('(reddit, post)');
+    expect(callArg.goal).not.toContain('post-batch');
 
     // targetCount carried from channelMix.
     expect(callArg.goal).toContain('targetCount: 5');
@@ -151,7 +153,7 @@ describe('ensureDailyRunEnqueued', () => {
     expect(callArg.goal).not.toContain('content-manager');
   });
 
-  it('emits 2 directives for a Reddit-only setup', async () => {
+  it('emits one reply spawn for a Reddit-only setup (no post spawn)', async () => {
     setupHappyPath({
       pathRow: {
         id: 'path-r',
@@ -171,12 +173,12 @@ describe('ensureDailyRunEnqueued', () => {
 
     const callArg = dispatchLeadMessageMock.mock.calls[0]![0];
     expect(callArg.goal).toContain('(reddit, reply)');
-    expect(callArg.goal).toContain('(reddit, post)');
+    expect(callArg.goal).not.toContain('(reddit, post)');
     expect(callArg.goal).not.toContain('(x, reply)');
     expect(callArg.goal).not.toContain('(x, post)');
   });
 
-  it('skips reply spawn when repliesPerDay is 0', async () => {
+  it('skips reply spawn when repliesPerDay is 0 and emits no post spawn either', async () => {
     setupHappyPath({
       pathRow: {
         id: 'path-r',
@@ -198,8 +200,9 @@ describe('ensureDailyRunEnqueued', () => {
     const callArg = dispatchLeadMessageMock.mock.calls[0]![0];
     expect(callArg.goal).toContain('(x, reply)');
     expect(callArg.goal).not.toContain('(reddit, reply)');
-    // Post spawn is still emitted (it's gated on slot existence, not budget).
-    expect(callArg.goal).toContain('(reddit, post)');
+    // Daily never spawns post-batch agents; sweeper owns that path.
+    expect(callArg.goal).not.toContain('(reddit, post)');
+    expect(callArg.goal).not.toContain('(x, post)');
   });
 
   it('emits a "no budget" message when no channels are connected', async () => {
@@ -213,13 +216,13 @@ describe('ensureDailyRunEnqueued', () => {
     });
 
     const callArg = dispatchLeadMessageMock.mock.calls[0]![0];
-    expect(callArg.goal).toContain('No connected channels with active reply or post budget');
+    expect(callArg.goal).toContain('No connected channels with active reply budget');
     expect(callArg.goal).not.toContain('Task(');
   });
 });
 
 describe('buildDailyGoalText (pure)', () => {
-  it('emits 4 (channel × mode) lines when both channels are budgeted', () => {
+  it('emits reply spawn lines for every budgeted channel and no post spawns', () => {
     const goal = buildDailyGoalText({
       productName: 'Acme',
       platforms: ['x', 'reddit'],
@@ -233,12 +236,15 @@ describe('buildDailyGoalText (pure)', () => {
     expect(goal).toContain('Source: cron');
     expect(goal).toContain('(x, reply)');
     expect(goal).toContain('(reddit, reply)');
-    expect(goal).toContain('(x, post)');
-    expect(goal).toContain('(reddit, post)');
     expect(goal).toContain('targetCount: 5');
     expect(goal).toContain('targetCount: 2');
     // Daily MUST NOT seed plan_items.
     expect(goal).not.toContain('add_plan_item');
+    // Daily MUST NOT spawn post-batch agents — plan-execute-sweeper
+    // already drafts content_post directly via processPostsBatchTool.
+    expect(goal).not.toContain('(x, post)');
+    expect(goal).not.toContain('(reddit, post)');
+    expect(goal).not.toContain('post-batch');
   });
 
   it('omits source clause when none is provided', () => {

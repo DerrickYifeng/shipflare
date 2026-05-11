@@ -8,8 +8,11 @@
  *     seed plan_items → spawn one social-media-manager per (channel × mode)
  *
  *   daily (every cron tick):
- *     load today's content_reply / content_post slots →
- *     spawn one social-media-manager per (channel × mode), parallelized
+ *     load today's content_reply slots →
+ *     spawn one social-media-manager per (channel, reply), parallelized.
+ *     content_post drafting is owned by `plan-execute-sweeper` and runs
+ *     directly via `processPostsBatchTool` — daily never spawns post-batch
+ *     agents (would race the sweeper for already-claimed rows).
  *
  * The full per-trigger logic lives in the goal preamble (see
  * `buildDailyGoalText` below). AGENT.md no longer carries trigger
@@ -146,19 +149,19 @@ interface DailyGoalArgs {
  * verbatim — every spawn directive lives here, not in AGENT.md.
  *
  * Daily does NOT add new plan_items (kickoff + weekly-replan own
- * that). It dispatches drafting against existing slots:
+ * that). Daily ALSO does not dispatch content_post drafting — the
+ * every-minute `plan-execute-sweeper` already owns that path via
+ * `processPostsBatchTool` (no agent spawn, just the tool). Daily
+ * only handles content_reply discovery + drafting:
  *
  *   1. For each connected channel where repliesPerDay > 0, spawn ONE
  *      social-media-manager in (channel, reply) mode against today's
  *      content_reply slot. The coordinator queries the slot's uuid
  *      itself — we just tell it which channels to look at.
- *   2. For each connected channel with content_post slots scheduled
- *      today that aren't yet drafted, spawn ONE batch in (channel,
- *      post) mode. The coordinator decides which slot uuids to pass.
- *   3. Parallelize all spawns in a single assistant turn.
+ *   2. Parallelize all spawns in a single assistant turn.
  *
- * Channels without budget for a given mode are silently skipped — no
- * spawn directive is emitted.
+ * Channels without reply budget are silently skipped — no spawn
+ * directive is emitted.
  */
 export function buildDailyGoalText(args: DailyGoalArgs): string {
   const { productName, platforms, source, channelMix } = args;
@@ -183,24 +186,15 @@ export function buildDailyGoalText(args: DailyGoalArgs): string {
     );
   }
 
-  const postSpawns: string[] = [];
-  if (xConnected) {
-    postSpawns.push(
-      `- (x, post): if today's planned content_post rows for channel='x' exist, Task({ subagent_type: 'social-media-manager', description: 'draft x post batch', prompt: 'Mode: post-batch\\nplanItemIds: <today's x content_post uuids>' })`,
-    );
-  }
-  if (redditConnected) {
-    postSpawns.push(
-      `- (reddit, post): if today's planned content_post rows for channel='reddit' exist, Task({ subagent_type: 'social-media-manager', description: 'draft reddit post batch', prompt: 'Mode: post-batch\\nplanItemIds: <today's reddit content_post uuids>' })`,
-    );
-  }
-
   const lines: string[] = [
     `Daily automation run for ${productName}.`,
     `Connected platforms: ${platformList}.`,
     `Trigger: daily.${sourceClause ? ' ' + sourceClause : ''}`,
     ``,
-    `Daily does NOT add new plan_items — kickoff + weekly-replan own that. Read today's slots, dispatch drafting, mark them drafted.`,
+    `Daily does NOT add new plan_items — kickoff + weekly-replan own that.`,
+    `Daily does NOT dispatch content_post drafting — the plan-execute-sweeper`,
+    `runs every minute and claims due content_post rows directly via`,
+    `processPostsBatchTool. Daily only fills today's content_reply slots.`,
     ``,
     `Per-channel reply budget (read off the active strategic path):`,
     `- x: ${repliesX} replies/day`,
@@ -208,19 +202,18 @@ export function buildDailyGoalText(args: DailyGoalArgs): string {
     ``,
   ];
 
-  const allSpawns = [...replySpawns, ...postSpawns];
-  if (allSpawns.length > 0) {
+  if (replySpawns.length > 0) {
     lines.push(
-      `Step 1 — query_plan_items({ status: ['planned'] }) to find today's content_reply / content_post rows. Group by channel.`,
+      `Step 1 — query_plan_items({ status: ['planned'] }) to find today's content_reply rows. Group by channel.`,
       ``,
       `Step 2 — Dispatch all of the following Task spawns IN A SINGLE ASSISTANT TURN (engine accepts multiple tool_use blocks per turn — parallelize). Skip any directive whose corresponding slot row doesn't exist for today:`,
-      ...allSpawns,
+      ...replySpawns,
       ``,
       `Step 3 — As each <task-notification> arrives, call update_plan_item({ id: <touched uuid>, state: 'drafted' }) for the slot(s) that task drafted for.`,
     );
   } else {
     lines.push(
-      `No connected channels with active reply or post budget. Skip dispatch and tell the founder which channel they should connect.`,
+      `No connected channels with active reply budget. Skip dispatch and tell the founder which channel they should connect.`,
     );
   }
 

@@ -11,6 +11,7 @@ import type { DiscoveryScanJobData } from '@/lib/queue/types';
  */
 
 let lastProductUserFilter: string | null = null;
+let lastConvTeamFilter: string | null = null;
 
 const fixtures = {
   channels: [
@@ -26,26 +27,45 @@ const fixtures = {
     'u-3': [],
     'u-4': [{ id: 'p-4', name: 'Product Four' }],
   } as Record<string, { id: string; name: string }[]>,
+  // Map of teamId → rows returned by the kickoff-dedup lookup. Default
+  // is "no kickoff today" (empty array); tests can pre-populate this
+  // to simulate a same-day kickoff for a specific team.
+  kickoffsToday: {} as Record<string, { id: string }[]>,
 };
 
 vi.mock('@/lib/db/schema', () => ({
   channels: { userId: 'userId', platform: 'platform' },
   products: { userId: 'userId', id: 'id', name: 'name' },
+  teamConversations: {
+    id: 'id',
+    teamId: 'team_id',
+    title: 'title',
+    createdAt: 'created_at',
+  },
 }));
 
 vi.mock('drizzle-orm', () => ({
   eq: (col: unknown, val: unknown) => {
     if (typeof val === 'string') {
-      lastProductUserFilter = val;
+      // Track both the product-user filter and the kickoff-team filter.
+      // The kickoff query has shape eq(teamConversations.teamId, 'team-x').
+      if (val.startsWith('team-')) {
+        lastConvTeamFilter = val;
+      } else {
+        lastProductUserFilter = val;
+      }
     }
-    return { col, val };
+    return { kind: 'eq', col, val };
   },
+  and: (...clauses: unknown[]) => ({ kind: 'and', clauses }),
+  gte: (col: unknown, val: unknown) => ({ kind: 'gte', col, val }),
+  like: (col: unknown, val: unknown) => ({ kind: 'like', col, val }),
 }));
 
 vi.mock('@/lib/db', () => ({
   db: {
     select: (projection?: unknown) => ({
-      from: () => {
+      from: (table?: unknown) => {
         const proj = projection as Record<string, unknown> | undefined;
         // channels read: { userId, platform }
         if (proj && 'platform' in proj && 'userId' in proj) {
@@ -58,6 +78,26 @@ vi.mock('@/lib/db', () => ({
               limit: () =>
                 Promise.resolve(
                   fixtures.products[lastProductUserFilter ?? ''] ?? [],
+                ),
+            }),
+          };
+        }
+        // teamConversations kickoff-dedup read: projection {id}, table
+        // is the teamConversations schema object — match on the shape
+        // having teamId column attribute.
+        if (
+          proj &&
+          'id' in proj &&
+          !('name' in proj) &&
+          table &&
+          typeof table === 'object' &&
+          'teamId' in (table as Record<string, unknown>)
+        ) {
+          return {
+            where: () => ({
+              limit: () =>
+                Promise.resolve(
+                  fixtures.kickoffsToday[lastConvTeamFilter ?? ''] ?? [],
                 ),
             }),
           };
@@ -89,6 +129,8 @@ vi.mock('@/lib/team-daily-run', () => ({
 beforeEach(() => {
   vi.clearAllMocks();
   lastProductUserFilter = null;
+  lastConvTeamFilter = null;
+  fixtures.kickoffsToday = {};
 });
 
 function fanoutJob(): Job<DiscoveryScanJobData> {
@@ -199,5 +241,25 @@ describe('processDailyRunFanout', () => {
     const userIds = calls.map((c) => (c[0] as { userId: string }).userId);
     // u-3 has a channel row but no product — must not be dispatched.
     expect(userIds).not.toContain('u-3');
+  });
+
+  it('skips users whose team already had a kickoff today (UTC)', async () => {
+    // Simulate u-1's team having a kickoff row from earlier today.
+    fixtures.kickoffsToday['team-u-1'] = [{ id: 'conv-kickoff-1' }];
+
+    const { processDailyRunFanout } = await import('../daily-run-fanout');
+    const { ensureDailyRunEnqueued } = await import('@/lib/team-daily-run');
+
+    await processDailyRunFanout(fanoutJob());
+
+    const calls = (
+      ensureDailyRunEnqueued as unknown as { mock: { calls: unknown[][] } }
+    ).mock.calls;
+    const userIds = calls.map((c) => (c[0] as { userId: string }).userId);
+
+    // u-1 was kickoff'd today → daily skipped. Other eligible users still fire.
+    expect(userIds).not.toContain('u-1');
+    expect(userIds).toEqual(expect.arrayContaining(['u-2', 'u-4']));
+    expect(ensureDailyRunEnqueued).toHaveBeenCalledTimes(2);
   });
 });
