@@ -3,6 +3,8 @@ import {
   pgEnum,
   text,
   timestamp,
+  date,
+  integer,
   jsonb,
   index,
 } from 'drizzle-orm/pg-core';
@@ -77,7 +79,8 @@ export const planItems = pgTable(
 
     phase: launchPhaseEnum('phase').notNull(),
     channel: text('channel'),
-    scheduledAt: timestamp('scheduled_at', { mode: 'date' }).notNull(),
+    dueDate: date('due_date', { mode: 'date' }).notNull(),
+    sortOrder: integer('sort_order').notNull().default(0),
 
     skillName: text('skill_name'),
     params: jsonb('params').notNull(),
@@ -91,10 +94,11 @@ export const planItems = pgTable(
     updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
   },
   (t) => [
-    index('plan_items_user_state_scheduled_idx').on(
+    index('plan_items_user_state_due_idx').on(
       t.userId,
       t.state,
-      t.scheduledAt,
+      t.dueDate,
+      t.sortOrder,
     ),
     index('plan_items_plan_idx').on(t.planId),
     index('plan_items_user_kind_state_idx').on(t.userId, t.kind, t.state),
