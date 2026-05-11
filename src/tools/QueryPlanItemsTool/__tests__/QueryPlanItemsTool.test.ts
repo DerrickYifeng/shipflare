@@ -36,7 +36,8 @@ interface PlanItemRow {
   userAction: string;
   phase: string;
   channel: string | null;
-  scheduledAt: Date;
+  dueDate: Date;
+  sortOrder: number;
   skillName: string | null;
   params: unknown;
   title: string;
@@ -70,7 +71,8 @@ function seed(row: Partial<PlanItemRow>): PlanItemRow {
     userAction: 'approve',
     phase: 'foundation',
     channel: 'x',
-    scheduledAt: new Date(),
+    dueDate: new Date(),
+    sortOrder: 0,
     skillName: null,
     params: {},
     title: 'Row',

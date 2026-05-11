@@ -39,7 +39,8 @@ export interface QueryPlanItemsRow {
   userAction: string;
   phase: string;
   channel: string | null;
-  scheduledAt: string;
+  dueDate: string; // YYYY-MM-DD
+  sortOrder: number;
   skillName: string | null;
   params: unknown;
   title: string;
@@ -98,8 +99,8 @@ export const queryPlanItemsTool: ToolDefinition<
 
     if (input.weekOffset != null) {
       const { start, end } = weekBoundsForOffset(new Date(), input.weekOffset);
-      conditions.push(gte(planItems.scheduledAt, start));
-      conditions.push(lt(planItems.scheduledAt, end));
+      conditions.push(gte(planItems.dueDate, start));
+      conditions.push(lt(planItems.dueDate, end));
     }
 
     if (input.status != null && input.status.length > 0) {
@@ -118,7 +119,8 @@ export const queryPlanItemsTool: ToolDefinition<
         userAction: planItems.userAction,
         phase: planItems.phase,
         channel: planItems.channel,
-        scheduledAt: planItems.scheduledAt,
+        dueDate: planItems.dueDate,
+        sortOrder: planItems.sortOrder,
         skillName: planItems.skillName,
         params: planItems.params,
         title: planItems.title,
@@ -136,10 +138,11 @@ export const queryPlanItemsTool: ToolDefinition<
       userAction: r.userAction,
       phase: r.phase,
       channel: r.channel ?? null,
-      scheduledAt:
-        r.scheduledAt instanceof Date
-          ? r.scheduledAt.toISOString()
-          : String(r.scheduledAt),
+      dueDate:
+        r.dueDate instanceof Date
+          ? r.dueDate.toISOString().slice(0, 10)
+          : String(r.dueDate),
+      sortOrder: r.sortOrder,
       skillName: r.skillName ?? null,
       params: r.params ?? null,
       title: r.title,

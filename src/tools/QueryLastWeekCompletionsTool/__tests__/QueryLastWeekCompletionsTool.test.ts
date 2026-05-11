@@ -38,7 +38,8 @@ interface PlanItemRow {
   channel: string | null;
   params: unknown;
   completedAt: Date | null;
-  scheduledAt: Date;
+  dueDate: Date;
+  sortOrder: number;
 }
 
 function makeCtx(store: InMemoryStore, deps: Record<string, unknown>): ToolContext {
@@ -79,7 +80,8 @@ describe('queryLastWeekCompletionsTool', () => {
         channel: 'x',
         params: { angle: 'claim' },
         completedAt: midLastWeek,
-        scheduledAt: midLastWeek,
+        dueDate: midLastWeek,
+        sortOrder: 0,
       },
       {
         id: 'this-week-done',
@@ -91,7 +93,8 @@ describe('queryLastWeekCompletionsTool', () => {
         channel: 'x',
         params: { angle: 'story' },
         completedAt: midThisWeek,
-        scheduledAt: midThisWeek,
+        dueDate: midThisWeek,
+        sortOrder: 0,
       },
       {
         id: 'last-week-drafted',
@@ -103,7 +106,8 @@ describe('queryLastWeekCompletionsTool', () => {
         channel: 'x',
         params: {},
         completedAt: midLastWeek,
-        scheduledAt: midLastWeek,
+        dueDate: midLastWeek,
+        sortOrder: 0,
       },
       {
         id: 'otheruser',
@@ -115,7 +119,8 @@ describe('queryLastWeekCompletionsTool', () => {
         channel: 'x',
         params: {},
         completedAt: midLastWeek,
-        scheduledAt: midLastWeek,
+        dueDate: midLastWeek,
+        sortOrder: 0,
       },
     ]);
 

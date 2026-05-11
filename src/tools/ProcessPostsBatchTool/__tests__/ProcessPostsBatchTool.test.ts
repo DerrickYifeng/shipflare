@@ -69,7 +69,8 @@ interface PlanItemRow {
   userAction: string;
   phase: string;
   channel: string | null;
-  scheduledAt: Date;
+  dueDate: Date;
+  sortOrder: number;
   skillName: string | null;
   params: Record<string, unknown>;
   output: Record<string, unknown> | null;
@@ -116,7 +117,8 @@ function seedPlanItems(
     userAction: r.userAction ?? 'auto',
     phase: r.phase ?? 'foundation',
     channel: r.channel ?? 'x',
-    scheduledAt: r.scheduledAt ?? now,
+    dueDate: r.dueDate ?? now,
+    sortOrder: r.sortOrder ?? 0,
     skillName: r.skillName ?? null,
     params: r.params ?? {},
     output: r.output ?? null,

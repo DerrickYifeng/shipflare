@@ -289,8 +289,8 @@ async function draftOnce(
       title: item.title,
       description: item.description ?? '',
       channel: item.channel ?? '',
-      ...(item.scheduledAt
-        ? { scheduledAt: item.scheduledAt.toISOString() }
+      ...(item.dueDate
+        ? { dueDate: item.dueDate instanceof Date ? item.dueDate.toISOString().slice(0, 10) : String(item.dueDate) }
         : {}),
       ...(item.params ? { params: item.params } : {}),
     },
