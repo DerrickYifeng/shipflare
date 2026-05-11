@@ -32,16 +32,6 @@ function platformDisplay(channel: string): string {
   return PLATFORMS[channel]?.displayName ?? channel.toUpperCase();
 }
 
-function formatScheduledHour(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleTimeString('en-US', {
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
-  });
-}
-
 function progressLabel(slot: ReplySlot): string {
   const { state, draftedToday, targetCount } = slot;
   if (state === 'planned' && draftedToday === 0) {
@@ -78,8 +68,6 @@ export function ReplySlotCard({ slot }: ReplySlotCardProps) {
     flexShrink: 0,
   };
 
-  const scheduled = formatScheduledHour(slot.dueDate);
-
   return (
     <article style={articleStyle} aria-label="Today's reply session">
       <span style={dotStyle} aria-hidden />
@@ -97,20 +85,6 @@ export function ReplySlotCard({ slot }: ReplySlotCardProps) {
       >
         {progressLabel(slot)}
       </span>
-      {scheduled ? (
-        <>
-          <span style={{ color: 'var(--sf-fg-3)' }}>·</span>
-          <span
-            className="sf-mono"
-            style={{
-              letterSpacing: 'var(--sf-track-mono)',
-              color: 'var(--sf-fg-3)',
-            }}
-          >
-            {scheduled}
-          </span>
-        </>
-      ) : null}
     </article>
   );
 }
