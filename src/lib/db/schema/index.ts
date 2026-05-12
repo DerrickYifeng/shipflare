@@ -75,3 +75,8 @@ export {
   type AgentRun,
   type NewAgentRun,
 } from './team';
+export {
+  waitlistSignups,
+  type WaitlistSignup,
+  type NewWaitlistSignup,
+} from './waitlist-signups';
