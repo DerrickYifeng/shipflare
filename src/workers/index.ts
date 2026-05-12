@@ -12,7 +12,8 @@ import { getBullMQConnection } from '@/lib/redis';
 import '@/tools/registry-team';
 import { processReview } from './processors/review';
 import { processPosting } from './processors/posting';
-import { processHealthScore } from './processors/health-score';
+import { processGrowthRollup } from './processors/growth-rollup';
+import { processGrowthRollupFanout } from './processors/growth-rollup-fanout';
 import { processDream } from './processors/dream';
 import { processCodeScan } from './processors/code-scan';
 import { processXEngagement } from './processors/engagement';
@@ -27,10 +28,10 @@ import { processReconcileMailbox } from './processors/reconcile-mailbox';
 import { processAgentRun } from './processors/agent-run';
 import { processRedditChannelResearch } from './processors/reddit-channel-research';
 import { AGENT_RUN_QUEUE_NAME, type AgentRunJobData } from '@/lib/queue/agent-run';
-import { dreamQueue, discoveryScanQueue, metricsQueue, analyticsQueue } from '@/lib/queue';
+import { dreamQueue, discoveryScanQueue, metricsQueue, analyticsQueue, growthRollupQueue } from '@/lib/queue';
 import type { PlanExecuteJobData, RedditChannelResearchJobData } from '@/lib/queue';
 import { createLogger, loggerForJob } from '@/lib/logger';
-import type { ReviewJobData, PostingJobData, HealthScoreJobData, DreamJobData, CodeScanJobData, DiscoveryScanJobData, EngagementJobData, MetricsJobData, AnalyticsJobData } from '@/lib/queue/types';
+import type { ReviewJobData, PostingJobData, GrowthRollupJobData, DreamJobData, CodeScanJobData, DiscoveryScanJobData, EngagementJobData, MetricsJobData, AnalyticsJobData } from '@/lib/queue/types';
 
 // ----------------------------------------------------------------
 //  Phase 7 cron-only queues (no enqueue helpers — scheduled below)
@@ -122,9 +123,12 @@ const postingWorker = new Worker<PostingJobData>(
   { ...BASE_OPTS, concurrency: 1 }, // Serial: never risk parallel posts
 );
 
-const healthScoreWorker = new Worker<HealthScoreJobData>(
-  'health-score',
-  async (job) => processHealthScore(job),
+const growthRollupWorker = new Worker<GrowthRollupJobData>(
+  'health-score', // queue-name string unchanged for Redis stability
+  async (job) => {
+    if (job.data.kind === 'fanout') return processGrowthRollupFanout(job);
+    return processGrowthRollup(job);
+  },
   { ...BASE_OPTS, concurrency: 1 },
 );
 
@@ -226,6 +230,16 @@ const reconcileMailboxWorker = new Worker<Record<string, never>>(
 // Each job processes one agent turn (drain mailbox → fork skill → persist
 // outputs). Lock duration is 10 min — well above the per-turn ceiling but
 // short enough that a crashed worker frees the job for another consumer.
+//
+// concurrency=8 sized for a first-visit kickoff burst:
+//   1 team-lead (Chief of Staff) + up to 5 specialists
+//     (x-replies, reddit-replies, x-post-batch, reddit-research, reddit-post-batch)
+//   = 6 peak jobs, +2 headroom.
+// Stays under the Postgres pool ceiling (`src/lib/db/index.ts:17` = 10
+// in prod) so agent-run never starves connections from other workers
+// (reddit-channel-research, engagement, plan-execute, etc.). Going past
+// 8 here without bumping the Postgres pool risks `too_many_connections`
+// when another queue spikes at the same time.
 const agentRunWorker = new Worker<AgentRunJobData>(
   AGENT_RUN_QUEUE_NAME,
   async (job) => {
@@ -234,7 +248,7 @@ const agentRunWorker = new Worker<AgentRunJobData>(
     await processAgentRun(job);
     jobLog.info(`agent-run done agentId=${job.data.agentId}`);
   },
-  { ...BASE_OPTS, concurrency: 4, lockDuration: 600_000 },
+  { ...BASE_OPTS, concurrency: 8, lockDuration: 600_000 },
 );
 
 // Explicit failed handler for agent-run (the shared loop below also covers
@@ -250,7 +264,7 @@ agentRunWorker.on('failed', (job, err) => {
 
 const workers = [
   reviewWorker, postingWorker,
-  healthScoreWorker, dreamWorker, codeScanWorker,
+  growthRollupWorker, dreamWorker, codeScanWorker,
   dailyRunWorker,
   engagementWorker,
   metricsWorker, analyticsWorker,
@@ -303,6 +317,21 @@ async function scheduleMetrics() {
     {
       repeat: { pattern: '0 3 * * *' },
       jobId: 'metrics-cron',
+    },
+  );
+}
+
+// Schedule growth-rollup: daily at 02:00 UTC.
+// Cron timing chosen to avoid overlap with daily-run (13:00 UTC) and
+// metrics (03:00 UTC). The fanout processor enqueues one kind:'user'
+// job per founder; the user-side processGrowthRollup does the math.
+async function scheduleGrowthRollup() {
+  await growthRollupQueue.add(
+    'fanout',
+    { kind: 'fanout', schemaVersion: 1, traceId: 'cron-growth-rollup' },
+    {
+      repeat: { pattern: '0 2 * * *', tz: 'UTC' },
+      jobId: 'growth-rollup-fanout-cron',
     },
   );
 }
@@ -400,6 +429,7 @@ Promise.all([
   scheduleDailyRun(),
   scheduleMetrics(),
   scheduleAnalytics(),
+  scheduleGrowthRollup(),
   schedulePlanExecuteSweeper(),
   scheduleStaleSweeper(),
   scheduleWeeklyReplan(),
@@ -408,7 +438,7 @@ Promise.all([
   log.error('Failed to schedule cron jobs:', err.message);
 });
 
-log.info('All workers started: review, posting, health-score, dream, code-scan, daily-run, engagement, metrics, analytics, reddit-channel-research, plan-execute, plan-execute-sweeper, stale-sweeper, weekly-replan, team-run, agent-run, reconcile-mailbox. daily-run daily 13:00 UTC, plan-execute-sweeper every 1m, stale-sweeper every 1h, weekly-replan Monday 00:00 UTC, reconcile-mailbox every 1m, all others daily.');
+log.info('All workers started: review, posting, growth-rollup, dream, code-scan, daily-run, engagement, metrics, analytics, reddit-channel-research, plan-execute, plan-execute-sweeper, stale-sweeper, weekly-replan, team-run, agent-run, reconcile-mailbox. daily-run daily 13:00 UTC, growth-rollup daily 02:00 UTC, plan-execute-sweeper every 1m, stale-sweeper every 1h, weekly-replan Monday 00:00 UTC, reconcile-mailbox every 1m, all others daily.');
 
 // Graceful shutdown
 async function shutdown() {
