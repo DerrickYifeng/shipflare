@@ -300,25 +300,36 @@ export function createInMemoryStore(): InMemoryStore {
             list.push(withId);
             inserted.push(withId);
           }
-          const p = Promise.resolve(inserted) as Promise<
-            Array<Record<string, unknown>>
-          > & {
+          type InsertResult = Promise<Array<Record<string, unknown>>> & {
             returning: (
               projection?: Record<string, unknown>,
             ) => Promise<Array<Record<string, unknown>>>;
+            onConflictDoNothing: (
+              _opts?: unknown,
+            ) => InsertResult;
           };
-          p.returning = (projection?: Record<string, unknown>) => {
-            if (!projection) return Promise.resolve(inserted);
-            const keys = Object.keys(projection);
-            return Promise.resolve(
-              inserted.map((row) => {
-                const out: Record<string, unknown> = {};
-                for (const k of keys) out[k] = row[k];
-                return out;
-              }),
-            );
+          const makeResult = (
+            rowsForReturn: Array<Record<string, unknown>>,
+          ): InsertResult => {
+            const p = Promise.resolve(rowsForReturn) as InsertResult;
+            p.returning = (projection?: Record<string, unknown>) => {
+              if (!projection) return Promise.resolve(rowsForReturn);
+              const keys = Object.keys(projection);
+              return Promise.resolve(
+                rowsForReturn.map((row) => {
+                  const out: Record<string, unknown> = {};
+                  for (const k of keys) out[k] = row[k];
+                  return out;
+                }),
+              );
+            };
+            // In-memory mock: ON CONFLICT DO NOTHING is a no-op (we don't
+            // model UNIQUE constraints), so the inserted rows pass through.
+            // Tests that need conflict semantics should mock at a higher level.
+            p.onConflictDoNothing = (_opts?: unknown) => makeResult(rowsForReturn);
+            return p;
           };
-          return p;
+          return makeResult(inserted);
         },
       };
     },

@@ -23,7 +23,7 @@ import { db } from '@/lib/db';
 import { threads, drafts } from '@/lib/db/schema';
 import type { OwnedRow } from '@/app/api/plan-item/[id]/_helpers';
 import { planItems } from '@/lib/db/schema';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 
 // ---------------------------------------------------------------------------
 // Output schema — narrow the jsonb from plan_items.output
@@ -117,7 +117,10 @@ export async function synthesizeContentPostDraft(
       ? fullRow.title
       : 'Original post';
 
-  const [threadRow] = await db
+  // Idempotent insert: re-clicking Post must not violate
+  // threads(userId, platform, externalId) UNIQUE. ON CONFLICT DO NOTHING
+  // returns no row, so we then SELECT to recover the existing thread id.
+  const [insertedThread] = await db
     .insert(threads)
     .values({
       userId,
@@ -128,11 +131,30 @@ export async function synthesizeContentPostDraft(
       body: draftBody,
       community: subreddit ?? undefined,
     })
+    .onConflictDoNothing({
+      target: [threads.userId, threads.platform, threads.externalId],
+    })
     .returning({ id: threads.id });
+
+  let threadRow = insertedThread;
+  if (!threadRow) {
+    const [existing] = await db
+      .select({ id: threads.id })
+      .from(threads)
+      .where(
+        and(
+          eq(threads.userId, userId),
+          eq(threads.platform, platform),
+          eq(threads.externalId, syntheticExternalId),
+        ),
+      )
+      .limit(1);
+    threadRow = existing;
+  }
 
   if (!threadRow) {
     throw new Error(
-      `synthesizeContentPostDraft: failed to insert placeholder thread for plan_item ${planRow.id}`,
+      `synthesizeContentPostDraft: failed to insert or locate placeholder thread for plan_item ${planRow.id}`,
     );
   }
 
