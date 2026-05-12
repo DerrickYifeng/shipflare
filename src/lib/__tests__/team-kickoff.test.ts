@@ -499,7 +499,7 @@ describe('buildKickoffGoalText (pure)', () => {
     expect(goal).toMatch(/draft reddit post batch/);
   });
 
-  it('omits Reddit content_post spawn AND adds a NOTE when availableSubreddits is empty', () => {
+  it('spawns reddit research in parallel + defers Reddit posts to Step 3a when no subreddits researched yet', () => {
     const goal = buildKickoffGoalText({
       productName: 'Test',
       pathId: 'p1',
@@ -512,9 +512,53 @@ describe('buildKickoffGoalText (pure)', () => {
       },
       availableSubreddits: [],
     });
-    expect(goal).not.toMatch(/draft reddit post batch/);
+    // The NOTE about deferring still appears so the coordinator
+    // doesn't try to add Reddit content_post in Step 1.
     expect(goal).toMatch(
       /no subreddits have been researched yet|Reddit research not yet complete/,
     );
+    // New: research spawn appears in Step 2 alongside reply / X-post
+    // drafts (will run in parallel, ~30-60s).
+    expect(goal).toMatch(/\(reddit, research\)/);
+    expect(goal).toMatch(/research reddit communities/);
+    expect(goal).toMatch(/Mode: research-reddit-channels/);
+    // New: Step 3a section explaining what to do once the research
+    // <task-notification> returns.
+    expect(goal).toMatch(/Step 3a/);
+    expect(goal).toMatch(
+      /subreddits\[sortOrder % subreddits\.length\]\.subreddit/,
+    );
+    // The initial Step 2 list MUST NOT include the (reddit, post)
+    // spawn — that gets dispatched in Step 3a after research
+    // returns. (The string "draft reddit post batch" appears once,
+    // inside the Step 3a deferred dispatch.)
+    expect(goal).not.toMatch(/\(reddit, post\)/);
+    const draftRedditPostBatchMatches = goal.match(
+      /draft reddit post batch/g,
+    );
+    expect(draftRedditPostBatchMatches).toHaveLength(1);
+  });
+
+  it('omits research spawn when reddit is connected but reddit posts/week is 0', () => {
+    // No research is needed when reddit is connected but the founder
+    // chose 0 reddit posts/week — the (reddit, research) spawn would
+    // be useless work. Reply spawns still proceed.
+    const goal = buildKickoffGoalText({
+      productName: 'Test',
+      pathId: 'p1',
+      weekStart: '2026-05-11',
+      now: '2026-05-11T00:00:00Z',
+      channels: ['reddit'],
+      week1Posts: { x: 0, reddit: 0, email: 0 },
+      channelMix: {
+        reddit: { repliesPerDay: 2 },
+      },
+      availableSubreddits: [],
+    });
+    expect(goal).not.toMatch(/\(reddit, research\)/);
+    expect(goal).not.toMatch(/Step 3a/);
+    expect(goal).not.toMatch(/Mode: research-reddit-channels/);
+    // Reddit reply spawn still appears.
+    expect(goal).toMatch(/\(reddit, reply\)/);
   });
 });

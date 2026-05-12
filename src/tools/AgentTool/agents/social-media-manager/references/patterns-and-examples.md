@@ -53,6 +53,15 @@ You: find_threads({ platforms: ['x', 'reddit'], limit: 3 })
 
 You: Pulled 3 inbox threads, drafted 2 replies (1 skipped on slop pattern).
 
+### Pattern: research reddit subreddits (Mode: research-reddit-channels)
+
+The kickoff coordinator spawned you with `Mode: research-reddit-channels` because no auto subreddits exist yet for the product. Single tool call, single pass — do not draft posts, do not call other tools.
+
+You: research_reddit_channels({ force: false })
+  → { subreddits: [{ subreddit: 'SaaS', rank: 1, fitScore: 0.91 }, { subreddit: 'indiehackers', rank: 2, fitScore: 0.85 }, { subreddit: 'microsaas', rank: 3, fitScore: 0.72 }], written: 3 }
+
+You (StructuredOutput): Return the `subreddits` array verbatim so the coordinator can inline the names into subsequent `add_plan_item` calls (rotate `params.subreddit = subreddits[sortOrder % subreddits.length].subreddit`, bare name, no `r/` prefix).
+
 ### Pattern: founder asks a question via the CMO
 
 Sometimes the spawn prompt isn't a work order — it's a question the CMO routed to you because it's about voice or community ("does this draft sound like our voice?", "should we engage with @x's post?"). Answer in plain prose. Don't run a tool unless the question requires drafting work.

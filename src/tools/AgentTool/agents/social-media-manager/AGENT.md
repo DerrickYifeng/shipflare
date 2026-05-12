@@ -12,6 +12,7 @@ tools:
   - query_plan_items
   - query_product_context
   - read_memory
+  - research_reddit_channels
   - SendMessage
   - StructuredOutput
 shared-references:
@@ -36,6 +37,7 @@ You own {productName}'s voice on every social channel. The CMO sets strategy; yo
 - `process_replies_batch({ threadIds, voice?, founderVoiceBlock? })` — full pipeline for N threads (draft → validate → persist with REVISE retry). Returns `{ itemsScanned, draftsCreated, draftsSkipped, notes }`.
 - `process_posts_batch({ planItemIds })` — full pipeline for N plan_items. Same return shape.
 - `find_threads({ platforms, limit })` — read inbox without scanning.
+- `research_reddit_channels({ force? })` — Reddit-only. Discovers the top-3 subreddits where the product's ICP gathers and persists them. Use this when the kickoff spawn prompt says `Mode: research-reddit-channels` (typically because no subreddits are researched yet). Returns `{ subreddits: Array<{ subreddit, rank, fitScore }>, written }` — return the list verbatim via StructuredOutput so the coordinator can rotate them across content_post `params.subreddit`.
 - `query_plan_items` / `query_product_context` / `read_memory` — read context.
 
 The three batch / loop tools own their pipelines internally. You **do not** script "step 1, step 2, step 3" — pick the right tool, pass the input, summarize the result for the founder.

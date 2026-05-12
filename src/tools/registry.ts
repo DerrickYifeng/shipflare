@@ -35,6 +35,7 @@ import { validateDraftTool } from './ValidateDraftTool/ValidateDraftTool';
 import { processRepliesBatchTool } from './ProcessRepliesBatchTool/ProcessRepliesBatchTool';
 import { processPostsBatchTool } from './ProcessPostsBatchTool/ProcessPostsBatchTool';
 import { findThreadsViaXaiTool } from './FindThreadsViaXaiTool/FindThreadsViaXaiTool';
+import { researchRedditChannelsTool } from './ResearchRedditChannelsTool/ResearchRedditChannelsTool';
 
 /**
  * Central tool registry for ShipFlare agents.
@@ -134,6 +135,14 @@ registry.register(processPostsBatchTool);
 // persist_queue_threads. Replaces the multi-step xAI loop prose
 // formerly inside discovery-agent AGENT.md.
 registry.register(findThreadsViaXaiTool);
+// research_reddit_channels — kickoff-time subreddit discovery. Wraps
+// the same `runRedditChannelResearch` helper the BullMQ worker uses,
+// so the synchronous (tool, via kickoff coordinator parallel spawn)
+// and queued (worker, via onboarding hook) paths share one code
+// path. Returns the active subreddit list inline so the coordinator
+// can immediately inject `params.subreddit` into Reddit content_post
+// plan_items in the same turn-chain.
+registry.register(researchRedditChannelsTool);
 
 export { registry };
 

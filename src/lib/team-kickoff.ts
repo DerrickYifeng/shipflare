@@ -301,6 +301,12 @@ export function buildKickoffGoalText(args: KickoffGoalArgs): string {
   // content_post rows without params.subreddit (Task 5's gate), so an
   // empty list means no draftable plan_items exist and the post-batch
   // would crash with "no plan items found".
+  //
+  // When Reddit posts ARE requested but no subreddits are researched
+  // yet (`redditPostsBlocked`), we spawn a parallel research subagent
+  // in Step 2 alongside the reply / X-post drafts. Reddit content_post
+  // plan_items + post-batch spawn get deferred to Step 3a, which runs
+  // once the research <task-notification> returns.
   const spawns: string[] = [];
   if (xConnected && repliesX > 0) {
     spawns.push(
@@ -320,6 +326,15 @@ export function buildKickoffGoalText(args: KickoffGoalArgs): string {
   if (redditConnected && week1Posts.reddit > 0 && subs.length > 0) {
     spawns.push(
       `- (reddit, post): Task({ subagent_type: 'social-media-manager', description: 'draft reddit post batch', prompt: 'Mode: post-batch\\nplanItemIds: <today's reddit content_post uuids>' })`,
+    );
+  }
+  // Reddit research deferred-spawn: fires in parallel with the reply /
+  // X-post drafts above. Once the research <task-notification> returns,
+  // Step 3a adds the Reddit content_post plan_items + dispatches the
+  // Reddit post-batch spawn.
+  if (redditPostsBlocked) {
+    spawns.push(
+      `- (reddit, research): Task({ subagent_type: 'social-media-manager', description: 'research reddit communities', prompt: 'Mode: research-reddit-channels' })`,
     );
   }
 
@@ -344,11 +359,12 @@ export function buildKickoffGoalText(args: KickoffGoalArgs): string {
 
   if (redditPostsBlocked) {
     // Reddit research hasn't finished yet — AddPlanItemTool would
-    // reject every Reddit content_post we tried to insert. Tell the
-    // coordinator to skip them this kickoff; replies and non-Reddit
-    // slots proceed normally.
+    // reject every Reddit content_post we tried to insert. Defer
+    // Reddit content_post seeding to Step 3a, which runs once the
+    // (reddit, research) <task-notification> arrives. Replies and
+    // non-Reddit slots proceed normally in Steps 1 + 2.
     lines.push(
-      `NOTE: Reddit content_post slots requested (${redditPostCount}/week) but no subreddits have been researched yet. Skip Reddit content_post add_plan_item calls this kickoff (the gate would reject them anyway). Tell the founder to wait for the reddit-channel-research worker to finish (~60s) or re-research from /settings/reddit-channels. Replies and non-Reddit channels proceed normally.`,
+      `NOTE: Reddit content_post slots requested (${redditPostCount}/week) but no subreddits have been researched yet. In Step 1, SKIP add_plan_item calls for Reddit content_post — they need params.subreddit (which the gate enforces) and we don't have those yet. The (reddit, research) parallel spawn in Step 2 will return the top-3 subreddits; Step 3a then adds the Reddit content_post plan_items and dispatches the Reddit post-batch. Replies and non-Reddit channels proceed normally.`,
       ``,
     );
   } else if (redditConnected && subs.length > 0) {
@@ -375,6 +391,17 @@ export function buildKickoffGoalText(args: KickoffGoalArgs): string {
       ``,
       `Step 3 — As each <task-notification> arrives, call update_plan_item({ id: <touched uuid>, state: 'drafted' }) for the slot(s) that task drafted for. Don't wait for all to return before updating the first.`,
     );
+    if (redditPostsBlocked) {
+      lines.push(
+        ``,
+        `Step 3a — When the (reddit, research) <task-notification> arrives:`,
+        `  - Parse the returned StructuredOutput; it carries \`subreddits: [{ subreddit, rank, fitScore }]\` (3 entries).`,
+        `  - For each Reddit content_post slot in week 1 (you skipped these in Step 1 because subreddits weren't known): call add_plan_item with params.subreddit = subreddits[sortOrder % subreddits.length].subreddit (bare name, NO 'r/' prefix). Distribute the ${redditPostCount} rows across this week's UTC days the same way you would have in Step 1.`,
+        `  - Then dispatch ONE Reddit post-batch spawn in the next turn:`,
+        `    Task({ subagent_type: 'social-media-manager', description: 'draft reddit post batch', prompt: 'Mode: post-batch\\nplanItemIds: <the uuids you just added>' })`,
+        `  - As that <task-notification> returns, update_plan_item state='drafted' on the touched rows (same rule as Step 3).`,
+      );
+    }
   } else {
     lines.push(
       `Step 2 — No connected channels with active reply or post budget. Skip dispatch and tell the founder which channel they should connect to start drafting.`,

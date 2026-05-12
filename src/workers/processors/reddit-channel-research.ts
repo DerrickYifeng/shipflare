@@ -15,6 +15,13 @@
  * Reddit /about + /new.json fetches. The enrichment helpers swallow
  * their own errors so one bad subreddit (404, rate-limited, malformed
  * payload) does not kill the batch.
+ *
+ * Architecture: the core research logic lives in
+ * `runRedditChannelResearch`, exported so a synchronous caller (the
+ * `research_reddit_channels` tool, used by the kickoff coordinator
+ * when no auto rows exist yet) can reuse the exact same code path
+ * without going through BullMQ. The BullMQ worker
+ * (`processRedditChannelResearch`) is a thin wrapper around it.
  */
 import type { Job } from 'bullmq';
 import { and, eq } from 'drizzle-orm';
@@ -34,7 +41,10 @@ import {
   fetchSubredditActivity,
 } from '@/lib/reddit-channel-enrichment';
 import { createLogger, loggerForJob } from '@/lib/logger';
+import type { Logger } from '@/lib/logger';
+import { listActiveSubreddits } from '@/lib/db/repositories/product-reddit-channels';
 import type { RedditChannelResearchJobData } from '@/lib/queue';
+import type { ToolContext } from '@/core/types';
 
 const baseLog = createLogger('worker:reddit-channel-research');
 
@@ -43,11 +53,51 @@ const TOP_K = 3;
 /** Candidate count requested from the research skill (skill clamps 3..12). */
 const CANDIDATE_COUNT = 6;
 
-export async function processRedditChannelResearch(
-  job: Job<RedditChannelResearchJobData>,
-): Promise<void> {
-  const log = loggerForJob(baseLog, job);
-  const { userId, productId, force = false } = job.data;
+export interface RunRedditChannelResearchArgs {
+  userId: string;
+  productId: string;
+  /** When true, wipe prior auto rows and re-research. Default false. */
+  force?: boolean;
+}
+
+export interface RunRedditChannelResearchResult {
+  /** Active (not disabled) subreddits ordered by rank ASC. Either the
+   *  freshly-written list (after a successful run) OR the pre-existing
+   *  list (when idempotency short-circuits the skill call). Empty when
+   *  the product row is missing or the skill returned zero candidates. */
+  subreddits: Array<{
+    subreddit: string;
+    rank: number;
+    fitScore: number | null;
+  }>;
+  /** Number of new auto rows written this run. 0 means idempotency
+   *  no-op (rows already existed and force=false) OR the skill
+   *  returned no candidates. */
+  written: number;
+}
+
+/**
+ * Core research logic. Loads the product, invokes the research skill
+ * via `runForkSkill`, enriches via Reddit public API, persists top-3
+ * with `source='auto'`. Returns the active subreddit list so
+ * synchronous callers (the `research_reddit_channels` tool) can use it
+ * directly without a follow-up query.
+ *
+ * Idempotent: when `force=false` and at least one auto row exists,
+ * skips the skill call and returns the existing list. Manual rows
+ * (`source='manual'`) are never touched on either path.
+ *
+ * The function never throws on enrichment / persistence failures it
+ * can recover from (missing product row → empty result, skill returns
+ * 0 candidates → empty result). Caller errors (bad userId/productId,
+ * skill crashes, transaction failures) propagate.
+ */
+export async function runRedditChannelResearch(
+  args: RunRedditChannelResearchArgs,
+  ctx: ToolContext | Record<string, unknown> = {},
+  log: Logger = baseLog,
+): Promise<RunRedditChannelResearchResult> {
+  const { userId, productId, force = false } = args;
 
   // Only count source='auto' rows toward idempotency — a re-research
   // after the founder has added manual entries still needs to run.
@@ -64,7 +114,8 @@ export async function processRedditChannelResearch(
       .limit(1);
     if (existing.length > 0) {
       log.info(`product ${productId} already researched — no-op`);
-      return;
+      const subreddits = await listActiveSubreddits(productId);
+      return { subreddits, written: 0 };
     }
   }
 
@@ -79,7 +130,7 @@ export async function processRedditChannelResearch(
     .limit(1);
   if (!productRow) {
     log.warn(`product ${productId} not found — aborting`);
-    return;
+    return { subreddits: [], written: 0 };
   }
 
   // Skill returns LLM-guessed memberCountApprox; we overwrite below
@@ -97,13 +148,13 @@ export async function processRedditChannelResearch(
     'researching-reddit-channels',
     JSON.stringify(skillInput),
     researchingRedditChannelsOutputSchema,
-    { userId, productId, db },
+    { userId, productId, db, ...(ctx as Record<string, unknown>) },
   );
 
   const candidates = result.candidates ?? [];
   if (candidates.length === 0) {
     log.warn(`xAI returned 0 candidates for product ${productId}`);
-    return;
+    return { subreddits: [], written: 0 };
   }
 
   const top = [...candidates]
@@ -153,4 +204,15 @@ export async function processRedditChannelResearch(
   log.info(
     `wrote ${enriched.length} auto reddit channels for product ${productId}`,
   );
+
+  const subreddits = await listActiveSubreddits(productId);
+  return { subreddits, written: enriched.length };
+}
+
+export async function processRedditChannelResearch(
+  job: Job<RedditChannelResearchJobData>,
+): Promise<void> {
+  const log = loggerForJob(baseLog, job);
+  const { userId, productId, force = false } = job.data;
+  await runRedditChannelResearch({ userId, productId, force }, {}, log);
 }

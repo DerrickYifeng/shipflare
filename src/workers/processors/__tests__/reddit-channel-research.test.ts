@@ -256,6 +256,25 @@ vi.mock('@/lib/reddit-channel-enrichment', () => ({
   }),
 }));
 
+// After refactor the processor / tool path also calls
+// `listActiveSubreddits` so callers (the `research_reddit_channels`
+// tool) can return the active subreddit list without a follow-up
+// query. The lightweight db mock above does not implement `orderBy`,
+// so we shim the repository helper directly: it returns the active
+// (non-disabled) rows from `hoisted.storedRows` ordered by rank ASC.
+vi.mock('@/lib/db/repositories/product-reddit-channels', () => ({
+  listActiveSubreddits: vi.fn(async (productId: string) =>
+    hoisted.storedRows
+      .filter((r) => r.productId === productId && r.disabled === false)
+      .sort((a, b) => a.rank - b.rank)
+      .map((r) => ({
+        subreddit: r.subreddit,
+        rank: r.rank,
+        fitScore: r.fitScore,
+      })),
+  ),
+}));
+
 vi.mock('@/lib/logger', () => ({
   createLogger: () => ({
     debug: () => {},
