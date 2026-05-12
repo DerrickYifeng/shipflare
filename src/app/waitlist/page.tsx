@@ -41,8 +41,10 @@ export default async function WaitlistPage({ searchParams }: WaitlistPageProps) 
       style={{ background: 'var(--sf-bg-dark)' }}
     >
       <GlassNav isAuthenticated={false} />
-      <ContextBanner variant={variant} />
-      <WaitlistForm initialEmail={initialEmail} referer={variant} />
+      <div className="flex-1 flex flex-col">
+        <ContextBanner variant={variant} />
+        <WaitlistForm initialEmail={initialEmail} referer={variant} />
+      </div>
       <FooterStrip />
     </main>
   );
