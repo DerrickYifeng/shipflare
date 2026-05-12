@@ -108,21 +108,11 @@ export interface ToolResult {
  * emitting agent is a subagent spawned via the Task tool. The Task tool
  * augments its child's events with this field so the top-level event
  * handler (the team-run worker) can attribute each nested tool call to
- * the specialist that ran it AND link it to the `team_tasks.id` row that
- * started the spawn — giving the activity-log UI a complete delegation
- * tree. Only the innermost spawn tags the event; outer spawns preserve
- * the existing tag so leaf events carry their immediate parent.
+ * the specialist that ran it — giving the activity-log UI a complete
+ * delegation tree. Only the innermost spawn tags the event; outer spawns
+ * preserve the existing tag so leaf events carry their immediate parent.
  */
 export interface StreamEventSpawnMeta {
-  /**
-   * `team_tasks.id` of the spawn that produced this event, when the
-   * spawn flowed through the Task tool (which records a team_tasks
-   * row before runAgent). `null` when the spawn was a SkillTool fork
-   * — skills don't allocate a team_tasks row, so the
-   * parent_tool_use_id + agentName fields are the only attribution
-   * the worker persists for fork-skill events.
-   */
-  parentTaskId: string | null;
   /**
    * Anthropic-issued `tool_use_id` of the coordinator's Task call that
    * spawned this subagent. Gives the UI a stable anchor to nest every

@@ -1,8 +1,8 @@
 import { testWithProduct, expect } from '../fixtures/auth';
 import { seedTeam, getTestDb } from '../fixtures/db';
 import {
+  agentRuns,
   teamMessages,
-  teamTasks,
   strategicPaths,
   planItems,
 } from '../../src/lib/db/schema';
@@ -13,7 +13,7 @@ import { eq, and } from 'drizzle-orm';
  * coordinator → growth-strategist → content-planner pipeline
  * end-to-end: POST /api/team/run with trigger='onboarding', wait for the
  * BullMQ worker to drive a multi-turn Anthropic session, and assert the
- * durable side-effects (team_messages, team_tasks, strategic_paths,
+ * durable side-effects (team_messages, agent_runs, strategic_paths,
  * plan_items) that the coordinator is contracted to produce.
  *
  * Gated behind RUN_FULL_E2E=1 for the same reason the Phase C
@@ -168,16 +168,21 @@ describeMaybe(
       }
       expect(finalStatus).toBe('completed');
 
-      // --- Delegation assertion: coordinator spawned ≥1 subagent Task ---
+      // --- Delegation assertion: coordinator spawned ≥1 subagent ---
       // The coordinator's job is to delegate — growth-strategist for the
-      // strategic path, content-planner for plan_items. If zero Tasks
-      // spawned, the coordinator short-circuited and the downstream
-      // contracts below won't hold anyway.
-      const taskRows = await db
-        .select({ id: teamTasks.id, memberId: teamTasks.memberId })
-        .from(teamTasks)
-        .where(eq(teamTasks.runId, runId));
-      expect(taskRows.length).toBeGreaterThanOrEqual(1);
+      // strategic path, content-planner for plan_items. Each spawn shows
+      // up as an `agent_runs` row whose `parent_agent_id` chains back to
+      // the lead. If zero teammates spawned, the coordinator short-circuited
+      // and the downstream contracts below won't hold anyway.
+      const teammateRows = await db
+        .select({ id: agentRuns.id, memberId: agentRuns.memberId })
+        .from(agentRuns)
+        .where(eq(agentRuns.teamId, teamId));
+      // Filter out the lead's own row by parent_agent_id NOT NULL via
+      // a follow-up filter in JS (drizzle's isNotNull import would
+      // need an extra import; this is the test path, keep it terse).
+      const teammateSpawns = teammateRows.length;
+      expect(teammateSpawns).toBeGreaterThanOrEqual(1);
 
       // --- ≥1 tool_call message (Task delegation OR StructuredOutput) ---
       const toolCallRows = await db

@@ -1,14 +1,15 @@
 // AI Team Platform tables (Phase A Day 4). See spec §6.1 in
 // docs/superpowers/specs/2026-04-20-ai-team-platform-design.md.
 //
-// Five tables model a user's AI team runtime:
+// Four tables model a user's AI team runtime:
 //   teams          — one row per product-scoped team
 //   team_members   — instances of AgentDefinition (AGENT.md) attached to a team
 //   team_messages  — every message that flowed during a run (user ↔ member ↔ tool)
-//   team_tasks     — one row per Task-tool spawn (supports nested spawns via parent_task_id)
-//   agent_runs     — one row per agent invocation (Phase B+ unified runtime;
-//                    superseded the deleted team_runs table — see migration
-//                    0016_drop_team_runs)
+//   agent_runs     — one row per agent invocation; the single source of
+//                    truth for task lifecycle (queued/running/sleeping/
+//                    completed/failed/killed). Superseded both the deleted
+//                    team_runs table (migration 0016) and the deleted
+//                    team_tasks table (migration 0029).
 //
 // ID convention mirrors the existing schema (users.id, products.id): text
 // columns populated with application-side UUIDs via `$defaultFn(() => crypto.randomUUID())`.
@@ -19,7 +20,6 @@ import {
   timestamp,
   integer,
   bigint,
-  numeric,
   jsonb,
   index,
   unique,
@@ -228,52 +228,6 @@ export const teamMessages = pgTable(
 
 export type TeamMessage = typeof teamMessages.$inferSelect;
 export type NewTeamMessage = typeof teamMessages.$inferInsert;
-
-// ---------------------------------------------------------------------------
-// team_tasks
-// ---------------------------------------------------------------------------
-
-export const teamTasks = pgTable(
-  'team_tasks',
-  {
-    id: text('id')
-      .primaryKey()
-      .$defaultFn(() => crypto.randomUUID()),
-    // Phase G cleanup (migration 0016_drop_team_runs): the FK to team_runs
-    // is gone. runId is now a free-text grouping handle pointing at the
-    // user_prompt team_messages.id that initiated the request. Stays
-    // notNull because every Task spawn happens inside a request — never
-    // standalone.
-    runId: text('run_id').notNull(),
-    // Nested spawns (A spawns B spawns C) chain through here.
-    parentTaskId: text('parent_task_id'),
-    memberId: text('member_id')
-      .notNull()
-      .references(() => teamMembers.id, { onDelete: 'cascade' }),
-    // Task tool's `description` param (3-5 words).
-    description: text('description').notNull(),
-    // Task tool's `prompt` param.
-    prompt: text('prompt').notNull(),
-    // Full Task input (subagent_type, name, ...).
-    input: jsonb('input').notNull(),
-    // StructuredOutput result or final text.
-    output: jsonb('output'),
-    // 'pending' | 'running' | 'completed' | 'failed'
-    status: text('status').notNull().default('pending'),
-    costUsd: numeric('cost_usd', { precision: 10, scale: 4 }),
-    turns: integer('turns').default(0),
-    startedAt: timestamp('started_at', { mode: 'date' }),
-    completedAt: timestamp('completed_at', { mode: 'date' }),
-    errorMessage: text('error_message'),
-  },
-  (t) => [
-    index('idx_team_tasks_run').on(t.runId, t.startedAt),
-    index('idx_team_tasks_member').on(t.memberId),
-  ],
-);
-
-export type TeamTask = typeof teamTasks.$inferSelect;
-export type NewTeamTask = typeof teamTasks.$inferInsert;
 
 // ---------------------------------------------------------------------------
 // agent_runs — one row per agent invocation in the unified Agent Teams

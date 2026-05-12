@@ -143,7 +143,6 @@ export async function runForkSkill<T = unknown>(
       parentToolUseId = '';
     }
     const spawnMeta: StreamEventSpawnMeta = {
-      parentTaskId: null,
       parentToolUseId,
       fromMemberId: specialistMemberId,
       agentName: def.name,

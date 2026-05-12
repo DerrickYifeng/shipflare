@@ -26,8 +26,8 @@ import { StatusBanner } from './status-banner';
 import { OnboardingBanner } from './onboarding-banner';
 import {
   stitchLeadMessages,
+  type AgentRunStatusMap,
   type DelegationTask,
-  type TaskLookup,
   type TeamRunLookup,
   type TeamRunMeta,
 } from './conversation-reducer';
@@ -59,7 +59,7 @@ export interface TeamDeskProps {
   inReview: number;
   approvedReady: number;
   turns: number;
-  taskLookup?: TaskLookup;
+  agentRunStatus?: AgentRunStatusMap;
   runLookup?: TeamRunLookup;
   /** ChatGPT-style conversation list for the sidebar. */
   conversations?: readonly ConversationMeta[];
@@ -99,7 +99,7 @@ export function TeamDesk({
   draftsInFlight,
   inReview,
   approvedReady,
-  taskLookup,
+  agentRunStatus,
   runLookup,
   conversations,
   initialConversationId,
@@ -438,7 +438,7 @@ export function TeamDesk({
 
   // ---------- Delegation tasks (task panel, global view) ----------
   const allDelegationTasks = useMemo<DelegationTask[]>(() => {
-    const nodes = stitchLeadMessages(liveMessages, taskLookup, partials);
+    const nodes = stitchLeadMessages(liveMessages, agentRunStatus, partials);
     const out: DelegationTask[] = [];
     for (const n of nodes) {
       if (n.kind === 'lead') {
@@ -446,7 +446,7 @@ export function TeamDesk({
       }
     }
     return out;
-  }, [liveMessages, taskLookup, partials]);
+  }, [liveMessages, agentRunStatus, partials]);
 
   // ---------- Handlers ----------
   const handleSelectConversation = useCallback((conversationId: string) => {
@@ -626,10 +626,10 @@ export function TeamDesk({
   );
 
   const handleCancelTask = useCallback(
-    async (taskId: string) => {
+    async (agentId: string) => {
       try {
         const res = await fetch(
-          `/api/team/task/${encodeURIComponent(taskId)}/cancel`,
+          `/api/team/agent/${encodeURIComponent(agentId)}/cancel`,
           { method: 'POST' },
         );
         if (!res.ok && res.status !== 200) {
@@ -639,7 +639,7 @@ export function TeamDesk({
             error?: string;
           };
           toast(
-            detail.error === 'task_not_found'
+            detail.error === 'agent_not_found'
               ? "Couldn't find that subtask to cancel."
               : `Couldn't cancel subtask: ${detail.error ?? `HTTP ${res.status}`}`,
             'error',
@@ -650,56 +650,6 @@ export function TeamDesk({
           err instanceof Error
             ? `Network error: ${err.message}`
             : 'Network error — subtask cancel not delivered.',
-          'error',
-        );
-      }
-    },
-    [toast],
-  );
-
-  const handleRetryTask = useCallback(
-    async (taskId: string) => {
-      try {
-        const res = await fetch(
-          `/api/team/task/${encodeURIComponent(taskId)}/retry`,
-          { method: 'POST' },
-        );
-        if (!res.ok) {
-          const detail = (await res
-            .json()
-            .catch(() => ({ error: `HTTP ${res.status}` }))) as {
-            error?: string;
-          };
-          toast(
-            detail.error === 'task_not_found'
-              ? "Couldn't find that subtask to retry."
-              : `Couldn't retry subtask: ${detail.error ?? `HTTP ${res.status}`}`,
-            'error',
-          );
-          return;
-        }
-        const body = (await res.json().catch(() => ({}))) as {
-          runId?: string;
-          conversationId?: string | null;
-        };
-        if (typeof body.conversationId === 'string') {
-          const convId = body.conversationId;
-          const nowIso = new Date().toISOString();
-          setConversationList((prev) =>
-            prev
-              .map((c) =>
-                c.id === convId ? { ...c, updatedAt: nowIso } : c,
-              )
-              .sort((a, b) => (a.updatedAt > b.updatedAt ? -1 : 1)),
-          );
-          setSelectedConversationId(convId);
-          toast('Retrying subtask.', 'success');
-        }
-      } catch (err) {
-        toast(
-          err instanceof Error
-            ? `Network error: ${err.message}`
-            : 'Network error — retry not delivered.',
           'error',
         );
       }
@@ -872,7 +822,7 @@ export function TeamDesk({
             messages={deferredThreadMessages}
             partials={deferredPartials}
             toolInputPartials={deferredToolInputPartials}
-            taskLookup={taskLookup}
+            agentRunStatus={agentRunStatus}
             runLookup={threadRunLookup}
             activeMemberId={null}
             onSelectMember={noopSelectMember}
@@ -903,7 +853,6 @@ export function TeamDesk({
             tasks={allDelegationTasks}
             onJumpToTask={handleJumpToTask}
             onCancelTask={handleCancelTask}
-            onRetryTask={handleRetryTask}
             thisWeek={{
               completed: approvedReady,
               awaiting: inReview,

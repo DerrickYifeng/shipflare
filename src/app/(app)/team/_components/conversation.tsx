@@ -22,10 +22,10 @@ import {
   groupByRun,
   stitchLeadMessages,
   type ActivityNode,
+  type AgentRunStatusMap,
   type ConversationNode,
   type LeadNode,
   type SessionGroup,
-  type TaskLookup,
   type TeamRunLookup,
 } from './conversation-reducer';
 
@@ -52,7 +52,7 @@ export interface ConversationProps {
    * hasn't finished streaming its arguments.
    */
   toolInputPartials?: ReadonlyMap<string, string>;
-  taskLookup?: TaskLookup;
+  agentRunStatus?: AgentRunStatusMap;
   runLookup?: TeamRunLookup;
   activeMemberId: string | null;
   onSelectMember: (memberId: string) => void;
@@ -107,7 +107,7 @@ export function Conversation({
   messages,
   partials,
   toolInputPartials,
-  taskLookup,
+  agentRunStatus,
   runLookup,
   activeMemberId,
   onSelectMember,
@@ -128,8 +128,8 @@ export function Conversation({
   }, [members]);
 
   const nodes: ConversationNode[] = useMemo(
-    () => stitchLeadMessages(messages, taskLookup, partials),
-    [messages, taskLookup, partials],
+    () => stitchLeadMessages(messages, agentRunStatus, partials),
+    [messages, agentRunStatus, partials],
   );
 
   const groups: SessionGroup[] = useMemo(
@@ -396,15 +396,14 @@ export function Conversation({
 
   const renderActivityNode = (node: ActivityNode) => {
     // Natural attribution: "Nova used Grep" vs "Team Lead used Grep".
-    // parentTaskId present → subagent context; prefer `agentName` meta
-    // (shipped today) and only fall back to the raw member displayName
-    // once Phase F provisions a team_members row per spawn. Main-thread
-    // calls attribute to the coordinator — looked up by id, else
-    // "Team Lead" as a neutral, always-correct label.
+    // `agentName` is stamped on spawned events by `wrapOnEventWithSpawnMeta`
+    // — when present, the row was emitted inside a specialist's run, so we
+    // attribute it to that specialist. Otherwise it's a coordinator call
+    // — looked up by id, else "Team Lead" as a neutral, always-correct
+    // label.
     let actor: string | null = null;
-    if (node.parentTaskId) {
-      const member = node.agentName ? null : null;
-      actor = node.agentName ?? member ?? 'Specialist';
+    if (node.agentName) {
+      actor = node.agentName;
     } else {
       const coord = coordinatorId ? memberLookup.get(coordinatorId) : null;
       actor = coord?.displayName ?? 'Team Lead';

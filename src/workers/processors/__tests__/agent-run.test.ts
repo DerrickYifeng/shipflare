@@ -2339,7 +2339,6 @@ describe('processAgentRun', () => {
       toolUseId: 'toolu_child_1',
       input: { query: 'launch announcements' },
       spawnMeta: {
-        parentTaskId: 'task_parent_1',
         parentToolUseId: 'toolu_parent_1',
         fromMemberId: 'child-mem',
         agentName: 'discovery-agent',
@@ -2390,7 +2389,6 @@ describe('processAgentRun', () => {
           toolUseId: 'toolu_child_2',
           input: { query: 'spawnMeta-tagged' },
           spawnMeta: {
-            parentTaskId: 'task_parent_2',
             parentToolUseId: 'toolu_parent_2',
             fromMemberId: 'spawned-member',
             agentName: 'discovery-agent',
@@ -2579,7 +2577,6 @@ describe('processAgentRun', () => {
           toolUseId: 'toolu_sse_from_1',
           input: { query: 'spawn-attributed' },
           spawnMeta: {
-            parentTaskId: 'task_sse_from_1',
             parentToolUseId: 'toolu_lead_disp_1',
             fromMemberId: 'spawned-mem-sse',
             agentName: 'discovery-agent',
@@ -2596,7 +2593,6 @@ describe('processAgentRun', () => {
             is_error: false,
           },
           spawnMeta: {
-            parentTaskId: 'task_sse_from_1',
             parentToolUseId: 'toolu_lead_disp_1',
             fromMemberId: 'spawned-mem-sse',
             agentName: 'discovery-agent',
@@ -2609,7 +2605,6 @@ describe('processAgentRun', () => {
           blockIndex: 0,
           text: 'spawn-attributed reply',
           spawnMeta: {
-            parentTaskId: 'task_sse_from_1',
             parentToolUseId: 'toolu_lead_disp_1',
             fromMemberId: 'spawned-mem-sse',
             agentName: 'discovery-agent',

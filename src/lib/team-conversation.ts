@@ -65,15 +65,19 @@ interface ToolCallMetadata {
   toolUseId?: unknown;
   input?: unknown;
   /** Set when this message is INTERNAL to a Task-spawned subagent
-   *  rather than visible to the coordinator. */
-  parentTaskId?: unknown;
+   *  rather than visible to the coordinator. Agent-run.ts persists the
+   *  parent's tool_use_id (the lead's Task call) on every subagent
+   *  event via wrapOnEventWithSpawnMeta; presence of this field means
+   *  the row belongs in the subagent's dispatch card, not the lead's
+   *  visible history. */
+  parent_tool_use_id?: unknown;
 }
 
 interface ToolResultMetadata {
   toolName?: unknown;
   toolUseId?: unknown;
   isError?: unknown;
-  parentTaskId?: unknown;
+  parent_tool_use_id?: unknown;
 }
 
 function asMeta<T>(m: unknown): T {
@@ -85,11 +89,12 @@ function asMeta<T>(m: unknown): T {
  * coordinator's conversation only sees its own `Task` tool_call and the
  * returned tool_result summary — not the subagent's internal x_search
  * / StructuredOutput chatter. Subagent-internal rows carry
- * `metadata.parentTaskId` (see team-run.ts emitToolEvent).
+ * `metadata.parent_tool_use_id` (see `agent-run.ts`'s tool_call /
+ * agent_text persisters, which stamp spawnMeta-tagged events).
  */
 function isCoordinatorScope(row: TeamMessageRow): boolean {
-  const meta = asMeta<{ parentTaskId?: unknown }>(row.metadata);
-  return meta.parentTaskId === undefined || meta.parentTaskId === null;
+  const meta = asMeta<{ parent_tool_use_id?: unknown }>(row.metadata);
+  return meta.parent_tool_use_id === undefined || meta.parent_tool_use_id === null;
 }
 
 export interface LoadConversationHistoryOptions {

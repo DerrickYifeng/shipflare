@@ -49,14 +49,9 @@ export const DEFAULT_SUBAGENT_MAX_TURNS = 200;
  * Extended ToolContext carried by subagents. `depth` enforces the spawn-depth
  * limit (spec §16: circular-Task mitigation). Parents increment when launching
  * a child so the chain is observable from anywhere in the stack.
- *
- * `parentTaskId` is reserved for Phase A Day 4 team_tasks wiring — we pass it
- * through today as an opaque string so `spawn()` needs no changes when the DB
- * lands.
  */
 export interface ChildToolContext extends ToolContext {
   depth: number;
-  parentTaskId?: string;
 }
 
 /**
@@ -158,10 +153,7 @@ export function buildAgentConfigFromDefinition(
  *   - `get()` delegates through so the child sees the parent's deps
  *   - `depth` increments from parent by 1
  */
-export function createChildContext(
-  parent: ToolContext,
-  parentTaskId?: string,
-): ChildToolContext {
+export function createChildContext(parent: ToolContext): ChildToolContext {
   const parentDepth = getContextDepth(parent);
   const childController = new AbortController();
 
@@ -176,7 +168,6 @@ export function createChildContext(
   const child: ChildToolContext = {
     abortSignal: childController.signal,
     depth: parentDepth + 1,
-    ...(parentTaskId !== undefined ? { parentTaskId } : {}),
     get<V>(key: string): V {
       return parent.get<V>(key);
     },
@@ -266,10 +257,9 @@ export async function spawnSubagent<T = unknown>(
   // (input ≠ output) compile when callers parameterize `<T>` to the
   // output type. spawnSubagent only consumes parsed output.
   outputSchema?: z.ZodType<T, z.ZodTypeDef, unknown>,
-  parentTaskId?: string,
 ): Promise<AgentResult<T>> {
   const config = buildAgentConfigFromDefinition(def);
-  const childCtx = createChildContext(parentCtx, parentTaskId);
+  const childCtx = createChildContext(parentCtx);
 
   const skillPreload = await buildSkillPreloadMessages(def.skills, childCtx);
   const prebuilt =

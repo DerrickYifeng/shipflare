@@ -1,11 +1,11 @@
 import type { CSSProperties, ReactNode } from 'react';
 
 export interface TodaysOutputProps {
-  /** team_tasks rows with status='completed' this week. */
+  /** agent_runs rows with status='completed' this week. */
   completedTasks: number | string;
   /** team_members.status='waiting_approval' count. */
   awaitingApproval: number | string;
-  /** team_tasks rows with status in {pending, running}. */
+  /** agent_runs rows still in queued / running / resuming / sleeping. */
   tasksInFlight: number | string;
   /** Voice-match score (stubbed "—" until the writer pipeline lands). */
   voiceMatch: number | string;

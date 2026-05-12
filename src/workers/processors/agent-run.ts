@@ -109,6 +109,7 @@ async function publishStatusChange(params: {
     | 'killed';
   lastActiveAt: Date;
   displayName?: string;
+  parentToolUseId?: string | null;
 }): Promise<void> {
   try {
     const pub = getPubSubPublisher();
@@ -120,11 +121,18 @@ async function publishStatusChange(params: {
         messageId: crypto.randomUUID(),
         type: 'agent_status_change',
         teamId: params.teamId,
-        agentId: params.agentId,
-        status: params.status,
-        lastActiveAt: params.lastActiveAt.toISOString(),
-        displayName: params.displayName ?? null,
         createdAt: params.lastActiveAt.toISOString(),
+        // Stash custom fields in metadata. `normalizeEvent` on the client
+        // (useTeamEvents) preserves only id / runId / conversationId /
+        // teamId / from / to / type / content / metadata / createdAt; the
+        // reducer reads `agentId`, `status`, etc. out of `metadata`.
+        metadata: {
+          agentId: params.agentId,
+          status: params.status,
+          lastActiveAt: params.lastActiveAt.toISOString(),
+          displayName: params.displayName ?? null,
+          parentToolUseId: params.parentToolUseId ?? null,
+        },
       }),
     );
   } catch (err) {
@@ -269,6 +277,7 @@ async function markFailed(
   reason: string,
   teamId: string,
   isLead: boolean,
+  parentToolUseId: string | null,
 ): Promise<void> {
   const now = new Date();
   await db
@@ -293,6 +302,7 @@ async function markFailed(
     agentId,
     status: 'failed',
     lastActiveAt: now,
+    parentToolUseId,
   });
 }
 
@@ -454,7 +464,7 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
     // the writethrough hits the right cache path even when the AgentDefinition
     // didn't resolve (e.g., stale row, registry drift).
     const looksLikeLead = row.agentDefName === 'coordinator';
-    await markFailed(agentId, reason, row.teamId, looksLikeLead);
+    await markFailed(agentId, reason, row.teamId, looksLikeLead, row.parentToolUseId);
     await synthAndDeliverNotification({
       agentId,
       parentAgentId: row.parentAgentId,
@@ -560,6 +570,7 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
       agentId,
       status: 'resuming',
       lastActiveAt: resumingAt,
+      parentToolUseId: row.parentToolUseId,
     });
     priorMessages = await loadAgentRunHistory(agentId, db);
     log.info(
@@ -594,6 +605,7 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
     agentId,
     status: 'running',
     lastActiveAt: runningAt,
+    parentToolUseId: row.parentToolUseId,
   });
 
   // Read initial prompt from mailbox (the Task tool inserted it before
@@ -601,6 +613,74 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
   // additionally polls for new mail between turns.
   const initialBatch = await drainMailbox(agentId, db);
   const initialPrompt = initialBatch.length > 0 ? (initialBatch[0].content ?? '') : '';
+
+  // Spurious-wake guard (2026-05-12). A wake() can fire without any new
+  // mailbox content — e.g. the delayed BullMQ job Sleep scheduled
+  // arrives AFTER a SendMessage already woke the lead and consumed the
+  // mailbox, or two wake() calls race and the second one drains nothing.
+  // Without this guard, the empty initialPrompt becomes a `{role:
+  // 'user', content: ''}` push at query-loop.ts:351-354, which then
+  // hits `addMessageCacheBreakpoint` (api-client.ts:309-319) and gets
+  // converted to `[{type:'text', text:'', cache_control:{...}}]` — and
+  // Anthropic rejects with `messages.N.content.0.text: cache_control
+  // cannot be set for empty text blocks`.
+  //
+  // Branches:
+  //   - Lead with priorMessages, no new mail → spurious wake. Mark
+  //     back to sleeping (no sleepUntil — the next genuine wake from
+  //     SendMessage / Task is what should drive the next turn), skip
+  //     runAgent + the task_notification synthesis. The cycle ends
+  //     cleanly with no API call.
+  //   - Teammate (resume from sleep) with priorMessages, no new mail
+  //     → same — back to sleeping.
+  //   - Fresh teammate spawn with no priorMessages and no initialBatch
+  //     → real bug (the Task tool promised a prompt). Fail the run via
+  //     synthAndDeliverNotification so the lead's mailbox sees the
+  //     failure instead of waiting forever.
+  if (initialPrompt.length === 0 && initialBatch.length === 0) {
+    const hasPrior =
+      Array.isArray(priorMessages) && priorMessages.length > 0;
+    if (hasPrior) {
+      log.info(
+        `agent-run ${agentId}: spurious wake — empty mailbox + ${priorMessages!.length} priorMessages; returning to sleep without API call`,
+      );
+      const sleepingAt = new Date();
+      await db
+        .update(agentRuns)
+        .set({ status: 'sleeping', lastActiveAt: sleepingAt })
+        .where(eq(agentRuns.id, agentId));
+      if (isLead) {
+        await cacheLeadStatus(row.teamId, agentId, 'sleeping', sleepingAt);
+      } else {
+        await cacheTeammateStatus(row.teamId, agentId, 'sleeping', sleepingAt, null);
+      }
+      await publishStatusChange({
+        teamId: row.teamId,
+        agentId,
+        status: 'sleeping',
+        lastActiveAt: sleepingAt,
+        parentToolUseId: row.parentToolUseId,
+      });
+      return;
+    }
+    // No prior messages either — fresh spawn that received nothing.
+    // Fail loud so the parent's mailbox sees it.
+    const reason = 'spawned with no mailbox content';
+    log.warn(`agent-run ${agentId}: ${reason} — failing run`);
+    await markFailed(agentId, reason, row.teamId, isLead, row.parentToolUseId);
+    await synthAndDeliverNotification({
+      agentId,
+      parentAgentId: row.parentAgentId,
+      teamId: row.teamId,
+      memberId: row.memberId,
+      status: 'failed',
+      finalText: '',
+      summary: reason,
+      usage: { totalTokens: 0, toolUses: 0, durationMs: 0 },
+      teammateName: row.agentDefName,
+    });
+    return;
+  }
   // Phase E hot-fix (working-indicator gap): the API route at /api/team/run
   // and /api/team/conversations/:id/messages publishes the inbound user_prompt
   // SSE event with `runId = messageId` (the user_prompt row's id is the
@@ -1040,7 +1120,6 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
   const teammateStreamEvent =
     !isLead && row.parentToolUseId && row.parentToolUseId.length > 0
       ? wrapOnEventWithSpawnMeta(handleStreamEvent, {
-          parentTaskId: null,
           parentToolUseId: row.parentToolUseId,
           fromMemberId: row.memberId,
           agentName: def.name,
@@ -1281,6 +1360,7 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
       agentId,
       status: 'sleeping',
       lastActiveAt: sleptAt,
+      parentToolUseId: row.parentToolUseId,
     });
     return;
   }
@@ -1329,6 +1409,7 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
     agentId,
     status: isLead && status === 'completed' ? 'sleeping' : status,
     lastActiveAt: exitAt,
+    parentToolUseId: row.parentToolUseId,
   });
 
   await synthAndDeliverNotification({

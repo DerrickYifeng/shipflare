@@ -14,7 +14,7 @@ import type {
 } from '@/core/types';
 import { createLogger } from '@/lib/logger';
 import type { Database } from '@/lib/db';
-import { agentRuns, teamMembers, teamMessages, teamTasks } from '@/lib/db/schema';
+import { agentRuns, teamMembers, teamMessages } from '@/lib/db/schema';
 import { getAvailableAgents, resolveAgent } from './registry';
 import { getAgentOutputSchema } from './agent-schemas';
 import {
@@ -94,42 +94,28 @@ export interface TaskResult {
   duration: number;
   turns: number;
   /**
-   * Set on the Phase B async return — the `agent_runs.id` of the spawned
-   * teammate. Undefined for the synchronous path.
+   * Set on the async return — the `agent_runs.id` of the spawned teammate.
+   * Undefined for the synchronous path.
    */
   agentId?: string;
   /**
    * Lifecycle marker. `'completed'` for the sync path (the spawned subagent
-   * has already produced `result`); `'async_launched'` for the Phase B
-   * opt-in async path (the agent_runs row is in `'queued'` state and the
-   * BullMQ wake has been enqueued — no result yet).
+   * has already produced `result`); `'async_launched'` for the opt-in async
+   * path (the agent_runs row is in `'queued'` state and the BullMQ wake has
+   * been enqueued — no result yet).
    */
   status?: 'completed' | 'async_launched';
 }
 
 // ---------------------------------------------------------------------------
-// team_tasks persistence (Phase A Day 4)
+// Context helpers
 // ---------------------------------------------------------------------------
 
 /**
- * Pull optional deps off the ToolContext. When this Task invocation is part
- * of a team run, all four keys are present; when it's invoked from an
- * ad-hoc caller (tests, CLI), some are absent and we degrade gracefully.
- */
-function readUserIdFromCtx(ctx: ToolContext): string | null {
-  try {
-    const v = ctx.get<string | null>('userId');
-    return typeof v === 'string' && v.length > 0 ? v : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
  * Read the agent_runs.id of the agent currently executing this Task call.
- * The agent-run processor (Phase D Task 4) injects `callerAgentId` into the
- * ToolContext for every tool invocation. When the lead spawns a teammate
- * via `Task(run_in_background:true)`, this returns the lead's agentId, which
+ * The agent-run processor injects `callerAgentId` into the ToolContext for
+ * every tool invocation. When the lead spawns a teammate via
+ * `Task(run_in_background:true)`, this returns the lead's agentId, which
  * becomes the spawned teammate's `parentAgentId` — the routing key the
  * teammate's eventual `task_notification` uses to find its parent's mailbox.
  *
@@ -151,7 +137,6 @@ function readTeamDeps(ctx: ToolContext): {
   runId: string | null;
   teamId: string | null;
   currentMemberId: string | null;
-  parentTaskId: string | null;
 } {
   function tryGet<T>(key: string): T | null {
     try {
@@ -160,111 +145,12 @@ function readTeamDeps(ctx: ToolContext): {
       return null;
     }
   }
-  const extended = ctx as unknown as { parentTaskId?: string };
   return {
     db: tryGet<Database>('db'),
     runId: tryGet<string>('runId'),
     teamId: tryGet<string>('teamId'),
     currentMemberId: tryGet<string>('currentMemberId'),
-    parentTaskId: extended.parentTaskId ?? null,
   };
-}
-
-/**
- * INSERT team_tasks with status='running'. Returns the generated task id
- * (opaque to the caller — passed back into spawnSubagent so nested spawns
- * can chain through `parent_task_id`).
- */
-async function recordTaskStart(
-  ctx: ToolContext,
-  input: TaskInput,
-  agentName: string,
-): Promise<string | undefined> {
-  const { db, runId, teamId, currentMemberId, parentTaskId } = readTeamDeps(ctx);
-  if (!db || !runId || !teamId || !currentMemberId) {
-    // Not a team run — skip the insert.
-    return undefined;
-  }
-  // Read the tool_use_id for *this* Task invocation (tool-executor
-  // plumbs it in via a per-call ctx proxy). Stashing it in
-  // `input.toolUseId` lets the UI's `taskLookup` join tool_call rows to
-  // team_tasks without a schema migration — the reducer extracts
-  // `toolUseId` from the coordinator's tool_call metadata, and
-  // page.tsx builds a dual-key map so either side hits.
-  let toolUseId: string | null = null;
-  try {
-    const fromCtx = ctx.get<string | null | undefined>('toolUseId');
-    if (typeof fromCtx === 'string' && fromCtx.length > 0) toolUseId = fromCtx;
-  } catch {
-    // ctx.get throws on unknown keys in some ctx implementations —
-    // treat as "not a team run context with toolUseId" and move on.
-    toolUseId = null;
-  }
-  const taskId = crypto.randomUUID();
-  await db.insert(teamTasks).values({
-    id: taskId,
-    runId,
-    parentTaskId,
-    // member_id is the member that is ABOUT TO EXECUTE the task — i.e. the
-    // spawn target, not the caller. We don't have a team_members row for
-    // the subagent directly in Phase A (the team provisioner's Phase F
-    // responsibility), so we record the CALLER as member_id for now.
-    // TODO(Phase F): resolve team_members row for `agent_type=agentName`
-    // and record that id here instead.
-    memberId: currentMemberId,
-    description: input.description,
-    prompt: input.prompt,
-    input: {
-      subagent_type: input.subagent_type,
-      description: input.description,
-      prompt: input.prompt,
-      ...(input.name !== undefined ? { name: input.name } : {}),
-      agentName,
-      ...(toolUseId !== null ? { toolUseId } : {}),
-    },
-    status: 'running',
-    startedAt: new Date(),
-    turns: 0,
-  });
-  return taskId;
-}
-
-async function recordTaskComplete(
-  ctx: ToolContext,
-  taskId: string,
-  output: unknown,
-  costUsd: number,
-  turns: number,
-): Promise<void> {
-  const { db } = readTeamDeps(ctx);
-  if (!db) return;
-  await db
-    .update(teamTasks)
-    .set({
-      status: 'completed',
-      completedAt: new Date(),
-      costUsd: String(costUsd),
-      turns,
-      output: output as Record<string, unknown>,
-    })
-    .where(eq(teamTasks.id, taskId));
-}
-
-async function recordTaskFailure(
-  ctx: ToolContext,
-  taskId: string,
-  message: string,
-): Promise<void> {
-  const { db } = readTeamDeps(ctx);
-  if (!db) return;
-  await db
-    .update(teamTasks)
-    .set({
-      status: 'failed',
-      completedAt: new Date(),
-      errorMessage: message,
-    })
-    .where(eq(teamTasks.id, taskId));
 }
 
 /**
@@ -296,10 +182,10 @@ export async function resolveSpecialistMemberId(
 
 /**
  * Wrap a parent's onEvent so that `tool_start` / `tool_done` events emitted
- * inside the child's runAgent carry a `spawnMeta` tag pointing at the
- * `team_tasks.id` row the child is running under. The innermost spawn tags
- * the event; deeper spawns preserve an existing tag so leaf events always
- * carry their immediate parent. Non-tool events pass through untouched.
+ * inside the child's runAgent carry a `spawnMeta` tag identifying the
+ * spawned subagent. The innermost spawn tags the event; deeper spawns
+ * preserve an existing tag so leaf events always carry their immediate
+ * parent. Non-tool events pass through untouched.
  */
 export function wrapOnEventWithSpawnMeta(
   parentOnEvent: (event: StreamEvent) => void | Promise<void>,
@@ -334,12 +220,12 @@ export function wrapOnEventWithSpawnMeta(
 }
 
 // ---------------------------------------------------------------------------
-// Phase B — async branch: launch a teammate by inserting `agent_runs` +
-// initial mailbox message, then waking the agent-run BullMQ worker.
+// Async branch: launch a teammate by inserting `agent_runs` + initial
+// mailbox message, then waking the agent-run BullMQ worker.
 //
 // This path returns IMMEDIATELY with `{agentId, status:'async_launched'}`.
-// The lead's mailbox-drain loop (Phase B Task 12) is what eventually
-// surfaces the teammate's `<task-notification>` back to the caller.
+// The lead's mailbox-drain loop is what eventually surfaces the teammate's
+// `<task-notification>` back to the caller.
 // ---------------------------------------------------------------------------
 
 async function launchAsyncTeammate(
@@ -369,23 +255,19 @@ async function launchAsyncTeammate(
 
   const agentId = crypto.randomUUID();
 
-  // Phase E Task 7: read the caller's agentId from the ctx the agent-run
-  // processor (Phase D Task 4) injected. When the lead spawns a teammate,
-  // callerAgentId === lead.agentId; sub-spawns (forbidden by
-  // INTERNAL_TEAMMATE_TOOLS in Phase C) would carry the parent teammate's
+  // Read the caller's agentId from the ctx the agent-run processor injected.
+  // When the lead spawns a teammate, callerAgentId === lead.agentId; sub-spawns
+  // (forbidden by INTERNAL_TEAMMATE_TOOLS) would carry the parent teammate's
   // id. Null when no agent-scoped ctx is present (legacy / test paths) —
   // agent_runs.parent_agent_id is nullable so this is safe.
   const parentAgentId = getCallerAgentId(ctx);
 
   // Anthropic-issued `tool_use_id` of THIS Task call. tool-executor plumbs it
-  // through the per-call ctx proxy (same key the sync path reads at L573).
-  // The agent-run worker reads `agent_runs.parentToolUseId` at startup and
-  // wraps the teammate's onEvent with a `spawnMeta.parentToolUseId` so the
-  // founder UI's conversation-reducer can bucket the teammate's own
-  // tool_call / agent_text rows under the DelegationCard's task.toolUseId.
-  // Without this, the dispatch card renders "thinking…" forever even while
-  // the worker is producing tool_use blocks. Empty string (not null) when
-  // ctx lacks toolUseId — keeps legacy / test paths working.
+  // through the per-call ctx proxy. The agent-run worker reads
+  // `agent_runs.parentToolUseId` at startup and wraps the teammate's onEvent
+  // with a `spawnMeta.parentToolUseId` so the founder UI's
+  // conversation-reducer can bucket the teammate's own tool_call / agent_text
+  // rows under the DelegationCard's task.toolUseId.
   let parentToolUseId = '';
   try {
     const fromCtx = ctx.get<string | null | undefined>('toolUseId');
@@ -396,8 +278,8 @@ async function launchAsyncTeammate(
     parentToolUseId = '';
   }
 
-  // 1. Queue the agent_runs row. The agent-run worker (Task 9) drains its
-  //    mailbox and drives runAgent against `agentDefName`.
+  // 1. Queue the agent_runs row. The agent-run worker drains its mailbox
+  //    and drives runAgent against `agentDefName`.
   const spawnedAt = new Date();
   await db.insert(agentRuns).values({
     id: agentId,
@@ -480,11 +362,11 @@ async function launchAsyncTeammate(
  * spawnSubagent(). Errors are caught and returned as structured strings so the
  * parent agent can read them via tool_result and self-correct.
  *
- * Phase B: when `input.run_in_background === true` AND the team flag is on
- * AND a team-run context is present, the call returns immediately with
- * `{agentId, status:'async_launched'}` and the spawned teammate runs out
- * of band. Any failed precondition silently falls through to the existing
- * sync path so existing callers and tests are unaffected.
+ * When `input.run_in_background === true` AND a team-run context is present,
+ * the call returns immediately with `{agentId, status:'async_launched'}` and
+ * the spawned teammate runs out of band. Any failed precondition silently
+ * falls through to the existing sync path so existing callers and tests are
+ * unaffected.
  */
 export const taskTool: ToolDefinition<TaskInput, TaskResult> = buildTool({
   name: TASK_TOOL_NAME,
@@ -504,7 +386,7 @@ export const taskTool: ToolDefinition<TaskInput, TaskResult> = buildTool({
   // Task is never side-effect-free: the subagent it spawns may write to DB.
   isReadOnly: false,
   async execute(input, ctx): Promise<TaskResult> {
-    // Phase B — async branch (opt-in via `run_in_background:true`).
+    // Async branch (opt-in via `run_in_background:true`).
     //
     // Fires ONLY when ALL of:
     //   1. `input.run_in_background === true`
@@ -512,10 +394,7 @@ export const taskTool: ToolDefinition<TaskInput, TaskResult> = buildTool({
     //
     // Any failed precondition silently falls through to the sync path —
     // this preserves backward compatibility for ad-hoc / CLI / test
-    // callers that don't carry team context. (Phase G removed the
-    // `SHIPFLARE_AGENT_TEAMS` feature flag — Agent Teams is the default
-    // and the async path is always taken when the two preconditions are
-    // met.)
+    // callers that don't carry team context.
     if (input.run_in_background === true) {
       const { teamId: asyncTeamId } = readTeamDeps(ctx);
       if (asyncTeamId !== null) {
@@ -550,8 +429,6 @@ export const taskTool: ToolDefinition<TaskInput, TaskResult> = buildTool({
       );
     }
 
-    const parentTaskId = await recordTaskStart(ctx, input, agent.name);
-
     log.debug(
       `Task spawning "${agent.name}" (depth=${currentDepth + 1}, desc="${input.description}")`,
     );
@@ -565,12 +442,11 @@ export const taskTool: ToolDefinition<TaskInput, TaskResult> = buildTool({
     // aren't team-scoped won't have it, in which case we pass undefined
     // and the child runs quietly.
     //
-    // When we have a parentTaskId (team-scoped run), wrap the parent's
-    // onEvent so the child's tool events carry a `spawnMeta` tag — the
-    // team-run worker's event bridge reads this and writes each nested
-    // tool_call / tool_result into team_messages with the correct
-    // `from_member_id` + `metadata.parentTaskId`, so the activity-log UI
-    // can render the full delegation tree.
+    // Wrap the parent's onEvent so the child's tool events carry a
+    // `spawnMeta` tag — the worker's event bridge reads this and writes
+    // each nested tool_call / tool_result into team_messages with the
+    // correct `from_member_id` + `metadata.parent_tool_use_id`, so the
+    // activity-log UI can render the full delegation tree.
     let onEventFn: SpawnCallbacks['onEvent'] | undefined;
     try {
       const fromCtx = ctx.get<SpawnCallbacks['onEvent'] | null>('onEvent');
@@ -580,7 +456,7 @@ export const taskTool: ToolDefinition<TaskInput, TaskResult> = buildTool({
     }
 
     let wrappedOnEvent: SpawnCallbacks['onEvent'] | undefined = onEventFn;
-    if (onEventFn && parentTaskId) {
+    if (onEventFn) {
       const specialistMemberId = await resolveSpecialistMemberId(
         ctx,
         agent.name,
@@ -598,7 +474,6 @@ export const taskTool: ToolDefinition<TaskInput, TaskResult> = buildTool({
         parentToolUseId = '';
       }
       const spawnMeta: StreamEventSpawnMeta = {
-        parentTaskId,
         parentToolUseId,
         fromMemberId: specialistMemberId,
         agentName: agent.name,
@@ -612,50 +487,28 @@ export const taskTool: ToolDefinition<TaskInput, TaskResult> = buildTool({
 
     // Resolve the subagent's terminal-output Zod schema. Agents whose
     // AGENT.md frontmatter includes `StructuredOutput` in the tool list
-    // (coordinator, content-planner, …) each have a
-    // schema registered under `src/tools/AgentTool/agent-schemas.ts` —
-    // that schema is handed to runAgent so it synthesizes a validated
-    // `StructuredOutput` tool on the subagent's Anthropic tool list. Agents
-    // without a registered schema run in plain-text terminal mode.
+    // (coordinator, content-planner, …) each have a schema registered
+    // under `src/tools/AgentTool/agent-schemas.ts` — that schema is handed
+    // to runAgent so it synthesizes a validated `StructuredOutput` tool on
+    // the subagent's Anthropic tool list. Agents without a registered
+    // schema run in plain-text terminal mode.
     const subagentOutputSchema = getAgentOutputSchema(agent.name);
 
-    try {
-      const agentResult = await spawnSubagent(
-        agent,
-        input.prompt,
-        ctx,
-        callbacks,
-        subagentOutputSchema ?? undefined,
-        parentTaskId,
-      );
+    const agentResult = await spawnSubagent(
+      agent,
+      input.prompt,
+      ctx,
+      callbacks,
+      subagentOutputSchema ?? undefined,
+    );
 
-      const duration = Date.now() - startedAt;
+    const duration = Date.now() - startedAt;
 
-      if (parentTaskId) {
-        await recordTaskComplete(
-          ctx,
-          parentTaskId,
-          agentResult.result,
-          agentResult.usage.costUsd,
-          agentResult.usage.turns,
-        );
-      }
-
-      return {
-        result: agentResult.result,
-        cost: agentResult.usage.costUsd,
-        duration,
-        turns: agentResult.usage.turns,
-      };
-    } catch (err) {
-      if (parentTaskId) {
-        await recordTaskFailure(
-          ctx,
-          parentTaskId,
-          err instanceof Error ? err.message : String(err),
-        );
-      }
-      throw err;
-    }
+    return {
+      result: agentResult.result,
+      cost: agentResult.usage.costUsd,
+      duration,
+      turns: agentResult.usage.turns,
+    };
   },
 });

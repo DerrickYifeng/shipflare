@@ -23,15 +23,15 @@ export interface TaskPanelProps {
   onJumpToTask?: (messageId: string, runId: string | null) => void;
   /**
    * Hover-revealed Stop action on a RUNNING / QUEUED row. Receives the
-   * `taskId` (team_tasks.id). Matches the inline SubtaskCard handler
-   * so both surfaces point at the same backend endpoint.
+   * spawned teammate's `agent_runs.id` so both this surface and the
+   * inline SubtaskCard route through `/api/team/agent/[agentId]/cancel`.
    */
-  onCancelTask?: (taskId: string) => void | Promise<void>;
+  onCancelTask?: (agentId: string) => void | Promise<void>;
   /**
    * Hover-revealed Retry action on a DONE / FAILED row. Spawns a fresh
-   * team_run with the same prompt — caller routes to the new session.
+   * teammate run with the same prompt — caller routes to the new session.
    */
-  onRetryTask?: (taskId: string) => void | Promise<void>;
+  onRetryTask?: (agentId: string) => void | Promise<void>;
   /** Metrics for the THIS WEEK section at the bottom. */
   thisWeek: {
     completed: number;
@@ -211,8 +211,8 @@ export function TaskPanel({
 interface TaskPanelRowProps {
   task: DelegationTask;
   onJump?: (messageId: string, runId: string | null) => void;
-  onCancel?: (taskId: string) => void | Promise<void>;
-  onRetry?: (taskId: string) => void | Promise<void>;
+  onCancel?: (agentId: string) => void | Promise<void>;
+  onRetry?: (agentId: string) => void | Promise<void>;
   variant: 'expanded' | 'compact';
 }
 
@@ -305,34 +305,36 @@ function TaskPanelRow({
 
   const handleCancel = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!onCancel || !task.taskId || pending) return;
+    if (!onCancel || !task.agentId || pending) return;
     setPending(true);
     try {
-      await onCancel(task.taskId);
+      await onCancel(task.agentId);
     } finally {
       setPending(false);
     }
   };
   const handleRetry = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!onRetry || !task.taskId || pending) return;
+    if (!onRetry || !task.agentId || pending) return;
     setPending(true);
     try {
-      await onRetry(task.taskId);
+      await onRetry(task.agentId);
     } finally {
       setPending(false);
     }
   };
 
   // Hover-revealed action: Stop on running/queued, Retry on terminal.
-  // Gated on `task.taskId` because the reducer can surface a coord-side
-  // DelegationTask without a DB row (e.g. pre-insert retries) and we
-  // need a concrete taskId to hit the `/api/team/task/...` endpoints.
-  const canCancel = isRunning && !!onCancel && !!task.taskId;
+  // Gated on `task.agentId` because the reducer can surface a coord-side
+  // DelegationTask before the async dispatch receipt has landed (the
+  // brief window between Task tool_call and the spawned agent_runs row
+  // becoming visible). The `/api/team/agent/[agentId]/...` endpoints
+  // need a concrete agentId.
+  const canCancel = isRunning && !!onCancel && !!task.agentId;
   const canRetry =
     (task.status === 'failed' || task.status === 'done') &&
     !!onRetry &&
-    !!task.taskId;
+    !!task.agentId;
   const showAction = hover && (canCancel || canRetry);
 
   const actionBtn: CSSProperties = {

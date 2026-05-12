@@ -98,7 +98,7 @@ describe('<ActivityLog>', () => {
     expect(screen.queryByText('visible')).toBeNull();
   });
 
-  it('indents messages with metadata.parentTaskId (threaded view)', () => {
+  it('indents messages with metadata.parent_tool_use_id (threaded view)', () => {
     const { container } = setup([
       msg({
         id: 'parent',
@@ -109,7 +109,7 @@ describe('<ActivityLog>', () => {
         id: 'child',
         type: 'tool_call',
         content: 'write_strategic_path',
-        metadata: { parentTaskId: 'task-1', agentName: 'growth-strategist' },
+        metadata: { parent_tool_use_id: 'toolu_parent', agent_name: 'growth-strategist' },
         createdAt: '2026-04-20T00:00:01Z',
       }),
     ]);
