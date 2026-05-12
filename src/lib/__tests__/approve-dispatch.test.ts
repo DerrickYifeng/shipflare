@@ -79,6 +79,17 @@ describe('dispatchApprove', () => {
       expect.objectContaining({ draftId: 'd1', mode: 'direct' }),
     );
   });
+
+  it('throws when the posting path is reached without a channelId', async () => {
+    await expect(
+      dispatchApprove({
+        ...baseInput,
+        draft: { ...baseInput.draft, draftType: 'original_post' },
+        channelId: null,
+      }),
+    ).rejects.toThrow(/channelId/);
+    expect(enqueuePosting).not.toHaveBeenCalled();
+  });
 });
 
 describe('dispatchApprove — Reddit branches', () => {

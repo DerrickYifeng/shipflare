@@ -23,7 +23,7 @@ import { db } from '@/lib/db';
 import { threads, drafts } from '@/lib/db/schema';
 import type { OwnedRow } from '@/app/api/plan-item/[id]/_helpers';
 import { planItems } from '@/lib/db/schema';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 
 // ---------------------------------------------------------------------------
 // Output schema — narrow the jsonb from plan_items.output
@@ -171,7 +171,13 @@ export async function synthesizeContentPostDraft(
   const whyItWorks =
     typeof output.whyItWorks === 'string' ? output.whyItWorks : null;
 
-  const [draftRow] = await db
+  // Idempotent insert: the partial unique index `drafts_user_thread_pending_uq`
+  // forbids two pending drafts per (userId, threadId). A re-clicked Post (or
+  // a fallthrough after `loadDispatchInputForDraft` returned null on first
+  // approve) must reuse the existing pending draft rather than crash with
+  // a duplicate-key 500. ON CONFLICT DO NOTHING + follow-up SELECT mirrors
+  // the threads-insert pattern above.
+  const [insertedDraft] = await db
     .insert(drafts)
     .values({
       userId,
@@ -184,11 +190,31 @@ export async function synthesizeContentPostDraft(
       confidenceScore,
       whyItWorks: whyItWorks ?? undefined,
     })
+    .onConflictDoNothing({
+      target: [drafts.userId, drafts.threadId],
+      where: sql`"status" = 'pending'`,
+    })
     .returning({ id: drafts.id });
+
+  let draftRow = insertedDraft;
+  if (!draftRow) {
+    const [existing] = await db
+      .select({ id: drafts.id })
+      .from(drafts)
+      .where(
+        and(
+          eq(drafts.userId, userId),
+          eq(drafts.threadId, threadRow.id),
+          eq(drafts.status, 'pending'),
+        ),
+      )
+      .limit(1);
+    draftRow = existing;
+  }
 
   if (!draftRow) {
     throw new Error(
-      `synthesizeContentPostDraft: failed to insert draft for plan_item ${planRow.id}`,
+      `synthesizeContentPostDraft: failed to insert or locate draft for plan_item ${planRow.id}`,
     );
   }
 

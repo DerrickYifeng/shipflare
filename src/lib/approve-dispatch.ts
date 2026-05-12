@@ -22,7 +22,12 @@ export interface DispatchInput {
     platform: string;
     externalId: string | null;
   };
-  channelId: string;
+  /**
+   * Only required for the `enqueuePosting` path (X original_post). Reddit
+   * is always-on no-binding so its dispatch is a handoff that never reads
+   * channelId; loaders return null in that case.
+   */
+  channelId: string | null;
 }
 
 export type DispatchResult =
@@ -97,6 +102,12 @@ export async function dispatchApprove(
       kind: 'handoff',
       intentUrl: buildRedditHandoffPageUrl(input.draft.id),
     };
+  }
+
+  if (!input.channelId) {
+    throw new Error(
+      `dispatchApprove: posting path requires channelId (draft ${input.draft.id}, platform ${input.thread.platform})`,
+    );
   }
 
   await enqueuePosting({
