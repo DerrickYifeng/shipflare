@@ -67,4 +67,26 @@ describe('signIn callback redirect behavior', () => {
       '/waitlist?from=denied&email=name%2Btag%40example.com',
     );
   });
+
+  it('returns true for a Google-shape profile with an allowed email', async () => {
+    vi.mocked(isEmailAllowed).mockResolvedValue(true);
+    const cb = await importSignInCallback();
+    const result = await cb({
+      user: { id: 'u2', email: 'alice@example.com' },
+      account: { provider: 'google' } as Account,
+      profile: { sub: '108472736284756', email_verified: true } as unknown as Profile,
+    });
+    expect(result).toBe(true);
+  });
+
+  it('returns /waitlist redirect URL for a Google-shape profile with a disallowed email', async () => {
+    vi.mocked(isEmailAllowed).mockResolvedValue(false);
+    const cb = await importSignInCallback();
+    const result = await cb({
+      user: { id: undefined, email: 'mallory@example.com' },
+      account: { provider: 'google' } as Account,
+      profile: { sub: '99999', email_verified: true } as unknown as Profile,
+    });
+    expect(result).toBe('/waitlist?from=denied&email=mallory%40example.com');
+  });
 });
