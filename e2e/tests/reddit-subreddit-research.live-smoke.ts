@@ -7,8 +7,8 @@
  * for contributors.
  *
  * Coverage:
- * 1. /onboarding/research shows the top-3 subreddits within 60s (or
- *    immediately if research already ran for this product).
+ * 1. /settings/reddit-channels shows the top-3 subreddits within 60s
+ *    (or immediately if research already ran for this product).
  * 2. /today eventually surfaces a Reddit content_post card with a
  *    subreddit visible on the card.
  * 3. Clicking Post opens a new tab on https://www.reddit.com/r/<sub>/submit
@@ -26,12 +26,15 @@ test.skip(
 
 test.use({ storageState: AUTH_STATE });
 
-test('founder sees top-3 subreddits in onboarding and posts to Reddit submit URL', async ({
+test('founder sees top-3 subreddits in settings and posts to Reddit submit URL', async ({
   page,
   context,
 }) => {
-  // 1. Visit onboarding research
-  await page.goto('/onboarding/research');
+  // 1. Visit the Reddit-channels management page in settings. The
+  // dedicated /onboarding/research page was removed once kickoff
+  // started spawning a (reddit, research) subagent in parallel with
+  // reply / X-post drafting.
+  await page.goto('/settings/reddit-channels');
 
   // Wait for at least one channel row (research may already be done from a
   // prior run; either way 60s is a comfortable upper bound).
