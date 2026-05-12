@@ -4,12 +4,14 @@ const STATUS_STYLE: Record<UserRow['status'], React.CSSProperties> = {
   active: { background: '#1f7a3a', color: '#fff' },
   dormant: { background: '#9a7a1f', color: '#fff' },
   lost: { background: '#7a1f1f', color: '#fff' },
+  stalled: { background: '#555', color: '#fff' },
 };
 
 const STATUS_LABEL: Record<UserRow['status'], string> = {
   active: '🟢 active',
   dormant: '🟡 dormant',
   lost: '🔴 lost',
+  stalled: '⚪ stalled',
 };
 
 export function UserTable({ rows }: { rows: UserRow[] }) {

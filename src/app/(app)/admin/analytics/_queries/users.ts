@@ -11,7 +11,7 @@ export interface UserRow {
   scans7d: number;
   replies7d: number;
   posts7d: number;
-  status: 'active' | 'dormant' | 'lost';
+  status: 'active' | 'dormant' | 'lost' | 'stalled';
 }
 
 export async function getActiveUsers(
@@ -45,11 +45,19 @@ export async function getActiveUsers(
     const signedInWithin14d =
       r.lastLoginAt != null && r.lastLoginAt.getTime() >= day14.getTime();
 
-    let status: 'active' | 'dormant' | 'lost';
-    if (hasAction) status = 'active';
-    else if (signedInRecently) status = 'dormant';
-    else if (!signedInWithin14d) status = 'lost';
-    else status = 'dormant';
+    let status: 'active' | 'dormant' | 'lost' | 'stalled';
+    if (hasAction) {
+      status = 'active';
+    } else if (r.lastLoginAt === null) {
+      // Never logged in — signed up but didn't return
+      status = 'stalled';
+    } else if (signedInRecently) {
+      status = 'dormant';
+    } else if (!signedInWithin14d) {
+      status = 'lost';
+    } else {
+      status = 'dormant';
+    }
 
     return {
       userId: r.userId,

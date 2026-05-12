@@ -2,6 +2,7 @@ import NextAuth from 'next-auth';
 import type { Adapter } from 'next-auth/adapters';
 import GitHub from 'next-auth/providers/github';
 import { DrizzleAdapter } from '@auth/drizzle-adapter';
+import { eq } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import {
   users,
@@ -50,6 +51,35 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       return session;
     },
     signIn: signInCallback,
+  },
+  events: {
+    async signIn({ user, account, profile }) {
+      if (!user.id) return; // shouldn't happen here, but guard
+      try {
+        if (account?.provider === 'github' && profile) {
+          const githubProfile = profile as { id?: number | string; login?: string };
+          await db
+            .update(users)
+            .set({
+              ...(githubProfile.id !== undefined
+                ? { githubId: String(githubProfile.id) }
+                : {}),
+              lastLoginAt: new Date(),
+            })
+            .where(eq(users.id, user.id));
+        } else {
+          await db
+            .update(users)
+            .set({ lastLoginAt: new Date() })
+            .where(eq(users.id, user.id));
+        }
+      } catch (err) {
+        // Stamp is observational metadata — never fail the sign-in.
+        // (events run after session creation anyway, but log so a DB blip is visible.)
+        const log = (await import('@/lib/logger')).createLogger('auth:events');
+        log.error('failed to stamp signin metadata', err);
+      }
+    },
   },
   pages: {
     signIn: '/',

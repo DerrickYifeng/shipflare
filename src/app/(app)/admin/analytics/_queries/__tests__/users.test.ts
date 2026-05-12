@@ -114,7 +114,21 @@ describe('getActiveUsers', () => {
     ]);
     activityCountsMock.mockResolvedValueOnce(new Map());
     const rows = await getActiveUsers({ now: NOW, windowDays: 30 });
-    expect(rows[0].status).toBe('lost'); // no login in 14d (never logged in)
+    expect(rows[0].status).toBe('stalled'); // signed up but never returned
+  });
+
+  it('classifies users who never logged in as stalled (not lost)', async () => {
+    dbSelectReturn.mockResolvedValueOnce([
+      {
+        userId: 'u7',
+        email: 'never-returned@x.com',
+        createdAt: ago(3),
+        lastLoginAt: null,
+      },
+    ]);
+    activityCountsMock.mockResolvedValueOnce(new Map());
+    const rows = await getActiveUsers({ now: NOW, windowDays: 30 });
+    expect(rows[0].status).toBe('stalled');
   });
 
   it('falls back to "(no email)" when user.email is null', async () => {
