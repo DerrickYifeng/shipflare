@@ -7,6 +7,7 @@ import { waitlistSignups } from '@/lib/db/schema';
 import { acquireRateLimit } from '@/lib/rate-limit';
 import { sendEmail } from '@/lib/email';
 import { waitlistAdminNotification } from '@/lib/email/templates/waitlist-admin-notification';
+import { waitlistThankYou } from '@/lib/email/templates/waitlist-thank-you';
 import { hashIp } from '@/lib/ip-hash';
 import { createLogger } from '@/lib/logger';
 
@@ -125,22 +126,43 @@ export async function joinWaitlist(
     Math.abs(row.updatedAt.getTime() - row.createdAt.getTime()) < 1000;
 
   if (isNew) {
-    try {
-      await sendEmail(
-        waitlistAdminNotification({
-          email: parsed.data.email,
-          useCase: parsed.data.useCase,
-          referer: parsed.data.referer ?? null,
-        }),
-      );
-    } catch (err) {
-      // Notification failure must not surface to the user — the signup row
-      // is already committed. Most likely cause: SUPER_ADMIN_EMAIL unset.
-      log.error('waitlist admin notification failed', {
-        emailTag: parsed.data.email.slice(0, 3) + '***',
-        err: err instanceof Error ? err.message : String(err),
-      });
-    }
+    // Two emails go out in parallel:
+    //   1. Admin notification to SUPER_ADMIN_EMAIL — "new waitlist signup"
+    //   2. Thank-you to the applicant — confirms receipt + sets expectation
+    //
+    // Both are fire-and-forget. sendEmail() never throws (returns
+    // {ok, reason}); the only place a throw can happen is the admin
+    // template's hard-fail when SUPER_ADMIN_EMAIL is unset. We catch
+    // that locally so the user's submission still returns ok:true.
+    const adminP = (async () => {
+      try {
+        await sendEmail(
+          waitlistAdminNotification({
+            email: parsed.data.email,
+            useCase: parsed.data.useCase,
+            referer: parsed.data.referer ?? null,
+          }),
+        );
+      } catch (err) {
+        log.error('waitlist admin notification failed', {
+          emailTag: parsed.data.email.slice(0, 3) + '***',
+          err: err instanceof Error ? err.message : String(err),
+        });
+      }
+    })();
+
+    const thankYouP = (async () => {
+      try {
+        await sendEmail(waitlistThankYou({ email: parsed.data.email }));
+      } catch (err) {
+        log.error('waitlist thank-you email failed', {
+          emailTag: parsed.data.email.slice(0, 3) + '***',
+          err: err instanceof Error ? err.message : String(err),
+        });
+      }
+    })();
+
+    await Promise.all([adminP, thankYouP]);
   }
 
   return { ok: true, alreadyOnList: !isNew };

@@ -28,6 +28,14 @@ vi.mock('@/lib/email/templates/waitlist-admin-notification', () => ({
   })),
 }));
 
+vi.mock('@/lib/email/templates/waitlist-thank-you', () => ({
+  waitlistThankYou: vi.fn((i) => ({
+    to: i.email,
+    subject: 'thanks',
+    text: `Hi ${i.email}`,
+  })),
+}));
+
 vi.mock('@/lib/ip-hash', () => ({
   hashIp: vi.fn(() => 'abc123'),
 }));
@@ -87,7 +95,7 @@ describe('joinWaitlist', () => {
     expect(result.error).toMatch(/too many/i);
   });
 
-  it('upserts a new row and sends admin notification', async () => {
+  it('upserts a new row and sends BOTH admin notification + thank-you', async () => {
     await joinWaitlist(undefined as never, fd({
       email: 'NewUser@Example.COM',
       useCase: '  building a SaaS  ',
@@ -100,7 +108,36 @@ describe('joinWaitlist', () => {
       referer: 'landing',
       ipHash: 'abc123',
     }));
-    expect(sendEmail).toHaveBeenCalledTimes(1);
+    // One email to admin, one thank-you to applicant
+    expect(sendEmail).toHaveBeenCalledTimes(2);
+    // Thank-you addresses the applicant
+    expect(sendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ to: 'newuser@example.com' }),
+    );
+    // Admin notification addresses the configured admin
+    expect(sendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ to: 'admin@x' }),
+    );
+  });
+
+  it('thank-you email failure does not fail the action', async () => {
+    const { waitlistThankYou } = await import(
+      '@/lib/email/templates/waitlist-thank-you'
+    );
+    vi.mocked(waitlistThankYou).mockImplementationOnce(() => {
+      throw new Error('thank-you template misconfigured');
+    });
+
+    const result = await joinWaitlist(
+      undefined as never,
+      fd({ email: 'newuser@example.com' }),
+    );
+
+    expect(result.ok).toBe(true);
+    // Admin notification still fires even when thank-you blows up
+    expect(sendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ to: 'admin@x' }),
+    );
   });
 
   it('skips admin notification when the row already existed', async () => {
