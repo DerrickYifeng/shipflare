@@ -222,6 +222,7 @@ function FieldShell({ label, htmlFor, hint, children }: FieldShellProps) {
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'baseline',
+          gap: 16,
           fontSize: 'var(--sf-text-xs)',
           fontFamily: 'var(--sf-font-mono)',
           letterSpacing: '0.08em',
@@ -232,7 +233,14 @@ function FieldShell({ label, htmlFor, hint, children }: FieldShellProps) {
       >
         <span>{label}</span>
         {hint ? (
-          <span style={{ textTransform: 'none', letterSpacing: 'var(--sf-track-normal)' }}>
+          <span
+            style={{
+              textTransform: 'none',
+              letterSpacing: 'var(--sf-track-normal)',
+              color: 'var(--sf-fg-on-dark-4)',
+              flexShrink: 0,
+            }}
+          >
             {hint}
           </span>
         ) : null}
