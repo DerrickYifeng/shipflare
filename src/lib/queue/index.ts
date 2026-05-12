@@ -5,7 +5,7 @@ import { createLogger } from '@/lib/logger';
 import {
   reviewJobSchema,
   postingJobSchema,
-  healthScoreJobSchema,
+  growthRollupJobSchema,
   dreamJobSchema,
   codeScanJobSchema,
   engagementJobSchema,
@@ -16,7 +16,7 @@ import {
 import type {
   ReviewJobData,
   PostingJobData,
-  HealthScoreJobData,
+  GrowthRollupJobData,
   DreamJobData,
   CodeScanJobData,
   DiscoveryScanJobData,
@@ -66,7 +66,7 @@ export const postingQueue = new Queue<PostingJobData>('posting', {
     attempts: 1, // Never retry posts — avoid duplicate publishes
   },
 });
-export const healthScoreQueue = new Queue<HealthScoreJobData>('health-score', {
+export const growthRollupQueue = new Queue<GrowthRollupJobData>('health-score', {
   ...connection,
   defaultJobOptions,
 });
@@ -196,17 +196,21 @@ export async function enqueuePosting(
 }
 
 /**
- * Enqueue health score recalculation.
+ * Enqueue growth rollup (fanout or per-user).
  */
-export async function enqueueHealthScore(
-  data: HealthScoreJobData,
+export async function enqueueGrowthRollup(
+  data: GrowthRollupJobData,
 ): Promise<void> {
-  const payload = healthScoreJobSchema.parse(withEnvelope(data));
-  log.debug(`Enqueued health-score for user ${payload.userId}`);
-  await healthScoreQueue.add('calculate', payload, {
-    attempts: 3,
-    backoff: { type: 'exponential', delay: 2000 },
-  });
+  const payload = growthRollupJobSchema.parse(withEnvelope(data));
+  log.debug(`Enqueued growth-rollup kind=${payload.kind ?? 'user'}`);
+  await growthRollupQueue.add(
+    payload.kind === 'fanout' ? 'fanout' : 'calculate',
+    payload,
+    {
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 2000 },
+    },
+  );
 }
 
 /**

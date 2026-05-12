@@ -55,16 +55,37 @@ export const postingJobSchema = z.object({
 export type PostingJobData = z.input<typeof postingJobSchema>;
 
 // ---------------------------------------------------------------------------
-// Health score
+// Growth rollup (formerly: health-score)
+//
+// Two shapes:
+//   - kind: 'fanout' — cron entry; processor iterates users w/ ≥1 channel
+//                       and enqueues per-user jobs.
+//   - kind: 'user'   — per-user rollup work.
+// Queue name stays 'health-score' in Redis for stability with any in-flight
+// schedule; the TS identifiers rename to match the new domain.
 // ---------------------------------------------------------------------------
 
-export const healthScoreJobSchema = z.object({
+const growthRollupFanout = z.object({
+  kind: z.literal('fanout'),
+  schemaVersion: SCHEMA_VERSION,
+  traceId: TRACE_ID,
+});
+
+const growthRollupUser = z.object({
   kind: z.literal('user').optional(),
   schemaVersion: SCHEMA_VERSION,
   traceId: TRACE_ID,
   userId: z.string().min(1),
 });
-export type HealthScoreJobData = z.input<typeof healthScoreJobSchema>;
+
+export const growthRollupJobSchema = z.discriminatedUnion('kind', [
+  growthRollupFanout,
+  growthRollupUser.extend({ kind: z.literal('user') }),
+]);
+// Two-shape input (the legacy `kind`-less payload is treated as 'user').
+export type GrowthRollupJobData =
+  | z.input<typeof growthRollupUser>
+  | z.input<typeof growthRollupFanout>;
 
 // ---------------------------------------------------------------------------
 // Dream / Code scan
@@ -214,7 +235,7 @@ export type XAnalyticsJobData = AnalyticsJobData;
 export type JobData =
   | ReviewJobData
   | PostingJobData
-  | HealthScoreJobData
+  | GrowthRollupJobData
   | DreamJobData
   | CodeScanJobData
   | DiscoveryScanJobData
