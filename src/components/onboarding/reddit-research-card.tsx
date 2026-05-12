@@ -207,6 +207,7 @@ export function RedditResearchCard() {
   const [addError, setAddError] = useState<string | null>(null);
   const [addValue, setAddValue] = useState('');
   const [busy, setBusy] = useState(false);
+  const [reResearchError, setReResearchError] = useState<string | null>(null);
 
   const status = useSWR<StatusResponse>(
     '/api/onboarding/reddit-research/status',
@@ -287,9 +288,25 @@ export function RedditResearchCard() {
   }
 
   async function handleReResearch() {
-    // Wired up in Task 8. For now we just refresh local state so the
-    // founder isn't stuck.
-    await Promise.all([status.mutate(), channels.mutate()]);
+    setReResearchError(null);
+    setBusy(true);
+    try {
+      const r = await fetch('/api/reddit-channels/re-research', {
+        method: 'POST',
+      });
+      if (!r.ok) {
+        throw new Error(`HTTP ${r.status}`);
+      }
+      // Status will flip back to 'pending' as the worker runs —
+      // polling resumes automatically once SWR re-reads the status.
+      await Promise.all([status.mutate(), channels.mutate()]);
+    } catch (err) {
+      setReResearchError(
+        err instanceof Error ? err.message : 'Failed to start re-research',
+      );
+    } finally {
+      setBusy(false);
+    }
   }
 
   // ── Error (fetcher threw) ───────────────────────────────────────────────
@@ -468,6 +485,15 @@ export function RedditResearchCard() {
           Re-research
         </button>
       </div>
+
+      {reResearchError ? (
+        <div
+          role="alert"
+          style={{ fontSize: 12, color: 'var(--sf-error-ink)' }}
+        >
+          {reResearchError}
+        </div>
+      ) : null}
 
       {sortedChannels.length === 0 ? (
         <p style={{ margin: 0, color: 'var(--sf-fg-2)' }}>

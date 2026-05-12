@@ -19,9 +19,14 @@ vi.mock('@/lib/auth', () => ({
   auth: async () => (authUserId ? { user: { id: authUserId } } : null),
 }));
 
-// `@/lib/queue` no longer needs mocking here — the onboarding commit
-// route does not enqueue any discovery-specific jobs in v3. The rubric
-// is generated lazily by the first discovery-scan.
+// `@/lib/queue` mock. The commit route now enqueues
+// `reddit-channel-research` when reddit is among the active channels in
+// the strategic path. Other discovery-specific jobs remain unmocked —
+// the rubric is generated lazily by the first discovery-scan.
+const enqueueRedditChannelResearchMock = vi.fn(async () => undefined);
+vi.mock('@/lib/queue', () => ({
+  enqueueRedditChannelResearch: enqueueRedditChannelResearchMock,
+}));
 
 const deleteDraftMock = vi.fn(async () => undefined);
 vi.mock('@/lib/onboarding-draft', () => ({
@@ -271,6 +276,7 @@ beforeEach(() => {
   provisionTeamForProductMock.mockClear();
   createAutomationConversationMock.mockClear();
   getUserChannelsMock.mockClear();
+  enqueueRedditChannelResearchMock.mockClear();
 });
 
 describe('POST /api/onboarding/commit — auth + rate limit', () => {
@@ -481,6 +487,57 @@ describe('POST /api/onboarding/commit — happy path', () => {
     };
     const res = await POST(makeRequest(body));
     expect(res.status).toBe(400);
+  });
+});
+
+describe('POST /api/onboarding/commit — reddit-channel-research enqueue', () => {
+  // The validPath.channelMix fixture is narrowed to `{ x: ... }`; widen
+  // for these tests so the type-checker accepts the `reddit` key.
+  function bodyWithRedditChannel(): ReturnType<typeof bodyFor> {
+    const body = bodyFor('mvp');
+    body.path = {
+      ...validPath,
+      channelMix: {
+        x: { preferredHours: [14, 17, 21] },
+        reddit: { preferredHours: [9, 13] },
+      },
+    } as typeof validPath;
+    return body;
+  }
+
+  it('enqueues research with force=false when channelMix.reddit is set', async () => {
+    const { POST } = await import('../route');
+    const res = await POST(makeRequest(bodyWithRedditChannel()));
+    expect(res.status).toBe(200);
+    expect(enqueueRedditChannelResearchMock).toHaveBeenCalledTimes(1);
+    expect(enqueueRedditChannelResearchMock).toHaveBeenCalledWith({
+      userId: 'user-1',
+      productId: 'prod-new-1',
+      force: false,
+    });
+  });
+
+  it('does NOT enqueue research when channelMix.reddit is absent', async () => {
+    const { POST } = await import('../route');
+    // Default fixture has channelMix={ x: ... } only — reddit not selected.
+    const res = await POST(makeRequest(bodyFor('mvp')));
+    expect(res.status).toBe(200);
+    expect(enqueueRedditChannelResearchMock).not.toHaveBeenCalled();
+  });
+
+  it('still returns 200 if BullMQ enqueue throws (non-fatal)', async () => {
+    enqueueRedditChannelResearchMock.mockRejectedValueOnce(
+      new Error('redis down'),
+    );
+    const { POST } = await import('../route');
+    const res = await POST(makeRequest(bodyWithRedditChannel()));
+    expect(res.status).toBe(200);
+    const payload = (await res.json()) as { success: boolean; enqueued: string[] };
+    expect(payload.success).toBe(true);
+    // The failed enqueue did NOT get added to the enqueued list.
+    expect(
+      payload.enqueued.some((e) => e.startsWith('reddit-channel-research:')),
+    ).toBe(false);
   });
 });
 

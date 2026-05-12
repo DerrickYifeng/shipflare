@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 
 // Mock SWR before importing the component so the component picks up the
 // mock at evaluate-time. We control which mocked dataset gets returned
@@ -180,5 +180,81 @@ describe('<RedditResearchCard /> — done state', () => {
 
     render(<RedditResearchCard />);
     expect(screen.getByText(/no subreddits yet/i)).toBeTruthy();
+  });
+
+  it('POSTs to /api/reddit-channels/re-research and revalidates both SWR hooks on click', async () => {
+    const statusMutate = vi.fn(async () => undefined);
+    const channelsMutate = vi.fn(async () => undefined);
+    swrMockState[STATUS_URL] = {
+      data: { status: 'done', count: 0 },
+      mutate: statusMutate,
+    };
+    swrMockState[CHANNELS_URL] = {
+      data: { channels: [] },
+      mutate: channelsMutate,
+    };
+
+    const fetchMock = vi.fn<(input: string, init?: RequestInit) => Promise<Response>>(
+      async () => new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    try {
+      render(<RedditResearchCard />);
+      const btn = screen.getByRole('button', { name: /re-research/i });
+      fireEvent.click(btn);
+      // Let the in-flight promise chain settle.
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // Asserted POST shape: correct URL + method, no body.
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [calledUrl, calledInit] = fetchMock.mock.calls[0];
+      expect(calledUrl).toBe('/api/reddit-channels/re-research');
+      expect(calledInit?.method).toBe('POST');
+
+      // Both SWR hooks revalidated so the UI flips back to 'pending'
+      // once the worker writes new rows.
+      expect(statusMutate).toHaveBeenCalledTimes(1);
+      expect(channelsMutate).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('surfaces an inline error when re-research POST fails', async () => {
+    const statusMutate = vi.fn(async () => undefined);
+    const channelsMutate = vi.fn(async () => undefined);
+    swrMockState[STATUS_URL] = {
+      data: { status: 'done', count: 0 },
+      mutate: statusMutate,
+    };
+    swrMockState[CHANNELS_URL] = {
+      data: { channels: [] },
+      mutate: channelsMutate,
+    };
+
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({ error: 'boom' }), { status: 500 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    try {
+      render(<RedditResearchCard />);
+      fireEvent.click(screen.getByRole('button', { name: /re-research/i }));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // The failure surfaced as an inline alert near the button.
+      const alert = await screen.findByRole('alert');
+      expect(alert.textContent).toMatch(/HTTP 500/);
+      // Revalidation did NOT fire (we short-circuit on !r.ok).
+      expect(statusMutate).not.toHaveBeenCalled();
+      expect(channelsMutate).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
