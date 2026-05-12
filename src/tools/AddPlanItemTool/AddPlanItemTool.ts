@@ -100,6 +100,18 @@ export const addPlanItemTool: ToolDefinition<PlanItemInput, AddPlanItemResult> =
             `add_plan_item: content_post params failed validation — ${message}`,
           );
         }
+        if (input.channel === 'reddit') {
+          if (
+            typeof parsed.data.subreddit !== 'string' ||
+            parsed.data.subreddit.length === 0
+          ) {
+            throw new Error(
+              `add_plan_item: reddit content_post requires params.subreddit. ` +
+                `Set it from the available subreddits the kickoff goal listed ` +
+                `(see product_reddit_channels for the active list).`,
+            );
+          }
+        }
       }
 
       const planId = await resolvePlanId(ctx, userId, productId);

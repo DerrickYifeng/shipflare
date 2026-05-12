@@ -236,6 +236,67 @@ describe('addPlanItemTool', () => {
     });
   });
 
+  it('rejects reddit content_post without params.subreddit', async () => {
+    const ctx = makeCtx(store, { userId: 'user-1', productId: 'prod-1' });
+    await expect(
+      addPlanItemTool.execute(
+        {
+          kind: 'content_post',
+          channel: 'reddit',
+          userAction: 'approve',
+          phase: 'foundation',
+          dueDate: '2026-05-11',
+          sortOrder: 0,
+          skillName: 'draft-single-post',
+          params: { format: 'lesson' }, // no subreddit
+          title: 'reddit post',
+          description: null,
+        },
+        ctx,
+      ),
+    ).rejects.toThrow(/reddit content_post requires params\.subreddit/);
+  });
+
+  it('accepts reddit content_post WITH params.subreddit', async () => {
+    const ctx = makeCtx(store, { userId: 'user-1', productId: 'prod-1' });
+    const res = await addPlanItemTool.execute(
+      {
+        kind: 'content_post',
+        channel: 'reddit',
+        userAction: 'approve',
+        phase: 'foundation',
+        dueDate: '2026-05-11',
+        sortOrder: 0,
+        skillName: 'draft-single-post',
+        params: { format: 'lesson', subreddit: 'SaaS' },
+        title: 'reddit post',
+        description: null,
+      },
+      ctx,
+    );
+    expect(res.planItemId).toBeTruthy();
+  });
+
+  it('still accepts x content_post WITHOUT subreddit (X has no community)', async () => {
+    const ctx = makeCtx(store, { userId: 'user-1', productId: 'prod-1' });
+    const res = await addPlanItemTool.execute(
+      {
+        kind: 'content_post',
+        channel: 'x',
+        userAction: 'approve',
+        phase: 'foundation',
+        dueDate: '2026-05-11',
+        sortOrder: 0,
+        skillName: 'draft-single-post',
+        params: { format: 'hot_take' },
+        title: 'x post',
+        description: null,
+      },
+      ctx,
+    );
+    expect(res.planItemId).toBeTruthy();
+  });
+
   it('passes through legacy params unchanged for non-content_post kinds', async () => {
     store.register<PlanRow>(plans, [
       {
