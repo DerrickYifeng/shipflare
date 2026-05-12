@@ -8,7 +8,7 @@
 // AgentDefinition → AgentConfig → runAgent plumbing to spawnSubagent
 // (which already exists for the AgentTool path).
 
-import type { ZodType } from 'zod';
+import type { ZodType, ZodTypeDef } from 'zod';
 import { createToolContext } from '@/bridge/agent-runner';
 import { getAllSkills } from '@/tools/SkillTool/registry';
 import { DEFAULT_SKILL_FORK_MAX_TURNS } from '@/tools/SkillTool/constants';
@@ -53,7 +53,10 @@ import type {
 export async function runForkSkill<T = unknown>(
   skillName: string,
   args: string,
-  outputSchema?: ZodType<T>,
+  // Widen the input slot so schemas using `.default(...)` / `.optional()`
+  // (where z.input ≠ z.output) compile when callers pass the output type
+  // as `<T>`. The schema is only used to parse model output → T anyway.
+  outputSchema?: ZodType<T, ZodTypeDef, unknown>,
   depsOrParent: Record<string, unknown> | ToolContext = {},
 ): Promise<AgentResult<T>> {
   const all = await getAllSkills();

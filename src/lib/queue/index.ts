@@ -11,6 +11,7 @@ import {
   engagementJobSchema,
   metricsJobSchema,
   analyticsJobSchema,
+  redditChannelResearchJobSchema,
 } from './types';
 import type {
   ReviewJobData,
@@ -22,6 +23,7 @@ import type {
   EngagementJobData,
   MetricsJobData,
   AnalyticsJobData,
+  RedditChannelResearchJobData,
 } from './types';
 
 const log = createLogger('lib:queue');
@@ -108,23 +110,17 @@ export const analyticsQueue = new Queue<AnalyticsJobData>('analytics', {
 });
 
 /**
- * Job payload for the `reddit-channel-research` worker. Runs the
+ * Per-product Reddit subreddit research. Runs the
  * `researching-reddit-channels` fork-skill, enriches the top candidates
  * via Reddit's public JSON API, and persists the top-3 as
  * `source='auto'` rows on `product_reddit_channels`. Idempotent on
  * `(productId)` — when `force` is false (default) and the product
  * already has at least one auto row, the processor no-ops.
+ *
+ * `enqueueRedditChannelResearch` further guards with a deterministic
+ * jobId so concurrent enqueues for the same product collapse at the
+ * BullMQ layer before they can race the in-DB idempotency gate.
  */
-export interface RedditChannelResearchJobData {
-  schemaVersion: 1;
-  userId: string;
-  productId: string;
-  /** If false (default), skip when product_reddit_channels already has at
-   *  least one auto row for the product. */
-  force?: boolean;
-  traceId?: string;
-}
-
 export const redditChannelResearchQueue =
   new Queue<RedditChannelResearchJobData>('reddit-channel-research', {
     ...connection,
@@ -295,18 +291,27 @@ export async function enqueueAnalytics(data: AnalyticsJobData): Promise<void> {
 }
 
 /**
- * Enqueue Reddit subreddit kickoff research for a product. Idempotency
- * is enforced inside the processor (see `RedditChannelResearchJobData`);
- * call sites may pass `force: true` to force a re-research even when
- * auto rows exist.
+ * Enqueue Reddit subreddit kickoff research for a product.
+ *
+ * - The non-force path uses a deterministic `rcr:<productId>` jobId so
+ *   BullMQ rejects duplicate enqueues while a prior job is still
+ *   waiting/active. This collapses concurrent kickoff triggers (onboard
+ *   commit, retry-from-UI) at the queue level before they can race the
+ *   in-DB idempotency gate against the `(productId, subreddit)` UNIQUE
+ *   constraint.
+ * - The force path appends a timestamp so the founder-driven
+ *   "Re-research" stays enqueueable; concurrent forces are tolerated
+ *   because force is itself the "I want this to run now" signal.
  */
 export async function enqueueRedditChannelResearch(
   data: Omit<RedditChannelResearchJobData, 'schemaVersion'>,
 ): Promise<void> {
-  log.debug(`Enqueued reddit-channel-research for product ${data.productId}`);
-  await redditChannelResearchQueue.add('research', {
-    schemaVersion: 1,
-    ...data,
+  const payload = redditChannelResearchJobSchema.parse(withEnvelope(data));
+  log.debug(`Enqueued reddit-channel-research for product ${payload.productId}`);
+  await redditChannelResearchQueue.add('research', payload, {
+    jobId: payload.force
+      ? `rcr:${payload.productId}:force:${Date.now()}`
+      : `rcr:${payload.productId}`,
   });
 }
 
@@ -325,6 +330,7 @@ export {
   planExecuteJobSchema,
 } from './plan-execute';
 export type { PlanExecuteJobData } from './plan-execute';
+export type { RedditChannelResearchJobData } from './types';
 
 // ----------------------------------------------------------------
 //  Agent-run queue (Phase B Task 7)

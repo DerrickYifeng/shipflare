@@ -262,7 +262,10 @@ export async function spawnSubagent<T = unknown>(
   prompt: string,
   parentCtx: ToolContext,
   callbacks?: SpawnCallbacks,
-  outputSchema?: z.ZodType<T>,
+  // Widen input slot so schemas with `.default(...)` / `.optional()`
+  // (input ≠ output) compile when callers parameterize `<T>` to the
+  // output type. spawnSubagent only consumes parsed output.
+  outputSchema?: z.ZodType<T, z.ZodTypeDef, unknown>,
   parentTaskId?: string,
 ): Promise<AgentResult<T>> {
   const config = buildAgentConfigFromDefinition(def);

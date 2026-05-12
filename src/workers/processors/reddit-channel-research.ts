@@ -19,9 +19,16 @@
 import type { Job } from 'bullmq';
 import { and, eq } from 'drizzle-orm';
 import { db } from '@/lib/db';
-import { productRedditChannels, products } from '@/lib/db/schema';
+import {
+  productRedditChannels,
+  products,
+  type NewProductRedditChannel,
+} from '@/lib/db/schema';
 import { runForkSkill } from '@/skills/run-fork-skill';
-import { researchingRedditChannelsOutputSchema } from '@/skills/researching-reddit-channels/schema';
+import {
+  researchingRedditChannelsOutputSchema,
+  type ResearchingRedditChannelsOutput,
+} from '@/skills/researching-reddit-channels/schema';
 import {
   fetchSubredditAbout,
   fetchSubredditActivity,
@@ -42,8 +49,8 @@ export async function processRedditChannelResearch(
   const log = loggerForJob(baseLog, job);
   const { userId, productId, force = false } = job.data;
 
-  // 1. Idempotency gate. We only consider source='auto' rows so a
-  //    re-research after a founder added manual entries still runs.
+  // Only count source='auto' rows toward idempotency — a re-research
+  // after the founder has added manual entries still needs to run.
   if (!force) {
     const existing = await db
       .select({ id: productRedditChannels.id })
@@ -61,7 +68,6 @@ export async function processRedditChannelResearch(
     }
   }
 
-  // 2. Load product fields needed by the skill input.
   const [productRow] = await db
     .select({
       name: products.name,
@@ -76,9 +82,8 @@ export async function processRedditChannelResearch(
     return;
   }
 
-  // 3. Invoke the research skill (fork-mode). The skill returns
-  //    candidates with LLM-guessed memberCountApprox; we overwrite
-  //    these with deterministic values from /about.json below.
+  // Skill returns LLM-guessed memberCountApprox; we overwrite below
+  // with the deterministic value from /about.json.
   const skillInput = {
     product: {
       name: productRow.name,
@@ -88,7 +93,7 @@ export async function processRedditChannelResearch(
     candidateCount: CANDIDATE_COUNT,
   };
 
-  const { result } = await runForkSkill(
+  const { result } = await runForkSkill<ResearchingRedditChannelsOutput>(
     'researching-reddit-channels',
     JSON.stringify(skillInput),
     researchingRedditChannelsOutputSchema,
@@ -101,16 +106,15 @@ export async function processRedditChannelResearch(
     return;
   }
 
-  // 4. Sort by fitScore DESC, take top-K.
   const top = [...candidates]
     .sort((a, b) => b.fitScore - a.fitScore)
     .slice(0, TOP_K);
 
-  // 5. Enrich in parallel. The helpers swallow their own errors and
-  //    return null / zeroed activity rather than throwing, so one bad
-  //    subreddit does not abort the batch.
-  const enriched = await Promise.all(
-    top.map(async (c, i) => {
+  // Enrichment helpers swallow their own errors (404, rate-limited,
+  // malformed payload), so Promise.all parallelism is safe — one bad
+  // subreddit does not abort the batch.
+  const enriched: NewProductRedditChannel[] = await Promise.all(
+    top.map(async (c, i): Promise<NewProductRedditChannel> => {
       const [about, activity] = await Promise.all([
         fetchSubredditAbout(c.subreddit),
         fetchSubredditActivity(c.subreddit),
@@ -124,14 +128,14 @@ export async function processRedditChannelResearch(
         rulesSummary: c.rulesSummary,
         activity,
         rank: i + 1,
-        source: 'auto' as const,
+        source: 'auto',
         disabled: false,
       };
     }),
   );
 
-  // 6. Atomic delete-then-insert. Only touches source='auto' rows so
-  //    founder-added manual rows survive a re-research.
+  // Delete-then-insert is atomic in one transaction; we only touch
+  // source='auto' rows so founder-added manual rows survive a re-research.
   await db.transaction(async (tx) => {
     await tx
       .delete(productRedditChannels)
