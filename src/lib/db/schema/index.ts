@@ -14,11 +14,11 @@ export { channels, threads } from './channels';
 export {
   drafts,
   posts,
-  healthScores,
   activityEvents,
   draftStatusEnum,
   postStatusEnum,
 } from './drafts';
+export { channelScores, moduleScores } from './growth';
 export { agentMemories, agentMemoryLogs } from './memories';
 export { codeSnapshots } from './code-snapshots';
 export {
@@ -65,7 +65,6 @@ export {
   teamMembers,
   teamConversations,
   teamMessages,
-  teamTasks,
   agentRuns,
   type Team,
   type NewTeam,
@@ -75,8 +74,6 @@ export {
   type NewTeamConversation,
   type TeamMessage,
   type NewTeamMessage,
-  type TeamTask,
-  type NewTeamTask,
   type AgentRun,
   type NewAgentRun,
 } from './team';

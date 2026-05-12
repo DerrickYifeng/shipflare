@@ -107,33 +107,6 @@ export const posts = pgTable(
   ],
 );
 
-export const healthScores = pgTable(
-  'health_scores',
-  {
-    id: text('id')
-      .primaryKey()
-      .$defaultFn(() => crypto.randomUUID()),
-    userId: text('user_id')
-      .notNull()
-      .references(() => users.id, { onDelete: 'cascade' }),
-    score: integer('score').notNull(),
-    s1Pipeline: real('s1_pipeline').notNull(),
-    s2Quality: real('s2_quality').notNull(),
-    s3Engagement: real('s3_engagement').notNull(),
-    s4Consistency: real('s4_consistency').notNull(),
-    s5Safety: real('s5_safety').notNull(),
-    calculatedAt: timestamp('calculated_at', { mode: 'date' })
-      .defaultNow()
-      .notNull(),
-  },
-  (t) => [
-    index('health_scores_user_calculated_idx').on(
-      t.userId,
-      desc(t.calculatedAt),
-    ),
-  ],
-);
-
 export const activityEvents = pgTable(
   'activity_events',
   {
