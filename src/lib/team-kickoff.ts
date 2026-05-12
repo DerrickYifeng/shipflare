@@ -29,6 +29,10 @@ import { createAutomationConversation } from '@/lib/team-conversation-helpers';
 import { currentWeekStart } from '@/lib/week-bounds';
 import { createLogger } from '@/lib/logger';
 import { derivePerWeekPosts } from '@/lib/strategic-path-helpers';
+import {
+  listActiveSubreddits,
+  type ActiveSubredditRow,
+} from '@/lib/db/repositories/product-reddit-channels';
 import type { StrategicPath } from '@/tools/schemas';
 
 const log = createLogger('lib:team-kickoff');
@@ -119,6 +123,14 @@ export async function ensureKickoffEnqueued(args: {
     .limit(1);
   const pathId = activePath?.id ?? null;
 
+  // The available-subreddits list drives the round-robin assignment
+  // for Reddit content_post params.subreddit (Task 5's gate rejects
+  // rows without it). Skip the DB hit when Reddit isn't connected —
+  // there are no Reddit content_post slots to seed in that case.
+  const availableSubreddits: ActiveSubredditRow[] = channels.includes('reddit')
+    ? await listActiveSubreddits(productId)
+    : [];
+
   // The goal preamble is the SOLE owner of kickoff dispatch logic
   // (per coordinator/AGENT.md "Goal-driven dispatch"). We pre-compute
   // the per-channel slot facts here — week-1 post counts via
@@ -141,6 +153,7 @@ export async function ensureKickoffEnqueued(args: {
       string,
       { repliesPerDay?: number | null } | null | undefined
     > | null,
+    availableSubreddits,
   });
 
   let conversationId: string;
@@ -205,7 +218,7 @@ export async function ensureKickoffEnqueued(args: {
   }
 }
 
-interface KickoffGoalArgs {
+export interface KickoffGoalArgs {
   productName: string;
   pathId: string | null;
   weekStart: string;
@@ -218,6 +231,21 @@ interface KickoffGoalArgs {
     string,
     { repliesPerDay?: number | null } | null | undefined
   > | null;
+  /**
+   * Active (not disabled) Reddit subreddits for the product, ordered
+   * by rank ASC. Empty array when reddit isn't connected or the
+   * `reddit-channel-research` worker hasn't finished yet. Drives the
+   * round-robin assignment in the goal body — the coordinator picks
+   * `availableSubreddits[sortOrder % availableSubreddits.length]` for
+   * each Reddit content_post slot. The caller is the one place that
+   * constructs the args, so this is required (no optional) — a future
+   * caller forgetting it should be a compile error.
+   */
+  availableSubreddits: ReadonlyArray<{
+    subreddit: string;
+    rank: number;
+    fitScore: number | null;
+  }>;
 }
 
 /**
@@ -260,11 +288,19 @@ export function buildKickoffGoalText(args: KickoffGoalArgs): string {
 
   const xConnected = channels.includes('x');
   const redditConnected = channels.includes('reddit');
+  const subs = args.availableSubreddits;
+  const redditPostCount = redditConnected ? week1Posts.reddit : 0;
+  const redditPostsBlocked =
+    redditConnected && redditPostCount > 0 && subs.length === 0;
 
   // Build the spawn directives. Each (channel, mode) pair becomes one
   // line in the goal IF the slot exists for today — pairs with zero
   // budget are silently dropped so the coordinator doesn't spawn
-  // empty work.
+  // empty work. Reddit content_post spawn is additionally gated on
+  // the subreddit list being non-empty: AddPlanItemTool rejects Reddit
+  // content_post rows without params.subreddit (Task 5's gate), so an
+  // empty list means no draftable plan_items exist and the post-batch
+  // would crash with "no plan items found".
   const spawns: string[] = [];
   if (xConnected && repliesX > 0) {
     spawns.push(
@@ -281,7 +317,7 @@ export function buildKickoffGoalText(args: KickoffGoalArgs): string {
       `- (x, post): Task({ subagent_type: 'social-media-manager', description: 'draft x post batch', prompt: 'Mode: post-batch\\nplanItemIds: <today's x content_post uuids>' })`,
     );
   }
-  if (redditConnected && week1Posts.reddit > 0) {
+  if (redditConnected && week1Posts.reddit > 0 && subs.length > 0) {
     spawns.push(
       `- (reddit, post): Task({ subagent_type: 'social-media-manager', description: 'draft reddit post batch', prompt: 'Mode: post-batch\\nplanItemIds: <today's reddit content_post uuids>' })`,
     );
@@ -305,6 +341,32 @@ export function buildKickoffGoalText(args: KickoffGoalArgs): string {
     `Pass weekStart=${weekStart} verbatim. dueDate must be >= today's date.`,
     ``,
   ];
+
+  if (redditPostsBlocked) {
+    // Reddit research hasn't finished yet — AddPlanItemTool would
+    // reject every Reddit content_post we tried to insert. Tell the
+    // coordinator to skip them this kickoff; replies and non-Reddit
+    // slots proceed normally.
+    lines.push(
+      `NOTE: Reddit content_post slots requested (${redditPostCount}/week) but no subreddits have been researched yet. Skip Reddit content_post add_plan_item calls this kickoff (the gate would reject them anyway). Tell the founder to wait for the reddit-channel-research worker to finish (~60s) or re-research from /settings/reddit-channels. Replies and non-Reddit channels proceed normally.`,
+      ``,
+    );
+  } else if (redditConnected && subs.length > 0) {
+    // Round-robin assignment over the researched subreddits. Names
+    // are stored WITHOUT the `r/` prefix throughout the system; the
+    // goal text restates that convention so the coordinator doesn't
+    // double-prefix.
+    lines.push(
+      `Available subreddits for reddit content_post (use these for params.subreddit, NO 'r/' prefix):`,
+      ...subs.map((s) =>
+        s.fitScore !== null
+          ? `  - ${s.subreddit} (fit ${s.fitScore.toFixed(2)})`
+          : `  - ${s.subreddit}`,
+      ),
+      `Rotate evenly: for each Reddit content_post row, set params.subreddit = availableSubreddits[sortOrder % availableSubreddits.length]. Use the bare subreddit name (e.g. "SaaS", not "r/SaaS").`,
+      ``,
+    );
+  }
 
   if (spawns.length > 0) {
     lines.push(
