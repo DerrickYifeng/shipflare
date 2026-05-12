@@ -1,17 +1,20 @@
 export type BannerVariant = 'denied' | 'no-email' | 'landing';
 
-const COPY: Record<BannerVariant, { headline: string; sub: string }> = {
+const COPY: Record<BannerVariant, { eyebrow: string; headline: string; sub: string }> = {
   denied: {
-    headline: "Your GitHub email isn't on the alpha list yet.",
-    sub: "Drop your details — we'll get back to you when a slot opens.",
+    eyebrow: 'Alpha access',
+    headline: "You're not on the list yet.",
+    sub: "Drop your details. We'll email when a slot opens.",
   },
   'no-email': {
+    eyebrow: 'Alpha access',
     headline: "GitHub didn't share your email.",
     sub: "Enter it below and we'll add you to the waitlist.",
   },
   landing: {
-    headline: 'ShipFlare is in private alpha.',
-    sub: "Request access — we're inviting design partners in waves.",
+    eyebrow: 'Private alpha',
+    headline: 'Request access.',
+    sub: "We're inviting design partners in waves.",
   },
 };
 
@@ -21,27 +24,46 @@ export function ContextBanner({ variant }: { variant: BannerVariant }) {
     <div
       style={{
         textAlign: 'center',
-        padding: '64px 24px 24px',
+        padding: 'clamp(64px, 12vh, 120px) 24px 32px',
         color: 'var(--sf-fg-on-dark-1)',
-        maxWidth: 640,
+        maxWidth: 720,
         margin: '0 auto',
       }}
     >
+      <div
+        style={{
+          fontFamily: 'var(--sf-font-mono)',
+          fontSize: 'var(--sf-text-xs)',
+          letterSpacing: '0.14em',
+          textTransform: 'uppercase',
+          color: 'var(--sf-fg-on-dark-3)',
+          marginBottom: 20,
+        }}
+      >
+        {copy.eyebrow}
+      </div>
       <h1
         style={{
-          fontSize: 'var(--sf-text-h1)',
+          fontFamily: 'var(--sf-font-display)',
+          fontSize: 'clamp(36px, 6vw, var(--sf-text-hero))',
           fontWeight: 600,
-          letterSpacing: 'var(--sf-track-tight)',
-          margin: '0 0 12px',
+          letterSpacing: 'var(--sf-track-hero)',
+          lineHeight: 1.07,
+          margin: '0 0 16px',
         }}
       >
         {copy.headline}
       </h1>
       <p
         style={{
-          fontSize: 'var(--sf-text-lg)',
+          fontSize: 'var(--sf-text-h3)',
+          letterSpacing: 'var(--sf-track-normal)',
+          lineHeight: 1.4,
           color: 'var(--sf-fg-on-dark-2)',
           margin: 0,
+          maxWidth: 540,
+          marginLeft: 'auto',
+          marginRight: 'auto',
         }}
       >
         {copy.sub}

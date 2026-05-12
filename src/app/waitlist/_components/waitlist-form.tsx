@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState } from 'react';
+import { useActionState, useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import Link from 'next/link';
 import {
@@ -8,6 +8,7 @@ import {
   type JoinWaitlistState,
 } from '../actions';
 import { type BannerVariant } from './context-banner';
+import { SignInModal } from '@/components/auth/sign-in-modal';
 
 const INITIAL: JoinWaitlistState = { ok: false };
 
@@ -18,37 +19,73 @@ export interface WaitlistFormProps {
 
 export function WaitlistForm({ initialEmail, referer }: WaitlistFormProps) {
   const [state, formAction] = useActionState(joinWaitlist, INITIAL);
+  const [signInOpen, setSignInOpen] = useState(false);
 
   if (state.ok) {
     return (
       <div
         style={{
-          maxWidth: 480,
-          margin: '0 auto 96px',
-          padding: 32,
-          background: 'var(--sf-bg-dark-surface)',
-          borderRadius: 'var(--sf-radius-lg)',
+          maxWidth: 520,
+          margin: '0 auto',
+          padding: '32px 24px clamp(96px, 18vh, 160px)',
           color: 'var(--sf-fg-on-dark-1)',
           textAlign: 'center',
         }}
       >
-        <h2
+        {/* Apple-style success glyph: thin-stroke checkmark on accent disc */}
+        <div
+          aria-hidden
           style={{
-            fontSize: 'var(--sf-text-h2)',
-            margin: '0 0 8px',
-            fontWeight: 600,
+            width: 56,
+            height: 56,
+            borderRadius: 'var(--sf-radius-full)',
+            background: 'var(--sf-accent)',
+            margin: '0 auto 24px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
           }}
         >
-          You're on the list.
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+            <path
+              d="M5 12.5l4.5 4.5L19 7"
+              stroke="#fff"
+              strokeWidth="1.75"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </div>
+        <h2
+          style={{
+            fontFamily: 'var(--sf-font-display)',
+            fontSize: 'var(--sf-text-h1)',
+            fontWeight: 600,
+            letterSpacing: 'var(--sf-track-tight)',
+            lineHeight: 1.1,
+            margin: '0 0 12px',
+          }}
+        >
+          You&rsquo;re on the list.
         </h2>
-        <p style={{ color: 'var(--sf-fg-on-dark-2)', margin: '0 0 24px' }}>
-          We'll email you when a slot opens.
+        <p
+          style={{
+            fontSize: 'var(--sf-text-lg)',
+            color: 'var(--sf-fg-on-dark-2)',
+            letterSpacing: 'var(--sf-track-normal)',
+            margin: '0 0 32px',
+          }}
+        >
+          We&rsquo;ll email you when a slot opens.
         </p>
         <Link
           href="/"
           style={{
-            color: 'var(--sf-accent)',
+            color: 'var(--sf-fg-on-dark-3)',
+            fontSize: 'var(--sf-text-sm)',
             textDecoration: 'underline',
+            textUnderlineOffset: 3,
+            transition: 'color var(--sf-dur-fast) var(--sf-ease-swift)',
           }}
         >
           ← Back to home
@@ -58,122 +95,202 @@ export function WaitlistForm({ initialEmail, referer }: WaitlistFormProps) {
   }
 
   return (
-    <form
-      action={formAction}
-      style={{
-        maxWidth: 480,
-        margin: '0 auto 96px',
-        padding: 32,
-        background: 'var(--sf-bg-dark-surface)',
-        borderRadius: 'var(--sf-radius-lg)',
-        color: 'var(--sf-fg-on-dark-1)',
-      }}
-    >
-      <label
-        htmlFor="waitlist-email"
-        style={{ display: 'block', fontSize: 14, marginBottom: 6 }}
-      >
-        Email
-      </label>
-      <input
-        id="waitlist-email"
-        name="email"
-        type="email"
-        required
-        defaultValue={initialEmail}
-        autoComplete="email"
-        aria-invalid={state.error ? true : undefined}
-        aria-describedby={state.error ? 'waitlist-email-error' : undefined}
-        style={inputStyle}
-      />
-
-      <label
-        htmlFor="waitlist-usecase"
-        style={{ display: 'block', fontSize: 14, marginTop: 16, marginBottom: 6 }}
-      >
-        What would you use ShipFlare for?{' '}
-        <span style={{ color: 'var(--sf-fg-on-dark-3)' }}>(optional)</span>
-      </label>
-      <textarea
-        id="waitlist-usecase"
-        name="useCase"
-        maxLength={500}
-        rows={3}
-        placeholder="A few words about what you'd like to ship faster."
-        style={{ ...inputStyle, resize: 'vertical' }}
-      />
-
-      <input type="hidden" name="referer" value={referer} />
-
-      {/* Honeypot — bots fill, humans don't see. */}
-      <input
-        name="company"
-        tabIndex={-1}
-        aria-hidden="true"
-        autoComplete="off"
+    <>
+      <form
+        action={formAction}
         style={{
-          position: 'absolute',
-          left: '-9999px',
-          opacity: 0,
-          pointerEvents: 'none',
-          height: 0,
-          width: 0,
+          maxWidth: 480,
+          margin: '0 auto',
+          padding: '0 24px clamp(64px, 14vh, 120px)',
+          color: 'var(--sf-fg-on-dark-1)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 16,
         }}
-      />
+      >
+        <FieldShell label="Email" htmlFor="waitlist-email">
+          <input
+            id="waitlist-email"
+            name="email"
+            type="email"
+            required
+            defaultValue={initialEmail}
+            autoComplete="email"
+            placeholder="you@example.com"
+            aria-invalid={state.error ? true : undefined}
+            aria-describedby={state.error ? 'waitlist-email-error' : undefined}
+            style={inputStyle}
+          />
+        </FieldShell>
 
-      {state.error ? (
-        <p
-          id="waitlist-email-error"
-          role="alert"
+        <FieldShell
+          label="What would you ship faster?"
+          htmlFor="waitlist-usecase"
+          hint="Optional"
+        >
+          <textarea
+            id="waitlist-usecase"
+            name="useCase"
+            maxLength={500}
+            rows={3}
+            placeholder="A few words about what you're building."
+            style={{ ...inputStyle, resize: 'vertical', minHeight: 84, paddingTop: 14 }}
+          />
+        </FieldShell>
+
+        <input type="hidden" name="referer" value={referer} />
+
+        {/* Honeypot — bots fill, humans don't see. */}
+        <input
+          name="company"
+          tabIndex={-1}
+          aria-hidden="true"
+          autoComplete="off"
           style={{
-            color: 'var(--sf-error)',
-            fontSize: 13,
-            marginTop: 12,
-            marginBottom: 0,
+            position: 'absolute',
+            left: '-9999px',
+            opacity: 0,
+            pointerEvents: 'none',
+            height: 0,
+            width: 0,
+          }}
+        />
+
+        {state.error ? (
+          <p
+            id="waitlist-email-error"
+            role="alert"
+            style={{
+              color: 'var(--sf-error)',
+              fontSize: 'var(--sf-text-sm)',
+              letterSpacing: 'var(--sf-track-normal)',
+              margin: 0,
+            }}
+          >
+            {state.error}
+          </p>
+        ) : null}
+
+        <SubmitButton />
+
+        <button
+          type="button"
+          onClick={() => setSignInOpen(true)}
+          style={{
+            marginTop: 4,
+            background: 'transparent',
+            border: 'none',
+            color: 'var(--sf-fg-on-dark-3)',
+            fontFamily: 'inherit',
+            fontSize: 'var(--sf-text-sm)',
+            letterSpacing: 'var(--sf-track-normal)',
+            cursor: 'pointer',
+            padding: 8,
+            textDecoration: 'underline',
+            textUnderlineOffset: 3,
+            transition: 'color var(--sf-dur-fast) var(--sf-ease-swift)',
+            alignSelf: 'center',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.color = 'var(--sf-fg-on-dark-1)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.color = 'var(--sf-fg-on-dark-3)';
           }}
         >
-          {state.error}
-        </p>
-      ) : null}
+          Already invited? Sign in with GitHub
+        </button>
+      </form>
+      <SignInModal open={signInOpen} onClose={() => setSignInOpen(false)} />
+    </>
+  );
+}
 
-      <SubmitButton />
-    </form>
+interface FieldShellProps {
+  label: string;
+  htmlFor: string;
+  hint?: string;
+  children: React.ReactNode;
+}
+
+function FieldShell({ label, htmlFor, hint, children }: FieldShellProps) {
+  return (
+    <div>
+      <label
+        htmlFor={htmlFor}
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'baseline',
+          fontSize: 'var(--sf-text-xs)',
+          fontFamily: 'var(--sf-font-mono)',
+          letterSpacing: '0.08em',
+          textTransform: 'uppercase',
+          color: 'var(--sf-fg-on-dark-3)',
+          marginBottom: 8,
+        }}
+      >
+        <span>{label}</span>
+        {hint ? (
+          <span style={{ textTransform: 'none', letterSpacing: 'var(--sf-track-normal)' }}>
+            {hint}
+          </span>
+        ) : null}
+      </label>
+      {children}
+    </div>
   );
 }
 
 function SubmitButton() {
   const { pending } = useFormStatus();
+  const [hover, setHover] = useState(false);
   return (
     <button
       type="submit"
       disabled={pending}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
       style={{
-        marginTop: 20,
-        width: '100%',
-        minHeight: 44,
-        background: 'var(--sf-accent)',
-        color: 'var(--sf-fg-on-dark-1)',
+        marginTop: 12,
+        alignSelf: 'center',
+        minHeight: 48,
+        padding: '0 32px',
+        background: pending
+          ? 'var(--sf-accent)'
+          : hover
+            ? 'var(--sf-accent-hover)'
+            : 'var(--sf-accent)',
+        color: '#ffffff',
         border: 'none',
-        borderRadius: 'var(--sf-radius-md)',
-        fontSize: 15,
-        fontWeight: 600,
+        borderRadius: 'var(--sf-radius-pill)',
+        fontSize: 'var(--sf-text-base)',
+        fontFamily: 'inherit',
+        fontWeight: 500,
+        letterSpacing: 'var(--sf-track-tight)',
         cursor: pending ? 'wait' : 'pointer',
-        opacity: pending ? 0.7 : 1,
+        opacity: pending ? 0.85 : 1,
+        transition:
+          'background var(--sf-dur-base) var(--sf-ease-swift), opacity var(--sf-dur-base) var(--sf-ease-swift)',
       }}
     >
-      {pending ? 'Sending…' : 'Request access'}
+      {pending ? 'Sending…' : 'Request access  →'}
     </button>
   );
 }
 
 const inputStyle: React.CSSProperties = {
   width: '100%',
-  padding: '10px 12px',
-  background: 'var(--sf-bg-dark)',
+  padding: '14px 16px',
+  background: 'rgba(255, 255, 255, 0.06)',
   color: 'var(--sf-fg-on-dark-1)',
-  border: '1px solid var(--sf-border-on-dark)',
-  borderRadius: 'var(--sf-radius-sm)',
-  fontSize: 15,
+  border: '1px solid rgba(255, 255, 255, 0.12)',
+  borderRadius: 'var(--sf-radius-lg)',
+  fontSize: 'var(--sf-text-base)',
+  letterSpacing: 'var(--sf-track-normal)',
   fontFamily: 'inherit',
   boxSizing: 'border-box',
+  outline: 'none',
+  transition:
+    'border-color var(--sf-dur-base) var(--sf-ease-swift), background var(--sf-dur-base) var(--sf-ease-swift), box-shadow var(--sf-dur-base) var(--sf-ease-swift)',
 };
