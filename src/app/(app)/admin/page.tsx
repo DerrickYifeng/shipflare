@@ -13,6 +13,12 @@ const TOOLS: Array<{ href: string; title: string; blurb: string }> = [
       'Manage allowlisted emails and per-partner activity. Add or revoke invites, see who has actually signed up.',
   },
   {
+    href: '/admin/analytics',
+    title: 'Analytics',
+    blurb:
+      'Alpha funnel, weekly cohort retention, daily activity, and per-user health for the last 30 days.',
+  },
+  {
     href: '/admin/team-runs',
     title: 'Team runs',
     blurb:
