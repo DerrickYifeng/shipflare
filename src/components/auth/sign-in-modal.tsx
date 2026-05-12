@@ -14,8 +14,6 @@ interface Provider {
   label: string;
   icon: ReactNode;
   action: () => Promise<void>;
-  /** Visual variant — picks which surface tokens the button uses. */
-  variant: 'dark' | 'light';
 }
 
 function GitHubIcon() {
@@ -54,19 +52,10 @@ function GoogleIcon() {
   );
 }
 
-const VARIANT_STYLES = {
-  dark: {
-    background: 'var(--sf-bg-dark)',
-    hoverBackground: 'var(--sf-bg-dark-surface)',
-    color: 'var(--sf-fg-on-dark-1)',
-    border: 'none',
-  },
-  light: {
-    background: 'var(--sf-bg-primary)',
-    hoverBackground: 'var(--sf-bg-secondary)',
-    color: 'var(--sf-fg-1)',
-    border: '1px solid var(--sf-border-subtle)',
-  },
+const BUTTON_STYLE = {
+  background: 'var(--sf-bg-dark)',
+  hoverBackground: 'var(--sf-bg-dark-surface)',
+  color: 'var(--sf-fg-on-dark-1)',
 } as const;
 
 const PROVIDERS: Provider[] = [
@@ -77,14 +66,12 @@ const PROVIDERS: Provider[] = [
     label: 'Continue with Google',
     icon: <GoogleIcon />,
     action: signInWithGoogle,
-    variant: 'light',
   },
   {
     id: 'github',
     label: 'Continue with GitHub',
     icon: <GitHubIcon />,
     action: signInWithGitHub,
-    variant: 'dark',
   },
 ];
 
@@ -191,10 +178,10 @@ export function SignInModal({ open, onClose, onBeforeSignIn }: SignInModalProps)
                   gap: 10,
                   minHeight: 44,
                   padding: '10px 20px',
-                  background: VARIANT_STYLES[provider.variant].background,
-                  color: VARIANT_STYLES[provider.variant].color,
+                  background: BUTTON_STYLE.background,
+                  color: BUTTON_STYLE.color,
                   borderRadius: 'var(--sf-radius-md)',
-                  border: VARIANT_STYLES[provider.variant].border,
+                  border: 'none',
                   fontSize: 'var(--sf-text-base)',
                   fontWeight: 500,
                   letterSpacing: 'var(--sf-track-tight)',
@@ -203,12 +190,10 @@ export function SignInModal({ open, onClose, onBeforeSignIn }: SignInModalProps)
                   fontFamily: 'inherit',
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.background =
-                    VARIANT_STYLES[provider.variant].hoverBackground;
+                  e.currentTarget.style.background = BUTTON_STYLE.hoverBackground;
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.background =
-                    VARIANT_STYLES[provider.variant].background;
+                  e.currentTarget.style.background = BUTTON_STYLE.background;
                 }}
               >
                 {provider.icon}
