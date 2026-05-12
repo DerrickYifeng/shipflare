@@ -32,9 +32,11 @@ vi.mock('@/lib/logger', () => ({
   }),
 }));
 
-// dbSelectMock is called once per chained .select() query in the route.
-// Each call must return the value for that particular query in sequence.
+// dbSelectMock is called once per chained .select() query in the route
+// (and helpers imported by the route). Each call returns the value for
+// that particular query in sequence.
 const dbSelectMock = vi.fn();
+const dbInsertMock = vi.fn();
 vi.mock('@/lib/db', () => ({
   db: {
     select: () => ({
@@ -47,6 +49,11 @@ vi.mock('@/lib/db', () => ({
         where: () => ({
           limit: () => dbSelectMock(),
         }),
+      }),
+    }),
+    insert: () => ({
+      values: () => ({
+        returning: () => dbInsertMock(),
       }),
     }),
     update: () => ({
@@ -74,6 +81,7 @@ beforeEach(() => {
   writeMock.mockReset();
   enqueueMock.mockReset();
   dbSelectMock.mockReset();
+  dbInsertMock.mockReset();
   dispatchMock.mockReset();
 });
 
@@ -106,7 +114,7 @@ describe('PATCH /api/today/[id]/approve', () => {
     expect(res.status).toBe(404);
   });
 
-  it('falls back to legacy enqueue when plan_item has no linked draft', async () => {
+  it('falls back to legacy enqueue when plan_item has no linked draft and no output', async () => {
     findMock.mockResolvedValueOnce({
       id: '11111111-1111-1111-1111-111111111111',
       userId: 'user-1',
@@ -117,8 +125,11 @@ describe('PATCH /api/today/[id]/approve', () => {
       skillName: null,
     });
     writeMock.mockResolvedValueOnce(null);
-    // findDraftForPlanItem returns no row → legacy enqueue path
+    // findDraftForPlanItem returns no row
     dbSelectMock.mockResolvedValueOnce([]);
+    // synthesizeContentPostDraft fetches plan_item — returns row with no output
+    // so synthesize returns null and falls through to legacy enqueue.
+    dbSelectMock.mockResolvedValueOnce([{ output: null, params: {}, title: 'Post' }]);
     const { PATCH } = await import('../route');
     const res = await PATCH(makeReq(), {
       params: Promise.resolve({ id: '11111111-1111-1111-1111-111111111111' }),
