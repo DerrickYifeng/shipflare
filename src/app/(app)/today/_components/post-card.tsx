@@ -261,19 +261,35 @@ export function PostCard({
         }}
       >
         {!isEditing ? (
-          <>
-            <Button
-              size="sm"
-              onClick={() => onApprove(item.id)}
-              disabled={item.status === 'pending_approval' || !item.draftBody}
+          item.status === 'queued' ? (
+            <span
+              className="sf-mono"
+              style={{
+                fontSize: 'var(--sf-text-xs)',
+                fontWeight: 600,
+                color: 'var(--sf-success)',
+                letterSpacing: 'var(--sf-track-mono)',
+                textTransform: 'uppercase',
+                padding: '6px 10px',
+              }}
             >
-              {item.status === 'pending_approval' ? 'Posting…' : 'Post'}
-            </Button>
-            {item.draftBody ? (
-              <TextAction onClick={() => setLocalEditing(true)}>Edit</TextAction>
-            ) : null}
-            <TextAction onClick={() => onSkip(item.id)}>Skip</TextAction>
-          </>
+              Posted ✓
+            </span>
+          ) : (
+            <>
+              <Button
+                size="sm"
+                onClick={() => onApprove(item.id)}
+                disabled={item.status === 'pending_approval' || !item.draftBody}
+              >
+                {item.status === 'pending_approval' ? 'Posting…' : 'Post'}
+              </Button>
+              {item.draftBody ? (
+                <TextAction onClick={() => setLocalEditing(true)}>Edit</TextAction>
+              ) : null}
+              <TextAction onClick={() => onSkip(item.id)}>Skip</TextAction>
+            </>
+          )
         ) : (
           <>
             <Button size="sm" onClick={handleSaveEdit}>

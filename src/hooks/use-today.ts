@@ -253,9 +253,19 @@ export function useToday() {
           return;
         }
 
-        // Queued: server confirmed the post is in BullMQ.
+        // Queued: server confirmed the post is in BullMQ. Mark optimistically
+        // so the card shows "Posted ✓" instead of the Post button, then poll
+        // again in ~3s + 8s — the posting worker typically flips the plan_item
+        // to `completed` within seconds, at which point /api/today drops the
+        // row from the feed and the card disappears.
         if (body.queued) {
           mutate(markPending(id, 'queued'), { revalidate: false });
+          window.setTimeout(() => {
+            void mutate();
+          }, 3000);
+          window.setTimeout(() => {
+            void mutate();
+          }, 8000);
           return;
         }
       } catch (err) {
