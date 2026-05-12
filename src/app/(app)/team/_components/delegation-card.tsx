@@ -23,6 +23,14 @@ export interface DelegationCardProps {
   memberLookup: ReadonlyMap<string, DelegationCardMember>;
   activeMemberId: string | null;
   onSelectMember: (memberId: string) => void;
+  /**
+   * Set of `agent_runs.id` values currently surfaced in the bottom rail
+   * (A2). When a task's `agentId` is in this set, the SubtaskCard
+   * collapses its pulsing in-flight chrome to a thin "see in rail" hint
+   * so the teammate doesn't appear twice on screen. Defaults to an empty
+   * set when omitted, preserving legacy inline behaviour.
+   */
+  activeSubagentIds?: ReadonlySet<string>;
 }
 
 const SUMMARY_COLLAPSED_CHARS = 180;
@@ -61,6 +69,7 @@ function DelegationCardImpl({
   memberLookup,
   activeMemberId,
   onSelectMember,
+  activeSubagentIds,
 }: DelegationCardProps) {
   if (tasks.length === 0) return null;
 
@@ -158,6 +167,8 @@ function DelegationCardImpl({
       <ul style={stack}>
         {tasks.map((task) => {
           const member = resolveMember(task);
+          const inRail =
+            !!task.agentId && !!activeSubagentIds?.has(task.agentId);
           return (
             <SubtaskCard
               key={task.messageId}
@@ -166,6 +177,7 @@ function DelegationCardImpl({
               active={!!activeMemberId && !!member && member.id === activeMemberId}
               onSelectMember={onSelectMember}
               isSoloDispatch={specialistCount === 1}
+              inRail={inRail}
             />
           );
         })}
@@ -196,6 +208,14 @@ interface SubtaskCardProps {
    * "Subtask" — otherwise the same label appears twice in the same card.
    */
   isSoloDispatch: boolean;
+  /**
+   * True when this subtask's agent_runs row is currently surfaced in
+   * the A2 bottom rail. The card swaps its expanded progress feed for
+   * a thin "Active in bottom rail" hint so the same teammate isn't
+   * shown twice. Falls back to the normal expanded layout once the
+   * teammate exits the rail (terminal status).
+   */
+  inRail: boolean;
 }
 
 function SubtaskCard({
@@ -204,6 +224,7 @@ function SubtaskCard({
   active,
   onSelectMember: _onSelectMember,
   isSoloDispatch,
+  inRail,
 }: SubtaskCardProps) {
   const [hover, setHover] = useState(false);
   // Subscribe to live tool-input bytes for this dispatch. By the time a
@@ -410,8 +431,15 @@ function SubtaskCard({
           renders the full progressItems list (capped to the most recent
           N events; older fold into a `+N earlier events` row at the top
           so the streaming text keeps the live-progress feel). Collapsed
-          shows only the final summary as a one-liner (if any). */}
-      {expanded ? (
+          shows only the final summary as a one-liner (if any).
+          When `inRail` is true, the A2 bottom rail owns the live-progress
+          chrome — we swap the in-flight body for a thin "Active in bottom
+          rail" hint so the teammate isn't shown twice. The task label
+          and header still render so the user sees what the teammate is
+          doing. */}
+      {inRail ? (
+        <InRailHint />
+      ) : expanded ? (
         <div style={{ marginTop: 2 }}>
           {hasProgress ? (
             <ProgressList items={task.progressItems} accentColor={borderColor} />
@@ -431,6 +459,35 @@ function SubtaskCard({
         </>
       )}
     </li>
+  );
+}
+
+/**
+ * Thin compass-arrow hint shown in a SubtaskCard whose teammate is
+ * currently surfaced in the A2 bottom rail. Replaces the pulsing
+ * in-progress chrome (thinking row, progress feed) so the same
+ * teammate isn't visually duplicated on screen — the rail owns the
+ * live-progress surface while the card keeps the label + header
+ * context for scroll-back history.
+ */
+function InRailHint() {
+  const wrap: CSSProperties = {
+    marginTop: 6,
+    padding: '6px 10px',
+    borderRadius: 6,
+    background: 'rgba(0, 0, 0, 0.03)',
+    fontFamily: 'var(--sf-font-mono)',
+    fontSize: 11,
+    color: 'var(--sf-fg-3)',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+  };
+  return (
+    <div style={wrap} data-testid="in-rail-hint" role="status">
+      <span aria-hidden="true">↓</span>
+      <span>Active in bottom rail</span>
+    </div>
   );
 }
 

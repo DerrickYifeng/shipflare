@@ -72,6 +72,24 @@ export interface ConversationProps {
    */
   focusPendingMessageId?: string | null;
   /**
+   * Set of `agent_runs.id` values currently surfaced in the bottom rail
+   * (A2). When a DelegationTask's `agentId` is in this set, the
+   * conversation-level DelegationCard collapses its pulsing in-flight
+   * chrome to a thin "see in rail" hint so the teammate doesn't appear
+   * twice on screen. Terminal teammates fall out of the set and the
+   * card re-expands with its final summary.
+   */
+  activeSubagentIds?: ReadonlySet<string>;
+  /**
+   * Pixel reservation at the bottom of the scroll container. Defaults
+   * to `DEFAULT_BOTTOM_RESERVATION` (sized for the composer card +
+   * outer padding + a comfort buffer). When the A2 bottom rail is
+   * non-empty, the caller bumps this so the last messages stay
+   * readable above the rail's translucent backdrop instead of being
+   * obscured by it.
+   */
+  bottomReservation?: number;
+  /**
    * Older-history pagination. When `hasOlder` is true and the user
    * scrolls within ~100px of the top of the thread, `onLoadOlder` is
    * invoked. The parent (TeamDesk) flips `loadingOlder` while the
@@ -83,6 +101,13 @@ export interface ConversationProps {
   loadingOlder?: boolean;
   onLoadOlder?: () => void;
 }
+
+/**
+ * Sized for the typical (collapsed) composer: 20 bottom inset +
+ * ~120 card + 40 fade ≈ 180. Bumped by the caller when the A2
+ * bottom rail is present.
+ */
+const DEFAULT_BOTTOM_RESERVATION = 180;
 
 const THREAD_MAX_WIDTH = 740;
 
@@ -115,6 +140,8 @@ export function Conversation({
   onPrefillComposer,
   onFocusComposer,
   focusPendingMessageId = null,
+  activeSubagentIds,
+  bottomReservation = DEFAULT_BOTTOM_RESERVATION,
   hasOlder = false,
   loadingOlder = false,
   onLoadOlder,
@@ -291,12 +318,14 @@ export function Conversation({
   //
   // `paddingBottom` reserves airspace for the fixed composer plus a
   // comfort gap so the last bubble never grazes the composer's fade.
-  // Sized for the typical (collapsed) composer: 20 bottom inset +
-  // ~120 card + 40 fade ≈ 180. When the user expands the textarea
-  // toward its 200px MAX_HEIGHT the topmost messages slide a bit
-  // further behind the composer fade, but the user is focused on the
-  // textarea at that point — this is the right tradeoff vs. burning
-  // ~220px of empty whitespace on every collapsed view.
+  // Default (DEFAULT_BOTTOM_RESERVATION = 180) is sized for the typical
+  // (collapsed) composer: 20 bottom inset + ~120 card + 40 fade. The
+  // caller bumps `bottomReservation` when the A2 bottom rail is
+  // rendered so the last messages stay readable above the rail's
+  // translucent backdrop. When the user expands the textarea toward
+  // its 200px MAX_HEIGHT the topmost messages slide a bit further
+  // behind the composer fade, but the user is focused on the textarea
+  // at that point — that tradeoff is preserved.
   const wrap: CSSProperties = {
     display: 'flex',
     flexDirection: 'column',
@@ -304,7 +333,7 @@ export function Conversation({
     flex: 1,
     minHeight: 0,
     overflowY: 'auto',
-    paddingBottom: 180,
+    paddingBottom: bottomReservation,
     // Disable Chrome's automatic scroll anchoring. Without this the
     // browser re-anchors to an element above the new content when the
     // list grows, which *subtracts* from `scrollTop` and masks the
@@ -386,6 +415,7 @@ export function Conversation({
             memberLookup={memberLookup}
             activeMemberId={activeMemberId}
             onSelectMember={onSelectMember}
+            activeSubagentIds={activeSubagentIds}
           />
         ) : null}
         {preparingCount > 0 ? (
