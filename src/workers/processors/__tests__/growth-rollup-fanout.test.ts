@@ -1,18 +1,23 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 let channelRows: Array<{ userId: string }> = [];
+let productRows: Array<{ userId: string }> = [];
 const enqueueCalls: Array<{ kind: 'user'; userId: string }> = [];
 
 vi.mock('@/lib/db', () => ({
   db: {
     select: () => ({
-      from: () => Promise.resolve(channelRows),
+      from: (table: { _label?: string }) => {
+        if (table._label === 'products') return Promise.resolve(productRows);
+        return Promise.resolve(channelRows);
+      },
     }),
   },
 }));
 
 vi.mock('@/lib/db/schema', () => ({
-  channels: { userId: 'channels.userId' },
+  channels: { _label: 'channels', userId: 'channels.userId' },
+  products: { _label: 'products', userId: 'products.userId' },
 }));
 
 vi.mock('@/lib/queue', () => ({
@@ -38,6 +43,7 @@ function makeJob(kind: 'fanout' | 'user', userId?: string) {
 
 beforeEach(() => {
   channelRows = [];
+  productRows = [];
   enqueueCalls.length = 0;
 });
 
@@ -48,7 +54,7 @@ describe('processGrowthRollupFanout', () => {
   });
 
   it('enqueues one job per distinct userId', async () => {
-    channelRows = [{ userId: 'u1' }, { userId: 'u2' }, { userId: 'u3' }];
+    productRows = [{ userId: 'u1' }, { userId: 'u2' }, { userId: 'u3' }];
     await processGrowthRollupFanout(makeJob('fanout'));
     expect(enqueueCalls).toEqual([
       { kind: 'user', userId: 'u1' },
@@ -57,14 +63,18 @@ describe('processGrowthRollupFanout', () => {
     ]);
   });
 
-  it('dedupes multiple channels for the same userId', async () => {
-    channelRows = [
-      { userId: 'u1' },
-      { userId: 'u1' }, // u1 has both X and Reddit
-      { userId: 'u2' },
-    ];
+  it('dedupes users appearing in both products and channels', async () => {
+    productRows = [{ userId: 'u1' }, { userId: 'u2' }];
+    channelRows = [{ userId: 'u1' }]; // u1 also has an X channel
     await processGrowthRollupFanout(makeJob('fanout'));
     expect(enqueueCalls).toHaveLength(2);
     expect(enqueueCalls.map((c) => c.userId).sort()).toEqual(['u1', 'u2']);
+  });
+
+  it('reddit-only users (product but no channels) are still enqueued', async () => {
+    productRows = [{ userId: 'reddit-only-user' }];
+    channelRows = []; // no channels at all
+    await processGrowthRollupFanout(makeJob('fanout'));
+    expect(enqueueCalls).toEqual([{ kind: 'user', userId: 'reddit-only-user' }]);
   });
 });
