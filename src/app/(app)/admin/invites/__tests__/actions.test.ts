@@ -15,6 +15,10 @@ const insertIntoAllowed: unknown[] = [];
 // updateWaitlist tracks args passed to tx.update(waitlistSignups).set(...).where(...)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const updateWaitlist = vi.fn<(vals: any) => void>();
+// updateWaitlistReturning controls the return value of .returning() on the waitlist UPDATE.
+// Default: returns one row (meaning THIS call did the approval).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const updateWaitlistReturning = vi.fn<() => Promise<any[]>>().mockResolvedValue([{ id: '00000000-0000-0000-0000-000000000001' }]);
 
 vi.mock('@/lib/db', () => ({
   db: {
@@ -62,10 +66,12 @@ vi.mock('@/lib/db', () => ({
         }),
         update: () => ({
           set: (vals: unknown) => ({
-            where: () => {
-              updateWaitlist(vals);
-              return Promise.resolve();
-            },
+            where: () => ({
+              returning: () => {
+                updateWaitlist(vals);
+                return updateWaitlistReturning();
+              },
+            }),
           }),
         }),
       };
@@ -122,6 +128,7 @@ beforeEach(() => {
   mockRequireAdmin.mockReset();
   selectFromMock.mockReset().mockResolvedValue([]);
   updateWaitlist.mockReset();
+  updateWaitlistReturning.mockReset().mockResolvedValue([{ id: '00000000-0000-0000-0000-000000000001' }]);
   sendEmailMock.mockReset().mockResolvedValue({ ok: true });
 });
 
@@ -281,7 +288,7 @@ describe('approveWaitlistSignup', () => {
     );
   });
 
-  it('sends an approval email to the applicant fire-and-forget', async () => {
+  it('sends an approval email to the applicant', async () => {
     vi.mocked(mockRequireAdmin).mockResolvedValueOnce('admin@x.com');
     selectFromMock.mockResolvedValueOnce([
       { id: '00000000-0000-0000-0000-000000000001', email: 'newuser@example.com' },
@@ -310,6 +317,21 @@ describe('approveWaitlistSignup', () => {
     selectFromMock.mockResolvedValueOnce([]);
     const result = await approveWaitlistSignup('00000000-0000-0000-0000-000000000099');
     expect(result).toEqual({ ok: false, error: 'Waitlist row not found.' });
+  });
+
+  it('does not send approval email when waitlist row was already approved (race)', async () => {
+    vi.mocked(mockRequireAdmin).mockResolvedValueOnce('admin@x.com');
+    selectFromMock.mockResolvedValueOnce([
+      { id: '00000000-0000-0000-0000-000000000001', email: 'newuser@example.com' },
+    ]);
+    // Simulate the WHERE clause filtering out the row (already approved)
+    // by making .returning() resolve to an empty array:
+    updateWaitlistReturning.mockResolvedValueOnce([]);
+
+    const result = await approveWaitlistSignup('00000000-0000-0000-0000-000000000001');
+
+    expect(result).toEqual({ ok: true });
+    expect(sendEmailMock).not.toHaveBeenCalled();
   });
 });
 

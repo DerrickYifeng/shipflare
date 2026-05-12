@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import { allowedEmails, sessions, users, waitlistSignups } from '@/lib/db/schema';
 import { requireAdmin } from '@/lib/admin';
@@ -133,9 +133,11 @@ const idSchema = z.object({ id: z.string().uuid() });
  * doesn't leave the row marked approved without the corresponding
  * allowlist entry.
  *
- * Sends the applicant a friendly "you're in" email after the
- * transaction commits — fire-and-forget; a Resend failure doesn't fail
- * the action (the founder can resend manually via the dashboard later).
+ * Sends the applicant a friendly "you're in" email after the transaction
+ * commits. The send awaits Resend's response but does NOT throw on
+ * failure — a misconfigured EMAIL_FROM or transient SMTP error logs a
+ * warning and the action still returns { ok: true }. The founder can
+ * resend manually from the dashboard later.
  */
 export async function approveWaitlistSignup(
   id: string,
@@ -155,39 +157,60 @@ export async function approveWaitlistSignup(
     return { ok: false, error: 'Waitlist row not found.' };
   }
   const row = rows[0];
+  const normalizedEmail = normalizeEmail(row.email);
 
-  await db.transaction(async (tx) => {
-    await tx
-      .insert(allowedEmails)
-      .values({
-        email: row.email,
-        invitedBy: adminEmail,
-        note: 'Approved from waitlist',
-      })
-      .onConflictDoUpdate({
-        target: allowedEmails.email,
-        set: {
-          revokedAt: null,
+  let actuallyApproved = false;
+  try {
+    await db.transaction(async (tx) => {
+      await tx
+        .insert(allowedEmails)
+        .values({
+          email: normalizedEmail,
           invitedBy: adminEmail,
-        },
-      });
+          note: 'Approved from waitlist',
+        })
+        .onConflictDoUpdate({
+          target: allowedEmails.email,
+          set: {
+            revokedAt: null,
+            invitedBy: adminEmail,
+          },
+        });
 
-    await tx
-      .update(waitlistSignups)
-      .set({
-        approvedAt: new Date(),
-        approvedBy: adminEmail,
-      })
-      .where(eq(waitlistSignups.id, row.id));
-  });
+      const updated = await tx
+        .update(waitlistSignups)
+        .set({
+          approvedAt: new Date(),
+          approvedBy: adminEmail,
+        })
+        .where(
+          and(
+            eq(waitlistSignups.id, row.id),
+            isNull(waitlistSignups.approvedAt),
+          ),
+        )
+        .returning({ id: waitlistSignups.id });
 
-  // Fire-and-forget email — don't block on Resend
-  const result = await sendEmail(waitlistApproved({ email: row.email }));
-  if (!result.ok) {
-    log.warn('approval email failed but action succeeded', {
-      email: row.email,
-      reason: result.reason,
+      actuallyApproved = updated.length > 0;
+
+      if (!actuallyApproved) {
+        log.info('waitlist row already approved by another admin', { id: row.id });
+      }
     });
+  } catch (err) {
+    log.error('approve transaction failed', { id: row.id, err });
+    return { ok: false, error: 'Database error, please retry.' };
+  }
+
+  // Only send the approval email if this call was the one that approved
+  if (actuallyApproved) {
+    const result = await sendEmail(waitlistApproved({ email: normalizedEmail }));
+    if (!result.ok) {
+      log.warn('approval email failed but action succeeded', {
+        email: normalizedEmail,
+        reason: result.reason,
+      });
+    }
   }
 
   revalidatePath('/admin/invites');
@@ -211,7 +234,13 @@ export async function dismissWaitlistSignup(
       dismissedAt: new Date(),
       dismissedBy: adminEmail,
     })
-    .where(eq(waitlistSignups.id, parsed.data.id));
+    .where(
+      and(
+        eq(waitlistSignups.id, parsed.data.id),
+        isNull(waitlistSignups.approvedAt),
+        isNull(waitlistSignups.dismissedAt),
+      ),
+    );
 
   revalidatePath('/admin/invites');
   return { ok: true };
