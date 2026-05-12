@@ -320,32 +320,25 @@ export function TodayBody({ yesterdayTop = null }: TodayBodyProps = {}) {
       if (it.cardFormat === 'reply') rs.push(it);
       else ps.push(it);
     }
-    // Source filter is keyed as `${platform}:${source}`, matching the chip
-    // id format in source-filter-rail.tsx. Exact match avoids cross-hits
-    // like "r/dev" matching "r/devops" that the prior substring check had.
+    // Source filter is keyed by platform only — chips collapse all
+    // per-account / per-subreddit detail into platform-level filters.
     const filtered = sourceFilterId
-      ? rs.filter(
-          (r) =>
-            r.community !== null &&
-            `${r.platform}:${r.community}` === sourceFilterId,
-        )
+      ? rs.filter((r) => r.platform === sourceFilterId)
       : rs;
     return { replies: rs, posts: ps, filteredReplies: filtered };
   }, [items, sourceFilterId]);
 
   // Filter rail entries derived from the replies currently in view —
-  // each unique (platform, community) pair becomes a chip.
+  // one chip per platform, with a count of replies for that platform.
   const displaySources = useMemo<SourceFilterEntry[]>(() => {
-    const seen = new Set<string>();
-    const out: SourceFilterEntry[] = [];
+    const counts = new Map<string, number>();
     for (const r of replies) {
-      if (r.community === null) continue;
-      const key = `${r.platform}:${r.community}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push({ platform: r.platform, source: r.community });
+      counts.set(r.platform, (counts.get(r.platform) ?? 0) + 1);
     }
-    return out;
+    return Array.from(counts.entries()).map(([platform, count]) => ({
+      platform,
+      count,
+    }));
   }, [replies]);
 
   const activeItem = items[activeIndex];
