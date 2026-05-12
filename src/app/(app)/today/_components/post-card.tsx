@@ -118,8 +118,19 @@ export function PostCard({
     transition: 'box-shadow var(--sf-dur-base) var(--sf-ease-swift)',
   };
 
+  const subredditOnItemString =
+    typeof subredditOnItem === 'string' && subredditOnItem.length > 0
+      ? subredditOnItem
+      : null;
+
   return (
-    <article ref={rootRef} style={articleStyle} aria-busy={isOptimistic || undefined}>
+    <article
+      ref={rootRef}
+      style={articleStyle}
+      aria-busy={isOptimistic || undefined}
+      data-testid="post-card"
+      data-channel={item.platform}
+    >
       <header
         style={{
           display: 'flex',
@@ -160,6 +171,7 @@ export function PostCard({
               }}
             >
               Original · {platformDisplay(item.platform)}
+              {subredditOnItemString ? ` · r/${subredditOnItemString}` : ''}
             </span>
           </div>
         </div>

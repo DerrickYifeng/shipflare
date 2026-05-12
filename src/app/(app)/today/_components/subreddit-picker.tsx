@@ -203,6 +203,7 @@ export function SubredditPicker({
 
   return (
     <div
+      data-testid="subreddit-picker"
       style={{
         display: 'flex',
         flexDirection: 'column',
