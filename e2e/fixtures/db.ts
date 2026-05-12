@@ -6,7 +6,6 @@ import * as schema from '../../src/lib/db/schema';
 import {
   makeThread,
   makeDraft,
-  makeHealthScore,
   makeActivityEvent,
   makeChannel,
   makeProduct,
@@ -78,12 +77,6 @@ export async function seedDrafts(
   );
   await db.insert(schema.drafts).values(items);
   return items;
-}
-
-export async function seedHealthScore(userId: string, score: number) {
-  const values = makeHealthScore(userId, score);
-  await db.insert(schema.healthScores).values(values);
-  return values;
 }
 
 export async function seedActivityEvents(userId: string, count: number) {

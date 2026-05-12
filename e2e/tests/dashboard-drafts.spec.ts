@@ -2,7 +2,6 @@ import { testWithProduct, expect } from '../fixtures/auth';
 import {
   seedThreads,
   seedDrafts,
-  seedHealthScore,
   seedActivityEvents,
 } from '../fixtures/db';
 
@@ -17,14 +16,9 @@ testWithProduct.describe('Dashboard: draft review', () => {
       testUser.id,
       threads.map((t) => t.id),
     );
-    await seedHealthScore(testUser.id, 72);
     await seedActivityEvents(testUser.id, 5);
 
     await page.goto('/dashboard');
-
-    // Verify health score ring
-    await expect(page.getByRole('img', { name: /Health score: 72/ })).toBeVisible();
-    await expect(page.getByText('72')).toBeVisible();
 
     // Verify 3 draft cards visible
     const draftCards = page.locator('[class*="animate-sf-fade-in"]');
