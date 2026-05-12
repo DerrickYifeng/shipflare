@@ -1,3 +1,5 @@
+'use client';
+
 import type { ReactNode } from 'react';
 import { Ops } from '@/components/ui/ops';
 
@@ -51,7 +53,7 @@ function PlatformTile({ platform }: { platform: string }) {
 function formatLastPost(iso: string | null): string {
   if (!iso) return '—';
   const then = new Date(iso).getTime();
-  const ago = Date.now() - then;
+  const ago = Math.max(0, Date.now() - then);
   const h = Math.floor(ago / 3_600_000);
   if (h < 1) return 'just now';
   if (h < 24) return `${h}h ago`;
