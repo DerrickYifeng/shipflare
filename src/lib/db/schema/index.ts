@@ -5,6 +5,11 @@ export {
   type NewAllowedEmail,
 } from './allowed-emails';
 export { products } from './products';
+export {
+  productRedditChannels,
+  type ProductRedditChannel,
+  type NewProductRedditChannel,
+} from './product-reddit-channels';
 export { channels, threads } from './channels';
 export {
   drafts,
