@@ -7,7 +7,12 @@ import { render, screen, cleanup } from '@testing-library/react';
 // per useSWR call via a small dispatch table keyed on the URL.
 const swrMockState: Record<
   string,
-  { data?: unknown; isLoading?: boolean; mutate?: () => Promise<unknown> }
+  {
+    data?: unknown;
+    error?: unknown;
+    isLoading?: boolean;
+    mutate?: () => Promise<unknown>;
+  }
 > = {};
 
 vi.mock('swr', () => ({
@@ -15,6 +20,7 @@ vi.mock('swr', () => ({
     const entry = swrMockState[key] ?? {};
     return {
       data: entry.data,
+      error: entry.error,
       isLoading: entry.isLoading ?? false,
       mutate: entry.mutate ?? (async () => undefined),
     };
@@ -36,6 +42,29 @@ afterEach(() => {
   // RTL's global `screen` queries the document — tear down rendered
   // DOM between tests so we don't pick up nodes from prior render().
   cleanup();
+});
+
+describe('<RedditResearchCard /> — error state', () => {
+  it('shows a refresh hint when the status fetch errors', () => {
+    swrMockState[STATUS_URL] = { error: new Error('boom') };
+    swrMockState[CHANNELS_URL] = { data: { channels: [] } };
+
+    render(<RedditResearchCard />);
+    expect(
+      screen.getByRole('heading', { name: /unable to load reddit communities/i }),
+    ).toBeTruthy();
+    expect(screen.getByText(/refresh the page to retry/i)).toBeTruthy();
+  });
+
+  it('shows the same hint when the channels fetch errors', () => {
+    swrMockState[STATUS_URL] = { data: { status: 'pending', count: 0 } };
+    swrMockState[CHANNELS_URL] = { error: new Error('boom') };
+
+    render(<RedditResearchCard />);
+    expect(
+      screen.getByRole('heading', { name: /unable to load reddit communities/i }),
+    ).toBeTruthy();
+  });
 });
 
 describe('<RedditResearchCard /> — pending state', () => {

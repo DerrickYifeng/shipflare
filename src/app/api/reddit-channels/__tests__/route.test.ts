@@ -207,3 +207,60 @@ describe('PATCH /api/reddit-channels', () => {
     );
   });
 });
+
+// ── Multi-tenant safety ────────────────────────────────────────────────────
+//
+// Locks in that the route NEVER trusts a client-supplied productId; the
+// productId passed to the repository always comes from the session (via
+// the products-by-userId lookup). If userA POSTs/PATCHes against a row
+// that lives under userB's product, the repository WHERE clause filters
+// by userA's productId and the row stays untouched.
+
+describe('multi-tenant safety', () => {
+  it('POST scopes upsert to the session user productId, not the request body', async () => {
+    authUserId = 'user-A';
+    findProductMock.mockResolvedValueOnce([{ id: 'prod-A' }]);
+    upsertManualSubredditMock.mockResolvedValueOnce(undefined);
+    // Adversarial body: client tries to slip in a tenant override.
+    const body = {
+      subreddit: 'SaaS',
+      productId: 'prod-B',
+      userId: 'user-B',
+    };
+    const { POST } = await import('../route');
+    const res = await POST(makePost(body));
+    expect(res.status).toBe(200);
+    expect(upsertManualSubredditMock).toHaveBeenCalledTimes(1);
+    const callArgs = upsertManualSubredditMock.mock.calls[0][0];
+    expect(callArgs.productId).toBe('prod-A');
+    expect(callArgs.userId).toBe('user-A');
+    expect(callArgs.subreddit).toBe('SaaS');
+    expect(callArgs.productId).not.toBe('prod-B');
+  });
+
+  it('PATCH scopes setSubredditDisabled to the session user productId', async () => {
+    authUserId = 'user-A';
+    findProductMock.mockResolvedValueOnce([{ id: 'prod-A' }]);
+    setSubredditDisabledMock.mockResolvedValueOnce(undefined);
+    const { PATCH } = await import('../route');
+    const res = await PATCH(
+      makePatch({ subreddit: 'SaaS', disabled: true }),
+    );
+    expect(res.status).toBe(200);
+    expect(setSubredditDisabledMock).toHaveBeenCalledTimes(1);
+    const [productIdArg, subredditArg, disabledArg] =
+      setSubredditDisabledMock.mock.calls[0];
+    expect(productIdArg).toBe('prod-A');
+    expect(subredditArg).toBe('SaaS');
+    expect(disabledArg).toBe(true);
+  });
+
+  it('GET scopes listAllSubreddits to the session user productId', async () => {
+    authUserId = 'user-A';
+    findProductMock.mockResolvedValueOnce([{ id: 'prod-A' }]);
+    listAllSubredditsMock.mockResolvedValueOnce([]);
+    const { GET } = await import('../route');
+    await GET(makeGet());
+    expect(listAllSubredditsMock).toHaveBeenCalledWith('prod-A');
+  });
+});

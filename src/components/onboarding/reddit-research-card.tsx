@@ -4,23 +4,33 @@
  * <RedditResearchCard /> — surfaces the kickoff Reddit-channel research
  * pass to the founder.
  *
- * Three states:
+ * Four render branches:
+ *   - `error`:   SWR fetcher threw (e.g. 4xx/5xx). Shows a refresh hint.
  *   - `pending`: spinner + reassurance copy. Polls every 3s.
+ *   - `failed`:  research job ended with failure; retry CTA.
  *   - `done`:    list of subreddits (active first, then disabled) with
  *                fit / activity / source badges + add-manual + re-research.
- *   - `failed`:  error state + retry CTA (re-research endpoint wires up
- *                in Task 8; for now the button is presented but the POST
- *                target is the same once /api/reddit-channels/re-research
- *                ships).
  *
  * SWR polls `/api/onboarding/reddit-research/status` and
  * `/api/reddit-channels`. The refreshInterval is gated on the current
  * status so once we settle on `done` or `failed` we stop hitting the
  * server.
+ *
+ * Design tokens follow the project's `--sf-*` namespace (see
+ * `src/app/globals.css`). No hex fallbacks — if a token is missing we
+ * want the cascade to surface the gap, not silently mask it.
  */
 
-import { useState } from 'react';
+import { useState, type FormEvent } from 'react';
 import useSWR from 'swr';
+
+interface ChannelActivity {
+  postsLast7d?: number;
+  commentsLast7d?: number;
+  medianUpvotes?: number;
+}
+
+type ChannelSource = 'auto' | 'manual';
 
 interface ChannelRow {
   id: string;
@@ -28,13 +38,9 @@ interface ChannelRow {
   memberCount: number | null;
   fitScore: number | null;
   rulesSummary: string | null;
-  activity: {
-    postsLast7d?: number;
-    commentsLast7d?: number;
-    medianUpvotes?: number;
-  } | null;
+  activity: ChannelActivity | null;
   rank: number;
-  source: 'auto' | 'manual' | string;
+  source: ChannelSource;
   disabled: boolean;
 }
 
@@ -49,7 +55,19 @@ interface ChannelsResponse {
 
 const SUBREDDIT_REGEX = /^[A-Za-z0-9_]{3,21}$/;
 
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
+/**
+ * Throws on non-2xx so SWR surfaces it via `error` instead of letting
+ * the component parse a JSON error envelope into success data. SWR's
+ * built-in revalidation will keep retrying once we've signalled an
+ * error here.
+ */
+async function fetcher<T>(url: string): Promise<T> {
+  const r = await fetch(url);
+  if (!r.ok) {
+    throw new Error(`${url} → ${r.status}`);
+  }
+  return (await r.json()) as T;
+}
 
 function formatMembers(n: number | null): string {
   if (n == null) return '—';
@@ -59,10 +77,10 @@ function formatMembers(n: number | null): string {
 }
 
 function fitBadgeColor(score: number | null): string {
-  if (score == null) return 'var(--color-sf-text-tertiary, #888)';
-  if (score >= 0.7) return 'var(--color-sf-success, #2a8a4a)';
-  if (score >= 0.4) return 'var(--color-sf-warning, #b8830f)';
-  return 'var(--color-sf-text-tertiary, #888)';
+  if (score == null) return 'var(--sf-fg-3)';
+  if (score >= 0.7) return 'var(--sf-success)';
+  if (score >= 0.4) return 'var(--sf-warning)';
+  return 'var(--sf-fg-3)';
 }
 
 interface ChannelRowProps {
@@ -89,10 +107,10 @@ function ChannelRowView({ row, onToggle, busy }: ChannelRowProps) {
         gap: 4,
         padding: '12px 14px',
         borderRadius: 10,
-        border: '1px solid var(--color-sf-border, #e3e3e3)',
+        border: '1px solid var(--sf-border)',
         background: row.disabled
-          ? 'var(--color-sf-bg-muted, #f6f6f6)'
-          : 'var(--color-sf-bg-primary, #fff)',
+          ? 'var(--sf-bg-tertiary)'
+          : 'var(--sf-bg-secondary)',
         opacity: row.disabled ? 0.6 : 1,
       }}
     >
@@ -105,12 +123,16 @@ function ChannelRowView({ row, onToggle, busy }: ChannelRowProps) {
         }}
       >
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-          <span style={{ fontWeight: 600, fontSize: 15 }}>
+          <span
+            style={{
+              fontWeight: 600,
+              fontSize: 15,
+              color: 'var(--sf-fg-1)',
+            }}
+          >
             r/{row.subreddit}
           </span>
-          <span
-            style={{ fontSize: 12, color: 'var(--color-sf-text-secondary, #555)' }}
-          >
+          <span style={{ fontSize: 12, color: 'var(--sf-fg-3)' }}>
             {formatMembers(row.memberCount)} members
           </span>
         </div>
@@ -120,7 +142,7 @@ function ChannelRowView({ row, onToggle, busy }: ChannelRowProps) {
             style={{
               fontSize: 11,
               fontWeight: 600,
-              color: '#fff',
+              color: 'var(--sf-fg-on-dark-1)',
               background: fitBadgeColor(row.fitScore),
               padding: '2px 8px',
               borderRadius: 999,
@@ -133,8 +155,8 @@ function ChannelRowView({ row, onToggle, busy }: ChannelRowProps) {
             style={{
               fontSize: 11,
               fontWeight: 500,
-              color: 'var(--color-sf-text-secondary, #555)',
-              border: '1px solid var(--color-sf-border, #e3e3e3)',
+              color: 'var(--sf-fg-3)',
+              border: '1px solid var(--sf-border)',
               padding: '2px 8px',
               borderRadius: 999,
               textTransform: 'capitalize',
@@ -150,8 +172,9 @@ function ChannelRowView({ row, onToggle, busy }: ChannelRowProps) {
               fontSize: 12,
               padding: '4px 10px',
               borderRadius: 8,
-              border: '1px solid var(--color-sf-border, #ccc)',
+              border: '1px solid var(--sf-border)',
               background: 'transparent',
+              color: 'var(--sf-fg-1)',
               cursor: busy ? 'wait' : 'pointer',
             }}
           >
@@ -159,12 +182,7 @@ function ChannelRowView({ row, onToggle, busy }: ChannelRowProps) {
           </button>
         </div>
       </div>
-      <div
-        style={{
-          fontSize: 12,
-          color: 'var(--color-sf-text-secondary, #555)',
-        }}
-      >
+      <div style={{ fontSize: 12, color: 'var(--sf-fg-3)' }}>
         {activityText}
       </div>
       {row.rulesSummary ? (
@@ -172,7 +190,7 @@ function ChannelRowView({ row, onToggle, busy }: ChannelRowProps) {
           title={row.rulesSummary}
           style={{
             fontSize: 12,
-            color: 'var(--color-sf-text-tertiary, #888)',
+            color: 'var(--sf-fg-4)',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
@@ -207,10 +225,12 @@ export function RedditResearchCard() {
     },
   );
 
-  const sortedChannels = (channels.data?.channels ?? []).slice().sort((a, b) => {
-    if (a.disabled !== b.disabled) return a.disabled ? 1 : -1;
-    return a.rank - b.rank;
-  });
+  const sortedChannels = (channels.data?.channels ?? [])
+    .slice()
+    .sort((a, b) => {
+      if (a.disabled !== b.disabled) return a.disabled ? 1 : -1;
+      return a.rank - b.rank;
+    });
 
   async function handleToggle(subreddit: string, nextDisabled: boolean) {
     setBusy(true);
@@ -221,7 +241,9 @@ export function RedditResearchCard() {
         body: JSON.stringify({ subreddit, disabled: nextDisabled }),
       });
       if (!res.ok) {
-        const detail = await res.json().catch(() => null);
+        const detail = (await res.json().catch(() => null)) as
+          | { error?: string }
+          | null;
         throw new Error(detail?.error ?? `HTTP ${res.status}`);
       }
       await channels.mutate();
@@ -232,7 +254,7 @@ export function RedditResearchCard() {
     }
   }
 
-  async function handleAdd(e: React.FormEvent<HTMLFormElement>) {
+  async function handleAdd(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setAddError(null);
     const trimmed = addValue.trim();
@@ -250,7 +272,9 @@ export function RedditResearchCard() {
         body: JSON.stringify({ subreddit: trimmed }),
       });
       if (!res.ok) {
-        const detail = await res.json().catch(() => null);
+        const detail = (await res.json().catch(() => null)) as
+          | { error?: string }
+          | null;
         throw new Error(detail?.error ?? `HTTP ${res.status}`);
       }
       setAddValue('');
@@ -268,6 +292,38 @@ export function RedditResearchCard() {
     await Promise.all([status.mutate(), channels.mutate()]);
   }
 
+  // ── Error (fetcher threw) ───────────────────────────────────────────────
+  // Surfaces 4xx/5xx during the brief window between /api/onboarding/commit
+  // and the first successful read, or any other transient failure. We trust
+  // SWR to keep revalidating in the background.
+  if (status.error || channels.error) {
+    return (
+      <section
+        aria-labelledby="reddit-research-heading"
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 16,
+          padding: 24,
+          borderRadius: 14,
+          border: '1px solid var(--sf-border)',
+          background: 'var(--sf-bg-secondary)',
+        }}
+      >
+        <h2
+          id="reddit-research-heading"
+          style={{ fontSize: 18, margin: 0, color: 'var(--sf-fg-1)' }}
+        >
+          Unable to load Reddit communities
+        </h2>
+        <p style={{ margin: 0, color: 'var(--sf-fg-2)' }}>
+          Refresh the page to retry. If this persists, your product
+          record may still be initializing.
+        </p>
+      </section>
+    );
+  }
+
   const currentStatus = status.data?.status ?? 'pending';
 
   // ── Pending ─────────────────────────────────────────────────────────────
@@ -282,11 +338,14 @@ export function RedditResearchCard() {
           gap: 16,
           padding: 24,
           borderRadius: 14,
-          border: '1px solid var(--color-sf-border, #e3e3e3)',
-          background: 'var(--color-sf-bg-primary, #fff)',
+          border: '1px solid var(--sf-border)',
+          background: 'var(--sf-bg-secondary)',
         }}
       >
-        <h2 id="reddit-research-heading" style={{ fontSize: 18, margin: 0 }}>
+        <h2
+          id="reddit-research-heading"
+          style={{ fontSize: 18, margin: 0, color: 'var(--sf-fg-1)' }}
+        >
           Researching your Reddit communities
         </h2>
         <div
@@ -294,7 +353,7 @@ export function RedditResearchCard() {
             display: 'flex',
             alignItems: 'center',
             gap: 12,
-            color: 'var(--color-sf-text-secondary, #555)',
+            color: 'var(--sf-fg-2)',
           }}
         >
           <span
@@ -304,8 +363,8 @@ export function RedditResearchCard() {
               width: 16,
               height: 16,
               borderRadius: '50%',
-              border: '2px solid var(--color-sf-border, #ddd)',
-              borderTopColor: 'var(--color-sf-accent, #2563eb)',
+              border: '2px solid var(--sf-border)',
+              borderTopColor: 'var(--sf-accent)',
               animation: 'spin 0.9s linear infinite',
               display: 'inline-block',
             }}
@@ -331,19 +390,17 @@ export function RedditResearchCard() {
           gap: 16,
           padding: 24,
           borderRadius: 14,
-          border: '1px solid var(--color-sf-error, #d34a4a)',
-          background: 'var(--color-sf-bg-primary, #fff)',
+          border: '1px solid var(--sf-error)',
+          background: 'var(--sf-bg-secondary)',
         }}
       >
-        <h2 id="reddit-research-heading" style={{ fontSize: 18, margin: 0 }}>
+        <h2
+          id="reddit-research-heading"
+          style={{ fontSize: 18, margin: 0, color: 'var(--sf-fg-1)' }}
+        >
           Couldn&apos;t finish researching Reddit
         </h2>
-        <p
-          style={{
-            margin: 0,
-            color: 'var(--color-sf-text-secondary, #555)',
-          }}
-        >
+        <p style={{ margin: 0, color: 'var(--sf-fg-2)' }}>
           Something went wrong while picking subreddits. You can retry or
           add subreddits manually below — we&apos;ll keep both either way.
         </p>
@@ -354,8 +411,9 @@ export function RedditResearchCard() {
             alignSelf: 'flex-start',
             padding: '8px 14px',
             borderRadius: 10,
-            border: '1px solid var(--color-sf-border, #ccc)',
-            background: 'var(--color-sf-bg-primary, #fff)',
+            border: '1px solid var(--sf-border)',
+            background: 'var(--sf-bg-secondary)',
+            color: 'var(--sf-fg-1)',
             cursor: 'pointer',
           }}
         >
@@ -375,8 +433,8 @@ export function RedditResearchCard() {
         gap: 16,
         padding: 24,
         borderRadius: 14,
-        border: '1px solid var(--color-sf-border, #e3e3e3)',
-        background: 'var(--color-sf-bg-primary, #fff)',
+        border: '1px solid var(--sf-border)',
+        background: 'var(--sf-bg-secondary)',
       }}
     >
       <div
@@ -387,7 +445,10 @@ export function RedditResearchCard() {
           gap: 12,
         }}
       >
-        <h2 id="reddit-research-heading" style={{ fontSize: 18, margin: 0 }}>
+        <h2
+          id="reddit-research-heading"
+          style={{ fontSize: 18, margin: 0, color: 'var(--sf-fg-1)' }}
+        >
           Your Reddit communities
         </h2>
         <button
@@ -398,8 +459,9 @@ export function RedditResearchCard() {
             fontSize: 12,
             padding: '4px 10px',
             borderRadius: 8,
-            border: '1px solid var(--color-sf-border, #ccc)',
+            border: '1px solid var(--sf-border)',
             background: 'transparent',
+            color: 'var(--sf-fg-1)',
             cursor: busy ? 'wait' : 'pointer',
           }}
         >
@@ -408,12 +470,7 @@ export function RedditResearchCard() {
       </div>
 
       {sortedChannels.length === 0 ? (
-        <p
-          style={{
-            margin: 0,
-            color: 'var(--color-sf-text-secondary, #555)',
-          }}
-        >
+        <p style={{ margin: 0, color: 'var(--sf-fg-2)' }}>
           No subreddits yet — add your first one below.
         </p>
       ) : (
@@ -444,7 +501,7 @@ export function RedditResearchCard() {
       >
         <label
           htmlFor="add-subreddit-input"
-          style={{ fontSize: 13, fontWeight: 500 }}
+          style={{ fontSize: 13, fontWeight: 500, color: 'var(--sf-fg-1)' }}
         >
           Add another subreddit
         </label>
@@ -459,7 +516,9 @@ export function RedditResearchCard() {
               flex: 1,
               padding: '8px 12px',
               borderRadius: 8,
-              border: '1px solid var(--color-sf-border, #ccc)',
+              border: '1px solid var(--sf-border)',
+              background: 'var(--sf-bg-tertiary)',
+              color: 'var(--sf-fg-1)',
               fontSize: 14,
               fontFamily: 'inherit',
             }}
@@ -471,8 +530,8 @@ export function RedditResearchCard() {
               padding: '8px 14px',
               borderRadius: 8,
               border: 'none',
-              background: 'var(--color-sf-accent, #2563eb)',
-              color: '#fff',
+              background: 'var(--sf-accent)',
+              color: 'var(--sf-fg-on-dark-1)',
               cursor: busy ? 'wait' : 'pointer',
               fontWeight: 500,
             }}
@@ -483,10 +542,7 @@ export function RedditResearchCard() {
         {addError ? (
           <div
             role="alert"
-            style={{
-              fontSize: 12,
-              color: 'var(--color-sf-error, #d34a4a)',
-            }}
+            style={{ fontSize: 12, color: 'var(--sf-error-ink)' }}
           >
             {addError}
           </div>

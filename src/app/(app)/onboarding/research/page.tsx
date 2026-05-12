@@ -39,12 +39,7 @@ export default async function OnboardingResearchPage() {
           gap: 16,
         }}
       >
-        <p
-          style={{
-            margin: 0,
-            color: 'var(--color-sf-text-secondary, #555)',
-          }}
-        >
+        <p style={{ margin: 0, color: 'var(--sf-fg-2)' }}>
           ShipFlare picks the three subreddits where your ICP is most likely
           to engage. You can swap, disable, or add your own at any time.
         </p>
