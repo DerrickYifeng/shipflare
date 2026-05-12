@@ -27,10 +27,18 @@ vi.mock('@/lib/logger', () => ({
 }));
 
 // The route reads drafts when the plan_item lookup misses, then issues
-// either an UPDATE planItems (jsonb_set on output.draft_body) or an
-// UPDATE drafts (replyBody). We capture the table identity passed to
-// `update()` so tests can assert which path ran without poking at SQL.
+// either an UPDATE planItems (jsonb_set on output.draft_body, or
+// params merge) or an UPDATE drafts (replyBody). We capture every
+// update so tests can assert which path(s) ran without poking at SQL.
 const draftLookupMock = vi.fn();
+interface UpdateRecord {
+  table: string;
+  set: Record<string, unknown>;
+}
+const updates: UpdateRecord[] = [];
+// Convenience accessor preserved for existing tests that read the
+// last-write table/set. New tests can iterate `updates` directly to
+// see both the body-update AND the params-merge from the same PATCH.
 const lastUpdate: { table: string | null; set: Record<string, unknown> | null } = {
   table: null,
   set: null,
@@ -52,6 +60,7 @@ vi.mock('@/lib/db', () => ({
           // schema mock below stamps a `__name` so we can assert which
           // table was hit.
           const id = (table as unknown as { __name?: string }).__name ?? 'unknown';
+          updates.push({ table: id, set: s });
           lastUpdate.table = id;
           lastUpdate.set = s;
           return Promise.resolve();
@@ -63,7 +72,14 @@ vi.mock('@/lib/db', () => ({
 
 vi.mock('@/lib/db/schema', () => ({
   drafts: { __name: 'drafts', id: 'id', userId: 'userId', replyBody: 'replyBody', status: 'status', updatedAt: 'updatedAt' },
-  planItems: { __name: 'planItems', id: 'id', userId: 'userId', output: 'output', updatedAt: 'updatedAt' },
+  planItems: {
+    __name: 'planItems',
+    id: 'id',
+    userId: 'userId',
+    output: 'output',
+    params: 'params',
+    updatedAt: 'updatedAt',
+  },
 }));
 
 vi.mock('drizzle-orm', () => ({
@@ -89,6 +105,7 @@ beforeEach(() => {
   authUserId = 'user-1';
   findOwnedPlanItemMock.mockReset();
   draftLookupMock.mockReset();
+  updates.length = 0;
   lastUpdate.table = null;
   lastUpdate.set = null;
 });
@@ -217,5 +234,186 @@ describe('PATCH /api/today/[id]/edit', () => {
     });
     expect(res.status).toBe(409);
     expect(lastUpdate.table).toBeNull();
+  });
+});
+
+// ── params patches (Reddit subreddit picker safety net) ────────────────
+//
+// Locks in the new shape:
+//   PATCH { params: { subreddit: 'SaaS' } } → merges into plan_items.params
+// without dropping unrelated keys, and still respects the existing
+// EDITABLE_PLAN_STATES gate. Adversarial shapes (`r/SaaS`, missing
+// subreddit, both body+params, neither) must be rejected as 400 / honored
+// in the documented order.
+
+describe('PATCH /api/today/[id]/edit — params patches', () => {
+  it('rejects an empty patch with 400 (refine: at least one of body/params)', async () => {
+    const { PATCH } = await import('../route');
+    const res = await PATCH(makeReq({}), {
+      params: Promise.resolve({ id: VALID_ID }),
+    });
+    expect(res.status).toBe(400);
+    expect(updates.length).toBe(0);
+  });
+
+  it('accepts a valid subreddit params patch and merges into existing params', async () => {
+    findOwnedPlanItemMock.mockResolvedValueOnce({
+      id: VALID_ID,
+      userId: 'user-1',
+      state: 'drafted',
+      userAction: 'approve',
+      kind: 'content_post',
+      channel: 'reddit',
+      skillName: null,
+      params: { targetCount: 1, templateId: 'orig-1' },
+    });
+    const { PATCH } = await import('../route');
+    const res = await PATCH(makeReq({ params: { subreddit: 'SaaS' } }), {
+      params: Promise.resolve({ id: VALID_ID }),
+    });
+    expect(res.status).toBe(200);
+    // Exactly one update — the params merge. Body wasn't patched.
+    expect(updates).toHaveLength(1);
+    expect(updates[0].table).toBe('planItems');
+    expect(updates[0].set.params).toEqual({
+      targetCount: 1,
+      templateId: 'orig-1',
+      subreddit: 'SaaS',
+    });
+  });
+
+  it('preserves params merge when the existing params object is null', async () => {
+    findOwnedPlanItemMock.mockResolvedValueOnce({
+      id: VALID_ID,
+      userId: 'user-1',
+      state: 'drafted',
+      userAction: 'approve',
+      kind: 'content_post',
+      channel: 'reddit',
+      skillName: null,
+      params: null,
+    });
+    const { PATCH } = await import('../route');
+    const res = await PATCH(makeReq({ params: { subreddit: 'webdev' } }), {
+      params: Promise.resolve({ id: VALID_ID }),
+    });
+    expect(res.status).toBe(200);
+    expect(updates).toHaveLength(1);
+    expect(updates[0].set.params).toEqual({ subreddit: 'webdev' });
+  });
+
+  it('rejects subreddit values with `r/` prefix or other regex misses', async () => {
+    findOwnedPlanItemMock.mockResolvedValueOnce({
+      id: VALID_ID,
+      userId: 'user-1',
+      state: 'drafted',
+      userAction: 'approve',
+      kind: 'content_post',
+      channel: 'reddit',
+      skillName: null,
+      params: null,
+    });
+    const { PATCH } = await import('../route');
+    const res = await PATCH(makeReq({ params: { subreddit: 'r/SaaS' } }), {
+      params: Promise.resolve({ id: VALID_ID }),
+    });
+    expect(res.status).toBe(400);
+    expect(updates.length).toBe(0);
+  });
+
+  it('rejects subreddit values that are too short', async () => {
+    findOwnedPlanItemMock.mockResolvedValueOnce({
+      id: VALID_ID,
+      userId: 'user-1',
+      state: 'drafted',
+      userAction: 'approve',
+      kind: 'content_post',
+      channel: 'reddit',
+      skillName: null,
+      params: null,
+    });
+    const { PATCH } = await import('../route');
+    const res = await PATCH(makeReq({ params: { subreddit: 'ab' } }), {
+      params: Promise.resolve({ id: VALID_ID }),
+    });
+    expect(res.status).toBe(400);
+    expect(updates.length).toBe(0);
+  });
+
+  it('rejects unknown keys in params (strict schema)', async () => {
+    findOwnedPlanItemMock.mockResolvedValueOnce({
+      id: VALID_ID,
+      userId: 'user-1',
+      state: 'drafted',
+      userAction: 'approve',
+      kind: 'content_post',
+      channel: 'reddit',
+      skillName: null,
+      params: null,
+    });
+    const { PATCH } = await import('../route');
+    const res = await PATCH(
+      makeReq({ params: { subreddit: 'SaaS', evilFlag: true } }),
+      { params: Promise.resolve({ id: VALID_ID }) },
+    );
+    expect(res.status).toBe(400);
+    expect(updates.length).toBe(0);
+  });
+
+  it('updates both body AND params in one PATCH', async () => {
+    findOwnedPlanItemMock.mockResolvedValueOnce({
+      id: VALID_ID,
+      userId: 'user-1',
+      state: 'drafted',
+      userAction: 'approve',
+      kind: 'content_post',
+      channel: 'reddit',
+      skillName: null,
+      params: { targetCount: 1 },
+    });
+    const { PATCH } = await import('../route');
+    const res = await PATCH(
+      makeReq({ body: 'new body', params: { subreddit: 'SaaS' } }),
+      { params: Promise.resolve({ id: VALID_ID }) },
+    );
+    expect(res.status).toBe(200);
+    // Two updates: body first, then params merge.
+    expect(updates).toHaveLength(2);
+    expect(updates[0].table).toBe('planItems');
+    expect(updates[0].set.output).toBeTruthy();
+    expect(updates[1].table).toBe('planItems');
+    expect(updates[1].set.params).toEqual({ targetCount: 1, subreddit: 'SaaS' });
+  });
+
+  it('respects the same not_editable state gate for params patches', async () => {
+    findOwnedPlanItemMock.mockResolvedValueOnce({
+      id: VALID_ID,
+      userId: 'user-1',
+      state: 'approved',
+      userAction: 'approve',
+      kind: 'content_post',
+      channel: 'reddit',
+      skillName: null,
+      params: null,
+    });
+    const { PATCH } = await import('../route');
+    const res = await PATCH(makeReq({ params: { subreddit: 'SaaS' } }), {
+      params: Promise.resolve({ id: VALID_ID }),
+    });
+    expect(res.status).toBe(409);
+    expect(updates.length).toBe(0);
+  });
+
+  it('rejects params patches that fall through to the drafts path with 400', async () => {
+    findOwnedPlanItemMock.mockResolvedValueOnce(null);
+    draftLookupMock.mockResolvedValueOnce([
+      { id: VALID_ID, userId: 'user-1', status: 'pending' },
+    ]);
+    const { PATCH } = await import('../route');
+    const res = await PATCH(makeReq({ params: { subreddit: 'SaaS' } }), {
+      params: Promise.resolve({ id: VALID_ID }),
+    });
+    expect(res.status).toBe(400);
+    expect(updates.length).toBe(0);
   });
 });

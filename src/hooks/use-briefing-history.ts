@@ -32,6 +32,11 @@ export interface UseBriefingHistoryResult {
 function adapt(item: BriefingHistoryItem): TodoItem {
   return {
     ...item,
+    // History rows are all reply drafts (no plan_items.params), so
+    // there's no subreddit picker to surface. Stamp `null` to satisfy
+    // the TodoItem contract added in Task 9 of the Reddit subreddit
+    // research work.
+    params: null,
     cardFormat: item.draftType === 'original_post' ? 'post' : 'reply',
   };
 }
