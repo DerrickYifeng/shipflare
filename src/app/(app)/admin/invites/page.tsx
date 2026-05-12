@@ -1,10 +1,12 @@
+import Link from 'next/link';
 import { desc, sql } from 'drizzle-orm';
 import { db } from '@/lib/db';
-import { allowedEmails, users } from '@/lib/db/schema';
+import { allowedEmails, users, waitlistSignups } from '@/lib/db/schema';
 import { getPartnerActivityCounts } from '@/lib/admin/partner-activity';
 import { InviteForm } from './_components/invite-form';
 import { RevokeButton } from './_components/revoke-button';
 import { NoteCell } from './_components/note-cell';
+import { WaitlistTab } from './_components/waitlist-tab';
 
 /**
  * /admin/invites — design-partner allowlist management.
@@ -12,12 +14,148 @@ import { NoteCell } from './_components/note-cell';
  * Auth is gated by `(app)/admin/layout.tsx` (ADMIN_EMAILS env var) — it
  * 404s non-admins so the existence of this page isn't advertised. The
  * server actions in `./actions.ts` re-check via `requireAdmin()`.
- *
- * Joins `users` so we can show whether each invitee has actually
- * signed up + when they last logged in. The join is on lower(email)
- * for case-safety.
  */
-export default async function AdminInvitesPage() {
+
+interface PageProps {
+  searchParams: Promise<{ tab?: string; status?: string }>;
+}
+
+export default async function AdminInvitesPage({ searchParams }: PageProps) {
+  const sp = await searchParams;
+  const tab = sp.tab === 'waitlist' ? 'waitlist' : 'invites';
+  const status =
+    sp.status === 'approved' || sp.status === 'dismissed'
+      ? sp.status
+      : 'pending';
+
+  // Counts for the badges — runs unconditionally so both tabs show counts.
+  const [{ pending, approved, dismissed }] = await db
+    .select({
+      pending: sql<number>`count(*) filter (where approved_at is null and dismissed_at is null)`,
+      approved: sql<number>`count(*) filter (where approved_at is not null)`,
+      dismissed: sql<number>`count(*) filter (where dismissed_at is not null)`,
+    })
+    .from(waitlistSignups);
+
+  return (
+    <div>
+      <h2
+        style={{
+          margin: '0 0 12px',
+          fontSize: 18,
+          fontWeight: 500,
+          color: 'var(--sf-fg-1)',
+        }}
+      >
+        Design partner invites
+      </h2>
+
+      {/* Tab strip */}
+      <div
+        style={{
+          display: 'flex',
+          gap: 24,
+          borderBottom: '1px solid var(--sf-border-1)',
+          marginBottom: 24,
+        }}
+      >
+        <TabLink href="/admin/invites" active={tab === 'invites'}>
+          Invites
+        </TabLink>
+        <TabLink href="/admin/invites?tab=waitlist" active={tab === 'waitlist'}>
+          Waitlist {Number(pending) > 0 ? `(${pending})` : ''}
+        </TabLink>
+      </div>
+
+      {tab === 'invites' ? (
+        <InvitesTabContent />
+      ) : (
+        <>
+          {/* Status filter chips */}
+          <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
+            <FilterChip
+              href="/admin/invites?tab=waitlist&status=pending"
+              active={status === 'pending'}
+            >
+              Pending ({pending})
+            </FilterChip>
+            <FilterChip
+              href="/admin/invites?tab=waitlist&status=approved"
+              active={status === 'approved'}
+            >
+              Approved ({approved})
+            </FilterChip>
+            <FilterChip
+              href="/admin/invites?tab=waitlist&status=dismissed"
+              active={status === 'dismissed'}
+            >
+              Dismissed ({dismissed})
+            </FilterChip>
+          </div>
+          <WaitlistTab status={status} />
+        </>
+      )}
+    </div>
+  );
+}
+
+function TabLink({
+  href,
+  active,
+  children,
+}: {
+  href: string;
+  active: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <Link
+      href={href}
+      style={{
+        padding: '10px 0',
+        borderBottom: active
+          ? '2px solid var(--sf-accent)'
+          : '2px solid transparent',
+        color: active ? 'var(--sf-fg-1)' : 'var(--sf-fg-3)',
+        textDecoration: 'none',
+        fontSize: 14,
+        fontWeight: active ? 600 : 400,
+        marginBottom: -1,
+      }}
+    >
+      {children}
+    </Link>
+  );
+}
+
+function FilterChip({
+  href,
+  active,
+  children,
+}: {
+  href: string;
+  active: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <Link
+      href={href}
+      style={{
+        padding: '4px 12px',
+        borderRadius: 999,
+        background: active ? 'var(--sf-bg-tertiary)' : 'transparent',
+        color: active ? 'var(--sf-fg-1)' : 'var(--sf-fg-3)',
+        border: '1px solid var(--sf-border-1)',
+        fontSize: 12,
+        textDecoration: 'none',
+      }}
+    >
+      {children}
+    </Link>
+  );
+}
+
+async function InvitesTabContent() {
   const rows = await db
     .select({
       email: allowedEmails.email,
@@ -41,16 +179,6 @@ export default async function AdminInvitesPage() {
 
   return (
     <div>
-      <h2
-        style={{
-          margin: '0 0 8px',
-          fontSize: 18,
-          fontWeight: 500,
-          color: 'var(--sf-fg-1)',
-        }}
-      >
-        Design partner invites
-      </h2>
       <p style={{ marginTop: 0, fontSize: 13, color: 'var(--sf-fg-3)' }}>
         Manage allowlisted emails. Sign-in is rejected for any GitHub email not
         listed here (or matching <code>SUPER_ADMIN_EMAIL</code>).
@@ -103,11 +231,7 @@ export default async function AdminInvitesPage() {
                 <Td>
                   <StatusPill
                     state={
-                      isRevoked
-                        ? 'revoked'
-                        : hasJoined
-                          ? 'joined'
-                          : 'pending'
+                      isRevoked ? 'revoked' : hasJoined ? 'joined' : 'pending'
                     }
                   />
                 </Td>
@@ -194,11 +318,24 @@ function Td({
 }
 
 function StatusPill({ state }: { state: 'pending' | 'joined' | 'revoked' }) {
-  const palette: Record<typeof state, { bg: string; fg: string; label: string }> = {
-    pending: { bg: 'rgba(180,180,180,0.12)', fg: 'var(--sf-fg-3)', label: 'pending' },
-    joined: { bg: 'rgba(80,200,120,0.14)', fg: '#2ea043', label: 'joined' },
-    revoked: { bg: 'rgba(220,80,80,0.12)', fg: '#c0392b', label: 'revoked' },
-  };
+  const palette: Record<typeof state, { bg: string; fg: string; label: string }> =
+    {
+      pending: {
+        bg: 'rgba(180,180,180,0.12)',
+        fg: 'var(--sf-fg-3)',
+        label: 'pending',
+      },
+      joined: {
+        bg: 'rgba(80,200,120,0.14)',
+        fg: '#2ea043',
+        label: 'joined',
+      },
+      revoked: {
+        bg: 'rgba(220,80,80,0.12)',
+        fg: '#c0392b',
+        label: 'revoked',
+      },
+    };
   const { bg, fg, label } = palette[state];
   return (
     <span

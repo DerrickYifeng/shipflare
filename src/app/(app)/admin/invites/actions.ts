@@ -4,10 +4,12 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { and, eq, sql } from 'drizzle-orm';
 import { db } from '@/lib/db';
-import { allowedEmails, sessions, users } from '@/lib/db/schema';
+import { allowedEmails, sessions, users, waitlistSignups } from '@/lib/db/schema';
 import { requireAdmin } from '@/lib/admin';
 import { normalizeEmail, getSuperAdminEmail } from '@/lib/auth/allowlist';
 import { createLogger } from '@/lib/logger';
+import { sendEmail } from '@/lib/email';
+import { waitlistApproved } from '@/lib/email/templates/waitlist-approved';
 
 const log = createLogger('admin:invites');
 
@@ -117,6 +119,100 @@ export async function updateNote(formData: FormData): Promise<ActionResult> {
     .where(and(eq(allowedEmails.email, email)));
 
   log.info(`invite note updated: ${email} by ${adminEmail}`);
+  revalidatePath('/admin/invites');
+  return { ok: true };
+}
+
+const idSchema = z.object({ id: z.string().uuid() });
+
+/**
+ * Approve a waitlist signup → insert into allowed_emails (un-revoke on
+ * conflict) and stamp the waitlist row with approved_at/approved_by.
+ *
+ * Both writes run inside a single transaction so a partial failure
+ * doesn't leave the row marked approved without the corresponding
+ * allowlist entry.
+ *
+ * Sends the applicant a friendly "you're in" email after the
+ * transaction commits — fire-and-forget; a Resend failure doesn't fail
+ * the action (the founder can resend manually via the dashboard later).
+ */
+export async function approveWaitlistSignup(
+  id: string,
+): Promise<ActionResult> {
+  const adminEmail = await requireAdmin();
+  const parsed = idSchema.safeParse({ id });
+  if (!parsed.success) return { ok: false, error: 'Invalid id.' };
+
+  // Look up the email before the transaction so we can use it for both
+  // the insert and the email.
+  const rows = await db
+    .select({ id: waitlistSignups.id, email: waitlistSignups.email })
+    .from(waitlistSignups)
+    .where(eq(waitlistSignups.id, parsed.data.id))
+    .limit(1);
+  if (rows.length === 0) {
+    return { ok: false, error: 'Waitlist row not found.' };
+  }
+  const row = rows[0];
+
+  await db.transaction(async (tx) => {
+    await tx
+      .insert(allowedEmails)
+      .values({
+        email: row.email,
+        invitedBy: adminEmail,
+        note: 'Approved from waitlist',
+      })
+      .onConflictDoUpdate({
+        target: allowedEmails.email,
+        set: {
+          revokedAt: null,
+          invitedBy: adminEmail,
+        },
+      });
+
+    await tx
+      .update(waitlistSignups)
+      .set({
+        approvedAt: new Date(),
+        approvedBy: adminEmail,
+      })
+      .where(eq(waitlistSignups.id, row.id));
+  });
+
+  // Fire-and-forget email — don't block on Resend
+  const result = await sendEmail(waitlistApproved({ email: row.email }));
+  if (!result.ok) {
+    log.warn('approval email failed but action succeeded', {
+      email: row.email,
+      reason: result.reason,
+    });
+  }
+
+  revalidatePath('/admin/invites');
+  return { ok: true };
+}
+
+/**
+ * Soft-dismiss a waitlist signup. No email sent — reversible by
+ * the admin from the Dismissed filter view.
+ */
+export async function dismissWaitlistSignup(
+  id: string,
+): Promise<ActionResult> {
+  const adminEmail = await requireAdmin();
+  const parsed = idSchema.safeParse({ id });
+  if (!parsed.success) return { ok: false, error: 'Invalid id.' };
+
+  await db
+    .update(waitlistSignups)
+    .set({
+      dismissedAt: new Date(),
+      dismissedBy: adminEmail,
+    })
+    .where(eq(waitlistSignups.id, parsed.data.id));
+
   revalidatePath('/admin/invites');
   return { ok: true };
 }
