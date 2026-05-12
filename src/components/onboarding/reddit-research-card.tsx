@@ -1,20 +1,20 @@
 'use client';
 
 /**
- * <RedditResearchCard /> — surfaces the kickoff Reddit-channel research
- * pass to the founder.
+ * <RedditResearchCard /> — surfaces the Reddit-channel research output
+ * to the founder.
  *
- * Four render branches:
+ * Three render branches, all derived from `/api/reddit-channels` GET:
  *   - `error`:   SWR fetcher threw (e.g. 4xx/5xx). Shows a refresh hint.
- *   - `pending`: spinner + reassurance copy. Polls every 3s.
- *   - `failed`:  research job ended with failure; retry CTA.
+ *   - `empty`:   no rows yet — research will run on next kickoff, or
+ *                click Re-research to fire it now.
  *   - `done`:    list of subreddits (active first, then disabled) with
  *                fit / activity / source badges + add-manual + re-research.
  *
- * SWR polls `/api/onboarding/reddit-research/status` and
- * `/api/reddit-channels`. The refreshInterval is gated on the current
- * status so once we settle on `done` or `failed` we stop hitting the
- * server.
+ * Kickoff runs research automatically (Task 11) so there is no dedicated
+ * progress page anymore. Re-research from this card is fire-and-forget
+ * from the UI's perspective — we surface a one-shot inline hint telling
+ * the founder to refresh in 30–60s.
  *
  * Design tokens follow the project's `--sf-*` namespace (see
  * `src/app/globals.css`). No hex fallbacks — if a token is missing we
@@ -42,11 +42,6 @@ interface ChannelRow {
   rank: number;
   source: ChannelSource;
   disabled: boolean;
-}
-
-interface StatusResponse {
-  status: 'pending' | 'done' | 'failed';
-  count: number;
 }
 
 interface ChannelsResponse {
@@ -209,22 +204,12 @@ export function RedditResearchCard() {
   const [addValue, setAddValue] = useState('');
   const [busy, setBusy] = useState(false);
   const [reResearchError, setReResearchError] = useState<string | null>(null);
-
-  const status = useSWR<StatusResponse>(
-    '/api/onboarding/reddit-research/status',
-    fetcher,
-    {
-      refreshInterval: (latest) => (latest?.status === 'pending' ? 3000 : 0),
-    },
-  );
+  const [reResearchHint, setReResearchHint] = useState<string | null>(null);
 
   const channels = useSWR<ChannelsResponse>(
     '/api/reddit-channels',
     fetcher,
-    {
-      refreshInterval: () =>
-        status.data?.status === 'pending' ? 3000 : 0,
-    },
+    { revalidateOnFocus: false },
   );
 
   const sortedChannels = (channels.data?.channels ?? [])
@@ -290,6 +275,7 @@ export function RedditResearchCard() {
 
   async function handleReResearch() {
     setReResearchError(null);
+    setReResearchHint(null);
     setBusy(true);
     try {
       const r = await fetch('/api/reddit-channels/re-research', {
@@ -298,9 +284,13 @@ export function RedditResearchCard() {
       if (!r.ok) {
         throw new Error(`HTTP ${r.status}`);
       }
-      // Status will flip back to 'pending' as the worker runs —
-      // polling resumes automatically once SWR re-reads the status.
-      await Promise.all([status.mutate(), channels.mutate()]);
+      // Fire-and-forget: the worker runs asynchronously. SWR's
+      // revalidate-on-focus will pick up new rows once they land, or
+      // the founder can manually refresh.
+      setReResearchHint(
+        'Research kicked off — refresh in 30–60s to see the results.',
+      );
+      await channels.mutate();
     } catch (err) {
       setReResearchError(
         err instanceof Error ? err.message : 'Failed to start re-research',
@@ -314,7 +304,7 @@ export function RedditResearchCard() {
   // Surfaces 4xx/5xx during the brief window between /api/onboarding/commit
   // and the first successful read, or any other transient failure. We trust
   // SWR to keep revalidating in the background.
-  if (status.error || channels.error) {
+  if (channels.error) {
     return (
       <section
         aria-labelledby="reddit-research-heading"
@@ -342,10 +332,8 @@ export function RedditResearchCard() {
     );
   }
 
-  const currentStatus = status.data?.status ?? 'pending';
-
-  // ── Pending ─────────────────────────────────────────────────────────────
-  if (currentStatus === 'pending') {
+  // ── Loading (first paint, before SWR returns) ──────────────────────────
+  if (channels.isLoading && !channels.data) {
     return (
       <section
         aria-labelledby="reddit-research-heading"
@@ -364,7 +352,7 @@ export function RedditResearchCard() {
           id="reddit-research-heading"
           style={{ fontSize: 18, margin: 0, color: 'var(--sf-fg-1)' }}
         >
-          Researching your Reddit communities
+          Your Reddit communities
         </h2>
         <div
           style={{
@@ -387,61 +375,14 @@ export function RedditResearchCard() {
               display: 'inline-block',
             }}
           />
-          <span>
-            Looking for the three subreddits where your ICP is most likely
-            to engage. Usually takes under 60 seconds.
-          </span>
+          <span>Loading…</span>
         </div>
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </section>
     );
   }
 
-  // ── Failed ──────────────────────────────────────────────────────────────
-  if (currentStatus === 'failed') {
-    return (
-      <section
-        aria-labelledby="reddit-research-heading"
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 16,
-          padding: 24,
-          borderRadius: 14,
-          border: '1px solid var(--sf-error)',
-          background: 'var(--sf-bg-secondary)',
-        }}
-      >
-        <h2
-          id="reddit-research-heading"
-          style={{ fontSize: 18, margin: 0, color: 'var(--sf-fg-1)' }}
-        >
-          Couldn&apos;t finish researching Reddit
-        </h2>
-        <p style={{ margin: 0, color: 'var(--sf-fg-2)' }}>
-          Something went wrong while picking subreddits. You can retry or
-          add subreddits manually below — we&apos;ll keep both either way.
-        </p>
-        <button
-          type="button"
-          onClick={handleReResearch}
-          style={{
-            alignSelf: 'flex-start',
-            padding: '8px 14px',
-            borderRadius: 10,
-            border: '1px solid var(--sf-border)',
-            background: 'var(--sf-bg-secondary)',
-            color: 'var(--sf-fg-1)',
-            cursor: 'pointer',
-          }}
-        >
-          Retry
-        </button>
-      </section>
-    );
-  }
-
-  // ── Done ────────────────────────────────────────────────────────────────
+  // ── Loaded (empty or with rows) ────────────────────────────────────────
   return (
     <section
       aria-labelledby="reddit-research-heading"
@@ -496,9 +437,20 @@ export function RedditResearchCard() {
         </div>
       ) : null}
 
+      {reResearchHint ? (
+        <div
+          role="status"
+          style={{ fontSize: 12, color: 'var(--sf-fg-2)' }}
+        >
+          {reResearchHint}
+        </div>
+      ) : null}
+
       {sortedChannels.length === 0 ? (
         <p style={{ margin: 0, color: 'var(--sf-fg-2)' }}>
-          No subreddits yet — add your first one below.
+          No Reddit communities researched yet. The team will research
+          them automatically on your next kickoff, or click Re-research
+          to run it now.
         </p>
       ) : (
         <ul

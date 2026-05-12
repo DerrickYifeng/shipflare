@@ -29,12 +29,11 @@ vi.mock('swr', () => ({
 
 import { RedditResearchCard } from '../reddit-research-card';
 
-const STATUS_URL = '/api/onboarding/reddit-research/status';
 const CHANNELS_URL = '/api/reddit-channels';
 
 beforeEach(() => {
-  // Reset both keys before each test so leakage doesn't pollute results.
-  swrMockState[STATUS_URL] = {};
+  // Reset the channels key before each test so leakage doesn't pollute
+  // results.
   swrMockState[CHANNELS_URL] = {};
 });
 
@@ -45,9 +44,8 @@ afterEach(() => {
 });
 
 describe('<RedditResearchCard /> — error state', () => {
-  it('shows a refresh hint when the status fetch errors', () => {
-    swrMockState[STATUS_URL] = { error: new Error('boom') };
-    swrMockState[CHANNELS_URL] = { data: { channels: [] } };
+  it('shows a refresh hint when the channels fetch errors', () => {
+    swrMockState[CHANNELS_URL] = { error: new Error('boom') };
 
     render(<RedditResearchCard />);
     expect(
@@ -55,59 +53,34 @@ describe('<RedditResearchCard /> — error state', () => {
     ).toBeTruthy();
     expect(screen.getByText(/refresh the page to retry/i)).toBeTruthy();
   });
-
-  it('shows the same hint when the channels fetch errors', () => {
-    swrMockState[STATUS_URL] = { data: { status: 'pending', count: 0 } };
-    swrMockState[CHANNELS_URL] = { error: new Error('boom') };
-
-    render(<RedditResearchCard />);
-    expect(
-      screen.getByRole('heading', { name: /unable to load reddit communities/i }),
-    ).toBeTruthy();
-  });
 });
 
-describe('<RedditResearchCard /> — pending state', () => {
-  it('renders a spinner and reassurance copy', () => {
-    swrMockState[STATUS_URL] = { data: { status: 'pending', count: 0 } };
-    swrMockState[CHANNELS_URL] = { data: { channels: [] } };
+describe('<RedditResearchCard /> — loading state', () => {
+  it('renders a spinner while SWR is loading and has no data yet', () => {
+    swrMockState[CHANNELS_URL] = { isLoading: true, data: undefined };
 
     render(<RedditResearchCard />);
-    expect(
-      screen.getByRole('heading', { name: /researching your reddit communities/i }),
-    ).toBeTruthy();
     expect(screen.getByRole('status', { name: /loading/i })).toBeTruthy();
-    // Reassurance hint about ≤60s
-    expect(screen.getByText(/under 60 seconds/i)).toBeTruthy();
-  });
-
-  it('defaults to pending when status data is missing', () => {
-    swrMockState[STATUS_URL] = { data: undefined };
-    swrMockState[CHANNELS_URL] = { data: undefined };
-
-    render(<RedditResearchCard />);
-    expect(
-      screen.getByRole('heading', { name: /researching your reddit communities/i }),
-    ).toBeTruthy();
   });
 });
 
-describe('<RedditResearchCard /> — failed state', () => {
-  it('renders the error heading and a retry CTA', () => {
-    swrMockState[STATUS_URL] = { data: { status: 'failed', count: 0 } };
+describe('<RedditResearchCard /> — empty state', () => {
+  it('renders the "no subreddits yet" message and a Re-research button when channels is []', () => {
     swrMockState[CHANNELS_URL] = { data: { channels: [] } };
 
     render(<RedditResearchCard />);
     expect(
-      screen.getByRole('heading', { name: /couldn.t finish researching reddit/i }),
+      screen.getByRole('heading', { name: /your reddit communities/i }),
     ).toBeTruthy();
-    expect(screen.getByRole('button', { name: /retry/i })).toBeTruthy();
+    expect(
+      screen.getByText(/no reddit communities researched yet/i),
+    ).toBeTruthy();
+    expect(screen.getByRole('button', { name: /re-research/i })).toBeTruthy();
   });
 });
 
 describe('<RedditResearchCard /> — done state', () => {
   it('renders all channel rows sorted active-first and the add-form', () => {
-    swrMockState[STATUS_URL] = { data: { status: 'done', count: 2 } };
     swrMockState[CHANNELS_URL] = {
       data: {
         channels: [
@@ -174,21 +147,8 @@ describe('<RedditResearchCard /> — done state', () => {
     expect(items[2].textContent).toContain('startups');
   });
 
-  it('renders an empty-state hint when channels is []', () => {
-    swrMockState[STATUS_URL] = { data: { status: 'done', count: 0 } };
-    swrMockState[CHANNELS_URL] = { data: { channels: [] } };
-
-    render(<RedditResearchCard />);
-    expect(screen.getByText(/no subreddits yet/i)).toBeTruthy();
-  });
-
-  it('POSTs to /api/reddit-channels/re-research and revalidates both SWR hooks on click', async () => {
-    const statusMutate = vi.fn(async () => undefined);
+  it('POSTs to /api/reddit-channels/re-research and revalidates the channels SWR on click', async () => {
     const channelsMutate = vi.fn(async () => undefined);
-    swrMockState[STATUS_URL] = {
-      data: { status: 'done', count: 0 },
-      mutate: statusMutate,
-    };
     swrMockState[CHANNELS_URL] = {
       data: { channels: [] },
       mutate: channelsMutate,
@@ -214,22 +174,23 @@ describe('<RedditResearchCard /> — done state', () => {
       expect(calledUrl).toBe('/api/reddit-channels/re-research');
       expect(calledInit?.method).toBe('POST');
 
-      // Both SWR hooks revalidated so the UI flips back to 'pending'
-      // once the worker writes new rows.
-      expect(statusMutate).toHaveBeenCalledTimes(1);
+      // Channels SWR revalidated so any new rows the worker writes
+      // surface on the next read.
       expect(channelsMutate).toHaveBeenCalledTimes(1);
+
+      // Inline hint tells the founder to refresh in 30–60s.
+      // The fetch + setState chain spans a few microtasks; findByText
+      // polls so we don't race the React commit.
+      expect(
+        await screen.findByText(/refresh in 30.{0,3}60s/i),
+      ).toBeTruthy();
     } finally {
       vi.unstubAllGlobals();
     }
   });
 
   it('surfaces an inline error when re-research POST fails', async () => {
-    const statusMutate = vi.fn(async () => undefined);
     const channelsMutate = vi.fn(async () => undefined);
-    swrMockState[STATUS_URL] = {
-      data: { status: 'done', count: 0 },
-      mutate: statusMutate,
-    };
     swrMockState[CHANNELS_URL] = {
       data: { channels: [] },
       mutate: channelsMutate,
@@ -251,7 +212,6 @@ describe('<RedditResearchCard /> — done state', () => {
       const alert = await screen.findByRole('alert');
       expect(alert.textContent).toMatch(/HTTP 500/);
       // Revalidation did NOT fire (we short-circuit on !r.ok).
-      expect(statusMutate).not.toHaveBeenCalled();
       expect(channelsMutate).not.toHaveBeenCalled();
     } finally {
       vi.unstubAllGlobals();
