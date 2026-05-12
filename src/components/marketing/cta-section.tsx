@@ -1,8 +1,8 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { PillCta } from '@/components/ui/pill-cta';
-import { Ops } from '@/components/ui/ops';
 import { SignInModal } from '@/components/auth/sign-in-modal';
 
 export interface CTASectionProps {
@@ -75,7 +75,7 @@ export function CTASection({ isAuthenticated }: CTASectionProps) {
         </p>
 
         <div
-          style={{ marginTop: 40, display: 'flex', justifyContent: 'center' }}
+          style={{ marginTop: 40, display: 'flex', flexDirection: 'column', alignItems: 'center' }}
         >
           {isAuthenticated ? (
             <PillCta
@@ -86,36 +86,47 @@ export function CTASection({ isAuthenticated }: CTASectionProps) {
               Open Briefing
             </PillCta>
           ) : (
-            <PillCta onClick={() => setSignInOpen(true)}>
-              <GithubMark />
-              Continue with GitHub
-            </PillCta>
-          )}
-        </div>
-
-        {!isAuthenticated && (
-          <div
-            className="flex flex-wrap items-center justify-center"
-            style={{ marginTop: 24, gap: 20 }}
-          >
-            <Ops tone="onDark">coming soon</Ops>
-            {['Google', '𝕏', 'Email'].map((label) => (
-              <span
-                key={label}
+            <>
+              <Link
+                href="/waitlist"
                 style={{
-                  color: 'var(--sf-fg-on-dark-4)',
-                  fontSize: 'var(--sf-text-xs)',
-                  fontFamily: 'var(--sf-font-mono)',
-                  textTransform: 'uppercase',
-                  letterSpacing: 'var(--sf-track-mono)',
-                  opacity: 0.7,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  height: 48,
+                  padding: '0 24px',
+                  background: 'var(--sf-accent)',
+                  color: 'var(--sf-fg-on-dark-1)',
+                  borderRadius: 'var(--sf-radius-pill)',
+                  fontSize: 'var(--sf-text-base)',
+                  fontWeight: 500,
+                  letterSpacing: 'var(--sf-track-normal)',
+                  textDecoration: 'none',
+                  transition: 'background var(--sf-dur-base) var(--sf-ease-swift)',
                 }}
               >
-                {label}
-              </span>
-            ))}
-          </div>
-        )}
+                Request alpha access
+                <span style={{ fontSize: 16 }} aria-hidden="true">→</span>
+              </Link>
+              <button
+                type="button"
+                onClick={() => setSignInOpen(true)}
+                style={{
+                  marginTop: 12,
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'var(--sf-fg-on-dark-3)',
+                  fontSize: 14,
+                  cursor: 'pointer',
+                  textDecoration: 'underline',
+                  textUnderlineOffset: 3,
+                }}
+              >
+                Already invited? Sign in with GitHub
+              </button>
+            </>
+          )}
+        </div>
       </div>
       <SignInModal open={signInOpen} onClose={() => setSignInOpen(false)} />
     </section>
