@@ -10,6 +10,7 @@ import {
   verificationTokens,
 } from '@/lib/db/schema';
 import { encryptAccount, decryptAccount } from './account-encryption';
+import { signInCallback } from './signin-callback';
 
 const baseAdapter = DrizzleAdapter(db, {
   usersTable: users,
@@ -48,29 +49,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       }
       return session;
     },
-    async signIn({ user, account, profile }) {
-      // Stamp metadata. Bundle githubId + lastLoginAt in one UPDATE so
-      // we don't double-roundtrip the DB.
-      if (account?.provider === 'github' && profile && user.id) {
-        const githubProfile = profile as { id?: number; login?: string };
-        const { eq } = await import('drizzle-orm');
-        await db
-          .update(users)
-          .set({
-            ...(githubProfile.id ? { githubId: String(githubProfile.id) } : {}),
-            lastLoginAt: new Date(),
-          })
-          .where(eq(users.id, user.id));
-      } else if (user.id) {
-        const { eq } = await import('drizzle-orm');
-        await db
-          .update(users)
-          .set({ lastLoginAt: new Date() })
-          .where(eq(users.id, user.id));
-      }
-
-      return true;
-    },
+    signIn: signInCallback,
   },
   pages: {
     signIn: '/',
