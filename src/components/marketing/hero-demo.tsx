@@ -96,38 +96,43 @@ export function HeroDemo({ headline = DEFAULT_HEADLINE, isAuthenticated }: HeroD
         </p>
 
         <div
-          className="flex flex-wrap"
-          style={{ marginTop: 40, gap: 12, justifyContent: 'center' }}
+          className="flex flex-col items-center"
+          style={{ marginTop: 40, gap: 12 }}
         >
-          {isAuthenticated ? (
-            <PillCta
-              onClick={() => {
-                window.location.href = '/briefing';
+          <div
+            className="flex flex-wrap"
+            style={{ gap: 12, justifyContent: 'center' }}
+          >
+            {isAuthenticated ? (
+              <PillCta
+                onClick={() => {
+                  window.location.href = '/briefing';
+                }}
+              >
+                Open Briefing
+              </PillCta>
+            ) : (
+              <WaitlistPillLink />
+            )}
+            <a
+              href="#see-it"
+              className="inline-flex items-center"
+              style={{
+                gap: 6,
+                height: 48,
+                padding: '0 16px',
+                color: 'var(--sf-link-dark)',
+                fontSize: 'var(--sf-text-base)',
+                letterSpacing: 'var(--sf-track-normal)',
+                textDecoration: 'none',
               }}
             >
-              Open Briefing
-            </PillCta>
-          ) : (
-            <div className="inline-flex flex-col items-center">
-              <WaitlistPillLink />
-              <AlreadyInvitedButton onClick={() => setSignInOpen(true)} />
-            </div>
+              See it in action ↓
+            </a>
+          </div>
+          {!isAuthenticated && (
+            <AlreadyInvitedButton onClick={() => setSignInOpen(true)} />
           )}
-          <a
-            href="#see-it"
-            className="inline-flex items-center"
-            style={{
-              gap: 6,
-              height: 48,
-              padding: '0 16px',
-              color: 'var(--sf-link-dark)',
-              fontSize: 'var(--sf-text-base)',
-              letterSpacing: 'var(--sf-track-normal)',
-              textDecoration: 'none',
-            }}
-          >
-            See it in action ↓
-          </a>
         </div>
 
         {/* Agent roles strip — teases HowItWorks below */}
