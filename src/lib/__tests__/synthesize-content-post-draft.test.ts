@@ -49,6 +49,7 @@ function makeXPlanRow(id = 'plan-1'): OwnedRow {
     kind: 'content_post',
     channel: 'x',
     skillName: null,
+    params: null,
   };
 }
 
@@ -62,6 +63,7 @@ function makeRedditPlanRow(id = 'plan-r1'): OwnedRow {
     kind: 'content_post',
     channel: 'reddit',
     skillName: null,
+    params: null,
   };
 }
 

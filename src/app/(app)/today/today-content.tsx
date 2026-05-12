@@ -172,6 +172,7 @@ export function TodayBody({ yesterdayTop = null }: TodayBodyProps = {}) {
     skip: rawSkip,
     edit: rawEdit,
     handoff,
+    mutate: refetchToday,
   } = useToday();
   const { toast, toastWithAction } = useToast();
   const { mutate: globalMutate } = useSWRConfig();
@@ -468,6 +469,12 @@ export function TodayBody({ yesterdayTop = null }: TodayBodyProps = {}) {
                   isActive={item.id === activeId}
                   forceEditing={item.id === editingId}
                   onEditDone={() => setEditingId(null)}
+                  onSubredditApplied={() => {
+                    // Server merged params.subreddit; re-fetch the feed
+                    // so the card re-renders with `needsSubreddit=false`
+                    // and the Post button replaces the picker.
+                    void refetchToday();
+                  }}
                 />
               ))}
             </div>

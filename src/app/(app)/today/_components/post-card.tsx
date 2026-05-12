@@ -20,6 +20,7 @@ import { Toggle } from '@/components/ui/toggle';
 import { PLATFORMS } from '@/lib/platform-config';
 import type { TodoItem } from '@/hooks/use-today';
 import { PlatformGlyph } from './platform-glyph';
+import { SubredditPicker } from './subreddit-picker';
 
 interface PostCardProps {
   item: TodoItem;
@@ -29,6 +30,13 @@ interface PostCardProps {
   isActive?: boolean;
   forceEditing?: boolean;
   onEditDone?: () => void;
+  /**
+   * Called after an inline subreddit picker successfully patches the
+   * plan_item. The parent should revalidate the today feed so the
+   * picker disappears and the Post button takes its place. Optional —
+   * non-Reddit cards never trigger it.
+   */
+  onSubredditApplied?: () => void;
 }
 
 function platformDisplay(platform: string): string {
@@ -44,6 +52,7 @@ export function PostCard({
   isActive = false,
   forceEditing = false,
   onEditDone,
+  onSubredditApplied,
 }: PostCardProps) {
   const [localEditing, setLocalEditing] = useState(false);
   const [editBody, setEditBody] = useState(item.draftBody ?? '');
@@ -61,6 +70,17 @@ export function PostCard({
 
   const isOptimistic = item.status !== 'pending';
   const contentType = item.calendarContentType ?? 'Original';
+
+  // Reddit content_post safety net: legacy plan_items (or any future
+  // bug in the subreddit-research pipeline) could land here without
+  // `params.subreddit`. dispatchApprove would throw on POST in that
+  // case; instead we swap the Post button for an inline subreddit
+  // picker so the founder can choose one without leaving Today.
+  const subredditOnItem = (item.params as { subreddit?: unknown } | null | undefined)?.subreddit;
+  const needsSubreddit =
+    item.platform === PLATFORMS.reddit.id &&
+    item.calendarContentType === 'content_post' &&
+    (typeof subredditOnItem !== 'string' || subredditOnItem.length === 0);
 
   const handleSaveEdit = () => {
     onEdit(item.id, editBody);
@@ -275,6 +295,13 @@ export function PostCard({
             >
               Posted ✓
             </span>
+          ) : needsSubreddit ? (
+            <SubredditPicker
+              planItemId={item.id}
+              onApplied={() => onSubredditApplied?.()}
+              onSkip={() => onSkip(item.id)}
+              TextAction={TextAction}
+            />
           ) : (
             <>
               <Button
@@ -322,6 +349,7 @@ function capitalize(s: string): string {
   if (!s) return s;
   return s[0].toUpperCase() + s.slice(1);
 }
+
 
 /* ── TextAction mirrors the ReplyCard one (kept local to avoid cycle) ── */
 
