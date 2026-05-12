@@ -307,6 +307,15 @@ export function addMessageCacheBreakpoint(
   const lastMsg = result[lastIdx]!;
 
   if (typeof lastMsg.content === 'string') {
+    // Defensive (2026-05-12): never produce an empty text block carrying
+    // cache_control — Anthropic rejects with `messages.N.content.0.text:
+    // cache_control cannot be set for empty text blocks`. The upstream
+    // guard at agent-run.ts skips spurious wakes that would push empty
+    // userMessage, but keep this branch robust against any other path
+    // that lands here with empty content. The cache breakpoint is a pure
+    // optimization — skipping it costs a cache miss next turn, never
+    // correctness.
+    if (lastMsg.content.length === 0) return result;
     result[lastIdx] = {
       ...lastMsg,
       content: [
@@ -320,6 +329,12 @@ export function addMessageCacheBreakpoint(
   } else if (Array.isArray(lastMsg.content) && lastMsg.content.length > 0) {
     const blocks = [...lastMsg.content];
     const lastBlock = blocks[blocks.length - 1]!;
+    // Same empty-text-block guard as the string branch above —
+    // explicitly skip when the would-be-marked block is a text block
+    // with empty text.
+    if (lastBlock.type === 'text' && lastBlock.text.length === 0) {
+      return result;
+    }
     blocks[blocks.length - 1] = {
       ...lastBlock,
       cache_control: { type: 'ephemeral' as const },
