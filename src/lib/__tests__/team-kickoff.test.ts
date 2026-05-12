@@ -58,6 +58,10 @@ function buildSelectChain(rows: unknown[]) {
  *   3. team_members
  *   4. strategic_paths
  *
+ * When `reddit` is in the connected channels list, a 5th SELECT
+ * fires against `product_reddit_channels` via `listActiveSubreddits`
+ * (Task 6 — used to round-robin Reddit content_post params.subreddit).
+ *
  * Helper to wire mocks for the "happy path" with a customizable
  * strategic_path row. Defaults to a path with x: 2 posts and 5
  * replies/day to exercise the parallel-spawn branches.
@@ -66,8 +70,17 @@ function setupHappyPath(opts?: {
   channels?: string[];
   pathRow?: Record<string, unknown> | null;
   productName?: string;
+  /** Rows returned from `listActiveSubreddits`. Only consulted when
+   *  `reddit` is among the connected channels — otherwise the helper
+   *  skips the DB hit entirely. */
+  availableSubreddits?: Array<{
+    subreddit: string;
+    rank: number;
+    fitScore: number | null;
+  }>;
 }): void {
   const productName = opts?.productName ?? 'Shipflare';
+  const channels = opts?.channels ?? ['x'];
   const pathRow =
     opts?.pathRow === null
       ? null
@@ -86,9 +99,7 @@ function setupHappyPath(opts?: {
           },
         };
 
-  if (opts?.channels) {
-    getUserChannelsMock.mockResolvedValueOnce(opts.channels);
-  }
+  getUserChannelsMock.mockResolvedValueOnce(channels);
 
   // 1. team_messages lookup → empty (no past kickoff).
   dbSelectMock.mockReturnValueOnce(buildSelectChain([]));
@@ -100,6 +111,12 @@ function setupHappyPath(opts?: {
   );
   // 4. strategic_paths lookup.
   dbSelectMock.mockReturnValueOnce(buildSelectChain(pathRow ? [pathRow] : []));
+  // 5. listActiveSubreddits — only fires when reddit is connected.
+  if (channels.includes('reddit')) {
+    dbSelectMock.mockReturnValueOnce(
+      buildSelectChain(opts?.availableSubreddits ?? []),
+    );
+  }
 
   dispatchLeadMessageMock.mockResolvedValueOnce({
     runId: 'run-new',
@@ -218,6 +235,10 @@ describe('ensureKickoffEnqueued', () => {
           reddit: { repliesPerDay: 2, preferredHours: [15] },
         },
       },
+      availableSubreddits: [
+        { subreddit: 'SaaS', rank: 1, fitScore: 0.9 },
+        { subreddit: 'indiehackers', rank: 2, fitScore: 0.8 },
+      ],
     });
 
     await ensureKickoffEnqueued({
@@ -252,6 +273,10 @@ describe('ensureKickoffEnqueued', () => {
           reddit: { repliesPerDay: 2, preferredHours: [15] },
         },
       },
+      availableSubreddits: [
+        { subreddit: 'SaaS', rank: 1, fitScore: 0.9 },
+        { subreddit: 'indiehackers', rank: 2, fitScore: 0.8 },
+      ],
     });
 
     await ensureKickoffEnqueued({
@@ -286,6 +311,9 @@ describe('ensureKickoffEnqueued', () => {
           reddit: { repliesPerDay: 0, preferredHours: [15] },
         },
       },
+      availableSubreddits: [
+        { subreddit: 'SaaS', rank: 1, fitScore: 0.9 },
+      ],
     });
 
     await ensureKickoffEnqueued({
@@ -399,6 +427,7 @@ describe('buildKickoffGoalText (pure)', () => {
       channelMix: {
         x: { repliesPerDay: 5 },
       },
+      availableSubreddits: [],
     });
     expect(goal).toContain('Acme');
     expect(goal).toContain('weekStart=2026-05-04T00:00:00.000Z');
@@ -418,6 +447,7 @@ describe('buildKickoffGoalText (pure)', () => {
       channels: ['x'],
       week1Posts: null,
       channelMix: null,
+      availableSubreddits: [],
     });
     expect(goal).toContain('No active strategic path');
     expect(goal).not.toContain('Task(');
@@ -435,9 +465,56 @@ describe('buildKickoffGoalText (pure)', () => {
       channelMix: {
         x: { repliesPerDay: -3 },
       },
+      availableSubreddits: [],
     });
     expect(goal).not.toContain('(x, reply)');
     expect(goal).not.toContain('(x, post)');
     expect(goal).toContain('No connected channels with active reply or post budget');
+  });
+
+  it('injects available subreddits into the goal text when reddit is connected', () => {
+    const goal = buildKickoffGoalText({
+      productName: 'Test',
+      pathId: 'p1',
+      weekStart: '2026-05-11',
+      now: '2026-05-11T00:00:00Z',
+      channels: ['reddit'],
+      week1Posts: { x: 0, reddit: 4, email: 0 },
+      channelMix: {
+        reddit: { repliesPerDay: 0 },
+      },
+      availableSubreddits: [
+        { subreddit: 'SaaS', rank: 1, fitScore: 0.91 },
+        { subreddit: 'indiehackers', rank: 2, fitScore: 0.85 },
+        { subreddit: 'microsaas', rank: 3, fitScore: 0.72 },
+      ],
+    });
+    expect(goal).toMatch(/Available subreddits for reddit content_post/);
+    expect(goal).toContain('SaaS');
+    expect(goal).toContain('indiehackers');
+    expect(goal).toContain('microsaas');
+    expect(goal).toContain('fit 0.91');
+    expect(goal).toMatch(/Rotate evenly[\s\S]*sortOrder/);
+    // The reddit post-batch spawn line is still present (subs > 0).
+    expect(goal).toMatch(/draft reddit post batch/);
+  });
+
+  it('omits Reddit content_post spawn AND adds a NOTE when availableSubreddits is empty', () => {
+    const goal = buildKickoffGoalText({
+      productName: 'Test',
+      pathId: 'p1',
+      weekStart: '2026-05-11',
+      now: '2026-05-11T00:00:00Z',
+      channels: ['reddit'],
+      week1Posts: { x: 0, reddit: 4, email: 0 },
+      channelMix: {
+        reddit: { repliesPerDay: 0 },
+      },
+      availableSubreddits: [],
+    });
+    expect(goal).not.toMatch(/draft reddit post batch/);
+    expect(goal).toMatch(
+      /no subreddits have been researched yet|Reddit research not yet complete/,
+    );
   });
 });
