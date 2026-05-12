@@ -1,6 +1,7 @@
 import NextAuth from 'next-auth';
 import type { Adapter } from 'next-auth/adapters';
 import GitHub from 'next-auth/providers/github';
+import Google from 'next-auth/providers/google';
 import { DrizzleAdapter } from '@auth/drizzle-adapter';
 import { eq } from 'drizzle-orm';
 import { db } from '@/lib/db';
@@ -35,9 +36,21 @@ const adapter: Adapter = {
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter,
   providers: [
+    // allowDangerousEmailAccountLinking: safe here — both providers return
+    // verified emails. The "dangerous" name in Auth.js docs targets providers
+    // that surface unverified emails (account-takeover vector). Setting this
+    // on BOTH so a Google user signing in via GitHub on the same email (or
+    // vice versa) joins the existing user row instead of being rejected with
+    // OAuthAccountNotLinked. See docs/superpowers/specs/2026-05-11-google-auth-design.md.
     GitHub({
       clientId: process.env.GITHUB_ID!,
       clientSecret: process.env.GITHUB_SECRET!,
+      allowDangerousEmailAccountLinking: true,
+    }),
+    Google({
+      clientId: process.env.GOOGLE_ID!,
+      clientSecret: process.env.GOOGLE_SECRET!,
+      allowDangerousEmailAccountLinking: true,
     }),
   ],
   session: {
