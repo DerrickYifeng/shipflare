@@ -8,8 +8,8 @@ const signInWithGitHub = vi.fn(async () => undefined);
 const signInWithGoogle = vi.fn(async () => undefined);
 
 vi.mock('@/app/actions/auth', () => ({
-  signInWithGitHub: (...args: unknown[]) => signInWithGitHub(...args),
-  signInWithGoogle: (...args: unknown[]) => signInWithGoogle(...args),
+  signInWithGitHub: () => signInWithGitHub(),
+  signInWithGoogle: () => signInWithGoogle(),
 }));
 
 // jsdom lacks <dialog> API methods (showModal/close). Polyfill them so the
