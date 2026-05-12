@@ -455,9 +455,9 @@ export function TodayBody({ yesterdayTop = null }: TodayBodyProps = {}) {
           )}
         </Section>
 
-        {/* ── Scheduled posts section ─────────────────────────────── */}
+        {/* ── Posts section ─────────────────────────────── */}
         {posts.length > 0 ? (
-          <Section label="Scheduled posts" count={posts.length}>
+          <Section label="Posts" count={posts.length}>
             <div
               style={{
                 display: 'flex',

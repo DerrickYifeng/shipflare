@@ -9,8 +9,8 @@ import { ShortcutsHelp, type ShortcutBinding } from '@/components/ui/shortcuts-h
 
 const SOURCE_FILTERS: Array<{ value: DraftSource | 'all'; label: string }> = [
   { value: 'all', label: 'All' },
-  { value: 'monitor', label: 'Scheduled replies' },
-  { value: 'calendar', label: 'Scheduled posts' },
+  { value: 'monitor', label: 'Replies' },
+  { value: 'calendar', label: 'Posts' },
   { value: 'engagement', label: 'Engage with my audience' },
   { value: 'discovery', label: 'Community threads' },
 ];

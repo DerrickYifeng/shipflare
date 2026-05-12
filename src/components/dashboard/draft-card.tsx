@@ -43,8 +43,8 @@ const verdictConfig = {
 } as const;
 
 const sourceLabel: Record<string, string> = {
-  monitor: 'Scheduled replies',
-  calendar: 'Scheduled posts',
+  monitor: 'Replies',
+  calendar: 'Posts',
   engagement: 'Engage with my audience',
   discovery: 'Community threads',
 };

@@ -250,7 +250,6 @@ export function PostCard({
         </div>
       ) : null}
 
-      {/* Footer: counter + actions */}
       <div
         style={{
           display: 'flex',
@@ -261,77 +260,21 @@ export function PostCard({
           background: 'var(--sf-bg-tertiary)',
         }}
       >
-        {!isEditing ? (() => {
-          // Three render modes by lifecycle:
-          //   X handoff     — has xIntentUrl: open X compose pre-filled.
-          //   X intent     — open X compose pre-filled; approve records handoff.
-          //   Queued (API) — server queued via BullMQ; show "Queued" label.
-          //   Default      — pre-click; show "Schedule" / "Approve".
-          const isInFlight = item.status === 'pending_approval';
-
-          if (item.xIntentUrl) {
-            const intentUrl = item.xIntentUrl;
-            const handleClick = () => {
-              if (typeof window !== 'undefined') {
-                window.open(intentUrl, '_blank', 'noopener,noreferrer');
-              }
-              onApprove(item.id);
-            };
-            return (
-              <>
-                <Button
-                  size="sm"
-                  disabled={!item.draftBody}
-                  onClick={handleClick}
-                >
-                  Schedule
-                </Button>
-                {item.draftBody ? (
-                  <TextAction onClick={() => setLocalEditing(true)}>Edit</TextAction>
-                ) : null}
-                <TextAction onClick={() => onSkip(item.id)}>Skip</TextAction>
-              </>
-            );
-          }
-
-          if (item.status === 'queued') {
-            return (
-              <>
-                <span
-                  className="sf-mono"
-                  style={{
-                    fontSize: 'var(--sf-text-xs)',
-                    color: 'var(--sf-fg-3)',
-                    letterSpacing: 'var(--sf-track-mono)',
-                  }}
-                >
-                  Queued
-                </span>
-                <TextAction onClick={() => onSkip(item.id)}>Skip</TextAction>
-              </>
-            );
-          }
-
-          return (
-            <>
-              <Button
-                size="sm"
-                onClick={() => onApprove(item.id)}
-                disabled={isInFlight}
-              >
-                {isInFlight
-                  ? 'Scheduling…'
-                  : item.draftBody
-                  ? 'Schedule'
-                  : 'Approve'}
-              </Button>
-              {item.draftBody ? (
-                <TextAction onClick={() => setLocalEditing(true)}>Edit</TextAction>
-              ) : null}
-              <TextAction onClick={() => onSkip(item.id)}>Skip</TextAction>
-            </>
-          );
-        })() : (
+        {!isEditing ? (
+          <>
+            <Button
+              size="sm"
+              onClick={() => onApprove(item.id)}
+              disabled={item.status === 'pending_approval' || !item.draftBody}
+            >
+              {item.status === 'pending_approval' ? 'Posting…' : 'Post'}
+            </Button>
+            {item.draftBody ? (
+              <TextAction onClick={() => setLocalEditing(true)}>Edit</TextAction>
+            ) : null}
+            <TextAction onClick={() => onSkip(item.id)}>Skip</TextAction>
+          </>
+        ) : (
           <>
             <Button size="sm" onClick={handleSaveEdit}>
               Save
