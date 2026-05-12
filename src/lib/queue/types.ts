@@ -60,32 +60,30 @@ export type PostingJobData = z.input<typeof postingJobSchema>;
 // Two shapes:
 //   - kind: 'fanout' — cron entry; processor iterates users w/ ≥1 channel
 //                       and enqueues per-user jobs.
-//   - kind: 'user'   — per-user rollup work.
+//   - kind: 'user' (default) — per-user rollup work. Legacy payloads
+//                              without `kind` are treated as 'user'.
 // Queue name stays 'health-score' in Redis for stability with any in-flight
 // schedule; the TS identifiers rename to match the new domain.
 // ---------------------------------------------------------------------------
 
-const growthRollupFanout = z.object({
+const growthRollupFanoutJobSchema = z.object({
   kind: z.literal('fanout'),
   schemaVersion: SCHEMA_VERSION,
   traceId: TRACE_ID,
 });
 
-const growthRollupUser = z.object({
+const growthRollupUserJobSchema = z.object({
   kind: z.literal('user').optional(),
   schemaVersion: SCHEMA_VERSION,
   traceId: TRACE_ID,
   userId: z.string().min(1),
 });
 
-export const growthRollupJobSchema = z.discriminatedUnion('kind', [
-  growthRollupFanout,
-  growthRollupUser.extend({ kind: z.literal('user') }),
+export const growthRollupJobSchema = z.union([
+  growthRollupFanoutJobSchema,
+  growthRollupUserJobSchema,
 ]);
-// Two-shape input (the legacy `kind`-less payload is treated as 'user').
-export type GrowthRollupJobData =
-  | z.input<typeof growthRollupUser>
-  | z.input<typeof growthRollupFanout>;
+export type GrowthRollupJobData = z.input<typeof growthRollupJobSchema>;
 
 // ---------------------------------------------------------------------------
 // Dream / Code scan
