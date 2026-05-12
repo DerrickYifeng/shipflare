@@ -6,12 +6,12 @@ export interface ApprovedInput {
 }
 
 export function waitlistApproved(input: ApprovedInput): EmailPayload {
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://shipflare.app';
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://shipflare.ai';
 
   const text = [
     "You're in.",
     '',
-    `Your ShipFlare alpha invite is ready. Sign in with GitHub using ${input.email}:`,
+    `Your ShipFlare alpha invite is ready. Sign in using ${input.email}:`,
     appUrl,
     '',
     'Reply to this email if you run into trouble.',
@@ -19,7 +19,7 @@ export function waitlistApproved(input: ApprovedInput): EmailPayload {
 
   const html = `<div style="font-family:system-ui,sans-serif;font-size:14px;line-height:1.5">
   <p><strong>You're in.</strong></p>
-  <p>Your ShipFlare alpha invite is ready. Sign in with GitHub using <code>${escapeHtml(input.email)}</code>:</p>
+  <p>Your ShipFlare alpha invite is ready. Sign in using <code>${escapeHtml(input.email)}</code>:</p>
   <p><a href="${escapeHtml(appUrl)}">${escapeHtml(appUrl)}</a></p>
   <p>Reply to this email if you run into trouble.</p>
 </div>`;
