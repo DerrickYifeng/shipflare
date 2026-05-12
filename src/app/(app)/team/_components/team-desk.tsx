@@ -16,7 +16,11 @@ import {
 } from '@/hooks/use-team-events';
 import { useToast } from '@/components/ui/toast';
 import { LeftRail, type LeftRailMember } from './left-rail';
-import { Conversation, type ConversationMember } from './conversation';
+import {
+  Conversation,
+  type ConversationMember,
+  type ConversationScrollHandle,
+} from './conversation';
 import { TaskPanel } from './task-panel';
 import {
   StickyComposer,
@@ -163,6 +167,17 @@ function TeamDeskInner({
   const inFlightFetchRef = useRef<Set<string>>(new Set());
 
   const composerRef = useRef<StickyComposerHandle | null>(null);
+  // Imperative handle into `<Conversation>` — lets `focusCardNow` mount
+  // the target row when the conversation is virtualized BEFORE querying
+  // for `subtask-card-${messageId}` and calling `scrollIntoView`. Without
+  // this, rail clicks on subagents whose card sits outside the
+  // virtualizer's visible window silently no-op (querySelector returns
+  // null for unmounted virtual rows). Null in non-virtualized mode (the
+  // bridge in Conversation makes `scrollToId` a no-op there since every
+  // row is already mounted).
+  const conversationScrollHandleRef = useRef<ConversationScrollHandle | null>(
+    null,
+  );
 
   const focusComposer = useCallback(() => {
     composerRef.current?.focus();
@@ -667,21 +682,54 @@ function TeamDeskInner({
   }, [threadMessages]);
 
   const focusCardNow = useCallback((messageId: string): void => {
-    const el = document.querySelector<HTMLElement>(
-      `[data-testid="subtask-card-${messageId}"]`,
-    );
+    // Notify subscribers (LeadMessage / DelegationCard) so they can
+    // expand or auto-scroll their internal panes. Fire-and-forget; no
+    // dependency on whether the target card mounts.
     window.dispatchEvent(
       new CustomEvent('sf:task-focus', { detail: { messageId } }),
     );
-    if (!el) return;
-    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
-    el.animate(
-      [
-        { boxShadow: '0 0 0 2px var(--sf-accent)' },
-        { boxShadow: '0 0 0 2px transparent' },
-      ],
-      { duration: 900, easing: 'ease-out' },
-    );
+
+    // Phase 1: ensure the row is in the DOM. In virtualized mode,
+    // off-window rows are unmounted — querySelector would return null
+    // and the jump would silently no-op. `scrollToId` calls into the
+    // virtualizer's scrollToIndex and the next animation frame is
+    // enough for the row to mount + measure. In non-virtualized mode
+    // `scrollToId` is a no-op (every row is already mounted) and the
+    // double-RAF is harmless overhead measured in tens of micros.
+    const handle = conversationScrollHandleRef.current;
+    if (handle) handle.scrollToId(messageId);
+
+    // Phase 2: find the inner SubtaskCard (which the row's renderer
+    // creates) and run the fine-grained centering + pulse animation.
+    // Wrapped in a double-RAF because the virtualizer may need one
+    // frame to mount the row and a second for the measureElement
+    // ResizeObserver to settle the row's final height. The animation
+    // call is wrapped in a null-check so legacy/raw runs without a
+    // SubtaskCard still trigger the sf:task-focus event above without
+    // a console error.
+    let frame1 = 0;
+    let frame2 = 0;
+    frame1 = requestAnimationFrame(() => {
+      frame2 = requestAnimationFrame(() => {
+        const el = document.querySelector<HTMLElement>(
+          `[data-testid="subtask-card-${messageId}"]`,
+        );
+        if (!el) return;
+        el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        el.animate(
+          [
+            { boxShadow: '0 0 0 2px var(--sf-accent)' },
+            { boxShadow: '0 0 0 2px transparent' },
+          ],
+          { duration: 900, easing: 'ease-out' },
+        );
+      });
+    });
+    // Best-effort: the closure exits before the frames fire so we
+    // can't return a teardown directly, but reassigning the timers
+    // through let-bindings keeps them GC-able once the frames resolve.
+    void frame1;
+    void frame2;
   }, []);
 
   const handleJumpToTask = useCallback(
@@ -1008,6 +1056,7 @@ function TeamDeskInner({
                 ? () => handleLoadOlder(selectedConversationId)
                 : undefined
             }
+            scrollHandleRef={conversationScrollHandleRef}
           />
         </div>
 
