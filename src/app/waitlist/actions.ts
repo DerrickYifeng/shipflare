@@ -59,18 +59,23 @@ export async function joinWaitlist(
     return { ok: true, alreadyOnList: false };
   }
 
-  const ip =
-    (await headers()).get('x-forwarded-for')?.split(',')[0]?.trim() ??
-    'unknown';
-  const rl = await acquireRateLimit(`waitlist:${ip}`, 60);
-  if (!rl.allowed) {
-    return {
-      ok: false,
-      error: 'Too many requests. Try again in a minute.',
-    };
+  const rawIp =
+    (await headers()).get('x-forwarded-for')?.split(',')[0]?.trim() ?? null;
+
+  // If we can't identify the source, skip rate-limiting (rather than using
+  // a shared 'unknown' bucket that would let one submit block everyone).
+  // The honeypot + DB upsert idempotency still limit damage.
+  if (rawIp) {
+    const rl = await acquireRateLimit(`waitlist:${rawIp}`, 60);
+    if (!rl.allowed) {
+      return {
+        ok: false,
+        error: 'Too many requests. Try again in a minute.',
+      };
+    }
   }
 
-  const ipHash = hashIp(ip);
+  const ipHash = rawIp ? hashIp(rawIp) : null;
 
   const rows = await db
     .insert(waitlistSignups)
@@ -101,12 +106,21 @@ export async function joinWaitlist(
     return { ok: false, error: 'Something went wrong. Try again.' };
   }
 
-  // Treat as "new" if updatedAt is within 1s of createdAt. ON CONFLICT
-  // path always bumps updatedAt with `new Date()` (Node clock) while
-  // createdAt was set by Postgres `now()` (DB clock) — the 1s tolerance
-  // covers clock skew. Theoretical race: two simultaneous submits within
-  // ~1ms produce two notifications for the same email. Acceptable for
-  // alpha; tighten if it becomes a real problem.
+  // Treat as "new" if updatedAt is within 1s of createdAt.
+  //
+  // First-insert path: both columns are set by `defaultNow()` in the
+  // same transaction → diff is effectively 0.
+  //
+  // Conflict path: `set: { updatedAt: new Date() }` uses Node's clock,
+  // which will be at least milliseconds (usually seconds/minutes) ahead
+  // of the original `createdAt` from Postgres `now()`, so the diff will
+  // exceed 1s.
+  //
+  // The 1s tolerance handles edge cases where a brand-new row is
+  // resubmitted within ~1s and the `new Date()` from the conflict path
+  // happens to land sub-millisecond after the DB-side `now()`. Stricter
+  // tolerance risks misclassifying. Looser risks suppressing legitimate
+  // resubmit notifications.
   const isNew =
     Math.abs(row.updatedAt.getTime() - row.createdAt.getTime()) < 1000;
 

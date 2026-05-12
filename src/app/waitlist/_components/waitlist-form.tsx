@@ -7,12 +7,13 @@ import {
   joinWaitlist,
   type JoinWaitlistState,
 } from '../actions';
+import { type BannerVariant } from './context-banner';
 
 const INITIAL: JoinWaitlistState = { ok: false };
 
 export interface WaitlistFormProps {
   initialEmail: string;
-  referer: 'denied' | 'landing' | 'no-email';
+  referer: BannerVariant;
 }
 
 export function WaitlistForm({ initialEmail, referer }: WaitlistFormProps) {
@@ -81,6 +82,8 @@ export function WaitlistForm({ initialEmail, referer }: WaitlistFormProps) {
         required
         defaultValue={initialEmail}
         autoComplete="email"
+        aria-invalid={state.error ? true : undefined}
+        aria-describedby={state.error ? 'waitlist-email-error' : undefined}
         style={inputStyle}
       />
 
@@ -120,6 +123,7 @@ export function WaitlistForm({ initialEmail, referer }: WaitlistFormProps) {
 
       {state.error ? (
         <p
+          id="waitlist-email-error"
           role="alert"
           style={{
             color: 'var(--sf-error)',
