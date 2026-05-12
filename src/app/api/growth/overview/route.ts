@@ -129,18 +129,20 @@ export async function GET() {
       const cfg = getPlatformConfig(platform);
       const score = scoresByPlatform.get(platform);
       const connection = connectedByPlatform.get(platform);
-      const handleOrLabel =
-        platform === 'reddit'
-          ? connection
-            ? 'Handoff mode'
-            : 'Not connected'
-          : connection?.username
-            ? `@${connection.username}`
-            : 'Not connected';
+      // Reddit is no-binding always-on (handoff mode): no channels row is
+      // ever written, but the founder ships content through their own
+      // browser via the handoff flow. Always render it as connected.
+      const isAlwaysOn = platform === 'reddit';
+      const connected = isAlwaysOn || !!connection;
+      const handleOrLabel = isAlwaysOn
+        ? 'Handoff mode'
+        : connection?.username
+          ? `@${connection.username}`
+          : 'Not connected';
       const out: ChannelOut = {
         platform,
         displayName: cfg.displayName,
-        connected: !!connection,
+        connected,
         handleOrLabel,
         score: score ? score.score : null,
         threads: score?.threads ?? 0,

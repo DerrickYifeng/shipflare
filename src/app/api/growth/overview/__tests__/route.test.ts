@@ -155,8 +155,10 @@ describe('GET /api/growth/overview', () => {
     expect(xChan?.connected).toBe(false);
     expect(xChan?.handleOrLabel).toBe('Not connected');
     const redditChan = social?.channels?.find((c) => c.platform === 'reddit');
-    expect(redditChan?.connected).toBe(false);
-    expect(redditChan?.handleOrLabel).toBe('Not connected');
+    // Reddit is no-binding always-on — never reads from `channels`, so it
+    // renders as connected (handoff mode) even on cold start.
+    expect(redditChan?.connected).toBe(true);
+    expect(redditChan?.handleOrLabel).toBe('Handoff mode');
     expect(redditChan?.activeSubreddits).toEqual([]);
   });
 
