@@ -49,8 +49,8 @@ export function InviteForm() {
           flex: '1 1 240px',
           padding: '8px 12px',
           fontSize: 13,
-          background: 'var(--sf-bg-1)',
-          border: '1px solid var(--sf-border-1)',
+          background: 'var(--sf-bg-tertiary)',
+          border: '1px solid var(--sf-border)',
           borderRadius: 4,
           color: 'var(--sf-fg-1)',
         }}
@@ -66,8 +66,8 @@ export function InviteForm() {
           flex: '2 1 320px',
           padding: '8px 12px',
           fontSize: 13,
-          background: 'var(--sf-bg-1)',
-          border: '1px solid var(--sf-border-1)',
+          background: 'var(--sf-bg-tertiary)',
+          border: '1px solid var(--sf-border)',
           borderRadius: 4,
           color: 'var(--sf-fg-1)',
         }}
@@ -78,8 +78,8 @@ export function InviteForm() {
         style={{
           padding: '8px 16px',
           fontSize: 13,
-          background: pending ? 'var(--sf-bg-2)' : 'var(--sf-fg-1)',
-          color: pending ? 'var(--sf-fg-3)' : 'var(--sf-bg-1)',
+          background: pending ? 'var(--sf-bg-tertiary)' : 'var(--sf-fg-1)',
+          color: pending ? 'var(--sf-fg-3)' : 'var(--sf-fg-on-dark-1)',
           border: 'none',
           borderRadius: 4,
           cursor: pending ? 'wait' : 'pointer',
