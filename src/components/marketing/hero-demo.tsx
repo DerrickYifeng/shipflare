@@ -99,39 +99,19 @@ export function HeroDemo({ headline = DEFAULT_HEADLINE, isAuthenticated }: HeroD
           className="flex flex-col items-center"
           style={{ marginTop: 40, gap: 12 }}
         >
-          <div
-            className="flex flex-wrap"
-            style={{ gap: 12, justifyContent: 'center' }}
-          >
-            {isAuthenticated ? (
-              <PillCta
-                onClick={() => {
-                  window.location.href = '/briefing';
-                }}
-              >
-                Open Briefing
-              </PillCta>
-            ) : (
-              <WaitlistPillLink />
-            )}
-            <a
-              href="#see-it"
-              className="inline-flex items-center"
-              style={{
-                gap: 6,
-                height: 48,
-                padding: '0 16px',
-                color: 'var(--sf-link-dark)',
-                fontSize: 'var(--sf-text-base)',
-                letterSpacing: 'var(--sf-track-normal)',
-                textDecoration: 'none',
+          {isAuthenticated ? (
+            <PillCta
+              onClick={() => {
+                window.location.href = '/briefing';
               }}
             >
-              See it in action ↓
-            </a>
-          </div>
-          {!isAuthenticated && (
-            <AlreadyInvitedButton onClick={() => setSignInOpen(true)} />
+              Open Briefing
+            </PillCta>
+          ) : (
+            <>
+              <WaitlistPillLink />
+              <AlreadyInvitedButton onClick={() => setSignInOpen(true)} />
+            </>
           )}
         </div>
 
