@@ -51,7 +51,14 @@ const paramsPatchSchema = z
   .object({
     subreddit: z.string().regex(SUBREDDIT_REGEX).optional(),
   })
-  .strict();
+  .strict()
+  // `{ params: {} }` would otherwise pass the outer refine and trigger
+  // a no-op UPDATE (touches updatedAt for nothing). Require at least
+  // one known key so writes are always meaningful.
+  .refine(
+    (p) => Object.keys(p).length > 0,
+    'params must include at least one key',
+  );
 
 const editPayloadSchema = z
   .object({

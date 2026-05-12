@@ -370,4 +370,48 @@ describe('PostCard — SubredditPicker behavior', () => {
     );
     expect(payload).toEqual({ params: { subreddit: 'webdev' } });
   });
+
+  it('moves keyboard focus to the manual input when "+ add another" is clicked', async () => {
+    swrMockState[CHANNELS_URL] = {
+      data: {
+        channels: [
+          { id: 'r1', subreddit: 'SaaS', rank: 1, fitScore: 0.9, disabled: false, source: 'auto' },
+        ],
+      },
+    };
+    renderPicker();
+    fireEvent.click(screen.getByRole('button', { name: /add another/i }));
+
+    // The manual input should now have focus so keyboard users can
+    // start typing immediately.
+    const input = screen.getByLabelText(/add a subreddit/i) as HTMLInputElement;
+    await waitFor(() => {
+      expect(document.activeElement).toBe(input);
+    });
+  });
+
+  it('returns keyboard focus to the dropdown when "Pick from list" is clicked', async () => {
+    swrMockState[CHANNELS_URL] = {
+      data: {
+        channels: [
+          { id: 'r1', subreddit: 'SaaS', rank: 1, fitScore: 0.9, disabled: false, source: 'auto' },
+        ],
+      },
+    };
+    renderPicker();
+
+    // Flip into manual mode then back.
+    fireEvent.click(screen.getByRole('button', { name: /add another/i }));
+    await waitFor(() =>
+      expect(screen.getByLabelText(/add a subreddit/i)).toBeTruthy(),
+    );
+    fireEvent.click(screen.getByRole('button', { name: /pick from list/i }));
+
+    const select = (await screen.findByLabelText(
+      /choose a subreddit/i,
+    )) as HTMLSelectElement;
+    await waitFor(() => {
+      expect(document.activeElement).toBe(select);
+    });
+  });
 });

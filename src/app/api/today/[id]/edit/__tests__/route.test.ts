@@ -256,6 +256,18 @@ describe('PATCH /api/today/[id]/edit — params patches', () => {
     expect(updates.length).toBe(0);
   });
 
+  it('rejects { params: {} } with 400 (params must include at least one key)', async () => {
+    // The outer refine would otherwise let an empty object through and
+    // produce a no-op UPDATE on updatedAt. The inner refine on
+    // paramsPatchSchema enforces that at least one known key is set.
+    const { PATCH } = await import('../route');
+    const res = await PATCH(makeReq({ params: {} }), {
+      params: Promise.resolve({ id: VALID_ID }),
+    });
+    expect(res.status).toBe(400);
+    expect(updates.length).toBe(0);
+  });
+
   it('accepts a valid subreddit params patch and merges into existing params', async () => {
     findOwnedPlanItemMock.mockResolvedValueOnce({
       id: VALID_ID,
