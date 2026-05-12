@@ -25,9 +25,10 @@ import { processStaleSweeper } from './processors/stale-sweeper';
 import { processWeeklyReplan } from './processors/weekly-replan';
 import { processReconcileMailbox } from './processors/reconcile-mailbox';
 import { processAgentRun } from './processors/agent-run';
+import { processRedditChannelResearch } from './processors/reddit-channel-research';
 import { AGENT_RUN_QUEUE_NAME, type AgentRunJobData } from '@/lib/queue/agent-run';
 import { dreamQueue, discoveryScanQueue, metricsQueue, analyticsQueue } from '@/lib/queue';
-import type { PlanExecuteJobData } from '@/lib/queue';
+import type { PlanExecuteJobData, RedditChannelResearchJobData } from '@/lib/queue';
 import { createLogger, loggerForJob } from '@/lib/logger';
 import type { ReviewJobData, PostingJobData, HealthScoreJobData, DreamJobData, CodeScanJobData, DiscoveryScanJobData, EngagementJobData, MetricsJobData, AnalyticsJobData } from '@/lib/queue/types';
 
@@ -158,6 +159,17 @@ const analyticsWorker = new Worker<AnalyticsJobData>(
   { ...BASE_OPTS, concurrency: 1 },
 );
 
+// Reddit subreddit kickoff research (one-shot per product). Each job
+// runs the `researching-reddit-channels` fork-skill, enriches the top
+// candidates via Reddit's public JSON API, and persists top-3 auto
+// rows to `product_reddit_channels`. Idempotent on (productId) unless
+// the job carries `force: true`.
+const redditChannelResearchWorker = new Worker<RedditChannelResearchJobData>(
+  'reddit-channel-research',
+  async (job) => processRedditChannelResearch(job),
+  { ...BASE_OPTS, concurrency: 2 },
+);
+
 // Daily-run fan-out — sole entry point for daily automation runs.
 // Walks every user with a team + product and dispatches one daily-playbook
 // lead message via `ensureDailyRunEnqueued`, rooted in the per-team
@@ -242,6 +254,7 @@ const workers = [
   dailyRunWorker,
   engagementWorker,
   metricsWorker, analyticsWorker,
+  redditChannelResearchWorker,
   // Phase 7
   planExecuteWorker, planExecuteSweeperWorker,
   staleSweeperWorker, weeklyReplanWorker,
@@ -395,7 +408,7 @@ Promise.all([
   log.error('Failed to schedule cron jobs:', err.message);
 });
 
-log.info('All workers started: review, posting, health-score, dream, code-scan, daily-run, engagement, metrics, analytics, plan-execute, plan-execute-sweeper, stale-sweeper, weekly-replan, team-run, agent-run, reconcile-mailbox. daily-run daily 13:00 UTC, plan-execute-sweeper every 1m, stale-sweeper every 1h, weekly-replan Monday 00:00 UTC, reconcile-mailbox every 1m, all others daily.');
+log.info('All workers started: review, posting, health-score, dream, code-scan, daily-run, engagement, metrics, analytics, reddit-channel-research, plan-execute, plan-execute-sweeper, stale-sweeper, weekly-replan, team-run, agent-run, reconcile-mailbox. daily-run daily 13:00 UTC, plan-execute-sweeper every 1m, stale-sweeper every 1h, weekly-replan Monday 00:00 UTC, reconcile-mailbox every 1m, all others daily.');
 
 // Graceful shutdown
 async function shutdown() {

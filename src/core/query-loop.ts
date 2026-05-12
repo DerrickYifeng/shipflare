@@ -263,7 +263,10 @@ export async function runAgent<T>(
   config: AgentConfig,
   userMessage: string,
   context: ToolContext,
-  outputSchema?: z.ZodType<T>,
+  // Widen input slot so schemas with `.default(...)` / `.optional()`
+  // (input ≠ output) compile when callers parameterize `<T>` to the
+  // output type. runAgent only consumes parsed output.
+  outputSchema?: z.ZodType<T, z.ZodTypeDef, unknown>,
   onProgress?: OnProgress,
   /** Pre-built cache-safe blocks for cross-agent cache sharing. */
   prebuilt?: {

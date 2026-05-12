@@ -184,6 +184,26 @@ export const discoveryScanJobSchema = z.object({
 export type DiscoveryScanJobData = z.input<typeof discoveryScanJobSchema>;
 
 // ---------------------------------------------------------------------------
+// Reddit channel research (kickoff subreddit discovery)
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-product subreddit research. `force=true` re-runs even when auto
+ * rows already exist (founder-triggered "Re-research" in settings).
+ */
+export const redditChannelResearchJobSchema = z.object({
+  kind: z.literal('user').optional(),
+  schemaVersion: SCHEMA_VERSION,
+  traceId: TRACE_ID,
+  userId: z.string().min(1),
+  productId: z.string().min(1),
+  force: z.boolean().optional(),
+});
+export type RedditChannelResearchJobData = z.input<
+  typeof redditChannelResearchJobSchema
+>;
+
+// ---------------------------------------------------------------------------
 // Back-compat aliases (will be removed after full migration)
 // ---------------------------------------------------------------------------
 
@@ -200,7 +220,8 @@ export type JobData =
   | DiscoveryScanJobData
   | EngagementJobData
   | MetricsJobData
-  | AnalyticsJobData;
+  | AnalyticsJobData
+  | RedditChannelResearchJobData;
 
 // ---------------------------------------------------------------------------
 // Runtime helpers for processors
