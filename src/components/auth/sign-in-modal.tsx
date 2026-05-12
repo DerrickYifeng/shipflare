@@ -54,6 +54,21 @@ function GoogleIcon() {
   );
 }
 
+const VARIANT_STYLES = {
+  dark: {
+    background: 'var(--sf-bg-dark)',
+    hoverBackground: 'var(--sf-bg-dark-surface)',
+    color: 'var(--sf-fg-on-dark-1)',
+    border: 'none',
+  },
+  light: {
+    background: 'var(--sf-bg-primary)',
+    hoverBackground: 'var(--sf-bg-secondary)',
+    color: 'var(--sf-fg-1)',
+    border: '1px solid var(--sf-border-subtle)',
+  },
+} as const;
+
 const PROVIDERS: Provider[] = [
   // Google first: friction-reduction is the goal, so lead with the
   // broader-reach option. See docs/superpowers/specs/2026-05-11-google-auth-design.md.
@@ -176,19 +191,10 @@ export function SignInModal({ open, onClose, onBeforeSignIn }: SignInModalProps)
                   gap: 10,
                   minHeight: 44,
                   padding: '10px 20px',
-                  background:
-                    provider.variant === 'dark'
-                      ? 'var(--sf-bg-dark)'
-                      : 'var(--sf-bg-primary)',
-                  color:
-                    provider.variant === 'dark'
-                      ? 'var(--sf-fg-on-dark-1)'
-                      : 'var(--sf-fg-1)',
+                  background: VARIANT_STYLES[provider.variant].background,
+                  color: VARIANT_STYLES[provider.variant].color,
                   borderRadius: 'var(--sf-radius-md)',
-                  border:
-                    provider.variant === 'dark'
-                      ? 'none'
-                      : '1px solid var(--sf-border-subtle)',
+                  border: VARIANT_STYLES[provider.variant].border,
                   fontSize: 'var(--sf-text-base)',
                   fontWeight: 500,
                   letterSpacing: 'var(--sf-track-tight)',
@@ -198,15 +204,11 @@ export function SignInModal({ open, onClose, onBeforeSignIn }: SignInModalProps)
                 }}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.background =
-                    provider.variant === 'dark'
-                      ? 'var(--sf-bg-dark-surface)'
-                      : 'var(--sf-bg-secondary)';
+                    VARIANT_STYLES[provider.variant].hoverBackground;
                 }}
                 onMouseLeave={(e) => {
                   e.currentTarget.style.background =
-                    provider.variant === 'dark'
-                      ? 'var(--sf-bg-dark)'
-                      : 'var(--sf-bg-primary)';
+                    VARIANT_STYLES[provider.variant].background;
                 }}
               >
                 {provider.icon}
