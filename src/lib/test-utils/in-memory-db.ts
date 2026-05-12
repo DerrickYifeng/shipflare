@@ -48,6 +48,9 @@ export interface NotSentinel {
 export interface DescSentinel {
   __desc: unknown;
 }
+export interface AscSentinel {
+  __asc: unknown;
+}
 export type WhereSentinel =
   | EqSentinel
   | GteSentinel
@@ -231,6 +234,7 @@ export function createInMemoryStore(): InMemoryStore {
       let targetTable: unknown = null;
       let filter: WhereSentinel | undefined;
       let limitN = Infinity;
+      let orderBySpec: Array<{ column: unknown; dir: 'asc' | 'desc' }> = [];
       const builder = {
         from(table: unknown) {
           targetTable = table;
@@ -244,7 +248,28 @@ export function createInMemoryStore(): InMemoryStore {
           filter = c;
           return builder;
         },
-        orderBy(..._args: unknown[]) {
+        orderBy(...args: unknown[]) {
+          // Decode sentinels for asc()/desc(). Bare column refs default
+          // to ascending. We only emit AscSentinel from `asc(...)` in the
+          // factory, so tolerate raw columns too.
+          orderBySpec = args.map((a) => {
+            const sentinel = a as
+              | DescSentinel
+              | { __asc: unknown }
+              | unknown;
+            if (sentinel && typeof sentinel === 'object') {
+              if ('__desc' in sentinel) {
+                return { column: (sentinel as DescSentinel).__desc, dir: 'desc' };
+              }
+              if ('__asc' in sentinel) {
+                return {
+                  column: (sentinel as { __asc: unknown }).__asc,
+                  dir: 'asc',
+                };
+              }
+            }
+            return { column: a, dir: 'asc' };
+          });
           return builder;
         },
         limit(n: number) {
@@ -258,9 +283,40 @@ export function createInMemoryStore(): InMemoryStore {
 
       function materialize(): unknown[] {
         const rows = store.get(targetTable);
-        const matching = rows.filter((row) =>
+        let matching = rows.filter((row) =>
           rowMatches(row as Record<string, unknown>, filter),
         );
+
+        // Apply ORDER BY when present. Stable sort across multiple keys.
+        if (orderBySpec.length > 0) {
+          const cmp = (a: unknown, b: unknown): number => {
+            if (a instanceof Date && b instanceof Date) {
+              return a.getTime() - b.getTime();
+            }
+            if (typeof a === 'number' && typeof b === 'number') return a - b;
+            if (typeof a === 'string' && typeof b === 'string') {
+              return a.localeCompare(b);
+            }
+            if (a == null && b == null) return 0;
+            if (a == null) return 1;
+            if (b == null) return -1;
+            return 0;
+          };
+          matching = [...matching].sort((aRow, bRow) => {
+            const a = aRow as Record<string, unknown>;
+            const b = bRow as Record<string, unknown>;
+            for (const spec of orderBySpec) {
+              const keys = columnKeys(spec.column);
+              const aKey = findRowKey(a, keys);
+              const bKey = findRowKey(b, keys);
+              const aVal = aKey !== null ? a[aKey] : undefined;
+              const bVal = bKey !== null ? b[bKey] : undefined;
+              const c = cmp(aVal, bVal);
+              if (c !== 0) return spec.dir === 'desc' ? -c : c;
+            }
+            return 0;
+          });
+        }
 
         // Apply SELECT projection when cols is supplied.
         let projected: unknown[] = matching;
@@ -289,17 +345,7 @@ export function createInMemoryStore(): InMemoryStore {
     insert(table: unknown) {
       return {
         values(row: Record<string, unknown> | Array<Record<string, unknown>>) {
-          const rows = Array.isArray(row) ? row : [row];
-          const list = store.get<Record<string, unknown>>(table);
-          const inserted: Array<Record<string, unknown>> = [];
-          for (const r of rows) {
-            const withId = {
-              ...r,
-              id: (r.id as string | undefined) ?? `mem-${list.length + 1}`,
-            };
-            list.push(withId);
-            inserted.push(withId);
-          }
+          const rowsToInsert = Array.isArray(row) ? row : [row];
           type InsertResult = Promise<Array<Record<string, unknown>>> & {
             returning: (
               projection?: Record<string, unknown>,
@@ -307,29 +353,104 @@ export function createInMemoryStore(): InMemoryStore {
             onConflictDoNothing: (
               _opts?: unknown,
             ) => InsertResult;
+            onConflictDoUpdate: (opts: {
+              target: unknown | unknown[];
+              set: Record<string, unknown>;
+            }) => InsertResult;
+          };
+          // Track whether the caller has already materialized the rows so
+          // we don't double-insert when `onConflictDoNothing` is chained.
+          let materialized: Array<Record<string, unknown>> | null = null;
+          const doInsert = (): Array<Record<string, unknown>> => {
+            if (materialized) return materialized;
+            const list = store.get<Record<string, unknown>>(table);
+            const inserted: Array<Record<string, unknown>> = [];
+            for (const r of rowsToInsert) {
+              const withId = {
+                ...r,
+                id: (r.id as string | undefined) ?? `mem-${list.length + 1}`,
+              };
+              list.push(withId);
+              inserted.push(withId);
+            }
+            materialized = inserted;
+            return inserted;
           };
           const makeResult = (
             rowsForReturn: Array<Record<string, unknown>>,
           ): InsertResult => {
-            const p = Promise.resolve(rowsForReturn) as InsertResult;
+            // Lazy promise: only materializes when awaited or .then'd. This
+            // lets the caller append `.onConflictDoUpdate(...)` after
+            // `.values(...)` without the default-path having already
+            // inserted the row.
+            const p = {
+              then(
+                onFulfilled?: (
+                  v: Array<Record<string, unknown>>,
+                ) => unknown,
+              ) {
+                const out = doInsert();
+                return Promise.resolve(out).then(onFulfilled);
+              },
+            } as unknown as InsertResult;
             p.returning = (projection?: Record<string, unknown>) => {
-              if (!projection) return Promise.resolve(rowsForReturn);
+              const out = doInsert();
+              if (!projection) return Promise.resolve(out);
               const keys = Object.keys(projection);
               return Promise.resolve(
-                rowsForReturn.map((row) => {
-                  const out: Record<string, unknown> = {};
-                  for (const k of keys) out[k] = row[k];
-                  return out;
+                out.map((row) => {
+                  const proj: Record<string, unknown> = {};
+                  for (const k of keys) proj[k] = row[k];
+                  return proj;
                 }),
               );
             };
-            // In-memory mock: ON CONFLICT DO NOTHING is a no-op (we don't
-            // model UNIQUE constraints), so the inserted rows pass through.
-            // Tests that need conflict semantics should mock at a higher level.
-            p.onConflictDoNothing = (_opts?: unknown) => makeResult(rowsForReturn);
+            // ON CONFLICT DO NOTHING is a no-op (no UNIQUE modeling).
+            p.onConflictDoNothing = (_opts?: unknown) =>
+              makeResult(rowsForReturn);
+            p.onConflictDoUpdate = (opts: {
+              target: unknown | unknown[];
+              set: Record<string, unknown>;
+            }) => {
+              // Simulate Postgres ON CONFLICT (target_cols) DO UPDATE SET:
+              // For each pending row, check whether the table already has
+              // a row matching ALL target columns. If yes → apply opts.set
+              // to that existing row, skip insert. If no → insert normally.
+              const list = store.get<Record<string, unknown>>(table);
+              const targets = Array.isArray(opts.target)
+                ? opts.target
+                : [opts.target];
+              const targetKeyLists = targets.map((t) => columnKeys(t));
+              const finalRows: Array<Record<string, unknown>> = [];
+              for (const r of rowsToInsert) {
+                const matchExisting = list.find((existing) =>
+                  targetKeyLists.every((keys) => {
+                    const existingKey = findRowKey(existing, keys);
+                    const incomingKey = findRowKey(r, keys);
+                    if (existingKey === null || incomingKey === null) {
+                      return false;
+                    }
+                    return existing[existingKey] === r[incomingKey];
+                  }),
+                );
+                if (matchExisting) {
+                  Object.assign(matchExisting, opts.set);
+                  finalRows.push(matchExisting);
+                } else {
+                  const withId = {
+                    ...r,
+                    id: (r.id as string | undefined) ?? `mem-${list.length + 1}`,
+                  };
+                  list.push(withId);
+                  finalRows.push(withId);
+                }
+              }
+              materialized = finalRows;
+              return makeResult(finalRows);
+            };
             return p;
           };
-          return makeResult(inserted);
+          return makeResult(rowsToInsert);
         },
       };
     },
@@ -389,6 +510,7 @@ export function drizzleMockFactory(
     // then returns [] for it, a trivially-satisfied no-op).
     not: (inner: WhereSentinel): NotSentinel => ({ __not: inner }),
     desc: (col: unknown): DescSentinel => ({ __desc: col }),
+    asc: (col: unknown): AscSentinel => ({ __asc: col }),
     sql: (..._args: unknown[]) => 'sql-stub',
   };
 }

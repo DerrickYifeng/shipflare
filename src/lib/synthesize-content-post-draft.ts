@@ -88,7 +88,11 @@ export async function synthesizeContentPostDraft(
   let postTitle: string | null = null;
 
   if (platform === 'reddit') {
-    // params.subreddit may include the r/ prefix — strip it for the DB.
+    // params.subreddit is REQUIRED by AddPlanItemTool for Reddit content_post
+    // since the kickoff-research refactor (2026-05-11). Strip any leading
+    // `r/` defensively; if it's still null here, AddPlanItem upstream is
+    // broken — keep the fallback null so dispatchApprove surfaces a clear
+    // error rather than crashing here.
     const rawParams = fullRow.params as Record<string, unknown> | null;
     const rawSubreddit =
       typeof rawParams?.subreddit === 'string' ? rawParams.subreddit : null;

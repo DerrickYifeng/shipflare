@@ -237,6 +237,20 @@ export const contentPostParamsSchema = z
       .optional(),
     metaphor_ban: z.array(z.string().min(1).max(40)).max(20).optional(),
     cross_refs: z.array(z.string().uuid()).max(5).optional(),
+    /**
+     * Reddit-only. REQUIRED at AddPlanItemTool when `channel === 'reddit'`.
+     * Stored without the `r/` prefix. The runtime check is in
+     * AddPlanItemTool — this field is optional at the Zod layer so X
+     * content_post params keep validating. Use the same naming bounds
+     * as Reddit's own rules: 3..21 chars, [A-Za-z0-9_]+ — same shape
+     * as researchingRedditChannelsOutputSchema's subreddit field.
+     */
+    subreddit: z
+      .string()
+      .min(3)
+      .max(21)
+      .regex(/^[A-Za-z0-9_]+$/)
+      .optional(),
   })
   .passthrough();
 
