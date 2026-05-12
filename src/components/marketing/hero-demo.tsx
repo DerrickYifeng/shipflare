@@ -1,11 +1,11 @@
 'use client';
 
 import { useState } from 'react';
-import Link from 'next/link';
 import { PillCta } from '@/components/ui/pill-cta';
 import { StatusDot } from '@/components/ui/status-dot';
 import { Ops } from '@/components/ui/ops';
 import { SignInModal } from '@/components/auth/sign-in-modal';
+import { WaitlistPillLink, AlreadyInvitedButton } from './waitlist-cta';
 
 export interface HeroDemoProps {
   headline?: string;
@@ -108,47 +108,9 @@ export function HeroDemo({ headline = DEFAULT_HEADLINE, isAuthenticated }: HeroD
               Open Briefing
             </PillCta>
           ) : (
-            <div
-              className="inline-flex flex-col items-center"
-              style={{ gap: 0 }}
-            >
-              <Link
-                href="/waitlist"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  height: 48,
-                  padding: '0 24px',
-                  background: 'var(--sf-accent)',
-                  color: 'var(--sf-fg-on-dark-1)',
-                  borderRadius: 'var(--sf-radius-pill)',
-                  fontSize: 'var(--sf-text-base)',
-                  fontWeight: 500,
-                  letterSpacing: 'var(--sf-track-normal)',
-                  textDecoration: 'none',
-                  transition: 'background var(--sf-dur-base) var(--sf-ease-swift)',
-                }}
-              >
-                Request alpha access
-                <span style={{ fontSize: 16 }} aria-hidden="true">→</span>
-              </Link>
-              <button
-                type="button"
-                onClick={() => setSignInOpen(true)}
-                style={{
-                  marginTop: 12,
-                  background: 'transparent',
-                  border: 'none',
-                  color: 'var(--sf-fg-on-dark-3)',
-                  fontSize: 14,
-                  cursor: 'pointer',
-                  textDecoration: 'underline',
-                  textUnderlineOffset: 3,
-                }}
-              >
-                Already invited? Sign in with GitHub
-              </button>
+            <div className="inline-flex flex-col items-center">
+              <WaitlistPillLink />
+              <AlreadyInvitedButton onClick={() => setSignInOpen(true)} />
             </div>
           )}
           <a

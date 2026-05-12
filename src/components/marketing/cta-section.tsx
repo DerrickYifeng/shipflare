@@ -1,9 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import Link from 'next/link';
 import { PillCta } from '@/components/ui/pill-cta';
 import { SignInModal } from '@/components/auth/sign-in-modal';
+import { WaitlistPillLink, AlreadyInvitedButton } from './waitlist-cta';
 
 export interface CTASectionProps {
   isAuthenticated: boolean;
@@ -87,63 +87,13 @@ export function CTASection({ isAuthenticated }: CTASectionProps) {
             </PillCta>
           ) : (
             <>
-              <Link
-                href="/waitlist"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  height: 48,
-                  padding: '0 24px',
-                  background: 'var(--sf-accent)',
-                  color: 'var(--sf-fg-on-dark-1)',
-                  borderRadius: 'var(--sf-radius-pill)',
-                  fontSize: 'var(--sf-text-base)',
-                  fontWeight: 500,
-                  letterSpacing: 'var(--sf-track-normal)',
-                  textDecoration: 'none',
-                  transition: 'background var(--sf-dur-base) var(--sf-ease-swift)',
-                }}
-              >
-                Request alpha access
-                <span style={{ fontSize: 16 }} aria-hidden="true">→</span>
-              </Link>
-              <button
-                type="button"
-                onClick={() => setSignInOpen(true)}
-                style={{
-                  marginTop: 12,
-                  background: 'transparent',
-                  border: 'none',
-                  color: 'var(--sf-fg-on-dark-3)',
-                  fontSize: 14,
-                  cursor: 'pointer',
-                  textDecoration: 'underline',
-                  textUnderlineOffset: 3,
-                }}
-              >
-                Already invited? Sign in with GitHub
-              </button>
+              <WaitlistPillLink />
+              <AlreadyInvitedButton onClick={() => setSignInOpen(true)} />
             </>
           )}
         </div>
       </div>
       <SignInModal open={signInOpen} onClose={() => setSignInOpen(false)} />
     </section>
-  );
-}
-
-function GithubMark() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 24 24"
-      width="20"
-      height="20"
-      fill="currentColor"
-      style={{ flexShrink: 0 }}
-    >
-      <path d="M12 .5C5.73.5.67 5.56.67 11.83c0 4.97 3.23 9.19 7.7 10.68.56.1.77-.24.77-.55v-1.93c-3.14.68-3.8-1.51-3.8-1.51-.51-1.3-1.25-1.65-1.25-1.65-1.02-.7.08-.68.08-.68 1.13.08 1.72 1.16 1.72 1.16 1 1.72 2.64 1.22 3.29.94.1-.72.39-1.22.71-1.5-2.51-.29-5.15-1.25-5.15-5.58 0-1.23.44-2.24 1.16-3.03-.12-.28-.5-1.43.11-2.97 0 0 .94-.3 3.08 1.16.9-.25 1.86-.37 2.82-.38.96.01 1.92.13 2.82.38 2.14-1.46 3.08-1.16 3.08-1.16.61 1.54.23 2.69.11 2.97.72.79 1.16 1.80 1.16 3.03 0 4.34-2.64 5.29-5.16 5.57.4.35.76 1.04.76 2.09v3.1c0 .31.2.66.78.55C20.11 21.01 23.33 16.8 23.33 11.83 23.33 5.56 18.27.5 12 .5Z" />
-    </svg>
   );
 }
