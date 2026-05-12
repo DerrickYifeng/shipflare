@@ -2,8 +2,8 @@
 name: researching-reddit-channels
 description: Find N candidate subreddits for a product's ICP via a single xAI Grok web_search pass (reddit.com only). Returns subreddit name, member count, rules summary, fit rationale, and 0-1 fit score per candidate. The worker (kickoff-time) overwrites memberCountApprox with a /about.json fetch and selects top-K. DO NOT use for thread discovery — that's find_threads_via_xai.
 context: fork
-model: grok-4.20-non-reasoning
-maxTurns: 4
+model: claude-haiku-4-5-20251001
+maxTurns: 3
 allowed-tools:
   - xai_find_customers
 ---
@@ -53,8 +53,10 @@ Every candidate you surface MUST satisfy ALL of:
    `r/AskReddit`, or other generic catch-alls.
 2. **Not NSFW / not over_18** — skip anything tagged adult.
 3. **At least 1,000 members** — under 1k is too thin for outreach.
-   If the page doesn't show a member count, omit that candidate
-   rather than guessing.
+   If the page doesn't show a member count at all, drop the candidate
+   rather than guessing; only set `member_count_approx: null` for
+   candidates that ARE plausibly above the threshold but where you
+   can't read the exact figure.
 4. **ICP-shaped** — the subreddit's audience plausibly contains the
    product's target user. A subreddit that mentions the topic once
    in passing does NOT qualify.
@@ -66,8 +68,8 @@ For each candidate, you write:
 - `subreddit` — the name WITHOUT the `r/` prefix
   (e.g. `"webdev"`, not `"r/webdev"`).
 - `memberCountApprox` — integer member count from the public sidebar.
-  Omit the field if you can't read it confidently — the worker will
-  refresh it via /about.json anyway.
+  Pass `null` when the count isn't readable; do not omit the field.
+  The worker will refresh it via /about.json anyway.
 - `rulesSummary` — one paragraph naming the rules that matter for
   outreach: self-promo limits (e.g. "1-in-10 rule"), AI/generated
   content bans, no-founder bans, weekly self-promo threads only.
@@ -89,7 +91,7 @@ Pass this literal as `responseFormatSchema`:
 {
   "type": "object",
   "additionalProperties": false,
-  "required": ["candidates", "notes"],
+  "required": ["candidates"],
   "properties": {
     "candidates": {
       "type": "array",
@@ -112,8 +114,7 @@ Pass this literal as `responseFormatSchema`:
           "fit_score": { "type": "number", "minimum": 0, "maximum": 1 }
         }
       }
-    },
-    "notes": { "type": "string" }
+    }
   }
 }
 ```
@@ -126,11 +127,11 @@ After `xai_find_customers` returns, call StructuredOutput with:
 {
   candidates: [
     {
-      subreddit: string,            // no r/ prefix
-      memberCountApprox?: number,   // omit when xAI couldn't resolve
+      subreddit: string,                  // no r/ prefix; 3..21 chars, [A-Za-z0-9_]+
+      memberCountApprox: number | null,   // null when xAI couldn't resolve the exact figure
       rulesSummary: string,
       fitRationale: string,
-      fitScore: number              // 0..1
+      fitScore: number                    // 0..1
     },
     ...
   ],

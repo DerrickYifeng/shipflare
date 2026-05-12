@@ -124,6 +124,22 @@ describe('researching-reddit-channels output schema', () => {
     expect(parsed.candidates[0].memberCountApprox).toBeUndefined();
   });
 
+  it('accepts memberCountApprox: null (xAI saw the page but could not read the figure)', () => {
+    const parsed = researchingRedditChannelsOutputSchema.parse({
+      candidates: [
+        {
+          subreddit: 'somesub',
+          memberCountApprox: null,
+          rulesSummary: '',
+          fitRationale: 'rationale',
+          fitScore: 0.5,
+        },
+      ],
+      costUsd: 0,
+    });
+    expect(parsed.candidates[0].memberCountApprox).toBeNull();
+  });
+
   it('rejects fitScore above 1', () => {
     expect(() =>
       researchingRedditChannelsOutputSchema.parse({
@@ -186,6 +202,89 @@ describe('researching-reddit-channels output schema', () => {
       }),
     ).toThrow();
   });
+
+  // Reddit's actual subreddit naming rules: 3..21 chars, [A-Za-z0-9_]+.
+  // These tests catch the xAI-hallucination patterns we care about
+  // (stray `r/` prefix, punctuation, too-short / too-long names).
+  it('rejects subreddit with a stray `r/` prefix', () => {
+    expect(() =>
+      researchingRedditChannelsOutputSchema.parse({
+        candidates: [
+          {
+            subreddit: 'r/webdev',
+            rulesSummary: '',
+            fitRationale: 'r',
+            fitScore: 0.5,
+          },
+        ],
+        costUsd: 0,
+      }),
+    ).toThrow();
+  });
+
+  it('rejects subreddit with punctuation or special chars', () => {
+    expect(() =>
+      researchingRedditChannelsOutputSchema.parse({
+        candidates: [
+          {
+            subreddit: 'web-dev',
+            rulesSummary: '',
+            fitRationale: 'r',
+            fitScore: 0.5,
+          },
+        ],
+        costUsd: 0,
+      }),
+    ).toThrow();
+  });
+
+  it('rejects subreddit shorter than 3 chars', () => {
+    expect(() =>
+      researchingRedditChannelsOutputSchema.parse({
+        candidates: [
+          {
+            subreddit: 'go',
+            rulesSummary: '',
+            fitRationale: 'r',
+            fitScore: 0.5,
+          },
+        ],
+        costUsd: 0,
+      }),
+    ).toThrow();
+  });
+
+  it('rejects subreddit longer than 21 chars', () => {
+    expect(() =>
+      researchingRedditChannelsOutputSchema.parse({
+        candidates: [
+          {
+            subreddit: 'a'.repeat(22),
+            rulesSummary: '',
+            fitRationale: 'r',
+            fitScore: 0.5,
+          },
+        ],
+        costUsd: 0,
+      }),
+    ).toThrow();
+  });
+
+  it('accepts subreddit at the 21-char boundary with underscores and digits', () => {
+    const name = 'Awesome_Subreddit_123'; // 21 chars exactly
+    const parsed = researchingRedditChannelsOutputSchema.parse({
+      candidates: [
+        {
+          subreddit: name,
+          rulesSummary: '',
+          fitRationale: 'r',
+          fitScore: 0.5,
+        },
+      ],
+      costUsd: 0,
+    });
+    expect(parsed.candidates[0].subreddit).toBe(name);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -198,7 +297,12 @@ describe('researching-reddit-channels skill loader', () => {
     expect(skill).not.toBeNull();
     expect(skill!.name).toBe('researching-reddit-channels');
     expect(skill!.context).toBe('fork');
-    expect(skill!.model).toBe('grok-4.20-non-reasoning');
+    // The fork-driver model is Claude (Haiku — mechanical 1-tool-call work);
+    // xAI Grok is invoked separately via the xai_find_customers tool.
+    expect(skill!.model).toBe('claude-haiku-4-5-20251001');
+    // Body forbids retries → 1 xAI call + 1 StructuredOutput = 2 turns;
+    // keep one turn of headroom but no more.
+    expect(skill!.maxTurns).toBe(3);
   });
 
   it('declares xai_find_customers as the only allowed tool', async () => {
@@ -243,6 +347,9 @@ describe('researching-reddit-channels skill loader', () => {
     expect(body).toContain('rules_summary');
     expect(body).toContain('fit_rationale');
     expect(body).toContain('fit_score');
+    // Regression guard: drop `notes` field — neighbors don't carry one
+    // and the Zod output schema doesn't model it.
+    expect(body).not.toContain('"notes"');
   });
 
   it('renders a body that spells out the quality bar', async () => {

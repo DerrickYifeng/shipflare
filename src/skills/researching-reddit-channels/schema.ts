@@ -8,7 +8,7 @@
 // Contract:
 //   Input  → product fields + optional icp + candidateCount (3..12, default 6)
 //   Output → candidates[] (subreddit, rulesSummary, fitRationale, fitScore,
-//            optional memberCountApprox) + costUsd
+//            nullable memberCountApprox) + costUsd
 
 import { z } from 'zod';
 
@@ -29,11 +29,18 @@ export type ResearchingRedditChannelsInput = z.infer<
 >;
 
 const candidateSchema = z.object({
-  /** Without r/ prefix. */
-  subreddit: z.string().min(1).max(60),
-  /** Member count as reported by xAI from the public subreddit page. The
-   *  worker overwrites this with a /about.json fetch. */
-  memberCountApprox: z.number().int().optional(),
+  /** Without `r/` prefix. Encodes Reddit's actual subreddit naming
+   *  rules: 3..21 chars, [A-Za-z0-9_]+ — catches xAI hallucinations
+   *  like a stray `r/` prefix or punctuation at parse time. */
+  subreddit: z
+    .string()
+    .min(3)
+    .max(21)
+    .regex(/^[A-Za-z0-9_]+$/, 'Subreddit must match /^[A-Za-z0-9_]+$/'),
+  /** Member count as reported by xAI from the public subreddit page.
+   *  `null` when xAI couldn't read the exact figure. The worker
+   *  (Task 4) overwrites this with a /about.json fetch either way. */
+  memberCountApprox: z.number().int().nullable().optional(),
   /** One-paragraph summary of the rules that matter (self-promo, AI,
    *  no-founders, etc.). Empty string if none relevant. */
   rulesSummary: z.string(),
