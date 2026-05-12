@@ -68,7 +68,7 @@ export async function WaitlistTab({ status }: { status: Status }) {
       </thead>
       <tbody>
         {rows.map((r) => (
-          <tr key={r.id} style={{ borderTop: '1px solid var(--sf-border-1)' }}>
+          <tr key={r.id} style={{ borderTop: '1px solid var(--sf-border)' }}>
             <td style={td}>{r.email}</td>
             <td style={td}>{r.useCase ?? '—'}</td>
             <td style={td}>{r.referer ?? '—'}</td>

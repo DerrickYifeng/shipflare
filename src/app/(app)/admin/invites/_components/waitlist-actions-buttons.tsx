@@ -33,7 +33,7 @@ export function WaitlistActionsButtons({ id }: { id: string }) {
           padding: '4px 10px',
           background: 'transparent',
           color: 'var(--sf-fg-3)',
-          border: '1px solid var(--sf-border-1)',
+          border: '1px solid var(--sf-border)',
           borderRadius: 4,
           fontSize: 12,
           cursor: pending ? 'wait' : 'pointer',

@@ -4,7 +4,7 @@ export function Retention({ data }: { data: RetentionResult }) {
   return (
     <div>
       <h3 style={{ fontSize: 14, fontWeight: 500, margin: '0 0 16px' }}>
-        Retention — meaningful actions per cohort
+        Retention — last 30 days
       </h3>
 
       {/* D1 / D7 / D14 + Stickiness */}
@@ -66,6 +66,12 @@ export function Retention({ data }: { data: RetentionResult }) {
           ))}
         </tbody>
       </table>
+      <p style={{ fontSize: 11, color: 'var(--sf-fg-3)', marginTop: 8 }}>
+        Cohort = users who signed up that week. Cell = % of cohort with a
+        meaningful action (scan, draft, post) during the offset week. D1/D7/D14
+        numerators are users with an action within N days of signup, divided by
+        users who signed up at least N days ago AND within the 30-day window.
+      </p>
     </div>
   );
 }

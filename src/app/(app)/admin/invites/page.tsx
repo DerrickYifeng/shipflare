@@ -55,7 +55,7 @@ export default async function AdminInvitesPage({ searchParams }: PageProps) {
         style={{
           display: 'flex',
           gap: 24,
-          borderBottom: '1px solid var(--sf-border-1)',
+          borderBottom: '1px solid var(--sf-border)',
           marginBottom: 24,
         }}
       >
@@ -145,7 +145,7 @@ function FilterChip({
         borderRadius: 999,
         background: active ? 'var(--sf-bg-tertiary)' : 'transparent',
         color: active ? 'var(--sf-fg-1)' : 'var(--sf-fg-3)',
-        border: '1px solid var(--sf-border-1)',
+        border: '1px solid var(--sf-border)',
         fontSize: 12,
         textDecoration: 'none',
       }}
@@ -214,7 +214,7 @@ async function InvitesTabContent() {
             return (
               <tr
                 key={row.email}
-                style={{ borderTop: '1px solid var(--sf-border-1)' }}
+                style={{ borderTop: '1px solid var(--sf-border)' }}
               >
                 <Td>
                   <div style={{ fontFamily: 'var(--sf-font-mono, monospace)' }}>
