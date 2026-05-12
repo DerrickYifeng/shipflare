@@ -11,6 +11,7 @@ import {
 } from 'react';
 import {
   useTeamEvents,
+  type PartialLeadMessage,
   type TeamActivityMessage,
 } from '@/hooks/use-team-events';
 import { useToast } from '@/components/ui/toast';
@@ -33,6 +34,10 @@ import {
 } from './conversation-reducer';
 import type { ConversationMeta } from './conversation-meta';
 import { useNewConversation } from './use-new-conversation';
+import {
+  StreamingProvider,
+  useStreamingDispatch,
+} from './streaming-context';
 
 export interface TeamDeskMember {
   id: string;
@@ -85,7 +90,14 @@ const H_PAD = 24;
  * only ever sees messages, grouped by the conversation they belong to.
  * Per-run dividers inside the thread are purely cosmetic.
  */
-export function TeamDesk({
+/**
+ * Inner body. Wrapped by `TeamDesk` (below) in `<StreamingProvider>` so
+ * that `useStreamingDispatch()` resolves inside the dispatch-piping
+ * effect. Splitting the function lets the provider sit ABOVE every
+ * consumer (`<Conversation>` + leaves) without changing the public
+ * signature.
+ */
+function TeamDeskInner({
   teamId,
   coordinatorId,
   fromOnboarding = false,
@@ -161,6 +173,14 @@ export function TeamDesk({
     initialMessages,
     onStall: handleStall,
   });
+
+  // Pipe streaming bytes from `useTeamEvents`'s partial maps into the
+  // per-tree `StreamingStore` so leaves can subscribe per-messageId via
+  // `useStreamingPartial` without re-rendering on every token. A2 will
+  // drop the partials prop entirely once the bottom rail takes over
+  // placeholder rendering; for now this runs alongside the existing
+  // prop path so the UI cannot regress.
+  useStreamingPartialPipe(partials, toolInputPartials);
 
   // Union of SSE stream + on-demand conversation fetches.
   // De-duped by id; keeps the SSE version (newer) when collision.
@@ -961,4 +981,91 @@ export function TeamDesk({
       `}</style>
     </div>
   );
+}
+
+/**
+ * Public wrapper. Hosts the per-tree `<StreamingProvider>` so leaves
+ * inside `<Conversation>` (LeadMessage, DelegationCard) can subscribe to
+ * streaming-partial state without forcing the conversation reducer to
+ * re-run on every token.
+ */
+export function TeamDesk(props: TeamDeskProps) {
+  return (
+    <StreamingProvider>
+      <TeamDeskInner {...props} />
+    </StreamingProvider>
+  );
+}
+
+/**
+ * Diff `partials` / `toolInputPartials` from `useTeamEvents` against the
+ * previous render's snapshot. Forwards the suffix of newly-arrived bytes
+ * to the streaming dispatch. When a partial vanishes from the map (final
+ * `agent_text` landed, or stall sweep dropped it), call the matching
+ * finalizer so any subscribed leaf clears its live-text override.
+ *
+ * Partials and tool-inputs are routed through independent finalize calls
+ * so their keyspaces stay separated even if a messageId and a toolUseId
+ * happen to collide on the same string (see `streaming-context.tsx`).
+ *
+ * Lives inside `<StreamingProvider>` so `useStreamingDispatch()` resolves.
+ * The diff lives on a ref (not state) because we never want this effect
+ * itself to trigger a re-render of `TeamDeskInner`.
+ */
+function useStreamingPartialPipe(
+  partials: ReadonlyMap<string, PartialLeadMessage>,
+  toolInputPartials: ReadonlyMap<string, string>,
+): void {
+  const dispatch = useStreamingDispatch();
+  const prevPartialTextRef = useRef<Map<string, string>>(new Map());
+  const prevToolInputRef = useRef<Map<string, string>>(new Map());
+
+  useEffect(() => {
+    const prev = prevPartialTextRef.current;
+    const seen = new Set<string>();
+    for (const [id, p] of partials) {
+      seen.add(id);
+      const prior = prev.get(id) ?? '';
+      const next = p.content;
+      if (next.length > prior.length && next.startsWith(prior)) {
+        dispatch.appendDelta(id, next.slice(prior.length));
+      } else if (next !== prior) {
+        // Non-monotonic edit (rare; happens on reconnect when the hook
+        // wipes its partials map — see `use-team-events.ts`'s `connected`
+        // branch). Replay the whole content as a single delta after
+        // finalizing the stale entry.
+        dispatch.finalizePartial(id);
+        if (next.length > 0) dispatch.appendDelta(id, next);
+      }
+    }
+    // Anything that was in the previous snapshot but isn't now → drop.
+    for (const id of prev.keys()) {
+      if (!seen.has(id)) dispatch.finalizePartial(id);
+    }
+    // Replace snapshot with the new view (content snapshot only).
+    const nextSnap = new Map<string, string>();
+    for (const [id, p] of partials) nextSnap.set(id, p.content);
+    prevPartialTextRef.current = nextSnap;
+  }, [partials, dispatch]);
+
+  useEffect(() => {
+    const prev = prevToolInputRef.current;
+    const seen = new Set<string>();
+    for (const [id, content] of toolInputPartials) {
+      seen.add(id);
+      const prior = prev.get(id) ?? '';
+      if (content.length > prior.length && content.startsWith(prior)) {
+        dispatch.appendToolInput(id, content.slice(prior.length));
+      } else if (content !== prior) {
+        dispatch.finalizeToolInput(id);
+        if (content.length > 0) dispatch.appendToolInput(id, content);
+      }
+    }
+    for (const id of prev.keys()) {
+      if (!seen.has(id)) dispatch.finalizeToolInput(id);
+    }
+    const nextSnap = new Map<string, string>();
+    for (const [id, content] of toolInputPartials) nextSnap.set(id, content);
+    prevToolInputRef.current = nextSnap;
+  }, [toolInputPartials, dispatch]);
 }

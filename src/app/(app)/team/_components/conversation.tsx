@@ -372,6 +372,7 @@ export function Conversation({
     return (
       <LeadMessage
         key={node.id}
+        messageId={node.id}
         agentType={agentType}
         displayName={displayName}
         createdAt={node.createdAt}

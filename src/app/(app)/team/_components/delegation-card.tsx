@@ -1,9 +1,16 @@
 'use client';
 
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import {
+  memo,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+} from 'react';
 import type { DelegationTask, ProgressItem } from './conversation-reducer';
 import { accentForAgentType, colorHexForAgentType } from './agent-accent';
 import { MessageMarkdown, stripMarkdownForPreview } from './message-markdown';
+import { useStreamingToolInput } from './streaming-context';
 
 export interface DelegationCardMember {
   id: string;
@@ -49,7 +56,7 @@ function capProgressItems(
  * decision — their backend side (BullMQ cancel + re-enqueue) is a
  * separate phase.
  */
-export function DelegationCard({
+function DelegationCardImpl({
   tasks,
   memberLookup,
   activeMemberId,
@@ -167,6 +174,16 @@ export function DelegationCard({
   );
 }
 
+/**
+ * Memoized public export. SubtaskCards inside subscribe to live
+ * tool-input bytes via `useStreamingToolInput(task.toolUseId)`, so the
+ * parent `<Conversation>` no longer needs to re-render this card on every
+ * `tool_input_delta`. Default shallow compare is correct: `tasks` arrays
+ * are constructed by the conversation reducer's `useMemo`, `memberLookup`
+ * is `useMemo`-stable in the caller, and `onSelectMember` is `useCallback`.
+ */
+export const DelegationCard = memo(DelegationCardImpl);
+
 interface SubtaskCardProps {
   task: DelegationTask;
   member: DelegationCardMember | null;
@@ -189,6 +206,17 @@ function SubtaskCard({
   isSoloDispatch,
 }: SubtaskCardProps) {
   const [hover, setHover] = useState(false);
+  // Subscribe to live tool-input bytes for this dispatch. By the time a
+  // SubtaskCard exists, the durable `tool_call` row has usually already
+  // landed and `useTeamEvents` has cleared the matching partial — so
+  // this hook normally returns `undefined`. A2's bottom rail will surface
+  // the streaming-arguments path; for A1 we wire the subscription so the
+  // leaf becomes the consumer (and only it re-renders if a delta lands
+  // before the durable row). The hook is null-safe so tasks without a
+  // `toolUseId` (which is nullable in the reducer) don't all collide on
+  // an empty-string key and re-render together.
+  const liveToolInput = useStreamingToolInput(task.toolUseId);
+  void liveToolInput; // A2 will consume this; A1 only wires the path.
   // Default: expand on RUNNING (user wants to see live progress),
   // collapse on any terminal state (history shouldn't dominate). The
   // auto-fold-on-transition below keeps the user's manual toggle
