@@ -9,6 +9,12 @@ export async function signInWithGitHub() {
   await signIn('github', { redirectTo: '/briefing' });
 }
 
+export async function signInWithGoogle() {
+  // Mirrors signInWithGitHub: lands on /briefing, which gates on `products`
+  // presence and forwards new users to /onboarding.
+  await signIn('google', { redirectTo: '/briefing' });
+}
+
 export async function signOutAction() {
   await signOut({ redirectTo: '/' });
 }
