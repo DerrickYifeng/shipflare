@@ -107,6 +107,34 @@ export const analyticsQueue = new Queue<AnalyticsJobData>('analytics', {
   defaultJobOptions,
 });
 
+/**
+ * Job payload for the `reddit-channel-research` worker. Runs the
+ * `researching-reddit-channels` fork-skill, enriches the top candidates
+ * via Reddit's public JSON API, and persists the top-3 as
+ * `source='auto'` rows on `product_reddit_channels`. Idempotent on
+ * `(productId)` — when `force` is false (default) and the product
+ * already has at least one auto row, the processor no-ops.
+ */
+export interface RedditChannelResearchJobData {
+  schemaVersion: 1;
+  userId: string;
+  productId: string;
+  /** If false (default), skip when product_reddit_channels already has at
+   *  least one auto row for the product. */
+  force?: boolean;
+  traceId?: string;
+}
+
+export const redditChannelResearchQueue =
+  new Queue<RedditChannelResearchJobData>('reddit-channel-research', {
+    ...connection,
+    defaultJobOptions: {
+      ...DEFAULT_RETENTION,
+      attempts: 2,
+      backoff: { type: 'exponential', delay: 5000 },
+    },
+  });
+
 // Backward-compat aliases (will be removed after full migration)
 export const xEngagementQueue = engagementQueue;
 export const xMetricsQueue = metricsQueue;
@@ -263,6 +291,22 @@ export async function enqueueAnalytics(data: AnalyticsJobData): Promise<void> {
   await analyticsQueue.add('compute', payload, {
     attempts: 2,
     backoff: { type: 'exponential', delay: 3000 },
+  });
+}
+
+/**
+ * Enqueue Reddit subreddit kickoff research for a product. Idempotency
+ * is enforced inside the processor (see `RedditChannelResearchJobData`);
+ * call sites may pass `force: true` to force a re-research even when
+ * auto rows exist.
+ */
+export async function enqueueRedditChannelResearch(
+  data: Omit<RedditChannelResearchJobData, 'schemaVersion'>,
+): Promise<void> {
+  log.debug(`Enqueued reddit-channel-research for product ${data.productId}`);
+  await redditChannelResearchQueue.add('research', {
+    schemaVersion: 1,
+    ...data,
   });
 }
 
