@@ -4,4 +4,3 @@
 // '@/tools/SkillTool/registry' and registers itself at module load.
 
 import './_smoke';
-import './researching-reddit-channels';

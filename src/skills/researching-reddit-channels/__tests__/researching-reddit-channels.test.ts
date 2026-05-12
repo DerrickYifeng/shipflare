@@ -1,10 +1,6 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import * as path from 'node:path';
 import { loadSkill } from '@/tools/SkillTool/loadSkillsDir';
-import {
-  __setSkillsRootForTesting,
-  getAllSkills,
-} from '@/tools/SkillTool/registry';
 import {
   researchingRedditChannelsInputSchema,
   researchingRedditChannelsOutputSchema,
@@ -202,6 +198,7 @@ describe('researching-reddit-channels skill loader', () => {
     expect(skill).not.toBeNull();
     expect(skill!.name).toBe('researching-reddit-channels');
     expect(skill!.context).toBe('fork');
+    expect(skill!.model).toBe('grok-4.20-non-reasoning');
   });
 
   it('declares xai_find_customers as the only allowed tool', async () => {
@@ -209,7 +206,7 @@ describe('researching-reddit-channels skill loader', () => {
     expect(skill!.allowedTools).toEqual(['xai_find_customers']);
   });
 
-  it('renders a body referencing xai_find_customers + reddit.com filter', async () => {
+  it('renders a body that instructs the fork to call xai_find_customers with web_search + reddit.com filter', async () => {
     const skill = await loadSkill(SKILL_DIR);
     const fakeCtx = {
       abortSignal: new AbortController().signal,
@@ -222,46 +219,34 @@ describe('researching-reddit-channels skill loader', () => {
       }),
       fakeCtx,
     );
+    // Tool wiring
     expect(body).toContain('xai_find_customers');
-    expect(body).toContain('reddit.com');
     expect(body).toContain('web_search');
-    expect(body).toContain('candidateCount');
-    expect(body).toContain('Quality bar');
-    expect(body).toContain('NSFW');
-    expect(body).toContain('1,000 members');
-    expect(body).toContain('defaultSources');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Bundled registration
-// ---------------------------------------------------------------------------
-
-describe('researching-reddit-channels bundled registration', () => {
-  // No __resetRegistryForTesting() here on purpose: the bundled-registration
-  // side-effect inside `@/skills/_bundled/researching-reddit-channels.ts`
-  // runs exactly once per Node process (module cache). Resetting the
-  // registry between tests would drop the registration and a static re-
-  // import wouldn't re-trigger the side-effect. Tests in this block want
-  // to verify the production registration shape, so we let it stand.
-  beforeEach(() => {
-    __setSkillsRootForTesting('/nonexistent');
+    expect(body).toContain('reddit.com');
+    expect(body).toContain('allowed_domains');
+    // The fork must surface a stable response_format name so xAI
+    // structured-output validation key matches downstream parsing.
+    expect(body).toContain('reddit_channel_research_result');
   });
 
-  it('registers via the _bundled barrel import', async () => {
-    const all = await getAllSkills();
-    const skill = all.find((s) => s.name === 'researching-reddit-channels');
-    expect(skill).toBeDefined();
-    expect(skill!.source).toBe('bundled');
-    expect(skill!.context).toBe('fork');
-    expect(skill!.allowedTools).toEqual(['xai_find_customers']);
-    expect(skill!.model).toBe('grok-4.20-non-reasoning');
+  it("renders a body that defines the response_format JSON schema's required fields", async () => {
+    const skill = await loadSkill(SKILL_DIR);
+    const fakeCtx = {
+      abortSignal: new AbortController().signal,
+      get: () => null,
+    } as never;
+    const body = await skill!.getPromptForCommand('{}', fakeCtx);
+    // The output JSON schema fields the worker (Task 4) will read.
+    expect(body).toContain('candidates');
+    expect(body).toContain('subreddit');
+    expect(body).toContain('member_count_approx');
+    expect(body).toContain('rules_summary');
+    expect(body).toContain('fit_rationale');
+    expect(body).toContain('fit_score');
   });
 
-  it('emits a prompt body covering the quality bar', async () => {
-    const all = await getAllSkills();
-    const skill = all.find((s) => s.name === 'researching-reddit-channels');
-    expect(skill).toBeDefined();
+  it('renders a body that spells out the quality bar', async () => {
+    const skill = await loadSkill(SKILL_DIR);
     const fakeCtx = {
       abortSignal: new AbortController().signal,
       get: () => null,
@@ -269,12 +254,10 @@ describe('researching-reddit-channels bundled registration', () => {
     const body = await skill!.getPromptForCommand(
       JSON.stringify({
         product: { name: 'Acme', description: 'd' },
+        candidateCount: 6,
       }),
       fakeCtx,
     );
-    expect(body).toContain('xai_find_customers');
-    expect(body).toContain('reddit.com');
-    expect(body).toContain('web_search');
     expect(body).toContain('Quality bar');
     expect(body).toContain('NSFW');
     expect(body).toContain('1,000 members');
@@ -283,10 +266,8 @@ describe('researching-reddit-channels bundled registration', () => {
     expect(body).toContain('"name":"Acme"');
   });
 
-  it('emits a body that asks the fork to skip retries when xAI returns nothing', async () => {
-    const all = await getAllSkills();
-    const skill = all.find((s) => s.name === 'researching-reddit-channels');
-    expect(skill).toBeDefined();
+  it('renders a body that forbids retries on empty xAI result', async () => {
+    const skill = await loadSkill(SKILL_DIR);
     const fakeCtx = {
       abortSignal: new AbortController().signal,
       get: () => null,
