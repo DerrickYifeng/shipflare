@@ -126,4 +126,13 @@ describe('processGrowthRollup', () => {
     const xRow = inserts.find((i) => i.table === 'channel_scores' && i.row.platform === 'x');
     expect(xRow!.row.approveRate).toBeCloseTo(0.75);
   });
+
+  it('ignores fanout-shaped payload without inserting rows', async () => {
+    const job = {
+      id: 'job-fan',
+      data: { kind: 'fanout', schemaVersion: 1 as const },
+    } as unknown as Parameters<typeof processGrowthRollup>[0];
+    await processGrowthRollup(job);
+    expect(inserts).toHaveLength(0);
+  });
 });

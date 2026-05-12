@@ -107,6 +107,19 @@ export async function countPending(
   return row?.n ?? 0;
 }
 
+/**
+ * Founder-decision tallies for the approve_rate metric.
+ *
+ *   "founder said yes" — drafts.status in ('approved', 'posted', 'handed_off').
+ *     Includes terminal post-approval states because rows transition
+ *     `approved → posted` (or `→ handed_off`) once shipped, and we still
+ *     want to count those as positive decisions in the window.
+ *   "founder said no"  — drafts.status = 'skipped'.
+ *
+ * Other statuses (pending / flagged / needs_revision / failed) are NOT
+ * yet decided and intentionally fall outside both buckets so the ratio
+ * reflects founder intent only.
+ */
 export async function countApprovedSkipped(
   userId: string,
   platform: string,
@@ -114,7 +127,7 @@ export async function countApprovedSkipped(
 ): Promise<{ approved: number; skipped: number }> {
   const [row] = await db
     .select({
-      approved: sql<number>`count(*) filter (where ${drafts.status} = 'approved')::int`,
+      approved: sql<number>`count(*) filter (where ${drafts.status} in ('approved','posted','handed_off'))::int`,
       skipped: sql<number>`count(*) filter (where ${drafts.status} = 'skipped')::int`,
     })
     .from(drafts)
