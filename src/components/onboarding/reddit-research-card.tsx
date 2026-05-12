@@ -101,6 +101,7 @@ function ChannelRowView({ row, onToggle, busy }: ChannelRowProps) {
 
   return (
     <li
+      data-testid="reddit-channel-row"
       style={{
         display: 'flex',
         flexDirection: 'column',
