@@ -17,6 +17,59 @@ import type {
 import { accentForAgentType, colorHexForAgentType } from './agent-accent';
 import { TodaysOutput } from './todays-output';
 
+/**
+ * Engine's MCPTool/UI.tsx renders unknown tool results through a compact
+ * shape summary instead of dumping bytes. Shipflare skills return
+ * JSON-shaped `agent_text` (e.g. `reading-plan` → `[{id,kind,phase,…}]`)
+ * which would otherwise leak uuids and internal column names into the
+ * TaskPanel. This summarizer collapses that to e.g.
+ * "12 items · kind, channel, phase, …".
+ *
+ * Non-JSON text passes through with newlines preserved so prose reads
+ * naturally; the founder sees the model's actual reasoning, not its
+ * structured returns.
+ */
+const SUMMARY_KEYS = 4;
+const PROSE_TRUNCATE = 1600;
+
+function summarizeProgressText(raw: string): string {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return '';
+  const first = trimmed[0];
+  if (first === '{' || first === '[') {
+    try {
+      const parsed: unknown = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        const n = parsed.length;
+        if (n === 0) return '(empty)';
+        const noun = n === 1 ? 'item' : 'items';
+        const sample = parsed[0];
+        if (sample !== null && typeof sample === 'object' && !Array.isArray(sample)) {
+          const keys = Object.keys(sample as Record<string, unknown>);
+          const shown = keys.slice(0, SUMMARY_KEYS).join(', ');
+          const more = keys.length > SUMMARY_KEYS ? ', …' : '';
+          return `${n} ${noun} · ${shown}${more}`;
+        }
+        return `${n} ${noun}`;
+      }
+      if (parsed !== null && typeof parsed === 'object') {
+        const keys = Object.keys(parsed as Record<string, unknown>);
+        if (keys.length === 0) return '{}';
+        const shown = keys.slice(0, SUMMARY_KEYS).join(', ');
+        const more = keys.length > SUMMARY_KEYS ? ', …' : '';
+        return `{ ${shown}${more} }`;
+      }
+      return String(parsed).slice(0, 140);
+    } catch {
+      // Falls through to prose path on malformed JSON.
+    }
+  }
+  if (trimmed.length > PROSE_TRUNCATE) {
+    return `${trimmed.slice(0, PROSE_TRUNCATE)}…`;
+  }
+  return trimmed;
+}
+
 export interface TaskPanelProps {
   tasks: readonly DelegationTask[];
   /**
@@ -626,18 +679,6 @@ function ProgressDetail({
     whiteSpace: 'pre-wrap',
     wordBreak: 'break-word',
   };
-  const toolOutput: CSSProperties = {
-    marginLeft: 18,
-    padding: '4px 8px',
-    borderRadius: 4,
-    background: 'rgba(0, 0, 0, 0.03)',
-    fontFamily: 'var(--sf-font-mono)',
-    fontSize: 11,
-    color: 'var(--sf-fg-2)',
-    lineHeight: 1.45,
-    whiteSpace: 'pre-wrap',
-    wordBreak: 'break-word',
-  };
   const elapsed: CSSProperties = {
     marginLeft: 'auto',
     color: 'var(--sf-fg-4)',
@@ -664,20 +705,18 @@ function ProgressDetail({
       ) : null}
       {visible.map((item) => {
         if (item.kind === 'tool') {
+          // Engine pattern: inline row shows toolName + elapsed only.
+          // Raw tool_result content (uuids, plan_item dumps, etc.) stays
+          // out of the panel so internal data structures don't leak to
+          // the founder. Errors keep their compact text via `errorText`.
           return (
-            <div
-              key={item.id}
-              style={{ display: 'flex', flexDirection: 'column', gap: 4 }}
-            >
-              <div style={row}>
-                <span aria-hidden="true">└ ◈</span>
-                <span style={tool}>{item.toolName}</span>
-                {item.errorText ? (
-                  <span style={{ color: 'var(--sf-error-ink)' }}>— {item.errorText}</span>
-                ) : null}
-                {item.elapsed ? <span style={elapsed}>{item.elapsed}</span> : null}
-              </div>
-              {item.output ? <div style={toolOutput}>{item.output}</div> : null}
+            <div key={item.id} style={row}>
+              <span aria-hidden="true">└ ◈</span>
+              <span style={tool}>{item.toolName}</span>
+              {item.errorText ? (
+                <span style={{ color: 'var(--sf-error-ink)' }}>— {item.errorText}</span>
+              ) : null}
+              {item.elapsed ? <span style={elapsed}>{item.elapsed}</span> : null}
             </div>
           );
         }
@@ -689,11 +728,14 @@ function ProgressDetail({
             </div>
           );
         }
-        // text — render the full content (multi-line preserved via
-        // pre-wrap). The wrap's own maxHeight bounds vertical growth.
+        // text — JSON-shaped skill outputs collapse to a shape summary
+        // ("12 items · kind, channel, phase, …") so the panel doesn't
+        // leak uuids / internal columns. Prose passes through with
+        // newlines preserved; the wrap's maxHeight bounds vertical
+        // growth.
         return (
           <div key={item.id} style={text}>
-            {item.text}
+            {summarizeProgressText(item.text)}
           </div>
         );
       })}

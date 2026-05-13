@@ -83,14 +83,6 @@ export type ProgressItem =
       complete: boolean;
       errorText: string | null;
       /**
-       * Successful tool_result content (truncated). Surfaced in the
-       * expanded TaskPanel so the founder can read what the tool
-       * actually returned — without this, the panel only showed the
-       * tool name with no payload. `null` when the tool is still
-       * in-flight or returned an error (use `errorText` for the latter).
-       */
-      output: string | null;
-      /**
        * Anthropic tool_use_id stamped on this tool_call. Used by
        * `populateDelegationProgress` to look up nested sub-events
        * (e.g. fork-skill calls spawned inside this tool) from the
@@ -469,12 +461,6 @@ function extractCompletionText(raw: string | null): string {
 }
 
 const ERROR_TRUNCATE_LEN = 140;
-// Cap successful tool_result payloads at a value that's roomy enough to
-// render a paragraph or two of teammate-facing summary inside the
-// TaskPanel's expanded card, but won't paste 100KB of raw JSON if the
-// tool dumped its entire response. The card's own scroll handles
-// overflow up to this cap.
-const TOOL_OUTPUT_TRUNCATE_LEN = 1600;
 
 function extractToolUseId(metadata: Record<string, unknown> | null): string | null {
   return readString(metadata, 'toolUseId', 'tool_use_id');
@@ -1043,23 +1029,19 @@ function buildProgressItems(
       const elapsed = result
         ? formatElapsed(msg.createdAt, result.createdAt)
         : null;
-      const isErrorResult =
-        result !== undefined &&
-        result.metadata !== null &&
-        (result.metadata as Record<string, unknown>)['isError'] === true;
       const errorText =
-        isErrorResult && result && result.content
+        result &&
+        result.metadata &&
+        (result.metadata as Record<string, unknown>)['isError'] === true &&
+        result.content
           ? truncate(result.content.trim(), ERROR_TRUNCATE_LEN)
           : null;
-      // Surface successful tool_result content in `output` so the
-      // expanded TaskPanel can render the payload. Error payloads stay
-      // on `errorText` (rendered differently — red treatment) so this
-      // field is null when the tool reported failure, and null while
-      // the tool is still in-flight (no `result` yet).
-      const output =
-        result !== undefined && !isErrorResult && result.content
-          ? truncate(result.content.trim(), TOOL_OUTPUT_TRUNCATE_LEN)
-          : null;
+      // Engine pattern (engine/tools/AgentTool/UI.tsx): the inline
+      // tool row shows toolName + elapsed only — never the raw payload
+      // — so we don't leak internal IDs (uuids, plan_item rows, etc.)
+      // to the founder. Errors stay visible via `errorText`. A future
+      // verbose/transcript drawer can read the full content from the
+      // durable team_messages row.
       raw.push({
         kind: 'tool',
         id: msg.id,
@@ -1068,7 +1050,6 @@ function buildProgressItems(
         elapsed,
         complete,
         errorText,
-        output,
         // Carry the tool_use_id forward so populateDelegationProgress
         // can graft nested sub-events (runForkSkill spawns, etc.)
         // onto this item's `subItems` after pairing is done.
