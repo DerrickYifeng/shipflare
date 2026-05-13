@@ -235,11 +235,10 @@ const reconcileMailboxWorker = new Worker<Record<string, never>>(
 //   1 team-lead (Chief of Staff) + up to 5 specialists
 //     (x-replies, reddit-replies, x-post-batch, reddit-research, reddit-post-batch)
 //   = 6 peak jobs, +2 headroom.
-// Stays under the Postgres pool ceiling (`src/lib/db/index.ts:17` = 10
-// in prod) so agent-run never starves connections from other workers
-// (reddit-channel-research, engagement, plan-execute, etc.). Going past
-// 8 here without bumping the Postgres pool risks `too_many_connections`
-// when another queue spikes at the same time.
+// Stays under the Postgres pool ceiling (`PG_POOL_MAX` env, default 30
+// in prod — see src/lib/db/index.ts). When bumping concurrency past 8,
+// monitor pool acquire latency; bump `PG_POOL_MAX` if `too_many_connections`
+// surfaces.
 const agentRunWorker = new Worker<AgentRunJobData>(
   AGENT_RUN_QUEUE_NAME,
   async (job) => {
