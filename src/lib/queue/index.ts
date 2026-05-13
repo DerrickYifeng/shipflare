@@ -232,10 +232,16 @@ export async function enqueueDream(data: DreamJobData): Promise<void> {
 /**
  * Enqueue a code scan for a GitHub repo.
  * Runs in worker: clone → scan → save snapshot.
+ *
+ * Idempotent on (userId, repoFullName): rapid re-POSTs from the onboarding
+ * SSE-stream pattern collapse to one job. Slash in repoFullName is escaped
+ * so BullMQ doesn't choke on it in the Redis key. Without this dedupe each
+ * client retry re-clones the repo and disk I/O contention compounds.
  */
 export async function enqueueCodeScan(data: CodeScanJobData): Promise<string> {
   const payload = codeScanJobSchema.parse(withEnvelope(data));
-  const jobId = `code-scan-${payload.userId}-${Date.now()}`;
+  const repoSlug = payload.repoFullName.replace(/\//g, '__');
+  const jobId = `code-scan-${payload.userId}-${repoSlug}`;
   log.debug(`Enqueued code-scan for ${payload.repoFullName}`);
   await codeScanQueue.add('scan', payload, {
     jobId,
