@@ -15,6 +15,7 @@ import type {
   ProgressItem,
 } from './conversation-reducer';
 import { accentForAgentType, colorHexForAgentType } from './agent-accent';
+import { MessageMarkdown } from './message-markdown';
 import { TodaysOutput } from './todays-output';
 
 /**
@@ -661,11 +662,13 @@ function ProgressDetail({
     color: 'var(--sf-fg-2)',
   };
   const text: CSSProperties = {
+    // MessageMarkdown handles whitespace + line wrapping per element.
+    // We just set color + sizing context here; no `pre-wrap` (which
+    // would prevent markdown's natural paragraph collapse) and no
+    // `wordBreak` (let `<pre>` inside MessageMarkdown handle its own
+    // horizontal overflow via its codeBlock style).
     color: 'var(--sf-fg-2)',
-    fontFamily: 'inherit',
     fontSize: 12,
-    whiteSpace: 'pre-wrap',
-    wordBreak: 'break-word',
   };
   const elapsed: CSSProperties = {
     marginLeft: 'auto',
@@ -716,14 +719,15 @@ function ProgressDetail({
             </div>
           );
         }
-        // text — JSON-shaped skill outputs collapse to a shape summary
-        // ("12 items · kind, channel, phase, …") so the panel doesn't
-        // leak uuids / internal columns. Prose passes through with
-        // newlines preserved; the wrap's maxHeight bounds vertical
-        // growth.
+        // text — JSON-shaped skill outputs collapse to a count summary
+        // ("12 items") so the panel doesn't leak uuids / internal
+        // columns. Prose passes through MessageMarkdown so backticks,
+        // bullets, and fenced code render properly (without it, agents'
+        // markdown showed up as literal `` ` `` and ``` characters).
+        const rendered = summarizeProgressText(item.text);
         return (
           <div key={item.id} style={text}>
-            {summarizeProgressText(item.text)}
+            <MessageMarkdown text={rendered} />
           </div>
         );
       })}
