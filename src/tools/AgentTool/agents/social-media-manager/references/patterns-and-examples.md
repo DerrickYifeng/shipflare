@@ -6,6 +6,8 @@ Concrete examples showing how to combine your tools for common situations. The C
 
 Your spawn prompt always carries a structured `channel:` field (`x` or `reddit`) alongside `Mode:`, `planItemId:`, and `targetCount:`. **This is the single source of truth for which platform to discover against** — pass it through verbatim as `find_threads_via_xai({ platform })`. Don't infer the channel from the description string ('fill x reply slot'), from `Channels connected`, or from which platform sounds more relevant — the prompt told you.
 
+Pass the `planItemId:` through to `process_replies_batch({ planItemId, threadIds })` so every drafted reply links back to the slot. The coordinator uses `query_plan_items.draftCount` to verify your work — if you skip the field, your drafts land orphaned and the coordinator flags it as a mis-routing.
+
 ### Pattern: discover threads, then fill a reply slot
 
 The CMO has a `content_reply` plan_item that needs threads sourced and replies drafted. You over-fetch via discovery (so the judging filter has room to be picky), then pass the top picks to the batch reply tool.
@@ -24,7 +26,7 @@ You: I'll source threads first, then draft replies for the strongest 3.
   find_threads_via_xai({ trigger: 'daily', maxResults: 6, platform: 'x' })   ← read `channel: x` from the prompt
   → { queued: 5, scanned: 14, topQueued: [{threadId, url, ...} × 5], scoutNotes: 'tightened bio filter; competitor accounts dropped' }
 
-  process_replies_batch({ threadIds: ['t-a', 't-b', 't-c'] })
+  process_replies_batch({ planItemId: '1862-…-c1f9', threadIds: ['t-a', 't-b', 't-c'] })   ← planItemId from the prompt
   → { itemsScanned: 3, draftsCreated: 3, draftsSkipped: 0, notes: 'no slop patterns matched' }
 
 You (StructuredOutput): Sourced 5 threads, drafted replies for 3. All in /briefing for review.
@@ -43,7 +45,7 @@ targetCount: 3
   find_threads_via_xai({ trigger: 'daily', maxResults: 6, platform: 'reddit' })
   → { queued: 4, scanned: 9, topQueued: [{threadId, url: 'https://reddit.com/r/SaaS/...', ...} × 4], scoutNotes: 'r/SaaS + r/indiehackers strong; r/Entrepreneur thinner' }
 
-  process_replies_batch({ threadIds: ['t-r1', 't-r2', 't-r3'] })  // batch tool reads channel from each thread row
+  process_replies_batch({ planItemId: 'a607-…-2c8', threadIds: ['t-r1', 't-r2', 't-r3'] })  // batch tool reads channel from each thread row; planItemId links drafts to the slot
 
 **The X variant and Reddit variant are symmetric.** A `channel: x` spawn against the X slot uses `platform: 'x'`. Calling discovery with the wrong platform produces drafts under the wrong slot — production has seen 8 X-slot drafts land in the Reddit slot (Reddit overflowed by 8, X showed 0/8 drafted) because the agent inferred the platform from `Channels connected` instead of reading `channel:`. Don't repeat that.
 

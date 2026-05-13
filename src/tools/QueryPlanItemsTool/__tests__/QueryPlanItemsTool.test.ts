@@ -25,7 +25,7 @@ vi.mock('@/lib/logger', () => ({
 }));
 
 import { queryPlanItemsTool, weekBoundsForOffset } from '../QueryPlanItemsTool';
-import { planItems } from '@/lib/db/schema';
+import { drafts, planItems } from '@/lib/db/schema';
 
 interface PlanItemRow {
   id: string;
@@ -161,5 +161,42 @@ describe('queryPlanItemsTool', () => {
       ctx,
     );
     expect(rows.map((r) => r.id).sort()).toEqual(['a', 'b']);
+  });
+
+  it('returns draftCount per plan_item (2026-05-13 verification regression)', async () => {
+    // Tier 2: the coordinator uses `draftCount` to mechanically verify
+    // a specialist's claim before flipping state to `drafted`. Each
+    // plan_item must count only its own `pending` drafts, scoped to
+    // the same userId.
+    store.register<PlanItemRow>(planItems, [
+      seed({ id: 'pi-x', channel: 'x' }),
+      seed({ id: 'pi-reddit', channel: 'reddit' }),
+    ]);
+    store.register(drafts, [
+      // 3 live drafts on the X slot
+      { id: 'd1', userId: 'user-1', planItemId: 'pi-x', status: 'pending' },
+      { id: 'd2', userId: 'user-1', planItemId: 'pi-x', status: 'pending' },
+      { id: 'd3', userId: 'user-1', planItemId: 'pi-x', status: 'pending' },
+      // rejected → excluded
+      { id: 'd4', userId: 'user-1', planItemId: 'pi-x', status: 'rejected' },
+      // other user's draft → excluded
+      { id: 'd5', userId: 'user-2', planItemId: 'pi-x', status: 'pending' },
+      // 1 draft on the Reddit slot
+      { id: 'd6', userId: 'user-1', planItemId: 'pi-reddit', status: 'pending' },
+      // orphaned draft (planItemId null) → excluded
+      { id: 'd7', userId: 'user-1', planItemId: null, status: 'pending' },
+    ]);
+    const ctx = makeCtx(store, { userId: 'user-1', productId: 'prod-1' });
+    const rows = await queryPlanItemsTool.execute({}, ctx);
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    expect(byId.get('pi-x')?.draftCount).toBe(3);
+    expect(byId.get('pi-reddit')?.draftCount).toBe(1);
+  });
+
+  it('returns draftCount: 0 when no drafts exist for a plan_item', async () => {
+    store.register<PlanItemRow>(planItems, [seed({ id: 'pi-empty' })]);
+    const ctx = makeCtx(store, { userId: 'user-1', productId: 'prod-1' });
+    const rows = await queryPlanItemsTool.execute({}, ctx);
+    expect(rows[0]?.draftCount).toBe(0);
   });
 });

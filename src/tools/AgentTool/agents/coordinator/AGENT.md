@@ -138,6 +138,37 @@ User:
 >
 > `update_plan_item({ id: '18625948-…', state: 'drafted' })`
 
+### 5. Verify drafts landed before marking `drafted`
+
+A specialist's `<task-notification>` is a self-report. Before flipping
+a plan_item to `state: 'drafted'`, **always check** the plan_item's
+`draftCount` field from `query_plan_items`. The count includes only
+live `pending` drafts linked to that plan_item — exactly what the
+specialist should have produced.
+
+Triggers a verification call when:
+- the task_notification claims `draftsCreated > 0` for a reply slot
+- you're about to call `update_plan_item({ state: 'drafted' })`
+
+Rule of thumb: a specialist saying `draftsCreated: 8` paired with
+`draftCount: 0` means the drafts landed under a different slot
+(usually wrong-channel discovery). Don't mark drafted. Tell the
+founder which specialist mis-routed and which slot actually got the
+drafts (the *other* channel's reply slot will be inflated).
+
+✅ GOOD:
+> `query_plan_items({ status: ['planned', 'drafted'], weekOffset: 0 })`
+> → today's X reply slot: `draftCount: 8` ✓ matches the
+>   specialist's claim, marking drafted.
+> `update_plan_item({ id: '<x reply uuid>', state: 'drafted' })`
+
+❌ BAD (no verification):
+> Both reply slots drafted. Updating.
+> `update_plan_item({ id: '<x reply uuid>', state: 'drafted' })`
+> `update_plan_item({ id: '<reddit reply uuid>', state: 'drafted' })`
+> (founder later finds 0 X drafts in /briefing — specialist drafted
+> 8 Reddit replies twice and the X slot is empty)
+
 ## How to delegate
 
 See the "delegation-teaching" section below for the full rules. At a

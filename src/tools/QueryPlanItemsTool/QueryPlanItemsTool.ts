@@ -11,7 +11,7 @@ import { z } from 'zod';
 import { and, eq, gte, inArray, lt } from 'drizzle-orm';
 import { buildTool } from '@/core/tool-system';
 import type { ToolDefinition } from '@/core/types';
-import { planItems, planItemStateEnum } from '@/lib/db/schema';
+import { drafts, planItems, planItemStateEnum } from '@/lib/db/schema';
 import { readDomainDeps } from '@/tools/context-helpers';
 
 export const QUERY_PLAN_ITEMS_TOOL_NAME = 'query_plan_items';
@@ -46,6 +46,16 @@ export interface QueryPlanItemsRow {
   title: string;
   description: string | null;
   completedAt: string | null;
+  /**
+   * Count of `drafts` rows whose `planItemId` equals this row's id and
+   * whose `status` is `pending` (i.e. live, not yet rejected/posted).
+   * Lets the coordinator mechanically verify a specialist's claim
+   * before flipping `state` to `drafted`: if a specialist returned
+   * `draftsCreated: 8` but `draftCount === 0`, the drafts landed under
+   * the wrong slot. Indexed via `drafts_plan_item_idx` so the LEFT
+   * JOIN scan stays cheap.
+   */
+  draftCount: number;
 }
 
 /**
@@ -76,6 +86,12 @@ export const queryPlanItemsTool: ToolDefinition<
     '(0=this week, 1=next, -1=last), by status (array of state values: ' +
     `${planItemStateValues.join(', ')}), or by a specific id. Omit ` +
     'filters to skip them. Scoped to the current user + product.' +
+    '\n\n' +
+    'Each row carries `draftCount` (live pending drafts linked to this ' +
+    'plan_item). Use it to verify a specialist actually drafted what it ' +
+    'claimed before flipping state to `drafted` — a `draftsCreated: N` ' +
+    'task_notification paired with `draftCount: 0` means the drafts ' +
+    'landed under the wrong slot.' +
     '\n\n' +
     'INPUT SHAPE (`status` MUST be an array of strings, NOT a single string):\n' +
     '{ "weekOffset": 0, "status": ["planned", "drafted"], "limit": 20 }\n\n' +
@@ -131,6 +147,35 @@ export const queryPlanItemsTool: ToolDefinition<
       .where(and(...conditions))
       .limit(limit);
 
+    // Second pass: count `pending` drafts linked to each returned
+    // plan_item. Kept as a separate query (rather than a SQL LEFT JOIN
+    // + GROUP BY) so the in-memory test mock — which doesn't implement
+    // leftJoin/groupBy — keeps working, and so the count predicate is
+    // obvious to the reader. `drafts_plan_item_idx` keeps each lookup
+    // cheap; the in-array filter bounds the scan to the page we just
+    // pulled (≤ 200 rows at most).
+    const draftCountByPlanItemId = new Map<string, number>();
+    if (rows.length > 0) {
+      const planItemIds = rows.map((r) => r.id);
+      const draftRows = await db
+        .select({ planItemId: drafts.planItemId })
+        .from(drafts)
+        .where(
+          and(
+            eq(drafts.userId, userId),
+            eq(drafts.status, 'pending'),
+            inArray(drafts.planItemId, planItemIds),
+          ),
+        );
+      for (const dr of draftRows) {
+        if (dr.planItemId == null) continue;
+        draftCountByPlanItemId.set(
+          dr.planItemId,
+          (draftCountByPlanItemId.get(dr.planItemId) ?? 0) + 1,
+        );
+      }
+    }
+
     return rows.map((r) => ({
       id: r.id,
       kind: r.kind,
@@ -153,6 +198,7 @@ export const queryPlanItemsTool: ToolDefinition<
           : r.completedAt
             ? String(r.completedAt)
             : null,
+      draftCount: draftCountByPlanItemId.get(r.id) ?? 0,
     }));
   },
 });
