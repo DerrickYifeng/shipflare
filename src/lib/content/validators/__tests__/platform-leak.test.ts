@@ -70,6 +70,26 @@ describe('validatePlatformLeak (target=x)', () => {
     expect(r.ok).toBe(true);
   });
 
+  it('does not flag English compounds containing "r/" (color/style, year/year)', () => {
+    for (const phrase of [
+      'pick color/style based on the brand guide.',
+      'year/year growth is the metric we track.',
+      'our/your code lives in the same monorepo.',
+      'founder/operator split is the real conversation.',
+    ]) {
+      const r = validatePlatformLeak(phrase, { targetPlatform: 'x' });
+      expect(r.ok, `falsely flagged: ${phrase}`).toBe(true);
+    }
+  });
+
+  it('still flags real subreddit references ("r/SideProject")', () => {
+    const r = validatePlatformLeak('check r/SideProject this week.', {
+      targetPlatform: 'x',
+    });
+    expect(r.ok).toBe(false);
+    expect(r.leakedPlatforms).toContain('reddit');
+  });
+
   it('flags multiple claims in one draft', () => {
     const r = validatePlatformLeak(
       'i post on reddit. i farm karma all day.',
@@ -95,6 +115,26 @@ describe('validatePlatformLeak (target=reddit)', () => {
       { targetPlatform: 'reddit' },
     );
     expect(r.ok).toBe(true);
+  });
+
+  it('does not flag word-ending-in-rt followed by @handle (smart @joe, start @noon)', () => {
+    for (const phrase of [
+      'smart @joe was on the call.',
+      'start @noon if that works for you.',
+      'art @sothebys auction was wild.',
+      'part @section_2 of the doc.',
+    ]) {
+      const r = validatePlatformLeak(phrase, { targetPlatform: 'reddit' });
+      expect(r.ok, `falsely flagged: ${phrase}`).toBe(true);
+    }
+  });
+
+  it('still flags real retweet token ("RT @handle")', () => {
+    const r = validatePlatformLeak('RT @somefounder this is great.', {
+      targetPlatform: 'reddit',
+    });
+    expect(r.ok).toBe(false);
+    expect(r.leakedPlatforms).toContain('x');
   });
 });
 

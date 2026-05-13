@@ -73,6 +73,12 @@ When adding a new channel (e.g., LinkedIn):
       selects it for plan items with `channel: '<new>'`.
 - [ ] Update `allowed-tools` in relevant SKILL.md frontmatters
 - [ ] Set `replyAuthorCooldownDays` in `PLATFORMS[id]` (omit to inherit 7-day default)
+- [ ] Add an entry to `PLATFORM_LEAK_TERMS` in
+      `src/lib/content/validators/platform-leak.ts` — explicitly enumerate the
+      platform's sibling-leak vocabulary as typed `LeakTerm`s (`word` /
+      `substring` / `regex`). There is no `displayName` fallback; missing
+      entries mean drafts for sibling platforms won't be checked against
+      leaks of this platform's vocabulary.
 - [ ] NO changes needed to: skill-runner, swarm, query-loop, schemas, core agent .md files,
       `full-scan.ts`, `discovery.ts`, `posting.ts`, or `/api/automation/run`
 
