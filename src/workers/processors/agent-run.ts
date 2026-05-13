@@ -51,6 +51,10 @@ import {
   cacheLeadStatus,
   cacheTeammateStatus,
 } from './lib/team-state-writethrough';
+import {
+  AgentStatusBatcher,
+  type FlushPayload,
+} from '@/lib/team/agent-status-batcher';
 import type { LeadStatus } from '@/lib/team/team-state-cache';
 import { loadConversationHistory } from '@/lib/team-conversation';
 import {
@@ -98,6 +102,60 @@ const DRAIN_POLL_INTERVAL_MS = 1000;
 // from the TaskStop tool but is recorded distinctly because the kill
 // is observed from the teammate's side here.
 const SHUTDOWN_REASON_GRACEFUL = 'shutdown_request received';
+
+// Phase B7: how often the status batcher flushes transient updates to
+// `agent_runs`. 500ms is the sweet spot — a chatty multi-turn run
+// produces 1 DB write per tick (instead of one per transition) while
+// remaining tight enough that a missed flush is at most half a second
+// behind on the durable row. The cache write-through (Redis) and SSE
+// pub still fire immediately at the call sites, so user-facing latency
+// is unaffected; only the durable agent_runs UPDATE is deferred.
+const STATUS_BATCHER_FLUSH_INTERVAL_MS = 500;
+
+// ---------------------------------------------------------------------------
+// Status batcher — module-level singleton (B7)
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-worker-process batcher for transient `agent_runs` status writes.
+ * TERMINAL writes (completed / failed / killed) stay synchronous — the
+ * worker exits right after them and a setInterval-driven flush can't
+ * fire if the process is dying.
+ *
+ * Wired into the worker's SIGTERM/SIGINT shutdown via
+ * `disposeAgentStatusBatcher()` so the final tick flushes before exit.
+ */
+const statusBatcher = new AgentStatusBatcher({
+  flushIntervalMs: STATUS_BATCHER_FLUSH_INTERVAL_MS,
+  flush: async (batch: FlushPayload[]) => {
+    // One UPDATE per row. For typical batch sizes (5-20 agents per tick
+    // under load) this is still 10-40x fewer round-trips than the
+    // pre-batch path. A single CASE WHEN UPDATE would consolidate further
+    // but is overkill for the volumes we run.
+    await Promise.all(
+      batch.map(async ({ agentId, ...update }) => {
+        // Strip undefined fields so we don't NULL columns that the
+        // caller didn't explicitly set (drizzle treats `undefined` as
+        // "set NULL" on .set() — last-write-wins must NOT clobber
+        // bullmqJobId / sleepUntil etc. when the caller didn't pass them).
+        const patch: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(update)) {
+          if (v !== undefined) patch[k] = v;
+        }
+        await db.update(agentRuns).set(patch).where(eq(agentRuns.id, agentId));
+      }),
+    );
+  },
+});
+
+/**
+ * Flush + tear down the module-level status batcher. Called from the
+ * worker process's SIGTERM/SIGINT handler so any pending status writes
+ * make it to Postgres before the process exits.
+ */
+export function disposeAgentStatusBatcher(): void {
+  statusBatcher.dispose();
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -687,14 +745,13 @@ async function runAgentTurn(
     }
   } else if (row.status === 'sleeping') {
     const resumingAt = new Date();
-    await db
-      .update(agentRuns)
-      .set({
-        status: 'resuming',
-        lastActiveAt: resumingAt,
-        bullmqJobId: job.id ?? null,
-      })
-      .where(eq(agentRuns.id, agentId));
+    // B7: batch the transient status write. Cache + SSE fire immediately
+    // so the user still sees the transition realtime.
+    statusBatcher.set(agentId, {
+      status: 'resuming',
+      lastActiveAt: resumingAt,
+      bullmqJobId: job.id ?? null,
+    });
     // UI-D: cache write-through. Teammate transitioning sleeping → resuming.
     await cacheTeammateStatus(row.teamId, agentId, 'resuming', resumingAt, null);
     // UI-B Task 8: SSE event for the same transition.
@@ -714,15 +771,14 @@ async function runAgentTurn(
   // Mark running. (For a non-lead resume, this is the second update —
   // moves the row from 'resuming' to 'running'. For a fresh run or a
   // lead run, this is the only status update before runAgent starts.)
+  // B7: batched — coalesces with any prior resuming-set above into a
+  // single DB write on the next flush tick.
   const runningAt = new Date();
-  await db
-    .update(agentRuns)
-    .set({
-      status: 'running',
-      lastActiveAt: runningAt,
-      bullmqJobId: job.id ?? null,
-    })
-    .where(eq(agentRuns.id, agentId));
+  statusBatcher.set(agentId, {
+    status: 'running',
+    lastActiveAt: runningAt,
+    bullmqJobId: job.id ?? null,
+  });
   // UI-D: cache write-through. queued/resuming → running. Lead vs teammate
   // routes to the right cache path so the roster doesn't show duplicate
   // entries for the lead row (the lead is rendered via leadStatus, not in
@@ -778,10 +834,13 @@ async function runAgentTurn(
         `agent-run ${agentId}: spurious wake — empty mailbox + ${priorMessages!.length} priorMessages; returning to sleep without API call`,
       );
       const sleepingAt = new Date();
-      await db
-        .update(agentRuns)
-        .set({ status: 'sleeping', lastActiveAt: sleepingAt })
-        .where(eq(agentRuns.id, agentId));
+      // B7: transient sleeping-mark (spurious wake recovery). Worker
+      // returns immediately after; the next wake() will run normally
+      // even if the DB row is briefly stale (cache + SSE are realtime).
+      statusBatcher.set(agentId, {
+        status: 'sleeping',
+        lastActiveAt: sleepingAt,
+      });
       if (isLead) {
         await cacheLeadStatus(row.teamId, agentId, 'sleeping', sleepingAt);
       } else {

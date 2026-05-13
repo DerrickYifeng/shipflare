@@ -25,7 +25,7 @@ import { processPlanExecuteSweeper } from './processors/plan-execute-sweeper';
 import { processStaleSweeper } from './processors/stale-sweeper';
 import { processWeeklyReplan } from './processors/weekly-replan';
 import { processReconcileMailbox } from './processors/reconcile-mailbox';
-import { processAgentRun } from './processors/agent-run';
+import { processAgentRun, disposeAgentStatusBatcher } from './processors/agent-run';
 import { processRedditChannelResearch } from './processors/reddit-channel-research';
 import {
   AGENT_RUN_QUEUE_NAMES,
@@ -468,6 +468,13 @@ log.info('All workers started: review, posting, growth-rollup, dream, code-scan,
 // Graceful shutdown
 async function shutdown() {
   log.info('Shutting down workers...');
+  // B7: flush any pending status-batcher entries before BullMQ workers
+  // close — otherwise transient queued/running/sleeping/resuming writes
+  // buffered for the next 500ms tick get lost on SIGTERM. The dispose
+  // fires the final flush fire-and-forget; we give it a brief grace
+  // window before exiting so the UPDATE round-trips complete.
+  disposeAgentStatusBatcher();
+  await new Promise((r) => setTimeout(r, 200));
   await Promise.all(workers.map((w) => w.close()));
   process.exit(0);
 }

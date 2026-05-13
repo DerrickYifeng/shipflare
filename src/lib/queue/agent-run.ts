@@ -240,3 +240,28 @@ export async function reenqueueWithDelay(
     },
   );
 }
+
+// ---------------------------------------------------------------------------
+// Observability — per-lane queue depth (B7)
+// ---------------------------------------------------------------------------
+
+/**
+ * BullMQ job counts per lane. Used by the admin observability route
+ * (`/api/admin/queue-stats`) to expose per-priority depth so a
+ * teammate-spawn burst piling up on `standard` while `priority` is
+ * idle is visible without poking Redis directly.
+ *
+ * Each value is the full `Queue.getJobCounts()` shape — keys include
+ * `waiting`, `active`, `delayed`, `failed`, `completed`, etc.
+ */
+export type QueueJobCounts = Awaited<ReturnType<Queue['getJobCounts']>>;
+
+export async function getAgentRunQueueStats(): Promise<
+  Record<AgentRunPriority, QueueJobCounts>
+> {
+  const entries = await Promise.all(
+    (Object.entries(queues) as Array<[AgentRunPriority, Queue<AgentRunJobData>]>)
+      .map(async ([lane, q]) => [lane, await q.getJobCounts()] as const),
+  );
+  return Object.fromEntries(entries) as Record<AgentRunPriority, QueueJobCounts>;
+}

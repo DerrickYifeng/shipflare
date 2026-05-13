@@ -281,6 +281,37 @@ vi.mock('@/lib/queue/agent-run', () => ({
   laneFromQueueName: laneFromQueueNameMock,
 }));
 
+// B7: stub the status batcher so its .set() calls land in the same
+// updateChain.set spy that pre-batch synchronous writes did. Tests
+// assert on the *intended* status transitions (queued → running,
+// sleeping → resuming, etc.); whether they land as one immediate DB
+// write or as a coalesced batch is implementation detail. Routing the
+// batcher's set straight into updateChain.set preserves existing
+// assertions without forcing every test to await a 500ms tick.
+vi.mock('@/lib/team/agent-status-batcher', () => {
+  return {
+    AgentStatusBatcher: class FakeAgentStatusBatcher {
+      // Constructor parameters intentionally ignored — the test fake is
+      // an in-memory pipe to the existing updateChain spy.
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars, no-unused-vars
+      constructor(...args: unknown[]) {}
+      set(_agentId: string, update: Record<string, unknown>): void {
+        // Forward into the same chain real db.update(agentRuns) hits, so
+        // assertions like `setCalls.some(s => s.status === 'resuming')`
+        // still pick up batched writes. Cast through `unknown` because
+        // updateChain.set is declared zero-arg (its only callers in this
+        // file are mock-introspection sites like `.mock.calls`).
+        (updateChain.set as unknown as (u: Record<string, unknown>) => void)(update);
+      }
+      async flushNow(): Promise<void> {}
+      dispose(): void {}
+      size(): number {
+        return 0;
+      }
+    },
+  };
+});
+
 import { processAgentRun } from '@/workers/processors/agent-run';
 import { db } from '@/lib/db';
 import { drainMailbox } from '@/workers/processors/lib/mailbox-drain';
