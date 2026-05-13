@@ -488,8 +488,14 @@ function TeamDeskInner({
   );
 
   // ---------- Delegation tasks (task panel, global view) ----------
+  // Pass `liveAgentRunStatus` (SSR seed + SSE deltas applied) so the
+  // DelegationCard's status pill flips QUEUED→RUNNING as the spawned
+  // teammates wake up. Passing the frozen `agentRunStatus` prop here was
+  // the bug — subtasks lied as QUEUED for the entire session, matching
+  // the same class of stale-status bug we already fixed for the right
+  // TaskPanel.
   const allDelegationTasks = useMemo<DelegationTask[]>(() => {
-    const nodes = stitchLeadMessages(liveMessages, agentRunStatus, partials);
+    const nodes = stitchLeadMessages(liveMessages, liveAgentRunStatus, partials);
     const out: DelegationTask[] = [];
     for (const n of nodes) {
       if (n.kind === 'lead') {
@@ -497,7 +503,7 @@ function TeamDeskInner({
       }
     }
     return out;
-  }, [liveMessages, agentRunStatus, partials]);
+  }, [liveMessages, liveAgentRunStatus, partials]);
 
   // ---------- Handlers ----------
   const handleSelectConversation = useCallback((conversationId: string) => {
@@ -908,7 +914,7 @@ function TeamDeskInner({
             messages={deferredThreadMessages}
             partials={deferredPartials}
             toolInputPartials={deferredToolInputPartials}
-            agentRunStatus={agentRunStatus}
+            agentRunStatus={liveAgentRunStatus}
             runLookup={threadRunLookup}
             activeMemberId={null}
             onSelectMember={noopSelectMember}

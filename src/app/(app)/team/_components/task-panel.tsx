@@ -599,12 +599,11 @@ function ProgressDetail({
     borderLeft: `2px solid ${accentColor}`,
     display: 'flex',
     flexDirection: 'column',
-    gap: 4,
-    // Bounded so a single expanded row doesn't push the other RUNNING
-    // cards out of the visible panel. ~140px ≈ 5-6 progress rows; the
-    // inner overflow lets the user scroll to older items inside the
-    // expanded card without losing siblings.
-    maxHeight: 140,
+    gap: 6,
+    // Expanded card needs room for tool outputs + multi-line agent text.
+    // 360px ≈ ~15-20 progress rows; inner overflow scrolls older items
+    // without losing sibling cards.
+    maxHeight: 360,
     overflowY: 'auto',
   };
   const row: CSSProperties = {
@@ -624,6 +623,20 @@ function ProgressDetail({
     color: 'var(--sf-fg-2)',
     fontFamily: 'inherit',
     fontSize: 12,
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
+  };
+  const toolOutput: CSSProperties = {
+    marginLeft: 18,
+    padding: '4px 8px',
+    borderRadius: 4,
+    background: 'rgba(0, 0, 0, 0.03)',
+    fontFamily: 'var(--sf-font-mono)',
+    fontSize: 11,
+    color: 'var(--sf-fg-2)',
+    lineHeight: 1.45,
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
   };
   const elapsed: CSSProperties = {
     marginLeft: 'auto',
@@ -652,13 +665,19 @@ function ProgressDetail({
       {visible.map((item) => {
         if (item.kind === 'tool') {
           return (
-            <div key={item.id} style={row}>
-              <span aria-hidden="true">└ ◈</span>
-              <span style={tool}>{item.toolName}</span>
-              {item.errorText ? (
-                <span style={{ color: 'var(--sf-error-ink)' }}>— {item.errorText}</span>
-              ) : null}
-              {item.elapsed ? <span style={elapsed}>{item.elapsed}</span> : null}
+            <div
+              key={item.id}
+              style={{ display: 'flex', flexDirection: 'column', gap: 4 }}
+            >
+              <div style={row}>
+                <span aria-hidden="true">└ ◈</span>
+                <span style={tool}>{item.toolName}</span>
+                {item.errorText ? (
+                  <span style={{ color: 'var(--sf-error-ink)' }}>— {item.errorText}</span>
+                ) : null}
+                {item.elapsed ? <span style={elapsed}>{item.elapsed}</span> : null}
+              </div>
+              {item.output ? <div style={toolOutput}>{item.output}</div> : null}
             </div>
           );
         }
@@ -670,11 +689,11 @@ function ProgressDetail({
             </div>
           );
         }
-        // text — show first line as a one-liner, full content if short.
-        const oneLiner = item.text.split('\n').find((l) => l.trim().length > 0) ?? '';
+        // text — render the full content (multi-line preserved via
+        // pre-wrap). The wrap's own maxHeight bounds vertical growth.
         return (
           <div key={item.id} style={text}>
-            {oneLiner.length > 140 ? `${oneLiner.slice(0, 140)}…` : oneLiner}
+            {item.text}
           </div>
         );
       })}
