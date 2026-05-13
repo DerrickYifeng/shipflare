@@ -1,12 +1,16 @@
 'use client';
 
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { pickRandomVerb } from './spinner-verbs';
 
 export interface TypingIndicatorProps {
   /**
-   * Optional explicit label. Defaults to "working". Falls back to the
-   * default when omitted — e.g. the coordinator turn between text_stop
-   * and the subagent's first event can pass "dispatching" here.
+   * Optional explicit label override. When omitted, the indicator picks
+   * a random spinner verb on mount (Claude Code style — `engine/components/
+   * Spinner.tsx` uses the same one-verb-per-mount approach). Callers pass
+   * an explicit label only when the state has a specific name worth
+   * showing instead, e.g. "dispatching" between text_stop and the
+   * subagent's first event.
    */
   label?: string;
 }
@@ -23,9 +27,14 @@ export interface TypingIndicatorProps {
  * finished, stream resumed, etc.) the component unmounts and the
  * counter resets — exactly the behavior we want, no manual reset.
  */
-export function TypingIndicator({ label = 'working' }: TypingIndicatorProps = {}) {
+export function TypingIndicator({ label }: TypingIndicatorProps = {}) {
   const startedAtRef = useRef<number | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  // Pick a verb once on mount (engine's pattern). Remounts on new turns
+  // naturally surface a fresh verb, so the rotation is "free" without
+  // an interval timer thrashing layout.
+  const [randomVerb] = useState(pickRandomVerb);
+  const displayLabel = label ?? randomVerb;
 
   useEffect(() => {
     startedAtRef.current = Date.now();
@@ -55,11 +64,13 @@ export function TypingIndicator({ label = 'working' }: TypingIndicatorProps = {}
   };
 
   const labelStyle: CSSProperties = {
+    // Engine renders verbs as "Pondering…" not "PONDERING…" — natural
+    // case keeps the whimsy readable. We previously upper-cased a single
+    // fixed "WORKING" label, which loses the verb's character.
     fontFamily: 'var(--sf-font-mono)',
     fontSize: 11,
     color: 'var(--sf-fg-3)',
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
+    letterSpacing: 0.2,
   };
 
   const elapsedStyle: CSSProperties = {
@@ -79,12 +90,12 @@ export function TypingIndicator({ label = 'working' }: TypingIndicatorProps = {}
       style={row}
       data-testid="typing-indicator"
       aria-live="polite"
-      aria-label={`Team Lead is ${label}`}
+      aria-label={`Team Lead is ${displayLabel}`}
     >
       <span style={{ ...dot, animationDelay: '0ms' }} aria-hidden="true" />
       <span style={{ ...dot, animationDelay: '180ms' }} aria-hidden="true" />
       <span style={{ ...dot, animationDelay: '360ms' }} aria-hidden="true" />
-      <span style={labelStyle}>{label}…</span>
+      <span style={labelStyle}>{displayLabel}…</span>
       {shouldShowElapsed ? (
         <span style={elapsedStyle}>· {elapsedSeconds}s</span>
       ) : null}

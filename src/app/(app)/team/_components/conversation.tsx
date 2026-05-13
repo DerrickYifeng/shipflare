@@ -613,10 +613,14 @@ export function Conversation({
             />
             {showTyping ? (
               <TypingIndicator
+                // "dispatching" is a meaningful state name (coordinator
+                // between text_stop and the subagent's first event), so
+                // we keep that explicit. Otherwise let the indicator
+                // pick a random spinner verb on mount — engine pattern.
                 label={
                   toolInputPartials && toolInputPartials.size > 0
                     ? 'dispatching'
-                    : 'working'
+                    : undefined
                 }
               />
             ) : null}
@@ -635,10 +639,14 @@ export function Conversation({
             ))}
             {showTyping ? (
               <TypingIndicator
+                // "dispatching" is a meaningful state name (coordinator
+                // between text_stop and the subagent's first event), so
+                // we keep that explicit. Otherwise let the indicator
+                // pick a random spinner verb on mount — engine pattern.
                 label={
                   toolInputPartials && toolInputPartials.size > 0
                     ? 'dispatching'
-                    : 'working'
+                    : undefined
                 }
               />
             ) : null}
