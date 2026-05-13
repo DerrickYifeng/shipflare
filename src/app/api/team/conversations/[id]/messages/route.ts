@@ -176,7 +176,9 @@ export async function POST(
   // window via BullMQ dedupe. The `runId` field on the response is the
   // inserted message id (legacy clients used team_runs.id; Phase E uses
   // the message id as the polling handle).
-  await wake(leadAgentId);
+  //
+  // B6: founder conversation message → priority lane.
+  await wake(leadAgentId, 'priority');
   const enqueued = {
     runId: messageId,
     traceId: leadAgentId,

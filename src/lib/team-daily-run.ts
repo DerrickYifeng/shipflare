@@ -119,6 +119,8 @@ export async function ensureDailyRunEnqueued(args: {
         goal,
         publicSummary,
         trigger: 'daily',
+        // B6: cron-driven daily fan-out → backfill lane (not founder traffic).
+        priority: 'backfill',
       },
       db,
     );

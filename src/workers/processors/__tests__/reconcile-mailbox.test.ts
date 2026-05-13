@@ -24,8 +24,12 @@ describe('processReconcileMailbox', () => {
     ] as never);
     await processReconcileMailbox();
     expect(wake).toHaveBeenCalledTimes(2);
-    expect(wake).toHaveBeenNthCalledWith(1, 'agent-1');
-    expect(wake).toHaveBeenNthCalledWith(2, 'agent-2');
+    // B6: cron-driven reconcile → backfill lane. By the time the
+    // backstop fires, the original wake is >30s late, so the retry
+    // runs at backfill priority rather than competing with fresh
+    // founder traffic on the priority lane.
+    expect(wake).toHaveBeenNthCalledWith(1, 'agent-1', 'backfill');
+    expect(wake).toHaveBeenNthCalledWith(2, 'agent-2', 'backfill');
   });
 
   it('does nothing when no orphans found', async () => {

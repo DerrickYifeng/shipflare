@@ -269,9 +269,16 @@ vi.mock('@/lib/team/team-tier', () => ({
 
 // Phase B3: stub the BullMQ re-enqueue path so a backpressure test
 // can assert the call without touching a real queue.
+// B6: also stub `laneFromQueueName` — processAgentRun reads the lane
+// from `job.queueName` to thread it through reenqueueWithDelay; the
+// makeJob factory doesn't set queueName, so the helper would be called
+// with `undefined`. Mocking it to a constant lets tests assert on the
+// observable contract (reenqueue fires) without coupling to job shape.
 const reenqueueWithDelayMock = vi.hoisted(() => vi.fn(async () => {}));
+const laneFromQueueNameMock = vi.hoisted(() => vi.fn(() => 'standard'));
 vi.mock('@/lib/queue/agent-run', () => ({
   reenqueueWithDelay: reenqueueWithDelayMock,
+  laneFromQueueName: laneFromQueueNameMock,
 }));
 
 import { processAgentRun } from '@/workers/processors/agent-run';
@@ -2787,9 +2794,14 @@ describe('processAgentRun', () => {
 
     await processAgentRun(makeJob('agent-cap'));
 
-    // Re-enqueue fired with the agentId + the documented delay (1500ms).
+    // Re-enqueue fired with the agentId + the documented delay (1500ms)
+    // + the lane resolved from job.queueName (mocked to 'standard').
     expect(reenqueueWithDelayMock).toHaveBeenCalledTimes(1);
-    expect(reenqueueWithDelayMock).toHaveBeenCalledWith('agent-cap', 1500);
+    expect(reenqueueWithDelayMock).toHaveBeenCalledWith(
+      'agent-cap',
+      1500,
+      'standard',
+    );
 
     // The inner worker body was never reached: no DB lookup, no runAgent.
     expect(db.query.agentRuns.findFirst).not.toHaveBeenCalled();
@@ -2905,11 +2917,13 @@ describe('processAgentRun', () => {
 
     await processAgentRun(makeJob('agent-rl-tenant'));
 
-    // Re-enqueue fired with the deny's retryMs.
+    // Re-enqueue fired with the deny's retryMs + the lane resolved from
+    // job.queueName (mocked to 'standard').
     expect(reenqueueWithDelayMock).toHaveBeenCalledTimes(1);
     expect(reenqueueWithDelayMock).toHaveBeenCalledWith(
       'agent-rl-tenant',
       5000,
+      'standard',
     );
 
     // Slot was held → must be released exactly once on the way out.
@@ -2946,6 +2960,7 @@ describe('processAgentRun', () => {
     expect(reenqueueWithDelayMock).toHaveBeenCalledWith(
       'agent-rl-global',
       1200,
+      'standard',
     );
     expect(releaseTenantSlotMock).toHaveBeenCalledTimes(1);
   });

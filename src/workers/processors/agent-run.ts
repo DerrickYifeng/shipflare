@@ -66,6 +66,7 @@ import {
 } from '@/lib/redis-scripts/tenant-semaphore';
 import { teamMessagesChannel } from '@/tools/SendMessageTool/SendMessageTool';
 import {
+  laneFromQueueName,
   reenqueueWithDelay,
   type AgentRunJobData,
 } from '@/lib/queue/agent-run';
@@ -500,6 +501,13 @@ async function synthAndDeliverNotification(params: NotifyParams): Promise<void> 
 export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> {
   const { agentId } = job.data;
 
+  // B6: every re-enqueue (backpressure + LlmRateLimited catch) must
+  // stay on the SAME lane the original job came from. A 'priority'
+  // founder wake that gets demoted to 'standard' on retry would lose
+  // its place in the priority queue behind any teammate burst — silent
+  // latency regression. Source the lane from BullMQ's `job.queueName`.
+  const lane = laneFromQueueName(job.queueName);
+
   // Look up owning user + tier BEFORE acquiring the slot. If this throws
   // (e.g. the agent_runs row was deleted between enqueue and dispatch),
   // we bubble the error up to BullMQ and never held a slot — no release
@@ -516,9 +524,9 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
   );
   if (!slot.acquired) {
     log.info(
-      `backpressure: user=${userId} at cap=${cap} (current=${slot.current}), re-enqueueing agent=${agentId}`,
+      `backpressure: user=${userId} at cap=${cap} (current=${slot.current}), re-enqueueing agent=${agentId} lane=${lane}`,
     );
-    await reenqueueWithDelay(agentId, BACKPRESSURE_DELAY_MS);
+    await reenqueueWithDelay(agentId, BACKPRESSURE_DELAY_MS, lane);
     return;
   }
   if (slot.failedOpen) {
@@ -539,6 +547,7 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
       //   suggested retryMs (reenqueueWithDelay adds jitter on top).
       //   The retryMs is the earliest a fresh token could become
       //   available; jitter prevents thundering-herd on resume.
+      //   The re-enqueue stays on the CURRENT lane (see `lane` above).
       // - `config` deny: a programming bug (cost > cap). Re-enqueueing
       //   would loop forever — fail loud so BullMQ marks the job as
       //   failed and ops can investigate. The semaphore slot is still
@@ -550,9 +559,9 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
         throw err;
       }
       log.info(
-        `llm-rate-limited(${err.scope}): re-enqueue agent=${agentId} after ${err.retryMs}ms`,
+        `llm-rate-limited(${err.scope}): re-enqueue agent=${agentId} after ${err.retryMs}ms lane=${lane}`,
       );
-      await reenqueueWithDelay(agentId, err.retryMs);
+      await reenqueueWithDelay(agentId, err.retryMs, lane);
       return;
     }
     throw err;

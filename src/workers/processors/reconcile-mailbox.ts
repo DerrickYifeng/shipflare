@@ -31,7 +31,13 @@ export async function processReconcileMailbox(): Promise<void> {
   log.info(`reconciling ${orphans.length} mailbox orphan(s)`);
   for (const row of orphans) {
     try {
-      await wake(row.to_agent_id);
+      // B6: cron-driven durable backstop → backfill lane. Even when the
+      // original wake was 'priority' (founder message that failed to
+      // enqueue), the reconcile retry runs at backfill priority because
+      // by definition we're already > 30s late — bumping ahead of fresh
+      // founder traffic would hurt the live foreground more than the
+      // already-stale background.
+      await wake(row.to_agent_id, 'backfill');
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       log.error(`wake failed during reconcile for ${row.to_agent_id}: ${msg}`);

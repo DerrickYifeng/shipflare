@@ -27,7 +27,11 @@ import { processWeeklyReplan } from './processors/weekly-replan';
 import { processReconcileMailbox } from './processors/reconcile-mailbox';
 import { processAgentRun } from './processors/agent-run';
 import { processRedditChannelResearch } from './processors/reddit-channel-research';
-import { AGENT_RUN_QUEUE_NAME, type AgentRunJobData } from '@/lib/queue/agent-run';
+import {
+  AGENT_RUN_QUEUE_NAMES,
+  type AgentRunJobData,
+  type AgentRunPriority,
+} from '@/lib/queue/agent-run';
 import { dreamQueue, discoveryScanQueue, metricsQueue, analyticsQueue, growthRollupQueue } from '@/lib/queue';
 import type { PlanExecuteJobData, RedditChannelResearchJobData } from '@/lib/queue';
 import { createLogger, loggerForJob } from '@/lib/logger';
@@ -231,34 +235,56 @@ const reconcileMailboxWorker = new Worker<Record<string, never>>(
 // outputs). Lock duration is 10 min — well above the per-turn ceiling but
 // short enough that a crashed worker frees the job for another consumer.
 //
-// concurrency=8 sized for a first-visit kickoff burst:
-//   1 team-lead (Chief of Staff) + up to 5 specialists
-//     (x-replies, reddit-replies, x-post-batch, reddit-research, reddit-post-batch)
-//   = 6 peak jobs, +2 headroom.
-// Stays under the Postgres pool ceiling (`PG_POOL_MAX` env, default 30
-// in prod — see src/lib/db/index.ts). When bumping concurrency past 8,
-// monitor pool acquire latency; bump `PG_POOL_MAX` if `too_many_connections`
-// surfaces.
-const agentRunWorker = new Worker<AgentRunJobData>(
-  AGENT_RUN_QUEUE_NAME,
-  async (job) => {
-    const jobLog = loggerForJob(log, job);
-    jobLog.info(`agent-run start agentId=${job.data.agentId}`);
-    await processAgentRun(job);
-    jobLog.info(`agent-run done agentId=${job.data.agentId}`);
-  },
-  { ...BASE_OPTS, concurrency: 8, lockDuration: 600_000 },
-);
+// B6: split into three lanes (priority/standard/backfill) so a teammate
+// burst can't sit ahead of a founder reply. All three share the same
+// `processAgentRun` body; only the BullMQ queue name + concurrency
+// differs. Total concurrency = 4 + 6 + 2 = 12 — sized for a first-visit
+// kickoff burst (1 lead + ~5 specialists = 6 peak) plus headroom for
+// concurrent founder priority traffic and cron backfill. Stays under
+// the Postgres pool ceiling (`PG_POOL_MAX` env, default 30 in prod —
+// see src/lib/db/index.ts).
+//
+// The per-tenant semaphore from B3 still caps in-flight across all
+// three lanes; lanes only decide *order*, not concurrency budget.
+const AGENT_RUN_LANE_CONCURRENCY: Record<AgentRunPriority, number> = {
+  priority: 4, // founder → lead messages, founder cancels
+  standard: 6, // teammate spawns, peer DMs, Sleep resume, TaskStop
+  backfill: 2, // reconcile-mailbox, daily-run fan-out, weekly-replan
+};
 
-// Explicit failed handler for agent-run (the shared loop below also covers
-// it via the workers array, but the per-worker handler keeps the lifecycle
-// log line in shape with the `agent-run start` / `agent-run done` pair).
-agentRunWorker.on('failed', (job, err) => {
-  if (job) {
-    loggerForJob(log, job).error(`agent-run failed agentId=${job.data.agentId}: ${err.message}`);
-  } else {
-    log.error(`agent-run failed (no job ref): ${err.message}`);
-  }
+const agentRunWorkers = (
+  Object.entries(AGENT_RUN_QUEUE_NAMES) as Array<
+    [AgentRunPriority, string]
+  >
+).map(([lane, name]) => {
+  const worker = new Worker<AgentRunJobData>(
+    name,
+    async (job) => {
+      const jobLog = loggerForJob(log, job);
+      jobLog.info(
+        `agent-run start lane=${lane} agentId=${job.data.agentId}`,
+      );
+      await processAgentRun(job);
+      jobLog.info(
+        `agent-run done lane=${lane} agentId=${job.data.agentId}`,
+      );
+    },
+    {
+      ...BASE_OPTS,
+      concurrency: AGENT_RUN_LANE_CONCURRENCY[lane],
+      lockDuration: 600_000,
+    },
+  );
+  worker.on('failed', (job, err) => {
+    if (job) {
+      loggerForJob(log, job).error(
+        `agent-run failed lane=${lane} agentId=${job.data.agentId}: ${err.message}`,
+      );
+    } else {
+      log.error(`agent-run failed lane=${lane} (no job ref): ${err.message}`);
+    }
+  });
+  return worker;
 });
 
 const workers = [
@@ -271,8 +297,8 @@ const workers = [
   // Phase 7
   planExecuteWorker, planExecuteSweeperWorker,
   staleSweeperWorker, weeklyReplanWorker,
-  // AI Team Platform
-  agentRunWorker,
+  // AI Team Platform — three lanes (priority / standard / backfill)
+  ...agentRunWorkers,
   reconcileMailboxWorker,
 ];
 

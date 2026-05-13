@@ -305,6 +305,10 @@ async function launchAsyncTeammate(
 
   // 3. Wake the agent-run worker via BullMQ. Idempotent within a 1-second
   //    bucket (see wake.ts).
+  //
+  //    B6: teammate first-spawn → standard lane (default). Founder
+  //    priority traffic flows through the lead's own wake calls, not
+  //    through teammate spawns.
   await wake(agentId);
 
   // UI-D: cache write-through. Append the freshly-spawned teammate to the

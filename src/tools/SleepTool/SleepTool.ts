@@ -141,6 +141,12 @@ export const sleepTool: ToolDefinition<SleepInput, SleepResult> = buildTool({
     //    near-simultaneous SendMessage→wake() calls onto the same job
     //    within BullMQ's removeOnComplete window — the earlier wake
     //    wins; the delayed job no-ops if the agent is already running.
+    //
+    //    B6: Sleep resume → standard lane (default). By the time the
+    //    sleep expires (typically minutes-to-hours later), the original
+    //    urgency has elapsed; treating the resumed turn as background
+    //    work is correct. Inbound SendMessage→wake on the same agent
+    //    can still bypass this on the priority lane.
     await enqueueAgentRun(
       { agentId },
       {

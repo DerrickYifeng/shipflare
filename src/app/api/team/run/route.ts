@@ -281,7 +281,10 @@ export async function POST(request: NextRequest): Promise<Response> {
     summary: goal.slice(0, 80),
   });
 
-  await wake(leadAgentId);
+  // B6: founder POST /api/team/run → priority lane. The lead's reply
+  // latency on a fresh user message should not sit behind a teammate-spawn
+  // burst on the standard lane.
+  await wake(leadAgentId, 'priority');
 
   // Response shape preserved for downstream consumers:
   //   - `runId`     → messageId (polling handle, replaces the old team_runs.id)

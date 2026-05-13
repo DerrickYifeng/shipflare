@@ -190,6 +190,9 @@ export async function ensureKickoffEnqueued(args: {
         goal,
         publicSummary,
         trigger: 'kickoff',
+        // B6: founder-initiated one-shot kickoff (signup auto-trigger
+        // or first-visit manual dispatch) → priority lane.
+        priority: 'priority',
       },
       db,
     );
