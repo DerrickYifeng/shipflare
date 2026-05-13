@@ -258,9 +258,15 @@ Respond with ONLY a JSON object matching this shape:
 /**
  * Use Claude to analyze scraped website content and extract structured product info.
  * Sends full page markdown (from Turndown) instead of just meta tags.
+ *
+ * `userId` (Phase B5) — when provided, the underlying createMessage
+ * call participates in the hierarchical Anthropic token bucket. The
+ * onboarding-extract route always has a session.user.id; future
+ * anonymous flows may leave it undefined.
  */
 export async function analyzeWebsite(
   scrape: WebScrapeResult,
+  userId?: string,
 ): Promise<ProductAnalysis> {
   const content = [
     `URL: ${scrape.url}`,
@@ -277,6 +283,7 @@ export async function analyzeWebsite(
       maxTokens: 400,
       system: ANALYZE_PROMPT,
       messages: [{ role: 'user', content }],
+      ...(userId !== undefined ? { tenantId: userId } : {}),
     });
 
     const text = response.content[0]?.type === 'text' ? response.content[0].text : '';

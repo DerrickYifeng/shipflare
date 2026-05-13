@@ -38,6 +38,7 @@ import type { Database } from '@/lib/db';
 import { agentRuns, teamConversations, teamMessages } from '@/lib/db/schema';
 import { TOOL_RESULT_TRUNCATION_LIMIT } from '@/lib/limits';
 import { runAgent } from '@/core/query-loop';
+import { LlmRateLimitedError } from '@/core/api-client';
 import { resolveAgent } from '@/tools/AgentTool/registry';
 import { wrapOnEventWithSpawnMeta } from '@/tools/AgentTool/AgentTool';
 import { buildAgentConfigFromDefinition } from '@/tools/AgentTool/spawn';
@@ -257,6 +258,13 @@ async function buildPhaseBToolContext(
         case 'teamId':
           return args.teamId as unknown as V;
         case 'userId':
+          return args.userId as unknown as V;
+        // Phase B5: spawn.ts reads this key to inherit the parent's
+        // tenant identity into child agent configs so child runAgent →
+        // createMessage calls participate in the same hierarchical
+        // Anthropic token bucket. Aliased to userId — the bucket is
+        // scoped per-shipflare-user.
+        case 'tenantId':
           return args.userId as unknown as V;
         case 'productId':
           return args.productId as unknown as V;
@@ -523,6 +531,31 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
 
   try {
     await runAgentTurn(agentId, job);
+  } catch (err) {
+    if (err instanceof LlmRateLimitedError) {
+      // Phase B5: hierarchical Anthropic token bucket refusal.
+      //
+      // - `tenant` / `global` deny: re-enqueue with the bucket's
+      //   suggested retryMs (reenqueueWithDelay adds jitter on top).
+      //   The retryMs is the earliest a fresh token could become
+      //   available; jitter prevents thundering-herd on resume.
+      // - `config` deny: a programming bug (cost > cap). Re-enqueueing
+      //   would loop forever — fail loud so BullMQ marks the job as
+      //   failed and ops can investigate. The semaphore slot is still
+      //   released by the outer `finally`.
+      if (err.scope === 'config') {
+        log.error(
+          `llm-rate-limited(config): cost > cap for agent=${agentId}, programming bug — failing job`,
+        );
+        throw err;
+      }
+      log.info(
+        `llm-rate-limited(${err.scope}): re-enqueue agent=${agentId} after ${err.retryMs}ms`,
+      );
+      await reenqueueWithDelay(agentId, err.retryMs);
+      return;
+    }
+    throw err;
   } finally {
     await releaseTenantSlot(redis, userId);
   }
@@ -1304,7 +1337,16 @@ async function runAgentTurn(
       ...def,
       systemPrompt: substitutePlaceholders(def.systemPrompt, promptCtx),
     };
-    const config = buildAgentConfigFromDefinition(renderedDef);
+    // Phase B5: wire the run's owning userId into the AgentConfig so
+    // every `createMessage` issued from this run's `runAgent` loop
+    // atomically acquires from the per-tenant + global Anthropic
+    // token bucket. Sourced from team.userId (the loadSystemPromptContext
+    // team row) — same value `userId` was bound to in the outer wrapper.
+    const config = buildAgentConfigFromDefinition(
+      renderedDef,
+      new Date(),
+      team.userId,
+    );
 
     // Phase E orphan fix (2026-05-03 plan, Task 1): the team-run worker
     // used to load userId / productId / teamId / platformDeps into the
@@ -1380,6 +1422,15 @@ async function runAgentTurn(
       result.usage.cacheWriteTokens;
   } catch (err) {
     durationMs = Date.now() - startedAtMs;
+    // Phase B5: LlmRateLimitedError must propagate to processAgentRun's
+    // outer wrapper, which translates it into a re-enqueue (tenant /
+    // global deny) or a loud failure (config deny). Swallowing it here
+    // would mark the run as 'failed' and skip the bucket-aware retry.
+    // The outer `finally` still runs (clearInterval, final drainMailbox)
+    // before the re-throw propagates, so cleanup is preserved.
+    if (err instanceof LlmRateLimitedError) {
+      throw err;
+    }
     if (gracefullyKilled) {
       // Graceful exit triggered by inbound shutdown_request — the
       // Anthropic SDK / our retry helper raises an abort error when

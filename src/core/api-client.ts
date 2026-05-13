@@ -2,8 +2,61 @@ import Anthropic from '@anthropic-ai/sdk';
 import type { ModelCosts, UsageSummary } from './types';
 import { MODEL_PRICING } from './types';
 import { createLogger } from '@/lib/logger';
+import { getKeyValueClient } from '@/lib/redis';
+import {
+  tryAcquireLlmTokens,
+  type DenyScope,
+} from '@/lib/redis-scripts/llm-token-bucket';
 
 const log = createLogger('core:api');
+
+// ---------------------------------------------------------------------------
+// Rate-limit error (Phase B5)
+// ---------------------------------------------------------------------------
+
+/**
+ * Thrown by `createMessage` when the hierarchical Anthropic token bucket
+ * refuses an acquire (see `src/lib/redis-scripts/llm-token-bucket.ts`).
+ *
+ * Three scopes are surfaced verbatim from the Lua bucket:
+ * - `tenant`: per-user bucket empty (most common; caller may retry after
+ *   `retryMs`). Workers should re-enqueue with delay.
+ * - `global`: per-platform bucket empty (all tenants combined exceeding
+ *   the upstream provider's rate limit). Workers should re-enqueue.
+ * - `config`: a configuration error (typically `cost > cap`) that can
+ *   never succeed on retry. Workers should NOT re-enqueue — log loud and
+ *   surface as a job failure so ops can investigate.
+ */
+export class LlmRateLimitedError extends Error {
+  constructor(
+    public readonly scope: DenyScope,
+    public readonly retryMs: number,
+  ) {
+    super(`llm_rate_limited:${scope} retry in ${retryMs}ms`);
+    this.name = 'LlmRateLimitedError';
+  }
+}
+
+// Defaults used when the env vars are unset / malformed.
+// `DEFAULT_LLM_TENANT_RPM=60` sized for ~15 active tenants
+// (60 × 15 = 900 = DEFAULT_LLM_GLOBAL_RPM). The global default
+// sits ~10% under Anthropic's Tier 2 ceiling (1000 RPM); see
+// .env.example for tier mapping and https://docs.anthropic.com/en/api/rate-limits.
+const DEFAULT_LLM_TENANT_RPM = 60;
+const DEFAULT_LLM_GLOBAL_RPM = 900;
+
+/**
+ * Parse a positive-integer-valued env var, falling back to `fallback` on
+ * absence / NaN / non-positive. Mirrors the defensive pattern from B1.
+ */
+function parsePositiveIntEnv(
+  raw: string | undefined,
+  fallback: number,
+): number {
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
 
 // ---------------------------------------------------------------------------
 // Singleton client
@@ -126,6 +179,18 @@ export interface CreateMessageOptions {
    * message, but nothing is forwarded).
    */
   onStreamEvent?: (event: Anthropic.Messages.RawMessageStreamEvent) => void;
+  /**
+   * Shipflare userId. When provided, each call atomically decrements a
+   * per-tenant + global Anthropic token bucket via Redis Lua (see
+   * `src/lib/redis-scripts/llm-token-bucket.ts`). Throws
+   * `LlmRateLimitedError` on deny — caller maps to a re-enqueue
+   * (workers) or 429 (HTTP routes).
+   *
+   * Optional: when undefined, the bucket is bypassed (pre-B5 behavior).
+   * All worker-side callers MUST populate this; anonymous flows
+   * (public scan, internal tests, etc.) leave it unset.
+   */
+  tenantId?: string;
 }
 
 export interface CreateMessageResult {
@@ -176,6 +241,51 @@ export async function createMessage(opts: CreateMessageOptions): Promise<CreateM
     });
   } else {
     cachedTools = tools;
+  }
+
+  // ---------------------------------------------------------------------
+  // Phase B5: hierarchical token bucket acquire.
+  //
+  // When the caller supplied a tenantId, atomically decrement both the
+  // per-user and global Anthropic buckets BEFORE we burn a slot in the
+  // (more expensive) retry loop below. On deny we throw a typed error
+  // the caller maps to a re-enqueue (workers) or 429 (HTTP routes).
+  // On the response we DO NOT refund — the call already happened (or
+  // will, after this point) so the slot has been spent regardless of
+  // upstream status.
+  //
+  // Failed-open path (Redis unreachable) deliberately lets the call
+  // through with a WARN log — better to serve traffic than wedge every
+  // worker on a Redis outage. Anthropic's 429s remain the backstop.
+  // ---------------------------------------------------------------------
+  if (opts.tenantId) {
+    const redis = getKeyValueClient();
+    const tenantRpm = parsePositiveIntEnv(
+      process.env.LLM_TENANT_RPM,
+      DEFAULT_LLM_TENANT_RPM,
+    );
+    const globalRpm = parsePositiveIntEnv(
+      process.env.LLM_GLOBAL_RPM,
+      DEFAULT_LLM_GLOBAL_RPM,
+    );
+
+    const ack = await tryAcquireLlmTokens(redis, {
+      tenantKey: `llm:tenant:${opts.tenantId}`,
+      tenantCap: tenantRpm,
+      tenantRefillPerSec: tenantRpm / 60,
+      globalKey: `llm:global:anthropic`,
+      globalCap: globalRpm,
+      globalRefillPerSec: globalRpm / 60,
+    });
+
+    if (!ack.allowed) {
+      throw new LlmRateLimitedError(ack.scope, ack.retryMs);
+    }
+    if (ack.failedOpen) {
+      log.warn(
+        `llm-token-bucket failed open for tenant=${opts.tenantId}; proceeding`,
+      );
+    }
   }
 
   let lastError: unknown;
@@ -356,6 +466,12 @@ export interface SideQueryOptions {
   tools?: Anthropic.Messages.Tool[];
   maxTokens?: number;
   signal?: AbortSignal;
+  /**
+   * Forwarded to `createMessage` for hierarchical token-bucket
+   * accounting (Phase B5). Optional — leave unset for anonymous /
+   * non-user-attributable side queries.
+   */
+  tenantId?: string;
 }
 
 /**
@@ -372,6 +488,7 @@ export async function sideQuery(opts: SideQueryOptions): Promise<Anthropic.Messa
     maxTokens: opts.maxTokens ?? 1024,
     signal: opts.signal,
     promptCaching: false, // Side queries are short-lived, caching not beneficial
+    ...(opts.tenantId !== undefined ? { tenantId: opts.tenantId } : {}),
   });
   return response;
 }

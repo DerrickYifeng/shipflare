@@ -87,8 +87,10 @@ export async function processCodeScan(job: Job<CodeScanJobData>): Promise<void> 
     cloneDir = await cloneRepo(repoFullName, githubToken);
 
     // Phase 2: Scan
+    // Phase B5: forward userId so the inner analyzeCodebase Anthropic
+    // call decrements the per-tenant + global token bucket.
     await publishProgress(redis, channel, 'scanning', 'Scanning files...');
-    const scanResult = await scanRepo(cloneDir);
+    const scanResult = await scanRepo(cloneDir, userId);
 
     // Pull a real homepage out of the README / package.json when possible.
     // Falls back to null so we don't leak the repo URL into products.url;

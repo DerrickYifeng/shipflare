@@ -168,6 +168,11 @@ export class AgentDream {
 
     const observationsContext = `# New Observations\n\n${logs.map((l, i) => `${i + 1}. ${l}`).join('\n')}`;
 
+    // TODO(B5+): plumb tenantId into sideQuery here. This is the memory subsystem's
+    // indirect Anthropic call path — currently bypasses the per-tenant bucket because
+    // no tenantId is threaded from the worker context. Trace caller: this.store has
+    // userId (currently private — expose via getter or store accessor); forward as
+    // tenantId. Out of B5 scope per plan.
     // 4. Side-query to Haiku
     const response = await sideQuery({
       model: DISTILL_MODEL,

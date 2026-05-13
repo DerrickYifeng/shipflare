@@ -132,6 +132,14 @@ export function resolveAgentTools(def: AgentDefinition): AnyToolDefinition[] {
 export function buildAgentConfigFromDefinition(
   def: AgentDefinition,
   now: Date = new Date(),
+  /**
+   * Shipflare userId, forwarded into the resulting AgentConfig so the
+   * downstream `runAgent` → `createMessage` calls participate in the
+   * hierarchical Anthropic token bucket (Phase B5). Optional —
+   * spawnSubagent inherits the parent's tenantId via `parentCtx` deps
+   * when available; ad-hoc callers may leave it undefined.
+   */
+  tenantId?: string,
 ): AgentConfig {
   return {
     name: def.name,
@@ -139,6 +147,7 @@ export function buildAgentConfigFromDefinition(
     model: def.model ?? DEFAULT_SUBAGENT_MODEL,
     tools: resolveAgentTools(def),
     maxTurns: def.maxTurns ?? DEFAULT_SUBAGENT_MAX_TURNS,
+    ...(tenantId !== undefined ? { tenantId } : {}),
   };
 }
 
@@ -258,7 +267,20 @@ export async function spawnSubagent<T = unknown>(
   // output type. spawnSubagent only consumes parsed output.
   outputSchema?: z.ZodType<T, z.ZodTypeDef, unknown>,
 ): Promise<AgentResult<T>> {
-  const config = buildAgentConfigFromDefinition(def);
+  // Phase B5: inherit tenantId from the parent ctx so child agents
+  // participate in the same hierarchical Anthropic token bucket.
+  // The dep is registered by the agent-run worker on the top-level
+  // ToolContext; absent / unregistered → undefined (no bucket).
+  let inheritedTenantId: string | undefined;
+  try {
+    const fromCtx = parentCtx.get<string | null | undefined>('tenantId');
+    if (typeof fromCtx === 'string' && fromCtx.length > 0) {
+      inheritedTenantId = fromCtx;
+    }
+  } catch {
+    inheritedTenantId = undefined;
+  }
+  const config = buildAgentConfigFromDefinition(def, new Date(), inheritedTenantId);
   const childCtx = createChildContext(parentCtx);
 
   const skillPreload = await buildSkillPreloadMessages(def.skills, childCtx);

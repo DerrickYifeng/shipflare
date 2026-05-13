@@ -2882,4 +2882,113 @@ describe('processAgentRun', () => {
     // that's reserved for the backpressure branch.
     expect(reenqueueWithDelayMock).not.toHaveBeenCalled();
   });
+
+  // -------------------------------------------------------------------
+  // Phase B5 — LlmRateLimitedError catch in processAgentRun's wrapper.
+  // -------------------------------------------------------------------
+
+  it('LlmRateLimitedError(tenant): re-enqueues with retryMs, does NOT mark failed, releases slot', async () => {
+    const { LlmRateLimitedError } = await import('@/core/api-client');
+    runAgentHoisted.fn.mockRejectedValueOnce(
+      new LlmRateLimitedError('tenant', 5000),
+    );
+
+    vi.mocked(db.query.agentRuns.findFirst).mockResolvedValue({
+      id: 'agent-rl-tenant',
+      teamId: 'team-1',
+      memberId: 'mem-1',
+      agentDefName: 'content-manager',
+      parentAgentId: null,
+      parentToolUseId: null,
+      status: 'queued',
+    } as never);
+
+    await processAgentRun(makeJob('agent-rl-tenant'));
+
+    // Re-enqueue fired with the deny's retryMs.
+    expect(reenqueueWithDelayMock).toHaveBeenCalledTimes(1);
+    expect(reenqueueWithDelayMock).toHaveBeenCalledWith(
+      'agent-rl-tenant',
+      5000,
+    );
+
+    // Slot was held → must be released exactly once on the way out.
+    expect(releaseTenantSlotMock).toHaveBeenCalledTimes(1);
+
+    // No agent_runs UPDATE marking the row 'failed' — that path is for
+    // genuine failures, not bucket-deny backpressure.
+    const failedUpdates = updateChain.set.mock.calls.filter((call) => {
+      const payload = (call as unknown as Array<{ status?: string }>)[0];
+      return payload?.status === 'failed';
+    });
+    expect(failedUpdates).toHaveLength(0);
+  });
+
+  it('LlmRateLimitedError(global): re-enqueues with retryMs', async () => {
+    const { LlmRateLimitedError } = await import('@/core/api-client');
+    runAgentHoisted.fn.mockRejectedValueOnce(
+      new LlmRateLimitedError('global', 1200),
+    );
+
+    vi.mocked(db.query.agentRuns.findFirst).mockResolvedValue({
+      id: 'agent-rl-global',
+      teamId: 'team-1',
+      memberId: 'mem-1',
+      agentDefName: 'content-manager',
+      parentAgentId: null,
+      parentToolUseId: null,
+      status: 'queued',
+    } as never);
+
+    await processAgentRun(makeJob('agent-rl-global'));
+
+    expect(reenqueueWithDelayMock).toHaveBeenCalledTimes(1);
+    expect(reenqueueWithDelayMock).toHaveBeenCalledWith(
+      'agent-rl-global',
+      1200,
+    );
+    expect(releaseTenantSlotMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('LlmRateLimitedError(config): re-throws to BullMQ, does NOT re-enqueue, releases slot', async () => {
+    const { LlmRateLimitedError } = await import('@/core/api-client');
+    runAgentHoisted.fn.mockRejectedValueOnce(
+      new LlmRateLimitedError('config', 0),
+    );
+
+    vi.mocked(db.query.agentRuns.findFirst).mockResolvedValue({
+      id: 'agent-rl-config',
+      teamId: 'team-1',
+      memberId: 'mem-1',
+      agentDefName: 'content-manager',
+      parentAgentId: null,
+      parentToolUseId: null,
+      status: 'queued',
+    } as never);
+
+    // Logger spy so the loud-error log doesn't pollute test output.
+    const errorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+
+    try {
+      // The 'config' scope is unrecoverable — wrapper re-throws so
+      // BullMQ marks the job failed. The outer promise rejects.
+      await expect(
+        processAgentRun(makeJob('agent-rl-config')),
+      ).rejects.toMatchObject({
+        name: 'LlmRateLimitedError',
+        scope: 'config',
+      });
+
+      // Critically: no re-enqueue on config scope — looping forever on
+      // a programming bug would be worse than just failing the job.
+      expect(reenqueueWithDelayMock).not.toHaveBeenCalled();
+
+      // Slot must still be released — the outer `finally` runs.
+      expect(releaseTenantSlotMock).toHaveBeenCalledTimes(1);
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
 });

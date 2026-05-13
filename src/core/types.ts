@@ -221,6 +221,13 @@ export interface QueryParams {
   onEvent?: (event: StreamEvent) => void;
   /** Enable prompt caching. Default: true. */
   promptCaching?: boolean;
+  /**
+   * Shipflare userId, forwarded to every `createMessage` call inside the
+   * loop. When set, each LLM round-trip atomically acquires from the
+   * hierarchical Anthropic token bucket (Phase B5). Optional — leave
+   * unset for anonymous flows.
+   */
+  tenantId?: string;
 }
 
 export interface QueryResult<T = unknown> {
@@ -239,6 +246,12 @@ export interface AgentConfig {
   tools: AnyToolDefinition[];
   maxTurns: number;
   outputSchema?: z.ZodType;
+  /**
+   * Shipflare userId, forwarded through `runAgent` → `createMessage`
+   * for hierarchical Anthropic token-bucket accounting (Phase B5).
+   * Optional — leave unset for anonymous flows.
+   */
+  tenantId?: string;
 }
 
 /**
