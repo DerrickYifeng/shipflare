@@ -390,6 +390,10 @@ describe('processAgentRun', () => {
     runAgentHoisted.state.lastArgs = null;
     publishMock.mockClear();
     loadSystemPromptContextMock.mockClear();
+    // Phase D Task D3: clear any per-test `vi.stubEnv('ENABLE_DURABLE_LEAD', ...)`
+    // override so each test starts on the durable path by default.
+    // Legacy-body tests opt back in via `vi.stubEnv` at the top of the case.
+    vi.unstubAllEnvs();
   });
 
   it('loads agent_runs row by agentId', async () => {
@@ -421,7 +425,13 @@ describe('processAgentRun', () => {
   // Phase C Task 7 — idle-turn drain + shutdown_request graceful exit
   // ---------------------------------------------------------------------
 
-  it('drains mailbox at idle-turn boundary and exposes content via injectMessages', async () => {
+  it('drains mailbox at idle-turn boundary and exposes content via injectMessages [legacy body]', async () => {
+    // D3 dropped the 1000ms polling drain timer — mail is drained ONCE
+    // per wake in the durable path. The polling drain only exists in
+    // `runAgentTurn_legacy` (preserved behind ENABLE_DURABLE_LEAD=false
+    // for one release). Pin the flag off so this test exercises the
+    // legacy body.
+    vi.stubEnv('ENABLE_DURABLE_LEAD', 'false');
     vi.mocked(db.query.agentRuns.findFirst).mockResolvedValue({
       id: 'agent-1',
       teamId: 'team-1',
@@ -513,7 +523,13 @@ describe('processAgentRun', () => {
     // assert via drainCount + injectArg presence.
   }, 10000);
 
-  it('on shutdown_request received, exits gracefully with status=killed and notification status=killed', async () => {
+  it('on shutdown_request received, exits gracefully with status=killed and notification status=killed [legacy body]', async () => {
+    // The shutdown_request → controller.abort() path lives in the legacy
+    // body's polling drain timer. D3 drops the timer; future revisions
+    // will surface a `killed` discriminant on LeadStepDecision once the
+    // shutdown flow is reworked for the durable path. Pin the flag off
+    // for this regression test.
+    vi.stubEnv('ENABLE_DURABLE_LEAD', 'false');
     vi.mocked(db.query.agentRuns.findFirst).mockResolvedValue({
       id: 'agent-1',
       teamId: 'team-1',
@@ -3041,5 +3057,425 @@ describe('processAgentRun', () => {
     } finally {
       errorSpy.mockRestore();
     }
+  });
+
+  // ===========================================================================
+  // Phase D Task D3 — durable yield-on-wait state machine
+  //
+  // The durable path (ENABLE_DURABLE_LEAD=true, on by default in dev/staging)
+  // runs ONE leadStep per wake, persists the decision, and yields the BullMQ
+  // worker slot between decisions. Four discriminants:
+  //   - spurious_wake: empty mailbox + non-empty history → no API call,
+  //     status reverts to 'sleeping'
+  //   - spawn_and_wait: async Task tool_use observed → status =
+  //     'waiting_for_children', waiting_for = [spawnedAgentId, ...],
+  //     checkpoint persisted
+  //   - sleep: Sleep tool_use observed → status = 'sleeping', sleepUntil +
+  //     nextWakeAt set, checkpoint persisted, delayed wake re-enqueued
+  //   - done: runAgent terminated cleanly → status = 'completed', parent
+  //     notified via synthAndDeliverNotification
+  // ===========================================================================
+
+  it('durable spurious_wake — empty mailbox + non-empty history returns to sleep without API call', async () => {
+    vi.mocked(db.query.agentRuns.findFirst).mockResolvedValue({
+      id: 'a-spurious',
+      teamId: 'team-1',
+      memberId: 'mem-1',
+      agentDefName: 'coordinator',
+      parentAgentId: null,
+      parentToolUseId: null,
+      status: 'sleeping',
+      checkpoint: null,
+      waitingFor: [],
+    } as never);
+    vi.mocked(resolveAgent).mockResolvedValueOnce({
+      source: 'built-in',
+      sourcePath: '/test',
+      name: 'coordinator',
+      description: 'lead',
+      role: 'lead',
+      tools: [],
+      disallowedTools: [],
+      skills: [],
+      requires: [],
+      background: false,
+      maxTurns: 10,
+      systemPrompt: 'You are the lead.',
+    });
+    // Lead has prior history loaded from the primary conversation.
+    vi.mocked(loadConversationHistory).mockResolvedValueOnce([
+      { role: 'user', content: 'previous turn' },
+    ]);
+    // selectChain.limit returns a conversation id so leadConversationId
+    // resolves (required to even reach the priorMessages load).
+    selectChain.limit.mockResolvedValue([{ id: 'conv-1' }]);
+    // Empty mailbox — the spurious-wake condition.
+    vi.mocked(drainMailbox).mockResolvedValueOnce([]);
+
+    await processAgentRun(makeJob('a-spurious'));
+
+    // Critically: runAgent must NOT have been called — no API spend.
+    expect(runAgentHoisted.fn).not.toHaveBeenCalled();
+
+    // The row must settle back to 'sleeping'.
+    const setCalls = updateChain.set.mock.calls.map(
+      (c) => (c as unknown as [Record<string, unknown>])[0],
+    );
+    expect(setCalls.some((s) => s.status === 'sleeping')).toBe(true);
+
+    // No spawn_and_wait / sleep / done persistence side effects.
+    expect(setCalls.some((s) => s.status === 'waiting_for_children')).toBe(
+      false,
+    );
+    expect(setCalls.some((s) => s.status === 'completed')).toBe(false);
+  });
+
+  it('durable spawn_and_wait — async Task spawn persists waiting_for + checkpoint, status=waiting_for_children', async () => {
+    vi.mocked(db.query.agentRuns.findFirst).mockResolvedValue({
+      id: 'a-spawn',
+      teamId: 'team-1',
+      memberId: 'mem-1',
+      agentDefName: 'coordinator',
+      parentAgentId: null,
+      parentToolUseId: null,
+      status: 'queued',
+      checkpoint: null,
+      waitingFor: [],
+    } as never);
+    vi.mocked(resolveAgent).mockResolvedValueOnce({
+      source: 'built-in',
+      sourcePath: '/test',
+      name: 'coordinator',
+      description: 'lead',
+      role: 'lead',
+      tools: [],
+      disallowedTools: [],
+      skills: [],
+      requires: [],
+      background: false,
+      maxTurns: 10,
+      systemPrompt: 'You are the lead.',
+    });
+    // Drive runAgent to emit an async Task tool_use, then return.
+    runAgentHoisted.fn.mockImplementationOnce(async (...args: unknown[]) => {
+      runAgentHoisted.state.lastArgs = args;
+      const onEvent = args[7] as
+        | ((e: Record<string, unknown>) => void | Promise<void>)
+        | undefined;
+      if (onEvent) {
+        await onEvent({
+          type: 'tool_start',
+          toolName: 'Task',
+          toolUseId: 'tu-spawn-1',
+          input: {
+            subagent_type: 'researcher',
+            prompt: 'find sources',
+            description: 'spawn',
+            run_in_background: true,
+          },
+        });
+        await onEvent({
+          type: 'tool_done',
+          toolName: 'Task',
+          toolUseId: 'tu-spawn-1',
+          result: {
+            tool_use_id: 'tu-spawn-1',
+            content: JSON.stringify({
+              result: null,
+              cost: 0,
+              duration: 0,
+              turns: 0,
+              agentId: 'child-agent-1',
+              status: 'async_launched',
+            }),
+          },
+          durationMs: 5,
+        });
+      }
+      return {
+        result: 'spawned a researcher',
+        usage: {
+          inputTokens: 10,
+          outputTokens: 20,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          costUsd: 0.001,
+          model: 'claude-sonnet-4-6',
+          turns: 1,
+        },
+      };
+    });
+    vi.mocked(drainMailbox).mockResolvedValueOnce([
+      {
+        id: 'msg-1',
+        toAgentId: 'a-spawn',
+        type: 'user_prompt',
+        messageType: 'message',
+        content: 'please research X',
+        createdAt: new Date(),
+      },
+    ]);
+
+    await processAgentRun(makeJob('a-spawn'));
+
+    const setCalls = updateChain.set.mock.calls.map(
+      (c) => (c as unknown as [Record<string, unknown>])[0],
+    );
+    const waitingSet = setCalls.find(
+      (s) => s.status === 'waiting_for_children',
+    );
+    expect(waitingSet).toBeDefined();
+    expect(waitingSet?.waitingFor).toEqual(['child-agent-1']);
+    expect(waitingSet?.checkpoint).toBeDefined();
+    const checkpoint = waitingSet?.checkpoint as {
+      pendingToolUseIds: string[];
+      lastProcessedIndex: number;
+    };
+    expect(checkpoint.pendingToolUseIds).toContain('tu-spawn-1');
+    // No 'completed' status write — the lead is paused, not finished.
+    expect(setCalls.some((s) => s.status === 'completed')).toBe(false);
+  });
+
+  it('durable sleep — Sleep tool_use persists sleeping + sleepUntil + nextWakeAt + checkpoint and re-enqueues', async () => {
+    vi.mocked(db.query.agentRuns.findFirst).mockResolvedValue({
+      id: 'a-sleep',
+      teamId: 'team-1',
+      memberId: 'mem-1',
+      agentDefName: 'content-manager',
+      parentAgentId: null,
+      parentToolUseId: null,
+      status: 'queued',
+      checkpoint: null,
+      waitingFor: [],
+    } as never);
+    runAgentHoisted.fn.mockImplementationOnce(async (...args: unknown[]) => {
+      runAgentHoisted.state.lastArgs = args;
+      const onEvent = args[7] as
+        | ((e: Record<string, unknown>) => void | Promise<void>)
+        | undefined;
+      const sleepDurationMs = 60_000;
+      if (onEvent) {
+        await onEvent({
+          type: 'tool_start',
+          toolName: 'Sleep',
+          toolUseId: 'sleep-1',
+          input: { duration_ms: sleepDurationMs },
+        });
+        await onEvent({
+          type: 'tool_done',
+          toolName: 'Sleep',
+          toolUseId: 'sleep-1',
+          result: {
+            tool_use_id: 'sleep-1',
+            content: JSON.stringify({
+              slept: true,
+              agentId: 'a-sleep',
+              durationMs: sleepDurationMs,
+              wakeAt: new Date(Date.now() + sleepDurationMs).toISOString(),
+            }),
+          },
+          durationMs: 2,
+        });
+      }
+      return {
+        result: 'going to sleep',
+        usage: {
+          inputTokens: 5,
+          outputTokens: 5,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          costUsd: 0,
+          model: 'claude-sonnet-4-6',
+          turns: 1,
+        },
+      };
+    });
+    vi.mocked(drainMailbox).mockResolvedValueOnce([
+      {
+        id: 'msg-1',
+        toAgentId: 'a-sleep',
+        type: 'user_prompt',
+        messageType: 'message',
+        content: 'wait a minute',
+        createdAt: new Date(),
+      },
+    ]);
+
+    const beforeMs = Date.now();
+    await processAgentRun(makeJob('a-sleep'));
+
+    const setCalls = updateChain.set.mock.calls.map(
+      (c) => (c as unknown as [Record<string, unknown>])[0],
+    );
+    const sleepingSet = setCalls.find(
+      (s) => s.status === 'sleeping' && s.sleepUntil !== undefined,
+    );
+    expect(sleepingSet).toBeDefined();
+    const sleepUntil = sleepingSet?.sleepUntil as Date | undefined;
+    const nextWakeAt = sleepingSet?.nextWakeAt as Date | undefined;
+    expect(sleepUntil).toBeInstanceOf(Date);
+    expect(nextWakeAt).toBeInstanceOf(Date);
+    // ~60s in the future (with a generous floor + ceiling for test jitter).
+    expect(sleepUntil!.getTime()).toBeGreaterThanOrEqual(beforeMs + 59_000);
+    expect(sleepUntil!.getTime()).toBeLessThanOrEqual(beforeMs + 65_000);
+    // Same instant on both columns (D6's scheduler reads nextWakeAt).
+    expect(sleepUntil!.getTime()).toBe(nextWakeAt!.getTime());
+    // Checkpoint persisted so D4 can resume from a coherent point.
+    expect(sleepingSet?.checkpoint).toBeDefined();
+
+    // The delayed wake was scheduled on the same lane the current job
+    // came from (mocked to 'standard').
+    expect(reenqueueWithDelayMock).toHaveBeenCalledTimes(1);
+    const reenqueueArgs = reenqueueWithDelayMock.mock.calls[0] as unknown as [
+      string,
+      number,
+      string,
+    ];
+    expect(reenqueueArgs[0]).toBe('a-sleep');
+    expect(reenqueueArgs[2]).toBe('standard');
+  });
+
+  it('durable done — clean runAgent exit marks completed + synth notification', async () => {
+    vi.mocked(db.query.agentRuns.findFirst).mockResolvedValue({
+      id: 'a-done',
+      teamId: 'team-1',
+      memberId: 'mem-1',
+      agentDefName: 'content-manager',
+      parentAgentId: 'parent-lead',
+      parentToolUseId: 'tu-parent-1',
+      status: 'queued',
+      checkpoint: null,
+      waitingFor: [],
+    } as never);
+    runAgentHoisted.fn.mockImplementationOnce(async (...args: unknown[]) => {
+      runAgentHoisted.state.lastArgs = args;
+      return {
+        result: 'I produced 3 drafts.',
+        usage: {
+          inputTokens: 10,
+          outputTokens: 20,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          costUsd: 0.001,
+          model: 'claude-sonnet-4-6',
+          turns: 2,
+        },
+      };
+    });
+    vi.mocked(drainMailbox).mockResolvedValueOnce([
+      {
+        id: 'msg-1',
+        toAgentId: 'a-done',
+        type: 'user_prompt',
+        messageType: 'message',
+        content: 'do the thing',
+        createdAt: new Date(),
+      },
+    ]);
+
+    await processAgentRun(makeJob('a-done'));
+
+    const setCalls = updateChain.set.mock.calls.map(
+      (c) => (c as unknown as [Record<string, unknown>])[0],
+    );
+    expect(setCalls.some((s) => s.status === 'completed')).toBe(true);
+
+    // task_notification row was inserted for the parent.
+    const notifInsert = insertChain.values.mock.calls.find(
+      (c) =>
+        (c as unknown as [Record<string, unknown>])[0]?.messageType ===
+        'task_notification',
+    );
+    expect(notifInsert).toBeDefined();
+  });
+
+  it('durable LlmRateLimitedError(tenant) — runAgent throw inside leadStep re-enqueues with retryMs', async () => {
+    const { LlmRateLimitedError } = await import('@/core/api-client');
+    runAgentHoisted.fn.mockRejectedValueOnce(
+      new LlmRateLimitedError('tenant', 7500),
+    );
+    vi.mocked(db.query.agentRuns.findFirst).mockResolvedValue({
+      id: 'a-rl',
+      teamId: 'team-1',
+      memberId: 'mem-1',
+      agentDefName: 'content-manager',
+      parentAgentId: null,
+      parentToolUseId: null,
+      status: 'queued',
+      checkpoint: null,
+      waitingFor: [],
+    } as never);
+    vi.mocked(drainMailbox).mockResolvedValueOnce([
+      {
+        id: 'msg-1',
+        toAgentId: 'a-rl',
+        type: 'user_prompt',
+        messageType: 'message',
+        content: 'go',
+        createdAt: new Date(),
+      },
+    ]);
+
+    await processAgentRun(makeJob('a-rl'));
+
+    // The outer wrapper translated the LlmRateLimitedError into a
+    // lane-preserving re-enqueue at the retryMs the bucket suggested.
+    expect(reenqueueWithDelayMock).toHaveBeenCalledTimes(1);
+    const reenqueueCallArgs = reenqueueWithDelayMock.mock
+      .calls[0] as unknown as [string, number, string];
+    expect(reenqueueCallArgs[1]).toBe(7500);
+
+    // No 'failed' status write — the bucket-aware retry path bypasses
+    // the markFailed branch.
+    const setCalls = updateChain.set.mock.calls.map(
+      (c) => (c as unknown as [Record<string, unknown>])[0],
+    );
+    expect(setCalls.some((s) => s.status === 'failed')).toBe(false);
+
+    // Slot was acquired + released exactly once.
+    expect(acquireTenantSlotMock).toHaveBeenCalledTimes(1);
+    expect(releaseTenantSlotMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('durable idempotent wake — terminal status (completed) returns without re-running runAgent', async () => {
+    vi.mocked(db.query.agentRuns.findFirst).mockResolvedValue({
+      id: 'a-terminal',
+      teamId: 'team-1',
+      memberId: 'mem-1',
+      agentDefName: 'content-manager',
+      parentAgentId: null,
+      parentToolUseId: null,
+      status: 'completed',
+      checkpoint: null,
+      waitingFor: [],
+    } as never);
+
+    await processAgentRun(makeJob('a-terminal'));
+
+    // No runAgent call — the terminal-status idempotency guard returns
+    // before reaching the drain / leadStep path.
+    expect(runAgentHoisted.fn).not.toHaveBeenCalled();
+    // No mailbox drain either — terminal-state runs are completely
+    // inert (mail accumulates for re-routing by the reconcile cron).
+    expect(drainMailbox).not.toHaveBeenCalled();
+  });
+
+  it('durable idempotent wake — waiting_for non-empty returns without re-running (D4 atomic drain owns the wake)', async () => {
+    vi.mocked(db.query.agentRuns.findFirst).mockResolvedValue({
+      id: 'a-waiting',
+      teamId: 'team-1',
+      memberId: 'mem-1',
+      agentDefName: 'coordinator',
+      parentAgentId: null,
+      parentToolUseId: null,
+      status: 'waiting_for_children',
+      checkpoint: null,
+      waitingFor: ['child-1', 'child-2'],
+    } as never);
+
+    await processAgentRun(makeJob('a-waiting'));
+
+    expect(runAgentHoisted.fn).not.toHaveBeenCalled();
+    expect(drainMailbox).not.toHaveBeenCalled();
   });
 });

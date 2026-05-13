@@ -82,6 +82,20 @@ export interface SpawnRequest {
   toolUseId: string;
   agentType: string;
   prompt: string;
+  /**
+   * `agent_runs.id` of the teammate the Task tool already INSERTed. The
+   * Task tool's async path (`launchAsyncTeammate` in AgentTool.ts) inserts
+   * the row + initial mailbox message + wake() BEFORE returning its
+   * `tool_done` result, so by the time D3 sees this SpawnRequest the
+   * teammate row already exists in `agent_runs`. D3 reads `spawnedAgentId`
+   * to populate the lead's `waiting_for` array — no second INSERT needed
+   * here (mirrors the engine PDF §3.5 "spawn is idempotent" invariant).
+   *
+   * Optional because a malformed tool_done payload (e.g. older clients,
+   * truncated JSON) may not surface the agentId; D3 warns and skips that
+   * child's entry rather than throwing.
+   */
+  spawnedAgentId?: string;
 }
 
 export type LeadStepDecision =
@@ -254,10 +268,24 @@ export async function leadStep(
           );
           return;
         }
+        // The Task tool's async path stamps the freshly-inserted teammate's
+        // `agent_runs.id` onto its result envelope (see
+        // `launchAsyncTeammate` return shape in
+        // `src/tools/AgentTool/AgentTool.ts:349-356`). D3's
+        // `spawn_and_wait` branch needs this id to populate the lead's
+        // `agent_runs.waiting_for` array. Best-effort: a malformed payload
+        // leaves it undefined and D3 falls back to skipping that child's
+        // waiting_for entry.
+        const spawnedAgentId =
+          'agentId' in parsed &&
+          typeof (parsed as { agentId: unknown }).agentId === 'string'
+            ? (parsed as { agentId: string }).agentId
+            : undefined;
         collectedSpawns.push({
           toolUseId: event.toolUseId,
           agentType: inp.subagent_type,
           prompt: inp.prompt,
+          spawnedAgentId,
         });
       }
       return;

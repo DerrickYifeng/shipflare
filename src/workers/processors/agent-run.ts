@@ -76,6 +76,8 @@ import {
 } from '@/lib/queue/agent-run';
 import { inflightCapForTier, tierForAgentRun } from '@/lib/team/team-tier';
 import type { AgentResult, StreamEvent, ToolContext } from '@/core/types';
+import type { LeadCheckpoint } from '@/lib/db/schema/team';
+import { leadStep, type LeadStepDeps } from './lead-step';
 
 const log = createLogger('agent-run');
 
@@ -111,6 +113,38 @@ const SHUTDOWN_REASON_GRACEFUL = 'shutdown_request received';
 // pub still fire immediately at the call sites, so user-facing latency
 // is unaffected; only the durable agent_runs UPDATE is deferred.
 const STATUS_BATCHER_FLUSH_INTERVAL_MS = 500;
+
+/**
+ * Phase D Task D3 — feature flag for the new yield-on-wait state machine.
+ *
+ * - `true`  (default): `processAgentRun` dispatches to `runAgentTurn_durable`
+ *   which runs ONE `leadStep` per wake, persists the resulting decision,
+ *   and yields the BullMQ worker slot between Sleep / spawn / done
+ *   transitions. The 1000ms polling drain goes away — mail is drained
+ *   once per wake.
+ * - `false` (rollback): `processAgentRun` dispatches to
+ *   `runAgentTurn_legacy` (preserved verbatim from the pre-D3 body) so
+ *   the legacy polling-drain behavior remains available as a one-flag
+ *   rollback escape hatch for one release.
+ *
+ * Production deploy procedure (see D6 backfill runbook):
+ *   1. Run `scripts/backfill-agent-runs-checkpoint.ts --commit` to seed
+ *      checkpoint/waiting_for/next_wake_at on every active run.
+ *   2. Flip this flag to `true` in the production env.
+ *   3. Verify with `/api/admin/queue-stats` that the per-lane depths
+ *      stay stable; verify no `LlmRateLimitedError` / `leadStep` error
+ *      spikes in worker logs.
+ *
+ * The flag is sticky per worker process — restart workers after toggling.
+ *
+ * Read lazily via a function (not a module-level const) so tests can flip
+ * the flag per-case with `vi.stubEnv('ENABLE_DURABLE_LEAD', 'false')`
+ * without restarting the import.
+ */
+function isDurableLeadEnabled(): boolean {
+  const raw = process.env.ENABLE_DURABLE_LEAD;
+  return raw === undefined ? true : raw === 'true';
+}
 
 // ---------------------------------------------------------------------------
 // Status batcher — module-level singleton (B7)
@@ -566,9 +600,10 @@ async function synthAndDeliverNotification(params: NotifyParams): Promise<void> 
  *   2. Tries to acquire a slot capped by `inflightCapForTier(tier)`.
  *   3. On refusal: re-enqueues a delayed copy via `reenqueueWithDelay`
  *      and returns WITHOUT touching the DB or doing any LLM work.
- *   4. On success: runs the actual turn in `runAgentTurn`, then releases
- *      the slot in `finally` — even on yield-to-sleep, graceful kill,
- *      or unexpected throws.
+ *   4. On success: runs the actual turn in `runAgentTurn_durable` (or
+ *      `runAgentTurn_legacy` when `ENABLE_DURABLE_LEAD=false`), then
+ *      releases the slot in `finally` — even on yield-to-sleep, graceful
+ *      kill, or unexpected throws.
  *
  * The semaphore TTL (`SEMAPHORE_TTL_SECONDS = 900s`) exceeds BullMQ's
  * lockDuration (600s) so a worker crash mid-run doesn't permanently
@@ -616,7 +651,11 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
   }
 
   try {
-    await runAgentTurn(agentId, job);
+    if (isDurableLeadEnabled()) {
+      await runAgentTurn_durable(agentId, job);
+    } else {
+      await runAgentTurn_legacy(agentId, job);
+    }
   } catch (err) {
     if (err instanceof LlmRateLimitedError) {
       // Phase B5: hierarchical Anthropic token bucket refusal.
@@ -649,12 +688,20 @@ export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> 
 }
 
 /**
- * The actual per-job worker body — preserves all pre-B3 behavior
+ * LEGACY per-job worker body — preserves all pre-D3 behavior
  * (drain timer, abort handling, terminal-state writes, notifications,
- * cache write-throughs, SSE pubs). Wrapped by `processAgentRun` above
- * which owns the per-tenant semaphore acquire/release.
+ * cache write-throughs, SSE pubs). Kept around behind the
+ * `ENABLE_DURABLE_LEAD=false` rollback flag for one release; D6's
+ * production-deploy procedure flips the flag to `true` after the
+ * checkpoint backfill, and a subsequent release can delete this body.
+ *
+ * The shape is identical to what was on `dev` at commit 49cc8d0 — do
+ * NOT touch this body until the new path has shipped to prod.
+ *
+ * Wrapped by `processAgentRun` above which owns the per-tenant
+ * semaphore acquire/release.
  */
-async function runAgentTurn(
+async function runAgentTurn_legacy(
   agentId: string,
   job: Job<AgentRunJobData>,
 ): Promise<void> {
@@ -1715,6 +1762,852 @@ async function runAgentTurn(
       log.warn(
         `agent-run ${agentId}: terminal SSE publish failed: ${err instanceof Error ? err.message : String(err)}`,
       );
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Phase D Task D3 — durable yield-on-wait state machine.
+//
+// The new per-job body. Replaces the legacy 1100-line `runAgentTurn_legacy`
+// body's "run to completion / drain timer / abort" loop with a thin
+// "run ONE step via leadStep, persist the decision, return" cycle.
+//
+// Architectural win: each wake holds the BullMQ worker slot only for the
+// duration of a single `leadStep` invocation (one runAgent call). Sleep
+// and async Task spawns yield the slot immediately — the next wake (a
+// scheduled BullMQ delay, or a SendMessage / task_notification arrival)
+// re-enters this function with the persisted `checkpoint` + transcript.
+// No 1000ms polling drain; mail is drained ONCE per wake.
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the per-step `handleStreamEvent` observer for the durable path.
+ *
+ * The durable observer is functionally identical to the legacy one — it
+ * persists `assistant_text_stop` / `tool_call` / `tool_result` rows to
+ * `team_messages` and publishes them to the team SSE channel for the
+ * lead and async-spawned teammates. The Sleep tool early-exit
+ * `controller.abort()` is still wired in so a Sleep tool_done inside
+ * runAgent unwinds the call promptly; the leadStep classifier then
+ * surfaces the `sleep` decision to us.
+ *
+ * Extracted here (rather than duplicating the 280-line legacy
+ * handleStreamEvent body) so the durable + legacy paths share the same
+ * persistence + SSE contract. Reuses the legacy implementation by
+ * delegating — the legacy body's handleStreamEvent is declared INSIDE
+ * `runAgentTurn_legacy`'s closure, so we replicate the minimal shape
+ * here.
+ *
+ * Returns `{ handleStreamEvent, controller }` so the caller can pass
+ * `controller.signal` into runAgent for cooperative abort on
+ * shutdown_request.
+ */
+interface DurableHandlerCtx {
+  agentId: string;
+  row: {
+    teamId: string;
+    memberId: string;
+    parentToolUseId: string | null;
+  };
+  isLead: boolean;
+  publishLiveSse: boolean;
+  leadConversationId: string | null;
+  leadRequestId: string | null;
+  controller: AbortController;
+}
+
+function buildDurableStreamHandler(
+  hctx: DurableHandlerCtx,
+): (event: StreamEvent) => Promise<void> {
+  const { agentId, row, isLead, publishLiveSse, leadConversationId, leadRequestId, controller } =
+    hctx;
+  return async (event: StreamEvent): Promise<void> => {
+    const resolveFromMemberId = (e: StreamEvent): string => {
+      if ('spawnMeta' in e && e.spawnMeta && e.spawnMeta.fromMemberId) {
+        return e.spawnMeta.fromMemberId;
+      }
+      return row.memberId;
+    };
+
+    // (1.5) Live-stream assistant text deltas — block-level partials are
+    // ephemeral and never persisted. Lead path only (founder watches the
+    // primary thread); async-spawned teammates also publish so their
+    // nested progress streams under the DelegationCard live.
+    if (
+      publishLiveSse &&
+      (event.type === 'assistant_text_start' ||
+        event.type === 'assistant_text_delta' ||
+        event.type === 'assistant_text_stop')
+    ) {
+      try {
+        const pub = getPubSubPublisher();
+        const baseEnvelope = {
+          messageId: event.messageId,
+          conversationId: leadConversationId,
+          runId: leadRequestId,
+          teamId: row.teamId,
+          from: resolveFromMemberId(event),
+          fromAgentId: agentId,
+          createdAt: new Date().toISOString(),
+        };
+        if (event.type === 'assistant_text_start') {
+          await pub.publish(
+            teamMessagesChannel(row.teamId),
+            JSON.stringify({
+              ...baseEnvelope,
+              type: 'agent_text_start',
+              content: '',
+            }),
+          );
+        } else if (event.type === 'assistant_text_delta') {
+          await pub.publish(
+            teamMessagesChannel(row.teamId),
+            JSON.stringify({
+              ...baseEnvelope,
+              type: 'agent_text_delta',
+              content: event.delta,
+            }),
+          );
+        } else {
+          await pub.publish(
+            teamMessagesChannel(row.teamId),
+            JSON.stringify({
+              ...baseEnvelope,
+              type: 'agent_text_stop',
+              content: '',
+            }),
+          );
+        }
+      } catch (err) {
+        log.warn(
+          `agent-run ${agentId}: agent_text streaming SSE publish failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+      if (event.type !== 'assistant_text_stop') return;
+    }
+
+    // (2) Persist assistant turns to team_messages.
+    if (event.type === 'assistant_text_stop' && event.text.length > 0) {
+      const insertedId = crypto.randomUUID();
+      const createdAt = new Date();
+      const assistantMetadata = event.spawnMeta
+        ? {
+            parent_tool_use_id: event.spawnMeta.parentToolUseId,
+            agent_name: event.spawnMeta.agentName,
+          }
+        : null;
+      try {
+        await db.insert(teamMessages).values({
+          id: insertedId,
+          teamId: row.teamId,
+          runId: isLead && leadRequestId ? leadRequestId : agentId,
+          conversationId: leadConversationId,
+          type: 'agent_text',
+          messageType: 'message',
+          fromMemberId: resolveFromMemberId(event),
+          fromAgentId: agentId,
+          content: event.text,
+          metadata: assistantMetadata,
+          deliveredAt: createdAt,
+          createdAt,
+        });
+      } catch (err) {
+        log.warn(
+          `agent-run ${agentId}: failed to persist assistant turn: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        return;
+      }
+      if (publishLiveSse) {
+        try {
+          const pub = getPubSubPublisher();
+          await pub.publish(
+            teamMessagesChannel(row.teamId),
+            JSON.stringify({
+              messageId: insertedId,
+              conversationId: leadConversationId,
+              runId: leadRequestId,
+              teamId: row.teamId,
+              from: resolveFromMemberId(event),
+              fromAgentId: agentId,
+              type: 'agent_text',
+              content: event.text,
+              metadata: assistantMetadata,
+              createdAt: createdAt.toISOString(),
+            }),
+          );
+        } catch (err) {
+          log.warn(
+            `agent-run ${agentId}: SSE publish failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+      return;
+    }
+
+    // (3) Persist tool_call / tool_result rows. Sleep + SyntheticOutput
+    // are skipped — Sleep is signaling-only (early-exit below), and
+    // SyntheticOutput's terminal write is covered by the assistant_text_stop
+    // branch above. Block must FALL THROUGH so the Sleep tool_done branch
+    // below still fires.
+    if (event.type === 'tool_start' || event.type === 'tool_done') {
+      if (event.toolName !== 'Sleep' && event.toolName !== 'SyntheticOutput') {
+        const insertedId = crypto.randomUUID();
+        const createdAt = new Date();
+        const isCall = event.type === 'tool_start';
+        const rawContent = isCall ? event.toolName : event.result.content;
+        const truncatedContent =
+          !isCall && rawContent.length > TOOL_RESULT_TRUNCATION_LIMIT
+            ? `${rawContent.slice(0, TOOL_RESULT_TRUNCATION_LIMIT)}…`
+            : rawContent;
+        const spawnMetaFields = event.spawnMeta
+          ? {
+              parent_tool_use_id: event.spawnMeta.parentToolUseId,
+              agent_name: event.spawnMeta.agentName,
+            }
+          : {};
+        const metadata = isCall
+          ? {
+              tool_use_id: event.toolUseId,
+              tool_name: event.toolName,
+              tool_input: event.input,
+              ...spawnMetaFields,
+            }
+          : {
+              tool_use_id: event.toolUseId,
+              tool_name: event.toolName,
+              tool_output: event.result.content,
+              is_error: !!event.result.is_error,
+              duration_ms: event.durationMs,
+              ...spawnMetaFields,
+            };
+        let persisted = true;
+        try {
+          await db.insert(teamMessages).values({
+            id: insertedId,
+            teamId: row.teamId,
+            runId: isLead && leadRequestId ? leadRequestId : agentId,
+            conversationId: leadConversationId,
+            type: isCall ? 'tool_call' : 'tool_result',
+            messageType: 'message',
+            fromMemberId: resolveFromMemberId(event),
+            fromAgentId: agentId,
+            content: truncatedContent,
+            metadata,
+            deliveredAt: createdAt,
+            createdAt,
+          });
+        } catch (err) {
+          persisted = false;
+          log.warn(
+            `agent-run ${agentId}: failed to persist ${isCall ? 'tool_call' : 'tool_result'}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+        if (persisted && publishLiveSse) {
+          try {
+            const pub = getPubSubPublisher();
+            await pub.publish(
+              teamMessagesChannel(row.teamId),
+              JSON.stringify({
+                messageId: insertedId,
+                conversationId: leadConversationId,
+                runId: leadRequestId,
+                teamId: row.teamId,
+                from: resolveFromMemberId(event),
+                fromAgentId: agentId,
+                type: isCall ? 'tool_call' : 'tool_result',
+                content: truncatedContent,
+                metadata,
+                createdAt: createdAt.toISOString(),
+              }),
+            );
+          } catch (err) {
+            log.warn(
+              `agent-run ${agentId}: SSE publish failed for ${isCall ? 'tool_call' : 'tool_result'}: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+        }
+      }
+    }
+
+    // (4) Sleep early-exit detection. leadStep also observes this and
+    // classifies the decision; here we just abort runAgent so the
+    // in-flight turn unwinds promptly. Identical to the legacy body.
+    if (event.type !== 'tool_done') return;
+    if (event.toolName !== 'Sleep') return;
+    if (event.result.is_error) return;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(event.result.content);
+    } catch {
+      return;
+    }
+    if (
+      parsed !== null &&
+      typeof parsed === 'object' &&
+      'slept' in parsed &&
+      (parsed as { slept: unknown }).slept === true
+    ) {
+      log.info(`agent-run ${agentId}: Sleep observed, signalling early exit`);
+      try {
+        controller.abort();
+      } catch {
+        // Already aborted — safe to ignore.
+      }
+    }
+  };
+}
+
+/**
+ * The durable per-job worker body. See module-header `ENABLE_DURABLE_LEAD`
+ * doc for the rollback flag.
+ *
+ * Lifecycle per wake:
+ *   1. Load `agent_runs` row + idempotency check.
+ *   2. Resolve def, transition to `running` (with `resuming` step if
+ *      coming from `sleeping`).
+ *   3. Load history (lead: conversation; teammate: per-agent transcript)
+ *      + drain mailbox ONCE.
+ *   4. Build LeadStepDeps + invoke `leadStep`.
+ *   5. Apply decision: spurious_wake → return; spawn_and_wait → persist
+ *      waiting_for + checkpoint; sleep → persist sleeping +
+ *      sleepUntil/nextWakeAt + checkpoint + re-enqueue with delay; done
+ *      → terminal write + notify parent.
+ *
+ * `LlmRateLimitedError` propagates to `processAgentRun`'s outer catch
+ * which translates it into a lane-preserving re-enqueue (tenant/global
+ * scopes) or a loud failure (config scope).
+ */
+async function runAgentTurn_durable(
+  agentId: string,
+  job: Job<AgentRunJobData>,
+): Promise<void> {
+  // 1. Load current state.
+  const row = await db.query.agentRuns.findFirst({
+    where: eq(agentRuns.id, agentId),
+  });
+  if (!row) {
+    throw new Error(`agent_runs row not found for agentId=${agentId}`);
+  }
+
+  // Idempotent wake guards. Terminal status: nothing to do. Lead waiting
+  // on children with a non-empty `waitingFor` array: still waiting; D4's
+  // atomic drain will re-enqueue us when the last child completes. A
+  // bare wake() while waiting (e.g. from a peer-DM shadow) must NOT
+  // restart the loop — that would re-run leadStep on stale state and
+  // burn API spend.
+  if (
+    row.status === 'completed' ||
+    row.status === 'failed' ||
+    row.status === 'killed'
+  ) {
+    log.info(
+      `agent-run ${agentId}: durable wake on terminal status=${row.status}; ignoring`,
+    );
+    return;
+  }
+  if (
+    row.status === 'waiting_for_children' &&
+    Array.isArray(row.waitingFor) &&
+    row.waitingFor.length > 0
+  ) {
+    log.info(
+      `agent-run ${agentId}: durable wake while waiting on ${row.waitingFor.length} children; ignoring (D4 atomic drain will re-enqueue)`,
+    );
+    return;
+  }
+
+  // 2. Resolve agent def.
+  const def = await resolveAgent(row.agentDefName);
+  if (!def) {
+    const reason = `unknown agent: ${row.agentDefName}`;
+    const looksLikeLead = row.agentDefName === 'coordinator';
+    await markFailed(agentId, reason, row.teamId, looksLikeLead, row.parentToolUseId);
+    await synthAndDeliverNotification({
+      agentId,
+      parentAgentId: row.parentAgentId,
+      teamId: row.teamId,
+      memberId: row.memberId,
+      status: 'failed',
+      finalText: '',
+      summary: reason,
+      usage: { totalTokens: 0, toolUses: 0, durationMs: 0 },
+      teammateName: row.agentDefName,
+    });
+    return;
+  }
+
+  const isLead = def.role === 'lead';
+  const hasParentToolUseId =
+    typeof row.parentToolUseId === 'string' && row.parentToolUseId.length > 0;
+  const publishLiveSse = isLead || hasParentToolUseId;
+  let leadConversationId: string | null = null;
+  if (publishLiveSse) {
+    leadConversationId = await resolvePrimaryConversation(row.teamId, db);
+  }
+
+  // 3. Load priorMessages. Lead reads the team's primary conversation;
+  // teammate resumes via per-agent transcript when waking from sleep /
+  // waiting_for_children. Fresh teammate spawns (status=queued) start
+  // with no history; the first mailbox drain seeds the initial prompt.
+  let priorMessages: Anthropic.Messages.MessageParam[] | undefined;
+  if (isLead) {
+    if (leadConversationId) {
+      priorMessages = await loadConversationHistory(row.teamId, {
+        conversationId: leadConversationId,
+        db,
+      });
+      log.info(
+        `agent-run ${agentId}: durable lead loaded ${priorMessages.length} messages from conversation ${leadConversationId}`,
+      );
+    } else {
+      log.info(
+        `agent-run ${agentId}: durable lead has no team_conversations row yet — running without priorMessages`,
+      );
+    }
+  } else if (
+    row.status === 'sleeping' ||
+    row.status === 'waiting_for_children'
+  ) {
+    // Sleeping → resuming → running transition mirrors the legacy body.
+    // waiting_for_children → running fires after D4's atomic drain
+    // re-enqueues us. Both transitions surface a `resuming` SSE event so
+    // the roster shows the wake live.
+    const resumingAt = new Date();
+    statusBatcher.set(agentId, {
+      status: 'resuming',
+      lastActiveAt: resumingAt,
+      bullmqJobId: job.id ?? null,
+    });
+    await cacheTeammateStatus(row.teamId, agentId, 'resuming', resumingAt, null);
+    await publishStatusChange({
+      teamId: row.teamId,
+      agentId,
+      status: 'resuming',
+      lastActiveAt: resumingAt,
+      parentToolUseId: row.parentToolUseId,
+    });
+    priorMessages = await loadAgentRunHistory(agentId, db);
+    log.info(
+      `agent-run ${agentId}: durable teammate resuming from ${row.status} with ${priorMessages.length} prior messages`,
+    );
+  }
+
+  // 4. Transition to running. Lead vs teammate cache routing matches
+  // the legacy body so the founder UI's roster stays consistent.
+  const runningAt = new Date();
+  statusBatcher.set(agentId, {
+    status: 'running',
+    lastActiveAt: runningAt,
+    bullmqJobId: job.id ?? null,
+  });
+  if (isLead) {
+    await cacheLeadStatus(row.teamId, agentId, 'running', runningAt);
+  } else {
+    await cacheTeammateStatus(row.teamId, agentId, 'running', runningAt, null);
+  }
+  await publishStatusChange({
+    teamId: row.teamId,
+    agentId,
+    status: 'running',
+    lastActiveAt: runningAt,
+    parentToolUseId: row.parentToolUseId,
+  });
+
+  // 5. Drain mailbox ONCE per wake. New mail arriving during the step
+  // doesn't reach this run — but the SendMessage that delivered it
+  // called wake(), which enqueues a new BullMQ job; that job's
+  // processAgentRun will re-enter here and see the new mail. Architectural
+  // win: no polling drain timer holding the worker slot for seconds.
+  const initialBatch = await drainMailbox(agentId, db);
+  const initialPrompt =
+    initialBatch.length > 0 ? (initialBatch[0].content ?? '') : '';
+
+  // Spurious-wake guard (matches legacy body's 2026-05-12 fix). leadStep
+  // ALSO guards for this, but mirroring the check here lets us settle
+  // the agent_runs row back to `sleeping` without burning an API call.
+  // The leadStep guard is the second line of defense — both layers must
+  // stay in sync.
+  const hasPrior = Array.isArray(priorMessages) && priorMessages.length > 0;
+  if (initialPrompt.length === 0 && initialBatch.length === 0) {
+    if (hasPrior) {
+      log.info(
+        `agent-run ${agentId}: spurious wake — empty mailbox + ${priorMessages!.length} priorMessages; returning to sleep without API call`,
+      );
+      const sleepingAt = new Date();
+      statusBatcher.set(agentId, {
+        status: 'sleeping',
+        lastActiveAt: sleepingAt,
+      });
+      if (isLead) {
+        await cacheLeadStatus(row.teamId, agentId, 'sleeping', sleepingAt);
+      } else {
+        await cacheTeammateStatus(row.teamId, agentId, 'sleeping', sleepingAt, null);
+      }
+      await publishStatusChange({
+        teamId: row.teamId,
+        agentId,
+        status: 'sleeping',
+        lastActiveAt: sleepingAt,
+        parentToolUseId: row.parentToolUseId,
+      });
+      return;
+    }
+    // Fresh spawn with no mailbox content — fail loud so the parent's
+    // mailbox sees the failure instead of waiting forever.
+    const reason = 'spawned with no mailbox content';
+    log.warn(`agent-run ${agentId}: ${reason} — failing run`);
+    await markFailed(agentId, reason, row.teamId, isLead, row.parentToolUseId);
+    await synthAndDeliverNotification({
+      agentId,
+      parentAgentId: row.parentAgentId,
+      teamId: row.teamId,
+      memberId: row.memberId,
+      status: 'failed',
+      finalText: '',
+      summary: reason,
+      usage: { totalTokens: 0, toolUses: 0, durationMs: 0 },
+      teammateName: row.agentDefName,
+    });
+    return;
+  }
+
+  const leadRequestId =
+    isLead && initialBatch.length > 0 ? initialBatch[0].id : null;
+
+  // 6. pendingInjections — mailbox[1..N] is folded back into the in-step
+  // injection FIFO. leadStep consumes ONLY mailbox[0] as the seed; the
+  // rest land at runAgent's next idle-turn boundary via injectMessages.
+  const pendingInjections: Anthropic.Messages.MessageParam[] = [];
+  for (let i = 1; i < initialBatch.length; i += 1) {
+    const msg = initialBatch[i];
+    if (msg.content !== null && msg.content.length > 0) {
+      pendingInjections.push({ role: 'user', content: msg.content });
+    }
+  }
+  const injectMessages = (): Anthropic.Messages.MessageParam[] => {
+    if (pendingInjections.length === 0) return [];
+    return pendingInjections.splice(0, pendingInjections.length);
+  };
+
+  // 7. Build the per-step controller + onEvent + ctx, then invoke leadStep.
+  const controller = new AbortController();
+  const onEventHolder: OnEventHolder = { fn: null };
+
+  const handleStreamEvent = buildDurableStreamHandler({
+    agentId,
+    row,
+    isLead,
+    publishLiveSse,
+    leadConversationId,
+    leadRequestId,
+    controller,
+  });
+
+  // Async-spawned teammates need their own onEvent wrapped with spawnMeta
+  // so their tool_call / agent_text rows nest under the DelegationCard.
+  // Mirrors the legacy body's wiring at line ~1332-1339.
+  const teammateStreamEvent =
+    !isLead && row.parentToolUseId && row.parentToolUseId.length > 0
+      ? wrapOnEventWithSpawnMeta(handleStreamEvent, {
+          parentToolUseId: row.parentToolUseId,
+          fromMemberId: row.memberId,
+          agentName: def.name,
+        })
+      : handleStreamEvent;
+  onEventHolder.fn = teammateStreamEvent;
+
+  // Render the AGENT.md placeholders + build the ToolContext + invoke
+  // leadStep. Wrapped in a single try/catch so any throw — from the
+  // loader (e.g. "team not found"), buildAgentConfigFromDefinition,
+  // platform-deps initialization, or runAgent / leadStep itself —
+  // settles the run as failed and emits a parent task_notification.
+  //
+  // LlmRateLimitedError is re-thrown to processAgentRun's outer catch
+  // which translates tenant/global deny into a lane-preserving re-enqueue
+  // and config deny into a loud failure. Mirrors the legacy body's
+  // same-named guard.
+  const startedAtMs = Date.now();
+  let decision: Awaited<ReturnType<typeof leadStep>>;
+  let durationMs = 0;
+  try {
+    const { ctx: promptCtx, team } = await loadSystemPromptContext({
+      teamId: row.teamId,
+      db,
+    });
+    const renderedDef: AgentDefinition = {
+      ...def,
+      systemPrompt: substitutePlaceholders(def.systemPrompt, promptCtx),
+    };
+    const config = buildAgentConfigFromDefinition(
+      renderedDef,
+      new Date(),
+      team.userId,
+    );
+    const ctx = await buildPhaseBToolContext(controller, agentId, {
+      teamId: team.id,
+      userId: team.userId,
+      productId: team.productId,
+      memberId: row.memberId,
+      conversationId: leadConversationId,
+      runId: isLead && leadRequestId ? leadRequestId : agentId,
+      role: isLead ? 'lead' : 'member',
+      onEventHolder,
+    });
+
+    const deps: LeadStepDeps = {
+      config,
+      ctx,
+      parentOnEvent: teammateStreamEvent,
+      injectMessages,
+    };
+    // Mailbox shape for leadStep: same DrainedMessage[] returned by
+    // drainMailbox above. leadStep reads mailbox[0].content for the seed
+    // prompt and ignores the rest (re-injected via pendingInjections).
+    decision = await leadStep(
+      {
+        agentId,
+        history: priorMessages ?? [],
+        mailbox: initialBatch,
+        checkpoint: row.checkpoint ?? null,
+        tenantId: team.userId,
+      },
+      deps,
+    );
+    durationMs = Date.now() - startedAtMs;
+  } catch (err) {
+    if (err instanceof LlmRateLimitedError) {
+      throw err;
+    }
+    const reason = err instanceof Error ? err.message : String(err);
+    const durationMsErr = Date.now() - startedAtMs;
+    log.error('agent-run failed', { agentId, err });
+    await markFailed(agentId, reason, row.teamId, isLead, row.parentToolUseId);
+    await synthAndDeliverNotification({
+      agentId,
+      parentAgentId: row.parentAgentId,
+      teamId: row.teamId,
+      memberId: row.memberId,
+      status: 'failed',
+      finalText: '',
+      summary: reason,
+      usage: { totalTokens: 0, toolUses: 0, durationMs: durationMsErr },
+      teammateName: def.name,
+    });
+    return;
+  }
+
+  // 8. Apply the decision.
+  switch (decision.kind) {
+    case 'spurious_wake': {
+      // leadStep itself detected the spurious wake (the same condition
+      // we checked above) and short-circuited before calling runAgent.
+      // Settle the row back to sleeping — same as the above guard, but
+      // duplicated here so a future change to leadStep's guard can't
+      // leave the row in an inconsistent state.
+      log.info(
+        `agent-run ${agentId}: leadStep returned spurious_wake; returning to sleep`,
+      );
+      const sleepingAt = new Date();
+      statusBatcher.set(agentId, {
+        status: 'sleeping',
+        lastActiveAt: sleepingAt,
+      });
+      if (isLead) {
+        await cacheLeadStatus(row.teamId, agentId, 'sleeping', sleepingAt);
+      } else {
+        await cacheTeammateStatus(row.teamId, agentId, 'sleeping', sleepingAt, null);
+      }
+      await publishStatusChange({
+        teamId: row.teamId,
+        agentId,
+        status: 'sleeping',
+        lastActiveAt: sleepingAt,
+        parentToolUseId: row.parentToolUseId,
+      });
+      return;
+    }
+
+    case 'spawn_and_wait': {
+      // Teammates are already INSERTed (the Task tool's
+      // launchAsyncTeammate body ran inside runAgent and inserted each
+      // child's agent_runs row + initial mailbox prompt + wake()).
+      // D3's job is to record the lead's waiting-state durably:
+      //   - status = 'waiting_for_children'
+      //   - waiting_for = [spawnedAgentId, ...]
+      //   - checkpoint = leadStep's newCheckpoint
+      // D4 (next task) will atomically drain waiting_for when each
+      // child's task_notification arrives and re-enqueue the lead on
+      // the last drain.
+      const childIds = decision.spawns
+        .map((s) => s.spawnedAgentId)
+        .filter((id): id is string => typeof id === 'string' && id.length > 0);
+      if (childIds.length === 0) {
+        log.warn(
+          `agent-run ${agentId}: spawn_and_wait but no spawnedAgentId on any child — falling back to running (peer-DM keeps lead alive)`,
+        );
+      }
+      log.info(
+        `agent-run ${agentId}: leadStep returned spawn_and_wait — waiting on ${childIds.length} children`,
+      );
+      const waitingAt = new Date();
+      // Synchronous terminal-adjacent write: drop any buffered transient
+      // 'running'/'resuming' before the durable persist, then write
+      // synchronously. The status_batcher's tick is up to ~500ms and
+      // could clobber this with a stale 'running' if we batched it.
+      statusBatcher.invalidate(agentId);
+      await db
+        .update(agentRuns)
+        .set({
+          status: 'waiting_for_children',
+          waitingFor: childIds,
+          checkpoint: decision.newCheckpoint as LeadCheckpoint,
+          lastActiveAt: waitingAt,
+        })
+        .where(eq(agentRuns.id, agentId));
+      // Cache write-through: surface as 'sleeping' for the lead (the
+      // LeadStatus union doesn't include 'waiting_for_children'; the
+      // cache shows the lead as idle, which is the right UX semantic).
+      // Teammates surface their literal 'sleeping' state because the
+      // teammate roster reads the durable column for the status pill.
+      if (isLead) {
+        await cacheLeadStatus(row.teamId, agentId, 'sleeping', waitingAt);
+      } else {
+        await cacheTeammateStatus(row.teamId, agentId, 'sleeping', waitingAt, null);
+      }
+      await publishStatusChange({
+        teamId: row.teamId,
+        agentId,
+        status: 'sleeping',
+        lastActiveAt: waitingAt,
+        parentToolUseId: row.parentToolUseId,
+      });
+      return;
+    }
+
+    case 'sleep': {
+      // The Sleep tool itself already wrote agent_runs.sleepUntil + status
+      // synchronously inside its execute(). D3 re-stamps both columns
+      // here for defense-in-depth + persists the new checkpoint and
+      // schedules a delayed wake on the SAME lane the current job is on.
+      log.info(
+        `agent-run ${agentId}: leadStep returned sleep until ${new Date(decision.untilMs).toISOString()}`,
+      );
+      const sleptAt = new Date();
+      const sleepUntil = new Date(decision.untilMs);
+      statusBatcher.invalidate(agentId);
+      await db
+        .update(agentRuns)
+        .set({
+          status: 'sleeping',
+          sleepUntil,
+          nextWakeAt: sleepUntil,
+          checkpoint: decision.newCheckpoint as LeadCheckpoint,
+          lastActiveAt: sleptAt,
+        })
+        .where(eq(agentRuns.id, agentId));
+      if (isLead) {
+        await cacheLeadStatus(row.teamId, agentId, 'sleeping', sleptAt);
+      } else {
+        await cacheTeammateStatus(row.teamId, agentId, 'sleeping', sleptAt);
+      }
+      await publishStatusChange({
+        teamId: row.teamId,
+        agentId,
+        status: 'sleeping',
+        lastActiveAt: sleptAt,
+        parentToolUseId: row.parentToolUseId,
+      });
+      // Schedule the delayed wake. Lane is preserved from the current
+      // job — a 'priority' founder wake that yielded for sleep stays
+      // on 'priority' when it resumes. Floor at 0 so a Sleep payload
+      // whose untilMs already passed during the step doesn't error.
+      const delayMs = Math.max(0, decision.untilMs - Date.now());
+      await reenqueueWithDelay(agentId, delayMs, laneFromQueueName(job.queueName));
+      return;
+    }
+
+    case 'done': {
+      // Terminal completion. Synthesize task_notification, mark
+      // completed, notify parent if teammate. The legacy body also
+      // surfaced 'killed' via gracefullyKilled and 'failed' via the
+      // catch block — the durable path treats LlmRateLimitedError /
+      // unexpected throws via processAgentRun's outer try/catch, so
+      // here we only handle the clean-exit case. Future revisions can
+      // add a `killed` discriminant to LeadStepDecision once the
+      // shutdown_request flow is reworked for the durable path
+      // (peer-DM shadow already doesn't wake; see CLAUDE.md "Critical
+      // invariants").
+      const finalText = decision.summary;
+      const summary = `${def.name} completed in 1 step`;
+      log.info(
+        `agent-run ${agentId}: leadStep returned done after ${durationMs}ms`,
+      );
+      const exitAt = new Date();
+      statusBatcher.invalidate(agentId);
+      await db
+        .update(agentRuns)
+        .set({
+          status: 'completed',
+          lastActiveAt: exitAt,
+          totalTokens: 0,
+          toolUses: 0,
+          shutdownReason: null,
+        })
+        .where(eq(agentRuns.id, agentId));
+      if (isLead) {
+        await cacheLeadStatus(row.teamId, agentId, 'sleeping', exitAt);
+      } else {
+        await cacheTeammateStatus(row.teamId, agentId, 'completed', exitAt);
+      }
+      await publishStatusChange({
+        teamId: row.teamId,
+        agentId,
+        status: isLead ? 'sleeping' : 'completed',
+        lastActiveAt: exitAt,
+        parentToolUseId: row.parentToolUseId,
+      });
+
+      await synthAndDeliverNotification({
+        agentId,
+        parentAgentId: row.parentAgentId,
+        teamId: row.teamId,
+        memberId: row.memberId,
+        status: 'completed',
+        finalText,
+        summary,
+        usage: { totalTokens: 0, toolUses: 0, durationMs },
+        teammateName: def.name,
+      });
+
+      // Lead's terminal SSE event so the founder UI's typing indicator
+      // clears in real time. Same shape as the legacy body's terminal
+      // publish (line 1734-1762).
+      if (def.role === 'lead' && leadRequestId) {
+        try {
+          const pub = getPubSubPublisher();
+          await pub.publish(
+            teamMessagesChannel(row.teamId),
+            JSON.stringify({
+              messageId: crypto.randomUUID(),
+              conversationId: leadConversationId,
+              runId: leadRequestId,
+              teamId: row.teamId,
+              from: row.memberId,
+              fromAgentId: agentId,
+              type: 'completion',
+              content: '',
+              metadata: null,
+              createdAt: new Date().toISOString(),
+            }),
+          );
+        } catch (err) {
+          log.warn(
+            `agent-run ${agentId}: terminal SSE publish failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+      return;
     }
   }
 }
