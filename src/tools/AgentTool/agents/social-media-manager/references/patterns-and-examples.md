@@ -2,13 +2,26 @@
 
 Concrete examples showing how to combine your tools for common situations. The CMO will name the situation in the spawn prompt; pick the closest pattern, adapt as needed. **You are not required to follow these step-by-step** — they show the *kind* of move, not a recipe.
 
+## Reading the spawn prompt
+
+Your spawn prompt always carries a structured `channel:` field (`x` or `reddit`) alongside `Mode:`, `planItemId:`, and `targetCount:`. **This is the single source of truth for which platform to discover against** — pass it through verbatim as `find_threads_via_xai({ platform })`. Don't infer the channel from the description string ('fill x reply slot'), from `Channels connected`, or from which platform sounds more relevant — the prompt told you.
+
 ### Pattern: discover threads, then fill a reply slot
 
 The CMO has a `content_reply` plan_item that needs threads sourced and replies drafted. You over-fetch via discovery (so the judging filter has room to be picky), then pass the top picks to the batch reply tool.
 
+Spawn prompt example:
+
+```
+Mode: discover-and-fill-slot
+channel: x
+planItemId: 1862-…-c1f9
+targetCount: 8
+```
+
 You: I'll source threads first, then draft replies for the strongest 3.
 
-  find_threads_via_xai({ trigger: 'daily', maxResults: 6 })
+  find_threads_via_xai({ trigger: 'daily', maxResults: 6, platform: 'x' })   ← read `channel: x` from the prompt
   → { queued: 5, scanned: 14, topQueued: [{threadId, url, ...} × 5], scoutNotes: 'tightened bio filter; competitor accounts dropped' }
 
   process_replies_batch({ threadIds: ['t-a', 't-b', 't-c'] })
@@ -16,12 +29,23 @@ You: I'll source threads first, then draft replies for the strongest 3.
 
 You (StructuredOutput): Sourced 5 threads, drafted replies for 3. All in /briefing for review.
 
-**Reddit variant.** When `Channels connected` lists Reddit and the slot is for Reddit replies, pass `platform: 'reddit'` so discovery uses xAI `web_search` against reddit.com instead of `x_search`:
+**Reddit variant.** When the spawn prompt says `channel: reddit`, pass `platform: 'reddit'` so discovery uses xAI `web_search` against reddit.com instead of `x_search`:
+
+Spawn prompt:
+
+```
+Mode: discover-and-fill-slot
+channel: reddit
+planItemId: a6071e9a-…-2c8
+targetCount: 3
+```
 
   find_threads_via_xai({ trigger: 'daily', maxResults: 6, platform: 'reddit' })
   → { queued: 4, scanned: 9, topQueued: [{threadId, url: 'https://reddit.com/r/SaaS/...', ...} × 4], scoutNotes: 'r/SaaS + r/indiehackers strong; r/Entrepreneur thinner' }
 
   process_replies_batch({ threadIds: ['t-r1', 't-r2', 't-r3'] })  // batch tool reads channel from each thread row
+
+**The X variant and Reddit variant are symmetric.** A `channel: x` spawn against the X slot uses `platform: 'x'`. Calling discovery with the wrong platform produces drafts under the wrong slot — production has seen 8 X-slot drafts land in the Reddit slot (Reddit overflowed by 8, X showed 0/8 drafted) because the agent inferred the platform from `Channels connected` instead of reading `channel:`. Don't repeat that.
 
 ### Pattern: thread list already provided
 

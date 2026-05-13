@@ -438,6 +438,35 @@ describe('buildKickoffGoalText (pure)', () => {
     expect(goal).not.toContain('(reddit,');
   });
 
+  it('every social-media-manager spawn carries a structured `channel:` field (2026-05-13 regression)', () => {
+    // Production incident: kickoff dispatched "fill x reply slot" with a
+    // prompt that named the channel only in the human-facing
+    // `description`. The agent skimmed past it, inferred Reddit from
+    // `Channels connected`, called find_threads_via_xai({ platform:
+    // 'reddit' }), and the 8 X drafts landed in the Reddit slot. The
+    // structured `channel:` field is the single source of truth — assert
+    // it appears on every (channel, mode) spawn directive in the prompt.
+    const goal = buildKickoffGoalText({
+      productName: 'Acme',
+      pathId: 'p1',
+      weekStart: '2026-05-11',
+      now: '2026-05-13T00:00:00Z',
+      channels: ['x', 'reddit'],
+      week1Posts: { x: 2, reddit: 3, email: 0 },
+      channelMix: {
+        x: { repliesPerDay: 8 },
+        reddit: { repliesPerDay: 3 },
+      },
+      availableSubreddits: [
+        { subreddit: 'SaaS', rank: 1, fitScore: 0.91 },
+      ],
+    });
+    expect(goal).toMatch(/\(x, reply\)[\s\S]*?channel: x/);
+    expect(goal).toMatch(/\(reddit, reply\)[\s\S]*?channel: reddit/);
+    expect(goal).toMatch(/\(x, post\)[\s\S]*?channel: x/);
+    expect(goal).toMatch(/\(reddit, post\)[\s\S]*?channel: reddit/);
+  });
+
   it('returns a fallback goal when pathId is null', () => {
     const goal = buildKickoffGoalText({
       productName: 'Acme',

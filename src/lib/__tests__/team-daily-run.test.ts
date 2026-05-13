@@ -258,4 +258,19 @@ describe('buildDailyGoalText (pure)', () => {
     expect(goal).toContain('Trigger: daily.');
     expect(goal).not.toContain('Source:');
   });
+
+  it('every reply spawn carries a structured `channel:` field (2026-05-13 regression)', () => {
+    // Pairs with the team-kickoff regression test — same incident,
+    // same fix on the daily path.
+    const goal = buildDailyGoalText({
+      productName: 'Acme',
+      platforms: ['x', 'reddit'],
+      channelMix: {
+        x: { repliesPerDay: 8 },
+        reddit: { repliesPerDay: 3 },
+      },
+    });
+    expect(goal).toMatch(/\(x, reply\)[\s\S]*?channel: x/);
+    expect(goal).toMatch(/\(reddit, reply\)[\s\S]*?channel: reddit/);
+  });
 });

@@ -310,25 +310,34 @@ export function buildKickoffGoalText(args: KickoffGoalArgs): string {
   // in Step 2 alongside the reply / X-post drafts. Reddit content_post
   // plan_items + post-batch spawn get deferred to Step 3a, which runs
   // once the research <task-notification> returns.
+  // `channel:` is a structured prompt field — the description string
+  // ('fill x reply slot') is human-facing and easy for the agent to
+  // skim past. The agent has been documented (in
+  // social-media-manager/references/patterns-and-examples.md) to read
+  // this field for the discovery `platform` argument. Without it, an
+  // X-slot spawn was found in production calling
+  // find_threads_via_xai({ platform: 'reddit' }) — drafts landed under
+  // thread.platform='reddit' (Reddit slot overflowed by 8) while
+  // /briefing's X slot showed 0/8 drafted (2026-05-13 incident).
   const spawns: string[] = [];
   if (xConnected && repliesX > 0) {
     spawns.push(
-      `- (x, reply): Task({ subagent_type: 'social-media-manager', description: 'fill x reply slot', prompt: 'Mode: discover-and-fill-slot\\nplanItemId: <today's x content_reply uuid>\\ntargetCount: ${repliesX}' })`,
+      `- (x, reply): Task({ subagent_type: 'social-media-manager', description: 'fill x reply slot', prompt: 'Mode: discover-and-fill-slot\\nchannel: x\\nplanItemId: <today's x content_reply uuid>\\ntargetCount: ${repliesX}' })`,
     );
   }
   if (redditConnected && repliesReddit > 0) {
     spawns.push(
-      `- (reddit, reply): Task({ subagent_type: 'social-media-manager', description: 'fill reddit reply slot', prompt: 'Mode: discover-and-fill-slot\\nplanItemId: <today's reddit content_reply uuid>\\ntargetCount: ${repliesReddit}' })`,
+      `- (reddit, reply): Task({ subagent_type: 'social-media-manager', description: 'fill reddit reply slot', prompt: 'Mode: discover-and-fill-slot\\nchannel: reddit\\nplanItemId: <today's reddit content_reply uuid>\\ntargetCount: ${repliesReddit}' })`,
     );
   }
   if (xConnected && week1Posts.x > 0) {
     spawns.push(
-      `- (x, post): Task({ subagent_type: 'social-media-manager', description: 'draft x post batch', prompt: 'Mode: post-batch\\nplanItemIds: <today's x content_post uuids>' })`,
+      `- (x, post): Task({ subagent_type: 'social-media-manager', description: 'draft x post batch', prompt: 'Mode: post-batch\\nchannel: x\\nplanItemIds: <today's x content_post uuids>' })`,
     );
   }
   if (redditConnected && week1Posts.reddit > 0 && subs.length > 0) {
     spawns.push(
-      `- (reddit, post): Task({ subagent_type: 'social-media-manager', description: 'draft reddit post batch', prompt: 'Mode: post-batch\\nplanItemIds: <today's reddit content_post uuids>' })`,
+      `- (reddit, post): Task({ subagent_type: 'social-media-manager', description: 'draft reddit post batch', prompt: 'Mode: post-batch\\nchannel: reddit\\nplanItemIds: <today's reddit content_post uuids>' })`,
     );
   }
   // Reddit research deferred-spawn: fires in parallel with the reply /
