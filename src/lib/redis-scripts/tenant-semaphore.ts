@@ -42,6 +42,14 @@ export interface AcquireResult {
   current: number;
   /** Cap echoed back from the Lua script (for diagnostics). */
   cap: number;
+  /**
+   * True when Redis was unreachable and we failed OPEN (returned acquired=true
+   * without holding a real slot). Undefined on the happy path. Callers should
+   * track this separately from real acquires for metrics — e.g. emit
+   * `tenant_semaphore_fail_open_count` so dashboards don't confuse a Redis
+   * outage with a healthy "0 inflight, first acquire" reading.
+   */
+  failedOpen?: boolean;
 }
 
 /**
@@ -85,9 +93,16 @@ export async function acquireTenantSlot(
     log.warn(
       `tenant-semaphore acquire failed for ${userId}, failing open: ${err instanceof Error ? err.message : String(err)}`,
     );
-    return { acquired: true, current: 0, cap };
+    return { acquired: true, current: 0, cap, failedOpen: true };
   }
 }
+
+/**
+ * TTL applied when over-release floors the counter at 0. Matches the
+ * typical acquire-TTL ceiling so the placeholder key doesn't outlive the
+ * window in which a legitimate caller would care about its value.
+ */
+const FLOOR_TTL_SECONDS = 3600;
 
 /**
  * Unconditionally decrement the in-flight counter for a tenant.
@@ -108,7 +123,9 @@ export async function releaseTenantSlot(
   try {
     const newval = await redis.decr(key);
     if (newval < 0) {
-      await redis.set(key, '0');
+      // Floor at 0; preserve a TTL so over-release doesn't leave a 0-valued
+      // key with no expiry (tiny Redis key-leak otherwise).
+      await redis.set(key, '0', 'EX', FLOOR_TTL_SECONDS);
     }
   } catch (err) {
     log.warn(

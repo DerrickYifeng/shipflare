@@ -12,10 +12,19 @@
 -- Else              → INCR + EXPIRE, return {1, newval, cap}.
 
 local key = KEYS[1]
-local cap = tonumber(ARGV[1])
-local ttl = tonumber(ARGV[2])
+-- Defensive coercion: if ARGV is nil / non-numeric / NaN, `tonumber` returns
+-- nil. Falling through with `current >= cap` against a nil cap would error,
+-- the wrapper would catch it, and we'd silently FAIL OPEN (unbounded
+-- concurrency). Coerce to safe defaults and refuse instead.
+local cap = tonumber(ARGV[1]) or 0
+local ttl = tonumber(ARGV[2]) or 60
 
 local current = tonumber(redis.call('GET', key)) or 0
+
+-- cap<=0 also covers the "immediately refuse" use case and negative-cap typos.
+if cap <= 0 then
+  return {0, current, cap}
+end
 
 if current >= cap then
   return {0, current, cap}

@@ -70,4 +70,13 @@ describe('tenant-semaphore', () => {
     expect(remaining).toBeGreaterThan(0);
     expect(remaining).toBeLessThanOrEqual(ttl);
   });
+
+  it('refuses immediately when cap=0', async () => {
+    const r = await acquireTenantSlot(redis, userId, 0, 60);
+    expect(r.acquired).toBe(false);
+    expect(r.current).toBe(0);
+    // Lua refused without mutating the counter — key should still be absent.
+    const raw = await redis.get(`inflight:agent:${userId}`);
+    expect(raw).toBeNull();
+  });
 });
