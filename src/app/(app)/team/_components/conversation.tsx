@@ -230,25 +230,28 @@ export function Conversation({
     return false;
   }, [agentRunStatus]);
 
-  // Decide whether to show the typing indicator. Shown when:
-  // - a run is live, AND
-  //   - the selected run's status is 'running', OR
-  //   - (all view) any visible group belongs to a running run, OR
-  //   - the last visible node is a user bubble with no reply yet, OR
-  //   - any spawned teammate is still in flight (lead asleep after a
-  //     parallel dispatch is the common case).
+  // Decide whether to show the typing indicator.
+  //
+  // The `agentRunStatus` map is live-merged with SSE `agent_status_change`
+  // events (see team-desk's `liveAgentRunStatus`), so when ANY agent_run
+  // is non-terminal it's the most reliable "this thread is alive" signal
+  // we have — bypasses the legacy `isLive` prop, which relies on
+  // `team_messages.runId` markers that Phase E+ flows no longer write
+  // (see team-desk.tsx `threadIsLive` and page.tsx's "runId is NULL for
+  // new flows" comment). Without this bypass the indicator silently
+  // refused to render during kickoff, the most important moment to
+  // reassure the founder that something's happening.
   const showTyping = useMemo(() => {
-    if (!isLive) return false;
     if (visibleGroups.length === 0) return false;
+    if (anyAgentRunning) return true;
+    if (!isLive) return false;
     const lastGroup = visibleGroups[visibleGroups.length - 1];
     const runIsRunning = lastGroup.run?.status === 'running';
     const lastNode = lastGroup.nodes[lastGroup.nodes.length - 1];
     const lastIsUser = lastNode?.kind === 'user';
     const lastIsPendingActivity =
       lastNode?.kind === 'activity' && !lastNode.complete;
-    return (
-      runIsRunning || lastIsUser || lastIsPendingActivity || anyAgentRunning
-    );
+    return runIsRunning || lastIsUser || lastIsPendingActivity;
   }, [isLive, visibleGroups, anyAgentRunning]);
 
   // Scroll container and its direct child (the "content" element the
