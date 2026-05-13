@@ -526,9 +526,16 @@ function TeamDeskInner({
       // Number.isFinite guard handles malformed ISO strings.
       const parsed = lastActiveIso ? Date.parse(lastActiveIso) : Date.now();
       const lastActiveAt = Number.isFinite(parsed) ? parsed : Date.now();
+      // Prefer the subtask description ("fill x reply slot") as the primary
+      // line and keep the agent type ("Social Media Manager") as a subtitle.
+      // Matches the in-conversation SubtaskCard layout so the rail isn't a
+      // tiny pill row of agent names — it shows what's actually being done.
+      const subtaskLabel = t.label?.trim();
+      const agentLabel = t.subagentType?.trim();
       out.push({
         id: t.agentId,
-        name: t.subagentType ?? t.label,
+        name: subtaskLabel || agentLabel || 'Subtask',
+        subtitle: subtaskLabel && agentLabel ? agentLabel : undefined,
         status: mapRailStatus(runStatus?.status, t.status),
         lastActiveAt,
       });
@@ -1035,11 +1042,12 @@ function TeamDeskInner({
             focusPendingMessageId={pendingFocusMessageId}
             activeSubagentIds={activeSubagentIds}
             bottomReservation={
-              // Base reservation for composer + buffer is 180; the A2
-              // bottom rail adds ~60px (rail card ~44px + gap) when
-              // non-empty so the last messages stay readable above the
-              // rail's translucent backdrop instead of being obscured.
-              railSubagents.length > 0 ? 240 : 180
+              // Base reservation for composer + buffer is 180. The A2
+              // bottom rail is now a richer card stack (up to 320px tall,
+              // internally scrollable) instead of a thin pill strip, so
+              // reserve ~360px when non-empty to keep the last messages
+              // readable above the rail's translucent backdrop.
+              railSubagents.length > 0 ? 380 : 180
             }
             hasOlder={
               selectedConversationId
@@ -1091,9 +1099,11 @@ function TeamDeskInner({
           right: 0,
           // Anchor just above the composer's 20px outer paddingBottom plus
           // the composer card itself (~96px when collapsed). The rail's
-          // ~44px height + a small gap below keeps clear of the composer
-          // even with the maxed-out textarea.
-          bottom: 116,
+          // own card stretches up to RAIL_MAX_HEIGHT_PX (320px) when many
+          // dispatches are active; its internal vertical scroll keeps the
+          // overall footprint bounded. 124px = composer card + outer pad +
+          // an 8px gap so the rail's bottom edge doesn't touch the composer.
+          bottom: 124,
           paddingLeft: H_PAD,
           paddingRight: H_PAD,
           pointerEvents: 'none',
