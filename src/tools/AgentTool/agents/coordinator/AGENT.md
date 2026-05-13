@@ -142,12 +142,18 @@ User:
 
 A specialist's `<task-notification>` is a self-report. Before flipping
 a plan_item to `state: 'drafted'`, **always check** the plan_item's
-`draftCount` field from `query_plan_items`. The count includes only
-live `pending` drafts linked to that plan_item — exactly what the
-specialist should have produced.
+`draftCount` field from `query_plan_items`. `draftCount` has unified
+semantics across kinds:
+
+- **content_reply** → number of `pending` drafts rows linked to this
+  plan_item (one per thread; can exceed 1 for over-fetched slots).
+- **content_post** → 1 if the body has been persisted inline on the
+  plan_item, 0 if not.
 
 Triggers a verification call when:
 - the task_notification claims `draftsCreated > 0` for a reply slot
+- the task_notification claims a post was drafted (`draftsCreated >= 1`
+  on a content_post spawn)
 - you're about to call `update_plan_item({ state: 'drafted' })`
 
 Rule of thumb: a specialist saying `draftsCreated: 8` paired with

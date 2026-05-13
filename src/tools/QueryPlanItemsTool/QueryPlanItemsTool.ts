@@ -87,9 +87,13 @@ export const queryPlanItemsTool: ToolDefinition<
     `${planItemStateValues.join(', ')}), or by a specific id. Omit ` +
     'filters to skip them. Scoped to the current user + product.' +
     '\n\n' +
-    'Each row carries `draftCount` (live pending drafts linked to this ' +
-    'plan_item). Use it to verify a specialist actually drafted what it ' +
-    'claimed before flipping state to `drafted` — a `draftsCreated: N` ' +
+    'Each row carries `draftCount`, semantics by kind:\n' +
+    '  - content_reply: number of live `pending` drafts rows linked to ' +
+    'this plan_item (one per thread; can exceed 1 for over-fetched slots).\n' +
+    '  - content_post: 1 if `plan_items.output.draft_body` is non-empty, ' +
+    'else 0 (posts persist the body inline; no `drafts` row).\n' +
+    'Use it to verify a specialist actually drafted what it claimed ' +
+    'before flipping state to `drafted` — a `draftsCreated: N` ' +
     'task_notification paired with `draftCount: 0` means the drafts ' +
     'landed under the wrong slot.' +
     '\n\n' +
@@ -142,21 +146,40 @@ export const queryPlanItemsTool: ToolDefinition<
         title: planItems.title,
         description: planItems.description,
         completedAt: planItems.completedAt,
+        // Needed only for the content_post branch of draftCount —
+        // posts persist their body inside `plan_items.output.draft_body`
+        // (DraftPostTool.ts) instead of inserting a `drafts` row, so
+        // counting `drafts` rows would always return 0 for posts.
+        output: planItems.output,
       })
       .from(planItems)
       .where(and(...conditions))
       .limit(limit);
 
-    // Second pass: count `pending` drafts linked to each returned
-    // plan_item. Kept as a separate query (rather than a SQL LEFT JOIN
-    // + GROUP BY) so the in-memory test mock — which doesn't implement
-    // leftJoin/groupBy — keeps working, and so the count predicate is
-    // obvious to the reader. `drafts_plan_item_idx` keeps each lookup
-    // cheap; the in-array filter bounds the scan to the page we just
-    // pulled (≤ 200 rows at most).
+    // Build draftCount, branching on kind:
+    //
+    //  - content_reply: count `pending` drafts rows linked to this
+    //    plan_item via drafts.planItemId. There can be many (one per
+    //    thread) so a real count is meaningful; index
+    //    `drafts_plan_item_idx` keeps the lookup cheap.
+    //
+    //  - content_post: there is no drafts row — DraftPostTool writes
+    //    the body to plan_items.output.draft_body and flips state to
+    //    'drafted' in a single UPDATE. So treat the body's presence as
+    //    `1` and absence as `0`. Without this branch, the coordinator's
+    //    Tier 2 verification flagged every drafted post as a phantom
+    //    (state='drafted', draftCount=0) and warned the founder of a
+    //    persistence failure that wasn't there.
+    //
+    // Kept as separate queries rather than SQL LEFT JOIN + GROUP BY so
+    // the in-memory test mock (which doesn't implement leftJoin/
+    // groupBy) keeps working, and so the predicate per branch is
+    // obvious to the reader.
     const draftCountByPlanItemId = new Map<string, number>();
-    if (rows.length > 0) {
-      const planItemIds = rows.map((r) => r.id);
+    const replyPlanItemIds = rows
+      .filter((r) => r.kind === 'content_reply')
+      .map((r) => r.id);
+    if (replyPlanItemIds.length > 0) {
       const draftRows = await db
         .select({ planItemId: drafts.planItemId })
         .from(drafts)
@@ -164,7 +187,7 @@ export const queryPlanItemsTool: ToolDefinition<
           and(
             eq(drafts.userId, userId),
             eq(drafts.status, 'pending'),
-            inArray(drafts.planItemId, planItemIds),
+            inArray(drafts.planItemId, replyPlanItemIds),
           ),
         );
       for (const dr of draftRows) {
@@ -174,6 +197,17 @@ export const queryPlanItemsTool: ToolDefinition<
           (draftCountByPlanItemId.get(dr.planItemId) ?? 0) + 1,
         );
       }
+    }
+    for (const r of rows) {
+      if (r.kind !== 'content_post') continue;
+      const body =
+        r.output &&
+        typeof r.output === 'object' &&
+        !Array.isArray(r.output) &&
+        typeof (r.output as Record<string, unknown>)['draft_body'] === 'string'
+          ? ((r.output as Record<string, unknown>)['draft_body'] as string)
+          : '';
+      draftCountByPlanItemId.set(r.id, body.trim().length > 0 ? 1 : 0);
     }
 
     return rows.map((r) => ({
