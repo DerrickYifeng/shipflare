@@ -13,7 +13,7 @@
 // cap-by-tier table here is the only knob ops needs to tune.
 
 import { db } from '@/lib/db';
-import { agentRuns, teamMembers, teams } from '@/lib/db/schema';
+import { agentRuns, teams } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 
 export type Tier = 'free' | 'paid' | 'premium';
@@ -39,10 +39,10 @@ export function inflightCapForTier(tier: Tier): number {
 /**
  * Look up the owning user + tier for an `agent_runs` row.
  *
- * Joins `agent_runs → team_members → teams` to recover `teams.userId`.
- * All three are notNull FKs with an index on the joining column, so this
- * is a sub-ms three-row probe. Caching is intentionally avoided in B3 —
- * the budget should show up in profiling before we add a cache layer.
+ * Joins `agent_runs → teams` directly via `agentRuns.teamId` — both are
+ * notNull FKs with indexes on the joining column, so this is a sub-ms
+ * two-row probe. Caching is intentionally avoided in B3 — the budget
+ * should show up in profiling before we add a cache layer.
  *
  * Throws if the agent row doesn't exist. NOTE for the agent-run caller:
  * this throw happens BEFORE the semaphore acquire, so there's nothing to
@@ -59,8 +59,7 @@ export async function tierForAgentRun(agentId: string): Promise<{
   const rows = await db
     .select({ userId: teams.userId })
     .from(agentRuns)
-    .innerJoin(teamMembers, eq(agentRuns.memberId, teamMembers.id))
-    .innerJoin(teams, eq(teamMembers.teamId, teams.id))
+    .innerJoin(teams, eq(agentRuns.teamId, teams.id))
     .where(eq(agentRuns.id, agentId))
     .limit(1);
   const userId = rows[0]?.userId;

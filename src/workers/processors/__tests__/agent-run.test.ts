@@ -239,10 +239,20 @@ vi.mock('@/lib/redis', () => ({
 
 // Phase B3: stub the tenant semaphore — tests assert that processAgentRun
 // reaches the actual worker body, which means the slot acquire must
-// succeed by default. Each test can opt into a backpressure path by
-// overriding `acquireTenantSlotMock` for the call.
+// succeed by default. Each test can opt into a backpressure path or
+// failedOpen path by overriding `acquireTenantSlotMock` per-call. The
+// inline return type widens to include the optional `failedOpen` flag
+// so per-call overrides (`.mockResolvedValueOnce`) can set it without
+// fighting the type checker.
 const acquireTenantSlotMock = vi.hoisted(() =>
-  vi.fn(async () => ({ acquired: true, current: 1, cap: 3 })),
+  vi.fn(
+    async (): Promise<{
+      acquired: boolean;
+      current: number;
+      cap: number;
+      failedOpen?: boolean;
+    }> => ({ acquired: true, current: 1, cap: 3 }),
+  ),
 );
 const releaseTenantSlotMock = vi.hoisted(() => vi.fn(async () => {}));
 vi.mock('@/lib/redis-scripts/tenant-semaphore', () => ({
@@ -2756,5 +2766,120 @@ describe('processAgentRun', () => {
       'user-no-dup',
       null,
     );
+  });
+
+  // ---------------------------------------------------------------------------
+  // Phase B3: per-tenant semaphore wrapper paths.
+  //
+  // These tests drive the outer wrapper (acquire → branch → release)
+  // without exercising the inner `runAgentTurn` body — the body itself
+  // is covered by the 33 tests above. They use `.mockResolvedValueOnce`
+  // on the hoisted `acquireTenantSlotMock` to override its default
+  // (acquired:true) for the single call in the test.
+  // ---------------------------------------------------------------------------
+
+  it('backpressure: when acquireTenantSlot refuses, reenqueueWithDelay fires and runAgentTurn body is skipped', async () => {
+    acquireTenantSlotMock.mockResolvedValueOnce({
+      acquired: false,
+      current: 3,
+      cap: 3,
+    });
+
+    await processAgentRun(makeJob('agent-cap'));
+
+    // Re-enqueue fired with the agentId + the documented delay (1500ms).
+    expect(reenqueueWithDelayMock).toHaveBeenCalledTimes(1);
+    expect(reenqueueWithDelayMock).toHaveBeenCalledWith('agent-cap', 1500);
+
+    // The inner worker body was never reached: no DB lookup, no runAgent.
+    expect(db.query.agentRuns.findFirst).not.toHaveBeenCalled();
+    expect(runAgentHoisted.fn).not.toHaveBeenCalled();
+
+    // No slot was held, so the wrapper must NOT release.
+    expect(releaseTenantSlotMock).not.toHaveBeenCalled();
+  });
+
+  it('failedOpen: when acquireTenantSlot returns failedOpen, the run proceeds and a warn is emitted', async () => {
+    acquireTenantSlotMock.mockResolvedValueOnce({
+      acquired: true,
+      current: 0,
+      cap: 3,
+      failedOpen: true,
+    });
+
+    // Logger writes to console.error for warn/error levels (lib/logger.ts:88).
+    // Spy without swallowing so the test still sees its own errors on failure.
+    const errorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+
+    vi.mocked(db.query.agentRuns.findFirst).mockResolvedValue({
+      id: 'agent-fo',
+      teamId: 'team-1',
+      memberId: 'mem-1',
+      agentDefName: 'content-manager',
+      parentAgentId: null,
+      parentToolUseId: null,
+      status: 'queued',
+    } as never);
+
+    try {
+      await processAgentRun(makeJob('agent-fo'));
+
+      // Run actually proceeded — the inner body ran runAgent.
+      expect(runAgentHoisted.fn).toHaveBeenCalledTimes(1);
+
+      // The failed-open warning landed on console.error. Match on the
+      // distinctive substring so we don't pin to formatter details.
+      const warnedFailedOpen = errorSpy.mock.calls.some((args) =>
+        args.some(
+          (arg) =>
+            typeof arg === 'string' && arg.includes('failed open for user='),
+        ),
+      );
+      expect(warnedFailedOpen).toBe(true);
+
+      // The wrapper still releases in finally — fail-open holds no real slot
+      // in Redis, but our release call floors at 0 so it's a safe no-op.
+      expect(releaseTenantSlotMock).toHaveBeenCalledTimes(1);
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it('release: releaseTenantSlot is called even when the worker body throws', async () => {
+    // Default acquireTenantSlotMock returns acquired:true, current:1, cap:3.
+
+    // Force a throw out of runAgent so the outer try/finally fires.
+    runAgentHoisted.fn.mockRejectedValueOnce(new Error('boom'));
+
+    vi.mocked(db.query.agentRuns.findFirst).mockResolvedValue({
+      id: 'agent-throw',
+      teamId: 'team-1',
+      memberId: 'mem-1',
+      agentDefName: 'content-manager',
+      parentAgentId: null,
+      parentToolUseId: null,
+      status: 'queued',
+    } as never);
+
+    // The agent-run worker currently catches runAgent errors and converts
+    // them into a synthesized 'failed' task_notification — so the outer
+    // promise resolves normally even though the body threw. The contract
+    // we're asserting is the FINALLY behavior, not the surfaced error.
+    await processAgentRun(makeJob('agent-throw'));
+
+    // Slot was acquired with the stubbed userId from tierForAgentRun and
+    // must be released exactly once with the same userId.
+    expect(acquireTenantSlotMock).toHaveBeenCalledTimes(1);
+    expect(releaseTenantSlotMock).toHaveBeenCalledTimes(1);
+    expect(releaseTenantSlotMock).toHaveBeenCalledWith(
+      expect.anything(), // the redis client sentinel from the mocked getKeyValueClient
+      'user-1',
+    );
+
+    // Re-enqueue must NOT fire on the happy-acquire-then-throw path —
+    // that's reserved for the backpressure branch.
+    expect(reenqueueWithDelayMock).not.toHaveBeenCalled();
   });
 });
