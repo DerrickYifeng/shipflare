@@ -1,5 +1,5 @@
 // Renders the onboarding "Building plan" stage as a `/team`-style chat
-// transcript: a `LeadMessage` from the Chief of Staff coordinator,
+// transcript: a `LeadMessage` from the CMO coordinator,
 // followed by a Strategist subtask card whose tool list is driven by
 // real `tool_progress` SSE events.
 //

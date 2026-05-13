@@ -3,7 +3,7 @@
 // running on the backend (Stage 1 of the plan-building refactor switched
 // /api/onboarding/plan to invoke `runForkSkill('generating-strategy', …)`
 // directly — no team-run, no delegate). The UI pretends there is one so
-// the user gets the same "Chief of Staff dispatched a Strategist; here are
+// the user gets the same "CMO dispatched a Strategist; here are
 // the tools they ran" hierarchy they already see on /team.
 //
 // Pure function. Easy to unit-test. The component layer feeds in an array
@@ -103,7 +103,7 @@ const COORDINATOR_ERROR_BODY =
 const SUBTASK_FIRST_MESSAGE =
   "I'll gather context, then write the plan.";
 const SUBTASK_TITLE = 'Build initial 30-day plan';
-const COORDINATOR_NAME = 'Chief of Staff';
+const COORDINATOR_NAME = 'CMO';
 const SPECIALIST_NAME = 'Strategist';
 const SPECIALIST_ROLE = 'STRATEGIST · SUBTASK';
 

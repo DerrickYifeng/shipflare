@@ -23,8 +23,8 @@
  * into a single `social-media-manager` — the real industry job title for
  * someone who owns X (and later Reddit / LinkedIn / HN / Discord)
  * end-to-end. The strategic-path / plan-item generation that used to
- * live in `content-planner` was absorbed by the coordinator (chief of
- * staff scope at solo-founder scale).
+ * live in `content-planner` was absorbed by the coordinator (CMO scope
+ * at solo-founder scale).
  */
 export type BaseAgentType = 'coordinator';
 
@@ -82,7 +82,7 @@ export interface DisplayNameMap {
  * "Social Media Manager" instead of "Jordan".
  */
 export const DEFAULT_DISPLAY_NAMES: DisplayNameMap = {
-  coordinator: 'Chief of Staff',
+  coordinator: 'CMO',
   'social-media-manager': 'Social Media Manager',
 };
 

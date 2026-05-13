@@ -213,7 +213,7 @@ const loadSystemPromptContextMock = vi.hoisted(() =>
         itemCount: 0,
         statusBreakdown: '',
         founderName: 'TestFounder',
-        teamRoster: '- coordinator: Chief of Staff (Tools: Task)',
+        teamRoster: '- coordinator: CMO (Tools: Task)',
       },
       team: {
         id: 'team-1',
@@ -2160,7 +2160,7 @@ describe('processAgentRun', () => {
         itemCount: 3,
         statusBreakdown: 'planned: 3',
         founderName: 'Alex',
-        teamRoster: '- coordinator: Chief of Staff (Tools: Task)',
+        teamRoster: '- coordinator: CMO (Tools: Task)',
       },
       team: {
         id: 'team-subst',
@@ -2187,7 +2187,7 @@ describe('processAgentRun', () => {
     expect(config.systemPrompt).toContain('Welcome to Acme');
     expect(config.systemPrompt).toContain('Founder: Alex');
     expect(config.systemPrompt).toContain(
-      '- coordinator: Chief of Staff (Tools: Task)',
+      '- coordinator: CMO (Tools: Task)',
     );
     expect(config.systemPrompt).not.toContain('{productName}');
     expect(config.systemPrompt).not.toContain('{founderName}');
@@ -2231,7 +2231,7 @@ describe('processAgentRun', () => {
         itemCount: 0,
         statusBreakdown: '',
         founderName: 'TestFounder',
-        teamRoster: '- coordinator: Chief of Staff (Tools: Task)',
+        teamRoster: '- coordinator: CMO (Tools: Task)',
       },
       team: { id: 'team-ctx', userId: 'user-7', productId: 'prod-3' },
     });
@@ -2295,7 +2295,7 @@ describe('processAgentRun', () => {
         itemCount: 0,
         statusBreakdown: '',
         founderName: 'TestFounder',
-        teamRoster: '- coordinator: Chief of Staff (Tools: Task)',
+        teamRoster: '- coordinator: CMO (Tools: Task)',
       },
       team: {
         id: 'team-platform',
@@ -2812,7 +2812,7 @@ describe('processAgentRun', () => {
         itemCount: 0,
         statusBreakdown: '',
         founderName: 'TestFounder',
-        teamRoster: '- coordinator: Chief of Staff (Tools: Task)',
+        teamRoster: '- coordinator: CMO (Tools: Task)',
       },
       team: {
         id: 'team-no-dup',

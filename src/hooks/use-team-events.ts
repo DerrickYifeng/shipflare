@@ -116,7 +116,7 @@ export interface PartialLeadMessage {
    */
   parentToolUseId: string | null;
   /**
-   * Subagent's `agentDefName` (e.g. `chief-of-staff`, `post-writer`).
+   * Subagent's `agentDefName` (e.g. `coordinator`, `social-media-manager`).
    * Null for top-level lead text. Same source as `parentToolUseId`;
    * used as a defensive fallback when `parentToolUseId` is missing.
    */

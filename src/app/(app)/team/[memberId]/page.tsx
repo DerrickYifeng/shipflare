@@ -47,7 +47,7 @@ const STATUS_LABEL: Record<string, string> = {
 
 const AGENT_ROLE_BLURB: Record<string, string> = {
   coordinator:
-    'Chief of Staff. Receives your goals, delegates to specialists, composes final outputs.',
+    'CMO. Receives your goals, delegates to specialists, composes final outputs.',
   'social-media-manager':
     "Social Media Manager. Owns the founder's presence on X (and Reddit / LinkedIn / HN / Discord as they connect). Finds threads, drafts replies, drafts + schedules original posts.",
 };

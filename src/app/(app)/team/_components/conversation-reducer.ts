@@ -556,7 +556,7 @@ export function stitchLeadMessages(
   // Without #2, subagent text whose parentToolUseId failed to land would
   // bubble up as a LeadNode and the UI's `node.fromMemberId ?? coordinatorId`
   // fallback (conversation.tsx:256) would render it as the coordinator's
-  // avatar — which is exactly the "Chief of Staff SYNTHESIS pasting JSON"
+  // avatar — which is exactly the "CMO SYNTHESIS pasting JSON"
   // mis-attribution observed in production traces 2026-05-02.
   const hasSubagentName = (metadata: Record<string, unknown> | null): boolean => {
     // Use extractAgentName so both `agentName` (camelCase, defensively

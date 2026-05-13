@@ -71,7 +71,7 @@ export interface EnsureTeamResult {
 export interface EnsureTeamOptions {
   /**
    * Optional display-name overrides; when present they replace the default
-   * "Chief of Staff"/"Head of Growth"/etc. labels for the matching agent
+   * "CMO"/"Social Media Manager"/etc. labels for the matching agent
    * types during the INSERT. Existing rows are never re-named.
    */
   displayNames?: Partial<DisplayNameMap>;

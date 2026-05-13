@@ -59,7 +59,7 @@ describe('stitchLeadMessages — subagent routing (regression)', () => {
   it('routes subagent agent_text away from top-level even when parentToolUseId is missing — backstop on agentName', () => {
     // This is the production bug: parentToolUseId was missing on a
     // subagent agent_text row, so the row bubbled up and the UI rendered
-    // it as the coordinator (Chief of Staff). The agentName backstop
+    // it as the coordinator (CMO). The agentName backstop
     // catches this case.
     const messages = [
       msg({
@@ -188,7 +188,7 @@ describe('stitchLeadMessages — streaming partial subagent filter (2026-05-13)'
 
 describe('stitchLeadMessages — stripping hallucinated <task-notification> XML', () => {
   it('strips a fabricated task-notification block from lead agent_text (2026-05-12 bug)', () => {
-    // Production bug: Chief of Staff occasionally hallucinates a
+    // Production bug: CMO occasionally hallucinates a
     // stylized <task-notification> block in its own SYNTHESIS turn —
     // a paraphrase of the user-role notification injected by
     // synthAndDeliverNotification. coordinator/AGENT.md §4 forbids it,
