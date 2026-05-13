@@ -1127,9 +1127,14 @@ async function runAgentTurn_legacy(
 
     // (2) Persist assistant turns.
     if (event.type === 'assistant_text_stop' && event.text.length > 0) {
-      // Generate the row id up front so the SSE publish (lead path) can
-      // reference the same id the durable row carries.
-      const insertedId = crypto.randomUUID();
+      // Use the stream's messageId for the persisted row id so the
+      // streaming partial (keyed on event.messageId in use-team-events
+      // partials map) and the durable final row share the SAME id.
+      // Without this match, the partial would clear on agent_text_stop
+      // and the persisted row would arrive under a fresh UUID — the
+      // conversation reducer can't reconcile them, so the streamed
+      // bubble appears to "disappear" after streaming completes.
+      const insertedId = event.messageId;
       const createdAt = new Date();
       // Stash spawnMeta only when present so the UI's delegation tree
       // can nest a child agent's text under the parent Task's dispatch
@@ -1924,7 +1929,15 @@ function buildDurableStreamHandler(
 
     // (2) Persist assistant turns to team_messages.
     if (event.type === 'assistant_text_stop' && event.text.length > 0) {
-      const insertedId = crypto.randomUUID();
+      // Use the stream's messageId for the persisted row id so the
+      // streaming partial (keyed on event.messageId in use-team-events
+      // partials map) and the durable final row share the SAME id.
+      // Without this match, the partial would clear on agent_text_stop
+      // and the persisted row would arrive under a fresh UUID — the
+      // conversation reducer can't reconcile them, so the streamed
+      // bubble appears to "disappear" after streaming completes even
+      // though the durable row is in the DB.
+      const insertedId = event.messageId;
       const createdAt = new Date();
       const assistantMetadata = event.spawnMeta
         ? {
