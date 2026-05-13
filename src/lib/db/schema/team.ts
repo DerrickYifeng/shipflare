@@ -252,6 +252,42 @@ export type NewTeamMessage = typeof teamMessages.$inferInsert;
 // migration once the self-ref pattern is sorted out.
 // ---------------------------------------------------------------------------
 
+/**
+ * Lead step-function checkpoint payload (Phase D — durable lead orchestrator).
+ *
+ * Persisted on `agent_runs.checkpoint` so a lead can be re-enqueued from
+ * the `waiting_for_children → running` transition (D2-D4) without losing
+ * track of which Task() tool-calls it has already issued. NULL for
+ * legacy single-shot teammates and for leads that have never entered
+ * the waiting state.
+ *
+ * Consumed by the pure step function landing in D2 (and the
+ * processAgentRun refactor in D3).
+ */
+export interface LeadCheckpoint {
+  /**
+   * Index into the assistant-message history (the lead's transcript)
+   * that the step function has already processed up to (exclusive).
+   * On resume, the step function replays the transcript starting at
+   * this index so it doesn't re-issue Task() calls it already made.
+   */
+  lastProcessedIndex: number;
+  /**
+   * Anthropic `tool_use_id`s for Task() calls the lead has issued but
+   * for which it has not yet observed a matching `tool_result`. The
+   * resume path correlates these against incoming task_notification
+   * mailbox rows (Phase D4) to know when `waiting_for` should drain.
+   */
+  pendingToolUseIds: string[];
+  /**
+   * Arbitrary opaque state the step function carries across resumes
+   * (e.g. partial planner output, accumulated peer-DM digest, etc.).
+   * Shape is owned by the step function — kept as a free-form record
+   * so D2 can evolve it without a new migration.
+   */
+  state: Record<string, unknown>;
+}
+
 export const agentRuns = pgTable(
   'agent_runs',
   {
@@ -290,6 +326,27 @@ export const agentRuns = pgTable(
     shutdownReason: text('shutdown_reason'),
     totalTokens: bigint('total_tokens', { mode: 'number' }).default(0),
     toolUses: integer('tool_uses').default(0),
+    /**
+     * Phase D — durable lead orchestrator checkpoint. See `LeadCheckpoint`
+     * above. NULL for legacy single-shot teammates.
+     */
+    checkpoint: jsonb('checkpoint').$type<LeadCheckpoint | null>(),
+    /**
+     * Phase D — array of `agent_runs.id` this lead is currently waiting
+     * on. When the array drains to empty (D4 atomic update), the lead
+     * is re-enqueued and the step function resumes from `checkpoint`.
+     * Defaults to empty array so existing rows are backward-compatible.
+     */
+    waitingFor: text('waiting_for')
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    /**
+     * Phase D — Sleep-style scheduled resume timestamp. The scheduler
+     * scans rows with `next_wake_at <= now()` and re-enqueues them.
+     * NULL for runs that aren't currently sleeping on a wake.
+     */
+    nextWakeAt: timestamp('next_wake_at', { withTimezone: true }),
   },
   (t) => [
     index('idx_agent_runs_team_status_active').on(
@@ -299,6 +356,22 @@ export const agentRuns = pgTable(
     ),
     index('idx_agent_runs_sleep_until').on(t.sleepUntil),
     index('idx_agent_runs_parent').on(t.parentAgentId),
+    /**
+     * Phase D — fast lookup "which leads are waiting on agent X" so the
+     * D4 atomic-drain code can find candidates without a full scan.
+     * Partial: leads with empty `waiting_for` (the common steady-state)
+     * don't need to be in the index.
+     */
+    index('idx_agent_runs_waiting_for')
+      .using('gin', t.waitingFor)
+      .where(sql`cardinality(${t.waitingFor}) > 0`),
+    /**
+     * Phase D — scheduler scan path for time-based wakes. Partial: most
+     * runs are not sleeping on a wake, so excluding NULLs keeps it tiny.
+     */
+    index('idx_agent_runs_next_wake_at')
+      .on(t.nextWakeAt)
+      .where(sql`${t.nextWakeAt} IS NOT NULL`),
   ],
 );
 

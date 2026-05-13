@@ -218,6 +218,13 @@
       "when": 1779700030000,
       "tag": "0030_growth_rollup_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1779700031000,
+      "tag": "0031_agent_runs_checkpoint_waiting_for",
+      "breakpoints": true
     }
   ]
 }
