@@ -76,7 +76,6 @@ import {
 } from '@/lib/queue/agent-run';
 import { inflightCapForTier, tierForAgentRun } from '@/lib/team/team-tier';
 import type { AgentResult, StreamEvent, ToolContext } from '@/core/types';
-import type { LeadCheckpoint } from '@/lib/db/schema/team';
 import { leadStep, type LeadStepDeps } from './lead-step';
 
 const log = createLogger('agent-run');
@@ -2442,10 +2441,25 @@ async function runAgentTurn_durable(
       const childIds = decision.spawns
         .map((s) => s.spawnedAgentId)
         .filter((id): id is string => typeof id === 'string' && id.length > 0);
+      // Zombie-state guard. If we wrote `status='waiting_for_children'`
+      // with an EMPTY `waiting_for` array, the idempotent-wake guard at
+      // the top of this function (which requires `waitingFor.length > 0`
+      // to early-return) would NOT short-circuit on the next wake —
+      // leadStep would run again. But no child completion will ever
+      // re-enqueue us through D4's atomic-drain path (waiting_for was
+      // never populated). The lead would drift until an incidental wake
+      // from peer-DM / mailbox arrival.
+      //
+      // Cleaner: leave the row's current status untouched (still
+      // 'running' from the runningAt transition above) and yield this
+      // BullMQ slot. The next mailbox arrival re-enqueues via the
+      // normal wake() path; the lead picks up where it left off via
+      // priorMessages on the next leadStep.
       if (childIds.length === 0) {
         log.warn(
-          `agent-run ${agentId}: spawn_and_wait but no spawnedAgentId on any child — falling back to running (peer-DM keeps lead alive)`,
+          `agent-run ${agentId}: spawn_and_wait with no spawnedAgentId — leaving status='running' and yielding without persist (next mailbox wake will resume)`,
         );
+        return;
       }
       log.info(
         `agent-run ${agentId}: leadStep returned spawn_and_wait — waiting on ${childIds.length} children`,
@@ -2461,7 +2475,7 @@ async function runAgentTurn_durable(
         .set({
           status: 'waiting_for_children',
           waitingFor: childIds,
-          checkpoint: decision.newCheckpoint as LeadCheckpoint,
+          checkpoint: decision.newCheckpoint,
           lastActiveAt: waitingAt,
         })
         .where(eq(agentRuns.id, agentId));
@@ -2502,7 +2516,7 @@ async function runAgentTurn_durable(
           status: 'sleeping',
           sleepUntil,
           nextWakeAt: sleepUntil,
-          checkpoint: decision.newCheckpoint as LeadCheckpoint,
+          checkpoint: decision.newCheckpoint,
           lastActiveAt: sleptAt,
         })
         .where(eq(agentRuns.id, agentId));
@@ -2533,15 +2547,25 @@ async function runAgentTurn_durable(
       // surfaced 'killed' via gracefullyKilled and 'failed' via the
       // catch block — the durable path treats LlmRateLimitedError /
       // unexpected throws via processAgentRun's outer try/catch, so
-      // here we only handle the clean-exit case. Future revisions can
-      // add a `killed` discriminant to LeadStepDecision once the
-      // shutdown_request flow is reworked for the durable path
-      // (peer-DM shadow already doesn't wake; see CLAUDE.md "Critical
-      // invariants").
+      // here we only handle the clean-exit case.
+      //
+      // TODO(D4+): graceful shutdown_request handling. The legacy body
+      // observed inbound `shutdown_request` messages on its polling
+      // drain and exited with `status='killed'`. The durable path drains
+      // mail ONCE per wake, so a `shutdown_request` arriving mid-step is
+      // currently invisible until the next wake — at which point it
+      // reaches leadStep as a regular mailbox message. Reworking this
+      // requires a `killed` discriminant on `LeadStepDecision` plus a
+      // way to surface "user-initiated cancel" out of `runAgent`'s
+      // tool-execution loop (peer-DM shadow already doesn't wake the
+      // lead per CLAUDE.md's "Critical invariants"; the cancel pathway
+      // is the open piece).
       const finalText = decision.summary;
-      const summary = `${def.name} completed in 1 step`;
+      const totalTokens = decision.usage?.totalTokens ?? 0;
+      const toolUses = decision.usage?.toolUses ?? 0;
+      const summary = `${def.name} completed in ${toolUses} turns`;
       log.info(
-        `agent-run ${agentId}: leadStep returned done after ${durationMs}ms`,
+        `agent-run ${agentId}: leadStep returned done after ${durationMs}ms (totalTokens=${totalTokens}, turns=${toolUses})`,
       );
       const exitAt = new Date();
       statusBatcher.invalidate(agentId);
@@ -2550,8 +2574,8 @@ async function runAgentTurn_durable(
         .set({
           status: 'completed',
           lastActiveAt: exitAt,
-          totalTokens: 0,
-          toolUses: 0,
+          totalTokens,
+          toolUses,
           shutdownReason: null,
         })
         .where(eq(agentRuns.id, agentId));
@@ -2576,7 +2600,7 @@ async function runAgentTurn_durable(
         status: 'completed',
         finalText,
         summary,
-        usage: { totalTokens: 0, toolUses: 0, durationMs },
+        usage: { totalTokens, toolUses, durationMs },
         teammateName: def.name,
       });
 
@@ -2609,5 +2633,25 @@ async function runAgentTurn_durable(
       }
       return;
     }
+    default:
+      // Exhaustiveness check — if a future D4+ revision adds a 5th
+      // discriminant to `LeadStepDecision` (e.g. `'killed'`), this
+      // branch fails at compile time so we don't silently drop the new
+      // case. Reuses the same `assertNever` pattern as
+      // src/app/(app)/team/_components/team-desk.tsx:1299.
+      return assertNever(decision);
   }
+}
+
+/**
+ * Compile-time exhaustiveness check for discriminated-union switches.
+ * Throws at runtime if reached — TypeScript's `never` type ensures any
+ * unhandled discriminant becomes a compile error before this line is
+ * ever exercised. Local copy of the helper at
+ * `src/app/(app)/team/_components/team-desk.tsx:1299` (different
+ * module boundary; importing across the worker → UI seam isn't worth
+ * the dep edge).
+ */
+function assertNever(value: never): never {
+  throw new Error(`agent-run: unhandled LeadStepDecision variant: ${String(value)}`);
 }

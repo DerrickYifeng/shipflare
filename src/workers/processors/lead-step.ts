@@ -98,6 +98,21 @@ export interface SpawnRequest {
   spawnedAgentId?: string;
 }
 
+/**
+ * Usage envelope surfaced on a clean `done` decision so D3's apply-block
+ * can stamp `agent_runs.total_tokens` / `tool_uses` and forward the same
+ * counters into the synthesized `task_notification`. Without these
+ * fields, the durable path would silently regress billing /
+ * observability reads on `agent_runs` (the legacy body summed the four
+ * Anthropic token buckets off `result.usage`). Optional because rare
+ * call paths (test stubs faking an AgentResult without usage) may not
+ * produce a real envelope; D3 falls back to 0.
+ */
+export interface DoneUsage {
+  totalTokens: number;
+  toolUses: number;
+}
+
 export type LeadStepDecision =
   | { kind: 'spurious_wake' }
   | {
@@ -106,7 +121,7 @@ export type LeadStepDecision =
       newCheckpoint: LeadCheckpoint;
     }
   | { kind: 'sleep'; untilMs: number; newCheckpoint: LeadCheckpoint }
-  | { kind: 'done'; summary: string };
+  | { kind: 'done'; summary: string; usage?: DoneUsage };
 
 // ---------------------------------------------------------------------------
 // Runtime dependencies — supplied by the caller (D3 will wire these from
@@ -400,10 +415,27 @@ export async function leadStep(
 
   // No spawn / no sleep — runAgent terminated cleanly. Surface the
   // final text as the summary so D3 can stamp it on the synthesized
-  // task_notification.
+  // task_notification. Also surface the token / turn counters so D3
+  // can stamp `agent_runs.total_tokens` / `tool_uses` (mirrors the
+  // legacy body's `result.usage` sum at agent-run.ts:1506-1510).
   const summary =
     typeof agentResult.result === 'string'
       ? agentResult.result
       : JSON.stringify(agentResult.result);
-  return { kind: 'done', summary };
+  const usage: DoneUsage | undefined = agentResult.usage
+    ? {
+        totalTokens:
+          agentResult.usage.inputTokens +
+          agentResult.usage.outputTokens +
+          agentResult.usage.cacheReadTokens +
+          agentResult.usage.cacheWriteTokens,
+        // `UsageSummary.turns` is the closest proxy for "tool uses" in
+        // the current schema — the engine doesn't yet separate tool
+        // invocations from LLM turns. Match the legacy body which also
+        // wrote 0 to `tool_uses` (left as 0 until per-turn stream
+        // metrics land); using `turns` is a net improvement.
+        toolUses: agentResult.usage.turns ?? 0,
+      }
+    : undefined;
+  return { kind: 'done', summary, usage };
 }

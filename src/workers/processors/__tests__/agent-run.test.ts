@@ -3378,7 +3378,14 @@ describe('processAgentRun', () => {
     const setCalls = updateChain.set.mock.calls.map(
       (c) => (c as unknown as [Record<string, unknown>])[0],
     );
-    expect(setCalls.some((s) => s.status === 'completed')).toBe(true);
+    const completedSet = setCalls.find((s) => s.status === 'completed');
+    expect(completedSet).toBeDefined();
+    // totalTokens / toolUses must be stamped from the surfaced
+    // `decision.usage` — hardcoded zeros are a billing/observability
+    // regression vs. the legacy body.
+    // inputTokens(10) + outputTokens(20) + cache* (0) = 30.
+    expect(completedSet?.totalTokens).toBe(30);
+    expect(completedSet?.toolUses).toBe(2);
 
     // task_notification row was inserted for the parent.
     const notifInsert = insertChain.values.mock.calls.find(
@@ -3387,6 +3394,218 @@ describe('processAgentRun', () => {
         'task_notification',
     );
     expect(notifInsert).toBeDefined();
+  });
+
+  it('durable spawn_and_wait — empty spawnedAgentId fleet yields without persisting waiting_for_children (no zombie state)', async () => {
+    // Regression test for the zombie-state bug: a spawn_and_wait
+    // decision whose spawns ALL lack `spawnedAgentId` (older clients,
+    // truncated JSON in the Task tool's tool_done) used to write
+    // `status='waiting_for_children'` with `waiting_for=[]`. The
+    // idempotent-wake guard then proceeded to re-run leadStep on every
+    // wake (since `waiting_for.length === 0`) while no child completion
+    // could drive a transition — the lead drifted until incidental
+    // wakes. The fix: short-circuit before the persist, leaving the
+    // row at status='running' so the next mailbox arrival resumes
+    // cleanly.
+    vi.mocked(db.query.agentRuns.findFirst).mockResolvedValue({
+      id: 'a-spawn-no-id',
+      teamId: 'team-1',
+      memberId: 'mem-1',
+      agentDefName: 'coordinator',
+      parentAgentId: null,
+      parentToolUseId: null,
+      status: 'queued',
+      checkpoint: null,
+      waitingFor: [],
+    } as never);
+    vi.mocked(resolveAgent).mockResolvedValueOnce({
+      source: 'built-in',
+      sourcePath: '/test',
+      name: 'coordinator',
+      description: 'lead',
+      role: 'lead',
+      tools: [],
+      disallowedTools: [],
+      skills: [],
+      requires: [],
+      background: false,
+      maxTurns: 10,
+      systemPrompt: 'You are the lead.',
+    });
+    // Drive runAgent to emit an async Task tool_done WITHOUT agentId
+    // on the result envelope — exactly the malformed-payload condition
+    // that produces an empty childIds fleet.
+    runAgentHoisted.fn.mockImplementationOnce(async (...args: unknown[]) => {
+      runAgentHoisted.state.lastArgs = args;
+      const onEvent = args[7] as
+        | ((e: Record<string, unknown>) => void | Promise<void>)
+        | undefined;
+      if (onEvent) {
+        await onEvent({
+          type: 'tool_start',
+          toolName: 'Task',
+          toolUseId: 'tu-zombie-1',
+          input: {
+            subagent_type: 'researcher',
+            prompt: 'find sources',
+            description: 'spawn',
+            run_in_background: true,
+          },
+        });
+        await onEvent({
+          type: 'tool_done',
+          toolName: 'Task',
+          toolUseId: 'tu-zombie-1',
+          result: {
+            tool_use_id: 'tu-zombie-1',
+            // No `agentId` field — malformed envelope.
+            content: JSON.stringify({
+              result: null,
+              cost: 0,
+              duration: 0,
+              turns: 0,
+              status: 'async_launched',
+            }),
+          },
+          durationMs: 5,
+        });
+      }
+      return {
+        result: 'spawned a researcher',
+        usage: {
+          inputTokens: 1,
+          outputTokens: 1,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          costUsd: 0,
+          model: 'claude-sonnet-4-6',
+          turns: 1,
+        },
+      };
+    });
+    vi.mocked(drainMailbox).mockResolvedValueOnce([
+      {
+        id: 'msg-1',
+        toAgentId: 'a-spawn-no-id',
+        type: 'user_prompt',
+        messageType: 'message',
+        content: 'please research X',
+        createdAt: new Date(),
+      },
+    ]);
+
+    await processAgentRun(makeJob('a-spawn-no-id'));
+
+    // Critical assertion: NO `waiting_for_children` status write — the
+    // empty-childIds early-return must short-circuit before the
+    // synchronous persist. The setCalls list will contain the
+    // queued→running transition from the prelude, but never a
+    // waiting_for_children write.
+    const setCalls = updateChain.set.mock.calls.map(
+      (c) => (c as unknown as [Record<string, unknown>])[0],
+    );
+    expect(setCalls.some((s) => s.status === 'waiting_for_children')).toBe(
+      false,
+    );
+    // Also no completed / sleeping write — the function returned
+    // mid-decision, leaving the row at status='running' for the next
+    // wake to resume from.
+    expect(setCalls.some((s) => s.status === 'completed')).toBe(false);
+  });
+
+  it('durable done (LEAD path) — totalTokens/toolUses surfaced, no parent notify, completion SSE fires', async () => {
+    // Most common production case: founder asks lead a question, lead
+    // responds. parentAgentId is null (lead has no parent), so
+    // synthAndDeliverNotification still INSERTS a task_notification row
+    // (toAgentId=null, surfaced via the API's user_prompt drain) but
+    // wake() is skipped. The terminal completion SSE event fires so the
+    // founder UI's working indicator clears.
+    vi.mocked(db.query.agentRuns.findFirst).mockResolvedValue({
+      id: 'a-lead-done',
+      teamId: 'team-1',
+      memberId: 'mem-lead',
+      agentDefName: 'coordinator',
+      parentAgentId: null,
+      parentToolUseId: null,
+      status: 'queued',
+      checkpoint: null,
+      waitingFor: [],
+    } as never);
+    vi.mocked(resolveAgent).mockResolvedValueOnce({
+      source: 'built-in',
+      sourcePath: '/test',
+      name: 'coordinator',
+      description: 'lead',
+      role: 'lead',
+      tools: [],
+      disallowedTools: [],
+      skills: [],
+      requires: [],
+      background: false,
+      maxTurns: 10,
+      systemPrompt: 'You are the lead.',
+    });
+    selectChain.limit.mockResolvedValue([{ id: 'conv-1' }]);
+    runAgentHoisted.fn.mockImplementationOnce(async (...args: unknown[]) => {
+      runAgentHoisted.state.lastArgs = args;
+      return {
+        result: 'here is my answer',
+        usage: {
+          inputTokens: 50,
+          outputTokens: 100,
+          cacheReadTokens: 25,
+          cacheWriteTokens: 25,
+          costUsd: 0.01,
+          model: 'claude-sonnet-4-6',
+          turns: 3,
+        },
+      };
+    });
+    vi.mocked(drainMailbox).mockResolvedValueOnce([
+      {
+        id: 'msg-1',
+        toAgentId: 'a-lead-done',
+        type: 'user_prompt',
+        messageType: 'message',
+        content: 'what is the strategy?',
+        createdAt: new Date(),
+      },
+    ]);
+
+    await processAgentRun(makeJob('a-lead-done'));
+
+    const setCalls = updateChain.set.mock.calls.map(
+      (c) => (c as unknown as [Record<string, unknown>])[0],
+    );
+    const completedSet = setCalls.find((s) => s.status === 'completed');
+    expect(completedSet).toBeDefined();
+    // 50 + 100 + 25 + 25 = 200 totalTokens; turns=3.
+    expect(completedSet?.totalTokens).toBe(200);
+    expect(completedSet?.toolUses).toBe(3);
+
+    // task_notification row is still inserted (toAgentId=null because
+    // parentAgentId is null). The API's user_prompt drain picks it up.
+    const notifInsert = insertChain.values.mock.calls.find(
+      (c) =>
+        (c as unknown as [Record<string, unknown>])[0]?.messageType ===
+        'task_notification',
+    );
+    expect(notifInsert).toBeDefined();
+
+    // Terminal SSE completion event was published. We filter the
+    // publishMock calls by parsing the JSON payload and looking for
+    // type='completion'.
+    const completionPub = publishMock.mock.calls
+      .map((c) => c[1] as string)
+      .map((payload) => {
+        try {
+          return JSON.parse(payload) as Record<string, unknown>;
+        } catch {
+          return null;
+        }
+      })
+      .find((parsed) => parsed?.type === 'completion');
+    expect(completionPub).toBeDefined();
   });
 
   it('durable LlmRateLimitedError(tenant) — runAgent throw inside leadStep re-enqueues with retryMs', async () => {
