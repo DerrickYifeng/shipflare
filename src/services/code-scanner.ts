@@ -3,7 +3,7 @@ import { promisify } from 'node:util';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import fg from 'fast-glob';
-import Anthropic from '@anthropic-ai/sdk';
+import { createMessage } from '@/core/api-client';
 import { createLogger } from '@/lib/logger';
 import type {
   TechStack,
@@ -342,8 +342,6 @@ async function analyzeCodebase(params: {
   keyFiles: KeyFile[];
   techStack: TechStack;
 }): Promise<ProductAnalysis> {
-  const client = new Anthropic();
-
   const sections = [
     params.techStack.languages.length > 0
       ? `Tech Stack: ${params.techStack.languages.join(', ')} / ${params.techStack.frameworks.join(', ')}`
@@ -362,9 +360,11 @@ async function analyzeCodebase(params: {
   const content = sections.join('\n');
 
   try {
-    const response = await client.messages.create({
+    // Route through createMessage for shared retry logic on
+    // 429/529/5xx + prompt caching of the static CODEBASE_ANALYZE_PROMPT.
+    const { response } = await createMessage({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 400,
+      maxTokens: 400,
       system: CODEBASE_ANALYZE_PROMPT,
       messages: [{ role: 'user', content }],
     });
