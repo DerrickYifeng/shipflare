@@ -859,7 +859,7 @@ export function stitchLeadMessages(
  * identity is stable when no live events have landed (lets React's memo
  * boundaries dedup downstream).
  */
-function applyStatusChanges(
+export function applyStatusChanges(
   messages: readonly TeamActivityMessage[],
   seed: AgentRunStatusMap,
 ): Map<string, AgentRunStatus> {

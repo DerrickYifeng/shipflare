@@ -35,6 +35,7 @@ import {
   type RailSubagent,
 } from './active-subagents-rail';
 import {
+  applyStatusChanges,
   stitchLeadMessages,
   type AgentRunStatus,
   type AgentRunStatusMap,
@@ -483,6 +484,18 @@ function TeamDeskInner({
     [conversationList, titleByConv],
   );
 
+  // Merge SSE-delivered `agent_status_change` events on top of the
+  // SSR-seeded `agentRunStatus` once per render so every downstream
+  // consumer (rail, conversation reducer call sites that pass their own
+  // map, etc.) sees the same up-to-date view. `agentRunStatus` (prop) is
+  // frozen at page-load time; `liveAgentRunStatus` IS the fresh map.
+  // This was the bug: the rail used to read from `agentRunStatus`
+  // directly and never saw the queued→running transition.
+  const liveAgentRunStatus = useMemo(
+    () => applyStatusChanges(liveMessages, agentRunStatus ?? new Map()),
+    [liveMessages, agentRunStatus],
+  );
+
   // ---------- Delegation tasks (task panel, global view) ----------
   const allDelegationTasks = useMemo<DelegationTask[]>(() => {
     const nodes = stitchLeadMessages(liveMessages, agentRunStatus, partials);
@@ -499,12 +512,14 @@ function TeamDeskInner({
   // The rail surfaces in-flight teammates in a fixed bottom panel so they
   // never scroll out of view (engine TaskListV2 pattern). Source: the same
   // DelegationTask stream the right-rail Task panel uses, joined with the
-  // live `agentRunStatus` map so terminal states flow through to the TTL
-  // filter. No new fetch — every input already exists in this component.
+  // LIVE `liveAgentRunStatus` map so SSE transitions (queued → running →
+  // sleeping → done) flow through immediately and the TTL filter sees the
+  // truthful state. No new fetch — every input already exists in this
+  // component.
   //
-  // Stability strategy: `agentRunStatus` is a fresh Map reference every
-  // SSE tick (per `applyStatusChanges` reconciliation), so a naive
-  // `useMemo([allDelegationTasks, agentRunStatus])` would churn the
+  // Stability strategy: `liveAgentRunStatus` is a fresh Map reference every
+  // SSE tick (per `applyStatusChanges`), so a naive
+  // `useMemo([allDelegationTasks, liveAgentRunStatus])` would churn the
   // `railSubagents` array reference on every progress event — which in
   // turn would churn `activeSubagentIds` and bust A1's React.memo on
   // DelegationCard. The fix: build the snapshot, then derive a
@@ -519,7 +534,7 @@ function TeamDeskInner({
       if (!t.agentId) continue;
       if (seen.has(t.agentId)) continue;
       seen.add(t.agentId);
-      const runStatus = agentRunStatus?.get(t.agentId);
+      const runStatus = liveAgentRunStatus.get(t.agentId);
       const lastActiveIso = runStatus?.lastActiveAt ?? runStatus?.spawnedAt ?? null;
       // Date.now() as the floor when neither lastActiveAt nor spawnedAt
       // is populated — happens transiently before the first SSE tick.
@@ -541,7 +556,7 @@ function TeamDeskInner({
       });
     }
     return out;
-  }, [allDelegationTasks, agentRunStatus]);
+  }, [allDelegationTasks, liveAgentRunStatus]);
 
   // Signature: id+status+lastActiveAt for every entry, sorted by id so
   // the signature is order-insensitive. Anything that would change the
