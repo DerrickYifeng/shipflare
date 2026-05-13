@@ -152,4 +152,96 @@ describe('AgentStatusBatcher', () => {
     });
     batcher.dispose();
   });
+
+  // --------------------------------------------------------------------
+  // invalidate() — drops a buffered entry without flushing (B7 race fix)
+  // --------------------------------------------------------------------
+
+  it('invalidate drops the buffered entry without flushing', async () => {
+    const flush = vi.fn().mockResolvedValue(undefined);
+    const batcher = new AgentStatusBatcher({ flushIntervalMs: 50, flush });
+    batcher.set('a-1', makeUpdate({ status: 'running' }));
+    batcher.invalidate('a-1');
+    await new Promise((r) => setTimeout(r, 80));
+    expect(flush).not.toHaveBeenCalled();
+    await batcher.dispose();
+  });
+
+  it('invalidate is a no-op when no entry is buffered', () => {
+    const flush = vi.fn().mockResolvedValue(undefined);
+    const batcher = new AgentStatusBatcher({ flushIntervalMs: 50, flush });
+    expect(() => batcher.invalidate('never-set')).not.toThrow();
+    batcher.dispose();
+  });
+
+  it('invalidate prevents a stale transient from overwriting a sync terminal write (bug pattern)', async () => {
+    // Simulates the C1 race:
+    //   set('a-1', {status:'running'})  — transient, buffered
+    //   <markFailed() would write 'failed' here synchronously>
+    //   statusBatcher.invalidate('a-1')  — MUST happen before the sync write
+    //   ...batcher tick fires later → MUST NOT flush a stale 'running'
+    const flush = vi.fn().mockResolvedValue(undefined);
+    const batcher = new AgentStatusBatcher({ flushIntervalMs: 30, flush });
+    batcher.set('a-1', makeUpdate({ status: 'running' }));
+    // (Pretend the markFailed sync write happens here — outside the batcher.)
+    batcher.invalidate('a-1');
+    // Wait through multiple ticks.
+    await new Promise((r) => setTimeout(r, 120));
+    expect(flush).not.toHaveBeenCalled();
+    await batcher.dispose();
+  });
+
+  it('invalidate one agent does not affect other buffered agents', async () => {
+    const flush = vi.fn().mockResolvedValue(undefined);
+    const batcher = new AgentStatusBatcher({ flushIntervalMs: 40, flush });
+    batcher.set('a-1', makeUpdate({ status: 'running' }));
+    batcher.set('a-2', makeUpdate({ status: 'sleeping' }));
+    batcher.invalidate('a-1');
+    await new Promise((r) => setTimeout(r, 70));
+    expect(flush).toHaveBeenCalledTimes(1);
+    const batch = flush.mock.calls[0][0] as FlushPayload[];
+    expect(batch).toHaveLength(1);
+    expect(batch[0].agentId).toBe('a-2');
+    await batcher.dispose();
+  });
+
+  // --------------------------------------------------------------------
+  // dispose() — now async, awaits the final flush (I1)
+  // --------------------------------------------------------------------
+
+  it('dispose() awaits a slow final flush instead of returning early', async () => {
+    let flushDone = false;
+    const flush = vi.fn().mockImplementation(async () => {
+      // Simulate a slow DB round-trip — longer than the old 200ms grace.
+      await new Promise((r) => setTimeout(r, 80));
+      flushDone = true;
+    });
+    const batcher = new AgentStatusBatcher({ flushIntervalMs: 10_000, flush });
+    batcher.set('a-1', makeUpdate({ status: 'sleeping' }));
+    await batcher.dispose();
+    // The await on dispose() must not resolve until flush actually finished.
+    expect(flushDone).toBe(true);
+    expect(flush).toHaveBeenCalledTimes(1);
+  });
+
+  it('dispose() is idempotent — second call resolves immediately without re-flushing', async () => {
+    const flush = vi.fn().mockResolvedValue(undefined);
+    const batcher = new AgentStatusBatcher({ flushIntervalMs: 10_000, flush });
+    batcher.set('a-1', makeUpdate({ status: 'sleeping' }));
+    await batcher.dispose();
+    await batcher.dispose();
+    expect(flush).toHaveBeenCalledTimes(1);
+  });
+
+  it('dispose() swallows flush errors so the worker can still exit cleanly', async () => {
+    const flush = vi
+      .fn()
+      .mockImplementation(async () => {
+        throw new Error('db went down at shutdown');
+      });
+    const batcher = new AgentStatusBatcher({ flushIntervalMs: 10_000, flush });
+    batcher.set('a-1', makeUpdate({ status: 'sleeping' }));
+    // Must NOT reject — dispose's job is to give the process a clean exit.
+    await expect(batcher.dispose()).resolves.toBeUndefined();
+  });
 });

@@ -303,8 +303,13 @@ vi.mock('@/lib/team/agent-status-batcher', () => {
         // file are mock-introspection sites like `.mock.calls`).
         (updateChain.set as unknown as (u: Record<string, unknown>) => void)(update);
       }
+      // B7 race-fix: callers issuing a sync terminal write now call
+      // invalidate(agentId) immediately beforehand to drop any stale
+      // buffered transient. In the fake there's nothing to drop (set
+      // forwards straight to updateChain.set), so this is a no-op.
+      invalidate(_agentId: string): void {}
       async flushNow(): Promise<void> {}
-      dispose(): void {}
+      async dispose(): Promise<void> {}
       size(): number {
         return 0;
       }

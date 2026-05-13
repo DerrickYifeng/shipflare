@@ -470,11 +470,10 @@ async function shutdown() {
   log.info('Shutting down workers...');
   // B7: flush any pending status-batcher entries before BullMQ workers
   // close — otherwise transient queued/running/sleeping/resuming writes
-  // buffered for the next 500ms tick get lost on SIGTERM. The dispose
-  // fires the final flush fire-and-forget; we give it a brief grace
-  // window before exiting so the UPDATE round-trips complete.
-  disposeAgentStatusBatcher();
-  await new Promise((r) => setTimeout(r, 200));
+  // buffered for the next 500ms tick get lost on SIGTERM. AWAIT the
+  // dispose — the earlier fire-and-forget + 200ms setTimeout grace was
+  // unsafe under slow DB or large pending buffers.
+  await disposeAgentStatusBatcher();
   await Promise.all(workers.map((w) => w.close()));
   process.exit(0);
 }

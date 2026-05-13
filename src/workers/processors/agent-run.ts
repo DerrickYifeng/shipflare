@@ -151,10 +151,26 @@ const statusBatcher = new AgentStatusBatcher({
 /**
  * Flush + tear down the module-level status batcher. Called from the
  * worker process's SIGTERM/SIGINT handler so any pending status writes
- * make it to Postgres before the process exits.
+ * make it to Postgres before the process exits. AWAIT it — the previous
+ * fire-and-forget + 200ms grace was unsafe under slow DB / large pending
+ * buffers (final UPDATEs dropped on `process.exit(0)`).
  */
-export function disposeAgentStatusBatcher(): void {
-  statusBatcher.dispose();
+export async function disposeAgentStatusBatcher(): Promise<void> {
+  await statusBatcher.dispose();
+}
+
+/**
+ * Drop any buffered transient status update for `agentId` without
+ * flushing it. Callers about to issue a SYNCHRONOUS TERMINAL write
+ * (markFailed, final exit, post-Sleep recovery) MUST call this
+ * immediately before the `db.update(agentRuns)` to avoid the next
+ * batcher tick overwriting the terminal write with a stale buffered
+ * 'running' / 'resuming'. Exported so the SleepTool's exit choke point
+ * (`sleepingExit` branch) can invalidate without importing the
+ * singleton directly.
+ */
+export function invalidateAgentStatusFor(agentId: string): void {
+  statusBatcher.invalidate(agentId);
 }
 
 // ---------------------------------------------------------------------------
@@ -368,6 +384,10 @@ async function markFailed(
   parentToolUseId: string | null,
 ): Promise<void> {
   const now = new Date();
+  // B7 race-fix: drop any transient 'running'/'resuming' still buffered
+  // for this agent before the synchronous terminal write. Without this,
+  // the next batcher tick would overwrite the durable 'failed' row.
+  statusBatcher.invalidate(agentId);
   await db
     .update(agentRuns)
     .set({
@@ -1558,6 +1578,13 @@ async function runAgentTurn(
     // the early-exit signal landed. Mirror that into the cache so the
     // roster reflects the yield without waiting for the 60s TTL safety
     // net. Lead vs teammate routing still applies.
+    // B7 race-fix: SleepTool wrote agent_runs.status='sleeping' SYNCHRONOUSLY
+    // from inside the tool; if any transient batcher entry for this agent is
+    // still pending from earlier in the turn (e.g. the queued/resuming →
+    // running set), the next tick would overwrite the Sleep tool's
+    // 'sleeping' + sleepUntil with a stale 'running'. Drop the buffered
+    // entry now, before we return control to BullMQ.
+    statusBatcher.invalidate(agentId);
     const sleptAt = new Date();
     if (isLead) {
       await cacheLeadStatus(row.teamId, agentId, 'sleeping', sleptAt);
@@ -1577,6 +1604,11 @@ async function runAgentTurn(
 
   // Persist exit state.
   const exitAt = new Date();
+  // B7 race-fix: drop any transient 'running' still buffered for this
+  // agent before the synchronous terminal write. Without this, the next
+  // batcher tick (up to ~500ms later) would overwrite the durable
+  // completed/failed/killed row with a stale 'running' state.
+  statusBatcher.invalidate(agentId);
   await db
     .update(agentRuns)
     .set({

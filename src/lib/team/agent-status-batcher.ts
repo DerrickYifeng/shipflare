@@ -109,6 +109,27 @@ export class AgentStatusBatcher {
   }
 
   /**
+   * Drop any buffered update for this agentId without flushing it.
+   * Callers issuing a SYNCHRONOUS TERMINAL write (markFailed, final
+   * exit, Sleep-tool sleeping write) MUST call this immediately before
+   * their `db.update(agentRuns).set(...)` to prevent the next batcher
+   * tick from overwriting their durable terminal write with a stale
+   * buffered transient state (e.g. a 'running' set ~50ms earlier that
+   * hasn't flushed yet).
+   *
+   * Concretely the race window without invalidate():
+   *   1. statusBatcher.set(a, { status: 'running' })   // buffered, not yet flushed
+   *   2. markFailed(a, ...) → db.update.set({ status: 'failed' })  // sync write lands
+   *   3. ~500ms later: batcher tick → flushes buffered 'running'
+   *      → OVERWRITES 'failed' in agent_runs. Bug.
+   *
+   * No-op when no entry is buffered for `agentId`.
+   */
+  invalidate(agentId: string): void {
+    this.buffer.delete(agentId);
+  }
+
+  /**
    * Drain the buffer through the flush callback. No-op when empty.
    * On rejection, the in-flight batch is re-buffered so the next tick
    * retries; entries written DURING the failed flush survive (Map.set
@@ -138,21 +159,28 @@ export class AgentStatusBatcher {
   }
 
   /**
-   * Clear the interval and fire a final flush. Idempotent. Wire this
-   * into your worker's SIGTERM/SIGINT handler so a pending tick
-   * doesn't get lost when the process exits.
+   * Clear the interval and AWAIT a final flush. Idempotent. Wire this
+   * into your worker's SIGTERM/SIGINT handler — and `await` the
+   * returned promise — so a pending tick's UPDATEs make it to Postgres
+   * before `process.exit(0)`. A sync wrapper + empirical `setTimeout`
+   * grace window is NOT safe under a slow DB or a large pending
+   * buffer: the round-trips outlast the grace and the UPDATEs are
+   * dropped on exit.
+   *
+   * Subsequent calls after the first complete resolve immediately
+   * (idempotent — they neither re-flush nor throw).
    */
-  dispose(): void {
+  async dispose(): Promise<void> {
     if (this.disposed) return;
     this.disposed = true;
     clearInterval(this.timer);
-    // Fire-and-forget the final flush. Callers that need to await it
-    // can call `flushNow()` explicitly before dispose().
-    void this.flushNow().catch((err) => {
+    try {
+      await this.flushNow();
+    } catch (err) {
       log.warn(
         `agent-status-batcher final flush failed: ${err instanceof Error ? err.message : String(err)}`,
       );
-    });
+    }
   }
 
   /** Pending entry count — useful for /api/admin/queue-stats. */
