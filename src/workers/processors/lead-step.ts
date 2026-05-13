@@ -3,14 +3,14 @@
 // `leadStep` invokes `runAgent` (the existing multi-turn LLM loop) and
 // classifies what happened into one of four discriminated outcomes:
 //
-//   - 'continue'        — runAgent produced more assistant messages but
-//                         did not yield, spawn async teammates, or
-//                         terminate. The caller should call leadStep
-//                         again with the updated history. Rare in
-//                         practice (usually a synchronous tool finished
-//                         and the model wants another turn) but kept as
-//                         a distinct branch so D3's apply-decision
-//                         logic stays explicit.
+//   - 'spurious_wake'   — empty mailbox + non-empty history. No new
+//                         work to do. runAgent is NOT called (would
+//                         otherwise push an empty user message and
+//                         trip Anthropic's cache_control-on-empty-text
+//                         rejection — same bug fixed in
+//                         `agent-run.ts:820-895` on 2026-05-12).
+//                         D3 should put the agent back to sleep with
+//                         no status writes and no API spend.
 //   - 'spawn_and_wait'  — runAgent fired one or more
 //                         `Task(run_in_background:true)` calls. The
 //                         lead should be persisted with `waiting_for`
@@ -51,12 +51,28 @@ import { createLogger } from '@/lib/logger';
 const log = createLogger('agent-run:lead-step');
 
 // ---------------------------------------------------------------------------
-// Public types — match the D2 plan contract exactly.
+// Public types — match the D2 plan contract.
 // ---------------------------------------------------------------------------
 
 export interface LeadStepInput {
   agentId: string;
+  /**
+   * Prior conversation history (Anthropic MessageParam[]) — the caller
+   * has already replayed `team_messages` rows up to the checkpoint
+   * cursor. leadStep passes this through to runAgent's `priorMessages`
+   * unchanged. Empty means "fresh spawn — no transcript yet".
+   */
   history: Anthropic.Messages.MessageParam[];
+  /**
+   * Newly-drained mailbox messages addressed to this agent_run. The
+   * caller is responsible for draining `team_messages` via
+   * `drainMailbox`; leadStep only consumes `mailbox[0].content` as the
+   * seed user message handed to runAgent. Mailbox messages 1..N are NOT
+   * consumed by leadStep — the caller MUST re-inject them via the
+   * existing `pendingInjections` mechanism (the D3 caller's
+   * `injectMessages` callback) so they reach the agent at the next
+   * idle-turn boundary. Mirrors today's `agent-run.ts:824` behavior.
+   */
   mailbox: DrainedMessage[];
   checkpoint: LeadCheckpoint | null;
   tenantId: string;
@@ -69,11 +85,7 @@ export interface SpawnRequest {
 }
 
 export type LeadStepDecision =
-  | {
-      kind: 'continue';
-      assistantMessages: Anthropic.Messages.MessageParam[];
-      newCheckpoint: LeadCheckpoint;
-    }
+  | { kind: 'spurious_wake' }
   | {
       kind: 'spawn_and_wait';
       spawns: SpawnRequest[];
@@ -141,6 +153,29 @@ export async function leadStep(
     injectMessages,
     runAgentImpl = runAgent,
   } = deps;
+
+  // -------------------------------------------------------------------------
+  // Spurious-wake guard. Mirrors `agent-run.ts:820-895` (the 2026-05-12
+  // fix). When the mailbox is empty AND we have prior history, there's
+  // no new user input — pushing the empty string into runAgent's
+  // `userMessage` would land as `{role:'user', content:''}` in the
+  // conversation, then `addMessageCacheBreakpoint` would mark the empty
+  // text block with `cache_control:ephemeral`, and Anthropic rejects
+  // with `messages.N.content.0.text: cache_control cannot be set for
+  // empty text blocks`.
+  //
+  // Returning `spurious_wake` BEFORE invoking runAgent burns zero API
+  // spend; D3 puts the agent back to sleep with no checkpoint mutation
+  // and no terminal status write, awaiting the next genuine wake.
+  // -------------------------------------------------------------------------
+
+  const firstMailContent = mailbox[0]?.content ?? '';
+  if (firstMailContent.length === 0 && history.length > 0) {
+    log.info(
+      `leadStep ${input.agentId}: spurious wake (empty mailbox + ${history.length} priorMessages) — returning to sleep without API call`,
+    );
+    return { kind: 'spurious_wake' };
+  }
 
   // -------------------------------------------------------------------------
   // Stream-event observer: detect async-Task spawns and Sleep yields.
@@ -250,16 +285,15 @@ export async function leadStep(
   };
 
   // -------------------------------------------------------------------------
-  // Merge mailbox content into the seed user message. The existing
-  // `runAgentTurn` body uses `initialBatch[0].content` as the first user
-  // turn; for parity we do the same but also concatenate any additional
-  // drained messages so a queued burst doesn't get lost.
+  // Seed user message: first mailbox entry only. Additional mailbox
+  // messages (mailbox[1..N]) are NOT folded into the seed — the caller's
+  // existing `pendingInjections` drain re-injects them at the next
+  // idle-turn boundary inside runAgent (see `injectMessages` callback
+  // in agent-run.ts:1388-1391). Mirrors today's `initialBatch[0].content`
+  // behavior at agent-run.ts:824, preventing double-injection.
   // -------------------------------------------------------------------------
 
-  const seedSegments = mailbox
-    .map((m) => m.content ?? '')
-    .filter((s) => s.length > 0);
-  const seedPrompt = seedSegments.join('\n\n');
+  const seedPrompt = firstMailContent;
 
   // -------------------------------------------------------------------------
   // Invoke runAgent. D3 will pass the same `injectMessages` FIFO it uses
@@ -272,33 +306,27 @@ export async function leadStep(
   // is not re-threaded into runAgent — config carries it already.
   void tenantId;
 
-  let agentResult: AgentResult<unknown>;
-  try {
-    agentResult = await runAgentImpl(
-      config,
-      seedPrompt,
-      ctx,
-      undefined, // outputSchema
-      undefined, // onProgress
-      undefined, // prebuilt
-      undefined, // onIdleReset
-      observer,
-      injectMessages,
-      history.length > 0 ? history : undefined,
-    );
-  } catch (err) {
-    // LlmRateLimitedError MUST propagate so processAgentRun can re-enqueue
-    // with the bucket-suggested retryMs. Other errors also propagate — D3
-    // decides whether to mark the run as 'failed'.
-    throw err;
-  }
+  const agentResult: AgentResult<unknown> = await runAgentImpl(
+    config,
+    seedPrompt,
+    ctx,
+    undefined, // outputSchema
+    undefined, // onProgress
+    undefined, // prebuilt
+    undefined, // onIdleReset
+    observer,
+    injectMessages,
+    history.length > 0 ? history : undefined,
+  );
+  // LlmRateLimitedError and any other throws propagate untouched — D3
+  // (and outer processAgentRun) decide whether to re-enqueue or fail.
 
   // -------------------------------------------------------------------------
   // Classification.
   // -------------------------------------------------------------------------
 
   // Precedence order:
-  //   sleep > spawn_and_wait > continue > done
+  //   sleep > spawn_and_wait > done
   //
   // Rationale:
   //   - Sleep is a deliberate worker-slot yield; if the agent did BOTH
@@ -306,16 +334,15 @@ export async function leadStep(
   //     aborted (the Sleep early-exit fires controller.abort() in the
   //     existing handleStreamEvent). D3 should not treat the same step
   //     as both "waiting on spawns" and "sleeping".
-  //   - Spawn-and-wait beats continue/done because waiting on async
-  //     teammates is the load-bearing decision; the lead's final
-  //     assistant text after a spawn fan-out is irrelevant until the
-  //     teammates land.
+  //   - Spawn-and-wait beats done because waiting on async teammates is
+  //     the load-bearing decision; the lead's final assistant text after
+  //     a spawn fan-out is irrelevant until the teammates land.
 
-  // Index of `history.length` at the moment we classify — this is the
-  // resume cursor D3 will use. We don't append runAgent's internal
-  // transcript here because that lives in agentResult only when D3
-  // wires history persistence (already done today via agent_text
-  // team_messages rows).
+  // `lastProcessedIndex` records the entry-time history length. D3 is
+  // responsible for advancing this cursor on the durable side as it
+  // persists new assistant_text rows to `team_messages` (the existing
+  // pattern from agent-run.ts:1046-1158). See LeadCheckpoint JSDoc in
+  // src/lib/db/schema/team.ts for the ownership contract.
   const lastProcessedIndex = history.length;
 
   if (sleepDurationMs !== null) {
@@ -325,8 +352,7 @@ export async function leadStep(
     const untilMs = Date.now() + sleepDurationMs;
     const newCheckpoint: LeadCheckpoint = {
       lastProcessedIndex,
-      pendingToolUseIds:
-        checkpoint?.pendingToolUseIds.slice() ?? [],
+      pendingToolUseIds: checkpoint?.pendingToolUseIds.slice() ?? [],
       state: checkpoint?.state ?? {},
     };
     return { kind: 'sleep', untilMs, newCheckpoint };

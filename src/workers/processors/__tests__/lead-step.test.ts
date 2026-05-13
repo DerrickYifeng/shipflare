@@ -7,7 +7,6 @@
 // classifies the outcome correctly.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { z } from 'zod';
 import type Anthropic from '@anthropic-ai/sdk';
 import { LlmRateLimitedError } from '@/core/api-client';
 import type {
@@ -17,7 +16,6 @@ import type {
   ToolContext,
 } from '@/core/types';
 import type { runAgent } from '@/core/query-loop';
-import type { LeadCheckpoint } from '@/lib/db/schema/team';
 import { leadStep } from '../lead-step';
 
 // ---------------------------------------------------------------------------
@@ -63,12 +61,11 @@ function mockRunAgentWith(
   events: StreamEvent[],
   result: AgentResult<unknown>,
 ): typeof runAgent {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return (async (
     _config: AgentConfig,
     _userMessage: string,
     _ctx: ToolContext,
-    _outputSchema: z.ZodType | undefined,
+    _outputSchema: unknown,
     _onProgress: unknown,
     _prebuilt: unknown,
     _onIdleReset: unknown,
@@ -82,8 +79,7 @@ function mockRunAgentWith(
       }
     }
     return result;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  }) as any;
+  }) as unknown as typeof runAgent;
 }
 
 function asyncLaunchedEvents(
@@ -149,6 +145,22 @@ function sleepEvents(durationMs: number): StreamEvent[] {
   ];
 }
 
+// Helper: seed mailbox with a single non-empty message, so tests that
+// exercise sleep/spawn/done paths don't accidentally trigger the
+// spurious-wake guard when they pass non-empty `history`.
+function mailboxWith(content: string): Parameters<typeof leadStep>[0]['mailbox'] {
+  return [
+    {
+      id: 'm-1',
+      toAgentId: 'a-1',
+      type: 'user_prompt',
+      messageType: 'message',
+      content,
+      createdAt: new Date(),
+    },
+  ];
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -156,6 +168,64 @@ function sleepEvents(durationMs: number): StreamEvent[] {
 describe('leadStep — decision classification', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it('returns spurious_wake when history is non-empty and mailbox is empty (no new mail)', async () => {
+    // Regression test for the 2026-05-12 cache_control-on-empty-text bug
+    // (agent-run.ts:820-895). leadStep MUST short-circuit before
+    // invoking runAgent — otherwise the empty seed user message lands
+    // in Anthropic's conversation array, gets a cache_control:ephemeral
+    // breakpoint, and the API rejects with 400.
+    const runAgentMock = vi.fn();
+    const result = await leadStep(
+      {
+        agentId: 'a-1',
+        history: [{ role: 'user', content: 'old msg' }],
+        mailbox: [],
+        checkpoint: null,
+        tenantId: 'u-1',
+      },
+      {
+        config: makeConfig(),
+        ctx: makeCtx(),
+        runAgentImpl: runAgentMock as unknown as typeof runAgent,
+      },
+    );
+
+    expect(result.kind).toBe('spurious_wake');
+    // Critical: no LLM call was burned.
+    expect(runAgentMock).not.toHaveBeenCalled();
+  });
+
+  it('does NOT return spurious_wake on a fresh spawn (empty history + empty mailbox is a different bug path)', async () => {
+    // Empty mailbox + empty history is a "spawned with no content"
+    // condition that today fails loud via agent-run.ts:880-894. leadStep
+    // itself does not handle that — D3 will continue to handle it at
+    // the caller layer. Asserting here that the guard is correctly
+    // gated on `history.length > 0` so the guard doesn't swallow that
+    // bug path.
+    const runAgentImpl = mockRunAgentWith([], {
+      result: 'ok',
+      usage: emptyUsage(),
+    });
+    const result = await leadStep(
+      {
+        agentId: 'a-1',
+        history: [],
+        mailbox: [],
+        checkpoint: null,
+        tenantId: 'u-1',
+      },
+      {
+        config: makeConfig(),
+        ctx: makeCtx(),
+        runAgentImpl,
+      },
+    );
+    // Falls through to done (runAgent runs against empty seed); the
+    // empty-history branch does NOT mask the "fresh spawn with no
+    // content" condition.
+    expect(result.kind).toBe('done');
   });
 
   it('returns spawn_and_wait when runAgent emits async Task tool_use', async () => {
@@ -207,8 +277,10 @@ describe('leadStep — decision classification', () => {
     const result = await leadStep(
       {
         agentId: 'a-1',
+        // history is non-empty, mailbox is non-empty — bypasses the
+        // spurious-wake guard so we actually exercise classification.
         history: [{ role: 'user', content: 'hello' }],
-        mailbox: [],
+        mailbox: mailboxWith('please do these'),
         checkpoint: {
           lastProcessedIndex: 0,
           pendingToolUseIds: ['prior-tu'],
@@ -250,7 +322,9 @@ describe('leadStep — decision classification', () => {
       {
         agentId: 'a-1',
         history: [{ role: 'user', content: 'wait for me' }],
-        mailbox: [],
+        // Non-empty mailbox so the spurious-wake guard does not short-
+        // circuit before runAgent is invoked.
+        mailbox: mailboxWith('please wait'),
         checkpoint: null,
         tenantId: 'u-1',
       },
@@ -281,16 +355,7 @@ describe('leadStep — decision classification', () => {
       {
         agentId: 'a-1',
         history: [],
-        mailbox: [
-          {
-            id: 'm-1',
-            toAgentId: 'a-1',
-            type: 'user_prompt',
-            messageType: 'message',
-            content: 'hello',
-            createdAt: new Date(),
-          },
-        ],
+        mailbox: mailboxWith('hello'),
         checkpoint: null,
         tenantId: 'u-1',
       },
@@ -391,7 +456,12 @@ describe('leadStep — decision classification', () => {
     expect(parentOnEvent.mock.calls[1][0].type).toBe('tool_done');
   });
 
-  it('merges mailbox content into the seed user message handed to runAgent', async () => {
+  it('seeds runAgent with mailbox[0].content only — additional messages are NOT folded in', async () => {
+    // Contract: leadStep consumes ONLY mailbox[0]. Additional messages
+    // are left to the caller's `pendingInjections` drain to inject at
+    // the next idle-turn boundary inside runAgent. Concatenating them
+    // here would cause double-injection (the existing agent-run.ts
+    // drain timer pushes mailbox 1..N into pendingInjections too).
     let seenSeedPrompt: string | null = null;
     const runAgentImpl: typeof runAgent = (async (
       _config: AgentConfig,
@@ -433,29 +503,7 @@ describe('leadStep — decision classification', () => {
       },
     );
 
-    expect(seenSeedPrompt).toBe('first segment\n\nsecond segment');
-  });
-
-  it('keeps the continue discriminant in the public decision union (compile-time)', () => {
-    // Compile-time guard: ensure the discriminated union still includes
-    // 'continue' so D3 can rely on it being a callable branch. The
-    // runtime classification can't produce 'continue' against today's
-    // runAgent contract (which always returns or throws), but the
-    // type-level contract is load-bearing for the D3 apply step's
-    // exhaustive switch.
-    type AssertHasContinue = Extract<
-      Awaited<ReturnType<typeof leadStep>>,
-      { kind: 'continue' }
-    >;
-    const _proof: AssertHasContinue = {
-      kind: 'continue',
-      assistantMessages: [],
-      newCheckpoint: {
-        lastProcessedIndex: 0,
-        pendingToolUseIds: [],
-        state: {},
-      },
-    };
-    expect(_proof.kind).toBe('continue');
+    // First-only: caller's existing pendingInjections drain handles the rest.
+    expect(seenSeedPrompt).toBe('first segment');
   });
 });

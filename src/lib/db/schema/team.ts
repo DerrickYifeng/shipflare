@@ -266,10 +266,22 @@ export type NewTeamMessage = typeof teamMessages.$inferInsert;
  */
 export interface LeadCheckpoint {
   /**
-   * Index into the assistant-message history (the lead's transcript)
-   * that the step function has already processed up to (exclusive).
-   * On resume, the step function replays the transcript starting at
-   * this index so it doesn't re-issue Task() calls it already made.
+   * The index at which the next `leadStep` should resume reading the
+   * persisted transcript (the lead's `team_messages` history rebuilt
+   * via `loadConversationHistory` / `loadAgentRunHistory`). Records
+   * `history.length` at the moment the step function returned — i.e.
+   * the count of messages already replayed into runAgent's
+   * `priorMessages` for the just-completed step.
+   *
+   * **Ownership:** `leadStep` (D2) stamps this with the entry-time
+   * history length. ADVANCING the cursor across the step's own newly-
+   * produced assistant turns is D3's responsibility — D3 wires the
+   * `handleStreamEvent` persistence path that inserts `agent_text`
+   * rows into `team_messages`, and the next leadStep's caller rebuilds
+   * `history` from those rows. The checkpoint cursor exists primarily
+   * so D4's atomic waiting_for drain can sanity-check that the lead
+   * is resuming from a coherent point; the source-of-truth transcript
+   * lives in `team_messages`, not in this JSON column.
    */
   lastProcessedIndex: number;
   /**
