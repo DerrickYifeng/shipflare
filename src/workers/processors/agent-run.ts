@@ -45,6 +45,7 @@ import { buildAgentConfigFromDefinition } from '@/tools/AgentTool/spawn';
 import { createTeamPlatformDeps } from '@/lib/platform-deps';
 import { synthesizeTaskNotification } from './lib/synthesize-notification';
 import { wake } from './lib/wake';
+import { removeChildAndMaybeWake } from './lib/parent-reenqueue';
 import { drainMailbox } from './lib/mailbox-drain';
 import { loadAgentRunHistory } from './lib/agent-run-history';
 import {
@@ -565,8 +566,22 @@ async function synthAndDeliverNotification(params: NotifyParams): Promise<void> 
   // Phase B: when parentAgentId is null, the team-run drain (Task 12) polls
   // for these notifications. No wake() needed because there's no agentRun
   // for the lead yet (Phase E adds proper wake routing).
+  //
+  // Phase D4: when parentAgentId is non-null, atomically drain the
+  // completing child from the parent's `waiting_for` array. If THIS call
+  // drained the array empty AND the parent was 'waiting_for_children',
+  // the helper returns true — we wake on the 'priority' lane because
+  // the parent is now unblocked and resuming is founder-facing. If the
+  // parent still has siblings outstanding, or if the parent is a legacy
+  // row that never used the new column (waiting_for=[] and
+  // status≠'waiting_for_children'), the helper returns false and we
+  // fall back to a standard wake (legacy polling-drain compatibility).
   if (params.parentAgentId) {
-    await wake(params.parentAgentId);
+    const shouldWake = await removeChildAndMaybeWake(
+      params.parentAgentId,
+      params.agentId,
+    );
+    await wake(params.parentAgentId, shouldWake ? 'priority' : 'standard');
   }
 
   // UI-B Task 10: publish the SSE event AFTER the durable insert so the

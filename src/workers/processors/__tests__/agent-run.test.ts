@@ -67,6 +67,12 @@ vi.mock('@/lib/db', () => ({
       return selectChain;
     }),
     transaction: vi.fn(),
+    // D4: parent-reenqueue uses db.execute(sql`...`) for an atomic
+    // UPDATE+RETURNING. Default returns an empty array so
+    // removeChildAndMaybeWake's `if (!row)` branch fires (no parent
+    // found → no wake transition). Tests that exercise the durable
+    // parent-wake transition explicitly override this mock.
+    execute: vi.fn(async () => []),
   },
 }));
 
