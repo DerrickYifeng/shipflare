@@ -106,6 +106,21 @@ export interface PartialLeadMessage {
    * "thinking deeply…" notice can diff the same field.
    */
   lastActivityAt: number;
+  /**
+   * Anthropic-issued `tool_use_id` of the parent `Task` call when this
+   * partial originates from a spawned subagent. Null for top-level lead
+   * text. Stamped onto the SSE envelope's metadata by the worker
+   * (agent-run.ts, both bodies). The conversation reducer uses this to
+   * route subagent partials into the DelegationCard's progress feed
+   * instead of rendering them as a top-level lead bubble.
+   */
+  parentToolUseId: string | null;
+  /**
+   * Subagent's `agentDefName` (e.g. `chief-of-staff`, `post-writer`).
+   * Null for top-level lead text. Same source as `parentToolUseId`;
+   * used as a defensive fallback when `parentToolUseId` is missing.
+   */
+  agentName: string | null;
 }
 
 export interface UseTeamEventsResult {
@@ -196,6 +211,22 @@ type WirePayload =
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null;
+}
+
+/**
+ * Read a spawnMeta field (`parent_tool_use_id` or `agent_name`) from a
+ * partial's wire metadata. Returns null when missing or empty — top-level
+ * lead partials carry no spawnMeta, so callers can use null as the
+ * "this is the lead" signal.
+ */
+function readPartialSpawnField(
+  metadata: Record<string, unknown> | null,
+  key: 'parent_tool_use_id' | 'agent_name',
+): string | null {
+  if (!metadata) return null;
+  const v = metadata[key];
+  if (typeof v !== 'string' || v.length === 0) return null;
+  return v;
 }
 
 function normalizeSnapshot(p: SnapshotPayload): TeamActivityMessage {
@@ -330,6 +361,8 @@ export function useTeamEvents({
           content: '',
           createdAt: msg.createdAt,
           lastActivityAt: Date.now(),
+          parentToolUseId: readPartialSpawnField(msg.metadata, 'parent_tool_use_id'),
+          agentName: readPartialSpawnField(msg.metadata, 'agent_name'),
         });
         return next;
       });
@@ -338,6 +371,10 @@ export function useTeamEvents({
     if (msg.type === 'agent_text_delta') {
       setPartials((prev) => {
         const existing = prev.get(msg.id);
+        // The first delta sometimes arrives before agent_text_start
+        // (reconnect snapshot races), so read spawn fields from the
+        // delta's metadata too — the worker stamps the same metadata
+        // on start/delta/stop, so this is a safe fallback.
         const base: PartialLeadMessage = existing ?? {
           id: msg.id,
           runId: msg.runId,
@@ -347,6 +384,8 @@ export function useTeamEvents({
           content: '',
           createdAt: msg.createdAt,
           lastActivityAt: Date.now(),
+          parentToolUseId: readPartialSpawnField(msg.metadata, 'parent_tool_use_id'),
+          agentName: readPartialSpawnField(msg.metadata, 'agent_name'),
         };
         const next = new Map(prev);
         next.set(msg.id, {

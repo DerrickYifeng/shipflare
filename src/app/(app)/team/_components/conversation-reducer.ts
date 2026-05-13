@@ -822,9 +822,18 @@ export function stitchLeadMessages(
   // (rare but possible) surface in the right order. Since deltas land
   // after any non-streaming message the client has already seen, this
   // puts the typing bubble correctly at the tail.
+  //
+  // Subagent partials are filtered out — they carry parentToolUseId (the
+  // parent Task's tool_use_id) or agentName from the worker's spawnMeta
+  // stamp. Without this filter, a teammate's mid-stream text would render
+  // as the LEAD'S bubble, then vanish when the durable agent_text lands
+  // (which gets correctly routed under the DelegationCard via the
+  // `belongsToSubagent` check above). Founder UX: keep the main thread
+  // showing the lead's persona only; subagent activity surfaces inside
+  // the DelegationCard and the right-side TaskPanel.
   if (partials.size > 0) {
     const partialNodes = Array.from(partials.values())
-      .slice()
+      .filter((p) => p.parentToolUseId === null && p.agentName === null)
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     for (const p of partialNodes) {
       nodes.push({

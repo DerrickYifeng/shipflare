@@ -108,6 +108,84 @@ describe('stitchLeadMessages — subagent routing (regression)', () => {
   });
 });
 
+describe('stitchLeadMessages — streaming partial subagent filter (2026-05-13)', () => {
+  it('renders a coordinator partial as a top-level streaming LeadNode', () => {
+    const partials = new Map([
+      [
+        'blk-coord',
+        {
+          id: 'blk-coord',
+          runId: 'run-1',
+          teamId: 'team-1',
+          from: 'coord-member',
+          to: null,
+          content: 'Drafting plan…',
+          createdAt: '2026-05-13T00:00:00.000Z',
+          lastActivityAt: Date.now(),
+          parentToolUseId: null,
+          agentName: null,
+        },
+      ],
+    ]);
+    const nodes = stitchLeadMessages([], new Map(), partials);
+    const leads = nodes.filter((n) => n.kind === 'lead');
+    expect(leads).toHaveLength(1);
+    expect((leads[0] as LeadNode).text).toBe('Drafting plan…');
+  });
+
+  it('filters subagent partials with parentToolUseId from the top-level thread', () => {
+    // Production bug 2026-05-13: a teammate's mid-stream agent_text was
+    // rendering under the lead's persona because the streaming SSE
+    // envelope omitted spawnMeta. The worker now stamps it on the wire
+    // and the reducer routes subagent partials out of the top-level
+    // append — they surface in the DelegationCard / TaskPanel instead.
+    const partials = new Map([
+      [
+        'blk-sub',
+        {
+          id: 'blk-sub',
+          runId: 'run-1',
+          teamId: 'team-1',
+          from: 'social-member',
+          to: null,
+          content: "I'm drafting for X in the foundation phase…",
+          createdAt: '2026-05-13T00:00:00.000Z',
+          lastActivityAt: Date.now(),
+          parentToolUseId: 'toolu_abc',
+          agentName: 'social-media-manager',
+        },
+      ],
+    ]);
+    const nodes = stitchLeadMessages([], new Map(), partials);
+    expect(nodes.filter((n) => n.kind === 'lead')).toHaveLength(0);
+  });
+
+  it('filters subagent partials on agentName alone — defensive backstop', () => {
+    // Mirrors the durable agent_text path's defensive backstop: if
+    // parentToolUseId fails to land for any reason, agentName alone is
+    // enough to route the partial away from the top-level thread.
+    const partials = new Map([
+      [
+        'blk-sub',
+        {
+          id: 'blk-sub',
+          runId: 'run-1',
+          teamId: 'team-1',
+          from: 'social-member',
+          to: null,
+          content: 'thinking…',
+          createdAt: '2026-05-13T00:00:00.000Z',
+          lastActivityAt: Date.now(),
+          parentToolUseId: null,
+          agentName: 'social-media-manager',
+        },
+      ],
+    ]);
+    const nodes = stitchLeadMessages([], new Map(), partials);
+    expect(nodes.filter((n) => n.kind === 'lead')).toHaveLength(0);
+  });
+});
+
 describe('stitchLeadMessages — stripping hallucinated <task-notification> XML', () => {
   it('strips a fabricated task-notification block from lead agent_text (2026-05-12 bug)', () => {
     // Production bug: Chief of Staff occasionally hallucinates a

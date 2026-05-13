@@ -1068,6 +1068,17 @@ async function runAgentTurn_legacy(
         // Match the agent_text_stop publish envelope so the partial
         // baseline (runId / conversationId / from) is consistent with
         // the durable bubble that eventually replaces it.
+        //
+        // Stamp spawnMeta into `metadata` so the founder UI's reducer
+        // can attribute the streaming partial to the spawned specialist
+        // instead of rendering it as a top-level lead bubble — mirrors
+        // the durable agent_text branch below (assistantMetadata).
+        const streamingMetadata = event.spawnMeta
+          ? {
+              parent_tool_use_id: event.spawnMeta.parentToolUseId,
+              agent_name: event.spawnMeta.agentName,
+            }
+          : null;
         const baseEnvelope = {
           // useTeamEvents keys partials by `messageId`; sharing the
           // block-level id across start/delta/stop ensures the same
@@ -1078,6 +1089,7 @@ async function runAgentTurn_legacy(
           teamId: row.teamId,
           from: resolveFromMemberId(event),
           fromAgentId: agentId,
+          metadata: streamingMetadata,
           createdAt: new Date().toISOString(),
         };
         if (event.type === 'assistant_text_start') {
@@ -1882,6 +1894,15 @@ function buildDurableStreamHandler(
     ) {
       try {
         const pub = getPubSubPublisher();
+        // Mirror the durable-body envelope: stamp spawnMeta so subagent
+        // partials route into the DelegationCard, not the top-level
+        // thread.
+        const streamingMetadata = event.spawnMeta
+          ? {
+              parent_tool_use_id: event.spawnMeta.parentToolUseId,
+              agent_name: event.spawnMeta.agentName,
+            }
+          : null;
         const baseEnvelope = {
           messageId: event.messageId,
           conversationId: leadConversationId,
@@ -1889,6 +1910,7 @@ function buildDurableStreamHandler(
           teamId: row.teamId,
           from: resolveFromMemberId(event),
           fromAgentId: agentId,
+          metadata: streamingMetadata,
           createdAt: new Date().toISOString(),
         };
         if (event.type === 'assistant_text_start') {
