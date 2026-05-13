@@ -18,18 +18,18 @@ import { accentForAgentType, colorHexForAgentType } from './agent-accent';
 import { TodaysOutput } from './todays-output';
 
 /**
- * Engine's MCPTool/UI.tsx renders unknown tool results through a compact
- * shape summary instead of dumping bytes. Shipflare skills return
- * JSON-shaped `agent_text` (e.g. `reading-plan` → `[{id,kind,phase,…}]`)
- * which would otherwise leak uuids and internal column names into the
- * TaskPanel. This summarizer collapses that to e.g.
- * "12 items · kind, channel, phase, …".
+ * Engine's MCPTool/UI.tsx collapses unknown tool results into a one-line
+ * summary instead of dumping bytes (e.g. "Sent a message to #channel").
+ * Shipflare skills return JSON-shaped `agent_text` (e.g. `reading-plan`
+ * → `[{id, kind, phase, …}]`) which would otherwise leak uuids and
+ * internal column names. This summarizer keeps only the count — no
+ * keys — so the panel never exposes internals.
  *
- * Non-JSON text passes through with newlines preserved so prose reads
- * naturally; the founder sees the model's actual reasoning, not its
- * structured returns.
+ *   "12 items"   |   "1 item"   |   "(empty)"
+ *
+ * Prose (non-JSON) passes through truncated to 1600 chars with newlines
+ * preserved.
  */
-const SUMMARY_KEYS = 4;
 const PROSE_TRUNCATE = 1600;
 
 function summarizeProgressText(raw: string): string {
@@ -42,22 +42,10 @@ function summarizeProgressText(raw: string): string {
       if (Array.isArray(parsed)) {
         const n = parsed.length;
         if (n === 0) return '(empty)';
-        const noun = n === 1 ? 'item' : 'items';
-        const sample = parsed[0];
-        if (sample !== null && typeof sample === 'object' && !Array.isArray(sample)) {
-          const keys = Object.keys(sample as Record<string, unknown>);
-          const shown = keys.slice(0, SUMMARY_KEYS).join(', ');
-          const more = keys.length > SUMMARY_KEYS ? ', …' : '';
-          return `${n} ${noun} · ${shown}${more}`;
-        }
-        return `${n} ${noun}`;
+        return n === 1 ? '1 item' : `${n} items`;
       }
       if (parsed !== null && typeof parsed === 'object') {
-        const keys = Object.keys(parsed as Record<string, unknown>);
-        if (keys.length === 0) return '{}';
-        const shown = keys.slice(0, SUMMARY_KEYS).join(', ');
-        const more = keys.length > SUMMARY_KEYS ? ', …' : '';
-        return `{ ${shown}${more} }`;
+        return '(result)';
       }
       return String(parsed).slice(0, 140);
     } catch {
