@@ -79,21 +79,9 @@ export interface ConversationProps {
    */
   focusPendingMessageId?: string | null;
   /**
-   * Set of `agent_runs.id` values currently surfaced in the bottom rail
-   * (A2). When a DelegationTask's `agentId` is in this set, the
-   * conversation-level DelegationCard collapses its pulsing in-flight
-   * chrome to a thin "see in rail" hint so the teammate doesn't appear
-   * twice on screen. Terminal teammates fall out of the set and the
-   * card re-expands with its final summary.
-   */
-  activeSubagentIds?: ReadonlySet<string>;
-  /**
    * Pixel reservation at the bottom of the scroll container. Defaults
    * to `DEFAULT_BOTTOM_RESERVATION` (sized for the composer card +
-   * outer padding + a comfort buffer). When the A2 bottom rail is
-   * non-empty, the caller bumps this so the last messages stay
-   * readable above the rail's translucent backdrop instead of being
-   * obscured by it.
+   * outer padding + a comfort buffer).
    */
   bottomReservation?: number;
   /**
@@ -177,7 +165,6 @@ export function Conversation({
   onPrefillComposer,
   onFocusComposer,
   focusPendingMessageId = null,
-  activeSubagentIds,
   bottomReservation = DEFAULT_BOTTOM_RESERVATION,
   hasOlder = false,
   loadingOlder = false,
@@ -497,7 +484,6 @@ export function Conversation({
             memberLookup={memberLookup}
             activeMemberId={activeMemberId}
             onSelectMember={onSelectMember}
-            activeSubagentIds={activeSubagentIds}
           />
         ) : null}
         {preparingCount > 0 ? (

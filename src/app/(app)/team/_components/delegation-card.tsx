@@ -23,14 +23,6 @@ export interface DelegationCardProps {
   memberLookup: ReadonlyMap<string, DelegationCardMember>;
   activeMemberId: string | null;
   onSelectMember: (memberId: string) => void;
-  /**
-   * Set of `agent_runs.id` values currently surfaced in the bottom rail
-   * (A2). When a task's `agentId` is in this set, the SubtaskCard
-   * collapses its pulsing in-flight chrome to a thin "see in rail" hint
-   * so the teammate doesn't appear twice on screen. Defaults to an empty
-   * set when omitted, preserving legacy inline behaviour.
-   */
-  activeSubagentIds?: ReadonlySet<string>;
 }
 
 const SUMMARY_COLLAPSED_CHARS = 180;
@@ -69,7 +61,6 @@ function DelegationCardImpl({
   memberLookup,
   activeMemberId,
   onSelectMember,
-  activeSubagentIds,
 }: DelegationCardProps) {
   if (tasks.length === 0) return null;
 
@@ -167,8 +158,6 @@ function DelegationCardImpl({
       <ul style={stack}>
         {tasks.map((task) => {
           const member = resolveMember(task);
-          const inRail =
-            !!task.agentId && !!activeSubagentIds?.has(task.agentId);
           return (
             <SubtaskCard
               key={task.messageId}
@@ -177,7 +166,6 @@ function DelegationCardImpl({
               active={!!activeMemberId && !!member && member.id === activeMemberId}
               onSelectMember={onSelectMember}
               isSoloDispatch={specialistCount === 1}
-              inRail={inRail}
             />
           );
         })}
@@ -208,68 +196,32 @@ interface SubtaskCardProps {
    * "Subtask" — otherwise the same label appears twice in the same card.
    */
   isSoloDispatch: boolean;
-  /**
-   * True when this subtask's agent_runs row is currently surfaced in
-   * the A2 bottom rail. The card swaps its expanded progress feed for
-   * a thin "Active in bottom rail" hint so the same teammate isn't
-   * shown twice. Falls back to the normal expanded layout once the
-   * teammate exits the rail (terminal status).
-   */
-  inRail: boolean;
 }
 
+/**
+ * Subtask card rendered inline in the conversation. Intentionally
+ * SIMPLE — title + agent meta + status pill + (for terminal tasks) a
+ * one-line summary preview. The live progress feed / thinking row /
+ * expand-to-see-tools chrome was deleted 2026-05-13: those belong in
+ * the right-side Tasks panel which always stays visible. In-chat cards
+ * are meant to scroll up cleanly as the conversation grows.
+ */
 function SubtaskCard({
   task,
   member,
   active,
   onSelectMember: _onSelectMember,
   isSoloDispatch,
-  inRail,
 }: SubtaskCardProps) {
   const [hover, setHover] = useState(false);
   // Subscribe to live tool-input bytes for this dispatch. By the time a
   // SubtaskCard exists, the durable `tool_call` row has usually already
   // landed and `useTeamEvents` has cleared the matching partial — so
-  // this hook normally returns `undefined`. A2's bottom rail will surface
-  // the streaming-arguments path; for A1 we wire the subscription so the
-  // leaf becomes the consumer (and only it re-renders if a delta lands
-  // before the durable row). The hook is null-safe so tasks without a
-  // `toolUseId` (which is nullable in the reducer) don't all collide on
-  // an empty-string key and re-render together.
+  // this hook normally returns `undefined`. The hook is null-safe so
+  // tasks without a `toolUseId` (which is nullable in the reducer) don't
+  // all collide on an empty-string key and re-render together.
   const liveToolInput = useStreamingToolInput(task.toolUseId);
-  void liveToolInput; // A2 will consume this; A1 only wires the path.
-  // Default: expand on RUNNING (user wants to see live progress),
-  // collapse on any terminal state (history shouldn't dominate). The
-  // auto-fold-on-transition below keeps the user's manual toggle
-  // sticky after that first settle.
-  const [expanded, setExpanded] = useState<boolean>(
-    () => task.status === 'working',
-  );
-  const prevStatusRef = useRef(task.status);
-  useEffect(() => {
-    const prev = prevStatusRef.current;
-    prevStatusRef.current = task.status;
-    if (prev === 'working' && task.status !== 'working') {
-      // Task just settled — fold once. User can reopen by clicking.
-      // queueMicrotask defers the setState past the current render cycle.
-      queueMicrotask(() => setExpanded(false));
-    }
-  }, [task.status]);
-
-  // Right-rail Task panel dispatches `sf:task-focus` when the user
-  // clicks a Recent row so the matching subtask card force-expands
-  // alongside the scroll-into-view. Without this the user lands on a
-  // collapsed terminal card and has to click again to see details.
-  useEffect(() => {
-    const handler = (evt: Event): void => {
-      const detail = (evt as CustomEvent<{ messageId: string }>).detail;
-      if (detail?.messageId === task.messageId) {
-        setExpanded(true);
-      }
-    };
-    window.addEventListener('sf:task-focus', handler);
-    return () => window.removeEventListener('sf:task-focus', handler);
-  }, [task.messageId]);
+  void liveToolInput; // Live tool-input is surfaced in the right Tasks panel.
 
   // `member.agentType` is the redacted founder-facing label (e.g.
   // 'Social Media Manager'). When the lookup fails (orphan task with no
@@ -379,13 +331,6 @@ function SubtaskCard({
       ? `${previewSource.slice(0, SUMMARY_COLLAPSED_CHARS).trimEnd()}…`
       : previewSource;
 
-  const toggleExpand = () => {
-    setExpanded((v) => !v);
-  };
-
-  const hasProgress = task.progressItems.length > 0;
-  const showThinking = task.status === 'working' && !hasProgress;
-
   return (
     <li
       onMouseEnter={() => setHover(true)}
@@ -397,67 +342,27 @@ function SubtaskCard({
       aria-label={`${task.label}, ${task.status}`}
     >
       <span style={leftRule} aria-hidden="true" />
-
-      {/* Clickable header — toggles expand/collapse. The chevron +
-          title + status pill form the expand hit target. */}
-      <button
-        type="button"
-        onClick={toggleExpand}
-        aria-expanded={expanded}
-        style={{
-          all: 'unset',
-          cursor: 'pointer',
-          width: '100%',
-          display: 'block',
-        }}
-      >
-        <div style={topRow}>
-          <span style={title}>{task.label}</span>
-          <StatusBadge status={task.status} elapsed={task.elapsed} />
-          <ExpandChevron expanded={expanded} />
-        </div>
-        <div style={metaRow}>
-          {isSoloDispatch ? null : (
-            <>
-              <span style={memberStyle}>{memberName}</span>
-              <span aria-hidden="true">·</span>
-            </>
-          )}
-          <span style={subtaskStyle}>Subtask</span>
-        </div>
-      </button>
-
-      {/* Body: progress feed + thinking placeholder + summary. Expanded
-          renders the full progressItems list (capped to the most recent
-          N events; older fold into a `+N earlier events` row at the top
-          so the streaming text keeps the live-progress feel). Collapsed
-          shows only the final summary as a one-liner (if any).
-          When `inRail` is true, the A2 bottom rail owns the live-progress
-          chrome — we swap the in-flight body for a thin "Active in bottom
-          rail" hint so the teammate isn't shown twice. The task label
-          and header still render so the user sees what the teammate is
-          doing. */}
-      {inRail ? (
-        <InRailHint />
-      ) : expanded ? (
-        <div style={{ marginTop: 2 }}>
-          {hasProgress ? (
-            <ProgressList items={task.progressItems} accentColor={borderColor} />
-          ) : null}
-          {showThinking ? <ThinkingRow accentColor={borderColor} /> : null}
-          {task.outputSummary && task.status !== 'working' ? (
-            <ResultSummary text={task.outputSummary} status={task.status} />
-          ) : null}
-        </div>
-      ) : (
-        <>
-          {collapsedSummary ? (
-            <p style={summaryStyle}>{collapsedSummary}</p>
-          ) : showThinking ? (
-            <ThinkingRow accentColor={borderColor} />
-          ) : null}
-        </>
-      )}
+      <div style={topRow}>
+        <span style={title}>{task.label}</span>
+        <StatusBadge status={task.status} elapsed={task.elapsed} />
+      </div>
+      <div style={metaRow}>
+        {isSoloDispatch ? null : (
+          <>
+            <span style={memberStyle}>{memberName}</span>
+            <span aria-hidden="true">·</span>
+          </>
+        )}
+        <span style={subtaskStyle}>Subtask</span>
+      </div>
+      {/* Body: terminal tasks show a one-line preview of the output so
+          users can scroll back and recall what the teammate produced.
+          Working tasks render no body — the live progress feed lives in
+          the right Tasks panel where it stays visible regardless of
+          scroll position. */}
+      {collapsedSummary ? (
+        <p style={summaryStyle}>{collapsedSummary}</p>
+      ) : null}
     </li>
   );
 }

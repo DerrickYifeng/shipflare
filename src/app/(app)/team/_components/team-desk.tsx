@@ -29,11 +29,9 @@ import {
 } from './sticky-composer';
 import { StatusBanner } from './status-banner';
 import { OnboardingBanner } from './onboarding-banner';
-import {
-  ActiveSubagentsRail,
-  type RailStatus,
-  type RailSubagent,
-} from './active-subagents-rail';
+// A2's bottom rail was removed (2026-05-13): the right Tasks panel already
+// surfaces running teammates with live activity, and a second surface at the
+// bottom was redundant. Click-to-expand on the panel replaces the rail.
 import {
   applyStatusChanges,
   stitchLeadMessages,
@@ -87,13 +85,6 @@ const LEFT_WIDTH = 280;
 const RIGHT_WIDTH = 380;
 const GRID_GAP = 20;
 const H_PAD = 24;
-// Must match the composer's `appSidebarWidth` default (220). The rail
-// reuses this so its fixed-position center cell lines up under the
-// conversation column instead of drifting ~110px left of the composer
-// — `StickyComposer` anchors `left: appSidebarWidth, right: 0` while
-// the rail uses the same anchoring.
-const APP_SIDEBAR_WIDTH = 220;
-
 /**
  * Team desk — ChatGPT-style chat surface. State model:
  *
@@ -508,122 +499,6 @@ function TeamDeskInner({
     return out;
   }, [liveMessages, agentRunStatus, partials]);
 
-  // ---------- Active-subagents rail (A2) ----------
-  // The rail surfaces in-flight teammates in a fixed bottom panel so they
-  // never scroll out of view (engine TaskListV2 pattern). Source: the same
-  // DelegationTask stream the right-rail Task panel uses, joined with the
-  // LIVE `liveAgentRunStatus` map so SSE transitions (queued → running →
-  // sleeping → done) flow through immediately and the TTL filter sees the
-  // truthful state. No new fetch — every input already exists in this
-  // component.
-  //
-  // Stability strategy: `liveAgentRunStatus` is a fresh Map reference every
-  // SSE tick (per `applyStatusChanges`), so a naive
-  // `useMemo([allDelegationTasks, liveAgentRunStatus])` would churn the
-  // `railSubagents` array reference on every progress event — which in
-  // turn would churn `activeSubagentIds` and bust A1's React.memo on
-  // DelegationCard. The fix: build the snapshot, then derive a
-  // deterministic signature (sorted `id|status|lastActiveAt` join) and
-  // gate the memo on the SIGNATURE. The Set / array references stay
-  // stable across renders unless membership or per-entry fields actually
-  // change, so DelegationCard's shallow-compare correctly skips re-renders.
-  const railSubagentsRaw = useMemo<readonly RailSubagent[]>(() => {
-    const out: RailSubagent[] = [];
-    const seen = new Set<string>();
-    for (const t of allDelegationTasks) {
-      if (!t.agentId) continue;
-      if (seen.has(t.agentId)) continue;
-      seen.add(t.agentId);
-      const runStatus = liveAgentRunStatus.get(t.agentId);
-      const lastActiveIso = runStatus?.lastActiveAt ?? runStatus?.spawnedAt ?? null;
-      // Date.now() as the floor when neither lastActiveAt nor spawnedAt
-      // is populated — happens transiently before the first SSE tick.
-      // Number.isFinite guard handles malformed ISO strings.
-      const parsed = lastActiveIso ? Date.parse(lastActiveIso) : Date.now();
-      const lastActiveAt = Number.isFinite(parsed) ? parsed : Date.now();
-      // Prefer the subtask description ("fill x reply slot") as the primary
-      // line and keep the agent type ("Social Media Manager") as a subtitle.
-      // Matches the in-conversation SubtaskCard layout so the rail isn't a
-      // tiny pill row of agent names — it shows what's actually being done.
-      const subtaskLabel = t.label?.trim();
-      const agentLabel = t.subagentType?.trim();
-      out.push({
-        id: t.agentId,
-        name: subtaskLabel || agentLabel || 'Subtask',
-        subtitle: subtaskLabel && agentLabel ? agentLabel : undefined,
-        status: mapRailStatus(runStatus?.status, t.status),
-        lastActiveAt,
-      });
-    }
-    return out;
-  }, [allDelegationTasks, liveAgentRunStatus]);
-
-  // Signature: id+status+lastActiveAt for every entry, sorted by id so
-  // the signature is order-insensitive. Anything that would change the
-  // rendered rail (membership, status, or activity timestamp) flips
-  // the signature; anything that doesn't (e.g. unrelated SSE tick that
-  // re-derived the map without touching any rail entry) doesn't.
-  const railSignature = useMemo(() => {
-    return railSubagentsRaw
-      .map((s) => `${s.id}|${s.status}|${s.lastActiveAt}`)
-      .sort()
-      .join(',');
-  }, [railSubagentsRaw]);
-
-  const railSubagents = useMemo<readonly RailSubagent[]>(
-    () => railSubagentsRaw,
-    // Re-bind the array reference only when the signature flips, not on
-    // every map-reference change. eslint-disable: signature is a strict
-    // function of railSubagentsRaw, but we intentionally read the latest
-    // value at signature-change time rather than depending on the map.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [railSignature],
-  );
-
-  // The set of agentIds currently surfaced as "active" in the rail —
-  // passed to <Conversation> so its DelegationCard can collapse the
-  // pulsing in-flight card to a thin hint (avoids showing the same
-  // teammate twice). `running` / `queued` / `sleeping` count as active;
-  // recently-completed entries fade in the rail but the conversation
-  // re-shows them as full DelegationCards once they settle.
-  //
-  // Stability strategy mirrors `railSubagents` above: derive a sorted-id
-  // signature from the active subset, then re-allocate the Set only when
-  // the signature changes. A `lastActiveAt` tick alone does NOT churn
-  // this Set reference — exactly what A1's memo on DelegationCard needs.
-  const activeIdsList = useMemo(() => {
-    return railSubagentsRaw
-      .filter(
-        (s) =>
-          s.status === 'running' ||
-          s.status === 'queued' ||
-          s.status === 'sleeping',
-      )
-      .map((s) => s.id)
-      .sort();
-  }, [railSubagentsRaw]);
-  const activeIdsKey = activeIdsList.join(',');
-  const activeSubagentIds = useMemo<ReadonlySet<string>>(
-    () => new Set(activeIdsList),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: only re-allocate when membership signature changes
-    [activeIdsKey],
-  );
-
-  // agentId → messageId index so the rail's onSelect (which emits the
-  // agentId surfaced in the rail entry) can drive `focusCardNow`, which
-  // matches the existing right-rail Task panel's "click → scroll +
-  // pulse" path. Stable identity-keyed off allDelegationTasks; pairs
-  // remain stable as long as the underlying task list does.
-  const subtaskMessageByAgentId = useMemo<ReadonlyMap<string, string>>(() => {
-    const map = new Map<string, string>();
-    for (const t of allDelegationTasks) {
-      if (t.agentId && !map.has(t.agentId)) {
-        map.set(t.agentId, t.messageId);
-      }
-    }
-    return map;
-  }, [allDelegationTasks]);
-
   // ---------- Handlers ----------
   const handleSelectConversation = useCallback((conversationId: string) => {
     setSelectedConversationId(conversationId);
@@ -785,20 +660,6 @@ function TeamDeskInner({
 
   // Rail click → scroll the matching SubtaskCard into view + pulse it,
   // matching the engine TaskListV2 pattern ("tap a task → jump to it").
-  // Reuses `handleJumpToTask` so a rail click on a teammate in a
-  // different conversation switches the active thread first. When the
-  // agentId hasn't yet been joined to a DelegationTask (transient race
-  // before the spawn receipt lands), the handler is a no-op.
-  const handleRailSelect = useCallback(
-    (agentId: string) => {
-      const messageId = subtaskMessageByAgentId.get(agentId);
-      if (!messageId) return;
-      const task = allDelegationTasks.find((t) => t.messageId === messageId);
-      handleJumpToTask(messageId, task?.runId ?? null);
-    },
-    [subtaskMessageByAgentId, allDelegationTasks, handleJumpToTask],
-  );
-
   // After a cross-conversation jump, wait for the new cards to hit the
   // DOM then scroll + pulse the target.
   useEffect(() => {
@@ -1055,15 +916,11 @@ function TeamDeskInner({
             onPrefillComposer={prefillComposer}
             onFocusComposer={focusComposer}
             focusPendingMessageId={pendingFocusMessageId}
-            activeSubagentIds={activeSubagentIds}
-            bottomReservation={
-              // Base reservation for composer + buffer is 180. The A2
-              // bottom rail is now a richer card stack (up to 320px tall,
-              // internally scrollable) instead of a thin pill strip, so
-              // reserve ~360px when non-empty to keep the last messages
-              // readable above the rail's translucent backdrop.
-              railSubagents.length > 0 ? 380 : 180
-            }
+            // Base reservation: composer (~96px) + outer padding (~20px) +
+            // breathing room above the keyboard so the last message clears
+            // the sticky composer footer. The A2 bottom rail used to bump
+            // this; removed 2026-05-13 along with the rail itself.
+            bottomReservation={180}
             hasOlder={
               selectedConversationId
                 ? convWindowMap[selectedConversationId]?.hasMore ?? false
@@ -1086,6 +943,7 @@ function TeamDeskInner({
         <div className="ai-team-right" style={rightRail}>
           <TaskPanel
             tasks={allDelegationTasks}
+            liveAgentRunStatus={liveAgentRunStatus}
             onJumpToTask={handleJumpToTask}
             onCancelTask={handleCancelTask}
             thisWeek={{
@@ -1094,59 +952,6 @@ function TeamDeskInner({
               inFlight: draftsInFlight,
             }}
           />
-        </div>
-      </div>
-
-      {/*
-       * A2: bottom rail for in-flight teammates (engine TaskListV2 pattern).
-       * Sits fixed above the composer, aligned to the conversation column
-       * by reusing the same grid metrics. Returns null when there are no
-       * visible entries so the layout consumes zero airspace by default.
-       */}
-      <div
-        className="ai-team-rail-wrap"
-        style={{
-          position: 'fixed',
-          // Mirror StickyComposer's `left: appSidebarWidth, right: 0`
-          // anchoring so the rail's center cell aligns under the
-          // conversation column instead of drifting left.
-          left: APP_SIDEBAR_WIDTH,
-          right: 0,
-          // Anchor just above the composer's 20px outer paddingBottom plus
-          // the composer card itself (~96px when collapsed). The rail's
-          // own card stretches up to RAIL_MAX_HEIGHT_PX (320px) when many
-          // dispatches are active; its internal vertical scroll keeps the
-          // overall footprint bounded. 124px = composer card + outer pad +
-          // an 8px gap so the rail's bottom edge doesn't touch the composer.
-          bottom: 124,
-          paddingLeft: H_PAD,
-          paddingRight: H_PAD,
-          pointerEvents: 'none',
-          zIndex: 19,
-        }}
-      >
-        <div
-          className="ai-team-rail-grid"
-          style={{
-            display: 'grid',
-            gridTemplateColumns: `${LEFT_WIDTH}px 1fr ${RIGHT_WIDTH}px`,
-            gap: GRID_GAP,
-          }}
-        >
-          <div
-            style={{
-              gridColumn: '2 / span 1',
-              maxWidth: 740,
-              width: '100%',
-              margin: '0 auto',
-              pointerEvents: 'auto',
-            }}
-          >
-            <ActiveSubagentsRail
-              subagents={railSubagents}
-              onSelect={handleRailSelect}
-            />
-          </div>
         </div>
       </div>
 
@@ -1263,66 +1068,6 @@ export function TeamDesk(props: TeamDeskProps) {
       <TeamDeskInner {...props} />
     </StreamingProvider>
   );
-}
-
-/**
- * Map the `agent_runs.status` lifecycle + DelegationTask compact status onto
- * the rail's `RailStatus` enum. The rail's vocabulary is intentionally
- * coarser than `AgentRunStatus['status']`: `resuming` collapses into
- * `running` (both mean "actively working" from the user's POV), and
- * when the agent_runs row hasn't landed yet we fall back to the
- * DelegationTask status the conversation reducer already derived.
- *
- * Both inputs are explicitly typed so future enum additions trip the
- * exhaustiveness guards below at compile time rather than silently
- * falling through to an unintended branch.
- */
-function mapRailStatus(
-  runStatus: AgentRunStatus['status'] | undefined,
-  taskStatus: DelegationTask['status'],
-): RailStatus {
-  if (runStatus !== undefined) {
-    switch (runStatus) {
-      case 'running':
-      case 'resuming':
-        return 'running';
-      case 'queued':
-        return 'queued';
-      case 'sleeping':
-        return 'sleeping';
-      case 'completed':
-        return 'completed';
-      case 'failed':
-        return 'failed';
-      case 'killed':
-        return 'killed';
-      default:
-        return assertNever(runStatus);
-    }
-  }
-  // No matching agent_runs row yet — fall back to the reducer's compact status.
-  switch (taskStatus) {
-    case 'working':
-      return 'running';
-    case 'queued':
-      return 'queued';
-    case 'done':
-      return 'completed';
-    case 'failed':
-      return 'failed';
-    default:
-      return assertNever(taskStatus);
-  }
-}
-
-/**
- * Exhaustiveness guard for discriminated-union switches. Calling this
- * in a `default:` branch makes the TS compiler reject any future enum
- * addition that's not handled above. The runtime fallback throws so
- * we don't silently return undefined from a typed function.
- */
-function assertNever(value: never): never {
-  throw new Error(`Unhandled status variant: ${String(value)}`);
 }
 
 /**

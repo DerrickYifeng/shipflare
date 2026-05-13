@@ -1,18 +1,33 @@
 'use client';
 
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
   type CSSProperties,
 } from 'react';
-import type { DelegationTask } from './conversation-reducer';
+import type {
+  AgentRunStatus,
+  AgentRunStatusMap,
+  DelegationTask,
+  ProgressItem,
+} from './conversation-reducer';
 import { accentForAgentType, colorHexForAgentType } from './agent-accent';
 import { TodaysOutput } from './todays-output';
 
 export interface TaskPanelProps {
   tasks: readonly DelegationTask[];
+  /**
+   * Live agent_runs status map merged with SSE `agent_status_change`
+   * events. Used to override `task.status` when the conversation
+   * reducer hasn't yet folded the most recent transition into the
+   * DelegationTask field (the bug surface: panel kept showing QUEUED
+   * for teammates that were actively running and emitting tool_calls).
+   * When omitted, the panel falls back to `task.status` only.
+   */
+  liveAgentRunStatus?: AgentRunStatusMap;
   /**
    * Called when the user clicks a task row. Receives the
    * `messageId` + owning `runId` of the originating Task tool_call —
@@ -40,34 +55,93 @@ export interface TaskPanelProps {
   };
 }
 
+/**
+ * Compute the effective DelegationTask status, preferring the live
+ * agent_runs status when available. The agent_runs lifecycle has more
+ * granularity (`resuming` vs `running` vs `sleeping`); collapse to the
+ * coarser DelegationTask vocabulary so the panel's existing filters and
+ * label logic don't have to fan out.
+ */
+function effectiveStatus(
+  task: DelegationTask,
+  live: AgentRunStatus | undefined,
+): DelegationTask['status'] {
+  if (!live) return task.status;
+  switch (live.status) {
+    case 'running':
+    case 'resuming':
+      return 'working';
+    case 'queued':
+      return 'queued';
+    case 'sleeping':
+      // Treat sleeping as "still in flight" for panel partition.
+      return 'working';
+    case 'completed':
+      return 'done';
+    case 'failed':
+      return 'failed';
+    case 'killed':
+      return 'failed';
+    default:
+      return task.status;
+  }
+}
+
 const RECENT_DEFAULT_LIMIT = 3;
 
 export function TaskPanel({
   tasks,
+  liveAgentRunStatus,
   onJumpToTask,
   onCancelTask,
   onRetryTask,
   thisWeek,
 }: TaskPanelProps) {
+  // Pre-compute the effective status per task once so all downstream
+  // partitions / labels stay consistent. `effectiveStatus` prefers the
+  // live agent_runs map when available — the conversation reducer's
+  // DelegationTask.status field can lag behind the actual run state.
+  const effectiveByMessageId = useMemo(() => {
+    const m = new Map<string, DelegationTask['status']>();
+    for (const t of tasks) {
+      const live = t.agentId
+        ? liveAgentRunStatus?.get(t.agentId)
+        : undefined;
+      m.set(t.messageId, effectiveStatus(t, live));
+    }
+    return m;
+  }, [tasks, liveAgentRunStatus]);
+  const statusFor = useCallback(
+    (t: DelegationTask): DelegationTask['status'] =>
+      effectiveByMessageId.get(t.messageId) ?? t.status,
+    [effectiveByMessageId],
+  );
+
   // Partition by status. Running on top (always expanded), terminal
   // below in a capped RECENT section. `queued` gets bucketed with
   // running — it's transient and visually conveys "about to start".
   const running = useMemo(
     () =>
-      tasks.filter((t) => t.status === 'working' || t.status === 'queued'),
-    [tasks],
+      tasks.filter((t) => {
+        const s = statusFor(t);
+        return s === 'working' || s === 'queued';
+      }),
+    [tasks, statusFor],
   );
   const recentAll = useMemo(
     () =>
       tasks
-        .filter((t) => t.status === 'done' || t.status === 'failed')
+        .filter((t) => {
+          const s = statusFor(t);
+          return s === 'done' || s === 'failed';
+        })
         .slice()
         // Approximate "recency" via messageId reverse — the top-level
         // stitcher emits delegations in chronological order, so later
         // messageIds correspond to later tool_calls. Good enough for
         // a sidebar heuristic; if we wire createdAt later, sort here.
         .reverse(),
-    [tasks],
+    [tasks, statusFor],
   );
 
   const [showAllRecent, setShowAllRecent] = useState(false);
@@ -139,6 +213,7 @@ export function TaskPanel({
             <TaskPanelRow
               key={task.messageId}
               task={task}
+              effectiveStatus={statusFor(task)}
               onJump={onJumpToTask}
               onCancel={onCancelTask}
               onRetry={onRetryTask}
@@ -178,6 +253,7 @@ export function TaskPanel({
               <TaskPanelRow
                 key={task.messageId}
                 task={task}
+                effectiveStatus={statusFor(task)}
                 onJump={onJumpToTask}
                 onCancel={onCancelTask}
                 onRetry={onRetryTask}
@@ -210,6 +286,13 @@ export function TaskPanel({
 
 interface TaskPanelRowProps {
   task: DelegationTask;
+  /**
+   * Effective status — pre-computed by the parent from
+   * `liveAgentRunStatus` so the row's label / partition stays in sync
+   * with the actual agent_runs lifecycle. Falls back to `task.status`
+   * when no live entry exists.
+   */
+  effectiveStatus: DelegationTask['status'];
   onJump?: (messageId: string, runId: string | null) => void;
   onCancel?: (agentId: string) => void | Promise<void>;
   onRetry?: (agentId: string) => void | Promise<void>;
@@ -218,6 +301,7 @@ interface TaskPanelRowProps {
 
 function TaskPanelRow({
   task,
+  effectiveStatus,
   onJump,
   onCancel,
   onRetry,
@@ -225,6 +309,14 @@ function TaskPanelRow({
 }: TaskPanelRowProps) {
   const [hover, setHover] = useState(false);
   const [pending, setPending] = useState(false);
+  // Click-to-expand on running rows: reveals the full progressItems
+  // feed inline so the user can see every tool call + narration step
+  // without leaving the panel. Terminal rows stay collapsed because
+  // their info is already a one-liner ("DONE · 12s") plus the recent
+  // section's outputSummary preview.
+  const [expanded, setExpanded] = useState(false);
+  const isRunningRow =
+    effectiveStatus === 'working' || effectiveStatus === 'queued';
   // `task.subagentType` is the redacted founder-facing label
   // (e.g. 'Social Media Manager'); when missing fall through to the
   // unknown-label gradient via the empty string.
@@ -286,20 +378,24 @@ function TaskPanelRow({
     marginTop: 2,
   };
 
-  const isRunning = task.status === 'working' || task.status === 'queued';
+  // Use the effective status everywhere user-visible. Falls back to
+  // task.status only when the parent didn't compute one (caller still
+  // wires `effectiveStatus={statusFor(task)}` in both render sites).
+  const status: DelegationTask['status'] = effectiveStatus;
+  const isRunning = status === 'working' || status === 'queued';
   const agentLabel = task.subagentType ?? 'specialist';
   const statusLabel =
-    task.status === 'working'
+    status === 'working'
       ? 'RUNNING'
-      : task.status === 'queued'
+      : status === 'queued'
         ? 'QUEUED'
-        : task.status === 'done'
+        : status === 'done'
           ? 'DONE'
           : 'FAILED';
   const statusColor =
-    task.status === 'done'
+    status === 'done'
       ? 'var(--sf-success-ink)'
-      : task.status === 'failed'
+      : status === 'failed'
         ? 'var(--sf-error-ink)'
         : 'var(--sf-accent)';
 
@@ -332,7 +428,7 @@ function TaskPanelRow({
   // need a concrete agentId.
   const canCancel = isRunning && !!onCancel && !!task.agentId;
   const canRetry =
-    (task.status === 'failed' || task.status === 'done') &&
+    (status === 'failed' || status === 'done') &&
     !!onRetry &&
     !!task.agentId;
   const showAction = hover && (canCancel || canRetry);
@@ -352,10 +448,37 @@ function TaskPanelRow({
     marginLeft: 6,
   };
 
+  // Click semantics:
+  //   - On a RUNNING row: toggle expand, revealing the live progress feed.
+  //     Holding shift+click jumps to the inline card (existing behavior).
+  //   - On a TERMINAL row: jump to the inline card (existing behavior).
+  // Pre-A2 the only click action was jump-to-inline. The new toggle is
+  // additive — the right Tasks panel becomes the canonical "see what
+  // this teammate is doing right now" surface.
+  const handleRowClick = (e: React.MouseEvent) => {
+    if (isRunning && !e.shiftKey) {
+      setExpanded((v) => !v);
+      return;
+    }
+    if (onJump) onJump(task.messageId, task.runId);
+  };
+
+  const handleKey = (e: React.KeyboardEvent) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    if (isRunning) {
+      setExpanded((v) => !v);
+    } else if (onJump) {
+      onJump(task.messageId, task.runId);
+    }
+  };
+
   return (
     <div
       style={row}
-      onClick={onJump ? () => onJump(task.messageId, task.runId) : undefined}
+      onClick={handleRowClick}
+      onKeyDown={onJump || isRunning ? handleKey : undefined}
+      tabIndex={onJump || isRunning ? 0 : undefined}
       onMouseEnter={(e) => {
         setHover(true);
         (e.currentTarget as HTMLDivElement).style.background =
@@ -367,9 +490,11 @@ function TaskPanelRow({
           'var(--sf-bg-secondary)';
       }}
       data-testid={`task-panel-row-${task.messageId}`}
-      data-status={task.status}
-      role={onJump ? 'button' : undefined}
-      aria-label={`${agentLabel}: ${task.label}, ${task.status}`}
+      data-status={status}
+      data-expanded={isRunningRow && expanded ? 'true' : 'false'}
+      role={onJump || isRunning ? 'button' : undefined}
+      aria-expanded={isRunning ? expanded : undefined}
+      aria-label={`${agentLabel}: ${task.label}, ${status}`}
     >
       <span style={leftRule} aria-hidden="true" />
       <div style={topLine}>
@@ -404,12 +529,117 @@ function TaskPanelRow({
         ) : null}
       </div>
       <div style={titleStyle}>{task.label}</div>
-      {variant === 'expanded' && isRunning ? (
+      {variant === 'expanded' && isRunning && !expanded ? (
         <div style={metaLine}>
           <span style={{ color: borderColor }}>⤵</span>
           <span>{deriveLiveActivity(task)}</span>
         </div>
       ) : null}
+      {variant === 'expanded' && isRunning && expanded ? (
+        <ProgressDetail items={task.progressItems} accentColor={borderColor} />
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Inline-expanded progress feed for a running row. Mirrors the chat-
+ * side DelegationCard's progress list pattern but stripped down: the
+ * panel is narrow, so we render tool names + text bursts as a vertical
+ * list without the nested indentation. Caps at the most recent 20
+ * entries so a 60-tool sweep doesn't push the rest of the panel
+ * off-screen.
+ */
+function ProgressDetail({
+  items,
+  accentColor,
+}: {
+  items: readonly ProgressItem[];
+  accentColor: string;
+}) {
+  const wrap: CSSProperties = {
+    marginTop: 8,
+    padding: '8px 8px 8px 10px',
+    borderRadius: 6,
+    background: 'var(--sf-bg-primary)',
+    borderLeft: `2px solid ${accentColor}`,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 4,
+    maxHeight: 220,
+    overflowY: 'auto',
+  };
+  const row: CSSProperties = {
+    fontFamily: 'var(--sf-font-mono)',
+    fontSize: 11,
+    color: 'var(--sf-fg-3)',
+    lineHeight: 1.45,
+    display: 'flex',
+    alignItems: 'baseline',
+    gap: 6,
+  };
+  const tool: CSSProperties = {
+    fontWeight: 500,
+    color: 'var(--sf-fg-2)',
+  };
+  const text: CSSProperties = {
+    color: 'var(--sf-fg-2)',
+    fontFamily: 'inherit',
+    fontSize: 12,
+  };
+  const elapsed: CSSProperties = {
+    marginLeft: 'auto',
+    color: 'var(--sf-fg-4)',
+    fontVariantNumeric: 'tabular-nums',
+  };
+
+  const visible = items.slice(-20);
+  const hidden = items.length - visible.length;
+  if (items.length === 0) {
+    return (
+      <div style={wrap}>
+        <div style={{ ...row, fontStyle: 'italic', color: 'var(--sf-fg-4)' }}>
+          thinking…
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div style={wrap} role="region" aria-label="Live progress">
+      {hidden > 0 ? (
+        <div style={row}>
+          <span>+{hidden} earlier {hidden === 1 ? 'event' : 'events'}</span>
+        </div>
+      ) : null}
+      {visible.map((item) => {
+        if (item.kind === 'tool') {
+          return (
+            <div key={item.id} style={row}>
+              <span aria-hidden="true">└ ◈</span>
+              <span style={tool}>{item.toolName}</span>
+              {item.errorText ? (
+                <span style={{ color: 'var(--sf-error-ink)' }}>— {item.errorText}</span>
+              ) : null}
+              {item.elapsed ? <span style={elapsed}>{item.elapsed}</span> : null}
+            </div>
+          );
+        }
+        if (item.kind === 'group') {
+          return (
+            <div key={item.id} style={row}>
+              <span aria-hidden="true">└ ⊡</span>
+              <span style={tool}>{item.label}</span>
+            </div>
+          );
+        }
+        // text — show first line as a one-liner, full content if short.
+        const oneLiner = item.text.split('\n').find((l) => l.trim().length > 0) ?? '';
+        return (
+          <div key={item.id} style={text}>
+            {oneLiner.length > 140 ? `${oneLiner.slice(0, 140)}…` : oneLiner}
+          </div>
+        );
+      })}
     </div>
   );
 }
