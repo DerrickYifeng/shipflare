@@ -207,11 +207,36 @@ export function Conversation({
   const effectiveHasOlder = useVirtualized ? false : hasOlder;
   const effectiveLoadingOlder = useVirtualized ? false : loadingOlder;
 
+  // Any spawned teammate still running? The lead's own turn often ends
+  // immediately after a parallel dispatch — it posts SYNTHESIS, goes to
+  // sleep, and waits for `<task-notification>` arrivals. From the
+  // founder's perspective the team is still busy though, so the
+  // typing indicator must keep pulsing while ANY agent_run is in a
+  // non-terminal state (running, queued, waiting_for_children, etc.).
+  // Without this branch the indicator vanished as soon as the lead
+  // dispatched, even though 4 subagents were grinding for minutes.
+  const anyAgentRunning = useMemo(() => {
+    if (!agentRunStatus) return false;
+    for (const status of agentRunStatus.values()) {
+      const s = status.status;
+      // Active states from `agent_runs.status` (see conversation-reducer.ts
+      // AgentRunStatus). `sleeping` deliberately excluded — the lead row
+      // stays 'sleeping' indefinitely while idle, and we don't want a
+      // permanent indicator just because the lead exists.
+      if (s === 'running' || s === 'queued' || s === 'resuming') {
+        return true;
+      }
+    }
+    return false;
+  }, [agentRunStatus]);
+
   // Decide whether to show the typing indicator. Shown when:
   // - a run is live, AND
   //   - the selected run's status is 'running', OR
   //   - (all view) any visible group belongs to a running run, OR
-  //   - the last visible node is a user bubble with no reply yet.
+  //   - the last visible node is a user bubble with no reply yet, OR
+  //   - any spawned teammate is still in flight (lead asleep after a
+  //     parallel dispatch is the common case).
   const showTyping = useMemo(() => {
     if (!isLive) return false;
     if (visibleGroups.length === 0) return false;
@@ -221,8 +246,10 @@ export function Conversation({
     const lastIsUser = lastNode?.kind === 'user';
     const lastIsPendingActivity =
       lastNode?.kind === 'activity' && !lastNode.complete;
-    return runIsRunning || lastIsUser || lastIsPendingActivity;
-  }, [isLive, visibleGroups]);
+    return (
+      runIsRunning || lastIsUser || lastIsPendingActivity || anyAgentRunning
+    );
+  }, [isLive, visibleGroups, anyAgentRunning]);
 
   // Scroll container and its direct child (the "content" element the
   // ResizeObserver watches for grow events). `useAutoScroll` pins the
