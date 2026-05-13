@@ -117,12 +117,25 @@ export const agentRunQueue = queues.standard;
  * lead's reply latency degrades to standard-tier).
  *
  * Falls back to `'standard'` for unknown queue names — the safe default
- * (also matches the legacy 'agent-run' name).
+ * (also matches the legacy 'agent-run' name) — but emits a `warn` so
+ * a typo or future lane that the reverse lookup wasn't updated for
+ * surfaces in logs rather than silently demoting priority traffic.
  */
 export function laneFromQueueName(queueName: string): AgentRunPriority {
   for (const [lane, name] of Object.entries(AGENT_RUN_QUEUE_NAMES)) {
     if (name === queueName) return lane as AgentRunPriority;
   }
+  // The only real caller is `processAgentRun`, whose `job.queueName`
+  // is guaranteed by BullMQ to be one of the three registered names.
+  // An unknown name means a typo in a hardcoded queue name elsewhere
+  // (or a future lane added to AGENT_RUN_QUEUE_NAMES that the reverse
+  // lookup wasn't updated for). We default to 'standard' rather than
+  // throwing so the worker stays alive, but warn loudly — silent
+  // demotion of priority traffic to standard is exactly the kind of
+  // latency regression that's hard to spot from logs alone.
+  log.warn(
+    `laneFromQueueName: unknown queue '${queueName}', defaulting to standard`,
+  );
   return 'standard';
 }
 

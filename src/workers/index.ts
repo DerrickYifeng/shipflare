@@ -463,7 +463,7 @@ Promise.all([
   log.error('Failed to schedule cron jobs:', err.message);
 });
 
-log.info('All workers started: review, posting, growth-rollup, dream, code-scan, daily-run, engagement, metrics, analytics, reddit-channel-research, plan-execute, plan-execute-sweeper, stale-sweeper, weekly-replan, team-run, agent-run, reconcile-mailbox. daily-run daily 13:00 UTC, growth-rollup daily 02:00 UTC, plan-execute-sweeper every 1m, stale-sweeper every 1h, weekly-replan Monday 00:00 UTC, reconcile-mailbox every 1m, all others daily.');
+log.info('All workers started: review, posting, growth-rollup, dream, code-scan, daily-run, engagement, metrics, analytics, reddit-channel-research, plan-execute, plan-execute-sweeper, stale-sweeper, weekly-replan, agent-run (priority/standard/backfill), reconcile-mailbox. daily-run daily 13:00 UTC, growth-rollup daily 02:00 UTC, plan-execute-sweeper every 1m, stale-sweeper every 1h, weekly-replan Monday 00:00 UTC, reconcile-mailbox every 1m, all others daily.');
 
 // Graceful shutdown
 async function shutdown() {
