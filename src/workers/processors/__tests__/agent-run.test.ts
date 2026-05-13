@@ -55,8 +55,8 @@ const teamSelectChain: {
     { id: 'team-1', userId: 'user-1', productId: null },
   ]),
 };
-vi.mock('@/lib/db', () => ({
-  db: {
+vi.mock('@/lib/db', () => {
+  const dbMock = {
     query: { agentRuns: { findFirst: vi.fn() } },
     update: vi.fn(() => updateChain),
     insert: vi.fn(() => insertChain),
@@ -66,15 +66,25 @@ vi.mock('@/lib/db', () => ({
       if (projection && 'userId' in projection) return teamSelectChain;
       return selectChain;
     }),
-    transaction: vi.fn(),
+    // synthAndDeliverNotification now wraps the task_notification INSERT
+    // + parent-reenqueue drain in `db.transaction(async (tx) => ...)`
+    // so a worker crash between them can't strand the parent's
+    // `waiting_for` array. Execute the callback against the same db
+    // mock — the existing insert/execute spies then receive the calls
+    // as if they were issued directly. Bind via getter so the closure
+    // sees the final dbMock shape (avoids TDZ on tx === dbMock).
+    transaction: vi.fn(
+      async <T,>(cb: (tx: unknown) => Promise<T>): Promise<T> => cb(dbMock),
+    ),
     // D4: parent-reenqueue uses db.execute(sql`...`) for an atomic
     // UPDATE+RETURNING. Default returns an empty array so
     // removeChildAndMaybeWake's `if (!row)` branch fires (no parent
     // found → no wake transition). Tests that exercise the durable
     // parent-wake transition explicitly override this mock.
     execute: vi.fn(async () => []),
-  },
-}));
+  };
+  return { db: dbMock };
+});
 
 // Phase E orphan fix (Task 1): platform-deps mock — agent-run preloads
 // every platform client the team could need into the ToolContext via

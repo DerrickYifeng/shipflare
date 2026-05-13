@@ -20,10 +20,22 @@
 // status returns `shouldWake=true`.
 
 import { sql } from 'drizzle-orm';
-import { db } from '@/lib/db';
+import { db as defaultDb, type Database } from '@/lib/db';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('parent-reenqueue');
+
+/**
+ * A Drizzle transaction client OR the top-level `db`. The transaction
+ * type is reachable via the parameter to `db.transaction(async (tx) =>
+ * ...)`; both `db` and `tx` expose the same `.execute<T>(sql)` shape,
+ * so this alias is sufficient for the single statement below.
+ *
+ * Exposed so callers wrapping `synthAndDeliverNotification` in a
+ * transaction (see `agent-run.ts`) can pass their `tx` here without
+ * casting.
+ */
+export type ReenqueueDb = Database | Parameters<Parameters<Database['transaction']>[0]>[0];
 
 // `& Record<string, unknown>` is required for Drizzle's `db.execute<T>()`
 // generic, which constrains the row type to an index-signature shape so
@@ -56,11 +68,20 @@ type ReenqueueRow = {
  * the UPDATEs; the caller that observes the array drained AND the status
  * still on `waiting_for_children` wins; the other sees status='running'
  * (already transitioned) and returns `false`.
+ *
+ * The optional `tx` parameter lets callers participate in an outer
+ * transaction (e.g. `synthAndDeliverNotification` wrapping the
+ * `team_messages` INSERT + this drain in a single atomic step so a
+ * worker crash between them can't strand the parent's `waiting_for`
+ * array on a now-completed child). When omitted, uses the top-level
+ * `db` (legacy behavior).
  */
 export async function removeChildAndMaybeWake(
   parentAgentId: string,
   childAgentId: string,
+  tx?: ReenqueueDb,
 ): Promise<boolean> {
+  const dbClient = tx ?? defaultDb;
   // Single UPDATE...RETURNING with a snapshot CTE for atomicity. The CTE
   // takes a row-level FOR UPDATE lock and captures the pre-image
   // (`prev_status`, `prev_waiting_for`) under that lock; the UPDATE then
@@ -75,7 +96,7 @@ export async function removeChildAndMaybeWake(
   // CASE would return 'running' for a legacy parent that was already
   // 'running' with empty waiting_for — indistinguishable from a real
   // transition. The CTE makes the pre-image explicit.
-  const result = await db.execute<ReenqueueRow>(sql`
+  const result = await dbClient.execute<ReenqueueRow>(sql`
     WITH prev AS (
       SELECT id, status AS prev_status, waiting_for AS prev_waiting_for
       FROM agent_runs

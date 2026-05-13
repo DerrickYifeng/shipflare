@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import { users } from '@/lib/db/schema/users';
-import { teams, teamMembers, agentRuns } from '@/lib/db/schema/team';
+import { teams, teamMembers, agentRuns, teamMessages } from '@/lib/db/schema/team';
 import { removeChildAndMaybeWake } from '@/workers/processors/lib/parent-reenqueue';
 
 /**
@@ -191,5 +191,56 @@ describe('removeChildAndMaybeWake', () => {
       'c1',
     );
     expect(shouldWake).toBe(false);
+  });
+
+  it('participates in outer transaction — rolls back drain when caller aborts (crash recovery)', async () => {
+    // Cross-task integration fix: synthAndDeliverNotification wraps
+    // the task_notification INSERT + this drain in db.transaction so
+    // a worker crash between them can't strand the parent's
+    // waiting_for array. Simulate that crash: insert the mailbox
+    // row, drain the child, then THROW inside the transaction. The
+    // transaction must roll back, leaving waiting_for unchanged and
+    // no task_notification row persisted.
+    const { parentAgentId, teamId, memberId } = await seedParent({
+      waitingFor: ['c1'],
+      status: 'waiting_for_children',
+    });
+
+    const sentinel = new Error('simulated worker crash');
+    await expect(
+      db.transaction(async (tx) => {
+        await tx.insert(teamMessages).values({
+          teamId,
+          type: 'user_prompt',
+          messageType: 'task_notification',
+          fromMemberId: memberId,
+          toAgentId: parentAgentId,
+          content: '<task-notification>...</task-notification>',
+          summary: 'simulated child completed',
+        });
+        const shouldWake = await removeChildAndMaybeWake(
+          parentAgentId,
+          'c1',
+          tx,
+        );
+        // Drain SAW the row inside the tx (sanity: returns true on
+        // the unblocking transition), but we throw BEFORE commit so
+        // the change should not land.
+        expect(shouldWake).toBe(true);
+        throw sentinel;
+      }),
+    ).rejects.toBe(sentinel);
+
+    // Post-rollback: parent must look untouched.
+    const row = await getParent(parentAgentId);
+    expect(row?.waitingFor).toEqual(['c1']);
+    expect(row?.status).toBe('waiting_for_children');
+
+    // No task_notification row landed either.
+    const messages = await db
+      .select({ id: teamMessages.id })
+      .from(teamMessages)
+      .where(eq(teamMessages.teamId, teamId));
+    expect(messages).toEqual([]);
   });
 });

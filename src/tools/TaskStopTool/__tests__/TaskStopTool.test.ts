@@ -106,6 +106,13 @@ vi.mock('@/workers/processors/lib/wake', () => ({
 }));
 import { wake } from '@/workers/processors/lib/wake';
 
+// Mock the agent-run batcher invalidate so TaskStop can call it via
+// dynamic import without instantiating the real BullMQ worker.
+const invalidateSpy = vi.hoisted(() => vi.fn());
+vi.mock('@/workers/processors/agent-run', () => ({
+  invalidateAgentStatusFor: invalidateSpy,
+}));
+
 // ---------------------------------------------------------------------------
 // Import AFTER mocks
 // ---------------------------------------------------------------------------
@@ -150,6 +157,7 @@ beforeEach(() => {
   inserts.length = 0;
   updates.length = 0;
   vi.mocked(wake).mockClear();
+  invalidateSpy.mockClear();
 });
 
 // ---------------------------------------------------------------------------
@@ -195,6 +203,49 @@ describe('TaskStop tool — Phase C', () => {
     );
     expect(killedUpdate).toBeDefined();
     expect(killedUpdate!.values.shutdownReason).toBeTruthy();
+  });
+
+  it('invalidates the batcher for the TARGET before the sync UPDATE (B7 ordering)', async () => {
+    // B7 contract: TaskStop writes the TARGET's status='killed'
+    // synchronously, and the lead may share a worker process with the
+    // target — a buffered transient ('running' / 'resuming') for the
+    // target can flush AFTER the killed write and overwrite it.
+    // Verify the invalidate fires for the TARGET id and lands BEFORE
+    // the durable UPDATE.
+    const callOrder: string[] = [];
+    invalidateSpy.mockImplementation(() => {
+      callOrder.push('invalidate');
+    });
+    const recordingDb = {
+      insert(_table: unknown) {
+        return {
+          values(row: InsertedRow): Promise<void> {
+            inserts.push(row);
+            return Promise.resolve();
+          },
+        };
+      },
+      update(_table: unknown) {
+        return {
+          set(values: Record<string, unknown>) {
+            return {
+              where(cond: EqSentinel): Promise<void> {
+                callOrder.push('update');
+                updates.push({ values, whereValue: cond.__eq?.value });
+                return Promise.resolve();
+              },
+            };
+          },
+        };
+      },
+    };
+    const ctx = makeLeadCtx({ db: recordingDb });
+    await taskStopTool.execute({ task_id: 'agent-target' }, ctx);
+
+    expect(invalidateSpy).toHaveBeenCalledWith('agent-target');
+    expect(callOrder.indexOf('invalidate')).toBeLessThan(
+      callOrder.indexOf('update'),
+    );
   });
 
   it('rejects when caller is not lead (403)', async () => {

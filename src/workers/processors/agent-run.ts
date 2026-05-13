@@ -552,35 +552,56 @@ async function synthAndDeliverNotification(params: NotifyParams): Promise<void> 
     usage: params.usage,
   });
 
-  await db.insert(teamMessages).values({
-    teamId: params.teamId,
-    type: 'user_prompt',
-    messageType: 'task_notification',
-    fromMemberId: params.memberId,
-    fromAgentId: params.agentId,
-    toAgentId: params.parentAgentId, // null in Phase B (lead has no agent_runs row yet)
-    content: xml,
-    summary: params.summary,
+  // Cross-task integration fix: the task_notification INSERT and the
+  // parent-reenqueue drain MUST commit atomically. If the worker
+  // crashes between them, the team_messages row exists but the
+  // parent's `waiting_for` array still contains the completed child's
+  // id. The idempotent guard in `runAgentTurn_durable` (around
+  // line ~2123) then rejects every subsequent wake
+  // (`status='waiting_for_children' AND waitingFor.length > 0 → return`),
+  // so reconcile-mailbox re-wakes the parent forever and founder
+  // messages can't recover. Wrap both in a single transaction; the
+  // fire-and-forget `wake()` stays outside since it must observe the
+  // committed state.
+  let shouldWake = false;
+  await db.transaction(async (tx) => {
+    await tx.insert(teamMessages).values({
+      teamId: params.teamId,
+      type: 'user_prompt',
+      messageType: 'task_notification',
+      fromMemberId: params.memberId,
+      fromAgentId: params.agentId,
+      toAgentId: params.parentAgentId, // null in Phase B (lead has no agent_runs row yet)
+      content: xml,
+      summary: params.summary,
+    });
+
+    // Phase B: when parentAgentId is null, the team-run drain (Task 12) polls
+    // for these notifications. No wake() needed because there's no agentRun
+    // for the lead yet (Phase E adds proper wake routing).
+    //
+    // Phase D4: when parentAgentId is non-null, atomically drain the
+    // completing child from the parent's `waiting_for` array. If THIS call
+    // drained the array empty AND the parent was 'waiting_for_children',
+    // the helper returns true — we wake on the 'priority' lane because
+    // the parent is now unblocked and resuming is founder-facing. If the
+    // parent still has siblings outstanding, or if the parent is a legacy
+    // row that never used the new column (waiting_for=[] and
+    // status≠'waiting_for_children'), the helper returns false and we
+    // fall back to a standard wake (legacy polling-drain compatibility).
+    if (params.parentAgentId) {
+      shouldWake = await removeChildAndMaybeWake(
+        params.parentAgentId,
+        params.agentId,
+        tx,
+      );
+    }
   });
 
-  // Phase B: when parentAgentId is null, the team-run drain (Task 12) polls
-  // for these notifications. No wake() needed because there's no agentRun
-  // for the lead yet (Phase E adds proper wake routing).
-  //
-  // Phase D4: when parentAgentId is non-null, atomically drain the
-  // completing child from the parent's `waiting_for` array. If THIS call
-  // drained the array empty AND the parent was 'waiting_for_children',
-  // the helper returns true — we wake on the 'priority' lane because
-  // the parent is now unblocked and resuming is founder-facing. If the
-  // parent still has siblings outstanding, or if the parent is a legacy
-  // row that never used the new column (waiting_for=[] and
-  // status≠'waiting_for_children'), the helper returns false and we
-  // fall back to a standard wake (legacy polling-drain compatibility).
+  // Wake AFTER the transaction commits so the parent's leadStep
+  // observes the freshly-drained `waiting_for` array (not the
+  // uncommitted in-flight state).
   if (params.parentAgentId) {
-    const shouldWake = await removeChildAndMaybeWake(
-      params.parentAgentId,
-      params.agentId,
-    );
     await wake(params.parentAgentId, shouldWake ? 'priority' : 'standard');
   }
 

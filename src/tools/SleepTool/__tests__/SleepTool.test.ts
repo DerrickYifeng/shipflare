@@ -10,6 +10,13 @@ vi.mock('@/lib/db', () => ({
   db: {},
 }));
 
+// Mock the agent-run batcher invalidate so SleepTool can call it via
+// dynamic import without instantiating the real BullMQ worker.
+const invalidateSpy = vi.hoisted(() => vi.fn());
+vi.mock('@/workers/processors/agent-run', () => ({
+  invalidateAgentStatusFor: invalidateSpy,
+}));
+
 import { sleepTool, SLEEP_TOOL_NAME } from '@/tools/SleepTool/SleepTool';
 import { enqueueAgentRun } from '@/lib/queue/agent-run';
 import type { ToolContext } from '@/core/types';
@@ -51,6 +58,7 @@ function makeAgentCtx(over: { agentId?: string; updates?: UpdateCall[] } = {}): 
 describe('Sleep tool — Phase D', () => {
   beforeEach(() => {
     vi.mocked(enqueueAgentRun).mockClear();
+    invalidateSpy.mockClear();
   });
 
   it('exports the canonical name "Sleep"', () => {
@@ -94,5 +102,67 @@ describe('Sleep tool — Phase D', () => {
     await expect(
       sleepTool.execute({ duration_ms: 0 }, makeAgentCtx()),
     ).rejects.toThrow(/positive/i);
+  });
+
+  it('invalidates the batcher BEFORE the sync UPDATE (B7 ordering)', async () => {
+    // B7 contract: callers issuing a synchronous terminal-adjacent
+    // write to agent_runs.status MUST invalidate any buffered
+    // transient first, else the next batcher tick can overwrite the
+    // durable write with stale 'running'/'resuming'. Verify ordering
+    // by recording call sequence — invalidate must precede the
+    // db.update() side-effect (captured here via the updates array).
+    const updates: UpdateCall[] = [];
+    const callOrder: string[] = [];
+    invalidateSpy.mockImplementation(() => {
+      callOrder.push('invalidate');
+    });
+    const fakeDb = {
+      update(_table: unknown) {
+        return {
+          set(values: Record<string, unknown>) {
+            return {
+              where(_cond: unknown): Promise<void> {
+                callOrder.push('update');
+                updates.push({ values });
+                return Promise.resolve();
+              },
+            };
+          },
+        };
+      },
+      // SleepTool also reads back the agent's teamId after the update;
+      // return an empty selection so the writethrough path is a no-op.
+      select() {
+        return {
+          from() {
+            return {
+              where() {
+                return {
+                  limit() {
+                    return Promise.resolve([]);
+                  },
+                };
+              },
+            };
+          },
+        };
+      },
+    };
+    const ctx = {
+      abortSignal: new AbortController().signal,
+      get<V>(key: string): V {
+        if (key === 'callerAgentId') return 'agent-self' as V;
+        if (key === 'db') return fakeDb as V;
+        throw new Error(`missing dep: ${key}`);
+      },
+    };
+
+    await sleepTool.execute({ duration_ms: 30_000 }, ctx);
+
+    expect(invalidateSpy).toHaveBeenCalledWith('agent-self');
+    // The invalidate must land BEFORE the durable UPDATE.
+    expect(callOrder.indexOf('invalidate')).toBeLessThan(
+      callOrder.indexOf('update'),
+    );
   });
 });

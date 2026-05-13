@@ -75,6 +75,15 @@ export const webSearchTool: ToolDefinition<WebSearchInput, WebSearchOutput> =
     isReadOnly: true,
     async execute(input): Promise<WebSearchOutput> {
       const start = performance.now();
+      // TODO(B5+): this call bypasses the per-tenant LLM bucket / cached
+      // `createMessage` path because the `web_search_20250305` server-tool
+      // is in Anthropic's `ToolUnion` type, NOT `Anthropic.Messages.Tool[]`
+      // which `createMessage`'s signature requires. Routing through
+      // createMessage would need its `tools` parameter widened to
+      // `ToolUnion[]` (and the prompt-cache path re-verified against
+      // server tools). Until then, web_search consumes Anthropic spend
+      // without per-tenant accounting. Matches the TODO(B5+) markers on
+      // the memory-subsystem callers; track at: <future ticket>.
       const client = new Anthropic();
 
       // Anthropic's web_search server-tool. Type comes from the

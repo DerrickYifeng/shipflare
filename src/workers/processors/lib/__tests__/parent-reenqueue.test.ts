@@ -73,4 +73,28 @@ describe('removeChildAndMaybeWake (unit — contract)', () => {
     await removeChildAndMaybeWake('parent-1', 'child-1');
     expect(executeMock).toHaveBeenCalledTimes(1);
   });
+
+  it('uses the passed `tx` client when provided (transaction participation)', async () => {
+    // Cross-task integration fix: callers wrapping the
+    // task_notification INSERT + this drain in a single
+    // db.transaction must be able to pass `tx` so both statements
+    // commit atomically. If `tx` weren't honored, the drain would
+    // hit the top-level db and could observe (or be observed by)
+    // concurrent transactions racing against the same parent row.
+    const txExecuteMock = vi.fn().mockResolvedValueOnce([
+      { new_remaining: 0, new_status: 'running', transitioned: true },
+    ]);
+    const fakeTx = { execute: txExecuteMock };
+    // Cast through unknown: the runtime type is broader than our
+    // fake fixture and we only care that `tx.execute` is called.
+    await removeChildAndMaybeWake(
+      'parent-1',
+      'child-1',
+      fakeTx as unknown as Parameters<typeof removeChildAndMaybeWake>[2],
+    );
+
+    // The passed tx received the UPDATE; the top-level db did NOT.
+    expect(txExecuteMock).toHaveBeenCalledTimes(1);
+    expect(executeMock).not.toHaveBeenCalled();
+  });
 });
