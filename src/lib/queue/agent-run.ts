@@ -82,3 +82,38 @@ export async function enqueueAgentRun(
   log.debug(`enqueueAgentRun: agentId=${data.agentId} jobId=${jobId}${opts.delay ? ` delay=${opts.delay}ms` : ''}`);
   return { id: job.id, data };
 }
+
+// ---------------------------------------------------------------------------
+// reenqueueWithDelay — backpressure helper (Phase B3)
+// ---------------------------------------------------------------------------
+
+/**
+ * Re-enqueue an agent-run with a small delay + jitter. Used by the
+ * per-tenant semaphore (`acquireTenantSlot` refusal path) in
+ * `processAgentRun` to apply Stripe-style backpressure: the job exits
+ * without doing LLM work, and a delayed copy is requeued so the worker
+ * pool isn't burned cycling on a tenant at cap.
+ *
+ * The `jobId` collapses near-simultaneous re-enqueues for the same
+ * agent into a single delayed job — bucket size = 1 second of the
+ * scheduled fire time. Two callers backpressuring the same agent in the
+ * same second will dedupe; on the next second they'll get distinct
+ * bucket ids. Net effect: a tenant constantly at cap cycles ~1 acquire
+ * attempt per second per pending agent rather than thrashing the queue.
+ *
+ * NOTE: the cap is a SOFT limit. A tenant with 50 work items at cap=3
+ * keeps ~3 processing + ~47 queued — each queued one wakes every
+ * `delayMs + jitter`, briefly fails to acquire, and re-enqueues. That's
+ * by design: tenants get queued, not DoS'd.
+ */
+export async function reenqueueWithDelay(
+  agentId: string,
+  delayMs: number,
+): Promise<void> {
+  const jitter = Math.floor(Math.random() * 500);
+  const bucket = Math.floor((Date.now() + delayMs) / 1000);
+  await enqueueAgentRun(
+    { agentId },
+    { jobId: `delayed:${agentId}:${bucket}`, delay: delayMs + jitter },
+  );
+}

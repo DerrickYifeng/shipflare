@@ -226,8 +226,42 @@ vi.mock('@/lib/team/system-prompt-context', () => ({
 const publishMock = vi.hoisted(() =>
   vi.fn(async (_channel: string, _payload: string) => 1),
 );
+// Phase B3: stub the KV + BullMQ Redis getters so the new semaphore
+// wrapper around processAgentRun + the imported `reenqueueWithDelay`
+// helper don't try to spin up real ioredis instances under vitest.
+// `getKeyValueClient` returns an opaque sentinel — the actual
+// semaphore calls are mocked separately below.
 vi.mock('@/lib/redis', () => ({
   getPubSubPublisher: () => ({ publish: publishMock }),
+  getKeyValueClient: () => ({}),
+  getBullMQConnection: () => ({}),
+}));
+
+// Phase B3: stub the tenant semaphore — tests assert that processAgentRun
+// reaches the actual worker body, which means the slot acquire must
+// succeed by default. Each test can opt into a backpressure path by
+// overriding `acquireTenantSlotMock` for the call.
+const acquireTenantSlotMock = vi.hoisted(() =>
+  vi.fn(async () => ({ acquired: true, current: 1, cap: 3 })),
+);
+const releaseTenantSlotMock = vi.hoisted(() => vi.fn(async () => {}));
+vi.mock('@/lib/redis-scripts/tenant-semaphore', () => ({
+  acquireTenantSlot: acquireTenantSlotMock,
+  releaseTenantSlot: releaseTenantSlotMock,
+}));
+
+// Phase B3: stub the user/tier lookup so tests don't need to wire up
+// agent_runs → team_members → teams joins in the fake db.
+vi.mock('@/lib/team/team-tier', () => ({
+  tierForAgentRun: vi.fn(async () => ({ userId: 'user-1', tier: 'free' })),
+  inflightCapForTier: (_t: string) => 3,
+}));
+
+// Phase B3: stub the BullMQ re-enqueue path so a backpressure test
+// can assert the call without touching a real queue.
+const reenqueueWithDelayMock = vi.hoisted(() => vi.fn(async () => {}));
+vi.mock('@/lib/queue/agent-run', () => ({
+  reenqueueWithDelay: reenqueueWithDelayMock,
 }));
 
 import { processAgentRun } from '@/workers/processors/agent-run';

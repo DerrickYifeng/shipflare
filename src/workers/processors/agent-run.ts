@@ -58,12 +58,33 @@ import {
 } from '@/lib/team/system-prompt-context';
 import type { AgentDefinition } from '@/tools/AgentTool/loader';
 import { createLogger } from '@/lib/logger';
-import { getPubSubPublisher } from '@/lib/redis';
+import { getKeyValueClient, getPubSubPublisher } from '@/lib/redis';
+import {
+  acquireTenantSlot,
+  releaseTenantSlot,
+} from '@/lib/redis-scripts/tenant-semaphore';
 import { teamMessagesChannel } from '@/tools/SendMessageTool/SendMessageTool';
-import type { AgentRunJobData } from '@/lib/queue/agent-run';
+import {
+  reenqueueWithDelay,
+  type AgentRunJobData,
+} from '@/lib/queue/agent-run';
+import { inflightCapForTier, tierForAgentRun } from '@/lib/team/team-tier';
 import type { AgentResult, StreamEvent, ToolContext } from '@/core/types';
 
 const log = createLogger('agent-run');
+
+// Phase B3: how long Redis keeps the per-tenant in-flight counter alive
+// without an explicit release. Must EXCEED BullMQ's lockDuration (10 min,
+// see worker config) so a slot doesn't leak if a worker is killed mid-run
+// before its `finally` block runs. 15 min gives us 5 min of headroom over
+// the worst-case visible-lock window.
+const SEMAPHORE_TTL_SECONDS = 900;
+
+// Phase B3: how long a backpressured re-enqueue waits before its delayed
+// BullMQ job becomes runnable. ~1.5s + 0-500ms jitter keeps wake-storms
+// for a single tenant amortised at roughly one acquire-attempt per
+// second per queued agent — see `reenqueueWithDelay` for the math.
+const BACKPRESSURE_DELAY_MS = 1500;
 
 // Phase C: how often the background drain polls team_messages for
 // mid-run mail addressed to this agent. Mirrors team-run.ts' lead drain
@@ -444,9 +465,79 @@ async function synthAndDeliverNotification(params: NotifyParams): Promise<void> 
 // Entry point
 // ---------------------------------------------------------------------------
 
+/**
+ * BullMQ entry point for the `agent-run` queue.
+ *
+ * Phase B3 wraps the legacy single-function processor with a per-tenant
+ * in-flight semaphore (`acquireTenantSlot` / `releaseTenantSlot`) so a
+ * single user's runaway loop can't monopolise the worker pool. The
+ * wrapper:
+ *
+ *   1. Looks up the owning user + tier (`tierForAgentRun`). Throws on
+ *      missing-agent — that propagates as a BullMQ job failure since no
+ *      slot was held yet.
+ *   2. Tries to acquire a slot capped by `inflightCapForTier(tier)`.
+ *   3. On refusal: re-enqueues a delayed copy via `reenqueueWithDelay`
+ *      and returns WITHOUT touching the DB or doing any LLM work.
+ *   4. On success: runs the actual turn in `runAgentTurn`, then releases
+ *      the slot in `finally` — even on yield-to-sleep, graceful kill,
+ *      or unexpected throws.
+ *
+ * The semaphore TTL (`SEMAPHORE_TTL_SECONDS = 900s`) exceeds BullMQ's
+ * lockDuration (600s) so a worker crash mid-run doesn't permanently
+ * leak the slot. Redis-outage path: `acquireTenantSlot` fails OPEN with
+ * `failedOpen: true`; we WARN-log it so ops alerts can pick up Redis
+ * outages.
+ */
 export async function processAgentRun(job: Job<AgentRunJobData>): Promise<void> {
   const { agentId } = job.data;
 
+  // Look up owning user + tier BEFORE acquiring the slot. If this throws
+  // (e.g. the agent_runs row was deleted between enqueue and dispatch),
+  // we bubble the error up to BullMQ and never held a slot — no release
+  // needed. Wake() callers shouldn't fire for non-existent agents.
+  const { userId, tier } = await tierForAgentRun(agentId);
+  const cap = inflightCapForTier(tier);
+  const redis = getKeyValueClient();
+
+  const slot = await acquireTenantSlot(
+    redis,
+    userId,
+    cap,
+    SEMAPHORE_TTL_SECONDS,
+  );
+  if (!slot.acquired) {
+    log.info(
+      `backpressure: user=${userId} at cap=${cap} (current=${slot.current}), re-enqueueing agent=${agentId}`,
+    );
+    await reenqueueWithDelay(agentId, BACKPRESSURE_DELAY_MS);
+    return;
+  }
+  if (slot.failedOpen) {
+    // Observability metric: Redis unreachable, semaphore is permitting
+    // unconditionally. Should trigger an ops page if it sustains.
+    log.warn(
+      `tenant-semaphore failed open for user=${userId} (cap=${cap}); allowing without cap enforcement`,
+    );
+  }
+
+  try {
+    await runAgentTurn(agentId, job);
+  } finally {
+    await releaseTenantSlot(redis, userId);
+  }
+}
+
+/**
+ * The actual per-job worker body — preserves all pre-B3 behavior
+ * (drain timer, abort handling, terminal-state writes, notifications,
+ * cache write-throughs, SSE pubs). Wrapped by `processAgentRun` above
+ * which owns the per-tenant semaphore acquire/release.
+ */
+async function runAgentTurn(
+  agentId: string,
+  job: Job<AgentRunJobData>,
+): Promise<void> {
   const row = await db.query.agentRuns.findFirst({
     where: eq(agentRuns.id, agentId),
   });
