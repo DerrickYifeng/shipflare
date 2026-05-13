@@ -61,30 +61,48 @@ export interface TaskPanelProps {
  * granularity (`resuming` vs `running` vs `sleeping`); collapse to the
  * coarser DelegationTask vocabulary so the panel's existing filters and
  * label logic don't have to fan out.
+ *
+ * Defensive override: if the task is reporting `queued` (from either
+ * source) but has already emitted progress items (tool calls or text
+ * bursts), the agent is provably running — promote to 'working'. This
+ * patches a class of stale-status bugs where the queued → running SSE
+ * event was dropped (e.g. agent_status_change payloads without a runId
+ * filtered out somewhere) but tool_call events still propagated.
+ * Without this, the panel can stall on QUEUED forever even though the
+ * agent is producing output.
  */
 function effectiveStatus(
   task: DelegationTask,
   live: AgentRunStatus | undefined,
 ): DelegationTask['status'] {
-  if (!live) return task.status;
-  switch (live.status) {
-    case 'running':
-    case 'resuming':
-      return 'working';
-    case 'queued':
-      return 'queued';
-    case 'sleeping':
-      // Treat sleeping as "still in flight" for panel partition.
-      return 'working';
-    case 'completed':
-      return 'done';
-    case 'failed':
-      return 'failed';
-    case 'killed':
-      return 'failed';
-    default:
-      return task.status;
+  const base: DelegationTask['status'] = (() => {
+    if (!live) return task.status;
+    switch (live.status) {
+      case 'running':
+      case 'resuming':
+        return 'working';
+      case 'queued':
+        return 'queued';
+      case 'sleeping':
+        return 'working';
+      case 'completed':
+        return 'done';
+      case 'failed':
+        return 'failed';
+      case 'killed':
+        return 'failed';
+      default:
+        return task.status;
+    }
+  })();
+  // Progress-items override: if the task is "queued" but has produced
+  // observable work, it's actually running. Doesn't apply to terminal
+  // states (a completed task can have many progress items but should
+  // stay 'done').
+  if (base === 'queued' && task.progressItems.length > 0) {
+    return 'working';
   }
+  return base;
 }
 
 const RECENT_DEFAULT_LIMIT = 3;
@@ -150,6 +168,15 @@ export function TaskPanel({
     : recentAll.slice(0, RECENT_DEFAULT_LIMIT);
   const hiddenCount = Math.max(0, recentAll.length - recentVisible.length);
 
+  // Single-expansion mode: at most one row's live progress feed is
+  // visible at a time. Clicking another running row collapses the
+  // previous and expands the new one — without this, expanding 6
+  // concurrent dispatches makes the panel impossible to scan.
+  const [expandedMessageId, setExpandedMessageId] = useState<string | null>(null);
+  const handleToggleExpand = useCallback((messageId: string) => {
+    setExpandedMessageId((curr) => (curr === messageId ? null : messageId));
+  }, []);
+
   const container: CSSProperties = {
     display: 'flex',
     flexDirection: 'column',
@@ -214,6 +241,8 @@ export function TaskPanel({
               key={task.messageId}
               task={task}
               effectiveStatus={statusFor(task)}
+              expanded={expandedMessageId === task.messageId}
+              onToggleExpand={handleToggleExpand}
               onJump={onJumpToTask}
               onCancel={onCancelTask}
               onRetry={onRetryTask}
@@ -254,6 +283,8 @@ export function TaskPanel({
                 key={task.messageId}
                 task={task}
                 effectiveStatus={statusFor(task)}
+                expanded={false}
+                onToggleExpand={handleToggleExpand}
                 onJump={onJumpToTask}
                 onCancel={onCancelTask}
                 onRetry={onRetryTask}
@@ -293,6 +324,13 @@ interface TaskPanelRowProps {
    * when no live entry exists.
    */
   effectiveStatus: DelegationTask['status'];
+  /**
+   * Controlled-expansion: parent holds at most ONE expanded messageId
+   * at a time so siblings stay visible. Click toggles via
+   * `onToggleExpand`. Terminal rows are always passed `expanded=false`.
+   */
+  expanded: boolean;
+  onToggleExpand: (messageId: string) => void;
   onJump?: (messageId: string, runId: string | null) => void;
   onCancel?: (agentId: string) => void | Promise<void>;
   onRetry?: (agentId: string) => void | Promise<void>;
@@ -302,6 +340,8 @@ interface TaskPanelRowProps {
 function TaskPanelRow({
   task,
   effectiveStatus,
+  expanded,
+  onToggleExpand,
   onJump,
   onCancel,
   onRetry,
@@ -309,12 +349,6 @@ function TaskPanelRow({
 }: TaskPanelRowProps) {
   const [hover, setHover] = useState(false);
   const [pending, setPending] = useState(false);
-  // Click-to-expand on running rows: reveals the full progressItems
-  // feed inline so the user can see every tool call + narration step
-  // without leaving the panel. Terminal rows stay collapsed because
-  // their info is already a one-liner ("DONE · 12s") plus the recent
-  // section's outputSummary preview.
-  const [expanded, setExpanded] = useState(false);
   const isRunningRow =
     effectiveStatus === 'working' || effectiveStatus === 'queued';
   // `task.subagentType` is the redacted founder-facing label
@@ -457,7 +491,7 @@ function TaskPanelRow({
   // this teammate is doing right now" surface.
   const handleRowClick = (e: React.MouseEvent) => {
     if (isRunning && !e.shiftKey) {
-      setExpanded((v) => !v);
+      onToggleExpand(task.messageId);
       return;
     }
     if (onJump) onJump(task.messageId, task.runId);
@@ -467,7 +501,7 @@ function TaskPanelRow({
     if (e.key !== 'Enter' && e.key !== ' ') return;
     e.preventDefault();
     if (isRunning) {
-      setExpanded((v) => !v);
+      onToggleExpand(task.messageId);
     } else if (onJump) {
       onJump(task.messageId, task.runId);
     }
@@ -566,7 +600,11 @@ function ProgressDetail({
     display: 'flex',
     flexDirection: 'column',
     gap: 4,
-    maxHeight: 220,
+    // Bounded so a single expanded row doesn't push the other RUNNING
+    // cards out of the visible panel. ~140px ≈ 5-6 progress rows; the
+    // inner overflow lets the user scroll to older items inside the
+    // expanded card without losing siblings.
+    maxHeight: 140,
     overflowY: 'auto',
   };
   const row: CSSProperties = {
