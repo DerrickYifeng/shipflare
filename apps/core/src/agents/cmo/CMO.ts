@@ -4,6 +4,8 @@ import { type McpProps } from "@shipflare/shared";
 import type { Env } from "../../index";
 import { applyCmoSchema } from "./schema";
 import { registerChatTool } from "./tools/chat";
+import { registerConversationTools } from "./tools/conversation";
+import { registerRosterTools } from "./tools/roster";
 
 type CMOState = {
   initialized: boolean;
@@ -79,7 +81,9 @@ export class CMO extends McpAgent<Env, CMOState, McpProps> {
   async init(): Promise<void> {
     // S2.1: chat tool — founder's primary entrypoint.
     registerChatTool(this);
-    // S2.2: registerConversationTools(this), registerRosterTools(this)
+    // S2.2: conversation + roster management.
+    registerConversationTools(this);
+    registerRosterTools(this);
     // S2.4: registerDelegationTools(this), registerSharedStateTools(this)
   }
 
