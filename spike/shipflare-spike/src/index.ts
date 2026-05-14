@@ -12,7 +12,10 @@
 export { McpServerExample } from "./durable-objects/McpServerExample";
 export { AgentExample } from "./durable-objects/AgentExample";
 
-import type { McpServerExample } from "./durable-objects/McpServerExample";
+// Value import (not just type) — we need to call `McpServerExample.serve(...)`
+// at runtime to mount the Streamable HTTP transport for external MCP clients
+// (Claude Desktop, Cursor, @modelcontextprotocol/inspector, etc.).
+import { McpServerExample } from "./durable-objects/McpServerExample";
 import type { AgentExample } from "./durable-objects/AgentExample";
 
 export interface Env {
@@ -32,6 +35,16 @@ export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === "/healthz") return Response.json({ ok: true });
+
+    // External MCP Streamable HTTP transport — for Claude Desktop / external
+    // LLM clients. Pass `binding: "MCP_EXAMPLE"` to override the agents SDK
+    // default of `MCP_OBJECT`.
+    if (url.pathname.startsWith("/external-mcp/")) {
+      return McpServerExample.serve("/external-mcp/:userId/mcp", {
+        binding: "MCP_EXAMPLE",
+      }).fetch(request, env, ctx);
+    }
+
     const match = url.pathname.match(/^\/spike\/(\d{2})(?:\/.*)?$/);
     if (!match) return new Response("not found", { status: 404 });
     const id = match[1];
@@ -43,6 +56,10 @@ export default {
     }
     if (id === "02") {
       const mod = await import("./spikes/02-mcp-rpc");
+      return mod.default(request, env, ctx);
+    }
+    if (id === "03") {
+      const mod = await import("./spikes/03-mcp-http-streamable");
       return mod.default(request, env, ctx);
     }
     return new Response(`spike #${id} not yet implemented`, { status: 501 });
