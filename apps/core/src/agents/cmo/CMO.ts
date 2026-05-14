@@ -3,6 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { type McpProps } from "@shipflare/shared";
 import type { Env } from "../../index";
 import { applyCmoSchema } from "./schema";
+import { registerChatTool } from "./tools/chat";
 
 type CMOState = {
   initialized: boolean;
@@ -34,6 +35,29 @@ export class CMO extends McpAgent<Env, CMOState, McpProps> {
   server = new McpServer({ name: "shipflare-cmo", version: "1.0.0" });
   initialState: CMOState = { initialized: false, lastWakeAt: 0 };
 
+  /**
+   * Narrow accessors so tool-registration modules (which live outside the
+   * class and therefore can't see `protected` DurableObject members) can
+   * reach the raw SQL storage and Worker env. Returning the storage / env
+   * by reference is correct — these are stable per-DO singletons. Keep
+   * this surface minimal; broaden only when a new tool genuinely needs it.
+   *
+   * Naming: `sqlStorage` instead of `sql` because the parent `Agent`
+   * class already exposes a `sql` template-tag method for inline queries;
+   * a getter would shadow it incompatibly. The tool flow uses
+   * `sqlStorage.exec(...)` for parameterized statements via placeholders.
+   *
+   * Naming: `bindings` instead of `env` because `env` is a protected
+   * member of `DurableObject` — a public getter named `env` would alias
+   * a protected field, which TypeScript flags.
+   */
+  get sqlStorage(): SqlStorage {
+    return this.ctx.storage.sql;
+  }
+  get bindings(): Env {
+    return this.env;
+  }
+
   async onStart(props?: McpProps): Promise<void> {
     // Schema bootstrap runs BEFORE `super.onStart()` so that
     //  (a) our tables exist even if the parent's transport-init throws
@@ -53,8 +77,10 @@ export class CMO extends McpAgent<Env, CMOState, McpProps> {
   }
 
   async init(): Promise<void> {
-    // Tool registration — S2.1-S2.5 (chat, delegate, founder-context get/set,
-    // employee_log query, approval-queue resolve, etc.).
+    // S2.1: chat tool — founder's primary entrypoint.
+    registerChatTool(this);
+    // S2.2: registerConversationTools(this), registerRosterTools(this)
+    // S2.4: registerDelegationTools(this), registerSharedStateTools(this)
   }
 
   // fetch() handler for /internal/* endpoints — S2.5
