@@ -1,0 +1,42 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "shipflare-web",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-05-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true, "head_sampling_rate": 1 },
+
+  // Same D1 database as apps/core — both Workers read/write Better Auth's
+  // user / session / account / verification tables plus ShipFlare's
+  // `channels` table. `database_id` is a PLACEHOLDER; before a real
+  // `wrangler deploy` (production), run:
+  //   wrangler d1 create shipflare-prod
+  // and paste the returned UUID here (mirror the same UUID into
+  // apps/core/wrangler.jsonc so both Workers bind the same database).
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "shipflare-prod",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "../../packages/db/migrations"
+    }
+  ],
+
+  // Service Binding to apps/core. Both Workers must be deployed for this to
+  // resolve. Phase 0 spike #8 finding: Service Bindings strip the host header
+  // and `cf-connecting-ip` from the request — DO NOT rely on those headers
+  // being preserved across the binding. Use a synthetic origin
+  // ("https://internal/...") and an explicit `x-shipflare-internal: 1` header
+  // (verified core-side) for the first-login init hook in src/auth.ts.
+  "services": [
+    { "binding": "CORE", "service": "shipflare-core" }
+  ],
+
+  // OpenNext static asset binding — points at the build output. The build
+  // step (`opennextjs-cloudflare build`) populates both `.open-next/worker.js`
+  // and `.open-next/assets/`. Both paths are relative to this file.
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  }
+}

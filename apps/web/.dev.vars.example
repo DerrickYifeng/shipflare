@@ -1,0 +1,22 @@
+# .dev.vars.example — copy to .dev.vars and fill in.
+# .dev.vars is gitignored and read by `wrangler dev` / OpenNext local proxy.
+# For production: set via `wrangler secret put <NAME>` instead.
+
+# 32-byte random base64. Used by Better Auth to sign session cookies.
+#   openssl rand -base64 32
+BETTER_AUTH_SECRET=
+
+# Origin used by Better Auth for OAuth callback URL construction + CSRF.
+# Must exactly match the URL the browser hits. Localhost is dev-only;
+# staging / production need the deployed origin.
+BETTER_AUTH_URL=http://localhost:3000
+
+# From github.com/settings/developers → New OAuth App.
+# Callback URL must be <BETTER_AUTH_URL>/api/auth/callback/github
+GITHUB_CLIENT_ID=
+GITHUB_CLIENT_SECRET=
+
+# Shared with apps/core. Signs the short-lived JWTs the browser uses to call
+# core's /agents/<role>/<userId>/mcp routes directly. 32-byte random base64.
+#   openssl rand -base64 32
+MCP_JWT_SECRET=
