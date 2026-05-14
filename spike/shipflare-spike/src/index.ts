@@ -37,8 +37,13 @@ export default {
     if (url.pathname === "/healthz") return Response.json({ ok: true });
 
     // External MCP Streamable HTTP transport — for Claude Desktop / external
-    // LLM clients. Pass `binding: "MCP_EXAMPLE"` to override the agents SDK
-    // default of `MCP_OBJECT`.
+    // LLM clients.
+    //
+    // NOTE: external HTTP path does NOT auto-inject props into McpAgent.
+    // Only the in-process RPC transport (addMcpServer with DO binding) populates
+    // this.props from the caller. Phase 2 external MCP exposure must wrap this
+    // with withOAuthProvider(...) to populate props from user auth headers.
+    // `binding` must match wrangler.jsonc "durable_objects.bindings[].name".
     if (url.pathname.startsWith("/external-mcp/")) {
       return McpServerExample.serve("/external-mcp/:userId/mcp", {
         binding: "MCP_EXAMPLE",

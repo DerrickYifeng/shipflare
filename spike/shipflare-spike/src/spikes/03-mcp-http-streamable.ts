@@ -10,12 +10,14 @@ import type { Env } from "../index";
  * `@modelcontextprotocol/inspector`.
  */
 export default async function handler(
-  _req: Request,
+  req: Request,
   _env: Env,
   _ctx: ExecutionContext,
 ): Promise<Response> {
+  const url = new URL(req.url);
   return Response.json({
-    note: "External MCP route is /external-mcp/:userId/mcp. Use @modelcontextprotocol/inspector to validate manually, or see test/03-mcp-http-streamable.test.ts for the JSONRPC initialize handshake test.",
-    mcpUrl: "/external-mcp/test-user/mcp",
+    note: "External MCP route ready. Validate via test/03 or @modelcontextprotocol/inspector.",
+    mcpUrl: `${url.origin}/external-mcp/test-user/mcp`,
+    inspectorCmd: `npx -y @modelcontextprotocol/inspector@latest ${url.origin}/external-mcp/test-user/mcp`,
   });
 }
