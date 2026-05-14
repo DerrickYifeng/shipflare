@@ -35,12 +35,21 @@ import { createDb, user as userTable } from "@shipflare/db";
 import type { CMO } from "./agents/cmo/CMO";
 import type { HeadOfGrowth } from "./agents/head-of-growth/HeadOfGrowth";
 import type { SocialMediaMgr } from "./agents/social-media-manager/SocialMediaMgr";
+// `XMcpAgent` is type-imported here (Env declaration). The value re-export
+// below puts the class on the module graph so wrangler can discover it once
+// S5.3 uncomments the X_MCP binding.
+import type { XMcpAgent } from "./agents/platforms/x/XMcpAgent";
 
 // Value re-export so wrangler can discover the DO classes via the module
 // graph rooted at `main`.
 export { CMO } from "./agents/cmo/CMO";
 export { HeadOfGrowth } from "./agents/head-of-growth/HeadOfGrowth";
 export { SocialMediaMgr } from "./agents/social-media-manager/SocialMediaMgr";
+// Re-export the platform DO class so wrangler can discover it; the binding
+// in wrangler.jsonc + the Env entry below stay COMMENTED until S5.3 wires
+// migration tag v4. Re-exporting the class now keeps the import graph
+// reachable for schema tests that getByName-cast another binding.
+export { XMcpAgent } from "./agents/platforms/x/XMcpAgent";
 
 export interface Env {
   DB: D1Database;
@@ -48,8 +57,11 @@ export interface Env {
   CMO: DurableObjectNamespace<CMO>;
   HEAD_OF_GROWTH: DurableObjectNamespace<HeadOfGrowth>; // S3
   SOCIAL_MEDIA_MGR: DurableObjectNamespace<SocialMediaMgr>; // S4
-  // X_MCP: DurableObjectNamespace;              // S5
-  // REDDIT_MCP: DurableObjectNamespace;         // S5
+  // X_MCP: DurableObjectNamespace<XMcpAgent>;        // S5.3 uncomments this
+  //                                                     along with the
+  //                                                     wrangler.jsonc binding
+  //                                                     + migration tag v4
+  // REDDIT_MCP: DurableObjectNamespace;              // S5
   // Workflow binding — added when AgentPlanWorkflow lands (S6).
   // AGENT_PLAN_WORKFLOW: Workflow;
   // Secrets (wrangler secret put ...)

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { mcpServerName } from "@shipflare/shared";
+import { mcpServerName, platformServerName } from "@shipflare/shared";
 import { extractText } from "../lib/mcp-result";
 import type { SocialMediaMgr } from "../SocialMediaMgr";
 
@@ -116,7 +116,7 @@ export function registerResearchRedditChannelsTool(
       }
 
       // Step 2: find REDDIT_MCP and call research_subreddits
-      const redditServerName = `reddit-mcp-${userId}`;
+      const redditServerName = platformServerName("reddit", userId);
       const reddit = agent.mcp
         .listServers()
         .find((s) => s.name === redditServerName);

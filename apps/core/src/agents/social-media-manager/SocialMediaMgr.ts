@@ -1,6 +1,10 @@
 import { McpAgent } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { mcpServerName, type McpProps, type RoleSlug } from "@shipflare/shared";
+import {
+  mcpServerName,
+  platformServerName,
+  type McpProps,
+} from "@shipflare/shared";
 import type { Env } from "../../index";
 import { applySmmSchema } from "./schema";
 import { registerFindThreadsViaXaiTool } from "./tools/find-threads-via-xai";
@@ -90,14 +94,11 @@ export class SocialMediaMgr extends McpAgent<Env, SmmState, McpProps> {
    * Per spec §6.1 invariant #1: caller is `"peer"` (not `"cmo"`) — SMM is
    * calling UP to the CMO as a sibling employee, not down as the team lead.
    *
-   * Note on platform-tool naming: `RoleSlug` in `@shipflare/shared` only
-   * contains the three EMPLOYEE roles (cmo / head-of-growth /
-   * social-media-manager). X_MCP and REDDIT_MCP are TOOL MCPs (platform
-   * tool surfaces), not employee roles, so they aren't in `RoleSlug`. We
-   * cast `"x-mcp" as unknown as RoleSlug` to satisfy `mcpServerName`'s
-   * type signature; the runtime string is what matters for DO id
-   * derivation. S5 may introduce a dedicated `platformServerName()`
-   * helper for a cleaner pattern.
+   * Platform-tool naming uses `platformServerName(platform, userId)` from
+   * `@shipflare/shared/platform-registry`. Platforms are a distinct
+   * primitive from employee roles (which use `mcpServerName(role, userId)`);
+   * the previous `mcpServerName("x-mcp" as unknown as RoleSlug, userId)`
+   * cast was a workaround that S5.0 retires.
    */
   private async connectToPeers(): Promise<void> {
     // `props` is populated by the parent McpAgent.onStart() from the
@@ -143,7 +144,7 @@ export class SocialMediaMgr extends McpAgent<Env, SmmState, McpProps> {
     if (xBinding) {
       try {
         await this.addMcpServer(
-          mcpServerName("x-mcp" as unknown as RoleSlug, userId),
+          platformServerName("x", userId),
           xBinding,
           {
             props: {
@@ -169,7 +170,7 @@ export class SocialMediaMgr extends McpAgent<Env, SmmState, McpProps> {
     if (redditBinding) {
       try {
         await this.addMcpServer(
-          mcpServerName("reddit-mcp" as unknown as RoleSlug, userId),
+          platformServerName("reddit", userId),
           redditBinding,
           {
             props: {

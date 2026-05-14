@@ -1,6 +1,6 @@
 import { z } from "zod";
 import Anthropic from "@anthropic-ai/sdk";
-import { mcpServerName } from "@shipflare/shared";
+import { mcpServerName, platformServerName } from "@shipflare/shared";
 import { extractText } from "../lib/mcp-result";
 import type { SocialMediaMgr } from "../SocialMediaMgr";
 
@@ -83,13 +83,13 @@ export function registerFindThreadsViaXaiTool(agent: SocialMediaMgr): void {
       const productDescription = founderContext.productDescription ?? "";
 
       // Step 2: find the platform MCP and call its search tool.
-      // Server name shape matches mcpServerName("<platform>-mcp", userId)
+      // Server name shape comes from platformServerName(platform, userId)
       // → "x-mcp-${userId}" / "reddit-mcp-${userId}", matching the dial in
       // SocialMediaMgr.connectToPeers().
-      const platformServerName = `${platform}-mcp-${userId}`;
+      const platformServerKey = platformServerName(platform, userId);
       const platformServer = agent.mcp
         .listServers()
-        .find((s) => s.name === platformServerName);
+        .find((s) => s.name === platformServerKey);
       if (!platformServer) {
         return {
           content: [
