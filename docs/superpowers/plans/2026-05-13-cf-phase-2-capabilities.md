@@ -6,7 +6,7 @@
 
 **Architecture:** All capabilities slot into the existing `apps/core` Worker + Durable Objects topology. P2-A exposes existing McpAgent classes via Streamable HTTP. P2-B adds three new McpAgent classes following the SocialMediaMgr pattern. P2-C wires `addMcpServer` peer-to-peer with shadow fetches to CMO. P2-D adds a new SQLite table on CMO + opt-in memory injection. P2-E adds three new platform tool McpAgents. P2-F integrates Agents SDK's built-in web push.
 
-**Tech Stack:** Same as Phase 1 (CF Workers, Agents SDK, McpAgent, Dynamic Workflows, Drizzle / Hyperdrive, Better Auth) + Web Push API (VAPID).
+**Tech Stack:** Same as Phase 1 (CF Workers, Agents SDK, McpAgent, Dynamic Workflows, Drizzle / D1, Better Auth) + Web Push API (VAPID).
 
 **Spec:** `docs/superpowers/specs/2026-05-13-cloudflare-do-migration-design.md` §5.3.
 **Prerequisite:** Phase 1 deployed to production + 7-day observation GREEN.
@@ -64,6 +64,29 @@ apps/web/app/
 
 **Goal:** Each employee McpAgent class exposes a Streamable HTTP endpoint that the founder (or paying customer) can paste into Claude Desktop / Cursor / their own LLM stack. OAuth-scoped: external clients see a subset of tools based on scope.
 
+> **Phase 0 spike #3 findings for this work stream:**
+>
+> 1. **`McpAgent.serve(path)` defaults its `binding` argument to `"MCP_OBJECT"`.**
+>    Our DO bindings are named `CMO`, `HEAD_OF_GROWTH`, `SOCIAL_MEDIA_MGR`, etc.
+>    — so every `Klass.serve(...)` call MUST pass `{ binding: "<NAME>" }` explicitly,
+>    or it throws `Could not find McpAgent binding for MCP_OBJECT` at runtime.
+>    Example: `CMO.serve("/external/agents/cmo/:userId/mcp", { binding: "CMO" })`.
+>
+> 2. **External HTTP transport does NOT auto-populate `this.props` from request
+>    headers.** Our `routeToDO` injects `x-mcp-props` but that's only honored on
+>    the internal route. For the public external path, Phase 2 must wrap with
+>    `withOAuthProvider(...)` (from the agents SDK) to populate `props` from the
+>    validated OAuth token — the validateExternalAccess JWT check from Task A.2
+>    needs to feed into the same `props` object the McpAgent receives.
+>
+> 3. **Sessions are sticky via `mcp-session-id`**: every request after the
+>    initial handshake MUST echo this header; otherwise the server treats it as
+>    a fresh session. Document this contract for any external clients we
+>    publish docs for.
+>
+> 4. **`Cache-Control: no-cache` must be preserved** on the SSE response. Do
+>    NOT put a CDN with default caching in front of this route.
+
 ### Task A.0: Route external MCP requests
 
 **Files:**
@@ -108,9 +131,12 @@ import { CMO } from "./agents/cmo/CMO";
 if (externalMatch) {
   const [, role, userId] = externalMatch;
   // ...
+  // Phase 0 spike #3: McpAgent.serve() requires the binding name explicitly;
+  // its default is "MCP_OBJECT" which doesn't match our naming.
+  const binding = ROLE_REGISTRY[role as RoleSlug]?.binding;
   const Klass = { "cmo": CMO, "head-of-growth": HeadOfGrowth, /* ... */ }[role];
-  if (!Klass) return new Response("unknown role", { status: 404 });
-  return Klass.serve(`/external/agents/${role}/:userId/mcp`).fetch(request, env, ctx);
+  if (!Klass || !binding) return new Response("unknown role", { status: 404 });
+  return Klass.serve(`/external/agents/${role}/:userId/mcp`, { binding }).fetch(request, env, ctx);
 }
 ```
 
@@ -241,7 +267,10 @@ For tools that mutate (publish, hire, etc.), check scope:
 
 ```typescript
 // inside e.g. CMO's hireEmployee handler:
-const props = (extra as any).props;
+// Phase 0 spike #2 + #3: HTTP transport (this is the external-MCP path)
+// DOES populate extra.props (via withOAuthProvider in P2-A). RPC transport
+// would read agent.props instead. Choose based on the call path.
+const props = (extra as any).props ?? this.props;
 if (props.caller === "external" && !props.scope?.includes("admin")) {
   throw new Error("admin scope required");
 }
@@ -538,15 +567,17 @@ git commit -m "feat(p2-b): Brand Analyst McpAgent"
 async onStart() {
   applySmmSchema(this.ctx.storage.sql);
   this.setState({ lastWakeAt: Date.now() });
-  await this.addMcpServer("x", this.env.X_MCP, { props: { userId: this.props.userId, caller: "peer", role: "member" } });
-  await this.addMcpServer("reddit", this.env.REDDIT_MCP, { props: { userId: this.props.userId, caller: "peer", role: "member" } });
+  // Phase 0 spike #2: addMcpServer names must be tenant-namespaced
+  // (`${role}-${userId}`) — see Phase 1 plan S2.3 + S4.0.
+  await this.addMcpServer(`x-${this.props.userId}`, this.env.X_MCP, { props: { userId: this.props.userId, caller: "peer", role: "member" } });
+  await this.addMcpServer(`reddit-${this.props.userId}`, this.env.REDDIT_MCP, { props: { userId: this.props.userId, caller: "peer", role: "member" } });
 
   // P2-C: peer connection to Copywriter if hired
   const cmoStub = this.env.CMO.idFromName(this.props.userId);
   const rosterRes = await this.env.CMO.get(cmoStub).fetch(new Request("https://x/internal/query-roster"));
   const roster = await rosterRes.json() as Array<{ role: string; status: string }>;
   if (roster.find((r) => r.role === "copywriter" && r.status === "active")) {
-    await this.addMcpServer("copywriter", this.env.COPYWRITER, {
+    await this.addMcpServer(`copywriter-${this.props.userId}`, this.env.COPYWRITER, {
       props: { userId: this.props.userId, caller: "peer", role: "member" },
     });
   }
@@ -890,8 +921,9 @@ Tools: `discordPostToChannel`, `discordListenForMentions` (via webhook), `discor
 agent.server.registerTool("discordPostToChannel", {
   description: "Post to a specific Discord channel.",
   inputSchema: { channelId: z.string(), body: z.string() },
-}, async ({ channelId, body }, extra) => {
-  const props = (extra as any).props;
+}, async ({ channelId, body }) => {
+  // Phase 0 spike #2: RPC transport reads from agent.props.
+  const props = agent.props;
   if (props.role !== "lead" && props.caller !== "external") {
     throw new Error("Only lead can publish directly");
   }

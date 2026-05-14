@@ -526,3 +526,42 @@ Postgres. The user pivoted to D1 during Spike #4. Add to Task 11
   million rows read, $1.00 per million rows written, $0.75/GB-month
   storage (vs. Neon's compute-hour billing). Re-estimate Phase 2/3
   costs under D1 pricing.
+
+## Final Decision (2026-05-13)
+
+### Per-spike status
+| # | Status | Confidence | Notes |
+|---|---|---|---|
+| 1 Anthropic streaming | GREEN | high | 10/10 parallel streams, tool_use intact, no silent fallback |
+| 2 MCP RPC | GREEN | high | props via this.props (not extra.props), survives wrangler restart |
+| 3 MCP HTTP | GREEN | high | Streamable transport works; SDK requires explicit binding name |
+| 4 Better Auth + D1 | GREEN | high | Pivoted from Neon+Hyperdrive. Provider="sqlite", camelCase IDs |
+| 5 WebCrypto AES-GCM | GREEN | high | 100 round-trips, IV uniqueness, wrong-key rejection all verified |
+| 6 DO SQLite perf | GREEN | high | 7ms p99 SELECT, sub-ms INSERT — massive headroom vs 50/5ms thresholds |
+| 7 Dynamic Workflow | GREEN | high | step.sleep fully honored (5064ms actual for 5s sleep) |
+| 8 Service Binding | GREEN | high | Sub-ms latency, host/cf-connecting-ip stripped |
+| 9 Cron fan-out | GREEN | medium | Works via worker.scheduled() direct call; SELF.scheduled() broken |
+| 10 Resumable stream | GREEN | high | Last-Event-ID resume works; NaN guard required |
+
+### Phase 1 entry decision
+**GO** — all 10 GREEN, proceed to Phase 1 feature parity build.
+
+### Phase 0 deliverable summary
+- Total subagent rounds: ~30 (implementer + reviews + fix-loops)
+- Total commits on branch: ~13 (one per task + fixes)
+- Total tests: 22 passing in 7.58s wall-clock (vitest run, final verification 2026-05-13)
+- 11 architectural findings flow into spec / plan updates (next section)
+- ~1.5 days of clock time
+
+### Findings flowing into spec/plan updates
+1. **MIGRATION SPEC D6**: Hyperdrive+Neon → D1 (entire architecture switch)
+2. **SPEC §4.3.1**: `extra.props.userId` → `this.props.userId` for RPC transport
+3. **SPEC §4.3.1**: `addMcpServer(name, ...)` must use per-tenant namespaced name (e.g. `${role}-${userId}`)
+4. **SPEC**: `@callable()` decorator unusable with TS6/vitest-pool-workers; use plain DO RPC methods
+5. **SPEC**: `McpAgent.serve()` requires explicit `{ binding: "NAME" }`
+6. **SPEC**: External MCP HTTP path needs `withOAuthProvider` for props injection (Phase 2)
+7. **SPEC**: Service Bindings strip host/cf-connecting-ip; pass context via explicit headers
+8. **SPEC**: Better Auth Drizzle adapter `provider: "sqlite"` (not "d1"); camelCase IDs
+9. **SPEC**: Real Node encryption helper is `src/lib/encryption/index.ts`; envelope format mismatch needs transitional decoder for Phase 1
+10. **PLAN**: Test patterns — use `worker.scheduled()` directly (not `SELF.scheduled()`); add NaN guards on parsed integers from headers
+11. **PLAN**: DO SQLite: `transactionSync()` not raw BEGIN; use `type` (not `interface`) for `sql.exec<T>` generic constraint
