@@ -240,6 +240,12 @@ importers:
         specifier: ^4.90.1
         version: 4.90.1(@cloudflare/workers-types@4.20260511.1)
 
+  e2e:
+    devDependencies:
+      '@playwright/test':
+        specifier: ^1.49.0
+        version: 1.59.1
+
   packages/crypto:
     devDependencies:
       typescript:
