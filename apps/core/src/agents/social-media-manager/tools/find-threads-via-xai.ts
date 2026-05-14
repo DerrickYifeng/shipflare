@@ -1,6 +1,7 @@
 import { z } from "zod";
 import Anthropic from "@anthropic-ai/sdk";
 import { mcpServerName } from "@shipflare/shared";
+import { extractText } from "../lib/mcp-result";
 import type { SocialMediaMgr } from "../SocialMediaMgr";
 
 /**
@@ -211,20 +212,6 @@ export function registerFindThreadsViaXaiTool(agent: SocialMediaMgr): void {
       };
     },
   );
-}
-
-/**
- * Extract the text content from an MCP tool result. Tools return
- * `{ content: [{ type: "text", text: "..." }, ...] }`. This walks the
- * array and concatenates text blocks.
- */
-function extractText(result: unknown): string {
-  const r = result as { content?: Array<{ type: string; text?: string }> };
-  if (!r.content) return "";
-  return r.content
-    .filter((c) => c.type === "text" && typeof c.text === "string")
-    .map((c) => c.text as string)
-    .join("");
 }
 
 /**
