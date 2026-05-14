@@ -49,3 +49,9 @@ CREATE TABLE IF NOT EXISTS "verification" (
   "createdAt" INTEGER,
   "updatedAt" INTEGER
 );
+
+-- SQLite does NOT auto-index foreign-key columns. Without these the
+-- session-by-userId / account-by-userId lookups Better Auth runs on every
+-- authed request would full-table-scan once the tables grow.
+CREATE INDEX IF NOT EXISTS "session_userId_idx" ON "session"("userId");
+CREATE INDEX IF NOT EXISTS "account_userId_idx" ON "account"("userId");

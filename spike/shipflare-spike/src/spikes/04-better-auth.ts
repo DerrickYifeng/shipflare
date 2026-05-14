@@ -56,6 +56,9 @@ export function getAuth(env: Env): BetterAuthInstance {
       },
     },
     secret: env.BETTER_AUTH_SECRET,
+    // TODO(Phase 1): drive from env.BETTER_AUTH_URL (or equivalent).
+    // Better Auth uses this to construct OAuth callback URLs and CSRF checks.
+    // If left as localhost, OAuth will silently break in staging/production.
     baseURL: "http://localhost:8787",
   };
   const instance = betterAuth(options);

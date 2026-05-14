@@ -13,7 +13,6 @@
     "@cloudflare/vitest-pool-workers": "^0.16.4",
     "@cloudflare/workers-types": "^4.20260511.1",
     "@types/node": "^25.7.0",
-    "drizzle-kit": "^0.31.10",
     "typescript": "^6.0.3",
     "vitest": "^4.1.6",
     "wrangler": "^4.90.1"
@@ -21,7 +20,6 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.96.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@neondatabase/serverless": "^1.1.0",
     "agents": "^0.12.4",
     "better-auth": "^1.6.11",
     "drizzle-orm": "^0.45.2",

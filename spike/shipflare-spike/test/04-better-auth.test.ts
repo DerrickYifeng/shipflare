@@ -25,10 +25,14 @@ describe("Spike #4: Better Auth + Drizzle + D1", () => {
   }, 30_000);
 
   it("auth handler bootstraps without crashing on /api/auth/get-session", async () => {
-    // No cookie → Better Auth should respond cleanly (200 with null session or
-    // 401-class), NOT a 5xx that would mean the adapter / D1 wiring crashed.
     const res = await SELF.fetch("https://example.com/api/auth/get-session");
-    expect(res.status).toBeLessThan(500);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    // Better Auth returns bare null (not { session: null }) when called via its
+    // own handler — confirms the adapter resolved the session table, found no
+    // matching cookie, and returned cleanly (rather than throwing on a missing
+    // table or mis-wired D1 binding).
+    expect(body).toBeNull();
   }, 30_000);
 
   it("/spike/04 returns the manual-OAuth instructions payload", async () => {

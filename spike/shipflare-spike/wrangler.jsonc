@@ -38,7 +38,7 @@
     {
       "binding": "DB",
       "database_name": "shipflare-spike",
-      "database_id": "00000000-0000-0000-0000-000000000001",
+      "database_id": "00000000-0000-0000-0000-000000000001", // PLACEHOLDER — replace with `wrangler d1 create shipflare-spike` UUID before --remote deploy
       "migrations_dir": "./migrations"
     }
   ]
