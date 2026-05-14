@@ -33,16 +33,18 @@ import { ROLE_REGISTRY, isValidRole, type RoleSlug } from "@shipflare/shared";
 import { createDb, user as userTable } from "@shipflare/db";
 
 import type { CMO } from "./agents/cmo/CMO";
+import type { HeadOfGrowth } from "./agents/head-of-growth/HeadOfGrowth";
 
-// Value re-export so wrangler can discover the DO class via the module
+// Value re-export so wrangler can discover the DO classes via the module
 // graph rooted at `main`.
 export { CMO } from "./agents/cmo/CMO";
+export { HeadOfGrowth } from "./agents/head-of-growth/HeadOfGrowth";
 
 export interface Env {
   DB: D1Database;
   // DO bindings — uncomment as classes come online (S2-S5).
   CMO: DurableObjectNamespace<CMO>;
-  // HEAD_OF_GROWTH: DurableObjectNamespace;     // S3
+  HEAD_OF_GROWTH: DurableObjectNamespace<HeadOfGrowth>; // S3
   // SOCIAL_MEDIA_MGR: DurableObjectNamespace;   // S4
   // X_MCP: DurableObjectNamespace;              // S5
   // REDDIT_MCP: DurableObjectNamespace;         // S5

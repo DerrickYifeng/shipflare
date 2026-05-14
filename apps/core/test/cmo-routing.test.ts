@@ -85,11 +85,13 @@ describe("Worker /agents/<role>/<userId>/internal/* routing", () => {
   });
 
   it("returns 503 when role's DO namespace binding is not deployed yet", async () => {
-    // head-of-growth has a `HEAD_OF_GROWTH` binding in ROLE_REGISTRY but the
-    // wrangler.jsonc binding for it isn't enabled until S3. The Worker's
-    // internal route should surface a 503 (not 500) for this case.
+    // social-media-manager has a `SOCIAL_MEDIA_MGR` binding in ROLE_REGISTRY
+    // but the wrangler.jsonc binding for it isn't enabled until S4. The
+    // Worker's internal route should surface a 503 (not 500) for this case.
+    // (S3 enabled HEAD_OF_GROWTH, so this test moved one role down the
+    // staging order; the next still-commented binding is SMM.)
     const res = await SELF.fetch(
-      "https://example.com/agents/head-of-growth/u1/internal/init",
+      "https://example.com/agents/social-media-manager/u1/internal/init",
       {
         method: "POST",
         headers: INTERNAL_HEADERS,
