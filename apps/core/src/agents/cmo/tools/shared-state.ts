@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { mcpServerName } from "@shipflare/shared";
 import type { CMO } from "../CMO";
 
 /**
@@ -12,7 +13,7 @@ import type { CMO } from "../CMO";
  * - commitStrategicPath — HoG records a new strategy version
  * - addPlanItem / queryPlanItems / updatePlanItem — plan tickets
  * - approveDraft — founder approval, later wires to publish
- * - queryDrafts — RPC to SMM for now is stubbed (SMM doesn't exist yet)
+ * - queryDrafts — RPCs to SMM.list_drafts (returns [] if SMM not connected)
  */
 export function registerSharedStateTools(agent: CMO): void {
   agent.server.registerTool(
@@ -247,25 +248,67 @@ export function registerSharedStateTools(agent: CMO): void {
     },
   );
 
-  // queryDrafts — placeholder until SMM (S4) exists. For now returns [].
-  // Once SMM has listDrafts, this becomes an RPC into the SMM McpServer.
+  // queryDrafts — RPCs to SMM.list_drafts (S4.5 partial). Returns "[]" if
+  // SMM isn't connected (cron tick before hire, or SMM binding missing —
+  // same forward-compat shape as CMO's cron handler).
   agent.server.registerTool(
     "queryDrafts",
     {
       description:
-        "List drafts (pending approval, etc.). Currently returns [] — wires to SMM in a later task.",
+        "List drafts (typically pending approval) by status. RPCs to SMM. " +
+        "Returns [] if SMM not connected.",
       inputSchema: {
-        status: z.string().optional(),
+        status: z
+          .enum(["drafting", "ready", "posted", "failed", "rejected"])
+          .default("ready"),
+        limit: z.number().int().min(1).max(200).default(50),
       },
     },
-    async () => {
-      // TODO(S2.4-followup): once SMM lands in S4, RPC to
-      // mcpServers[mcpServerName("social-media-manager", userId)].callTool(
-      //   "listDrafts", {...}
-      // )
-      return {
-        content: [{ type: "text" as const, text: "[]" }],
-      };
+    async ({ status, limit }) => {
+      const userId = agent.props?.userId;
+      if (!userId) {
+        return { content: [{ type: "text" as const, text: "[]" }] };
+      }
+      const smmServerName = mcpServerName("social-media-manager", userId);
+      const smm = agent.mcp
+        .listServers()
+        .find((s) => s.name === smmServerName);
+      if (!smm) {
+        return { content: [{ type: "text" as const, text: "[]" }] };
+      }
+      try {
+        const result = await agent.mcp.callTool({
+          serverId: smm.id,
+          name: "list_drafts",
+          arguments: { status, limit },
+        });
+        // Pass through the JSON string SMM returned. Single-pass extract
+        // avoids the need to JSON.parse + re-stringify when SMM already
+        // wrapped rows as { content: [{ type: 'text', text: '<json>' }] }.
+        return {
+          content: [{ type: "text" as const, text: extractText(result) }],
+        };
+      } catch (err) {
+        console.warn(`[CMO ${userId}] list_drafts RPC failed:`, err);
+        return { content: [{ type: "text" as const, text: "[]" }] };
+      }
     },
   );
+}
+
+/**
+ * Extract the text content from an MCP tool result. Tools return
+ * `{ content: [{ type: "text", text: "..." }, ...] }`. This walks the
+ * array and concatenates text blocks.
+ *
+ * Duplicated from `find-threads-via-xai.ts`; if a third caller needs it,
+ * lift to `apps/core/src/agents/_shared/mcp-result.ts`.
+ */
+function extractText(result: unknown): string {
+  const r = result as { content?: Array<{ type: string; text?: string }> };
+  if (!r.content) return "";
+  return r.content
+    .filter((c) => c.type === "text" && typeof c.text === "string")
+    .map((c) => c.text as string)
+    .join("");
 }
