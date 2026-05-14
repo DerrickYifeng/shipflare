@@ -26,8 +26,16 @@
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "seed-user": "bun run scripts/seed-user.ts",
-    "replay:validating-draft": "bun run scripts/replay-validating-draft.ts"
+    "replay:validating-draft": "bun run scripts/replay-validating-draft.ts",
+    "ws:dev": "pnpm --parallel --filter=\"./apps/*\" dev",
+    "ws:dev:web": "pnpm --filter=@shipflare/web dev",
+    "ws:dev:core": "pnpm --filter=@shipflare/core dev",
+    "ws:build": "pnpm -r --filter=\"./apps/*\" --filter=\"./packages/*\" build",
+    "ws:test": "pnpm -r --filter=\"./apps/*\" --filter=\"./packages/*\" test",
+    "ws:typecheck": "pnpm -r --filter=\"./apps/*\" --filter=\"./packages/*\" typecheck",
+    "ws:migrate": "pnpm --filter=@shipflare/db migrate"
   },
+  "packageManager": "pnpm@10.31.0",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.88.0",
     "@auth/drizzle-adapter": "^1.11.1",
