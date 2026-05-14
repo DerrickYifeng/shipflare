@@ -887,3 +887,115 @@ These are explicitly deferred:
 - [Drizzle + D1](https://developers.cloudflare.com/d1/tutorials/build-a-comments-api/#3-create-database-and-schema)
 - Prior internal spec: `docs/superpowers/specs/2026-05-01-agent-skill-tool-decomposition-design.md`
 - Prior internal spec: `docs/superpowers/specs/2026-04-30-skill-primitive-restoration-design.md`
+
+---
+
+## 9. Phase 1 implementation findings (S2-S6 sweep)
+
+The following architectural patterns and gotchas surfaced during S2-S6
+implementation but were not anticipated in sections 1-7. Capture them
+here so future phases inherit the answers without rediscovering them.
+
+1. **Tool-file accessor pattern.** `McpAgent`'s `sql` is a template-tag
+   method and `env` is protected, so tool modules in `agents/*/tools.ts`
+   cannot reach into a `this`-bound DO directly. Each employee DO class
+   therefore exposes `get sqlStorage()` and `get bindings()` as public
+   getters; tool handlers receive the agent instance and read state via
+   those getters. Established by S2.1 (CMO chat tool) and applied to
+   HoG / SMM uniformly.
+
+2. **Agents SDK MCP API correction.** The original spec sketch used
+   `(agent as any).mcpServers?.[name].callTool(...)`. The real
+   `agents@0.12.4` surface is `agent.mcp.callTool({ serverId, name,
+   arguments })` and `agent.mcp.listServers()` to enumerate connected
+   servers. Adopt this shape in any new RPC plumbing — the old form
+   compiles via `any` but breaks at runtime.
+
+3. **Per-tenant namespacing for `addMcpServer`.** `addMcpServer(name,
+   namespace, props)` keys the McpServer DO by `name` only. Without a
+   per-tenant suffix, every user's MCPs collide on a single DO instance.
+   Use `mcpServerName(role, userId)` for employee MCPs (added in S1.1)
+   and `platformServerName(platform, userId)` for platform-tool MCPs
+   (added in S5.0). Surfaced in Phase 0 spike #2.
+
+4. **Schema bootstrap before `super.onStart()`.** McpAgent's
+   `super.onStart()` reads the DO name to derive the transport prefix
+   and throws on non-transport names. Schema bootstrap
+   (`applyXSchema(this.ctx.storage.sql)` etc.) MUST run *before*
+   `super.onStart()` so that tests using `getByName("plain-name")`
+   still construct the DO without exploding inside the SDK. Discovered
+   in S2.0.
+
+5. **`this.props` vs `extra.props`.** For in-process MCP RPC transport,
+   `this.props` carries the caller's identity (`userId`, `role`). For
+   HTTP MCP transport, `extra.props` is populated by the server-side
+   OAuth provider. Tool handlers should consistently read
+   `agent.props?.userId` from the in-process path and treat the HTTP
+   path as a separate adapter layer. Surfaced in S2.4.
+
+6. **Test pattern: stub.fetch doesn't trigger `onStart`.**
+   `@cloudflare/vitest-pool-workers`' `env.X.getByName("plain")`
+   returns a stub that does NOT invoke `onStart` on the first request.
+   Tests that need a populated schema must explicitly call
+   `applyXSchema(state.storage.sql)` inside `runInDurableObject`. The
+   bootstrap helper pattern is documented in `apps/core/test/`.
+   Surfaced in S2.5.
+
+7. **`.dev.vars` vs wrangler `vars`.** Putting plaintext values under
+   `vars` in `wrangler.jsonc` narrows generated `Cloudflare.Env` types
+   to *literal* strings, which conflicts with code that declares
+   `Env: string`. Use `.dev.vars` for dev/test secrets so the generated
+   types stay as plain `string`. Surfaced in S2.6.
+
+8. **Defense-in-depth header gating.** Internal-only routes (`/internal/*`)
+   require both a Worker-level `x-shipflare-internal: 1` check AND a
+   DO-level check. Service Bindings do not strip arbitrary client
+   headers, so the inner DO check is the load-bearing one — the Worker
+   check is belt-and-braces. Established in S2.6 and reused in S4.0.
+
+9. **`worker-configuration.d.ts` regeneration.** Adding bindings to
+   `wrangler.jsonc` requires `pnpm exec wrangler types` to refresh
+   `Cloudflare.Env`; without it typecheck breaks. The postinstall
+   hook handles fresh installs, but developers editing
+   `wrangler.jsonc` mid-session must rerun the command. Surfaced in
+   S4.0.
+
+10. **Migration tag append-only.** The DO SQLite migration tags are
+    versioned and append-only: v1 (CMO), v2 (HoG), v3 (SMM), v4
+    (XMcpAgent + RedditMcpAgent). Never edit a previous tag — Phase 2
+    additions append v5+. Established in Phase 0 spike #2 and held
+    throughout S2-S5.
+
+11. **`NULLS LAST` portability.** Workerd's SQLite build may not support
+    `ORDER BY col DESC NULLS LAST`. Use the portable form
+    `ORDER BY col IS NULL, col DESC` instead. Surfaced in S4.2 while
+    porting drafts queries.
+
+12. **Dynamic IN-clause pattern.** SQLite `?` placeholders cannot be
+    spread directly when the count is dynamic. The portable pattern is
+    `placeholders.map(() => "?").join(",")` for the SQL fragment plus
+    a spread (`...platforms, limit`) for the bound values — caller
+    values bind safely; only the placeholder count is interpolated.
+    Surfaced in S4.2.
+
+13. **`extractText` helper.** MCP tool results return
+    `{ content: [{ type: "text", text }] }`. The `extractText(result)`
+    helper at
+    `apps/core/src/agents/social-media-manager/lib/mcp-result.ts`
+    centralises the parse so callers don't reach into `content[0].text`
+    in five different ways. Lifted to its own module in S4.4.
+
+14. **`@shipflare/skills` runner replaces inline prompts.** S6.1 wired
+    SMM's `find_threads_via_xai`, `process_replies_batch`, and
+    `process_posts_batch` to `runSkill(name, inputs, context)` so
+    prompts live in `packages/skills/src/registry.ts`. The HoG tools
+    `generate_strategic_path` and `audit_plan` remain inline for
+    Phase 1 — they are more bespoke and can be promoted to the skill
+    registry in Phase 2 if reuse warrants it.
+
+15. **Channel token reader invariant.** Per the CLAUDE.md security TODO,
+    `apps/core/src/lib/channel.ts` is the ONLY module allowed to read
+    `channels.oauthTokenEncrypted`. Every other selector against the
+    `channels` table must use an explicit projection that omits the
+    encrypted columns. Re-stated during S5.0 to keep the platform-MCP
+    refactor honest.

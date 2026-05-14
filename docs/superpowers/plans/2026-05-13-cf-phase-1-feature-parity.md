@@ -111,6 +111,12 @@ shipflare/                              ← monorepo root (existing repo)
 
 ---
 
+## Phase 1 implementation patterns (read before starting any task)
+
+Implementers should skim spec §9 ("Phase 1 implementation findings (S2-S6 sweep)") before touching code. The fifteen findings codify gotchas that surfaced during S2-S6 and are easy to re-trip on, including: the `sqlStorage` / `bindings` public-getter pattern on each employee DO, the real `agent.mcp.callTool(...)` shape (NOT `agent.mcpServers?.[name].callTool(...)`), per-tenant `mcpServerName` / `platformServerName` namespacing for `addMcpServer`, running `applyXSchema` BEFORE `super.onStart()`, using `.dev.vars` instead of wrangler `vars` to keep `Cloudflare.Env` strings typed as `string`, defense-in-depth `x-shipflare-internal` header checks on `/internal/*`, rerunning `pnpm exec wrangler types` after editing `wrangler.jsonc`, the portable `ORDER BY col IS NULL, col DESC` substitute for `NULLS LAST`, dynamic IN-clause `placeholders.map(() => "?").join(",")` + spread, the `extractText` MCP-result helper, and the channel-token reader invariant (only `apps/core/src/lib/channel.ts` may select `oauthTokenEncrypted`). Treat the spec section as the canonical reference; this callout is a pointer, not a substitute.
+
+---
+
 ## S1 — Infrastructure (Day 0-1, foundation, blocks everything)
 
 ### Task S1.0: Initialize monorepo
