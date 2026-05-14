@@ -1,14 +1,20 @@
 import { getAgentByName } from "agents";
+import type { AgentExample } from "../durable-objects/AgentExample";
 import type { Env } from "../index";
 
 export default async function handler(
-  _req: Request,
+  req: Request,
   env: Env,
   _ctx: ExecutionContext,
 ): Promise<Response> {
-  const agent = await getAgentByName(env.AGENT_EXAMPLE, "spike-instance");
-  const result = await (agent as unknown as {
-    callMcpEcho(ping: string): Promise<unknown>;
-  }).callMcpEcho("hello-rpc");
+  // Optional `?name=` query param lets tests pick a unique agent instance for
+  // true state isolation. Defaults to "spike-instance" for manual curl use.
+  const url = new URL(req.url);
+  const name = url.searchParams.get("name") ?? "spike-instance";
+  const agent = await getAgentByName<Env, AgentExample>(
+    env.AGENT_EXAMPLE,
+    name,
+  );
+  const result = await agent.callMcpEcho("hello-rpc");
   return Response.json({ result });
 }

@@ -26,7 +26,14 @@ export class AgentExample extends Agent<Env, State> {
       // SDK from storage. Nothing to do; serverId already in state.
       return;
     }
-    const { id } = await this.addMcpServer("mcp", this.env.MCP_EXAMPLE, {
+    // Namespace the MCP server by this agent's name. `addMcpServer` derives
+    // the McpAgent DO's name from `serverName` (RPC_DO_PREFIX + normalizedName),
+    // so a hardcoded "mcp" would make all AgentExample instances share ONE
+    // McpServerExample DO. Using `mcp-${this.name}` gives each parent agent
+    // its own MCP server, which matches the typical per-tenant deployment
+    // pattern and gives tests true state isolation.
+    const serverName = `mcp-${this.name}`;
+    const { id } = await this.addMcpServer(serverName, this.env.MCP_EXAMPLE, {
       props: { userId: "test-user-123", secret: "test-secret-456" },
     });
     this.setState({ connected: true, mcpServerId: id });
