@@ -28,9 +28,14 @@ export default {
     if (url.pathname === "/healthz") return Response.json({ ok: true });
     const match = url.pathname.match(/^\/spike\/(\d{2})(?:\/.*)?$/);
     if (!match) return new Response("not found", { status: 404 });
+    const id = match[1];
     // Each spike task replaces the 501 fallback for its own NN by dynamically
     // importing src/spikes/NN-name.ts and returning its default export.
-    return new Response(`spike #${match[1]} not yet implemented`, { status: 501 });
+    if (id === "01") {
+      const mod = await import("./spikes/01-anthropic-streaming");
+      return mod.default(request, env, ctx);
+    }
+    return new Response(`spike #${id} not yet implemented`, { status: 501 });
   },
   async scheduled(_event: ScheduledController, _env: Env, _ctx: ExecutionContext): Promise<void> {
     // cron handler: implemented in Task 9
