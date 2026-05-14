@@ -177,6 +177,188 @@ export class CMO extends McpAgent<Env, CMOState, McpProps> {
     registerSharedStateTools(this);
   }
 
-  // fetch() handler for /internal/* endpoints — S2.5
-  // S2.6 wires the /agents/cmo/:userId/mcp public route at the Worker level.
+  /**
+   * Route `/internal/*` HTTP traffic to our private handlers; everything
+   * else falls through to McpAgent's own `fetch()` (so MCP transport
+   * routes like `/mcp` still work when the Worker entry forwards them).
+   *
+   * All `/internal/*` endpoints are gated on the `x-shipflare-internal: 1`
+   * header. The Worker entry (S2.6) sets this for Service-Binding-
+   * initiated traffic; Cloudflare's network layer rejects forged versions
+   * of the header from public clients. The 403 here is a belt-and-braces
+   * check — only internal CF traffic should ever reach these paths.
+   */
+  async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+
+    const internal = request.headers.get("x-shipflare-internal") === "1";
+    if (!internal && url.pathname.startsWith("/internal/")) {
+      return new Response("forbidden", { status: 403 });
+    }
+
+    if (url.pathname === "/internal/init") {
+      return this.handleInit(request);
+    }
+    if (url.pathname === "/internal/peer-dm-shadow") {
+      return this.handlePeerShadow(request);
+    }
+    if (url.pathname === "/internal/cron-tick") {
+      return this.handleCronTick(request);
+    }
+
+    // Fall through to McpAgent's default fetch (handles /mcp, WebSocket
+    // upgrades, etc. — S2.6 routes /mcp before this DO sees it; this is
+    // just a safety net).
+    return super.fetch(request);
+  }
+
+  /**
+   * Idempotent first-login hook. Called from `apps/web`'s Better Auth
+   * `databaseHooks.user.create.after` after a fresh user row lands in D1.
+   *
+   * Body: `{ email: string, githubLogin: string | null }`
+   *
+   * Effects (once, on first call):
+   *  - Seeds `founder_context` with email + githubLogin
+   *  - Hires every `ROLE_REGISTRY` entry where `defaultActive=true`
+   *    (excluding `cmo` — it's implicit; the CMO IS the DO)
+   *  - Re-runs `connectEmployees()` so the freshly-hired roles connect
+   *    now, without waiting for the next cold-start
+   *
+   * Idempotency: subsequent calls return `already_initialized` with
+   * status 200 and DO NOT overwrite existing rows. We gate on
+   * `founder_context` row count — if there's already at least one row,
+   * we've initialized before.
+   */
+  private async handleInit(request: Request): Promise<Response> {
+    const ctxCount = this.sqlStorage
+      .exec<{ c: number }>("SELECT COUNT(*) as c FROM founder_context")
+      .one().c;
+    if (ctxCount > 0) {
+      return new Response("already_initialized", { status: 200 });
+    }
+
+    const body = (await request.json()) as {
+      email: string;
+      githubLogin: string | null;
+    };
+    const now = Date.now();
+
+    this.sqlStorage.exec(
+      "INSERT INTO founder_context (key, value) VALUES (?, ?)",
+      "email",
+      body.email,
+    );
+    if (body.githubLogin) {
+      this.sqlStorage.exec(
+        "INSERT INTO founder_context (key, value) VALUES (?, ?)",
+        "githubLogin",
+        body.githubLogin,
+      );
+    }
+
+    // Hire all defaultActive roles from ROLE_REGISTRY (excluding cmo —
+    // implicit). The cast on the entries iterator is safe: ROLE_REGISTRY
+    // is `as const satisfies Record<string, RoleEntry>` so the value type
+    // is `(typeof ROLE_REGISTRY)[RoleSlug]` for every key.
+    for (const [role, entry] of Object.entries(ROLE_REGISTRY) as Array<
+      [RoleSlug, (typeof ROLE_REGISTRY)[RoleSlug]]
+    >) {
+      if (role === "cmo") continue;
+      if (!entry.defaultActive) continue;
+      this.sqlStorage.exec(
+        `INSERT INTO roster (role, hired_at, status) VALUES (?, ?, 'active')`,
+        role,
+        now,
+      );
+    }
+
+    // Connect freshly-hired employees now (don't wait for cold-start).
+    // RPC dial-up errors are non-fatal — init has already seeded local
+    // state; the next onStart will retry connections.
+    try {
+      await this.connectEmployees();
+    } catch (err) {
+      console.error(`[CMO init] connectEmployees failed during init:`, err);
+    }
+
+    return new Response("initialized", { status: 200 });
+  }
+
+  /**
+   * Peer-DM shadow log — Spec §6.1 invariant #2.
+   *
+   * When employee A calls employee B via RPC (e.g. SMM asks Copywriter
+   * for a rewrite), A also POSTs a quiet shadow message to the CMO via
+   * this endpoint so the CMO has visibility into peer-DMs WITHOUT being
+   * woken every time peers chat. The CMO picks these up on its next
+   * natural wake (founder message, cron tick, etc.).
+   *
+   * Body: `{ conversationId?: string, fromRole: string, toRole: string,
+   *          tool: string, summary: string, payload?: unknown }`
+   *
+   * **Must not** trigger any LLM call or broadcast. Quiet log append only.
+   */
+  private async handlePeerShadow(request: Request): Promise<Response> {
+    const body = (await request.json()) as {
+      conversationId?: string;
+      fromRole: string;
+      toRole: string;
+      tool: string;
+      summary: string;
+      payload?: unknown;
+    };
+    this.sqlStorage.exec(
+      `INSERT INTO employee_log
+         (conversation_id, from_role, kind, summary, payload_json, ts, notified_founder)
+       VALUES (?, ?, 'peer_dm_shadow', ?, ?, ?, 0)`,
+      body.conversationId ?? null,
+      body.fromRole,
+      body.summary,
+      JSON.stringify({
+        to: body.toRole,
+        tool: body.tool,
+        payload: body.payload,
+      }),
+      Date.now(),
+    );
+    return new Response("logged", { status: 200 });
+  }
+
+  /**
+   * Cron tick — called from `apps/core`'s `scheduled()` handler on the
+   * cron trigger. Currently fans out to SMM's inbound-sweep tool if SMM
+   * is connected; otherwise it's a no-op (SMM lands in S4).
+   *
+   * We never throw — cron should be self-healing. Failures get logged
+   * and a non-2xx-safe `200` body string identifies the case (the
+   * caller, a Worker's `scheduled()` handler, won't read the body but
+   * does benefit from a non-throw).
+   */
+  private async handleCronTick(_request: Request): Promise<Response> {
+    const userId = this.props?.userId;
+    if (!userId) {
+      return new Response("no userId in props", { status: 200 });
+    }
+
+    const smmServerName = mcpServerName("social-media-manager", userId);
+    const servers = this.mcp.listServers();
+    const smm = servers.find((s) => s.name === smmServerName);
+    if (!smm) {
+      // SMM not connected (not hired, or S4 not landed yet). Silent skip.
+      return new Response("noop:smm_not_connected", { status: 200 });
+    }
+
+    try {
+      await this.mcp.callTool({
+        serverId: smm.id,
+        name: "findThreadsViaXai",
+        arguments: { platform: "x", intent: "hourly-sweep" },
+      });
+    } catch (err) {
+      console.error(`[CMO cron-tick ${userId}] SMM call failed:`, err);
+      return new Response("err:smm_call_failed", { status: 200 });
+    }
+    return new Response("ticked", { status: 200 });
+  }
 }
