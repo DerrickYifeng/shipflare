@@ -4,6 +4,7 @@ import { mcpServerName, type McpProps } from "@shipflare/shared";
 import type { Env } from "../../index";
 import { applyHogSchema } from "./schema";
 import { registerStrategicPathTool } from "./tools/generate-strategic-path";
+import { registerAuditTool } from "./tools/audit-plan";
 
 interface HogState {
   lastWakeAt: number;
@@ -64,7 +65,7 @@ export class HeadOfGrowth extends McpAgent<Env, HogState, McpProps> {
 
   async init(): Promise<void> {
     registerStrategicPathTool(this);
-    // S3.2: registerAuditTool(this)
+    registerAuditTool(this);
   }
 
   /**
