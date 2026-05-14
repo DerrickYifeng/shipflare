@@ -138,5 +138,22 @@ export function applyCmoSchema(sql: SqlStorage): void {
     );
     CREATE INDEX IF NOT EXISTS idx_memory_active
       ON cross_conversation_memory(active, added_at);
+
+    -- P2-F: Web push subscriptions for browser notifications.
+    -- The browser subscribes via the Push API, sends the resulting
+    -- endpoint + keys to /api/push/subscribe (apps/web), which forwards
+    -- to /internal/push-subscribe on the CMO DO. Endpoint is the primary
+    -- key because Push protocol uniqueness is per-endpoint URL.
+    --   last_error: last non-2xx HTTP status from the push service, e.g.
+    --     "410" → subscription is dead (caller deletes the row); "5xx"
+    --     → transient (we keep + retry).
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+      endpoint TEXT PRIMARY KEY,
+      p256dh TEXT NOT NULL,
+      auth TEXT NOT NULL,
+      subscribed_at INTEGER NOT NULL,
+      last_used INTEGER,
+      last_error TEXT
+    );
   `);
 }

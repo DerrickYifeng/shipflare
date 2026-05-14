@@ -110,6 +110,14 @@ export interface Env {
    */
   EXTERNAL_MCP_SECRET: string;
   CHANNEL_ENC_KEY: string;
+  // P2-F — Web Push (RFC 8030 / VAPID). Public key is also bundled into
+  // the browser at build time as NEXT_PUBLIC_VAPID_PUBLIC in apps/web, and
+  // private key is used by the CMO to sign per-push VAPID JWTs.
+  // `VAPID_SUBJECT` must be a mailto: or https: URI per RFC 8292 §2.1.
+  // Generate with `generateVapidKeypair()` in src/lib/web-push.ts.
+  VAPID_PUBLIC: string;
+  VAPID_PRIVATE: string;
+  VAPID_SUBJECT: string;
 }
 
 /**

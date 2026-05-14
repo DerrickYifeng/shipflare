@@ -13,6 +13,11 @@ import { registerConversationTools } from "./tools/conversation";
 import { registerRosterTools } from "./tools/roster";
 import { registerDelegationTools } from "./tools/delegate";
 import { registerSharedStateTools } from "./tools/shared-state";
+import {
+  sendWebPush,
+  type PushPayload,
+  type PushSubscriptionRow,
+} from "../../lib/web-push";
 
 type CMOState = {
   initialized: boolean;
@@ -205,6 +210,9 @@ export class CMO extends McpAgent<Env, CMOState, McpProps> {
     if (url.pathname === "/internal/cron-tick") {
       return this.handleCronTick(request);
     }
+    if (url.pathname === "/internal/push-subscribe") {
+      return this.handlePushSubscribe(request);
+    }
 
     // Fall through to McpAgent's default fetch (handles /mcp, WebSocket
     // upgrades, etc. — S2.6 routes /mcp before this DO sees it; this is
@@ -360,5 +368,124 @@ export class CMO extends McpAgent<Env, CMOState, McpProps> {
       return new Response("err:smm_call_failed", { status: 200 });
     }
     return new Response("ticked", { status: 200 });
+  }
+
+  /**
+   * P2-F — Web push subscription persistence.
+   *
+   * Browser → `/api/push/subscribe` (apps/web, session-gated) → this route
+   * via Service Binding. We store the subscription so any push trigger
+   * inside the CMO DO can later call `sendPushToFounder()` and reach
+   * every active browser the founder enabled notifications in.
+   *
+   * Body: `{ endpoint, p256dh, auth }`.
+   *
+   * Endpoint is the primary key — re-subscribing from the same browser
+   * yields the same endpoint, so an UPSERT on conflict refreshes the keys
+   * and clears `last_error`. Different browser / device → different
+   * endpoint → separate row.
+   */
+  private async handlePushSubscribe(request: Request): Promise<Response> {
+    let body: PushSubscriptionRow;
+    try {
+      body = (await request.json()) as PushSubscriptionRow;
+    } catch {
+      return new Response("invalid json", { status: 400 });
+    }
+    if (
+      typeof body.endpoint !== "string" ||
+      typeof body.p256dh !== "string" ||
+      typeof body.auth !== "string" ||
+      body.endpoint.length === 0
+    ) {
+      return new Response("invalid subscription", { status: 400 });
+    }
+    this.sqlStorage.exec(
+      `INSERT INTO push_subscriptions (endpoint, p256dh, auth, subscribed_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(endpoint) DO UPDATE SET
+         p256dh = excluded.p256dh,
+         auth = excluded.auth,
+         last_error = NULL`,
+      body.endpoint,
+      body.p256dh,
+      body.auth,
+      Date.now(),
+    );
+    return new Response("subscribed", { status: 200 });
+  }
+
+  /**
+   * P2-F — Send a Web Push notification to every active subscription
+   * for this founder.
+   *
+   * Returns `{ sent, failed }`. On 404 / 410 from the push service the
+   * subscription is dead (browser un-subscribed) and we delete the row.
+   * Other non-2xx records `last_error` so a future inspection can decide
+   * to retry or evict.
+   *
+   * Phase 2 P2-F caveat: the payload is currently delivered as an empty
+   * body (the service worker shows a generic "Check ShipFlare" message
+   * regardless of `payload.title` / `payload.body`). Encrypted payload
+   * support arrives in P2-F.2 — once that lands, `sendWebPush` will
+   * deliver the actual title/body without changes to this method.
+   *
+   * Public on the class so wiring it into draft-ready hooks
+   * (`process-replies-batch.ts`, `process-posts-batch.ts`, etc. — see
+   * P2-F.2 TODOs) doesn't need a new MCP tool.
+   */
+  async sendPushToFounder(
+    payload: PushPayload,
+  ): Promise<{ sent: number; failed: number }> {
+    const subs = this.sqlStorage
+      .exec<PushSubscriptionRow>(
+        "SELECT endpoint, p256dh, auth FROM push_subscriptions",
+      )
+      .toArray();
+
+    const vapid = {
+      publicKey: this.bindings.VAPID_PUBLIC,
+      privateKey: this.bindings.VAPID_PRIVATE,
+      subject: this.bindings.VAPID_SUBJECT || "mailto:hello@shipflare.com",
+    };
+
+    let sent = 0;
+    let failed = 0;
+    for (const sub of subs) {
+      try {
+        const result = await sendWebPush(sub, payload, vapid);
+        if (result.ok) {
+          sent++;
+          this.sqlStorage.exec(
+            "UPDATE push_subscriptions SET last_used = ?, last_error = NULL WHERE endpoint = ?",
+            Date.now(),
+            sub.endpoint,
+          );
+        } else {
+          failed++;
+          if (result.shouldDelete) {
+            this.sqlStorage.exec(
+              "DELETE FROM push_subscriptions WHERE endpoint = ?",
+              sub.endpoint,
+            );
+          } else {
+            this.sqlStorage.exec(
+              "UPDATE push_subscriptions SET last_error = ? WHERE endpoint = ?",
+              String(result.status),
+              sub.endpoint,
+            );
+          }
+        }
+      } catch (err) {
+        failed++;
+        console.error(`[CMO push] send failed for ${sub.endpoint}:`, err);
+        this.sqlStorage.exec(
+          "UPDATE push_subscriptions SET last_error = ? WHERE endpoint = ?",
+          err instanceof Error ? err.message : String(err),
+          sub.endpoint,
+        );
+      }
+    }
+    return { sent, failed };
   }
 }

@@ -61,3 +61,13 @@ LINKEDIN_CLIENT_SECRET=
 # channel — they will need to re-authenticate.
 #   openssl rand -base64 32
 CHANNEL_ENC_KEY=
+
+# P2-F — Web Push (VAPID) public key. MUST match apps/core's VAPID_PUBLIC
+# (apps/core holds the matching private key). NEXT_PUBLIC_-prefix is special:
+# Next.js inlines it into the client bundle at build time. This value is
+# safe to expose to the browser by design — it's only used as the
+# `applicationServerKey` argument to `pushManager.subscribe`. Set in
+# `apps/web/.env.local` (gitignored) for local dev; for production pass via
+# wrangler vars / build-time env. Generate with `generateVapidKeypair()` in
+# apps/core/src/lib/web-push.ts.
+NEXT_PUBLIC_VAPID_PUBLIC=

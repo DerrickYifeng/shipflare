@@ -70,4 +70,16 @@ declare global {
   }
 }
 
+// P2-F — VAPID public key inlined into the browser bundle at build time
+// (Next.js bundles `process.env.NEXT_PUBLIC_*` literally into client code).
+// Declared on `ProcessEnv` so the `/notifications` client typechecks against
+// the bundled value. The matching SERVER-SIDE secret lives on apps/core
+// (`Env.VAPID_PUBLIC` / `VAPID_PRIVATE` / `VAPID_SUBJECT`) — apps/web does
+// NOT need the private key.
+declare namespace NodeJS {
+  interface ProcessEnv {
+    NEXT_PUBLIC_VAPID_PUBLIC?: string;
+  }
+}
+
 export {};

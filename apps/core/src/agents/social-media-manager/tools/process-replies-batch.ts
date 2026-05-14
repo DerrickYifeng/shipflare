@@ -171,6 +171,13 @@ export function registerProcessRepliesBatchTool(agent: SocialMediaMgr): void {
 
         if (validation.ok) {
           draftsCreated++;
+          // TODO(P2-F.2): notify founder via web push when a reply draft hits
+          // 'ready' status. Wire this through the CMO DO's sendPushToFounder()
+          // helper — needs a peer RPC channel from SMM → CMO (the
+          // peer-dm-shadow + employee_log path is the natural seam; a tiny
+          // "draft_ready" message type on /internal/peer-dm-shadow can carry
+          // the platform + threadId + draftId so the CMO can fire the push +
+          // record it in employee_log atomically).
         } else {
           draftsSkipped++;
           notes.push(

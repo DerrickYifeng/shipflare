@@ -21,3 +21,14 @@ XAI_API_KEY=
 # channel — they will need to re-authenticate.
 #   openssl rand -base64 32
 CHANNEL_ENC_KEY=
+
+# P2-F — Web Push (RFC 8030 / VAPID). Generate ONCE with:
+#   import { generateVapidKeypair } from "./src/lib/web-push";
+#   const { publicKey, privateKey } = await generateVapidKeypair();
+# Then store the values here for local dev and via `wrangler secret put` in
+# staging / production. VAPID_PUBLIC ALSO needs to be set on apps/web as
+# NEXT_PUBLIC_VAPID_PUBLIC so the browser can hand it to PushManager.subscribe.
+# VAPID_SUBJECT must be a mailto: or https: URI.
+VAPID_PUBLIC=
+VAPID_PRIVATE=
+VAPID_SUBJECT=mailto:hello@shipflare.com
