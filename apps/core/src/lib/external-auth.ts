@@ -135,6 +135,7 @@ export const TOOL_SCOPE_MAP: Record<string, ExternalScope> = {
   process_posts_batch: "draft",
   list_drafts: "read",
   research_reddit_channels: "draft",
+  polishWithCopywriter: "draft", // P2-C — SMM → Copywriter peer-DM
   // Platform tool MCPs (Phase 2 — not exposed at /external yet but
   // registered here so the map stays the single source of truth).
   x_search: "read",

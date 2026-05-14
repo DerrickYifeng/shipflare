@@ -13,6 +13,7 @@ import { registerListDraftsTool } from "./tools/list-drafts";
 import { registerProcessRepliesBatchTool } from "./tools/process-replies-batch";
 import { registerProcessPostsBatchTool } from "./tools/process-posts-batch";
 import { registerResearchRedditChannelsTool } from "./tools/research-reddit-channels";
+import { registerPolishWithCopywriterTool } from "./tools/polish-with-copywriter";
 
 interface SmmState {
   lastWakeAt: number;
@@ -82,6 +83,7 @@ export class SocialMediaMgr extends McpAgent<Env, SmmState, McpProps> {
     registerProcessRepliesBatchTool(this);
     registerProcessPostsBatchTool(this);
     registerResearchRedditChannelsTool(this); // S4 complete
+    registerPolishWithCopywriterTool(this); // P2-C — peer-DM exemplar
   }
 
   /**
@@ -190,6 +192,39 @@ export class SocialMediaMgr extends McpAgent<Env, SmmState, McpProps> {
       console.info(
         `[SMM ${userId}] REDDIT_MCP binding not deployed yet (S5) — skipping`,
       );
+    }
+
+    // ── COPYWRITER — P2-C peer connection ────────────────────────────────
+    // Pro-tier opt-in role; only present if the founder has hired it.
+    // We eager-connect on every onStart — addMcpServer just registers the
+    // binding and does not verify a DO has been initialized. If the
+    // founder hasn't hired Copywriter, the actual peer-DM call
+    // (polishWithCopywriter) surfaces a clear error rather than failing
+    // silently here. Future: gate via CMO.queryRoster once that RPC is
+    // safe to call from inside onStart (would require sequencing it
+    // after the CMO connection completes).
+    const copywriterBinding = envBag.COPYWRITER as
+      | DurableObjectNamespace<McpAgent>
+      | undefined;
+    if (copywriterBinding) {
+      try {
+        await this.addMcpServer(
+          mcpServerName("copywriter", userId),
+          copywriterBinding,
+          {
+            props: {
+              userId,
+              caller: "peer" as const,
+              role: "member" as const,
+            },
+          },
+        );
+      } catch (err) {
+        console.error(
+          `[SMM ${userId}] failed to connect to COPYWRITER:`,
+          err,
+        );
+      }
     }
   }
 }
