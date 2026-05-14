@@ -20,3 +20,10 @@ GITHUB_CLIENT_SECRET=
 # core's /agents/<role>/<userId>/mcp routes directly. 32-byte random base64.
 #   openssl rand -base64 32
 MCP_JWT_SECRET=
+
+# Public origin of apps/core. `/api/mcp-token` returns
+# `${CORE_PUBLIC_URL}/agents/<role>/<userId>/mcp` so the browser can call
+# core directly (per spec D13 — Web Worker isn't a proxy for chat). Defaults
+# to http://localhost:3001 (apps/core's `wrangler dev` port). Override per
+# environment (e.g. https://core.shipflare.app for production).
+CORE_PUBLIC_URL=http://localhost:3001

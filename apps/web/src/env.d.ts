@@ -28,6 +28,13 @@ declare global {
     // the web Worker signs short-lived tokens that core verifies on each
     // /agents/<role>/<userId>/mcp call.
     MCP_JWT_SECRET: string;
+
+    // Public URL of the apps/core Worker — used to build the browser-facing
+    // MCP endpoint that `/api/mcp-token` returns. The browser connects to
+    // `${CORE_PUBLIC_URL}/agents/<role>/<userId>/mcp` directly (per spec D13).
+    // Optional: defaults to `http://localhost:3001` in `next dev` (apps/core's
+    // default `wrangler dev` port). Set per-environment for staging/prod.
+    CORE_PUBLIC_URL?: string;
   }
 }
 
