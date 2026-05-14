@@ -82,6 +82,10 @@ export default {
       const mod = await import("./spikes/04-better-auth");
       return mod.default(request, env, ctx);
     }
+    if (id === "05") {
+      const mod = await import("./spikes/05-webcrypto-aes-gcm");
+      return mod.default(request, env);
+    }
     return new Response(`spike #${id} not yet implemented`, { status: 501 });
   },
   async scheduled(_event: ScheduledController, _env: Env, _ctx: ExecutionContext): Promise<void> {

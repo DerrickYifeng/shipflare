@@ -6,7 +6,7 @@
 | 2 | McpAgent + addMcpServer RPC | GREEN | Props passthrough: `propsUserId=test-user-123`, `propsSecret=test-secret-456` arrive in the McpAgent's tool handler via `this.props`. Vitest both pass; `wrangler dev` curl returns `callCount=1,2,3` across 3 calls (state persists), then `callCount=4` after a full `wrangler dev` restart — props are re-applied from DO storage. Zero outbound HTTP in `wrangler dev` log (only the 3 inbound GETs). agents v0.12.4, MCP SDK v1.29.0. Decorator workaround documented below. |
 | 3 | MCP Streamable HTTP | GREEN | `McpServerExample.serve("/external-mcp/:userId/mcp", { binding: "MCP_EXAMPLE" })` works end-to-end. Vitest 2/2 pass (initialize handshake + tools/list). Manual curl against `wrangler dev`: protocol `2024-11-05`, server `spike-mcp@1.0.0`, capabilities `{tools:{listChanged:true}}`, session id is a 64-char hex token returned in the `mcp-session-id` response header and required on subsequent requests. Responses are SSE-framed (`Content-Type: text/event-stream`, `Transfer-Encoding: chunked`, one `event: message\ndata: {...json}` block per JSON-RPC reply). `notifications/initialized` returns 202 (no body, no SSE frame). `tools/call echo_props` returns `propsUserId=null,propsSecret=null,callCount=N` — external HTTP path does NOT auto-inject props (only `addMcpServer` RPC does). State persists across calls within a session (callCount=1→2). |
 | 4 | Better Auth + Drizzle + D1 | GREEN | **Architectural pivot from spec: D1 instead of Hyperdrive+Neon** (see "Task 11 spec sweep" below). 3/3 vitest pass. `auth.api.getSession({ headers })` with no cookie returns `null`. `/api/auth/get-session` (the Better Auth route) returns <500 on cold call — adapter bootstraps cleanly against `drizzle(env.DB)` + `provider: "sqlite"`. The 4 Better Auth tables (`user`, `session`, `account`, `verification`) confirmed via `wrangler d1 execute --local`: `SELECT name FROM sqlite_master WHERE type='table'` returns all four plus `_cf_METADATA`. better-auth v1.6.11 + @better-auth/drizzle-adapter v1.6.11 + drizzle-orm 0.45.2/d1 + vitest-pool-workers 0.16.4. GitHub OAuth dance deferred to manual validation (documented in Spike #4 notes below). |
-| 5 | WebCrypto AES-GCM | PENDING | |
+| 5 | WebCrypto AES-GCM | GREEN | 5/5 vitest pass. 100 random tokens (each `crypto.randomUUID()-Math.random()`, ~50–55 chars) round-trip cleanly with a fresh 32-byte key. Same plaintext (`"same-input"`) encrypted twice produces different ciphertexts (12-byte random IV per call). Decrypting with the wrong key throws `OperationError` from `crypto.subtle.decrypt` — auth tag failure as expected. Edge cases: empty string and 1-byte plaintext both round-trip. UTF-8 emoji (`🔐`) survives `TextEncoder` → encrypt → decrypt → `TextDecoder`. Ciphertext sizes (base64): `""` → 40 chars (30B = 12B IV + 0B ct + 16B tag), `"a"` → 40 chars, `"ghp_short_token_example"` (23B) → 68 chars (51B), `"xoxb-..."` (34B) → 84 chars (63B), the 49B emoji string → 108 chars (81B). Test duration 1.45s. Helper exports (`encrypt`, `decrypt`, `generateKey`) are drop-in candidates for Phase 1 `packages/crypto` — replace `KEY_B64` default with a `wrangler secret` lookup (`env.CHANNEL_ENC_KEY`). |
 | 6 | DO SQLite perf | PENDING | |
 | 7 | Dynamic Workflow | PENDING | |
 | 8 | Service Binding | PENDING | |
@@ -189,6 +189,52 @@
   ```
   The auto-tests don't need real GitHub credentials — they validate
   bootstrap + the no-cookie path only.
+
+### Spike #5 (2026-05-13)
+
+- **Workers WebCrypto is API-compatible with browser WebCrypto** for AES-GCM
+  encrypt/decrypt/importKey. `crypto.subtle.encrypt` returns `ArrayBuffer`,
+  same as the browser; wrapping in `new Uint8Array(...)` works the way the
+  helper expects. No Workers-specific quirks observed.
+- **12-byte IV is correct.** NIST SP 800-38D §5.2.1.1 recommends 96-bit
+  (12-byte) IVs for AES-GCM — what we use. Some legacy code (and some online
+  examples) uses 16; don't. Workers WebCrypto accepts both but 12 is the
+  standard and what every mainstream lib (libsodium, AWS Encryption SDK,
+  GCP Tink) uses.
+- **Wrong-key decrypt throws `OperationError`** — the GCM auth tag is
+  validated as part of decryption, so a tampered ciphertext OR a wrong key
+  both surface as an `OperationError` from `crypto.subtle.decrypt`. Test
+  uses `rejects.toThrow()` (loose match) since the error class isn't part
+  of any stable spec we can pin against.
+- **UTF-8 + `TextEncoder`/`TextDecoder` round-trip works for emoji
+  (`🔐`).** This is the standard surrogate-pair-safe path; no special
+  handling needed. Confirms `TextDecoder.decode()` on the decrypted bytes
+  yields the original JS string.
+- **No AAD (additional authenticated data) used.** The existing
+  `src/lib/auth/account-encryption.ts` interface doesn't expect callers to
+  pass AAD on read, so adding it would require a caller-side change.
+  Deferred to a Phase 1 enhancement: AAD would bind ciphertext to a row id
+  so a swapped ciphertext from another row would fail to decrypt.
+  Documented in the helper file.
+- **Helper functions are zero-dep and lift cleanly into `packages/crypto`
+  for Phase 1.** The default `KEY_B64` (32 zero bytes) is test-only and
+  documented as such in the file header; production swaps it for
+  `env.CHANNEL_ENC_KEY` (wrangler secret). The `importKey` validation
+  rejects keys that aren't 32 bytes, which surfaces a misconfigured secret
+  at boot rather than at first decrypt.
+- **Ciphertext envelope is `[12B IV][N B ciphertext + 16B GCM tag]`
+  then base64.** Note WebCrypto AES-GCM returns the auth tag appended
+  to the ciphertext (single `ArrayBuffer`), unlike Node's
+  `createCipheriv` which exposes it separately via `getAuthTag()`. The
+  existing `src/lib/encryption/index.ts` uses a 3-part hex envelope
+  `iv:tag:ciphertext` with a 16-byte IV. Phase 1 migration plan: ship
+  a `maybeDecrypt` that recognises both envelope shapes (hex 3-part →
+  Node-style, base64 single blob → WebCrypto-style), re-encrypt rows
+  to the new envelope as they're touched, then drop the legacy
+  decoder once a backfill script confirms zero rows remain in the old
+  format. The 12-byte IV in the new envelope follows NIST
+  recommendation; the old code's 16-byte IV is functionally fine but
+  non-standard for GCM.
 
 ### Task 11 spec sweep — Hyperdrive → D1
 
