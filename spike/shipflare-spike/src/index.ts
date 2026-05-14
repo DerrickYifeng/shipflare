@@ -9,9 +9,15 @@
 //   Task 6: export { SqliteDO }         from "./durable-objects/SqliteDO";
 //   Task 7: export { ExampleWorkflow }  from "./workflows/ExampleWorkflow";
 
+export { McpServerExample } from "./durable-objects/McpServerExample";
+export { AgentExample } from "./durable-objects/AgentExample";
+
+import type { McpServerExample } from "./durable-objects/McpServerExample";
+import type { AgentExample } from "./durable-objects/AgentExample";
+
 export interface Env {
-  MCP_EXAMPLE: DurableObjectNamespace;
-  AGENT_EXAMPLE: DurableObjectNamespace;
+  MCP_EXAMPLE: DurableObjectNamespace<McpServerExample>;
+  AGENT_EXAMPLE: DurableObjectNamespace<AgentExample>;
   SQLITE_DO: DurableObjectNamespace;
   EX_WORKFLOW: Workflow;
   CALLEE?: Fetcher;
@@ -33,6 +39,10 @@ export default {
     // importing src/spikes/NN-name.ts and returning its default export.
     if (id === "01") {
       const mod = await import("./spikes/01-anthropic-streaming");
+      return mod.default(request, env, ctx);
+    }
+    if (id === "02") {
+      const mod = await import("./spikes/02-mcp-rpc");
       return mod.default(request, env, ctx);
     }
     return new Response(`spike #${id} not yet implemented`, { status: 501 });

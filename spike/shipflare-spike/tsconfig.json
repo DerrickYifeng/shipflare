@@ -15,5 +15,5 @@
     "noEmit": true,
     "experimentalDecorators": false
   },
-  "include": ["src/**/*", "test/**/*"]
+  "include": ["src/**/*", "test/**/*", "worker-configuration.d.ts"]
 }
