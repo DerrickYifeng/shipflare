@@ -16,14 +16,24 @@
  * a wrangler dev startup error.
  */
 
+import type { CMO } from "./agents/cmo/CMO";
+
+// Value re-export so wrangler can discover the DO class via the module
+// graph rooted at `main`. Per Phase 0 spike #2 the import-then-export
+// shape is required: `export { CMO } from "..."` alone has tripped
+// wrangler's class-name resolver in some setups.
+export { CMO } from "./agents/cmo/CMO";
+
 export interface Env {
   DB: D1Database;
   // DO bindings — uncomment as classes come online (S2-S5).
-  // CMO: DurableObjectNamespace;
-  // HEAD_OF_GROWTH: DurableObjectNamespace;
-  // SOCIAL_MEDIA_MGR: DurableObjectNamespace;
-  // X_MCP: DurableObjectNamespace;
-  // REDDIT_MCP: DurableObjectNamespace;
+  // Per Phase 0 spike #2: parameterized `DurableObjectNamespace<CMO>` is
+  // required (not bare) for `addMcpServer`'s generic constraint to resolve.
+  CMO: DurableObjectNamespace<CMO>;
+  // HEAD_OF_GROWTH: DurableObjectNamespace;     // S3
+  // SOCIAL_MEDIA_MGR: DurableObjectNamespace;   // S4
+  // X_MCP: DurableObjectNamespace;              // S5
+  // REDDIT_MCP: DurableObjectNamespace;         // S5
   // Workflow binding — added when AgentPlanWorkflow lands (S6).
   // AGENT_PLAN_WORKFLOW: Workflow;
   // Secrets (wrangler secret put ...)
