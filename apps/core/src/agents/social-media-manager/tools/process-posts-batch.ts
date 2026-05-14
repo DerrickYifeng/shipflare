@@ -1,5 +1,5 @@
 import { z } from "zod";
-import Anthropic from "@anthropic-ai/sdk";
+import { runSkill } from "@shipflare/skills";
 import { mcpServerName } from "@shipflare/shared";
 import { validateDraft } from "../lib/validators";
 import { extractText } from "../lib/mcp-result";
@@ -26,13 +26,16 @@ interface PlanItemRow {
  * Per plan item:
  *   1. Read item via CMO.queryPlanItems (filtered by id list)
  *   2. Pull founder_context for voice + product knowledge
- *   3. Anthropic-draft a post (inline prompt — S6 ports drafting-post/SKILL.md)
+ *   3. runSkill("drafting-post") to draft an original post
  *   4. Validate via validateDraft (platform-leak + length)
  *   5. Persist to drafts (kind='post', plan_item_id link, status='ready'/'failed')
  *   6. RPC CMO.updatePlanItem(id, status='in_progress', output={ draftId }) if valid
  *
  * Per spec §6.1: SMM never writes CMO's plan_items directly. updates go via
  * the exposed RPC tool.
+ *
+ * S6.1: the drafting prompt has been lifted to packages/skills/drafting-post
+ * and is invoked via `runSkill`. The inline `draftPost` helper is gone.
  *
  * Bulk-fetch design: we pull the full pending pool (capped at 200) in one
  * round-trip and filter in-memory by the requested ids. Cheaper than N
@@ -133,9 +136,6 @@ export function registerProcessPostsBatchTool(agent: SocialMediaMgr): void {
         "casual, direct, no marketing fluff";
 
       // Step 3: process each requested id
-      const client = new Anthropic({
-        apiKey: agent.bindings.ANTHROPIC_API_KEY,
-      });
       let draftsCreated = 0;
       let draftsSkipped = 0;
       const notes: string[] = [];
@@ -149,22 +149,43 @@ export function registerProcessPostsBatchTool(agent: SocialMediaMgr): void {
         }
 
         const platform = item.channel as "x" | "reddit";
+        const lengthHint = platform === "x" ? "≤ 280 chars" : "≤ 1500 chars";
+        const params = JSON.parse(item.params_json) as Record<string, unknown>;
 
-        // Step 3a: draft via LLM
+        // Step 3a: draft via `drafting-post` skill
         let draftBody = "";
         let whyItWorks = "";
         let confidence = 0;
         try {
-          const draft = await draftPost(client, {
-            product,
-            productDescription,
-            voice,
-            planItem: item,
-            platform,
-          });
-          draftBody = draft.body;
-          whyItWorks = draft.whyItWorks;
-          confidence = draft.confidence;
+          const raw = await runSkill<unknown>(
+            "drafting-post",
+            {
+              platform,
+              product,
+              productDescription: productDescription || "no description",
+              voice,
+              lengthHint,
+              skill: item.skill,
+              params: JSON.stringify(params, null, 2),
+            },
+            { env: { ANTHROPIC_API_KEY: agent.bindings.ANTHROPIC_API_KEY } },
+          );
+          if (raw && typeof raw === "object") {
+            const parsed = raw as {
+              body?: unknown;
+              whyItWorks?: unknown;
+              confidence?: unknown;
+            };
+            draftBody = typeof parsed.body === "string" ? parsed.body : "";
+            whyItWorks =
+              typeof parsed.whyItWorks === "string" ? parsed.whyItWorks : "";
+            confidence =
+              typeof parsed.confidence === "number" ? parsed.confidence : 0;
+          } else if (typeof raw === "string") {
+            draftBody = raw.slice(0, 280);
+            whyItWorks = "fallback parse";
+            confidence = 0;
+          }
         } catch (err) {
           draftsSkipped++;
           notes.push(`${planItemId}: LLM failed: ${String(err)}`);
@@ -245,95 +266,4 @@ export function registerProcessPostsBatchTool(agent: SocialMediaMgr): void {
       };
     },
   );
-}
-
-/**
- * Draft a single post via Anthropic.
- *
- * Phase 1 inline prompt; S6 ports to packages/skills/drafting-post/SKILL.md.
- */
-async function draftPost(
-  client: Anthropic,
-  input: {
-    product: string;
-    productDescription: string;
-    voice: string;
-    planItem: PlanItemRow;
-    platform: "x" | "reddit";
-  },
-): Promise<{ body: string; whyItWorks: string; confidence: number }> {
-  const lengthHint = input.platform === "x" ? "≤ 280 chars" : "≤ 1500 chars";
-  const params = JSON.parse(input.planItem.params_json) as Record<
-    string,
-    unknown
-  >;
-
-  const response = await client.messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: 1024,
-    system: `You are drafting an original ${input.platform.toUpperCase()} post for ${input.product} (${input.productDescription || "no description"}).
-
-Voice: ${input.voice}
-
-Constraints:
-- Length: ${lengthHint}
-- Voice match the founder's, NOT marketing copy
-- No buzzwords ("Game-changer", "Revolutionary", "Disrupting", "Unleash")
-- Specific over generic — numbers, concrete examples, real takes
-- Hook in the first line — make someone want to read the next sentence
-
-Skill: ${input.planItem.skill}
-Plan params: ${JSON.stringify(params, null, 2)}
-
-Output ONLY a JSON object inside a \`\`\`json code block:
-\`\`\`json
-{
-  "body": "<the post text, raw>",
-  "whyItWorks": "<1-sentence rationale>",
-  "confidence": 0.0
-}
-\`\`\``,
-    messages: [
-      {
-        role: "user",
-        content: `Draft a ${input.platform} post for skill="${input.planItem.skill}" with params: ${JSON.stringify(params)}`,
-      },
-    ],
-  });
-
-  const text = response.content
-    .filter((c): c is Anthropic.TextBlock => c.type === "text")
-    .map((c) => c.text)
-    .join("\n");
-
-  const fenced = text.match(/```json\s*([\s\S]*?)\s*```/);
-  const candidate = fenced?.[1] ?? text.match(/\{[\s\S]*\}/)?.[0];
-  if (!candidate) {
-    return {
-      body: text.slice(0, 280),
-      whyItWorks: "fallback parse",
-      confidence: 0,
-    };
-  }
-
-  try {
-    const parsed = JSON.parse(candidate) as {
-      body?: string;
-      whyItWorks?: string;
-      confidence?: number;
-    };
-    return {
-      body: typeof parsed.body === "string" ? parsed.body : "",
-      whyItWorks:
-        typeof parsed.whyItWorks === "string" ? parsed.whyItWorks : "",
-      confidence:
-        typeof parsed.confidence === "number" ? parsed.confidence : 0,
-    };
-  } catch {
-    return {
-      body: text.slice(0, 280),
-      whyItWorks: "JSON parse failed",
-      confidence: 0,
-    };
-  }
 }

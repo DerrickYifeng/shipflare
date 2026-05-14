@@ -1,5 +1,5 @@
 import { z } from "zod";
-import Anthropic from "@anthropic-ai/sdk";
+import { runSkill } from "@shipflare/skills";
 import { mcpServerName } from "@shipflare/shared";
 import { validateDraft } from "../lib/validators";
 import { extractText } from "../lib/mcp-result";
@@ -14,9 +14,12 @@ import type { SocialMediaMgr } from "../SocialMediaMgr";
  * Per thread:
  *   1. Read from threads_inbox
  *   2. Pull founder_context (voice + product) from CMO RPC
- *   3. Anthropic-draft a reply (inline drafting prompt — S6 ports proper)
+ *   3. runSkill("drafting-reply") to draft a reply in the founder's voice
  *   4. Validate: platform-leak + length limits (S6 ports throttle too)
  *   5. Persist to drafts table (status='ready' if valid; 'failed' if not)
+ *
+ * S6.1: the drafting prompt has been lifted to packages/skills/drafting-reply
+ * and is invoked via `runSkill`. The inline `draftReply` helper is gone.
  *
  * Returns: { itemsScanned, draftsCreated, draftsSkipped, notes: [...] }
  */
@@ -75,9 +78,6 @@ export function registerProcessRepliesBatchTool(agent: SocialMediaMgr): void {
         "casual, direct, no marketing fluff";
 
       // Step 2: process each thread
-      const client = new Anthropic({
-        apiKey: agent.bindings.ANTHROPIC_API_KEY,
-      });
       let draftsCreated = 0;
       let draftsSkipped = 0;
       const notes: string[] = [];
@@ -102,22 +102,43 @@ export function registerProcessRepliesBatchTool(agent: SocialMediaMgr): void {
         }
 
         const platform = threadRow.platform as "x" | "reddit";
+        const lengthHint = platform === "x" ? "≤ 280 chars" : "≤ 1000 chars";
 
-        // Step 3: draft the reply via Anthropic
+        // Step 3: draft the reply via the `drafting-reply` skill
         let draftBody = "";
         let whyItWorks = "";
         let confidence = 0;
         try {
-          const draft = await draftReply(client, {
-            product,
-            productDescription,
-            voice,
-            thread: threadRow,
-            platform,
-          });
-          draftBody = draft.body;
-          whyItWorks = draft.whyItWorks;
-          confidence = draft.confidence;
+          const raw = await runSkill<unknown>(
+            "drafting-reply",
+            {
+              product,
+              productDescription: productDescription || "no description",
+              voice,
+              platform,
+              lengthHint,
+              threadAuthor: threadRow.author ?? "someone",
+              threadContent: threadRow.content,
+            },
+            { env: { ANTHROPIC_API_KEY: agent.bindings.ANTHROPIC_API_KEY } },
+          );
+          if (raw && typeof raw === "object") {
+            const parsed = raw as {
+              body?: unknown;
+              whyItWorks?: unknown;
+              confidence?: unknown;
+            };
+            draftBody = typeof parsed.body === "string" ? parsed.body : "";
+            whyItWorks =
+              typeof parsed.whyItWorks === "string" ? parsed.whyItWorks : "";
+            confidence =
+              typeof parsed.confidence === "number" ? parsed.confidence : 0;
+          } else if (typeof raw === "string") {
+            // Fallback: runner couldn't parse JSON, returned raw text.
+            draftBody = raw.slice(0, 280);
+            whyItWorks = "fallback parse";
+            confidence = 0;
+          }
         } catch (err) {
           draftsSkipped++;
           notes.push(`${threadId}: LLM failed: ${String(err)}`);
@@ -173,80 +194,4 @@ export function registerProcessRepliesBatchTool(agent: SocialMediaMgr): void {
       };
     },
   );
-}
-
-/**
- * Draft a single reply via Anthropic.
- *
- * Phase 1 inline prompt; S6 lifts to packages/skills/drafting-reply/SKILL.md.
- */
-async function draftReply(
-  client: Anthropic,
-  input: {
-    product: string;
-    productDescription: string;
-    voice: string;
-    thread: { platform: string; author: string | null; content: string };
-    platform: "x" | "reddit";
-  },
-): Promise<{ body: string; whyItWorks: string; confidence: number }> {
-  const lengthHint = input.platform === "x" ? "≤ 280 chars" : "≤ 1000 chars";
-
-  const response = await client.messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: 1024,
-    system: `You are drafting a reply on behalf of ${input.product} (${input.productDescription || "no description"}).
-
-Voice: ${input.voice}
-
-You're replying to a real person on ${input.platform.toUpperCase()}. Your reply should:
-- Be genuinely useful and contextual to what they said
-- Be in the founder's voice (above)
-- Length: ${lengthHint}
-- Naturally mention ${input.product} ONLY if it actually solves their problem
-- Never sound like marketing copy or a sales pitch
-- Never use cringe phrases ("Game-changer!", "Disrupting", etc.)
-
-Output ONLY a JSON object inside a \`\`\`json code block:
-\`\`\`json
-{
-  "body": "<the reply text, no quotes, no @ mention prefix>",
-  "whyItWorks": "<1-sentence rationale>",
-  "confidence": 0.0
-}
-\`\`\``,
-    messages: [
-      {
-        role: "user",
-        content: `Thread from ${input.thread.author ?? "someone"}:\n\n${input.thread.content}`,
-      },
-    ],
-  });
-
-  const text = response.content
-    .filter((c): c is Anthropic.TextBlock => c.type === "text")
-    .map((c) => c.text)
-    .join("\n");
-
-  const fenced = text.match(/```json\s*([\s\S]*?)\s*```/);
-  const candidate = fenced?.[1] ?? text.match(/\{[\s\S]*\}/)?.[0];
-  if (!candidate) {
-    return { body: text.slice(0, 280), whyItWorks: "fallback parse", confidence: 0 };
-  }
-
-  try {
-    const parsed = JSON.parse(candidate) as {
-      body?: string;
-      whyItWorks?: string;
-      confidence?: number;
-    };
-    return {
-      body: typeof parsed.body === "string" ? parsed.body : "",
-      whyItWorks:
-        typeof parsed.whyItWorks === "string" ? parsed.whyItWorks : "",
-      confidence: typeof parsed.confidence === "number" ? parsed.confidence : 0,
-    };
-  } catch {
-    return { body: text.slice(0, 280), whyItWorks: "JSON parse failed", confidence: 0 };
-  }
 }
