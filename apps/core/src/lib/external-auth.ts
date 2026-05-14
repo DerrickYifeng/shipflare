@@ -124,6 +124,12 @@ export const TOOL_SCOPE_MAP: Record<string, ExternalScope> = {
   addPlanItem: "draft",
   updatePlanItem: "draft",
   delegateToEmployee: "draft",
+  // P2-D — cross-conversation memory (opt-in "Remember this"). rememberThis /
+  // forgetThis mutate the long-term memory store and ride in every future
+  // system prompt, so they're admin-scope. queryMemory is read-only.
+  rememberThis: "admin",
+  forgetThis: "admin",
+  queryMemory: "read",
   // Head of Growth
   generate_strategic_path: "draft",
   audit_plan: "read",

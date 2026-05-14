@@ -123,5 +123,20 @@ export function applyCmoSchema(sql: SqlStorage): void {
       replies_published INTEGER NOT NULL DEFAULT 0,
       json TEXT
     );
+
+    -- P2-D: Cross-conversation memory (opt-in, Claude.ai-style "Remember this").
+    -- Founder explicitly opts a fact in via the chat UI; we inject every active
+    -- row into the system prompt of subsequent chat turns regardless of
+    -- conversationId. Soft-delete (active=0) keeps audit trail.
+    CREATE TABLE IF NOT EXISTS cross_conversation_memory (
+      id TEXT PRIMARY KEY,
+      content TEXT NOT NULL,
+      source_conversation_id TEXT,
+      source_message_ts INTEGER,
+      added_at INTEGER NOT NULL,
+      active INTEGER NOT NULL DEFAULT 1
+    );
+    CREATE INDEX IF NOT EXISTS idx_memory_active
+      ON cross_conversation_memory(active, added_at);
   `);
 }

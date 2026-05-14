@@ -27,6 +27,13 @@ import { createCmoClient, type CmoClient } from "@/lib/mcp-client";
 interface ChatMessage {
   role: "user" | "assistant";
   content: string;
+  /** P2-D: timestamp captured when the message was rendered, used as
+   *  `source_message_ts` when the founder hits "Remember". */
+  ts?: number;
+  /** P2-D: client-side remembered flag — flips the button to "Remembered"
+   *  after a successful rememberThis round-trip so the founder doesn't
+   *  double-save. Server doesn't deduplicate by content. */
+  remembered?: boolean;
 }
 
 interface ChatStreamProps {
@@ -80,22 +87,51 @@ export default function ChatStream({ conversationId }: ChatStreamProps) {
   const send = useCallback(async () => {
     const trimmed = input.trim();
     if (!client || !trimmed || sending) return;
-    setMessages((m) => [...m, { role: "user", content: trimmed }]);
+    setMessages((m) => [
+      ...m,
+      { role: "user", content: trimmed, ts: Date.now() },
+    ]);
     setInput("");
     setSending(true);
     try {
       const reply = await client.chat(conversationId, trimmed);
-      setMessages((m) => [...m, { role: "assistant", content: reply }]);
+      setMessages((m) => [
+        ...m,
+        { role: "assistant", content: reply, ts: Date.now() },
+      ]);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       setMessages((m) => [
         ...m,
-        { role: "assistant", content: `[error: ${msg}]` },
+        { role: "assistant", content: `[error: ${msg}]`, ts: Date.now() },
       ]);
     } finally {
       setSending(false);
     }
   }, [client, conversationId, input, sending]);
+
+  // P2-D — Save an assistant turn to long-term memory. We flip a local
+  // `remembered` flag so the button can't double-fire (server doesn't dedupe
+  // by content). Errors surface to console; we don't want a transient MCP
+  // failure to wedge the chat surface.
+  const remember = useCallback(
+    async (index: number) => {
+      const msg = messages[index];
+      if (!client || !msg || msg.role !== "assistant" || msg.remembered) {
+        return;
+      }
+      try {
+        await client.rememberThis(msg.content, conversationId, msg.ts);
+        setMessages((prev) =>
+          prev.map((m, i) => (i === index ? { ...m, remembered: true } : m)),
+        );
+      } catch (err: unknown) {
+        // eslint-disable-next-line no-console
+        console.error("rememberThis failed:", err);
+      }
+    },
+    [client, conversationId, messages],
+  );
 
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -131,6 +167,19 @@ export default function ChatStream({ conversationId }: ChatStreamProps) {
             <p style={{ whiteSpace: "pre-wrap", margin: "0.25rem 0" }}>
               {m.content}
             </p>
+            {m.role === "assistant" && client && (
+              <button
+                onClick={() => void remember(i)}
+                disabled={!!m.remembered}
+                style={{
+                  fontSize: "0.75em",
+                  padding: "0.25rem 0.5rem",
+                  marginTop: "0.25rem",
+                }}
+              >
+                {m.remembered ? "Remembered" : "Remember"}
+              </button>
+            )}
           </div>
         ))}
         {sending && <p style={{ color: "#888" }}>CMO is thinking...</p>}

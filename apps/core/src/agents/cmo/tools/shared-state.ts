@@ -294,6 +294,94 @@ export function registerSharedStateTools(agent: CMO): void {
       }
     },
   );
+
+  // P2-D: Cross-conversation memory ("Remember this") — opt-in long-term
+  // facts that get injected into every chat tool's system prompt regardless
+  // of conversationId. Founder is the sole writer (no auto-record); the
+  // chat UI surfaces a "Remember" button on assistant turns.
+  agent.server.registerTool(
+    "rememberThis",
+    {
+      description:
+        "Save a fact / preference to long-term memory. Will be injected " +
+        "into every future conversation's system prompt. Opt-in: founder " +
+        "clicks 'Remember' on UI; not auto-recorded.",
+      inputSchema: {
+        content: z.string().min(1).max(2000),
+        sourceConversationId: z.string().optional(),
+        sourceMessageTs: z.number().int().optional(),
+      },
+    },
+    async ({ content, sourceConversationId, sourceMessageTs }) => {
+      const id = crypto.randomUUID();
+      agent.sqlStorage.exec(
+        `INSERT INTO cross_conversation_memory
+           (id, content, source_conversation_id, source_message_ts, added_at, active)
+         VALUES (?, ?, ?, ?, ?, 1)`,
+        id,
+        content,
+        sourceConversationId ?? null,
+        sourceMessageTs ?? null,
+        Date.now(),
+      );
+      return {
+        content: [
+          { type: "text" as const, text: JSON.stringify({ id, ok: true }) },
+        ],
+      };
+    },
+  );
+
+  agent.server.registerTool(
+    "forgetThis",
+    {
+      description:
+        "Deactivate a memory entry (soft delete; keeps audit trail).",
+      inputSchema: {
+        id: z.string().min(1),
+      },
+    },
+    async ({ id }) => {
+      const result = agent.sqlStorage.exec(
+        "UPDATE cross_conversation_memory SET active = 0 WHERE id = ?",
+        id,
+      );
+      if (result.rowsWritten === 0) {
+        throw new Error(`memory not found: ${id}`);
+      }
+      return { content: [{ type: "text" as const, text: "forgotten" }] };
+    },
+  );
+
+  agent.server.registerTool(
+    "queryMemory",
+    {
+      description: "List active long-term memories, newest first.",
+      inputSchema: {
+        limit: z.number().int().positive().max(100).default(50),
+      },
+    },
+    async ({ limit }) => {
+      const rows = agent.sqlStorage
+        .exec<{
+          id: string;
+          content: string;
+          added_at: number;
+          source_conversation_id: string | null;
+        }>(
+          `SELECT id, content, added_at, source_conversation_id
+           FROM cross_conversation_memory
+           WHERE active = 1
+           ORDER BY added_at DESC
+           LIMIT ?`,
+          limit,
+        )
+        .toArray();
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(rows) }],
+      };
+    },
+  );
 }
 
 /**

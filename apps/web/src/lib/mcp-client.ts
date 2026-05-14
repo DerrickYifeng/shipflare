@@ -200,6 +200,54 @@ export class CmoClient {
     return this.callJsonTool("fireEmployee", { role });
   }
 
+  /**
+   * P2-D — Save an opt-in long-term memory. The fact gets injected into every
+   * future chat tool's system prompt regardless of conversationId. Founder
+   * triggers this from the chat UI's "Remember" button on assistant turns.
+   */
+  async rememberThis(
+    content: string,
+    sourceConversationId?: string,
+    sourceMessageTs?: number,
+  ): Promise<{ id: string; ok: boolean }> {
+    return this.callJsonTool("rememberThis", {
+      content,
+      sourceConversationId,
+      sourceMessageTs,
+    });
+  }
+
+  /**
+   * P2-D — Soft-delete a memory entry (sets `active=0`; row preserved for
+   * audit trail). Throws if the id doesn't exist.
+   */
+  async forgetThis(id: string): Promise<string> {
+    if (!this.client) {
+      throw new Error("CmoClient.forgetThis called before connect()");
+    }
+    const result = (await this.client.callTool({
+      name: "forgetThis",
+      arguments: { id },
+    })) as CallToolResultLike;
+    return extractText(result);
+  }
+
+  /**
+   * P2-D — List active memories, newest first. Powers the `/memory` page.
+   */
+  async queryMemory(
+    limit = 50,
+  ): Promise<
+    Array<{
+      id: string;
+      content: string;
+      added_at: number;
+      source_conversation_id: string | null;
+    }>
+  > {
+    return this.callJsonTool("queryMemory", { limit });
+  }
+
   async close(): Promise<void> {
     await this.client?.close();
     this.client = null;

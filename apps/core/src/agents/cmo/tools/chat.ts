@@ -62,6 +62,14 @@ export function registerChatTool(agent: CMO): void {
         contextRows.map((r) => [r.key, r.value]),
       );
 
+      // 3b. P2-D: Load active long-term memories (opt-in, cross-conversation).
+      // Oldest-first so numbered list stays stable as new memories accrue.
+      const memories = agent.sqlStorage
+        .exec<{ content: string }>(
+          "SELECT content FROM cross_conversation_memory WHERE active = 1 ORDER BY added_at",
+        )
+        .toArray();
+
       // 4. Call Anthropic
       const client = new Anthropic({
         apiKey: agent.bindings.ANTHROPIC_API_KEY,
@@ -69,7 +77,7 @@ export function registerChatTool(agent: CMO): void {
       const response = await client.messages.create({
         model: "claude-sonnet-4-6",
         max_tokens: 2048,
-        system: buildSystemPrompt(founderContext),
+        system: buildSystemPrompt(founderContext, memories),
         messages: history.map((h) => ({
           role: (h.role === "assistant" ? "assistant" : "user") as
             | "user"
@@ -102,17 +110,32 @@ export function registerChatTool(agent: CMO): void {
 }
 
 /**
- * Build the CMO system prompt from identity-level founder_context KV.
+ * Build the CMO system prompt from identity-level founder_context KV +
+ * any opt-in cross-conversation memories (P2-D).
  *
  * Pulled out so we can unit-test the assembly independently of an
  * Anthropic call. Each field has a sensible fallback so the prompt is
  * coherent even before the founder has filled in the context.
+ *
+ * `memories` is the list of `cross_conversation_memory` rows (active=1).
+ * The block is omitted entirely when the founder hasn't opted in any
+ * memories yet — no point telling the model "always remember: (nothing)".
  */
-function buildSystemPrompt(ctx: Record<string, string>): string {
+export function buildSystemPrompt(
+  ctx: Record<string, string>,
+  memories: ReadonlyArray<{ content: string }> = [],
+): string {
   const productName = ctx.productName ?? "the founder's product";
   const productDescription = ctx.productDescription ?? "(not yet set)";
   const voice =
     ctx.voice ?? "default — friendly, direct, no marketing fluff";
+
+  const memoryBlock =
+    memories.length > 0
+      ? `\n\nThings to always remember about ${productName}:\n${memories
+          .map((m, i) => `${i + 1}. ${m.content}`)
+          .join("\n")}`
+      : "";
 
   return `You are the CMO for ${productName}'s AI marketing team.
 
@@ -127,5 +150,5 @@ task. Just chat conversationally with the founder, ask clarifying questions,
 explain that delegation isn't online yet if they ask for something that needs
 specialist work.
 
-Keep replies under 3 sentences unless the founder asks for more detail.`.trim();
+Keep replies under 3 sentences unless the founder asks for more detail.${memoryBlock}`.trim();
 }
