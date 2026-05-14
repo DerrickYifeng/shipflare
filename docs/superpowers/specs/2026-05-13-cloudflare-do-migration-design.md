@@ -369,9 +369,29 @@ RPC connections (`addMcpServer`) survive hibernation as of Agents SDK v0.6.0
 
 1. User clicks "Sign in with GitHub" → Better Auth → GitHub OAuth dance →
    callback → session cookie issued
-2. Better Auth `session` callback hook: if first login, `POST` to
-   `shipflare-core /agents/cmo/<userId>/internal/init` to seed CMO DO
-   (idempotent)
+2. Better Auth `databaseHooks.user.create.after` hook fires when the new
+   user row is INSERTed (i.e. first login), then `POST` to
+   `shipflare-core /agents/cmo/<userId>/internal/init` (fire-and-forget,
+   endpoint is idempotent) to seed CMO DO. Phase 1 S1.5 finding: Better
+   Auth 1.6.11 does NOT expose `callbacks.session` — the correct first-
+   login hook is `databaseHooks.user.create.after`. Reference shape:
+   ```typescript
+   databaseHooks: {
+     user: {
+       create: {
+         after: async (user) => {
+           await env.CORE.fetch(
+             new Request(`https://internal/agents/cmo/${user.id}/internal/init`, {
+               method: "POST",
+               headers: { "x-shipflare-internal": "1", "content-type": "application/json" },
+               body: JSON.stringify({ email: user.email, githubLogin: user.name ?? null }),
+             })
+           );
+         },
+       },
+     },
+   },
+   ```
 3. CMO DO `init` handler creates default `roster` (HoG + SMM hired), seeds
    `founder_context` placeholder; onboarding wizard fills in product
    details via `chat` tool turns
@@ -657,7 +677,8 @@ Day 2-9: Parallel streams
   S8 Auth flows
      ├─ GitHub OAuth via Better Auth
      ├─ X / Reddit OAuth callbacks (with WebCrypto encryption)
-     └─ CMO `/internal/init` webhook from Better Auth session callback
+     └─ CMO `/internal/init` webhook from Better Auth
+        `databaseHooks.user.create.after` (first-login hook)
 
   S9 DevX
      ├─ wrangler dev parallel: web + core

@@ -339,6 +339,23 @@ git commit -m "feat(shared): MCP props + role registry + shared types"
 > for Phase 1 cleanly — no transitional decoder needed. Old encrypted rows in
 > the legacy Node DB are discardable.
 
+> **Phase 1 S1.2 finding — TypeScript 5.9 `freshBytes` helper.** TS 5.9 strict
+> mode types `new Uint8Array(N)` as `Uint8Array<ArrayBufferLike>`, where
+> `ArrayBufferLike` can be `SharedArrayBuffer`-backed. WebCrypto APIs
+> (`crypto.subtle.encrypt`, `crypto.getRandomValues`, etc.) want a
+> `BufferSource` bound to a plain `ArrayBuffer` and will reject the wider
+> type. Wrap allocations through a tiny helper:
+>
+> ```typescript
+> function freshBytes(n: number): Uint8Array<ArrayBuffer> {
+>   return new Uint8Array(new ArrayBuffer(n));
+> }
+> ```
+>
+> Use `freshBytes(N)` anywhere you'd write `new Uint8Array(N)` for WebCrypto
+> operations (IV allocation, output buffer, key bytes). The existing
+> implementation in `packages/crypto/src/aes-gcm.ts` already uses this pattern.
+
 - [ ] **Step 1: Write `packages/crypto/package.json`**
 
 ```json
@@ -830,6 +847,7 @@ git commit -m "feat(core): scaffold Worker + jwt helper + healthz"
 - Create: `apps/web/next.config.ts`
 - Create: `apps/web/open-next.config.ts`
 - Create: `apps/web/wrangler.jsonc`
+- Create: `apps/web/src/env.d.ts` ← Phase 1 S1.5 finding — augments `CloudflareEnv` with our bindings + secrets so reads via `getCloudflareContext().env.<NAME>` typecheck. `wrangler types` only emits bindings declared in `wrangler.jsonc`; secrets are runtime-only and must be augmented here.
 - Create: `apps/web/src/auth.ts`
 - Create: `apps/web/src/db/index.ts`
 - Create: `apps/web/app/layout.tsx`
@@ -844,33 +862,50 @@ git commit -m "feat(core): scaffold Worker + jwt helper + healthz"
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev --port 3000",
-    "build": "next build && opennextjs-cloudflare build",
-    "deploy": "pnpm build && wrangler deploy",
+    "dev": "next dev --port 3000",
+    "build": "next build",
+    "build:worker": "opennextjs-cloudflare build",
+    "preview": "pnpm run build:worker && wrangler dev",
+    "deploy": "pnpm run build:worker && wrangler deploy",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "postinstall": "wrangler types"
   },
   "dependencies": {
     "@shipflare/shared": "workspace:*",
     "@shipflare/db": "workspace:*",
     "@shipflare/crypto": "workspace:*",
-    "better-auth": "^1.5.0",
-    "next": "^16.0.0",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@opennextjs/cloudflare": "^1.19.9",
+    "better-auth": "^1.6.11",
+    "next": "16.2.6",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "eventsource-parser": "^3.0.0"
   },
   "devDependencies": {
-    "@opennextjs/cloudflare": "^1.0.0",
-    "wrangler": "^4.0.0",
-    "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
-    "typescript": "^5.5.0",
-    "vitest": "^1.6.0"
+    "wrangler": "^4.90.1",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.6"
   }
 }
 ```
+
+> **Phase 1 S1.5 findings — script split.** Do NOT collapse `build` and
+> `build:worker` into a single script. The naive
+> `"build": "next build && opennextjs-cloudflare build"` causes infinite
+> recursion because OpenNext shells out to `next build` internally. Keep:
+> - `dev` → `next dev` (local Turbopack, fast)
+> - `build` → `next build` only (Next.js artifact)
+> - `build:worker` → `opennextjs-cloudflare build` (bundles for Worker)
+> - `preview` → builds + runs `wrangler dev` for local prod-build smoke
+> - `deploy` → builds + `wrangler deploy` for shipping to CF
+>
+> `postinstall: wrangler types` regenerates `worker-configuration.d.ts`
+> on every `pnpm install`, keeping binding types in lock-step with
+> `wrangler.jsonc`.
 
 - [ ] **Step 2: Write `apps/web/next.config.ts`**
 
@@ -915,6 +950,42 @@ export default defineCloudflareConfig({});
 }
 ```
 
+- [ ] **Step 4.5: Write `apps/web/src/env.d.ts`** (augment `CloudflareEnv`)
+
+> **Phase 1 S1.5 finding.** OpenNext's auto-generated `worker-configuration.d.ts`
+> only declares OpenNext's own bindings (`ASSETS`, `IMAGES`, `NEXT_INC_CACHE_*`).
+> Our bindings (`DB`, `CORE`) come in via `wrangler types`, but secrets
+> (`BETTER_AUTH_*`, `GITHUB_*`, `MCP_JWT_SECRET`) are runtime-only and do NOT
+> get emitted. We declare them by augmenting the global `CloudflareEnv`
+> interface here so `getCloudflareContext().env.<NAME>` typechecks.
+>
+> Pair this file with `apps/web/.dev.vars.example` — any secret added there
+> must also be reflected here, and vice-versa.
+
+```typescript
+// apps/web/src/env.d.ts
+declare global {
+  interface CloudflareEnv {
+    // Bindings (also in worker-configuration.d.ts via wrangler types,
+    // re-declared here so CloudflareEnv has them too).
+    DB: D1Database;
+    CORE: Fetcher;
+
+    // Better Auth secrets. Set via .dev.vars locally, `wrangler secret put`
+    // in staging/production.
+    BETTER_AUTH_SECRET: string;
+    BETTER_AUTH_URL: string;
+    GITHUB_CLIENT_ID: string;
+    GITHUB_CLIENT_SECRET: string;
+
+    // Browser → core JWT signing. Same secret as apps/core's MCP_JWT_SECRET.
+    MCP_JWT_SECRET: string;
+  }
+}
+
+export {};
+```
+
 - [ ] **Step 5: Write `apps/web/src/db/index.ts`**
 
 ```typescript
@@ -951,23 +1022,30 @@ export function getAuth() {
     },
     secret: env.BETTER_AUTH_SECRET,
     baseURL: env.PUBLIC_URL ?? "http://localhost:3000",
-    callbacks: {
-      session: async ({ user, session }) => {
-        // First-login CMO init hook
-        if (!user.metadata?.cmoInitialized) {
-          await env.CORE.fetch(
-            new Request(`https://internal/agents/cmo/${user.id}/internal/init`, {
-              method: "POST",
-              headers: { "x-shipflare-internal": "1" },
-              body: JSON.stringify({
-                email: user.email,
-                githubLogin: user.name,
-              }),
-            })
-          );
-          // Mark via Better Auth additional fields (or a separate flag table; for spike just check existence)
-        }
-        return { user, session };
+    // Phase 1 S1.5 finding: Better Auth 1.6.11 does NOT expose
+    // `callbacks.session`. The correct first-login hook is
+    // `databaseHooks.user.create.after`, which fires exactly once
+    // when a new user row is INSERTed (i.e. first login). The
+    // /internal/init endpoint is idempotent — fire-and-forget is fine.
+    databaseHooks: {
+      user: {
+        create: {
+          after: async (user) => {
+            await env.CORE.fetch(
+              new Request(`https://internal/agents/cmo/${user.id}/internal/init`, {
+                method: "POST",
+                headers: {
+                  "x-shipflare-internal": "1",
+                  "content-type": "application/json",
+                },
+                body: JSON.stringify({
+                  email: user.email,
+                  githubLogin: user.name ?? null,
+                }),
+              })
+            );
+          },
+        },
       },
     },
   });
@@ -3780,6 +3858,24 @@ git mv src/lib/reply-throttle.ts packages/tools/src/validators/reply-throttle.ts
 ```bash
 pnpm remove bullmq ioredis bull-board
 ```
+
+- [ ] **Step 5.5: Drop `@cloudflare/workers-types`** (Phase 1 S1 deprecation finding)
+
+Wrangler 4.90+ prints a deprecation notice on every install asking us to drop
+`@cloudflare/workers-types` in favor of the auto-generated
+`worker-configuration.d.ts` (emitted by `wrangler types`, wired up as
+`postinstall` in `apps/web` and `apps/core` package.json). Remove the dep:
+
+```bash
+pnpm --filter @shipflare/web remove @cloudflare/workers-types
+pnpm --filter @shipflare/core remove @cloudflare/workers-types
+```
+
+Then update each app's `tsconfig.json` `types: []` array to drop the entry,
+and verify `pnpm --filter @shipflare/web typecheck` + `pnpm --filter
+@shipflare/core typecheck` still pass. The generated
+`worker-configuration.d.ts` covers all the runtime types we read
+(`D1Database`, `Fetcher`, `DurableObjectNamespace`, etc.).
 
 - [ ] **Step 6: Rewrite CLAUDE.md "Agent Teams Architecture" section**
 
