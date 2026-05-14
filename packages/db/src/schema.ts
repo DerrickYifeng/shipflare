@@ -81,7 +81,9 @@ export const channels = sqliteTable("channels", {
   userId: text("userId")
     .notNull()
     .references(() => user.id, { onDelete: "cascade" }),
-  platform: text("platform", { enum: ["x", "reddit"] }).notNull(),
+  platform: text("platform", {
+    enum: ["x", "reddit", "linkedin", "hackernews", "discord"],
+  }).notNull(),
   externalUserId: text("externalUserId").notNull(),
   username: text("username"),
   // OAuth tokens encrypted via @shipflare/crypto AES-GCM envelope (Phase 0 spike #5).

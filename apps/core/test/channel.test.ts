@@ -38,14 +38,14 @@ async function applyTestD1Schema(): Promise<void> {
     `CREATE TABLE IF NOT EXISTS user ( id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, emailVerified INTEGER NOT NULL DEFAULT 0, name TEXT, image TEXT, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL )`,
   );
   await env.DB.exec(
-    `CREATE TABLE IF NOT EXISTS channels ( id TEXT PRIMARY KEY, userId TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE, platform TEXT NOT NULL CHECK (platform IN ('x', 'reddit')), externalUserId TEXT NOT NULL, username TEXT, oauthTokenEncrypted TEXT NOT NULL, oauthRefreshEncrypted TEXT, scope TEXT, connectedAt INTEGER NOT NULL, lastVerifiedAt INTEGER, status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'revoked', 'error')) )`,
+    `CREATE TABLE IF NOT EXISTS channels ( id TEXT PRIMARY KEY, userId TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE, platform TEXT NOT NULL CHECK (platform IN ('x', 'reddit', 'linkedin', 'hackernews', 'discord')), externalUserId TEXT NOT NULL, username TEXT, oauthTokenEncrypted TEXT NOT NULL, oauthRefreshEncrypted TEXT, scope TEXT, connectedAt INTEGER NOT NULL, lastVerifiedAt INTEGER, status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'revoked', 'error')) )`,
   );
 }
 
 interface ChannelRow {
   id: string;
   userId: string;
-  platform: "x" | "reddit";
+  platform: "x" | "reddit" | "linkedin" | "hackernews" | "discord";
   externalUserId: string;
   username: string | null;
   oauthTokenEncrypted: string;

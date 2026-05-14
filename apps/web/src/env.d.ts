@@ -53,6 +53,14 @@ declare global {
     X_CLIENT_SECRET: string;
     REDDIT_CLIENT_ID: string;
     REDDIT_CLIENT_SECRET: string;
+    // P2-E. LinkedIn OAuth 2.0 app — linkedin.com/developers → Apps →
+    //   Create app → Auth tab → "OAuth 2.0 settings" → Authorized
+    //   redirect URLs. Must equal `${BETTER_AUTH_URL}/api/channels/linkedin/callback`.
+    //   Scopes: r_liteprofile, w_member_social (request via the
+    //   "Sign In with LinkedIn using OpenID Connect" + "Share on LinkedIn"
+    //   products on the app's Products tab).
+    LINKEDIN_CLIENT_ID: string;
+    LINKEDIN_CLIENT_SECRET: string;
 
     // AES-GCM key (base64, 32 bytes) used by @shipflare/crypto to envelope-
     // encrypt channel OAuth tokens before they hit D1. Rotating this

@@ -49,7 +49,14 @@
       // P2-B — Phase 2 expanded roster (Pro tier, opt-in hires)
       { "name": "COPYWRITER", "class_name": "Copywriter" },
       { "name": "BRAND_ANALYST", "class_name": "BrandAnalyst" },
-      { "name": "COMMUNITY_MGR", "class_name": "CommunityManager" }
+      { "name": "COMMUNITY_MGR", "class_name": "CommunityManager" },
+      // P2-E — Phase 2 expanded platform surface (LinkedIn, HN, Discord).
+      // HN is anonymous (no channels row); the other two carry tokens
+      // through `channels.oauthTokenEncrypted` (LinkedIn = real OAuth,
+      // Discord = pasted bot token via lo-fi form-POST).
+      { "name": "LINKEDIN_MCP", "class_name": "LinkedInMcpAgent" },
+      { "name": "HN_MCP", "class_name": "HackerNewsMcpAgent" },
+      { "name": "DISCORD_MCP", "class_name": "DiscordMcpAgent" }
     ]
   },
 
@@ -73,7 +80,18 @@
     // environment it cannot be modified.
     { "tag": "v5", "new_sqlite_classes": ["Copywriter"] },
     { "tag": "v6", "new_sqlite_classes": ["BrandAnalyst"] },
-    { "tag": "v7", "new_sqlite_classes": ["CommunityManager"] }
+    { "tag": "v7", "new_sqlite_classes": ["CommunityManager"] },
+    // P2-E — three new platform tool MCPs land together. Append-only
+    // tag; do NOT merge into v4 (the X / Reddit tag) even though both
+    // groups are platform MCPs.
+    {
+      "tag": "v8",
+      "new_sqlite_classes": [
+        "LinkedInMcpAgent",
+        "HackerNewsMcpAgent",
+        "DiscordMcpAgent"
+      ]
+    }
   ],
 
   // Dynamic Workflow binding — class lands in a later task. AgentPlanWorkflow

@@ -47,6 +47,15 @@ X_CLIENT_SECRET=
 REDDIT_CLIENT_ID=
 REDDIT_CLIENT_SECRET=
 
+# LinkedIn OAuth 2.0 app — linkedin.com/developers → Apps → Auth → "OAuth
+# 2.0 settings" → Authorized redirect URLs. Must equal
+# ${BETTER_AUTH_URL}/api/channels/linkedin/callback exactly. Request the
+# "Sign In with LinkedIn using OpenID Connect" + "Share on LinkedIn"
+# products from the Products tab to unlock the r_liteprofile +
+# w_member_social scopes the connect route requests.
+LINKEDIN_CLIENT_ID=
+LINKEDIN_CLIENT_SECRET=
+
 # 32-byte base64 key used by @shipflare/crypto to AES-GCM encrypt channel
 # OAuth tokens before they hit D1. Rotating this invalidates every connected
 # channel — they will need to re-authenticate.

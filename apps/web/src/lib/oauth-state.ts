@@ -19,10 +19,10 @@ import { signJwt, verifyJwt } from "./jwt";
 export interface OAuthStatePayload {
   /** Random nonce echoed by the IdP — defends against CSRF. */
   state: string;
-  /** PKCE code_verifier (X only — Reddit omits this). */
+  /** PKCE code_verifier (X only — Reddit / LinkedIn omit this). */
   codeVerifier?: string;
   /** Platform tag — guards against cross-platform cookie reuse. */
-  platform: "x" | "reddit";
+  platform: "x" | "reddit" | "linkedin";
   /** Better Auth user.id — guards against cross-user cookie reuse. */
   userId: string;
 }
@@ -66,7 +66,7 @@ export async function verifyOAuthState(
   >;
   if (
     typeof state !== "string" ||
-    (platform !== "x" && platform !== "reddit") ||
+    (platform !== "x" && platform !== "reddit" && platform !== "linkedin") ||
     typeof userId !== "string"
   ) {
     throw new Error("invalid oauth state payload");

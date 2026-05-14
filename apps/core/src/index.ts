@@ -55,6 +55,11 @@ import { CommunityManager } from "./agents/community-manager/CommunityManager";
 // can discover them once S5.3 uncomments the X_MCP / REDDIT_MCP bindings.
 import type { XMcpAgent } from "./agents/platforms/x/XMcpAgent";
 import type { RedditMcpAgent } from "./agents/platforms/reddit/RedditMcpAgent";
+// P2-E platform MCPs. Type-only imports (re-exported below as values for
+// wrangler module-graph discovery + Env namespace declarations).
+import type { LinkedInMcpAgent } from "./agents/platforms/linkedin/LinkedInMcpAgent";
+import type { HackerNewsMcpAgent } from "./agents/platforms/hackernews/HackerNewsMcpAgent";
+import type { DiscordMcpAgent } from "./agents/platforms/discord/DiscordMcpAgent";
 
 // Value re-export so wrangler can discover the DO classes via the module
 // graph rooted at `main`. (We `import` the classes above as values so they
@@ -70,6 +75,10 @@ export { Copywriter, BrandAnalyst, CommunityManager };
 // binding.
 export { XMcpAgent } from "./agents/platforms/x/XMcpAgent";
 export { RedditMcpAgent } from "./agents/platforms/reddit/RedditMcpAgent";
+// P2-E — three new platform tool MCPs (migration tag v8).
+export { LinkedInMcpAgent } from "./agents/platforms/linkedin/LinkedInMcpAgent";
+export { HackerNewsMcpAgent } from "./agents/platforms/hackernews/HackerNewsMcpAgent";
+export { DiscordMcpAgent } from "./agents/platforms/discord/DiscordMcpAgent";
 
 export interface Env {
   DB: D1Database;
@@ -82,6 +91,11 @@ export interface Env {
   COPYWRITER: DurableObjectNamespace<Copywriter>; // P2-B — migration tag v5
   BRAND_ANALYST: DurableObjectNamespace<BrandAnalyst>; // P2-B — migration tag v6
   COMMUNITY_MGR: DurableObjectNamespace<CommunityManager>; // P2-B — migration tag v7
+  // P2-E — three new platform tool MCPs (migration tag v8). HN has no
+  // channels row (anonymous via Algolia); LinkedIn + Discord do.
+  LINKEDIN_MCP: DurableObjectNamespace<LinkedInMcpAgent>;
+  HN_MCP: DurableObjectNamespace<HackerNewsMcpAgent>;
+  DISCORD_MCP: DurableObjectNamespace<DiscordMcpAgent>;
   // Workflow binding — added when AgentPlanWorkflow lands (S6).
   // AGENT_PLAN_WORKFLOW: Workflow;
   // Secrets (wrangler secret put ...)
