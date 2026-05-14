@@ -11,17 +11,19 @@
 
 export { McpServerExample } from "./durable-objects/McpServerExample";
 export { AgentExample } from "./durable-objects/AgentExample";
+export { SqliteDO } from "./durable-objects/SqliteDO";
 
 // Value import (not just type) — we need to call `McpServerExample.serve(...)`
 // at runtime to mount the Streamable HTTP transport for external MCP clients
 // (Claude Desktop, Cursor, @modelcontextprotocol/inspector, etc.).
 import { McpServerExample } from "./durable-objects/McpServerExample";
 import type { AgentExample } from "./durable-objects/AgentExample";
+import type { SqliteDO } from "./durable-objects/SqliteDO";
 
 export interface Env {
   MCP_EXAMPLE: DurableObjectNamespace<McpServerExample>;
   AGENT_EXAMPLE: DurableObjectNamespace<AgentExample>;
-  SQLITE_DO: DurableObjectNamespace;
+  SQLITE_DO: DurableObjectNamespace<SqliteDO>;
   EX_WORKFLOW: Workflow;
   CALLEE?: Fetcher;
   ANTHROPIC_API_KEY: string;
@@ -84,6 +86,10 @@ export default {
     }
     if (id === "05") {
       const mod = await import("./spikes/05-webcrypto-aes-gcm");
+      return mod.default(request, env);
+    }
+    if (id === "06") {
+      const mod = await import("./spikes/06-do-sqlite-perf");
       return mod.default(request, env);
     }
     return new Response(`spike #${id} not yet implemented`, { status: 501 });

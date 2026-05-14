@@ -11,15 +11,16 @@
   "durable_objects": {
     "bindings": [
       { "name": "MCP_EXAMPLE", "class_name": "McpServerExample" },
-      { "name": "AGENT_EXAMPLE", "class_name": "AgentExample" }
-      // { "name": "SQLITE_DO",    "class_name": "SqliteDO" }
+      { "name": "AGENT_EXAMPLE", "class_name": "AgentExample" },
+      { "name": "SQLITE_DO", "class_name": "SqliteDO" }
     ]
   },
   // Wrangler migration tags are append-only. Adding a class to "v1" after it's
   // already been applied to a local .wrangler state won't take effect. New SQLite
   // classes added in later tasks must use a NEW tag (e.g. "v2"), not modify "v1".
   "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["McpServerExample", "AgentExample"] }
+    { "tag": "v1", "new_sqlite_classes": ["McpServerExample", "AgentExample"] },
+    { "tag": "v2", "new_sqlite_classes": ["SqliteDO"] }
   ],
 
   // Spike #4: Better Auth + Drizzle + D1.

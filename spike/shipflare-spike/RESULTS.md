@@ -7,7 +7,7 @@
 | 3 | MCP Streamable HTTP | GREEN | `McpServerExample.serve("/external-mcp/:userId/mcp", { binding: "MCP_EXAMPLE" })` works end-to-end. Vitest 2/2 pass (initialize handshake + tools/list). Manual curl against `wrangler dev`: protocol `2024-11-05`, server `spike-mcp@1.0.0`, capabilities `{tools:{listChanged:true}}`, session id is a 64-char hex token returned in the `mcp-session-id` response header and required on subsequent requests. Responses are SSE-framed (`Content-Type: text/event-stream`, `Transfer-Encoding: chunked`, one `event: message\ndata: {...json}` block per JSON-RPC reply). `notifications/initialized` returns 202 (no body, no SSE frame). `tools/call echo_props` returns `propsUserId=null,propsSecret=null,callCount=N` — external HTTP path does NOT auto-inject props (only `addMcpServer` RPC does). State persists across calls within a session (callCount=1→2). |
 | 4 | Better Auth + Drizzle + D1 | GREEN | **Architectural pivot from spec: D1 instead of Hyperdrive+Neon** (see "Task 11 spec sweep" below). 3/3 vitest pass. `auth.api.getSession({ headers })` with no cookie returns `null`. `/api/auth/get-session` (the Better Auth route) returns <500 on cold call — adapter bootstraps cleanly against `drizzle(env.DB)` + `provider: "sqlite"`. The 4 Better Auth tables (`user`, `session`, `account`, `verification`) confirmed via `wrangler d1 execute --local`: `SELECT name FROM sqlite_master WHERE type='table'` returns all four plus `_cf_METADATA`. better-auth v1.6.11 + @better-auth/drizzle-adapter v1.6.11 + drizzle-orm 0.45.2/d1 + vitest-pool-workers 0.16.4. GitHub OAuth dance deferred to manual validation (documented in Spike #4 notes below). |
 | 5 | WebCrypto AES-GCM | GREEN | 5/5 vitest pass. 100 random tokens (each `crypto.randomUUID()-Math.random()`, ~50–55 chars) round-trip cleanly with a fresh 32-byte key. Same plaintext (`"same-input"`) encrypted twice produces different ciphertexts (12-byte random IV per call). Decrypting with the wrong key throws `OperationError` from `crypto.subtle.decrypt` — auth tag failure as expected. Edge cases: empty string and 1-byte plaintext both round-trip. UTF-8 emoji (`🔐`) survives `TextEncoder` → encrypt → decrypt → `TextDecoder`. Ciphertext sizes (base64): `""` → 40 chars (30B = 12B IV + 0B ct + 16B tag), `"a"` → 40 chars, `"ghp_short_token_example"` (23B) → 68 chars (51B), `"xoxb-..."` (34B) → 84 chars (63B), the 49B emoji string → 108 chars (81B). Test duration 1.45s. Helper exports (`encrypt`, `decrypt`, `generateKey`) are drop-in candidates for Phase 1 `packages/crypto` — replace `KEY_B64` default with a `wrangler secret` lookup (`env.CHANNEL_ENC_KEY`). |
-| 6 | DO SQLite perf | PENDING | |
+| 6 | DO SQLite perf | GREEN | 1/1 vitest pass. 10000-row seed in 24ms via `transactionSync` (≈417k rows/sec). 50-sample benchmark inside the DO (after seed): SELECT `WHERE conv_id ORDER BY ts` p50=7ms / p99=7ms / max=11ms (returns all 10k rows, indexed lookup hits `idx_messages_conv_ts`). Single-row INSERT p50=0ms / p99=0ms / max=0ms — all 50 samples completed in <1ms each. `wrangler dev --local` corroborates: seed 25ms, SELECT 6/7/7, INSERT 0/0/0. Both runtimes well under thresholds (SELECT < 50ms p99, INSERT < 5ms p99). **Key finding:** raw `BEGIN TRANSACTION` SQL is forbidden in DO SQLite — workerd throws explicitly and points at `state.storage.transactionSync()`. Spec uses the JS API. SQLite v3 + workerd in-process, no network hop, so latencies are essentially CPU-bound. |
 | 7 | Dynamic Workflow | PENDING | |
 | 8 | Service Binding | PENDING | |
 | 9 | Cron fan-out | PENDING | |
@@ -235,6 +235,50 @@
   format. The 12-byte IV in the new envelope follows NIST
   recommendation; the old code's 16-byte IV is functionally fine but
   non-standard for GCM.
+
+### Spike #6 (2026-05-13)
+
+- **Raw `BEGIN TRANSACTION` SQL is forbidden in DO SQLite.** workerd
+  throws explicitly: *"To execute a transaction, please use the
+  state.storage.transaction() or state.storage.transactionSync() APIs
+  instead of the SQL BEGIN TRANSACTION or SAVEPOINT statements."* The
+  initial spec snippet wrapped the 10k INSERT loop in
+  `sql.exec("BEGIN TRANSACTION")` / `"COMMIT"` — replaced with
+  `ctx.storage.transactionSync(() => { ... })`. The JS API auto-rolls-back
+  on throw and interacts correctly with DO's automatic atomic
+  write-coalescing, so it's strictly better than the SQL form anyway.
+  Phase 1 `packages/team-state` (or wherever the per-team DO lives) must
+  use the JS API.
+- **DO SQLite is FAST in-process.** No network hop, in-isolate sqlite3.
+  10000-row seed in 24ms (≈417k rows/sec) inside a single
+  `transactionSync`. Indexed SELECT returning all 10k rows: p50/p99/max
+  = 7/7/11 ms in vitest, 6/7/7 ms under `wrangler dev --local`. Single
+  one-shot INSERT: p50/p99/max all sub-millisecond (0/0/0 ms reported —
+  `Date.now()` granularity is the floor). Numbers will inflate on real
+  Workers runtime under concurrent load, but the headroom under the
+  thresholds (50ms / 5ms) is enormous.
+- **`SqlStorage.exec<T>` requires `T extends Record<string, SqlStorageValue>`.**
+  Declaring `MsgRow` as an `interface` does NOT satisfy the index
+  signature constraint even when all members are individually
+  assignable — TypeScript treats interface members as known-keys-only.
+  Switched to `type MsgRow = { ... }` which auto-satisfies the
+  constraint. Pattern to follow in Phase 1 for any row type passed to
+  `sql.exec<T>`.
+- **Migration tags are append-only — confirmed in practice.** Task 2
+  added `v1: [McpServerExample, AgentExample]`; Task 6 added
+  `v2: [SqliteDO]` rather than amending `v1`. wrangler accepted both
+  tags and the local `.wrangler/state` migrated correctly. Mutating
+  `v1` in place is a silent no-op once already applied — preserve the
+  immutability comment in `wrangler.jsonc`.
+- **No pragma tuning required.** DO SQLite manages WAL / synchronous /
+  journal mode internally. Did not enable any `PRAGMA` — perf already
+  blew past thresholds. If a future workload needs query-plan-level
+  optimization, `EXPLAIN QUERY PLAN` is available via `sql.exec` like
+  any other SQL.
+- **`getByName` is the right namespace API.** Used
+  `env.SQLITE_DO.getByName("perf-test")` rather than
+  `idFromName` → `get(id)` — the SDK exposes `getByName` as a
+  one-step shortcut. Same semantics; cleaner call site.
 
 ### Task 11 spec sweep — Hyperdrive → D1
 
