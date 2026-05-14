@@ -3,6 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { mcpServerName, type McpProps, type RoleSlug } from "@shipflare/shared";
 import type { Env } from "../../index";
 import { applySmmSchema } from "./schema";
+import { registerFindThreadsViaXaiTool } from "./tools/find-threads-via-xai";
 
 interface SmmState {
   lastWakeAt: number;
@@ -66,9 +67,11 @@ export class SocialMediaMgr extends McpAgent<Env, SmmState, McpProps> {
   }
 
   async init(): Promise<void> {
-    // Tools come in S4.1-S4.5: find_threads_via_xai, find_threads,
-    // process_replies_batch, process_posts_batch, research_reddit_channels,
-    // listDrafts.
+    registerFindThreadsViaXaiTool(this);
+    // S4.2: registerFindThreadsTool(this)
+    // S4.3: registerProcessRepliesBatchTool(this)
+    // S4.4: registerProcessPostsBatchTool(this)
+    // S4.5: registerResearchRedditChannelsTool(this), registerListDraftsTool(this)
   }
 
   /**
