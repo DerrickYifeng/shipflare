@@ -27,3 +27,20 @@ MCP_JWT_SECRET=
 # to http://localhost:3001 (apps/core's `wrangler dev` port). Override per
 # environment (e.g. https://core.shipflare.app for production).
 CORE_PUBLIC_URL=http://localhost:3001
+
+# X (Twitter) OAuth 2.0 app — developer.twitter.com → App → Keys and tokens →
+# OAuth 2.0 Client ID/Secret. Callback URL on the X side MUST equal
+# ${BETTER_AUTH_URL}/api/channels/x/callback exactly.
+X_CLIENT_ID=
+X_CLIENT_SECRET=
+
+# Reddit OAuth 2.0 app — reddit.com/prefs/apps → "web app". The Redirect URI
+# MUST equal ${BETTER_AUTH_URL}/api/channels/reddit/callback exactly.
+REDDIT_CLIENT_ID=
+REDDIT_CLIENT_SECRET=
+
+# 32-byte base64 key used by @shipflare/crypto to AES-GCM encrypt channel
+# OAuth tokens before they hit D1. Rotating this invalidates every connected
+# channel — they will need to re-authenticate.
+#   openssl rand -base64 32
+CHANNEL_ENC_KEY=

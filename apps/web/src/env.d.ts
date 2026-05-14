@@ -35,6 +35,23 @@ declare global {
     // Optional: defaults to `http://localhost:3001` in `next dev` (apps/core's
     // default `wrangler dev` port). Set per-environment for staging/prod.
     CORE_PUBLIC_URL?: string;
+
+    // Per-platform OAuth client credentials. Registered at:
+    //   X (Twitter) — developer.twitter.com → App → Keys and tokens →
+    //     OAuth 2.0 Client ID and Secret. Callback URL must equal
+    //     `${BETTER_AUTH_URL}/api/channels/x/callback`.
+    //   Reddit — reddit.com/prefs/apps → web app. Redirect URI must equal
+    //     `${BETTER_AUTH_URL}/api/channels/reddit/callback`.
+    X_CLIENT_ID: string;
+    X_CLIENT_SECRET: string;
+    REDDIT_CLIENT_ID: string;
+    REDDIT_CLIENT_SECRET: string;
+
+    // AES-GCM key (base64, 32 bytes) used by @shipflare/crypto to envelope-
+    // encrypt channel OAuth tokens before they hit D1. Rotating this
+    // invalidates every connected channel — they'll need to re-auth.
+    //   openssl rand -base64 32
+    CHANNEL_ENC_KEY: string;
   }
 }
 
