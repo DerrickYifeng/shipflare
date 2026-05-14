@@ -44,6 +44,12 @@ import { createDb, user as userTable } from "@shipflare/db";
 import { CMO } from "./agents/cmo/CMO";
 import { HeadOfGrowth } from "./agents/head-of-growth/HeadOfGrowth";
 import { SocialMediaMgr } from "./agents/social-media-manager/SocialMediaMgr";
+// P2-B — Phase 2 Pro-tier opt-in roster. Imported as values so they can
+// register in the EMPLOYEE_CLASSES dispatch table and be re-exported below
+// for wrangler module-graph discovery (v5/v6/v7 migrations).
+import { Copywriter } from "./agents/copywriter/Copywriter";
+import { BrandAnalyst } from "./agents/brand-analyst/BrandAnalyst";
+import { CommunityManager } from "./agents/community-manager/CommunityManager";
 // `XMcpAgent` / `RedditMcpAgent` are type-imported here (Env declaration).
 // The value re-exports below put the classes on the module graph so wrangler
 // can discover them once S5.3 uncomments the X_MCP / REDDIT_MCP bindings.
@@ -56,6 +62,7 @@ import type { RedditMcpAgent } from "./agents/platforms/reddit/RedditMcpAgent";
 // MCP route — `export { X }` is enough on its own when there's already an
 // `import { X }` above, but we keep the explicit re-export for grep-ability.)
 export { CMO, HeadOfGrowth, SocialMediaMgr };
+export { Copywriter, BrandAnalyst, CommunityManager };
 // Re-export the platform DO classes so wrangler can discover them; the
 // bindings in wrangler.jsonc + the Env entries below stay COMMENTED until
 // S5.3 wires migration tag v4. Re-exporting the classes now keeps the
@@ -72,6 +79,9 @@ export interface Env {
   SOCIAL_MEDIA_MGR: DurableObjectNamespace<SocialMediaMgr>; // S4
   X_MCP: DurableObjectNamespace<XMcpAgent>; // S5.3 — migration tag v4
   REDDIT_MCP: DurableObjectNamespace<RedditMcpAgent>; // S5.3 — migration tag v4
+  COPYWRITER: DurableObjectNamespace<Copywriter>; // P2-B — migration tag v5
+  BRAND_ANALYST: DurableObjectNamespace<BrandAnalyst>; // P2-B — migration tag v6
+  COMMUNITY_MGR: DurableObjectNamespace<CommunityManager>; // P2-B — migration tag v7
   // Workflow binding — added when AgentPlanWorkflow lands (S6).
   // AGENT_PLAN_WORKFLOW: Workflow;
   // Secrets (wrangler secret put ...)
@@ -109,6 +119,10 @@ const EMPLOYEE_CLASSES: Record<string, any> = {
   cmo: CMO,
   "head-of-growth": HeadOfGrowth,
   "social-media-manager": SocialMediaMgr,
+  // P2-B — Phase 2 expanded roster
+  copywriter: Copywriter,
+  "brand-analyst": BrandAnalyst,
+  "community-manager": CommunityManager,
 };
 
 /**

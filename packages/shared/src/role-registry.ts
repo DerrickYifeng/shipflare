@@ -10,7 +10,13 @@
 
 export interface RoleEntry {
   /** Wrangler binding name; MUST match the wrangler.jsonc durable_objects.bindings[].name */
-  binding: "CMO" | "HEAD_OF_GROWTH" | "SOCIAL_MEDIA_MGR";
+  binding:
+    | "CMO"
+    | "HEAD_OF_GROWTH"
+    | "SOCIAL_MEDIA_MGR"
+    | "COPYWRITER"
+    | "BRAND_ANALYST"
+    | "COMMUNITY_MGR";
   /** Founder-facing display name */
   displayName: string;
   /** Tier — Phase 1 ships only "core" tier roles */
@@ -38,7 +44,28 @@ export const ROLE_REGISTRY = {
     tier: "core",
     defaultActive: true,
   },
-  // Phase 2 additions go here (Copywriter, Brand Analyst, Community Manager, etc.)
+  // Phase 2 expanded roster — Pro tier, opt-in hires (defaultActive: false).
+  // Each ships as its own McpAgent DO class with private SQLite (v5/v6/v7
+  // migrations). Founders explicitly "hire" them through the roster UI; the
+  // CMO never auto-spawns them.
+  "copywriter": {
+    binding: "COPYWRITER",
+    displayName: "Copywriter",
+    tier: "pro",
+    defaultActive: false,
+  },
+  "brand-analyst": {
+    binding: "BRAND_ANALYST",
+    displayName: "Brand Analyst",
+    tier: "pro",
+    defaultActive: false,
+  },
+  "community-manager": {
+    binding: "COMMUNITY_MGR",
+    displayName: "Community Manager",
+    tier: "pro",
+    defaultActive: false,
+  },
 } as const satisfies Record<string, RoleEntry>;
 
 export type RoleSlug = keyof typeof ROLE_REGISTRY;

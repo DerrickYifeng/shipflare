@@ -45,7 +45,11 @@
       { "name": "SOCIAL_MEDIA_MGR", "class_name": "SocialMediaMgr" },
       // S5 — Platform tool MCPs (landed S5.3 under migration tag v4)
       { "name": "X_MCP", "class_name": "XMcpAgent" },
-      { "name": "REDDIT_MCP", "class_name": "RedditMcpAgent" }
+      { "name": "REDDIT_MCP", "class_name": "RedditMcpAgent" },
+      // P2-B — Phase 2 expanded roster (Pro tier, opt-in hires)
+      { "name": "COPYWRITER", "class_name": "Copywriter" },
+      { "name": "BRAND_ANALYST", "class_name": "BrandAnalyst" },
+      { "name": "COMMUNITY_MGR", "class_name": "CommunityManager" }
     ]
   },
 
@@ -62,7 +66,14 @@
     { "tag": "v1", "new_sqlite_classes": ["CMO"] },
     { "tag": "v2", "new_sqlite_classes": ["HeadOfGrowth"] },
     { "tag": "v3", "new_sqlite_classes": ["SocialMediaMgr"] },
-    { "tag": "v4", "new_sqlite_classes": ["XMcpAgent", "RedditMcpAgent"] }
+    { "tag": "v4", "new_sqlite_classes": ["XMcpAgent", "RedditMcpAgent"] },
+    // P2-B — Phase 2 expanded roster. Append-only; do NOT merge these into
+    // v1-v4 even though all three are landing in the same commit, because
+    // wrangler tracks applied tags by name and once a tag has run in any
+    // environment it cannot be modified.
+    { "tag": "v5", "new_sqlite_classes": ["Copywriter"] },
+    { "tag": "v6", "new_sqlite_classes": ["BrandAnalyst"] },
+    { "tag": "v7", "new_sqlite_classes": ["CommunityManager"] }
   ],
 
   // Dynamic Workflow binding — class lands in a later task. AgentPlanWorkflow
