@@ -149,6 +149,33 @@ export class CmoClient {
   }
 
   /**
+   * List drafts via CMO → SMM RPC. CMO's `queryDrafts` tool wraps SMM's
+   * `list_drafts` and returns `[]` if SMM isn't hired yet (forward-compat
+   * with cron ticks that run before the founder hires an SMM).
+   *
+   * The row shape is whatever SMM's `list_drafts` emits — we type as
+   * `Record<string, unknown>` so adding columns server-side doesn't require
+   * a client redeploy. The `/drafts` page narrows to its own `Draft`
+   * interface for rendering.
+   */
+  async queryDrafts(
+    opts: { status?: string; limit?: number } = {},
+  ): Promise<Array<Record<string, unknown>>> {
+    return this.callJsonTool("queryDrafts", opts);
+  }
+
+  /**
+   * Approve a draft. Flips the matching `approval_queue` row to
+   * `decision='approved'`. Throws if the draft isn't in the queue (e.g.
+   * already approved, rejected, or never enqueued).
+   */
+  async approveDraft(
+    draftId: string,
+  ): Promise<{ draftId: string; decision: string }> {
+    return this.callJsonTool("approveDraft", { draftId });
+  }
+
+  /**
    * Hire an employee role. Idempotent — re-hiring a fired role flips status
    * back to "active". CMO is implicit, so `hireEmployee("cmo")` is rejected
    * server-side.
