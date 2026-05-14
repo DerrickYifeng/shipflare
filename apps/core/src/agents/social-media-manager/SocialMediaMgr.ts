@@ -6,6 +6,7 @@ import { applySmmSchema } from "./schema";
 import { registerFindThreadsViaXaiTool } from "./tools/find-threads-via-xai";
 import { registerFindThreadsTool } from "./tools/find-threads";
 import { registerListDraftsTool } from "./tools/list-drafts";
+import { registerProcessRepliesBatchTool } from "./tools/process-replies-batch";
 
 interface SmmState {
   lastWakeAt: number;
@@ -72,7 +73,7 @@ export class SocialMediaMgr extends McpAgent<Env, SmmState, McpProps> {
     registerFindThreadsViaXaiTool(this);
     registerFindThreadsTool(this);
     registerListDraftsTool(this);
-    // S4.3: registerProcessRepliesBatchTool(this)
+    registerProcessRepliesBatchTool(this);
     // S4.4: registerProcessPostsBatchTool(this)
     // S4.5 (remaining): registerResearchRedditChannelsTool(this)
   }
