@@ -16,6 +16,16 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { getAuth } from "@/auth";
 
+/**
+ * Force every (app) route to be rendered per-request. Without this, Next 16
+ * tries to statically prerender /chat, /team, /plan, etc. at build time,
+ * and `getCloudflareContext()` (called inside `getAuth()`) throws because
+ * there's no Workers runtime context during the static export pass.
+ *
+ * Propagates to every child route via Next's layout-level config inheritance.
+ */
+export const dynamic = "force-dynamic";
+
 interface AppLayoutProps {
   children: ReactNode;
 }
