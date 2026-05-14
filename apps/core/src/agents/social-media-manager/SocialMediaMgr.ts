@@ -8,6 +8,7 @@ import { registerFindThreadsTool } from "./tools/find-threads";
 import { registerListDraftsTool } from "./tools/list-drafts";
 import { registerProcessRepliesBatchTool } from "./tools/process-replies-batch";
 import { registerProcessPostsBatchTool } from "./tools/process-posts-batch";
+import { registerResearchRedditChannelsTool } from "./tools/research-reddit-channels";
 
 interface SmmState {
   lastWakeAt: number;
@@ -76,7 +77,7 @@ export class SocialMediaMgr extends McpAgent<Env, SmmState, McpProps> {
     registerListDraftsTool(this);
     registerProcessRepliesBatchTool(this);
     registerProcessPostsBatchTool(this);
-    // S4.5 (remaining): registerResearchRedditChannelsTool(this)
+    registerResearchRedditChannelsTool(this); // S4 complete
   }
 
   /**
