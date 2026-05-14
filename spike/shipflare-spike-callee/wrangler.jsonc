@@ -1,0 +1,8 @@
+{
+  "$schema": "../shipflare-spike/node_modules/wrangler/config-schema.json",
+  "name": "shipflare-spike-callee",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-05-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true, "head_sampling_rate": 1 }
+}

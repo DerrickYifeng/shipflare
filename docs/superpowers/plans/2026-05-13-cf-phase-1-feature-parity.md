@@ -4,9 +4,9 @@
 
 **Goal:** Ship ShipFlare with 100% feature parity to the current production codebase, running on Cloudflare Workers + Durable Objects + Agents SDK + Dynamic Workflows. Old Node/BullMQ stack deleted at the end.
 
-**Architecture:** Two-Worker monorepo: `apps/web` (Next.js via OpenNext, Better Auth, hosts UI + login + channel OAuth callbacks) and `apps/core` (DO host: CMO, HeadOfGrowth, SocialMediaMgr, XMcpAgent, RedditMcpAgent + AgentPlanWorkflow). Uniform McpAgent across all employees; CMO is pure orchestrator; Head of Growth handles strategy; SMM executes. Internal communication via in-process MCP RPC (`addMcpServer` with DO binding). Per-team data in CMO SQLite, per-employee private state in each employee's SQLite, cross-team data (users / accounts / channels) in Neon Postgres via Hyperdrive. Conversation-scoped chat memory (Claude.ai-style reset).
+**Architecture:** Two-Worker monorepo: `apps/web` (Next.js via OpenNext, Better Auth, hosts UI + login + channel OAuth callbacks) and `apps/core` (DO host: CMO, HeadOfGrowth, SocialMediaMgr, XMcpAgent, RedditMcpAgent + AgentPlanWorkflow). Uniform McpAgent across all employees; CMO is pure orchestrator; Head of Growth handles strategy; SMM executes. Internal communication via in-process MCP RPC (`addMcpServer` with DO binding). Per-team data in CMO SQLite, per-employee private state in each employee's SQLite, cross-team data (users / accounts / channels) in Cloudflare D1. Conversation-scoped chat memory (Claude.ai-style reset).
 
-**Tech Stack:** Cloudflare Workers v4, Agents SDK ≥0.6.0, McpAgent + Dynamic Workflows, Next.js 16 + OpenNext, Better Auth, Drizzle ORM, Neon Postgres + Hyperdrive, WebCrypto AES-GCM, `@anthropic-ai/sdk`, `@modelcontextprotocol/sdk`, vitest + `@cloudflare/vitest-pool-workers`, Playwright.
+**Tech Stack:** Cloudflare Workers v4, Agents SDK ≥0.6.0, McpAgent + Dynamic Workflows, Next.js 16 + OpenNext, Better Auth, Drizzle ORM, Cloudflare D1, WebCrypto AES-GCM, `@anthropic-ai/sdk`, `@modelcontextprotocol/sdk`, vitest + `@cloudflare/vitest-pool-workers`, Playwright.
 
 **Spec:** `docs/superpowers/specs/2026-05-13-cloudflare-do-migration-design.md` §5.2.
 **Prerequisite:** Phase 0 spike GREEN (`docs/superpowers/plans/2026-05-13-cf-phase-0-spike.md`).
@@ -35,7 +35,7 @@ shipflare/                              ← monorepo root (existing repo)
           channels/reddit/callback/route.ts
       src/
         auth.ts                         ← Better Auth client config
-        db/index.ts                     ← Drizzle + Hyperdrive
+        db/index.ts                     ← Drizzle + D1
         mcp-client.ts                   ← browser MCP client wrapper
       wrangler.jsonc
       open-next.config.ts
@@ -331,6 +331,14 @@ git commit -m "feat(shared): MCP props + role registry + shared types"
 - Create: `packages/crypto/src/index.ts`
 - Create: `packages/crypto/test/aes-gcm.test.ts`
 
+> **Phase 0 spike #5 finding (envelope format).** The existing Node encryption
+> helper lives at `src/lib/encryption/index.ts` (NOT
+> `src/lib/auth/account-encryption.ts`). Its envelope format is `iv:tag:ct` hex
+> with a 16-byte IV; WebCrypto outputs a single base64 buffer with a 12-byte IV
+> (NIST-recommended). Since we have no users, ship the new WebCrypto envelope
+> for Phase 1 cleanly — no transitional decoder needed. Old encrypted rows in
+> the legacy Node DB are discardable.
+
 - [ ] **Step 1: Write `packages/crypto/package.json`**
 
 ```json
@@ -443,7 +451,7 @@ git commit -m "feat(crypto): WebCrypto AES-GCM helper"
 
 ---
 
-### Task S1.3: Create `packages/db` (Drizzle schemas for Postgres)
+### Task S1.3: Create `packages/db` (Drizzle schemas for D1)
 
 **Files:**
 - Create: `packages/db/package.json`
@@ -467,11 +475,11 @@ git commit -m "feat(crypto): WebCrypto AES-GCM helper"
     "migrate": "drizzle-kit migrate"
   },
   "dependencies": {
-    "drizzle-orm": "^0.34.0",
-    "@neondatabase/serverless": "^0.10.0"
+    "drizzle-orm": "^0.45.0"
   },
   "devDependencies": {
-    "drizzle-kit": "^0.27.0",
+    "drizzle-kit": "^0.31.0",
+    "@cloudflare/workers-types": "^4.20260101.0",
     "typescript": "^5.5.0"
   }
 }
@@ -480,32 +488,35 @@ git commit -m "feat(crypto): WebCrypto AES-GCM helper"
 - [ ] **Step 2: Write `src/schema.ts`**
 
 ```typescript
-import { pgTable, text, timestamp, boolean, integer, primaryKey } from "drizzle-orm/pg-core";
+// Phase 0 spike #4 finding: use drizzle-orm/sqlite-core for D1 (NOT pg-core).
+// Better Auth's Drizzle adapter expects camelCase identifiers exactly as below —
+// `provider: "sqlite"` (not "d1") tells Better Auth which dialect to emit.
+import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
 
-// Better Auth standard schema (4 tables) — Better Auth's Drizzle adapter expects
-// these exact column names. Do not rename.
-export const user = pgTable("user", {
+// Better Auth standard schema (4 tables).
+export const user = sqliteTable("user", {
   id: text("id").primaryKey(),
   email: text("email").notNull().unique(),
-  emailVerified: boolean("emailVerified").notNull().default(false),
+  emailVerified: integer("emailVerified", { mode: "boolean" }).notNull().default(false),
   name: text("name"),
   image: text("image"),
-  createdAt: timestamp("createdAt").notNull().defaultNow(),
-  updatedAt: timestamp("updatedAt").notNull().defaultNow(),
+  createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull().default(sql`(unixepoch() * 1000)`),
+  updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull().default(sql`(unixepoch() * 1000)`),
 });
 
-export const session = pgTable("session", {
+export const session = sqliteTable("session", {
   id: text("id").primaryKey(),
-  expiresAt: timestamp("expiresAt").notNull(),
+  expiresAt: integer("expiresAt", { mode: "timestamp_ms" }).notNull(),
   token: text("token").notNull().unique(),
   ipAddress: text("ipAddress"),
   userAgent: text("userAgent"),
   userId: text("userId").notNull().references(() => user.id, { onDelete: "cascade" }),
-  createdAt: timestamp("createdAt").notNull().defaultNow(),
-  updatedAt: timestamp("updatedAt").notNull().defaultNow(),
+  createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull().default(sql`(unixepoch() * 1000)`),
+  updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull().default(sql`(unixepoch() * 1000)`),
 });
 
-export const account = pgTable("account", {
+export const account = sqliteTable("account", {
   id: text("id").primaryKey(),
   accountId: text("accountId").notNull(),
   providerId: text("providerId").notNull(),
@@ -513,25 +524,25 @@ export const account = pgTable("account", {
   accessToken: text("accessToken"),
   refreshToken: text("refreshToken"),
   idToken: text("idToken"),
-  accessTokenExpiresAt: timestamp("accessTokenExpiresAt"),
-  refreshTokenExpiresAt: timestamp("refreshTokenExpiresAt"),
+  accessTokenExpiresAt: integer("accessTokenExpiresAt", { mode: "timestamp_ms" }),
+  refreshTokenExpiresAt: integer("refreshTokenExpiresAt", { mode: "timestamp_ms" }),
   scope: text("scope"),
   password: text("password"),
-  createdAt: timestamp("createdAt").notNull().defaultNow(),
-  updatedAt: timestamp("updatedAt").notNull().defaultNow(),
+  createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull().default(sql`(unixepoch() * 1000)`),
+  updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull().default(sql`(unixepoch() * 1000)`),
 });
 
-export const verification = pgTable("verification", {
+export const verification = sqliteTable("verification", {
   id: text("id").primaryKey(),
   identifier: text("identifier").notNull(),
   value: text("value").notNull(),
-  expiresAt: timestamp("expiresAt").notNull(),
-  createdAt: timestamp("createdAt"),
-  updatedAt: timestamp("updatedAt"),
+  expiresAt: integer("expiresAt", { mode: "timestamp_ms" }).notNull(),
+  createdAt: integer("createdAt", { mode: "timestamp_ms" }),
+  updatedAt: integer("updatedAt", { mode: "timestamp_ms" }),
 });
 
 // ShipFlare-specific (1 table)
-export const channels = pgTable("channels", {
+export const channels = sqliteTable("channels", {
   id: text("id").primaryKey(),
   userId: text("userId").notNull().references(() => user.id, { onDelete: "cascade" }),
   platform: text("platform", { enum: ["x", "reddit"] }).notNull(),
@@ -540,8 +551,8 @@ export const channels = pgTable("channels", {
   oauthTokenEncrypted: text("oauthTokenEncrypted").notNull(),
   oauthRefreshEncrypted: text("oauthRefreshEncrypted"),
   scope: text("scope"),
-  connectedAt: timestamp("connectedAt").notNull().defaultNow(),
-  lastVerifiedAt: timestamp("lastVerifiedAt"),
+  connectedAt: integer("connectedAt", { mode: "timestamp_ms" }).notNull().default(sql`(unixepoch() * 1000)`),
+  lastVerifiedAt: integer("lastVerifiedAt", { mode: "timestamp_ms" }),
   status: text("status", { enum: ["active", "revoked", "error"] }).notNull().default("active"),
 });
 ```
@@ -549,16 +560,16 @@ export const channels = pgTable("channels", {
 - [ ] **Step 3: Write `src/index.ts`**
 
 ```typescript
-import { drizzle } from "drizzle-orm/neon-http";
-import { neon } from "@neondatabase/serverless";
+// Phase 0 spike #4 finding: use drizzle-orm/d1, not /neon-http. The D1 binding
+// is passed directly (no connectionString).
+import { drizzle } from "drizzle-orm/d1";
 import * as schema from "./schema";
 
 export * from "./schema";
 export type DB = ReturnType<typeof drizzle<typeof schema>>;
 
-export function createDb(connectionString: string): DB {
-  const sql = neon(connectionString);
-  return drizzle(sql, { schema });
+export function createDb(d1: D1Database): DB {
+  return drizzle(d1, { schema });
 }
 ```
 
@@ -567,11 +578,14 @@ export function createDb(connectionString: string): DB {
 ```typescript
 import { defineConfig } from "drizzle-kit";
 
+// Phase 0 spike #4: drizzle-kit emits SQLite-compatible migrations for D1.
+// We apply them with `wrangler d1 migrations apply <db-name>` instead of
+// the drizzle-kit `migrate` runner.
 export default defineConfig({
   schema: "./src/schema.ts",
-  out: "./src/migrations",
-  dialect: "postgresql",
-  dbCredentials: { url: process.env.DATABASE_URL! },
+  out: "../../apps/core/migrations",
+  dialect: "sqlite",
+  driver: "d1-http",
 });
 ```
 
@@ -579,21 +593,23 @@ export default defineConfig({
 
 ```bash
 cd packages/db
-export DATABASE_URL="postgresql://<neon-direct-url>"  # use Neon connection (not Hyperdrive) for migrations
 pnpm generate
+# emits SQL files into apps/core/migrations
 ```
 
-- [ ] **Step 6: Apply migration to dev DB**
+- [ ] **Step 6: Apply migration to local D1**
 
 ```bash
-pnpm migrate
+cd ../../apps/core
+pnpm wrangler d1 migrations apply shipflare-dev --local
+# for remote: pnpm wrangler d1 migrations apply shipflare-dev --remote
 ```
 
 - [ ] **Step 7: Commit**
 
 ```bash
 git add packages/db/
-git commit -m "feat(db): Drizzle schema for 5 Postgres tables"
+git commit -m "feat(db): Drizzle schema for 5 D1 tables"
 ```
 
 ---
@@ -651,8 +667,13 @@ git commit -m "feat(db): Drizzle schema for 5 Postgres tables"
   "compatibility_date": "2026-05-01",
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true, "head_sampling_rate": 1 },
-  "hyperdrive": [
-    { "binding": "PG", "id": "<TO_FILL_AFTER_HYPERDRIVE_CREATE>" }
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "shipflare-dev",
+      "database_id": "<TO_FILL_AFTER_WRANGLER_D1_CREATE>",
+      "migrations_dir": "./migrations"
+    }
   ],
   "durable_objects": {
     "bindings": [
@@ -748,7 +769,7 @@ export async function verifyJwt(token: string, secret: string): Promise<Record<s
 import { routeAgentRequest } from "agents";
 
 export interface Env {
-  PG: Hyperdrive;
+  DB: D1Database;
   CMO: DurableObjectNamespace;
   HEAD_OF_GROWTH: DurableObjectNamespace;
   SOCIAL_MEDIA_MGR: DurableObjectNamespace;
@@ -774,12 +795,13 @@ export default {
 } satisfies ExportedHandler<Env>;
 ```
 
-- [ ] **Step 6: Provision Hyperdrive**
+- [ ] **Step 6: Provision D1**
 
 ```bash
 cd apps/core
-wrangler hyperdrive create shipflare-dev --connection-string "$NEON_PROD_URL"
-# copy the returned ID into wrangler.jsonc
+pnpm wrangler d1 create shipflare-dev
+# copy the returned `database_id` UUID into wrangler.jsonc d1_databases[0].database_id
+# (no Neon / Postgres project to provision — D1 is the single primary source of truth)
 ```
 
 - [ ] **Step 7: Verify Worker boots**
@@ -878,8 +900,13 @@ export default defineCloudflareConfig({});
   "compatibility_date": "2026-05-01",
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true, "head_sampling_rate": 1 },
-  "hyperdrive": [
-    { "binding": "PG", "id": "<SAME_AS_CORE>" }
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "shipflare-dev",
+      "database_id": "<SAME_UUID_AS_CORE>",
+      "migrations_dir": "../core/migrations"
+    }
   ],
   "services": [
     { "binding": "CORE", "service": "shipflare-core" }
@@ -894,9 +921,9 @@ export default defineCloudflareConfig({});
 import { createDb, type DB } from "@shipflare/db";
 
 let _db: DB | null = null;
-export function getDb(env: { PG: Hyperdrive }): DB {
+export function getDb(env: { DB: D1Database }): DB {
   if (_db) return _db;
-  _db = createDb(env.PG.connectionString);
+  _db = createDb(env.DB);
   return _db;
 }
 ```
@@ -913,7 +940,9 @@ export function getAuth() {
   const { env } = getCloudflareContext();
   const db = getDb(env);
   return betterAuth({
-    database: drizzleAdapter(db, { provider: "pg" }),
+    // Phase 0 spike #4: Better Auth Drizzle adapter uses provider: "sqlite" for
+    // D1 (D1 is SQLite-over-HTTP). NOT "d1" — there is no "d1" provider.
+    database: drizzleAdapter(db, { provider: "sqlite" }),
     socialProviders: {
       github: {
         clientId: env.GITHUB_CLIENT_ID,
@@ -1463,7 +1492,10 @@ private async connectEmployees() {
     const entry = ROLE_REGISTRY[role as RoleSlug];
     if (!entry) continue;
     const binding = this.env[entry.binding] as DurableObjectNamespace;
-    await this.addMcpServer(role, binding, {
+    // Phase 0 spike #2: namespace the addMcpServer `name` with parent-tenant id.
+    // A bare `role` name would collapse two users' McpServer DOs into one instance
+    // (the name is the instance identity). agents@0.12.4.
+    await this.addMcpServer(`${role}-${this.props.userId}`, binding, {
       props: { userId: this.props.userId, caller: "cmo" },
     });
   }
@@ -1508,7 +1540,10 @@ export function registerDelegationTools(agent: CMO) {
       },
     },
     async ({ role, tool, args, conversationId }) => {
-      const mcpServer = (agent as any).mcpServers?.[role];
+      // Phase 0 spike #2: mcpServers is keyed by the namespaced name we used in
+      // addMcpServer (`${role}-${userId}`), not by bare role. Mirror that here.
+      const key = `${role}-${agent.props.userId}`;
+      const mcpServer = (agent as any).mcpServers?.[key];
       if (!mcpServer) throw new Error(`Employee ${role} not connected (not hired?)`);
       const result = await mcpServer.callTool(tool, { ...args, conversationId });
       // Log the delegation
@@ -1815,10 +1850,10 @@ export default {
   },
 
   async scheduled(_event, env, _ctx): Promise<void> {
-    // List active users (Postgres via Hyperdrive)
+    // List active users (D1)
     // For Phase 1, simplify: fan out by querying user table
     const { createDb, user } = await import("@shipflare/db");
-    const db = createDb(env.PG.connectionString);
+    const db = createDb(env.DB);
     const users = await db.select({ id: user.id }).from(user);
     await Promise.all(users.map((u) => {
       const stub = env.CMO.idFromName(u.id);
@@ -2016,8 +2051,10 @@ export function registerHogTools(agent: HeadOfGrowth) {
         conversationId: z.string(),
       },
     },
-    async ({ goal, conversationId }, extra) => {
-      const props = (extra as any).props;
+    async ({ goal, conversationId }, _extra) => {
+      // Phase 0 spike #2: RPC transport puts props on `agent.props`, not `extra.props`.
+      // Only HTTP transport populates extra.props. agents@0.12.4.
+      const props = agent.props;
       // Fetch founder context via CMO RPC
       const cmoServer = (agent as any).mcpServers?.cmo;
       if (!cmoServer) {
@@ -2226,11 +2263,13 @@ export class SocialMediaMgr extends McpAgent<Env, SmmState, McpProps> {
   async onStart() {
     applySmmSchema(this.ctx.storage.sql);
     this.setState({ lastWakeAt: Date.now() });
-    // Connect to platform tool MCPs
-    await this.addMcpServer("x", this.env.X_MCP, {
+    // Connect to platform tool MCPs.
+    // Phase 0 spike #2: namespace addMcpServer names per-tenant to avoid sharing
+    // an McpServer DO instance across users.
+    await this.addMcpServer(`x-${this.props.userId}`, this.env.X_MCP, {
       props: { userId: this.props.userId, caller: "peer", role: "member" },
     });
-    await this.addMcpServer("reddit", this.env.REDDIT_MCP, {
+    await this.addMcpServer(`reddit-${this.props.userId}`, this.env.REDDIT_MCP, {
       props: { userId: this.props.userId, caller: "peer", role: "member" },
     });
   }
@@ -2257,6 +2296,14 @@ git commit -m "feat(smm): class skeleton + schema + platform MCP connections"
 ---
 
 ### Task S4.1: SMM `findThreadsViaXai` + `processRepliesBatch` + `processPostsBatch` tools
+
+> **Phase 0 spike #2 reminder applies to every `(agent as any).mcpServers?.[role]`
+> lookup below.** `mcpServers` is keyed by the namespaced name we registered
+> in `addMcpServer` (e.g. `\`x-${userId}\``, `\`reddit-${userId}\``, `\`cmo-${userId}\``).
+> The bare-role lookups shown in the snippets below are simplified for
+> readability — implementers MUST use the namespaced key. A small helper
+> `getServer(agent, role)` that prefixes with `${role}-${agent.props.userId}` is
+> the cleanest pattern.
 
 **Files:**
 - Create: `apps/core/src/agents/social-media-manager/tools.ts`
@@ -2583,7 +2630,7 @@ import { createDb, channels } from "@shipflare/db";
 import type { XMcpAgent } from "./XMcpAgent";
 
 async function loadChannel(agent: XMcpAgent, userId: string) {
-  const db = createDb(agent.env.PG.connectionString);
+  const db = createDb(agent.env.DB);
   const [chan] = await db.select().from(channels).where(
     and(eq(channels.userId, userId), eq(channels.platform, "x"))
   ).limit(1);
@@ -2593,6 +2640,8 @@ async function loadChannel(agent: XMcpAgent, userId: string) {
 }
 
 export function registerXTools(agent: XMcpAgent) {
+  // Phase 0 spike #2: tool handlers read props from `agent.props` (RPC transport).
+  // `extra.props` is only populated when invoked via HTTP transport (McpAgent.serve()).
   agent.server.registerTool("xSearch", {
     description: "Search X via xAI Grok for engagement-worthy threads.",
     inputSchema: {
@@ -2600,8 +2649,8 @@ export function registerXTools(agent: XMcpAgent) {
       intent: z.string().default("engagement"),
       maxResults: z.number().default(20),
     },
-  }, async ({ product, intent, maxResults }, extra) => {
-    const userId = (extra as any).props.userId;
+  }, async ({ product, intent, maxResults }) => {
+    const userId = agent.props.userId;
     const channel = await loadChannel(agent, userId);
     const client = createXClient({ token: channel.token, xaiApiKey: agent.env.XAI_API_KEY });
     const threads = await client.searchViaXai({ product, intent, maxResults });
@@ -2614,8 +2663,8 @@ export function registerXTools(agent: XMcpAgent) {
       body: z.string(),
       replyToExternalId: z.string().optional(),
     },
-  }, async ({ body, replyToExternalId }, extra) => {
-    const props = (extra as any).props;
+  }, async ({ body, replyToExternalId }) => {
+    const props = agent.props;
     if (props.role !== "lead" && props.caller !== "external") {
       throw new Error("Only lead can publish directly; members produce drafts");
     }
@@ -2635,8 +2684,8 @@ export function registerXTools(agent: XMcpAgent) {
   agent.server.registerTool("xMetrics", {
     description: "Fetch engagement metrics for a posted item.",
     inputSchema: { externalId: z.string() },
-  }, async ({ externalId }, extra) => {
-    const userId = (extra as any).props.userId;
+  }, async ({ externalId }) => {
+    const userId = agent.props.userId;
     const channel = await loadChannel(agent, userId);
     const client = createXClient({ token: channel.token, xaiApiKey: agent.env.XAI_API_KEY });
     const metrics = await client.metrics({ externalId });
@@ -2704,7 +2753,7 @@ import { createDb, channels } from "@shipflare/db";
 import type { RedditMcpAgent } from "./RedditMcpAgent";
 
 async function loadOptionalChannel(agent: RedditMcpAgent, userId: string) {
-  const db = createDb(agent.env.PG.connectionString);
+  const db = createDb(agent.env.DB);
   const [chan] = await db.select().from(channels).where(
     and(eq(channels.userId, userId), eq(channels.platform, "reddit"))
   ).limit(1);
@@ -2736,8 +2785,9 @@ export function registerRedditTools(agent: RedditMcpAgent) {
       replyToExternalId: z.string().optional(),
       title: z.string().optional(),
     },
-  }, async ({ body, subreddit, replyToExternalId, title }, extra) => {
-    const props = (extra as any).props;
+  }, async ({ body, subreddit, replyToExternalId, title }) => {
+    // Phase 0 spike #2: read props from agent.props (RPC transport).
+    const props = agent.props;
     if (props.role !== "lead" && props.caller !== "external") {
       throw new Error("Only lead can publish directly");
     }
@@ -3496,6 +3546,42 @@ git commit -m "feat(web): X / Reddit OAuth callbacks with encrypted token storag
 ---
 
 ## S9 — DevX (Day 8-10, parallel)
+
+### Test patterns learned from Phase 0 spikes
+
+Apply these throughout `apps/core/test/**`:
+
+- **Use exact assertions** (`toBe`, parsed SSE frames) rather than substring
+  matchers like `toContain`. Spike #1 caught two false-greens that way.
+- **`SELF.scheduled(ctl)` is broken in `vitest-pool-workers` 0.16.4.** Import
+  the worker's default export and call its handler directly:
+  ```typescript
+  import worker from "../src/index";
+  import { env, createExecutionContext, waitOnExecutionContext, createScheduledController } from "cloudflare:test";
+  // ...
+  const ctl = createScheduledController({ scheduledTime: new Date(N), cron: "0 * * * *" });
+  const ctx = createExecutionContext();
+  await worker.scheduled!(ctl, env, ctx);
+  await waitOnExecutionContext(ctx);
+  ```
+  (Spike #9 finding — `SELF.scheduled` throws `DataCloneError`.)
+- **vitest-pool-workers DOES support cross-worker Service Bindings** via
+  `cloudflareTest({ miniflare: { workers: [...] } })` in `vitest.config.mts`.
+  Spike #8 finding — register the sibling Worker as an auxiliary worker.
+- **DO SQLite forbids raw `BEGIN TRANSACTION`** — use
+  `ctx.storage.transactionSync(() => { ... })` instead. Spike #6 finding.
+- **Use `type` not `interface` for `sql.exec<T>` generic constraint**: interface
+  members don't satisfy `Record<string, SqlStorageValue>` index signature even
+  when individually assignable. Spike #6 finding.
+- **NaN guard on parsed integers from request headers.** `parseInt(garbage)`
+  yields `NaN` which silently breaks loops. Apply
+  `Number.isNaN(parsed) ? 0 : parsed` (or a typed Zod parse) to any header
+  parsed into an integer. Spike #10 finding.
+- **Tests using `runInDurableObject` should snapshot pre-/post-counts** rather
+  than asserting exact totals; DO state persists across tests within a file
+  in vitest-pool-workers. Spike #9 finding.
+
+---
 
 ### Task S9.0: CI workflow
 
