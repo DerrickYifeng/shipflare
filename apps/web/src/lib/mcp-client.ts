@@ -94,21 +94,114 @@ export class CmoClient {
   async startNewConversation(
     title?: string,
   ): Promise<{ conversationId: string }> {
-    if (!this.client) {
-      throw new Error("CmoClient.startNewConversation called before connect()");
-    }
-    const result = (await this.client.callTool({
-      name: "startNewConversation",
-      arguments: title ? { title } : {},
-    })) as CallToolResultLike;
-    const text = extractText(result) || "{}";
-    return JSON.parse(text) as { conversationId: string };
+    return this.callJsonTool<{ conversationId: string }>(
+      "startNewConversation",
+      title ? { title } : {},
+    );
+  }
+
+  /**
+   * List the founder's roster (every role ever hired, active + fired).
+   *
+   * Mirrors `queryRoster` in `apps/core/src/agents/cmo/tools/roster.ts`. The
+   * client filters by status in the UI — we always pull the full set so
+   * fired-then-rehired rows stay visible if we ever want to surface them.
+   */
+  async queryRoster(): Promise<
+    Array<{
+      role: string;
+      hired_at: number;
+      status: string;
+      hire_config_json: string | null;
+    }>
+  > {
+    return this.callJsonTool("queryRoster", {});
+  }
+
+  /**
+   * List plan_items. Optionally filter by `status` / `ownerRole` and cap
+   * `limit` (CMO clamps at 200). Returns rows in the row-shape emitted by
+   * `queryPlanItems` — fields stay loosely typed because the UI just renders
+   * the columns it knows about.
+   */
+  async queryPlanItems(
+    opts: { status?: string; ownerRole?: string; limit?: number } = {},
+  ): Promise<Array<Record<string, unknown>>> {
+    return this.callJsonTool("queryPlanItems", opts);
+  }
+
+  /**
+   * List active (non-archived) conversations, newest first. Used by the
+   * `/chat` index page so founders can resume an old thread or start a new
+   * one.
+   */
+  async listConversations(
+    limit = 20,
+  ): Promise<
+    Array<{
+      id: string;
+      started_at: number;
+      ended_at: number | null;
+      title: string | null;
+    }>
+  > {
+    return this.callJsonTool("listConversations", { limit });
+  }
+
+  /**
+   * Hire an employee role. Idempotent — re-hiring a fired role flips status
+   * back to "active". CMO is implicit, so `hireEmployee("cmo")` is rejected
+   * server-side.
+   */
+  async hireEmployee(
+    role: string,
+    hireConfig?: Record<string, unknown>,
+  ): Promise<{ role: string; status: string }> {
+    return this.callJsonTool(
+      "hireEmployee",
+      hireConfig ? { role, hireConfig } : { role },
+    );
+  }
+
+  /**
+   * Fire an employee. Status flips to "fired"; SQLite + history are preserved
+   * so re-hiring restores the same DO instance.
+   */
+  async fireEmployee(
+    role: string,
+  ): Promise<{ role: string; status: string }> {
+    return this.callJsonTool("fireEmployee", { role });
   }
 
   async close(): Promise<void> {
     await this.client?.close();
     this.client = null;
     this.transport = null;
+  }
+
+  /**
+   * Generic helper for tools whose entire result is a single JSON text block.
+   * The CMO server always returns `[{ type: "text", text: JSON.stringify(...) }]`
+   * for non-streaming queries, so we concatenate every text block (defensive
+   * against future multi-block returns) and `JSON.parse` once.
+   *
+   * Kept private so callers route through typed wrappers and we keep the
+   * SDK shape contained.
+   */
+  private async callJsonTool<T>(
+    name: string,
+    args: Record<string, unknown>,
+  ): Promise<T> {
+    if (!this.client) {
+      throw new Error(`CmoClient.${name} called before connect()`);
+    }
+    const result = (await this.client.callTool({
+      name,
+      arguments: args,
+    })) as CallToolResultLike;
+    const text = extractText(result);
+    if (!text) return {} as T;
+    return JSON.parse(text) as T;
   }
 }
 
