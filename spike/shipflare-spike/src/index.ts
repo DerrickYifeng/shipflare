@@ -113,6 +113,10 @@ export default {
       const mod = await import("./spikes/09-cron-fanout");
       return mod.default(request, env);
     }
+    if (id === "10") {
+      const mod = await import("./spikes/10-resumable-stream");
+      return mod.default(request, env);
+    }
     return new Response(`spike #${id} not yet implemented`, { status: 501 });
   },
   // Spike #9 — Cron fan-out. wrangler.jsonc `triggers.crons` invokes this

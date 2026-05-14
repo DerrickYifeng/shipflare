@@ -11,7 +11,7 @@
 | 7 | Dynamic Workflow | GREEN | 1/1 vitest pass in 5064ms. `step.do("step-a") → step.sleep("5 seconds") → step.do("step-b")` completes cleanly with `output.a.tag="A"`, `output.b.tag="B"`, `output.durationMs >= 5000` (actual run: test took ~5s total, so durationMs is ~5000ms — vitest-pool-workers DOES honor the sleep duration in the local Workflow simulator). Test polled `/spike/07/status?id=<id>` at 1s intervals; instance reached `status="complete"` on first non-running poll after the sleep elapsed. Full suite: 7 files / 16/16 tests pass in 7.54s. `WorkflowEntrypoint` imports from `"cloudflare:workers"` (standard path, no shim needed). Migration tags untouched — Workflow classes don't live in the `migrations[].new_sqlite_classes` array. **Test simulation HONORS sleep duration** — no test-vs-prod divergence observed for `step.sleep("5 seconds")`; production wall-clock semantics match the simulator within ~64ms scheduling overhead. |
 | 8 | Service Binding | GREEN | 1/1 vitest pass in ~5ms test time. `env.CALLEE.fetch(...)` round-trip exercised end-to-end against an auxiliary `shipflare-spike-callee` worker registered via `cloudflareTest({ miniflare: { workers: [...] } })`. Manual `wrangler dev` validation with BOTH workers running side-by-side: first call latency `5ms` (cold isolate boot for the callee), warmed-up p50 across 10 calls = `1ms`, with several samples reporting `0ms` (`Date.now()` floor). HTTP `200`. Round-trip total `8.6ms` including curl + JSON parse. **Zero-network confirmed**: `headerEcho` shows custom headers (`x-shipflare-internal`, `x-test`, `content-type`, `content-length`) pass through; `host` from the synthesized `new Request("https://internal/test-echo", ...)` is dropped by the binding layer (Service Bindings rewrite the host header — caller's original host is NOT exposed to the callee). `cf-connecting-ip` is also absent on the binding path (no edge translation). Callee echo body shape: `{ pathReceived: "/test-echo", methodReceived: "POST", headerEcho: {...}, timestamp: <ms>, callee: "shipflare-spike-callee" }`. wrangler 4.90.1, miniflare 4.20260508. |
 | 9 | Cron fan-out | GREEN | 2/2 vitest pass in ~14ms test time. `wrangler.jsonc` `triggers.crons: ["*/1 * * * *"]` uncommented; modules-format `scheduled()` exported from `src/index.ts` dispatches to `src/spikes/09-cron-fanout.ts` `onCron()`, which fans out to a single `SqliteDO` instance (`getByName("cron-target")`) via `markCronTick(scheduledTime)` — appends a row to the existing `messages` table tagged `conv_id='cron-marker'` with `ts=scheduledTime`, `content=cron@<scheduledTime>`. Vitest pattern: `createScheduledController({ scheduledTime, cron })` + `createExecutionContext()` + direct call to the worker's exported `scheduled` handler (NOT `SELF.scheduled`, which throws `DataCloneError: Could not serialize object of type "LoopbackServiceStub"` in vitest-pool-workers 0.16.4). Test 1: triggers cron with scheduledTime=1700000000000, asserts marker is in the DO with exact `ts` and `content` echo. Test 2: snapshots pre-count, triggers twice (t1=...001000, t2=...002000), asserts post-count ≥ pre+2 and both timestamps are in the recent list. **Manual validation** via `pnpm wrangler dev --test-scheduled`: two `curl 'http://localhost:8787/__scheduled?cron=*/1+*+*+*+*'` calls each returned HTTP 200 with log line `Ran scheduled event`; `GET /spike/09` after first call returned `markerCount=1`, after second `markerCount=2`, with the latest tick at index 0 of `recent[]`. Both runtimes confirm the cron handler invokes correctly and the DO marker pattern observable for Phase 1's hourly inbound sweeps. No new migration tag (existing `messages` table reused). |
-| 10 | Resumable stream | PENDING | |
+| 10 | Resumable stream | GREEN | 3/3 vitest pass in ~657ms (full suite 22/22 in 7.55s). Handler at `src/spikes/10-resumable-stream.ts` reads `last-event-id` request header, parses to int, and starts the emission loop at `parsedId + 1` (header carries the LAST DELIVERED event, so resume starts from next). Test 1 (no header): emits ids 0..9 with bodies `chunk-0`..`chunk-9`; `content-type: text/event-stream` and `cache-control: no-cache` verified. Test 2 (`Last-Event-ID: 4`): emits 5..14 (10 chunks starting at 5), confirming the off-by-one is correct (5, not 4). Test 3 (`Last-Event-ID: not-a-number`): NaN guard (`Number.isNaN(parsed) ? 0 : parsed`) falls back to 0 — without it, `parseInt("invalid") + 1 = NaN` and `i < NaN` is always false, so the loop would silently emit zero chunks (a real DoS / hang vector for the founder UI if not guarded). SSE wire format strict: each frame is `id: <n>\ndata: chunk-<n>\n\n`. `x-accel-buffering: no` hint also set so an intermediate CDN won't buffer. Test consumer parses framed SSE with `\n\n` separators and per-frame `^id:\s*(\d+)` / `^data:\s*(.*)$` regexes. **Key finding:** the `parseInt("garbage")` → NaN trap is a real Phase 1 input-validation hazard — fixed here, must be applied to the founder UI stream handler. **Resume contract:** `Last-Event-ID` is the standard EventSource auto-reconnect header; browsers send it on reconnect with the value of the last received `id:` field. The +1 offset is part of the SSE resumption contract, not an arbitrary choice. |
 
 ## Risk Updates
 
@@ -441,6 +441,53 @@
   use pre/post snapshots (delta ≥ +2) rather than exact counts so prior
   test markers don't break the second. Cross-file: vitest-pool-workers
   resets local DO state between files (miniflare cleanup).
+
+### Spike #10 (2026-05-13)
+
+- **`Last-Event-ID` request header is the SSE resume contract**, not a
+  custom invention. Browsers' `EventSource` automatically reads the `id:`
+  field of every received frame and re-sends it on reconnect via this
+  header. Server-side: the value carries the **last delivered** event id,
+  so resume starts at `parsedId + 1` (off-by-one is part of the spec, not
+  a bug). Phase 1 founder-UI fetch-stream client should mirror this — on
+  reconnect, send `Last-Event-ID: <last_seen_id>` and the server picks up
+  from the next chunk. Works the same whether the underlying transport is
+  a plain `Response(stream)` (this spike) or an `addEventListener('open'
+  /'message')` EventSource (Phase 1 chat).
+- **`parseInt("garbage")` → NaN trap is a real DoS hazard.** Without the
+  `Number.isNaN(parsed) ? 0 : parsed` guard, a malformed `Last-Event-ID`
+  header makes the loop `for (let i = NaN; i < NaN + 10; ...)` never
+  iterate — server returns 200 with `content-type: text/event-stream` and
+  zero chunks. The client then hangs forever waiting for data that will
+  never come. Found while writing test 3; the spec snippet's naïve
+  `parseInt(...) + 1` form had this bug. Fixed inline. **Phase 1 action
+  item:** apply the same NaN guard to whatever handler ends up streaming
+  the founder UI chat. Could also reject with `400` on malformed input
+  instead of falling back to id=0; falling back is more forgiving and
+  matches the SSE spec's "if you don't recognize it, reset" intent.
+- **`x-accel-buffering: no` is the right header for "don't buffer this
+  SSE response".** nginx and many CDNs (including Cloudflare's edge for
+  most plans) respect this hint and switch the response to streaming
+  mode. Same header used by Spike #3's MCP Streamable HTTP transport —
+  consistent across all our SSE surfaces.
+- **`ReadableStream({ start })` controller pattern is the canonical
+  Worker streaming shape.** Both `ReadableStream({ start, pull })` and
+  `TransformStream`'s writable side work; for a fixed-length
+  back-to-back emission like this spike, `start` is simplest. The 20ms
+  `await new Promise((r) => setTimeout(r, 20))` between chunks ensures
+  the response body is actually framed across multiple network writes
+  rather than coalesced into a single buffer — matches the cadence the
+  Phase 1 LLM stream will exhibit (~10-50ms per token).
+- **Test consumer parses framed SSE with a stream-aware buffer.** The
+  reader returns chunks at arbitrary byte boundaries — a single
+  `reader.read()` might give back one full frame, two, or half of one.
+  The test's `consumeStream` accumulates into a buffer and slices at
+  every `\n\n` until none remains. Same parser shape works for
+  production EventSource (browser does this internally). Per-frame
+  regex `^id:\s*(\d+)` / `^data:\s*(.*)$` use `^...$` anchors with
+  `/m` flag so multi-field frames parse correctly.
+- **22/22 full suite still green** — adding spike #10 didn't regress
+  prior tests. Total runtime 7.55s for 10 test files.
 
 ### Task 11 spec sweep — Hyperdrive → D1
 
