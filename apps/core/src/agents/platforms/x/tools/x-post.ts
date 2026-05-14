@@ -5,7 +5,7 @@ import {
   requireChannel,
   requirePublishPermission,
   requireUserId,
-} from "./lib/guards";
+} from "../../_shared/guards";
 
 /**
  * x_post — publish a tweet or reply on behalf of the OAuth-bound user.
@@ -47,11 +47,12 @@ export function registerXPostTool(agent: XMcpAgent): void {
     },
     async ({ body, replyToExternalId }) => {
       const props = agent.props;
-      requirePublishPermission(props);
-      const userId = requireUserId(props);
+      requirePublishPermission(props, "x_post");
+      const userId = requireUserId(props, "XMcpAgent");
 
       const channel = requireChannel(
         await getChannel(agent.bindings, userId, "x"),
+        "X",
       );
 
       const apiBody: {

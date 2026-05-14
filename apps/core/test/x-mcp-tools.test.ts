@@ -4,7 +4,7 @@ import {
   requireChannel,
   requirePublishPermission,
   requireUserId,
-} from "../src/agents/platforms/x/tools/lib/guards";
+} from "../src/agents/platforms/_shared/guards";
 import { applyXSchema } from "../src/agents/platforms/x/schema";
 import type { CMO } from "../src/agents/cmo/CMO";
 import type { ChannelConnection } from "../src/lib/channel";
@@ -103,11 +103,11 @@ describe("XMcpAgent guards", () => {
 
   describe("requireChannel", () => {
     it("returns the channel when non-null", () => {
-      expect(requireChannel(channel)).toBe(channel);
+      expect(requireChannel(channel, "X")).toBe(channel);
     });
 
     it("throws a clear error when channel is null", () => {
-      expect(() => requireChannel(null)).toThrow(
+      expect(() => requireChannel(null, "X")).toThrow(
         /X channel not connected/,
       );
     });
@@ -116,12 +116,14 @@ describe("XMcpAgent guards", () => {
   describe("requireUserId", () => {
     it("returns userId when present", () => {
       expect(
-        requireUserId({ userId: "abc", caller: "external" }),
+        requireUserId({ userId: "abc", caller: "external" }, "XMcpAgent"),
       ).toBe("abc");
     });
 
     it("throws when userId missing", () => {
-      expect(() => requireUserId(undefined)).toThrow(/userId in props/);
+      expect(() => requireUserId(undefined, "XMcpAgent")).toThrow(
+        /userId in props/,
+      );
     });
   });
 });

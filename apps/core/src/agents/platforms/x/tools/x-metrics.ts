@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { getChannel } from "../../../../lib/channel";
 import type { XMcpAgent } from "../XMcpAgent";
-import { requireChannel, requireUserId } from "./lib/guards";
+import { requireChannel, requireUserId } from "../../_shared/guards";
 
 /**
  * x_metrics — fetch engagement metrics for a previously-published tweet.
@@ -33,9 +33,10 @@ export function registerXMetricsTool(agent: XMcpAgent): void {
     },
     async ({ externalId }) => {
       const props = agent.props;
-      const userId = requireUserId(props);
+      const userId = requireUserId(props, "XMcpAgent");
       const channel = requireChannel(
         await getChannel(agent.bindings, userId, "x"),
+        "X",
       );
 
       const url =
