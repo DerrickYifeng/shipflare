@@ -87,6 +87,35 @@ export class SqliteDO extends DurableObject<Env> {
     return { ms: Date.now() - t };
   }
 
+  // Spike #9 — Cron fan-out marker. Writes a single row tagged with
+  // conv_id='cron-marker' so the scheduled() handler can prove it fanned
+  // out to this DO and Phase 1 can observe per-tick activity without
+  // adding a new table. `scheduledTime` echoes the `ScheduledController`
+  // field so tests can assert the exact tick they triggered.
+  async markCronTick(scheduledTime: number): Promise<{ count: number }> {
+    this.ctx.storage.sql.exec(
+      "INSERT INTO messages (conv_id, ts, content) VALUES (?, ?, ?)",
+      "cron-marker",
+      scheduledTime,
+      `cron@${scheduledTime}`,
+    );
+    const row = this.ctx.storage.sql
+      .exec<{ c: number }>(
+        "SELECT COUNT(*) as c FROM messages WHERE conv_id = ?",
+        "cron-marker",
+      )
+      .one();
+    return { count: row.c };
+  }
+
+  async listCronMarkers(): Promise<Array<{ ts: number; content: string }>> {
+    return this.ctx.storage.sql
+      .exec<{ ts: number; content: string }>(
+        "SELECT ts, content FROM messages WHERE conv_id = 'cron-marker' ORDER BY ts DESC LIMIT 10",
+      )
+      .toArray();
+  }
+
   // Sample N timed selects + N timed inserts in-DO; return p50/p99/max.
   async benchmark(
     convId: string,

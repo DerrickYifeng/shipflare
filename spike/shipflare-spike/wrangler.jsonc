@@ -58,6 +58,14 @@
   // without that registration miniflare refuses to start.
   "services": [
     { "binding": "CALLEE", "service": "shipflare-spike-callee" }
-  ]
-  // "triggers": { "crons": ["*/1 * * * *"] },
+  ],
+  // Spike #9 — Cron fan-out. `triggers.crons` causes Cloudflare's scheduler
+  // to invoke `scheduled()` on this Worker at the cron times listed. The
+  // every-minute cadence below is for the spike only; Phase 1's inbound-
+  // sweep cron will be hourly. In `wrangler dev` use `--test-scheduled`
+  // and curl `http://localhost:8787/__scheduled?cron=*/1+*+*+*+*` to fire
+  // the handler synthetically. In vitest, use `SELF.scheduled(ctl)` with
+  // `createScheduledController({ scheduledTime, cron })` from
+  // `cloudflare:test`.
+  "triggers": { "crons": ["*/1 * * * *"] }
 }

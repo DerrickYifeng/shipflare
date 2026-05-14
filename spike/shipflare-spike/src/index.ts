@@ -109,9 +109,17 @@ export default {
       const mod = await import("./spikes/08-service-binding");
       return mod.default(request, env);
     }
+    if (id === "09") {
+      const mod = await import("./spikes/09-cron-fanout");
+      return mod.default(request, env);
+    }
     return new Response(`spike #${id} not yet implemented`, { status: 501 });
   },
-  async scheduled(_event: ScheduledController, _env: Env, _ctx: ExecutionContext): Promise<void> {
-    // cron handler: implemented in Task 9
+  // Spike #9 — Cron fan-out. wrangler.jsonc `triggers.crons` invokes this
+  // handler on schedule. Delegate to the per-spike module so the entry
+  // file stays a thin dispatcher.
+  async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    const mod = await import("./spikes/09-cron-fanout");
+    await mod.onCron(event, env, ctx);
   },
 } satisfies ExportedHandler<Env>;

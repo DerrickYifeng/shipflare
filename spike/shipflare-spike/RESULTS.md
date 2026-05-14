@@ -10,7 +10,7 @@
 | 6 | DO SQLite perf | GREEN | 1/1 vitest pass. 10000-row seed in 24ms via `transactionSync` (≈417k rows/sec). 50-sample benchmark inside the DO (after seed): SELECT `WHERE conv_id ORDER BY ts` p50=7ms / p99=7ms / max=11ms (returns all 10k rows, indexed lookup hits `idx_messages_conv_ts`). Single-row INSERT p50=0ms / p99=0ms / max=0ms — all 50 samples completed in <1ms each. `wrangler dev --local` corroborates: seed 25ms, SELECT 6/7/7, INSERT 0/0/0. Both runtimes well under thresholds (SELECT < 50ms p99, INSERT < 5ms p99). **Key finding:** raw `BEGIN TRANSACTION` SQL is forbidden in DO SQLite — workerd throws explicitly and points at `state.storage.transactionSync()`. Spec uses the JS API. SQLite v3 + workerd in-process, no network hop, so latencies are essentially CPU-bound. |
 | 7 | Dynamic Workflow | GREEN | 1/1 vitest pass in 5064ms. `step.do("step-a") → step.sleep("5 seconds") → step.do("step-b")` completes cleanly with `output.a.tag="A"`, `output.b.tag="B"`, `output.durationMs >= 5000` (actual run: test took ~5s total, so durationMs is ~5000ms — vitest-pool-workers DOES honor the sleep duration in the local Workflow simulator). Test polled `/spike/07/status?id=<id>` at 1s intervals; instance reached `status="complete"` on first non-running poll after the sleep elapsed. Full suite: 7 files / 16/16 tests pass in 7.54s. `WorkflowEntrypoint` imports from `"cloudflare:workers"` (standard path, no shim needed). Migration tags untouched — Workflow classes don't live in the `migrations[].new_sqlite_classes` array. **Test simulation HONORS sleep duration** — no test-vs-prod divergence observed for `step.sleep("5 seconds")`; production wall-clock semantics match the simulator within ~64ms scheduling overhead. |
 | 8 | Service Binding | GREEN | 1/1 vitest pass in ~5ms test time. `env.CALLEE.fetch(...)` round-trip exercised end-to-end against an auxiliary `shipflare-spike-callee` worker registered via `cloudflareTest({ miniflare: { workers: [...] } })`. Manual `wrangler dev` validation with BOTH workers running side-by-side: first call latency `5ms` (cold isolate boot for the callee), warmed-up p50 across 10 calls = `1ms`, with several samples reporting `0ms` (`Date.now()` floor). HTTP `200`. Round-trip total `8.6ms` including curl + JSON parse. **Zero-network confirmed**: `headerEcho` shows custom headers (`x-shipflare-internal`, `x-test`, `content-type`, `content-length`) pass through; `host` from the synthesized `new Request("https://internal/test-echo", ...)` is dropped by the binding layer (Service Bindings rewrite the host header — caller's original host is NOT exposed to the callee). `cf-connecting-ip` is also absent on the binding path (no edge translation). Callee echo body shape: `{ pathReceived: "/test-echo", methodReceived: "POST", headerEcho: {...}, timestamp: <ms>, callee: "shipflare-spike-callee" }`. wrangler 4.90.1, miniflare 4.20260508. |
-| 9 | Cron fan-out | PENDING | |
+| 9 | Cron fan-out | GREEN | 2/2 vitest pass in ~14ms test time. `wrangler.jsonc` `triggers.crons: ["*/1 * * * *"]` uncommented; modules-format `scheduled()` exported from `src/index.ts` dispatches to `src/spikes/09-cron-fanout.ts` `onCron()`, which fans out to a single `SqliteDO` instance (`getByName("cron-target")`) via `markCronTick(scheduledTime)` — appends a row to the existing `messages` table tagged `conv_id='cron-marker'` with `ts=scheduledTime`, `content=cron@<scheduledTime>`. Vitest pattern: `createScheduledController({ scheduledTime, cron })` + `createExecutionContext()` + direct call to the worker's exported `scheduled` handler (NOT `SELF.scheduled`, which throws `DataCloneError: Could not serialize object of type "LoopbackServiceStub"` in vitest-pool-workers 0.16.4). Test 1: triggers cron with scheduledTime=1700000000000, asserts marker is in the DO with exact `ts` and `content` echo. Test 2: snapshots pre-count, triggers twice (t1=...001000, t2=...002000), asserts post-count ≥ pre+2 and both timestamps are in the recent list. **Manual validation** via `pnpm wrangler dev --test-scheduled`: two `curl 'http://localhost:8787/__scheduled?cron=*/1+*+*+*+*'` calls each returned HTTP 200 with log line `Ran scheduled event`; `GET /spike/09` after first call returned `markerCount=1`, after second `markerCount=2`, with the latest tick at index 0 of `recent[]`. Both runtimes confirm the cron handler invokes correctly and the DO marker pattern observable for Phase 1's hourly inbound sweeps. No new migration tag (existing `messages` table reused). |
 | 10 | Resumable stream | PENDING | |
 
 ## Risk Updates
@@ -387,6 +387,60 @@
   service: "shipflare-core" }]` in `apps/web/wrangler.jsonc`. Zero new
   primitives, zero outbound network egress, no DNS / TLS handshake. The
   abstraction shape is identical to the spike.
+
+### Spike #9 (2026-05-13)
+
+- **`SELF.scheduled(...)` is NOT usable in vitest-pool-workers 0.16.4.** The
+  `SELF` constant is a `LoopbackServiceStub` that fails to serialize the
+  scheduled-event payload across the test boundary, throwing
+  `DataCloneError: Could not serialize object of type "LoopbackServiceStub"`
+  (and the call itself isn't even on the local `Fetcher` typedef — `worker-
+  configuration.d.ts` declares Fetcher as just `{ fetch, connect }`). The
+  canonical pattern documented in `cloudflare:test`'s types is: import the
+  worker's default export directly (`import worker from "../src/index"`),
+  construct controller + context via `createScheduledController` and
+  `createExecutionContext`, then call `worker.scheduled!(ctl, env, ctx)`
+  and `await waitOnExecutionContext(ctx)`. This is functionally equivalent
+  to a cron tick — the platform's real scheduler builds the same controller
+  shape and invokes the same handler. Phase 1 cron tests should follow this
+  pattern (not the spec snippet's `SELF.scheduled(...)` form).
+- **`pnpm wrangler dev --test-scheduled` is the manual cron rig.** The
+  `__scheduled` HTTP endpoint accepts a `cron` query param (URL-encoded;
+  `*` survives but `/` must be `+` — the URL form is
+  `*/1+*+*+*+*`). Each hit synthetically fires the worker's `scheduled()`
+  handler with a fresh `scheduledTime = Date.now()` and returns 200 with
+  the line `Ran scheduled event` in wrangler's log. No `triggers.crons`
+  entries are required for `--test-scheduled` to work, but production
+  deploy obviously needs them.
+- **Migration tag unchanged.** Adding `markCronTick` / `listCronMarkers`
+  methods to `SqliteDO` is just code — no schema change (the existing
+  `messages` table is reused with `conv_id='cron-marker'`). Migration tags
+  stay at `v1` + `v2`; no `v3` needed. This matches the Spike #6 finding:
+  tags are append-only **for class additions**, not for arbitrary method
+  changes.
+- **Cron schedule string `*/1 * * * *`** parses cleanly under wrangler
+  4.90.1; no extra escaping needed in the JSONC. The every-minute cadence
+  is for spike-only — Phase 1 inbound sweeps will be hourly
+  (`0 * * * *`), and the per-team fan-out will iterate over active CMOs
+  fetched from D1 inside `onCron()` and dispatch DO stubs in parallel
+  with `Promise.allSettled`. The shape proven here (cron → scheduled() →
+  `env.SQLITE_DO.getByName(<id>).method()`) is exactly the production
+  shape, just with a list of `<id>`s instead of one.
+- **`ScheduledController` shape echoed correctly.** `ctl.scheduledTime`
+  arrives at the handler as a number (ms epoch), exactly as set by
+  `createScheduledController({ scheduledTime: new Date(N) })`. The
+  controller's `cron` field is also preserved. Tests assert on both —
+  Phase 1 can rely on these fields being the same on local and prod.
+- **`createScheduledController` accepts `{ scheduledTime?: Date; cron?:
+  string }`.** Note `scheduledTime` is a Date (not a number) in the options,
+  but the resulting controller exposes `scheduledTime` as a number — the
+  test pool internally coerces via `Number(options?.scheduledTime ??
+  Date.now())`. Tests use `new Date(1_700_000_000_000)` deterministically.
+- **In-test DO state persists across tests within a file.** Same DO
+  instance (`cron-target`) accumulates markers across both tests; assertions
+  use pre/post snapshots (delta ≥ +2) rather than exact counts so prior
+  test markers don't break the second. Cross-file: vitest-pool-workers
+  resets local DO state between files (miniflare cleanup).
 
 ### Task 11 spec sweep — Hyperdrive → D1
 
