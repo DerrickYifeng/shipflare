@@ -26,7 +26,13 @@ export interface Env {
   AGENT_EXAMPLE: DurableObjectNamespace<AgentExample>;
   SQLITE_DO: DurableObjectNamespace<SqliteDO>;
   EX_WORKFLOW: Workflow;
-  CALLEE?: Fetcher;
+  // Spike #8 — Service Binding to the sibling `shipflare-spike-callee` Worker.
+  // `Fetcher` is the runtime-types alias for a callable Worker stub. The
+  // binding is declared in wrangler.jsonc and resolved in vitest via an
+  // auxiliary worker in `vitest.config.mts`. The handler still tolerates a
+  // runtime-unbound value (returns 503 with a hint) for safety when the
+  // sibling is misconfigured (see spikes/08-service-binding.ts).
+  CALLEE: Fetcher;
   ANTHROPIC_API_KEY: string;
   BETTER_AUTH_SECRET: string;
   GITHUB_CLIENT_ID: string;
@@ -97,6 +103,10 @@ export default {
     // both creation and status-query routes under one dispatch entry.
     if (id === "07") {
       const mod = await import("./spikes/07-dynamic-workflow");
+      return mod.default(request, env);
+    }
+    if (id === "08") {
+      const mod = await import("./spikes/08-service-binding");
       return mod.default(request, env);
     }
     return new Response(`spike #${id} not yet implemented`, { status: 501 });

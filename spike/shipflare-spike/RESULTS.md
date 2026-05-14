@@ -9,7 +9,7 @@
 | 5 | WebCrypto AES-GCM | GREEN | 5/5 vitest pass. 100 random tokens (each `crypto.randomUUID()-Math.random()`, ~50–55 chars) round-trip cleanly with a fresh 32-byte key. Same plaintext (`"same-input"`) encrypted twice produces different ciphertexts (12-byte random IV per call). Decrypting with the wrong key throws `OperationError` from `crypto.subtle.decrypt` — auth tag failure as expected. Edge cases: empty string and 1-byte plaintext both round-trip. UTF-8 emoji (`🔐`) survives `TextEncoder` → encrypt → decrypt → `TextDecoder`. Ciphertext sizes (base64): `""` → 40 chars (30B = 12B IV + 0B ct + 16B tag), `"a"` → 40 chars, `"ghp_short_token_example"` (23B) → 68 chars (51B), `"xoxb-..."` (34B) → 84 chars (63B), the 49B emoji string → 108 chars (81B). Test duration 1.45s. Helper exports (`encrypt`, `decrypt`, `generateKey`) are drop-in candidates for Phase 1 `packages/crypto` — replace `KEY_B64` default with a `wrangler secret` lookup (`env.CHANNEL_ENC_KEY`). |
 | 6 | DO SQLite perf | GREEN | 1/1 vitest pass. 10000-row seed in 24ms via `transactionSync` (≈417k rows/sec). 50-sample benchmark inside the DO (after seed): SELECT `WHERE conv_id ORDER BY ts` p50=7ms / p99=7ms / max=11ms (returns all 10k rows, indexed lookup hits `idx_messages_conv_ts`). Single-row INSERT p50=0ms / p99=0ms / max=0ms — all 50 samples completed in <1ms each. `wrangler dev --local` corroborates: seed 25ms, SELECT 6/7/7, INSERT 0/0/0. Both runtimes well under thresholds (SELECT < 50ms p99, INSERT < 5ms p99). **Key finding:** raw `BEGIN TRANSACTION` SQL is forbidden in DO SQLite — workerd throws explicitly and points at `state.storage.transactionSync()`. Spec uses the JS API. SQLite v3 + workerd in-process, no network hop, so latencies are essentially CPU-bound. |
 | 7 | Dynamic Workflow | GREEN | 1/1 vitest pass in 5064ms. `step.do("step-a") → step.sleep("5 seconds") → step.do("step-b")` completes cleanly with `output.a.tag="A"`, `output.b.tag="B"`, `output.durationMs >= 5000` (actual run: test took ~5s total, so durationMs is ~5000ms — vitest-pool-workers DOES honor the sleep duration in the local Workflow simulator). Test polled `/spike/07/status?id=<id>` at 1s intervals; instance reached `status="complete"` on first non-running poll after the sleep elapsed. Full suite: 7 files / 16/16 tests pass in 7.54s. `WorkflowEntrypoint` imports from `"cloudflare:workers"` (standard path, no shim needed). Migration tags untouched — Workflow classes don't live in the `migrations[].new_sqlite_classes` array. **Test simulation HONORS sleep duration** — no test-vs-prod divergence observed for `step.sleep("5 seconds")`; production wall-clock semantics match the simulator within ~64ms scheduling overhead. |
-| 8 | Service Binding | PENDING | |
+| 8 | Service Binding | GREEN | 1/1 vitest pass in ~5ms test time. `env.CALLEE.fetch(...)` round-trip exercised end-to-end against an auxiliary `shipflare-spike-callee` worker registered via `cloudflareTest({ miniflare: { workers: [...] } })`. Manual `wrangler dev` validation with BOTH workers running side-by-side: first call latency `5ms` (cold isolate boot for the callee), warmed-up p50 across 10 calls = `1ms`, with several samples reporting `0ms` (`Date.now()` floor). HTTP `200`. Round-trip total `8.6ms` including curl + JSON parse. **Zero-network confirmed**: `headerEcho` shows custom headers (`x-shipflare-internal`, `x-test`, `content-type`, `content-length`) pass through; `host` from the synthesized `new Request("https://internal/test-echo", ...)` is dropped by the binding layer (Service Bindings rewrite the host header — caller's original host is NOT exposed to the callee). `cf-connecting-ip` is also absent on the binding path (no edge translation). Callee echo body shape: `{ pathReceived: "/test-echo", methodReceived: "POST", headerEcho: {...}, timestamp: <ms>, callee: "shipflare-spike-callee" }`. wrangler 4.90.1, miniflare 4.20260508. |
 | 9 | Cron fan-out | PENDING | |
 | 10 | Resumable stream | PENDING | |
 
@@ -321,6 +321,72 @@
   no-ops returning the cached output. Production eviction-during-sleep
   validation needs `wrangler deploy` + manual force-restart, deferred to
   Phase 1 pre-cutover smoke test.
+
+### Spike #8 (2026-05-13)
+
+- **vitest-pool-workers DOES simulate Service Bindings** — contrary to the
+  task spec's "can't fully simulate" assumption. The key is registering the
+  sibling Worker as an auxiliary worker via the `cloudflareTest({ miniflare:
+  { workers: [...] } })` option in `vitest.config.mts`. Without that
+  registration, miniflare refuses to start the test pool with
+  `Worker "..."'s binding "CALLEE" refers to a service "...", but no such
+  service is defined`. With it registered, the in-test `env.CALLEE.fetch()`
+  call resolves end-to-end and the handler returns 200 with the callee's
+  echo body.
+- **Auxiliary workers do NOT go through Vite transforms.** Pointing
+  `scriptPath` at the sibling's `src/index.ts` fails with `ERR_MODULE_PARSE:
+  The keyword 'interface' is reserved` — miniflare treats the file as raw
+  JS. Workaround: inline a JS-equivalent of the callee handler via
+  `script: "..."` in the auxiliary worker config. The canonical TS
+  implementation in `spike/shipflare-spike-callee/src/index.ts` is what
+  `wrangler dev` and the production deploy run; the inline string in
+  `vitest.config.mts` is a test-only stub that mirrors its echo contract.
+  For Phase 1 we should probably build the callee with `tsc` (or wrangler
+  itself) to `dist/index.js` and point `scriptPath` at the built artifact,
+  so the test stays DRY with production.
+- **`wrangler types` made `CALLEE: Fetcher` required** the moment the
+  `services[]` block was uncommented in `wrangler.jsonc`. The Task 0 stub
+  had `CALLEE?: Fetcher` (optional) which then conflicted with the
+  generated `Cloudflare.Env`'s required `CALLEE: Fetcher`, breaking
+  `DurableObjectNamespace<Env>` constraints across `AgentExample`,
+  `McpServerExample`, and `spikes/02-mcp-rpc.ts` (they require
+  `Env extends Cloudflare.Env`). Fix: drop the `?` on `Env.CALLEE`, and in
+  the spike handler cast `env.CALLEE as unknown as Fetcher | undefined`
+  before the null-check so the runtime-tolerant branch still type-checks
+  under strict mode.
+- **Manual `wrangler dev` validation: zero-network confirmed.** Started
+  `shipflare-spike-callee` on `:8788` and `shipflare-spike` on `:8787` in
+  parallel. wrangler's dev server auto-discovers locally-running services
+  by name (the `services[].service: "shipflare-spike-callee"` matches the
+  callee's `wrangler.jsonc`.name) — no port hard-coding needed. First call
+  `latencyMs=5` (cold isolate boot on the callee side); 10 follow-up calls
+  reported `0` or `1` ms each. Sub-millisecond steady-state corroborates
+  the "in-process, no DNS / TLS / TCP" promise of Service Bindings — same
+  isolate group, function-call cost only.
+- **Service Bindings rewrite the host header on the synthesized Request.**
+  The caller built `new Request("https://internal/test-echo", { headers:
+  {...} })`; the callee's `headerEcho` shows `content-length`,
+  `content-type`, `x-shipflare-internal`, `x-test` but NO `host` and NO
+  `cf-connecting-ip`. The binding layer strips/replaces host (no public
+  hostname is meaningful for an in-process call) and there's no edge to
+  inject `cf-connecting-ip`. Phase 1 `apps/web → apps/core` should NOT
+  rely on host-based routing or `cf-connecting-ip` over a Service
+  Binding — pass the originating context explicitly via a header or
+  signed JWT instead.
+- **Custom headers passthrough is clean.** `x-shipflare-internal: 1` made
+  it across (this header was added partly to give the callee a way to
+  distinguish in-process traffic from any future public-routed traffic,
+  should the callee ever be exposed). Pattern: send a shared-secret HMAC
+  in this header for defense-in-depth, since Service Bindings don't have
+  built-in cross-worker auth — anything bound can call you. Phase 1
+  notes: enforce a per-call HMAC at the `apps/core` perimeter even though
+  the binding can only originate from `apps/web` by configuration.
+- **Phase 1 mirror is straightforward.** `apps/web/src/lib/core-client.ts`
+  would just be `env.CORE.fetch(new Request("https://internal/...", {...}))`,
+  with `env.CORE: Fetcher` declared and `services: [{ binding: "CORE",
+  service: "shipflare-core" }]` in `apps/web/wrangler.jsonc`. Zero new
+  primitives, zero outbound network egress, no DNS / TLS handshake. The
+  abstraction shape is identical to the spike.
 
 ### Task 11 spec sweep — Hyperdrive → D1
 

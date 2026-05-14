@@ -49,9 +49,15 @@
       "name": "example-workflow",
       "class_name": "ExampleWorkflow"
     }
+  ],
+  // Spike #8 — Service Binding. `service` must match the callee's
+  // `wrangler.jsonc`.name; wrangler dev discovers the local callee
+  // automatically when both workers run side-by-side. vitest-pool-workers
+  // resolves this binding via an auxiliary worker registered in
+  // `vitest.config.mts` (`cloudflareTest({ miniflare: { workers: [...] } })`);
+  // without that registration miniflare refuses to start.
+  "services": [
+    { "binding": "CALLEE", "service": "shipflare-spike-callee" }
   ]
   // "triggers": { "crons": ["*/1 * * * *"] },
-  // "services": [
-  //   { "binding": "CALLEE", "service": "shipflare-spike-callee" }
-  // ]
 }
