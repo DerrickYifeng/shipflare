@@ -1,0 +1,4 @@
+ANTHROPIC_API_KEY=<paste-real-key-here>
+BETTER_AUTH_SECRET=test-secret-32-bytes-of-randomness-aaaa
+GITHUB_CLIENT_ID=<paste-test-oauth-app>
+GITHUB_CLIENT_SECRET=<paste-test-oauth-app>
