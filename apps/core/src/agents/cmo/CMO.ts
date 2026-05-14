@@ -11,6 +11,8 @@ import { applyCmoSchema } from "./schema";
 import { registerChatTool } from "./tools/chat";
 import { registerConversationTools } from "./tools/conversation";
 import { registerRosterTools } from "./tools/roster";
+import { registerDelegationTools } from "./tools/delegate";
+import { registerSharedStateTools } from "./tools/shared-state";
 
 type CMOState = {
   initialized: boolean;
@@ -168,7 +170,11 @@ export class CMO extends McpAgent<Env, CMOState, McpProps> {
     // S2.2: conversation + roster management.
     registerConversationTools(this);
     registerRosterTools(this);
-    // S2.4: registerDelegationTools(this), registerSharedStateTools(this)
+    // S2.4: CMO → employee delegation + shared-state RPC surface
+    //   (per spec §6.1 invariant #1: CMO SQLite is the per-team source of
+    //   truth; employees write to it ONLY via these tools).
+    registerDelegationTools(this);
+    registerSharedStateTools(this);
   }
 
   // fetch() handler for /internal/* endpoints — S2.5
