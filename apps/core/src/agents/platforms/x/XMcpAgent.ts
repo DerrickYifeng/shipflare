@@ -3,6 +3,9 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { McpProps } from "@shipflare/shared";
 import type { Env } from "../../../index";
 import { applyXSchema } from "./schema";
+import { registerXSearchTool } from "./tools/x-search";
+import { registerXPostTool } from "./tools/x-post";
+import { registerXMetricsTool } from "./tools/x-metrics";
 
 interface XState {
   lastWakeAt: number;
@@ -70,14 +73,14 @@ export class XMcpAgent extends McpAgent<
   }
 
   /**
-   * Tool registration lands in S5.1 (`x_search`, `x_post`, `x_metrics`).
-   * S5.0 deliberately ships the class + schema only so SMM's cleanup
-   * (`platformServerName` + the now-uncast `addMcpServer` dial) can land
-   * without dragging in the platform SDK churn.
+   * Tool registration. Three tools, one per concrete X API surface:
+   *   - x_search  — read via xAI Grok (env.XAI_API_KEY, no OAuth)
+   *   - x_post    — write, role-gated to lead/external (OAuth via getChannel)
+   *   - x_metrics — read, OAuth-required (any role) (OAuth via getChannel)
    */
   async init(): Promise<void> {
-    // S5.1: registerXSearchTool(this);
-    // S5.1: registerXPostTool(this);
-    // S5.1: registerXMetricsTool(this);
+    registerXSearchTool(this);
+    registerXPostTool(this);
+    registerXMetricsTool(this);
   }
 }
