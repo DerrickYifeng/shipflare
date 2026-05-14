@@ -60,11 +60,8 @@ export interface Env {
   CMO: DurableObjectNamespace<CMO>;
   HEAD_OF_GROWTH: DurableObjectNamespace<HeadOfGrowth>; // S3
   SOCIAL_MEDIA_MGR: DurableObjectNamespace<SocialMediaMgr>; // S4
-  // X_MCP: DurableObjectNamespace<XMcpAgent>;        // S5.3 uncomments both
-  // REDDIT_MCP: DurableObjectNamespace<RedditMcpAgent>; // X_MCP + REDDIT_MCP
-  //                                                     along with the
-  //                                                     wrangler.jsonc bindings
-  //                                                     + migration tag v4
+  X_MCP: DurableObjectNamespace<XMcpAgent>; // S5.3 — migration tag v4
+  REDDIT_MCP: DurableObjectNamespace<RedditMcpAgent>; // S5.3 — migration tag v4
   // Workflow binding — added when AgentPlanWorkflow lands (S6).
   // AGENT_PLAN_WORKFLOW: Workflow;
   // Secrets (wrangler secret put ...)
