@@ -21,6 +21,14 @@ GITHUB_CLIENT_SECRET=
 #   openssl rand -base64 32
 MCP_JWT_SECRET=
 
+# Shared with apps/core. Signs Phase 2 long-lived (30d) external MCP tokens
+# minted by /api/external-mcp/issue for 3rd-party MCP clients (Claude
+# Desktop, Cursor). MUST match apps/core's EXTERNAL_MCP_SECRET exactly.
+# Distinct from MCP_JWT_SECRET so a leaked browser-session token can't be
+# used to impersonate a 3rd-party client.
+#   openssl rand -base64 32
+EXTERNAL_MCP_SECRET=
+
 # Public origin of apps/core. `/api/mcp-token` returns
 # `${CORE_PUBLIC_URL}/agents/<role>/<userId>/mcp` so the browser can call
 # core directly (per spec D13 — Web Worker isn't a proxy for chat). Defaults

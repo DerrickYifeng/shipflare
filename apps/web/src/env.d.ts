@@ -29,6 +29,13 @@ declare global {
     // /agents/<role>/<userId>/mcp call.
     MCP_JWT_SECRET: string;
 
+    // Phase 2 external MCP token signing. Same secret as apps/core's
+    // EXTERNAL_MCP_SECRET — /api/external-mcp/issue mints long-lived (30d)
+    // tokens for 3rd-party MCP clients (Claude Desktop, Cursor). Distinct
+    // from MCP_JWT_SECRET so a leaked browser-session token can't be used
+    // to impersonate a 3rd-party client.
+    EXTERNAL_MCP_SECRET: string;
+
     // Public URL of the apps/core Worker — used to build the browser-facing
     // MCP endpoint that `/api/mcp-token` returns. The browser connects to
     // `${CORE_PUBLIC_URL}/agents/<role>/<userId>/mcp` directly (per spec D13).

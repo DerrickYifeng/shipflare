@@ -4,9 +4,17 @@
  * S2.6 wires the real routing:
  *
  * - `/healthz` → quick liveness probe
- * - `/agents/<role>/<userId>/mcp[/...]` → external MCP entry. JWT-protected
- *   (HS256, signed by `apps/web` via `MCP_JWT_SECRET`). Phase 1 only exposes
- *   `cmo`; HoG / SMM ride along on the CMO's `addMcpServer` in-process pipe.
+ * - `/agents/<role>/<userId>/mcp[/...]` → Phase 1 internal MCP entry,
+ *   JWT-protected (HS256, signed by `apps/web` via `MCP_JWT_SECRET`).
+ *   Phase 1 only exposes `cmo` here; HoG / SMM ride along on the CMO's
+ *   `addMcpServer` in-process pipe.
+ * - `/external/agents/<role>/<userId>/mcp[/...]` → Phase 2 external MCP
+ *   entry for 3rd-party MCP clients (Claude Desktop, Cursor, founder's
+ *   own LLM stack). Long-lived (30d) tokens signed with a SEPARATE
+ *   `EXTERNAL_MCP_SECRET` so a leaked browser-session token can't
+ *   impersonate a 3rd-party client (and vice-versa). Each employee class
+ *   (CMO / HoG / SMM) is exposed; scope is recorded in the token but
+ *   per-tool gating is forward-compat (P2-A.followup).
  * - `/agents/<role>/<userId>/internal/<path>` → Service-Binding-only routes
  *   for sibling-agent RPC. Gated by `x-shipflare-internal: 1` (Cloudflare
  *   strips this header from public-edge traffic, so only intra-network
@@ -29,12 +37,13 @@
  */
 
 import { verifyJwt } from "./lib/jwt";
+import { validateExternalAccess } from "./lib/external-auth";
 import { ROLE_REGISTRY, isValidRole, type RoleSlug } from "@shipflare/shared";
 import { createDb, user as userTable } from "@shipflare/db";
 
-import type { CMO } from "./agents/cmo/CMO";
-import type { HeadOfGrowth } from "./agents/head-of-growth/HeadOfGrowth";
-import type { SocialMediaMgr } from "./agents/social-media-manager/SocialMediaMgr";
+import { CMO } from "./agents/cmo/CMO";
+import { HeadOfGrowth } from "./agents/head-of-growth/HeadOfGrowth";
+import { SocialMediaMgr } from "./agents/social-media-manager/SocialMediaMgr";
 // `XMcpAgent` / `RedditMcpAgent` are type-imported here (Env declaration).
 // The value re-exports below put the classes on the module graph so wrangler
 // can discover them once S5.3 uncomments the X_MCP / REDDIT_MCP bindings.
@@ -42,10 +51,11 @@ import type { XMcpAgent } from "./agents/platforms/x/XMcpAgent";
 import type { RedditMcpAgent } from "./agents/platforms/reddit/RedditMcpAgent";
 
 // Value re-export so wrangler can discover the DO classes via the module
-// graph rooted at `main`.
-export { CMO } from "./agents/cmo/CMO";
-export { HeadOfGrowth } from "./agents/head-of-growth/HeadOfGrowth";
-export { SocialMediaMgr } from "./agents/social-media-manager/SocialMediaMgr";
+// graph rooted at `main`. (We `import` the classes above as values so they
+// can also be used in the EMPLOYEE_CLASSES dispatch table for the external
+// MCP route — `export { X }` is enough on its own when there's already an
+// `import { X }` above, but we keep the explicit re-export for grep-ability.)
+export { CMO, HeadOfGrowth, SocialMediaMgr };
 // Re-export the platform DO classes so wrangler can discover them; the
 // bindings in wrangler.jsonc + the Env entries below stay COMMENTED until
 // S5.3 wires migration tag v4. Re-exporting the classes now keeps the
@@ -68,15 +78,61 @@ export interface Env {
   ANTHROPIC_API_KEY: string;
   XAI_API_KEY: string;
   MCP_JWT_SECRET: string;
+  /**
+   * Phase 2 external MCP signing secret. SEPARATE from MCP_JWT_SECRET so a
+   * leaked browser-session token (60s TTL, used by `/agents/<role>/<userId>/mcp`)
+   * cannot be used to impersonate a 3rd-party MCP client (30d TTL,
+   * `/external/agents/<role>/<userId>/mcp`).
+   */
+  EXTERNAL_MCP_SECRET: string;
   CHANNEL_ENC_KEY: string;
 }
 
 /**
- * `/agents/<role>/<userId>/mcp[/...]` — external MCP entry. The trailing
- * `(?:\/|$)` covers BOTH the initial handshake POST to `/mcp` and any
- * subsequent McpAgent sub-paths (e.g. `/mcp/messages`).
+ * Class dispatch table for the Phase 2 external MCP route. Maps the URL
+ * `<role>` segment to the McpAgent subclass we use for `Klass.serve(...)`.
+ *
+ * Keep in sync with `ROLE_REGISTRY` (`@shipflare/shared`): every role with
+ * an `externalExposed` capability needs an entry here. P2-B additions get
+ * added here when they land — adding a row in `ROLE_REGISTRY` alone is not
+ * enough to expose a new role externally.
+ *
+ * Typed as `Record<string, typeof McpAgent>` would require fighting the
+ * generic params on McpAgent<Env, State, Props>. The use-site only calls
+ * `.serve(path, { binding }).fetch(...)`, which all three classes inherit
+ * unchanged from `McpAgent`. `any` here is bounded: the dispatch is gated
+ * by `validateExternalAccess` (auth) + the URL-pattern check above, and
+ * the runtime types come from the McpAgent base class.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const EMPLOYEE_CLASSES: Record<string, any> = {
+  cmo: CMO,
+  "head-of-growth": HeadOfGrowth,
+  "social-media-manager": SocialMediaMgr,
+};
+
+/**
+ * `/agents/<role>/<userId>/mcp[/...]` — Phase 1 internal MCP entry. The
+ * trailing `(?:\/|$)` covers BOTH the initial handshake POST to `/mcp` and
+ * any subsequent McpAgent sub-paths (e.g. `/mcp/messages`).
  */
 const MCP_ROUTE = /^\/agents\/([a-z-]+)\/([^/]+)\/mcp(?:\/|$)/;
+
+/**
+ * `/external/agents/<role>/<userId>/mcp[/...]` — Phase 2 external MCP entry.
+ *
+ * Long-lived (30d) tokens signed with `EXTERNAL_MCP_SECRET` (distinct from
+ * the browser-session `MCP_JWT_SECRET`). Token claims must match the URL
+ * `<role>` and `<userId>` segments exactly (or `role === "*"` for the
+ * admin-issued any-role token).
+ *
+ * Per Phase 0 spike #3 finding: `McpAgent.serve()` defaults its binding to
+ * `"MCP_OBJECT"`. We MUST override with `{ binding: "<NAME>" }` explicitly
+ * for each employee class; otherwise the SDK will look up a binding name
+ * that doesn't exist in our wrangler config.
+ */
+const EXTERNAL_MCP_ROUTE =
+  /^\/external\/agents\/([a-z-]+)\/([^/]+)\/mcp(?:\/|$)/;
 
 /**
  * `/agents/<role>/<userId>/internal/<path>` — Service-Binding-only RPC.
@@ -97,12 +153,23 @@ export default {
   async fetch(
     request: Request,
     env: Env,
-    _ctx: ExecutionContext,
+    ctx: ExecutionContext,
   ): Promise<Response> {
     const url = new URL(request.url);
 
     if (url.pathname === "/healthz") {
       return Response.json({ ok: true, ts: Date.now() });
+    }
+
+    // External MCP route MUST match BEFORE the Phase 1 `/agents/...` route.
+    // The Phase 1 MCP_ROUTE regex (`/^\/agents\/.../`) would never see
+    // `/external/agents/...` anyway (it's anchored at the start), but we
+    // run the external check first for clarity + to short-circuit a
+    // potentially-expensive DO spin-up if the JWT is bad.
+    const externalMatch = EXTERNAL_MCP_ROUTE.exec(url.pathname);
+    if (externalMatch) {
+      const [, role, userId] = externalMatch;
+      return handleExternalMcpRequest(request, env, ctx, role!, userId!);
     }
 
     const internalMatch = INTERNAL_ROUTE.exec(url.pathname);
@@ -241,4 +308,55 @@ async function handleMcpRequest(
   // framing, session id, etc.
   const stub = env.CMO.get(env.CMO.idFromName(userId));
   return stub.fetch(request);
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// /external/agents/<role>/<userId>/mcp  — Phase 2 external MCP entry
+//
+// Long-lived (30d) tokens signed with `EXTERNAL_MCP_SECRET`. Token claims
+// must match the URL `<role>` and `<userId>` (or `role === "*"`).
+//
+// Per Phase 0 spike #3:
+//   - `McpAgent.serve()` defaults its binding to `"MCP_OBJECT"` — we MUST
+//     pass `{ binding: "<NAME>" }` explicitly. The binding name comes from
+//     ROLE_REGISTRY[role].binding.
+//   - The external HTTP path does NOT auto-populate `this.props`, so
+//     per-tool scope gating is NOT implemented in P2-A. Scope is recorded
+//     in the token (forward-compat) but currently grants URL-level access
+//     (any tool on this role). Documented in /docs/mcp + /mcp-urls.
+// ──────────────────────────────────────────────────────────────────────────
+async function handleExternalMcpRequest(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+  role: string,
+  userId: string,
+): Promise<Response> {
+  const token = await validateExternalAccess(request, env, userId, role);
+  if (!token) {
+    return new Response("unauthorized", { status: 401 });
+  }
+
+  if (!isValidRole(role)) {
+    return new Response("unknown role", { status: 404 });
+  }
+  const Klass = EMPLOYEE_CLASSES[role];
+  const entry = ROLE_REGISTRY[role as RoleSlug];
+  if (!Klass || !entry) {
+    return new Response("role not exposed externally", { status: 404 });
+  }
+  const binding = entry.binding;
+  // Defensive: ensure the named binding actually exists on `env`. If the
+  // DO class is declared in ROLE_REGISTRY + EMPLOYEE_CLASSES but the
+  // wrangler binding isn't deployed yet, fail loud with 503.
+  const ns = (env as unknown as Record<string, unknown>)[binding];
+  if (!ns) {
+    return new Response(`binding "${binding}" not deployed`, { status: 503 });
+  }
+
+  // Per Phase 0 spike #3: pass `binding` explicitly. The path pattern uses
+  // `:userId` so the MCP SDK can extract the per-tenant DO id from the URL.
+  return Klass.serve(`/external/agents/${role}/:userId/mcp`, {
+    binding,
+  }).fetch(request, env, ctx);
 }

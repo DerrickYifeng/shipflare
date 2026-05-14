@@ -44,6 +44,7 @@ export default async function AppLayout({ children }: AppLayoutProps) {
         <Link href="/team">Team</Link>
         <Link href="/plan">Plan</Link>
         <Link href="/drafts">Drafts</Link>
+        <Link href="/mcp-urls">MCP URLs</Link>
         <Link href="/settings/channels">Settings</Link>
         <span style={{ marginLeft: "auto" }}>
           Signed in as <strong>{session.user.email}</strong>

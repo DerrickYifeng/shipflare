@@ -1,0 +1,23 @@
+# Test + `wrangler dev` defaults. Production overrides each value via
+# `wrangler secret put <NAME>`. Never commit a real secret here.
+#
+# MCP_JWT_SECRET MUST match the value apps/web uses to sign tokens —
+# both sides verify with the same HS256 secret.
+MCP_JWT_SECRET=
+
+# EXTERNAL_MCP_SECRET signs Phase 2 long-lived (30d) tokens for 3rd-party
+# MCP clients (Claude Desktop, Cursor, the founder's own LLM stack). MUST
+# match apps/web's EXTERNAL_MCP_SECRET — apps/web's /api/external-mcp/issue
+# signs with it, apps/core verifies. Production: `wrangler secret put
+# EXTERNAL_MCP_SECRET` in BOTH workers.
+#   openssl rand -base64 32
+EXTERNAL_MCP_SECRET=
+
+ANTHROPIC_API_KEY=
+XAI_API_KEY=
+
+# 32-byte base64 key used by @shipflare/crypto to AES-GCM encrypt channel
+# OAuth tokens before they hit D1. Rotating this invalidates every connected
+# channel — they will need to re-authenticate.
+#   openssl rand -base64 32
+CHANNEL_ENC_KEY=
