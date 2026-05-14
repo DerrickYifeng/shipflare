@@ -20,6 +20,27 @@
   // classes added in later tasks must use a NEW tag (e.g. "v2"), not modify "v1".
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["McpServerExample", "AgentExample"] }
+  ],
+
+  // Spike #4: Better Auth + Drizzle + D1.
+  //
+  // The original Phase 0 plan called for Hyperdrive + Neon Postgres. We
+  // pivoted to D1 to eliminate the external-service dependency; spec
+  // (docs/superpowers/specs/2026-05-13-cloudflare-do-migration-design.md
+  // decision D6) is on the Task 11 sweep list.
+  //
+  // `database_id` is a placeholder UUID — wrangler / vitest-pool-workers
+  // only require `binding` + `database_name` for local (miniflare-backed)
+  // operation. For remote provisioning (`wrangler dev --remote` or
+  // production deploy) replace this with the real UUID from
+  // `wrangler d1 create shipflare-spike`.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "shipflare-spike",
+      "database_id": "00000000-0000-0000-0000-000000000001",
+      "migrations_dir": "./migrations"
+    }
   ]
   // "workflows": [
   //   { "binding": "EX_WORKFLOW", "name": "example-workflow",

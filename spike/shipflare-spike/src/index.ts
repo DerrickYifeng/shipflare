@@ -28,7 +28,10 @@ export interface Env {
   BETTER_AUTH_SECRET: string;
   GITHUB_CLIENT_ID: string;
   GITHUB_CLIENT_SECRET: string;
-  HYPERDRIVE: Hyperdrive;
+  // binding name must match wrangler.jsonc d1_databases[].binding. Phase 0
+  // pivoted from Hyperdrive/Neon Postgres to D1 (see RESULTS.md Spike #4
+  // for the Task 11 sweep note).
+  DB: D1Database;
 }
 
 export default {
@@ -50,6 +53,14 @@ export default {
       }).fetch(request, env, ctx);
     }
 
+    // Better Auth owns every /api/auth/* route (sign-in / callback / session /
+    // sign-out / etc.). Must come BEFORE the /spike/NN matcher so the
+    // dispatcher doesn't 404 on auth callbacks.
+    if (url.pathname.startsWith("/api/auth/")) {
+      const { authHandler } = await import("./spikes/04-better-auth");
+      return authHandler(request, env);
+    }
+
     const match = url.pathname.match(/^\/spike\/(\d{2})(?:\/.*)?$/);
     if (!match) return new Response("not found", { status: 404 });
     const id = match[1];
@@ -65,6 +76,10 @@ export default {
     }
     if (id === "03") {
       const mod = await import("./spikes/03-mcp-http-streamable");
+      return mod.default(request, env, ctx);
+    }
+    if (id === "04") {
+      const mod = await import("./spikes/04-better-auth");
       return mod.default(request, env, ctx);
     }
     return new Response(`spike #${id} not yet implemented`, { status: 501 });
