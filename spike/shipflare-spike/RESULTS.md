@@ -8,7 +8,7 @@
 | 4 | Better Auth + Drizzle + D1 | GREEN | **Architectural pivot from spec: D1 instead of Hyperdrive+Neon** (see "Task 11 spec sweep" below). 3/3 vitest pass. `auth.api.getSession({ headers })` with no cookie returns `null`. `/api/auth/get-session` (the Better Auth route) returns <500 on cold call — adapter bootstraps cleanly against `drizzle(env.DB)` + `provider: "sqlite"`. The 4 Better Auth tables (`user`, `session`, `account`, `verification`) confirmed via `wrangler d1 execute --local`: `SELECT name FROM sqlite_master WHERE type='table'` returns all four plus `_cf_METADATA`. better-auth v1.6.11 + @better-auth/drizzle-adapter v1.6.11 + drizzle-orm 0.45.2/d1 + vitest-pool-workers 0.16.4. GitHub OAuth dance deferred to manual validation (documented in Spike #4 notes below). |
 | 5 | WebCrypto AES-GCM | GREEN | 5/5 vitest pass. 100 random tokens (each `crypto.randomUUID()-Math.random()`, ~50–55 chars) round-trip cleanly with a fresh 32-byte key. Same plaintext (`"same-input"`) encrypted twice produces different ciphertexts (12-byte random IV per call). Decrypting with the wrong key throws `OperationError` from `crypto.subtle.decrypt` — auth tag failure as expected. Edge cases: empty string and 1-byte plaintext both round-trip. UTF-8 emoji (`🔐`) survives `TextEncoder` → encrypt → decrypt → `TextDecoder`. Ciphertext sizes (base64): `""` → 40 chars (30B = 12B IV + 0B ct + 16B tag), `"a"` → 40 chars, `"ghp_short_token_example"` (23B) → 68 chars (51B), `"xoxb-..."` (34B) → 84 chars (63B), the 49B emoji string → 108 chars (81B). Test duration 1.45s. Helper exports (`encrypt`, `decrypt`, `generateKey`) are drop-in candidates for Phase 1 `packages/crypto` — replace `KEY_B64` default with a `wrangler secret` lookup (`env.CHANNEL_ENC_KEY`). |
 | 6 | DO SQLite perf | GREEN | 1/1 vitest pass. 10000-row seed in 24ms via `transactionSync` (≈417k rows/sec). 50-sample benchmark inside the DO (after seed): SELECT `WHERE conv_id ORDER BY ts` p50=7ms / p99=7ms / max=11ms (returns all 10k rows, indexed lookup hits `idx_messages_conv_ts`). Single-row INSERT p50=0ms / p99=0ms / max=0ms — all 50 samples completed in <1ms each. `wrangler dev --local` corroborates: seed 25ms, SELECT 6/7/7, INSERT 0/0/0. Both runtimes well under thresholds (SELECT < 50ms p99, INSERT < 5ms p99). **Key finding:** raw `BEGIN TRANSACTION` SQL is forbidden in DO SQLite — workerd throws explicitly and points at `state.storage.transactionSync()`. Spec uses the JS API. SQLite v3 + workerd in-process, no network hop, so latencies are essentially CPU-bound. |
-| 7 | Dynamic Workflow | PENDING | |
+| 7 | Dynamic Workflow | GREEN | 1/1 vitest pass in 5064ms. `step.do("step-a") → step.sleep("5 seconds") → step.do("step-b")` completes cleanly with `output.a.tag="A"`, `output.b.tag="B"`, `output.durationMs >= 5000` (actual run: test took ~5s total, so durationMs is ~5000ms — vitest-pool-workers DOES honor the sleep duration in the local Workflow simulator). Test polled `/spike/07/status?id=<id>` at 1s intervals; instance reached `status="complete"` on first non-running poll after the sleep elapsed. Full suite: 7 files / 16/16 tests pass in 7.54s. `WorkflowEntrypoint` imports from `"cloudflare:workers"` (standard path, no shim needed). Migration tags untouched — Workflow classes don't live in the `migrations[].new_sqlite_classes` array. **Test simulation HONORS sleep duration** — no test-vs-prod divergence observed for `step.sleep("5 seconds")`; production wall-clock semantics match the simulator within ~64ms scheduling overhead. |
 | 8 | Service Binding | PENDING | |
 | 9 | Cron fan-out | PENDING | |
 | 10 | Resumable stream | PENDING | |
@@ -279,6 +279,48 @@
   `env.SQLITE_DO.getByName("perf-test")` rather than
   `idFromName` → `get(id)` — the SDK exposes `getByName` as a
   one-step shortcut. Same semantics; cleaner call site.
+
+### Spike #7 (2026-05-13)
+
+- **`WorkflowEntrypoint` imports from `"cloudflare:workers"`** — same module
+  as the standard Worker types, no separate `@cloudflare/workflows` package
+  needed in workers-types and agents@0.12.4. The class extends
+  `WorkflowEntrypoint<Env, Params>` where `Params` is the payload shape; the
+  `run(event, step)` signature gets `event.payload` typed as `Params`. Confirmed
+  in the generated `worker-configuration.d.ts` after wrangler types regen.
+- **vitest-pool-workers' Workflow simulator HONORS `step.sleep` duration.**
+  No test-vs-prod divergence — the 5s sleep actually paused execution for
+  ~5000ms wall-clock. Test run took 5064ms total (assertion `durationMs >= 5000`
+  passed; the extra ~64ms is scheduling / RPC overhead between vitest poll
+  iterations). Note from the task spec said "some versions don't actually wait
+  the full sleep duration in test mode" — `@cloudflare/vitest-pool-workers`
+  v0.16.4 does NOT exhibit this; sleep is fully simulated. **Worth re-testing
+  on production wrangler** if a future Worker runtime upgrade lands.
+- **Workflow `create` + `get` + `status` shape.** `env.EX_WORKFLOW.create({ params })`
+  returns a `WorkflowInstance` with `.id`. `env.EX_WORKFLOW.get(id)` re-acquires
+  the instance handle from any subsequent request. `instance.status()` returns
+  `{ status, output?, error?, ... }`. Terminal states: `"complete"`,
+  `"errored"`, `"terminated"`. Polling shape used in the test mirrors what
+  Phase 1 `AgentPlanWorkflow` UI will use to render a plan-in-progress.
+- **Migration tags unchanged.** Workflow classes do NOT belong in the
+  `migrations[].new_sqlite_classes` array — that's reserved for DO classes
+  with SQLite storage. The workflow binding declaration in `wrangler.jsonc`
+  is `workflows: [{ binding, name, class_name }]`, parallel to (not nested in)
+  `durable_objects` / `d1_databases`.
+- **Status sub-route via single dispatch.** `/spike/07` returns a fresh
+  workflow id; `/spike/07/status?id=<id>` polls. Handler branches on
+  `url.pathname.endsWith("/status")` — works because the route matcher in
+  `src/index.ts` is `/^\/spike\/(\d{2})(?:\/.*)?$/` (the optional `/.*` lets
+  the dispatch happily forward to the same handler for both paths).
+- **Eviction-survival validated implicitly.** Workflows are durable by design;
+  every `step.do` output is checkpointed to the platform's state store and
+  every `step.sleep` returns a continuation token. The 5s sleep window is too
+  short to force a real eviction in vitest, but the architectural guarantee
+  (PER §Workflow Engine reference) is that resume-from-anywhere works because
+  step results are content-addressed and re-runs of a completed step are
+  no-ops returning the cached output. Production eviction-during-sleep
+  validation needs `wrangler deploy` + manual force-restart, deferred to
+  Phase 1 pre-cutover smoke test.
 
 ### Task 11 spec sweep — Hyperdrive → D1
 

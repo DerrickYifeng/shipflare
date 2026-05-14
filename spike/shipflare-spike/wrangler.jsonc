@@ -42,11 +42,14 @@
       "database_id": "00000000-0000-0000-0000-000000000001", // PLACEHOLDER — replace with `wrangler d1 create shipflare-spike` UUID before --remote deploy
       "migrations_dir": "./migrations"
     }
+  ],
+  "workflows": [
+    {
+      "binding": "EX_WORKFLOW",
+      "name": "example-workflow",
+      "class_name": "ExampleWorkflow"
+    }
   ]
-  // "workflows": [
-  //   { "binding": "EX_WORKFLOW", "name": "example-workflow",
-  //     "class_name": "ExampleWorkflow" }
-  // ],
   // "triggers": { "crons": ["*/1 * * * *"] },
   // "services": [
   //   { "binding": "CALLEE", "service": "shipflare-spike-callee" }

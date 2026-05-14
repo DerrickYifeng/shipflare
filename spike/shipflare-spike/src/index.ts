@@ -12,6 +12,7 @@
 export { McpServerExample } from "./durable-objects/McpServerExample";
 export { AgentExample } from "./durable-objects/AgentExample";
 export { SqliteDO } from "./durable-objects/SqliteDO";
+export { ExampleWorkflow } from "./workflows/ExampleWorkflow";
 
 // Value import (not just type) — we need to call `McpServerExample.serve(...)`
 // at runtime to mount the Streamable HTTP transport for external MCP clients
@@ -90,6 +91,12 @@ export default {
     }
     if (id === "06") {
       const mod = await import("./spikes/06-do-sqlite-perf");
+      return mod.default(request, env);
+    }
+    // Spike #7 handler internally branches on the `/status` suffix to expose
+    // both creation and status-query routes under one dispatch entry.
+    if (id === "07") {
+      const mod = await import("./spikes/07-dynamic-workflow");
       return mod.default(request, env);
     }
     return new Response(`spike #${id} not yet implemented`, { status: 501 });
