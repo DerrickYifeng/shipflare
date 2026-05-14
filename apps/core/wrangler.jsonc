@@ -79,4 +79,15 @@
   "triggers": {
     "crons": ["0 * * * *"]
   }
+
+  // Secrets are NOT declared in wrangler.jsonc (would leak the value into
+  // the generated `Cloudflare.Env` as a literal type, breaking the wider
+  // `string` constraint our `Env` interface declares).
+  //
+  // Instead, `.dev.vars` supplies test + `wrangler dev` defaults and
+  // production runs `wrangler secret put MCP_JWT_SECRET` (and the same
+  // for ANTHROPIC_API_KEY / XAI_API_KEY / CHANNEL_ENC_KEY).
+  //
+  // apps/web must hold the same MCP_JWT_SECRET — both sides verify the
+  // HS256 signature with one shared secret.
 }

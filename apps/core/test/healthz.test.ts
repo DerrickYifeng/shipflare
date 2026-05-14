@@ -15,8 +15,9 @@ describe("apps/core healthz + routing stubs", () => {
     expect(res.status).toBe(404);
   });
 
-  it("GET /agents/cmo/u1/mcp returns 501 (not wired yet)", async () => {
+  it("GET /agents/cmo/u1/mcp without auth returns 401", async () => {
+    // S2.6 wired the route. Without a Bearer token, MCP path returns 401.
     const res = await SELF.fetch("https://example.com/agents/cmo/u1/mcp");
-    expect(res.status).toBe(501);
+    expect(res.status).toBe(401);
   });
 });

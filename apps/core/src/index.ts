@@ -1,34 +1,46 @@
 /**
  * @shipflare/core — DO host Worker entry.
  *
- * Phase 1 scaffold. The actual McpAgent DO classes (CMO, HoG, SMM,
- * X / Reddit tool MCPs) come online in S2-S5. The AgentPlanWorkflow lands
- * with S6. For now this file:
+ * S2.6 wires the real routing:
  *
- * - serves `/healthz`
- * - stubs `/agents/<role>/<userId>/mcp` and
- *   `/agents/<role>/<userId>/internal/<...>` so the routing contract is
- *   visible (returns 501 with a pointer to the wiring task)
- * - stubs `scheduled()` for the hourly inbound-sweep cron
+ * - `/healthz` → quick liveness probe
+ * - `/agents/<role>/<userId>/mcp[/...]` → external MCP entry. JWT-protected
+ *   (HS256, signed by `apps/web` via `MCP_JWT_SECRET`). Phase 1 only exposes
+ *   `cmo`; HoG / SMM ride along on the CMO's `addMcpServer` in-process pipe.
+ * - `/agents/<role>/<userId>/internal/<path>` → Service-Binding-only routes
+ *   for sibling-agent RPC. Gated by `x-shipflare-internal: 1` (Cloudflare
+ *   strips this header from public-edge traffic, so only intra-network
+ *   callers can set it; the DO re-checks defensively).
+ * - `scheduled()` → hourly fan-out. Iterates `user` rows in D1, POSTs
+ *   `/internal/cron-tick` to each user's CMO DO. Per-DO failures are
+ *   isolated via `Promise.allSettled`.
  *
- * DO/Workflow bindings are commented out in wrangler.jsonc until their
- * class declarations land — adding a binding before its class compiles is
- * a wrangler dev startup error.
+ * Phase 0 spike #2: parameterized `DurableObjectNamespace<CMO>` is required
+ * (not bare) for `addMcpServer`'s generic constraint to resolve, and the
+ * `import { CMO }` then `export { CMO }` form is the wrangler-friendly way
+ * to expose the DO class.
+ *
+ * Phase 0 spike #8: Service Bindings strip `host` / `cf-connecting-ip` from
+ * forwarded requests — never depend on those for auth. Pass identity via
+ * JWT (external) or the `x-shipflare-internal` header (internal).
+ *
+ * Phase 0 spike #9: `SELF.scheduled()` is broken in vitest-pool-workers —
+ * tests invoke `worker.scheduled!(ctl, env, ctx)` directly instead.
  */
+
+import { verifyJwt } from "./lib/jwt";
+import { ROLE_REGISTRY, isValidRole, type RoleSlug } from "@shipflare/shared";
+import { createDb, user as userTable } from "@shipflare/db";
 
 import type { CMO } from "./agents/cmo/CMO";
 
 // Value re-export so wrangler can discover the DO class via the module
-// graph rooted at `main`. Per Phase 0 spike #2 the import-then-export
-// shape is required: `export { CMO } from "..."` alone has tripped
-// wrangler's class-name resolver in some setups.
+// graph rooted at `main`.
 export { CMO } from "./agents/cmo/CMO";
 
 export interface Env {
   DB: D1Database;
   // DO bindings — uncomment as classes come online (S2-S5).
-  // Per Phase 0 spike #2: parameterized `DurableObjectNamespace<CMO>` is
-  // required (not bare) for `addMcpServer`'s generic constraint to resolve.
   CMO: DurableObjectNamespace<CMO>;
   // HEAD_OF_GROWTH: DurableObjectNamespace;     // S3
   // SOCIAL_MEDIA_MGR: DurableObjectNamespace;   // S4
@@ -43,16 +55,32 @@ export interface Env {
   CHANNEL_ENC_KEY: string;
 }
 
-/** Matches `/agents/<role>/<userId>/mcp[/...]` — used by the browser MCP client. */
+/**
+ * `/agents/<role>/<userId>/mcp[/...]` — external MCP entry. The trailing
+ * `(?:\/|$)` covers BOTH the initial handshake POST to `/mcp` and any
+ * subsequent McpAgent sub-paths (e.g. `/mcp/messages`).
+ */
 const MCP_ROUTE = /^\/agents\/([a-z-]+)\/([^/]+)\/mcp(?:\/|$)/;
 
-/** Matches `/agents/<role>/<userId>/internal/<...>` — used by sibling agents (DO → DO over fetch). */
-const INTERNAL_ROUTE = /^\/agents\/([a-z-]+)\/([^/]+)\/internal\//;
+/**
+ * `/agents/<role>/<userId>/internal/<path>` — Service-Binding-only RPC.
+ * The captured group `(\/internal\/.+)` is forwarded verbatim to the DO so
+ * the DO's fetch handler sees the same `/internal/...` path it expects.
+ */
+const INTERNAL_ROUTE = /^\/agents\/([a-z-]+)\/([^/]+)(\/internal\/.+)$/;
+
+/**
+ * Per-tick cap on D1 user fan-out. We're early in Phase 1 — every active CMO
+ * gets ticked every hour regardless of activity. The cap prevents a runaway
+ * cron call when the user table grows faster than the per-user activity
+ * gating ships. Remove this once `user.lastActiveAt`-based filtering exists.
+ */
+const CRON_FANOUT_CAP = 1000;
 
 export default {
   async fetch(
     request: Request,
-    _env: Env,
+    env: Env,
     _ctx: ExecutionContext,
   ): Promise<Response> {
     const url = new URL(request.url);
@@ -61,21 +89,22 @@ export default {
       return Response.json({ ok: true, ts: Date.now() });
     }
 
-    if (MCP_ROUTE.test(url.pathname)) {
-      // Wired in S2.6: validate Authorization Bearer JWT, derive
-      // (role, userId), look up the DO namespace from ROLE_REGISTRY, and
-      // forward to McpAgent.serve('/agents/:role/:userId/mcp', { binding }).
-      return new Response("MCP routing not wired yet — see S2.6", {
-        status: 501,
-      });
+    const internalMatch = INTERNAL_ROUTE.exec(url.pathname);
+    if (internalMatch) {
+      const [, role, userId, internalPath] = internalMatch;
+      return handleInternalRequest(
+        request,
+        env,
+        role!,
+        userId!,
+        internalPath!,
+      );
     }
 
-    if (INTERNAL_ROUTE.test(url.pathname)) {
-      // Wired in S2.6: shared-secret-authenticated routes for sibling-agent
-      // RPC (CMO → HoG, HoG → SMM, etc.) over the DO fetch boundary.
-      return new Response("internal routing not wired yet — see S2.6", {
-        status: 501,
-      });
+    const mcpMatch = MCP_ROUTE.exec(url.pathname);
+    if (mcpMatch) {
+      const [, role, userId] = mcpMatch;
+      return handleMcpRequest(request, env, role!, userId!);
     }
 
     return new Response("not found", { status: 404 });
@@ -83,11 +112,117 @@ export default {
 
   async scheduled(
     _event: ScheduledController,
-    _env: Env,
+    env: Env,
     _ctx: ExecutionContext,
   ): Promise<void> {
-    // Hourly fan-out to active CMOs for inbound sweep — wired in S2.6 / S6.
-    // Implementation will query D1 for users with `defaultActive` CMOs and
-    // dispatch a `tick` message to each via the CMO DO binding.
+    // Hourly fan-out. Read every user.id from D1, fire `/internal/cron-tick`
+    // at their CMO DO. Each tick is a separate DO instance so failures
+    // isolate — one bad CMO doesn't block the rest.
+    //
+    // Phase 0 spike #9: don't use `SELF.scheduled()` to test this; call
+    // the handler directly from tests instead.
+    try {
+      const db = createDb(env.DB);
+      const users = await db.select({ id: userTable.id }).from(userTable);
+      const subset = users.slice(0, CRON_FANOUT_CAP);
+      await Promise.allSettled(
+        subset.map(({ id: userId }) => {
+          const stub = env.CMO.get(env.CMO.idFromName(userId));
+          return stub.fetch(
+            new Request("https://internal/internal/cron-tick", {
+              method: "POST",
+              headers: { "x-shipflare-internal": "1" },
+            }),
+          );
+        }),
+      );
+    } catch (err) {
+      // Cron should be self-healing — log + swallow. The next tick retries.
+      console.error("[scheduled] cron fan-out failed:", err);
+    }
   },
 } satisfies ExportedHandler<Env>;
+
+// ──────────────────────────────────────────────────────────────────────────
+// /agents/<role>/<userId>/internal/<path>
+// Forwards verbatim to the DO's fetch() handler. The DO re-verifies the
+// `x-shipflare-internal: 1` header (defense in depth — see CMO.fetch).
+// ──────────────────────────────────────────────────────────────────────────
+async function handleInternalRequest(
+  request: Request,
+  env: Env,
+  role: string,
+  userId: string,
+  internalPath: string,
+): Promise<Response> {
+  // Worker-level gate. The DO has its own re-check; this short-circuits
+  // before we even spin up the DO stub.
+  if (request.headers.get("x-shipflare-internal") !== "1") {
+    return new Response("forbidden", { status: 403 });
+  }
+  if (!isValidRole(role)) {
+    return new Response("unknown role", { status: 404 });
+  }
+  const entry = ROLE_REGISTRY[role as RoleSlug];
+  // The `Env` interface only declares bindings that are currently configured
+  // in wrangler.jsonc. Indexing by an arbitrary string (entry.binding) needs
+  // an explicit widening cast — the lookup is validated against `undefined`
+  // below before use.
+  const ns = (env as unknown as Record<string, unknown>)[entry.binding] as
+    | DurableObjectNamespace
+    | undefined;
+  if (!ns) {
+    return new Response(`binding "${entry.binding}" not deployed`, {
+      status: 503,
+    });
+  }
+  const stub = ns.get(ns.idFromName(userId));
+
+  // Strip the public path prefix — the DO's fetch handler expects
+  // `/internal/<path>`, not `/agents/<role>/<userId>/internal/<path>`.
+  return stub.fetch(new Request(`https://internal${internalPath}`, request));
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// /agents/<role>/<userId>/mcp
+// External MCP entry. JWT-protected. Token must carry `{ userId }` matching
+// the URL.
+//
+// Phase 1: only `cmo` is exposed externally (founder UI → CMO). Other roles
+// (Head of Growth, Social Media Manager) ride along on the CMO's
+// `addMcpServer` in-process pipe and are unreachable from /agents/<role>.
+// Phase 2 will open a separate `/external/agents/...` prefix with stricter
+// scope checks.
+// ──────────────────────────────────────────────────────────────────────────
+async function handleMcpRequest(
+  request: Request,
+  env: Env,
+  role: string,
+  userId: string,
+): Promise<Response> {
+  if (role !== "cmo") {
+    return new Response("role not exposed at /agents in Phase 1", {
+      status: 404,
+    });
+  }
+
+  // JWT validation. Bearer prefix → verify → claim.userId vs URL.userId.
+  const auth = request.headers.get("authorization");
+  if (!auth?.startsWith("Bearer ")) {
+    return new Response("unauthorized", { status: 401 });
+  }
+  let claims: Record<string, unknown>;
+  try {
+    claims = await verifyJwt(auth.slice(7), env.MCP_JWT_SECRET);
+  } catch {
+    return new Response("invalid token", { status: 401 });
+  }
+  if (claims["userId"] !== userId) {
+    return new Response("token userId mismatch", { status: 403 });
+  }
+
+  // Forward to the CMO DO. The DO's McpAgent transport handles JSON-RPC
+  // framing, session id, etc.
+  const stub = env.CMO.get(env.CMO.idFromName(userId));
+  return stub.fetch(request);
+}
