@@ -40,9 +40,9 @@
       // S2 — CMO
       { "name": "CMO", "class_name": "CMO" },
       // S3 — Head of Growth
-      { "name": "HEAD_OF_GROWTH", "class_name": "HeadOfGrowth" }
+      { "name": "HEAD_OF_GROWTH", "class_name": "HeadOfGrowth" },
       // S4 — Social Media Manager
-      // { "name": "SOCIAL_MEDIA_MGR", "class_name": "SocialMediaMgr" },
+      { "name": "SOCIAL_MEDIA_MGR", "class_name": "SocialMediaMgr" }
       // S5 — Platform tool MCPs
       // { "name": "X_MCP", "class_name": "XMcpAgent" },
       // { "name": "REDDIT_MCP", "class_name": "RedditMcpAgent" }
@@ -60,8 +60,8 @@
   // DO class in the matching S-task.
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["CMO"] },
-    { "tag": "v2", "new_sqlite_classes": ["HeadOfGrowth"] }
-    // { "tag": "v3", "new_sqlite_classes": ["SocialMediaMgr"] },
+    { "tag": "v2", "new_sqlite_classes": ["HeadOfGrowth"] },
+    { "tag": "v3", "new_sqlite_classes": ["SocialMediaMgr"] }
     // { "tag": "v4", "new_sqlite_classes": ["XMcpAgent", "RedditMcpAgent"] }
   ],
 

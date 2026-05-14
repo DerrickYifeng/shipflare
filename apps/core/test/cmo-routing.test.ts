@@ -84,22 +84,12 @@ describe("Worker /agents/<role>/<userId>/internal/* routing", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns 503 when role's DO namespace binding is not deployed yet", async () => {
-    // social-media-manager has a `SOCIAL_MEDIA_MGR` binding in ROLE_REGISTRY
-    // but the wrangler.jsonc binding for it isn't enabled until S4. The
-    // Worker's internal route should surface a 503 (not 500) for this case.
-    // (S3 enabled HEAD_OF_GROWTH, so this test moved one role down the
-    // staging order; the next still-commented binding is SMM.)
-    const res = await SELF.fetch(
-      "https://example.com/agents/social-media-manager/u1/internal/init",
-      {
-        method: "POST",
-        headers: INTERNAL_HEADERS,
-        body: "{}",
-      },
-    );
-    expect(res.status).toBe(503);
-  });
+  // NOTE: The "503 binding not deployed" sentinel was removed in S4. It
+  // previously pointed at `social-media-manager` (S2/S3 staging order),
+  // which is now wired. After S4, every role in ROLE_REGISTRY has its
+  // wrangler binding configured, so the 503 path is no longer exercisable
+  // here. Phase 2 will re-add a regression guard when new roles land via
+  // the static role-registry + dynamic deploy pattern.
 });
 
 describe("Worker /agents/<role>/<userId>/mcp routing", () => {
