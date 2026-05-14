@@ -1,0 +1,31 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "shipflare-spike",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-05-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true, "head_sampling_rate": 1 }
+
+  // TODO: re-enable in subsequent tasks as DO classes / workflows are added.
+  // Commented out for Task 0 scaffold because the referenced classes don't exist yet
+  // and wrangler dev / wrangler types will fail without them.
+
+  // "durable_objects": {
+  //   "bindings": [
+  //     { "name": "MCP_EXAMPLE", "class_name": "McpServerExample" },
+  //     { "name": "AGENT_EXAMPLE", "class_name": "AgentExample" },
+  //     { "name": "SQLITE_DO",    "class_name": "SqliteDO" }
+  //   ]
+  // },
+  // "migrations": [
+  //   { "tag": "v1", "new_sqlite_classes": ["McpServerExample", "AgentExample", "SqliteDO"] }
+  // ],
+  // "workflows": [
+  //   { "binding": "EX_WORKFLOW", "name": "example-workflow",
+  //     "class_name": "ExampleWorkflow" }
+  // ],
+  // "triggers": { "crons": ["*/1 * * * *"] },
+  // "services": [
+  //   { "binding": "CALLEE", "service": "shipflare-spike-callee" }
+  // ]
+}
