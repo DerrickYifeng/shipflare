@@ -1,6 +1,11 @@
 import { McpAgent } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type McpProps } from "@shipflare/shared";
+import {
+  ROLE_REGISTRY,
+  mcpServerName,
+  type McpProps,
+  type RoleSlug,
+} from "@shipflare/shared";
 import type { Env } from "../../index";
 import { applyCmoSchema } from "./schema";
 import { registerChatTool } from "./tools/chat";
@@ -75,7 +80,86 @@ export class CMO extends McpAgent<Env, CMOState, McpProps> {
     // run after our schema bootstrap so tool handlers registered in init()
     // can rely on the tables being there.
     await super.onStart(props);
-    // Employee MCP connections (addMcpServer for each hired role) — S2.3.
+    // S2.3 — connect to each hired employee via in-process MCP RPC.
+    await this.connectEmployees();
+  }
+
+  /**
+   * Read the active roster and connect to each hired employee via in-process
+   * MCP RPC.
+   *
+   * Per Phase 0 spike #2 finding: the McpServer DO instance is keyed off the
+   * `name` argument to `addMcpServer`. WITHOUT per-tenant namespacing, all
+   * users' CMOs would share one McpServer DO per role, breaking isolation.
+   * `mcpServerName(role, userId)` (from @shipflare/shared) returns the
+   * canonical `${role}-${userId}` form.
+   *
+   * Forward-compat: if a hired role has no env binding yet (S3/S4 roles still
+   * coming online, or a Phase 2 role flagged in roster but binding not added),
+   * we log + skip. The next onStart picks it up once the binding is added.
+   *
+   * Per-role isolation: each addMcpServer call is wrapped in try/catch so one
+   * failing employee doesn't blow up the rest. The CMO remains usable for
+   * direct founder chat even if every employee dial-up fails.
+   */
+  private async connectEmployees(): Promise<void> {
+    // `props` is populated by the parent McpAgent.onStart() from the transport
+    // session. In production this is always present once super.onStart()
+    // resolves; defensively short-circuit if absent (non-transport DO names
+    // in tests skip parent init entirely — no roster connect needed there).
+    const userId = this.props?.userId;
+    if (!userId) {
+      return;
+    }
+    const hires = this.sqlStorage
+      .exec<{ role: string }>(
+        "SELECT role FROM roster WHERE status = 'active'",
+      )
+      .toArray();
+
+    for (const { role } of hires) {
+      if (!(role in ROLE_REGISTRY)) {
+        console.warn(
+          `[CMO ${userId}] roster has unknown role "${role}"; skipping`,
+        );
+        continue;
+      }
+      const entry = ROLE_REGISTRY[role as RoleSlug];
+      // The `Env` interface only declares bindings that are currently
+      // configured in wrangler.jsonc (CMO + future S3/S4 additions).
+      // Indexing by an arbitrary string (entry.binding) needs an explicit
+      // widening cast — the lookup result is always validated against
+      // `undefined` below before use.
+      const binding = (this.bindings as unknown as Record<string, unknown>)[
+        entry.binding
+      ] as DurableObjectNamespace<McpAgent> | undefined;
+      if (!binding) {
+        console.warn(
+          `[CMO ${userId}] role "${role}" hired but env binding "${entry.binding}" is not configured; ` +
+            `skipping. (Likely the employee's DO class isn't deployed yet.)`,
+        );
+        continue;
+      }
+      try {
+        await this.addMcpServer(
+          mcpServerName(role as RoleSlug, userId),
+          binding,
+          {
+            props: {
+              userId,
+              caller: "cmo" as const,
+            },
+          },
+        );
+      } catch (err) {
+        // RPC connection failure is non-fatal — the CMO is still usable for
+        // direct founder chat. Failing employees will retry on next onStart.
+        console.error(
+          `[CMO ${userId}] failed to connect to ${role}:`,
+          err,
+        );
+      }
+    }
   }
 
   async init(): Promise<void> {
