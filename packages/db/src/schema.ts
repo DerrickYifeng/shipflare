@@ -14,7 +14,7 @@
 // channels.(userId, platform)) are emitted in migrations/001_initial.sql
 // since SQLite does not auto-index FK columns.
 
-import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
 
 // ─── Better Auth standard tables (4) ────────────────────────────────────────
 
@@ -141,3 +141,35 @@ export const products = sqliteTable("products", {
 
 export type Product = typeof products.$inferSelect;
 export type NewProduct = typeof products.$inferInsert;
+
+// ─── ShipFlare growth snapshots (1) ────────────────────────────────────────
+
+export const growthSnapshots = sqliteTable(
+  "growth_snapshots",
+  {
+    id: text("id").primaryKey().notNull(),
+    userId: text("userId")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    platform: text("platform", { enum: ["x", "reddit"] }).notNull(),
+    capturedAt: integer("capturedAt", { mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    metrics: text("metrics", { mode: "json" })
+      .$type<Record<string, number>>()
+      .notNull(),
+    createdAt: integer("createdAt", { mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (t) => ({
+    userPlatformCaptured: index("idx_growth_user_platform_captured").on(
+      t.userId,
+      t.platform,
+      t.capturedAt,
+    ),
+  }),
+);
+
+export type GrowthSnapshot = typeof growthSnapshots.$inferSelect;
+export type NewGrowthSnapshot = typeof growthSnapshots.$inferInsert;
