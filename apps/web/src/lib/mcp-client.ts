@@ -259,6 +259,18 @@ export class CmoClient {
   }
 
   /**
+   * Read the founder_context KV map from CMO's SQLite.
+   *
+   * Returns `{ [key: string]: string }` where each value is a raw JSON string
+   * (the caller is responsible for parsing per-key). The `subreddits` key, for
+   * example, holds `JSON.stringify(Subreddit[])` written by SMM's
+   * `research_reddit_channels` tool.
+   */
+  async queryFounderContext(): Promise<Record<string, string>> {
+    return this.callJsonTool<Record<string, string>>("queryFounderContext", {});
+  }
+
+  /**
    * P2-D — List active memories, newest first. Powers the `/memory` page.
    */
   async queryMemory(
