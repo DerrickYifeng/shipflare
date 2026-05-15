@@ -644,9 +644,14 @@ function AccountSection({
   const handleDelete = async () => {
     setDeleting(true);
     try {
-      // Account deletion is not yet implemented. Surface this to the user instead
-      // of calling a 404 route. Track follow-up: see Phase 2 design.
-      throw new Error('Account deletion is not yet available during beta.');
+      const res = await fetch('/api/account', { method: 'DELETE' });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? 'Account deletion failed');
+      }
+      // Hard reload to flush all client state. The session cookie is now
+      // invalid so the middleware will redirect to the sign-in page.
+      window.location.href = '/';
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Could not delete account');
       setDeleting(false);
