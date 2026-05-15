@@ -3,32 +3,32 @@
 import { authClient } from "@/auth-client";
 
 interface SignInButtonProps {
+  provider?: "github" | "google";
   callbackURL?: string;
+  label?: string;
+  variant?: "primary" | "secondary";
 }
 
-export function SignInButton({ callbackURL = "/chat" }: SignInButtonProps) {
+export function SignInButton({
+  provider = "github",
+  callbackURL = "/briefing",
+  label,
+  variant = "primary",
+}: SignInButtonProps) {
+  const defaultLabel = provider === "google" ? "Sign in with Google" : "Sign in with GitHub";
+  const isPrimary = variant === "primary";
   return (
     <button
       type="button"
       onClick={() =>
         authClient.signIn.social({
-          provider: "github",
+          provider,
           callbackURL,
         })
       }
-      style={{
-        display: "inline-block",
-        padding: "0.5rem 1rem",
-        background: "#000",
-        color: "#fff",
-        border: "none",
-        borderRadius: "4px",
-        marginTop: "1rem",
-        cursor: "pointer",
-        fontSize: "1rem",
-      }}
+      className={isPrimary ? "sf-cta-primary" : "sf-cta-secondary"}
     >
-      Sign in with GitHub
+      {label ?? defaultLabel}
     </button>
   );
 }

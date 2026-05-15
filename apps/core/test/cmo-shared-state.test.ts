@@ -180,4 +180,52 @@ describe("CMO shared-state tools — persistence", () => {
       expect(result.rowsWritten).toBe(0);
     });
   });
+
+  it("rejectDraft marks decision=rejected on existing row", async () => {
+    const stub = env.CMO.getByName("ss-test-6");
+    await runInDurableObject(stub, async (_instance: CMO, state) => {
+      const sql = state.storage.sql;
+      applyCmoSchema(sql);
+      const draftId = "draft-reject-1";
+      sql.exec(
+        `INSERT INTO approval_queue
+           (id, draft_id, employee, kind, channel, preview, created_at)
+         VALUES (?, ?, 'social-media-manager', 'post', 'x', 'test preview', ?)`,
+        crypto.randomUUID(),
+        draftId,
+        Date.now(),
+      );
+      const now = Date.now();
+      const result = sql.exec(
+        `UPDATE approval_queue
+         SET decided_at = ?, decision = 'rejected'
+         WHERE draft_id = ?`,
+        now,
+        draftId,
+      );
+      expect(result.rowsWritten).toBe(1);
+      const row = sql
+        .exec<{ decision: string; decided_at: number }>(
+          "SELECT decision, decided_at FROM approval_queue WHERE draft_id = ?",
+          draftId,
+        )
+        .one();
+      expect(row.decision).toBe("rejected");
+      expect(row.decided_at).toBe(now);
+    });
+  });
+
+  it("rejectDraft returns rowsWritten=0 when draft not in queue", async () => {
+    const stub = env.CMO.getByName("ss-test-7");
+    await runInDurableObject(stub, async (_instance: CMO, state) => {
+      const sql = state.storage.sql;
+      applyCmoSchema(sql);
+      const result = sql.exec(
+        `UPDATE approval_queue SET decided_at = ?, decision = 'rejected' WHERE draft_id = ?`,
+        Date.now(),
+        "no-such-draft",
+      );
+      expect(result.rowsWritten).toBe(0);
+    });
+  });
 });

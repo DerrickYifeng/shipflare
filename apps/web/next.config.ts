@@ -10,6 +10,12 @@ initOpenNextCloudflareForDev();
 
 const config: NextConfig = {
   reactStrictMode: true,
+  async redirects() {
+    return [
+      { source: "/today", destination: "/briefing", permanent: true },
+      { source: "/calendar", destination: "/briefing", permanent: true },
+    ];
+  },
 };
 
 export default config;

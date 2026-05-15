@@ -25,7 +25,11 @@ testWithProduct.describe('Settings', () => {
     await expect(page.getByText('Danger zone')).toBeVisible();
   });
 
-  testWithProduct('deletes account with DELETE confirmation', async ({
+  // Verifies the delete dialog opens and the typed-DELETE gate works.
+  // We DO NOT actually click "Delete permanently" in CI — that would destroy
+  // the shared test user. The full end-to-end flow (redirect to /) is covered
+  // by the unit tests in apps/web/test/api-account.test.ts.
+  testWithProduct('settings account deletion dialog opens with typed-DELETE gate', async ({
     authenticatedPageWithProduct: page,
   }) => {
     await page.goto('/settings');
@@ -33,23 +37,23 @@ testWithProduct.describe('Settings', () => {
     // Open delete dialog
     await page.getByRole('button', { name: 'Delete account' }).click();
 
-    // Verify dialog
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+
+    // Verify dialog content
     await expect(page.getByText('Type DELETE to confirm', { exact: false })).toBeVisible();
 
-    // Button should be disabled
+    // Button should be disabled until "DELETE" is typed
     const deleteBtn = page.getByRole('button', { name: 'Delete permanently' });
     await expect(deleteBtn).toBeDisabled();
 
-    // Type DELETE to enable
+    // Type DELETE to enable the button
     await page.getByPlaceholder('Type DELETE').fill('DELETE');
     await expect(deleteBtn).toBeEnabled();
 
-    // Click delete
-    await deleteBtn.click();
-
-    // Should redirect to sign-in page
-    await page.waitForURL('/');
-    await expect(page.getByText('ShipFlare')).toBeVisible();
+    // DO NOT actually click delete in CI — would destroy the test user.
+    // The full happy-path (D1 deletion + redirect to /) is covered by
+    // unit tests on /api/account in apps/web/test/api-account.test.ts.
   });
 
   testWithProduct('cancels deletion dialog', async ({

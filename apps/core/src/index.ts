@@ -41,7 +41,12 @@ import { verifyJwt } from "./lib/jwt";
 import { validateExternalAccess } from "./lib/external-auth";
 import { transportName } from "./lib/do-name";
 import { ROLE_REGISTRY, isValidRole, type RoleSlug } from "@shipflare/shared";
-import { createDb, user as userTable } from "@shipflare/db";
+import {
+  createDb,
+  user as userTable,
+  channels as channelsTable,
+  growthSnapshots as growthSnapshotsTable,
+} from "@shipflare/db";
 
 import { CMO } from "./agents/cmo/CMO";
 import { HeadOfGrowth } from "./agents/head-of-growth/HeadOfGrowth";
@@ -209,8 +214,133 @@ export default {
       // Cron should be self-healing — log + swallow. The next tick retries.
       console.error("[scheduled] cron fan-out failed:", err);
     }
+
+    // Growth snapshots: capture per-(user, platform) metrics into D1 every
+    // 6h tick. Phase 1 stores empty metrics {}; a later task wires real
+    // collection. Per-(user, platform) failures are isolated via the
+    // try/catch inside snapshotGrowth.
+    try {
+      await snapshotGrowth(env);
+    } catch (err) {
+      console.error("[scheduled] growth snapshot fan-out failed:", err);
+    }
   },
 } satisfies ExportedHandler<Env>;
+
+// ──────────────────────────────────────────────────────────────────────────
+// Growth snapshot helpers — called from `scheduled()` every 6h.
+//
+// Phase 1: `fetchPlatformMetrics` returns an empty object. A future task
+// will wire real metric collection via the platform DO stubs (env.X_MCP /
+// env.REDDIT_MCP). The schema + cron cadence are stable; only the metric
+// payload needs to be filled in later.
+// ──────────────────────────────────────────────────────────────────────────
+
+/**
+ * Snapshot growth metrics for every (userId, platform) channel row in D1.
+ *
+ * Failures are per-(user, platform) — one bad row doesn't block the rest.
+ * The function itself is wrapped in try/catch in `scheduled()`.
+ */
+async function snapshotGrowth(env: Env): Promise<void> {
+  const db = createDb(env.DB);
+  // Distinct (userId, platform) pairs from channels rows. Only platforms
+  // with a channel row are snapshotted — Reddit "always-on" rows that have
+  // no channel entry are excluded until real collection lands.
+  const rows = await db
+    .selectDistinct({
+      userId: channelsTable.userId,
+      platform: channelsTable.platform,
+    })
+    .from(channelsTable);
+
+  await Promise.all(
+    rows.map(async ({ userId, platform }) => {
+      if (platform !== "x" && platform !== "reddit") return;
+      try {
+        const metrics = await fetchPlatformMetrics(env, userId, platform);
+        await db.insert(growthSnapshotsTable).values({
+          id: crypto.randomUUID(),
+          userId,
+          platform,
+          capturedAt: new Date(),
+          metrics,
+          createdAt: new Date(),
+        });
+      } catch (err) {
+        console.warn(
+          `[snapshotGrowth] failed for ${userId}/${platform}:`,
+          err,
+        );
+      }
+    }),
+  );
+}
+
+/**
+ * Fetch engagement metrics for a given user + platform.
+ *
+ * Routes to the platform DO's `/internal/<tool>` endpoint via a
+ * service-binding fetch. The DO re-checks the `x-shipflare-internal: 1`
+ * header defensively; Cloudflare strips this from public-edge traffic.
+ *
+ * Failures return an empty record so one user's error doesn't break the
+ * rest of the cron fan-out. Errors are logged with user/platform context.
+ */
+async function fetchPlatformMetrics(
+  env: Env,
+  userId: string,
+  platform: "x" | "reddit",
+): Promise<Record<string, number>> {
+  try {
+    if (platform === "x") {
+      const id = env.X_MCP.idFromName(userId);
+      const stub = env.X_MCP.get(id);
+      const res = await stub.fetch(
+        new Request("https://internal/internal/x_aggregate_metrics", {
+          method: "GET",
+          headers: { "x-shipflare-internal": "1" },
+        }),
+      );
+      if (!res.ok) {
+        console.warn(
+          `[fetchPlatformMetrics] x/${userId} DO returned ${res.status}`,
+        );
+        return {};
+      }
+      const json = (await res.json()) as Record<string, unknown>;
+      // capturedAt is a string — strip it; caller stores it separately.
+      const { capturedAt: _, error: __, ...numeric } = json;
+      return numeric as Record<string, number>;
+    }
+
+    if (platform === "reddit") {
+      const id = env.REDDIT_MCP.idFromName(userId);
+      const stub = env.REDDIT_MCP.get(id);
+      const res = await stub.fetch(
+        new Request("https://internal/internal/reddit_local_metrics", {
+          method: "GET",
+          headers: { "x-shipflare-internal": "1" },
+        }),
+      );
+      if (!res.ok) {
+        console.warn(
+          `[fetchPlatformMetrics] reddit/${userId} DO returned ${res.status}`,
+        );
+        return {};
+      }
+      const json = (await res.json()) as Record<string, unknown>;
+      const { capturedAt: _, error: __, ...numeric } = json;
+      return numeric as Record<string, number>;
+    }
+  } catch (err) {
+    console.warn(
+      `[fetchPlatformMetrics] ${platform}/${userId} threw:`,
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+  return {};
+}
 
 // ──────────────────────────────────────────────────────────────────────────
 // CORS — browser at `https://shipflare.ai` calls core at

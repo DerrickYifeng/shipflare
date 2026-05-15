@@ -1,6 +1,6 @@
 /**
- * `(app)` route group layout — wraps every authenticated page (chat, team,
- * plan, drafts, settings) with a session gate + a shared nav bar.
+ * `(app)` route group layout — wraps every authenticated page with a session
+ * gate + the full ShipFlare shell (Sidebar, TopNav, providers).
  *
  * Route groups (`(name)`) don't add URL segments — they just nest a layout
  * around a subtree. Anything that lives in `app/(app)/...` is protected;
@@ -11,58 +11,67 @@
  */
 
 import type { ReactNode } from "react";
+import { SWRConfig } from "swr";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import Link from "next/link";
 import { getAuth } from "@/auth";
+import { ThemeProvider } from "@/components/layout/theme-provider";
+import { ShellChromeProvider } from "@/components/layout/shell-chrome";
+import { ToastProvider } from "@/components/ui/toast";
+import { AppShell, AppCanvas } from "@/components/layout/app-shell";
+import { Sidebar } from "@/components/layout/sidebar";
+import { TopNav } from "@/components/layout/top-nav";
 
 /**
  * Force every (app) route to be rendered per-request. Without this, Next 16
- * tries to statically prerender /chat, /team, /plan, etc. at build time,
- * and `getCloudflareContext()` (called inside `getAuth()`) throws because
+ * tries to statically prerender protected routes at build time, and
+ * `getCloudflareContext()` (called inside `getAuth()`) throws because
  * there's no Workers runtime context during the static export pass.
  *
  * Propagates to every child route via Next's layout-level config inheritance.
  */
 export const dynamic = "force-dynamic";
 
-interface AppLayoutProps {
-  children: ReactNode;
-}
-
-export default async function AppLayout({ children }: AppLayoutProps) {
-  const auth = getAuth();
-  // `headers()` is async in Next 16. Pass the headers map straight into
-  // Better Auth's `getSession` — it pulls the session cookie itself.
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) {
-    redirect("/");
+export default async function AppLayout({ children }: { children: ReactNode }) {
+  let session = null;
+  try {
+    session = await getAuth().api.getSession({ headers: await headers() });
+  } catch (err) {
+    // Surface infra errors to logs without crashing the layout.
+    // Unauthenticated visitors will still redirect to "/" via the
+    // !session?.user check below.
+    console.error("[AppLayout] getSession failed", err);
+    session = null;
   }
+  if (!session?.user) redirect("/");
+
+  const user = {
+    name: session.user.name ?? null,
+    email: session.user.email ?? null,
+    image: session.user.image ?? null,
+  };
 
   return (
-    <div>
-      <nav
-        style={{
-          padding: "1rem",
-          borderBottom: "1px solid #eee",
-          display: "flex",
-          gap: "1rem",
-          alignItems: "center",
-        }}
-      >
-        <Link href="/chat">Chat</Link>
-        <Link href="/team">Team</Link>
-        <Link href="/plan">Plan</Link>
-        <Link href="/drafts">Drafts</Link>
-        <Link href="/memory">Memory</Link>
-        <Link href="/notifications">Notifications</Link>
-        <Link href="/mcp-urls">MCP URLs</Link>
-        <Link href="/settings/channels">Settings</Link>
-        <span style={{ marginLeft: "auto" }}>
-          Signed in as <strong>{session.user.email}</strong>
-        </span>
-      </nav>
-      <main style={{ padding: "2rem" }}>{children}</main>
-    </div>
+    <SWRConfig
+      value={{
+        dedupingInterval: 5_000,
+        focusThrottleInterval: 10_000,
+        revalidateOnFocus: false,
+      }}
+    >
+      <ThemeProvider>
+        <ShellChromeProvider>
+          <ToastProvider>
+            <AppShell>
+              <Sidebar user={user} />
+              <AppCanvas>
+                <TopNav userImage={user.image} />
+                <main className="sf-app-main">{children}</main>
+              </AppCanvas>
+            </AppShell>
+          </ToastProvider>
+        </ShellChromeProvider>
+      </ThemeProvider>
+    </SWRConfig>
   );
 }

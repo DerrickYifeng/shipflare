@@ -23,6 +23,8 @@ declare global {
     BETTER_AUTH_URL: string;
     GITHUB_CLIENT_ID: string;
     GITHUB_CLIENT_SECRET: string;
+    GOOGLE_CLIENT_ID: string;
+    GOOGLE_CLIENT_SECRET: string;
 
     // Browser → core JWT signing. Same secret as apps/core's MCP_JWT_SECRET —
     // the web Worker signs short-lived tokens that core verifies on each

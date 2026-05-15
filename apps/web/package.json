@@ -14,16 +14,17 @@
     "postinstall": "wrangler types"
   },
   "dependencies": {
-    "@shipflare/shared": "workspace:*",
-    "@shipflare/crypto": "workspace:*",
-    "@shipflare/db": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@opennextjs/cloudflare": "^1.19.9",
+    "@shipflare/crypto": "workspace:*",
+    "@shipflare/db": "workspace:*",
+    "@shipflare/shared": "workspace:*",
     "better-auth": "^1.6.11",
     "eventsource-parser": "^3.0.0",
     "next": "16.2.6",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "swr": "^2.4.1"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260511.1",

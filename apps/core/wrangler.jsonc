@@ -157,7 +157,7 @@
 	// you need to exercise the path more frequently.
 	"triggers": {
 		"crons": [
-			"0 * * * *"
+			"0 0/6 * * *"
 		]
 	}
 	// Secrets are NOT declared in wrangler.jsonc (would leak the value into

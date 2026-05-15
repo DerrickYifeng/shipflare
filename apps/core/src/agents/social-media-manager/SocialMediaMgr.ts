@@ -88,6 +88,40 @@ export class SocialMediaMgr extends McpAgent<Env, SmmState, McpProps> {
   }
 
   /**
+   * Route `/internal/*` requests. All endpoints are gated on
+   * `x-shipflare-internal: 1` (set by apps/web's service binding;
+   * Cloudflare strips this header from public-edge traffic).
+   */
+  async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    const internal = request.headers.get("x-shipflare-internal") === "1";
+    if (!internal && url.pathname.startsWith("/internal/")) {
+      return new Response("forbidden", { status: 403 });
+    }
+    if (url.pathname === "/internal/destroy") {
+      return this.handleDestroy();
+    }
+    return super.fetch(request);
+  }
+
+  /**
+   * Wipe all per-DO SQLite tables for this user. Called from `/api/account`
+   * DELETE as part of account deletion. Best-effort — D1 hard-delete fires
+   * regardless. The DO is recreated lazily on next access.
+   */
+  private handleDestroy(): Response {
+    const tables = this.sqlStorage
+      .exec<{ name: string }>(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+      )
+      .toArray();
+    for (const t of tables) {
+      this.sqlStorage.exec(`DROP TABLE IF EXISTS "${t.name}"`);
+    }
+    return new Response("destroyed", { status: 200 });
+  }
+
+  /**
    * Connect to CMO (always) + X_MCP / REDDIT_MCP (if deployed).
    *
    * Failure isolation: each connection wrapped in try/catch — one missing

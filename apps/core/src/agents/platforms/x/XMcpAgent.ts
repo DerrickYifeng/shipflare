@@ -6,6 +6,7 @@ import { applyXSchema } from "./schema";
 import { registerXSearchTool } from "./tools/x-search";
 import { registerXPostTool } from "./tools/x-post";
 import { registerXMetricsTool } from "./tools/x-metrics";
+import { registerXAggregateMetricsTool, computeXAggregateMetrics } from "./tools/x-aggregate-metrics";
 
 interface XState {
   lastWakeAt: number;
@@ -85,5 +86,36 @@ export class XMcpAgent extends McpAgent<
     registerXSearchTool(this);
     registerXPostTool(this);
     registerXMetricsTool(this);
+    registerXAggregateMetricsTool(this);
+  }
+
+  /**
+   * Route `/internal/*` requests. All endpoints are gated on
+   * `x-shipflare-internal: 1` (set by the cron worker; Cloudflare strips
+   * this header from public-edge traffic).
+   *
+   * `/internal/x_aggregate_metrics` — called by the growth-snapshot cron
+   * to fetch real X engagement metrics for this user without going through
+   * the MCP protocol layer.
+   */
+  async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    const internal = request.headers.get("x-shipflare-internal") === "1";
+    if (!internal && url.pathname.startsWith("/internal/")) {
+      return new Response("forbidden", { status: 403 });
+    }
+    if (url.pathname === "/internal/x_aggregate_metrics") {
+      try {
+        const metrics = await computeXAggregateMetrics(this, 30);
+        return new Response(JSON.stringify(metrics), {
+          headers: { "content-type": "application/json" },
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn("[XMcpAgent] /internal/x_aggregate_metrics failed:", msg);
+        return new Response(JSON.stringify({ error: msg }), { status: 500 });
+      }
+    }
+    return super.fetch(request);
   }
 }

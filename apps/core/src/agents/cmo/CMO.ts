@@ -219,6 +219,9 @@ export class CMO extends McpAgent<Env, CMOState, McpProps> {
     if (url.pathname === "/internal/push-subscribe") {
       return this.handlePushSubscribe(request);
     }
+    if (url.pathname === "/internal/destroy") {
+      return this.handleDestroy();
+    }
 
     // Fall through to McpAgent's default fetch (handles /mcp, WebSocket
     // upgrades, etc. — S2.6 routes /mcp before this DO sees it; this is
@@ -419,6 +422,27 @@ export class CMO extends McpAgent<Env, CMOState, McpProps> {
       Date.now(),
     );
     return new Response("subscribed", { status: 200 });
+  }
+
+  /**
+   * Wipe all per-DO SQLite tables for this user. Called from `/api/account`
+   * DELETE (via the apps/web service-binding) as part of account deletion.
+   *
+   * Best-effort — the D1 hard-delete of the user row fires regardless of
+   * whether this succeeds. The DO is recreated lazily on next access (it will
+   * just be empty). The `x-shipflare-internal: 1` gate is enforced by the
+   * caller's `fetch()` before this handler is reached.
+   */
+  private handleDestroy(): Response {
+    const tables = this.sqlStorage
+      .exec<{ name: string }>(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+      )
+      .toArray();
+    for (const t of tables) {
+      this.sqlStorage.exec(`DROP TABLE IF EXISTS "${t.name}"`);
+    }
+    return new Response("destroyed", { status: 200 });
   }
 
   /**

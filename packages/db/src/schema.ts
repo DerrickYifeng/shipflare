@@ -14,7 +14,8 @@
 // channels.(userId, platform)) are emitted in migrations/001_initial.sql
 // since SQLite does not auto-index FK columns.
 
-import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
+import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
 
 // ─── Better Auth standard tables (4) ────────────────────────────────────────
 
@@ -96,3 +97,80 @@ export const channels = sqliteTable("channels", {
     .notNull()
     .default("active"),
 });
+
+// ─── ShipFlare user preferences (1) ────────────────────────────────────────
+
+export const userPreferences = sqliteTable("user_preferences", {
+  userId: text("user_id")
+    .primaryKey()
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  timezone: text("timezone").notNull().default("UTC"),
+  theme: text("theme", { enum: ["light", "dark"] }).notNull().default("light"),
+  updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => new Date()),
+});
+
+export type UserPreferences = typeof userPreferences.$inferSelect;
+export type NewUserPreferences = typeof userPreferences.$inferInsert;
+
+// ─── ShipFlare product profile (1) ─────────────────────────────────────────
+
+export const products = sqliteTable("products", {
+  userId: text("userId")
+    .primaryKey()
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  name: text("name"),
+  description: text("description"),
+  keywords: text("keywords", { mode: "json" }).$type<string[]>(),
+  valueProp: text("valueProp"),
+  url: text("url"),
+  state: text("state", {
+    enum: ["draft", "pre-launch", "launched", "growing"],
+  })
+    .notNull()
+    .default("draft"),
+  launchDate: integer("launchDate", { mode: "timestamp_ms" }),
+  launchedAt: integer("launchedAt", { mode: "timestamp_ms" }),
+  createdAt: integer("createdAt", { mode: "timestamp_ms" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+  updatedAt: integer("updatedAt", { mode: "timestamp_ms" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+export type Product = typeof products.$inferSelect;
+export type NewProduct = typeof products.$inferInsert;
+
+// ─── ShipFlare growth snapshots (1) ────────────────────────────────────────
+
+export const growthSnapshots = sqliteTable(
+  "growth_snapshots",
+  {
+    id: text("id").primaryKey().notNull(),
+    userId: text("userId")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    platform: text("platform", { enum: ["x", "reddit"] }).notNull(),
+    capturedAt: integer("capturedAt", { mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    metrics: text("metrics", { mode: "json" })
+      .$type<Record<string, number>>()
+      .notNull(),
+    createdAt: integer("createdAt", { mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (t) => ({
+    userPlatformCaptured: index("idx_growth_user_platform_captured").on(
+      t.userId,
+      t.platform,
+      sql`${t.capturedAt} DESC`,
+    ),
+  }),
+);
+
+export type GrowthSnapshot = typeof growthSnapshots.$inferSelect;
+export type NewGrowthSnapshot = typeof growthSnapshots.$inferInsert;

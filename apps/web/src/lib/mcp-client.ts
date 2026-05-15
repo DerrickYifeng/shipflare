@@ -68,25 +68,43 @@ export class CmoClient {
   /**
    * Send a founder message to the CMO. Returns the full assistant reply.
    *
-   * Phase 1 is request/response (no token streaming) — the chat tool returns
-   * the entire reply in one MCP result. Phase 2 will upgrade to a streamable
-   * tool (chunked SSE). The wrapper signature can stay synchronous-shaped
-   * because callers already await the reply.
+   * When `onChunk` is provided, the client passes a `progressToken` so the
+   * server will emit `notifications/progress` notifications for each text
+   * delta. Each chunk's `message` field is forwarded to `onChunk` as it
+   * arrives, enabling a streaming UI. The returned promise still resolves
+   * with the complete authoritative reply from the tool result.
+   *
+   * Callers without `onChunk` receive the full reply in one shot — backward
+   * compatible with all existing call sites.
    */
-  async chat(conversationId: string, message: string): Promise<string> {
+  async chat(
+    conversationId: string,
+    message: string,
+    onChunk?: (chunk: string) => void,
+  ): Promise<string> {
     if (!this.client) {
       throw new Error("CmoClient.chat called before connect()");
     }
-    const result = (await this.client.callTool({
-      name: "chat",
-      arguments: { conversationId, message },
-    })) as CallToolResultLike;
+    const result = (await this.client.callTool(
+      {
+        name: "chat",
+        arguments: { conversationId, message },
+      },
+      undefined, // resultSchema — use SDK default
+      onChunk
+        ? {
+            onprogress: (p: { message?: string }) => {
+              if (p.message) onChunk(p.message);
+            },
+          }
+        : undefined,
+    )) as CallToolResultLike;
     return extractText(result);
   }
 
   /**
    * Create a fresh conversation. Returns the new conversationId for the
-   * caller to navigate to (e.g. `/chat/<id>`).
+   * caller to navigate to (e.g. `/team/<id>`).
    *
    * The CMO tool serialises its return as a single JSON text block; we parse
    * it here so callers don't need to know the wire shape.
@@ -120,19 +138,25 @@ export class CmoClient {
 
   /**
    * List plan_items. Optionally filter by `status` / `ownerRole` and cap
-   * `limit` (CMO clamps at 200). Returns rows in the row-shape emitted by
-   * `queryPlanItems` — fields stay loosely typed because the UI just renders
-   * the columns it knows about.
+   * `limit` (CMO clamps at 200).
+   *
+   * The type parameter `R` lets callers bind the row shape so they don't
+   * need `as unknown as SomeType[]` at every use site:
+   *
+   *   const items = await client.queryPlanItems<PlanItem>({ limit: 50 });
+   *
+   * Defaults to `Record<string, unknown>` for backward-compat callers that
+   * just render whatever columns arrive.
    */
-  async queryPlanItems(
+  async queryPlanItems<R = Record<string, unknown>>(
     opts: { status?: string; ownerRole?: string; limit?: number } = {},
-  ): Promise<Array<Record<string, unknown>>> {
-    return this.callJsonTool("queryPlanItems", opts);
+  ): Promise<R[]> {
+    return this.callJsonTool<R[]>("queryPlanItems", opts);
   }
 
   /**
    * List active (non-archived) conversations, newest first. Used by the
-   * `/chat` index page so founders can resume an old thread or start a new
+   * `/team` page so founders can resume an old thread or start a new
    * one.
    */
   async listConversations(
@@ -153,15 +177,17 @@ export class CmoClient {
    * `list_drafts` and returns `[]` if SMM isn't hired yet (forward-compat
    * with cron ticks that run before the founder hires an SMM).
    *
-   * The row shape is whatever SMM's `list_drafts` emits — we type as
-   * `Record<string, unknown>` so adding columns server-side doesn't require
-   * a client redeploy. The `/drafts` page narrows to its own `Draft`
-   * interface for rendering.
+   * The type parameter `R` lets callers bind the draft row shape:
+   *
+   *   const drafts = await client.queryDrafts<Draft>({ status: 'ready' });
+   *
+   * Defaults to `Record<string, unknown>` for callers that don't declare a
+   * shape (e.g. the `/briefing` page which uses its own local `Draft` type).
    */
-  async queryDrafts(
+  async queryDrafts<R = Record<string, unknown>>(
     opts: { status?: string; limit?: number } = {},
-  ): Promise<Array<Record<string, unknown>>> {
-    return this.callJsonTool("queryDrafts", opts);
+  ): Promise<R[]> {
+    return this.callJsonTool<R[]>("queryDrafts", opts);
   }
 
   /**
@@ -173,6 +199,24 @@ export class CmoClient {
     draftId: string,
   ): Promise<{ draftId: string; decision: string }> {
     return this.callJsonTool("approveDraft", { draftId });
+  }
+
+  /**
+   * Reject a draft. Flips the matching `approval_queue` row to
+   * `decision='rejected'`. Throws if the draft isn't in the queue (e.g.
+   * already decided, or never enqueued).
+   *
+   * `reason` is forwarded to the server but not persisted until
+   * `approval_queue.reason` column lands (see shared-state.ts comment).
+   */
+  async rejectDraft(
+    draftId: string,
+    reason?: string,
+  ): Promise<{ draftId: string; decision: "rejected" }> {
+    return this.callJsonTool(
+      "rejectDraft",
+      reason !== undefined ? { draftId, reason } : { draftId },
+    );
   }
 
   /**
@@ -230,6 +274,18 @@ export class CmoClient {
       arguments: { id },
     })) as CallToolResultLike;
     return extractText(result);
+  }
+
+  /**
+   * Read the founder_context KV map from CMO's SQLite.
+   *
+   * Returns `{ [key: string]: string }` where each value is a raw JSON string
+   * (the caller is responsible for parsing per-key). The `subreddits` key, for
+   * example, holds `JSON.stringify(Subreddit[])` written by SMM's
+   * `research_reddit_channels` tool.
+   */
+  async queryFounderContext(): Promise<Record<string, string>> {
+    return this.callJsonTool<Record<string, string>>("queryFounderContext", {});
   }
 
   /**
