@@ -73,7 +73,7 @@ export async function POST(req: Request): Promise<Response> {
         const parsed = JSON.parse(jsonMatch[0]) as ProductAnalysis;
         send({
           type: "complete",
-          profile: {
+          data: {
             url: `https://github.com/${repoFullName}`,
             name: parsed.productName ?? repoFullName.split("/")[1],
             description: parsed.oneLiner ?? "",

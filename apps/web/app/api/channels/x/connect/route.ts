@@ -44,6 +44,16 @@ export async function GET(req: Request): Promise<Response> {
   const { env } = getCloudflareContext();
   const publicUrl = env.BETTER_AUTH_URL ?? new URL(req.url).origin;
 
+  // Stash an optional `returnTo` path so the callback can redirect the user
+  // back to where they came from (e.g. `/onboarding` instead of the default
+  // `/settings/channels`). Only path-relative values are accepted; the
+  // callback rejects anything that doesn't start with "/".
+  const rawReturnTo = new URL(req.url).searchParams.get("returnTo");
+  const returnTo =
+    typeof rawReturnTo === "string" && rawReturnTo.startsWith("/")
+      ? rawReturnTo
+      : undefined;
+
   const state = generateState();
   const { verifier, challenge } = await generatePkcePair();
   const stateToken = await signOAuthState(
@@ -52,6 +62,7 @@ export async function GET(req: Request): Promise<Response> {
       codeVerifier: verifier,
       platform: "x",
       userId: session.user.id,
+      returnTo,
     },
     env.BETTER_AUTH_SECRET,
   );

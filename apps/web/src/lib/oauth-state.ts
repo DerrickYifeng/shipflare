@@ -25,6 +25,14 @@ export interface OAuthStatePayload {
   platform: "x" | "reddit" | "linkedin";
   /** Better Auth user.id — guards against cross-user cookie reuse. */
   userId: string;
+  /**
+   * Optional post-OAuth redirect path (must start with "/").
+   * Stashed in the signed state JWT so it survives the round-trip to the IdP.
+   * Callback reads this and redirects there instead of the default
+   * `/settings/channels`. Open-redirect is prevented by the startsWith("/")
+   * check in the callback.
+   */
+  returnTo?: string;
 }
 
 /**
@@ -60,7 +68,7 @@ export async function verifyOAuthState(
 ): Promise<OAuthStatePayload> {
   const decoded = await verifyJwt(token, secret);
   // The payload fields land at the top of the JWT alongside `iat` / `exp`.
-  const { state, codeVerifier, platform, userId } = decoded as Record<
+  const { state, codeVerifier, platform, userId, returnTo } = decoded as Record<
     string,
     unknown
   >;
@@ -77,6 +85,7 @@ export async function verifyOAuthState(
       typeof codeVerifier === "string" ? codeVerifier : undefined,
     platform,
     userId,
+    returnTo: typeof returnTo === "string" ? returnTo : undefined,
   };
 }
 

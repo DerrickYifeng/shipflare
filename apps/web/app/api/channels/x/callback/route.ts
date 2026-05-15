@@ -163,9 +163,15 @@ export async function GET(req: Request): Promise<Response> {
     scope: tokens.scope ?? null,
   });
 
-  return redirectWithClearedCookie(
-    `${publicUrl}/settings/channels?connected=x`,
-  );
+  // Honour the `returnTo` path stashed during connect (e.g. `/onboarding`).
+  // Only path-relative values are trusted (open-redirect guard: must start
+  // with "/"). Fall back to `/settings/channels` if absent or invalid.
+  const returnTo =
+    typeof statePayload.returnTo === "string" &&
+    statePayload.returnTo.startsWith("/")
+      ? statePayload.returnTo
+      : "/settings/channels";
+  return redirectWithClearedCookie(`${publicUrl}${returnTo}`);
 }
 
 function readCookie(req: Request, name: string): string | undefined {

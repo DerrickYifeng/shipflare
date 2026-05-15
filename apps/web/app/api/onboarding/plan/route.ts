@@ -42,31 +42,95 @@ const requestBodySchema = z.object({
 
 type RequestBody = z.infer<typeof requestBodySchema>;
 
-const SYSTEM_PROMPT = `You are the Head of Growth for an indie product. Produce a 30-day marketing strategy as a strict JSON object matching this Zod-style shape:
+const SYSTEM_PROMPT = `You are the Head of Growth for an indie product. Produce a 30-day marketing strategy as a strict JSON object.
+
+EXACT REQUIRED SHAPE (field names must match exactly — no substitutions):
 
 {
-  "narrative": string (200-2400 chars, 2-3 paragraphs explaining the strategic thesis),
-  "milestones": Array<{ title: string, summary: string, dueOffsetDays: number }>, // 3-12 items
-  "thesisArc": Array<{
-    weekStart: string (YYYY-MM-DD, Monday UTC),
-    theme: string,
-    posts: { x?: number, reddit?: number, email?: number }
-  }>, // 1-12 weeks
-  "contentPillars": string[] (3-4 short labels),
-  "channelMix": {
-    "x"?: { cadencePerWeek: number, repliesPerDay?: number },
-    "reddit"?: { cadencePerWeek: number },
-    "email"?: { cadencePerWeek: number }
-  } (at least one channel non-null, matching connected channels),
-  "phaseGoals": {
-    "foundation"?: string, "audience"?: string, "momentum"?: string,
-    "launch"?: string, "compound"?: string, "steady"?: string
-  } (at least the entry matching currentPhase is set)
+  "narrative": string,           // 200–2400 chars, 2–3 paragraphs explaining strategic thesis
+  "milestones": [                // 3–12 items
+    {
+      "atDayOffset": number,     // integer, days from today (e.g. 7, 14, 30)
+      "title": string,           // max 140 chars
+      "successMetric": string,   // max 240 chars — measurable success criteria
+      "phase": string            // MUST be one of: "foundation" | "audience" | "momentum" | "launch" | "compound" | "steady"
+    }
+  ],
+  "thesisArc": [                 // 1–12 items, one per week
+    {
+      "weekStart": string,       // YYYY-MM-DD, Monday 00:00 UTC
+      "theme": string,           // max 240 chars
+      "angleMix": string[],      // REQUIRED, 1–7 items, each MUST be one of: "claim" | "story" | "contrarian" | "howto" | "data" | "case" | "synthesis"
+      "posts": {                 // optional
+        "x"?: number,            // 0–14
+        "reddit"?: number,       // 0–14
+        "email"?: number         // 0–14
+      }
+    }
+  ],
+  "contentPillars": string[],    // 3–4 short labels, max 60 chars each
+  "channelMix": {                // at least one non-null; only include channels from input.channels
+    "x"?: {
+      "repliesPerDay": number,   // 0–50, nullable
+      "preferredHours": number[], // REQUIRED, 1–6 UTC hours (0–23, e.g. [9, 13, 17])
+      "preferredCommunities": string[] | null
+    },
+    "reddit"?: {
+      "repliesPerDay": number,   // 0–50, nullable
+      "preferredHours": number[], // REQUIRED, 1–6 UTC hours
+      "preferredCommunities": string[] | null  // e.g. ["r/SaaS", "r/startups"]
+    },
+    "email"?: {
+      "repliesPerDay": number,   // 0–50, nullable
+      "preferredHours": number[], // REQUIRED, 1–6 UTC hours
+      "preferredCommunities": string[] | null
+    }
+  },
+  "phaseGoals": {                // all fields optional strings, max 240 chars each
+    "foundation"?: string,
+    "audience"?: string,
+    "momentum"?: string,
+    "launch"?: string,
+    "compound"?: string,
+    "steady"?: string
+  }
 }
 
-Anchor thesisArc[0].weekStart at the Monday 00:00 UTC of the week containing today.
-Tailor channelMix to ONLY the channels passed in input.channels.
-Respond with ONLY the JSON object, no surrounding prose.`;
+CRITICAL RULES:
+- Use "successMetric" NOT "summary" or "dueOffsetDays" — use "atDayOffset"
+- "angleMix" is REQUIRED on every thesisArc entry (not optional)
+- "preferredHours" is REQUIRED on every channelMix entry — must have 1–6 elements
+- Only include channels in channelMix that appear in input.channels
+- Anchor thesisArc[0].weekStart to the weekStart value from input (Monday 00:00 UTC)
+
+VALID EXAMPLE (small but schema-compliant):
+{
+  "narrative": "This is a two-paragraph strategic narrative explaining the go-to-market approach for the product. It covers the core value proposition and target audience clearly. The second paragraph outlines the 30-day growth thesis and why these channels and cadences were chosen.",
+  "milestones": [
+    {"atDayOffset": 7, "title": "Soft launch on Show HN", "successMetric": "100 unique visits in first 24h", "phase": "momentum"},
+    {"atDayOffset": 14, "title": "First 10 paying users", "successMetric": "10 active subscriptions", "phase": "launch"},
+    {"atDayOffset": 30, "title": "Hit MRR target", "successMetric": "$1k MRR", "phase": "compound"}
+  ],
+  "thesisArc": [
+    {"weekStart": "<weekStart from input>", "theme": "Build in public", "angleMix": ["story", "data"], "posts": {"x": 3, "reddit": 1}},
+    {"weekStart": "<next Monday>", "theme": "Social proof", "angleMix": ["case", "claim"], "posts": {"x": 4}}
+  ],
+  "contentPillars": ["Product updates", "Industry insight", "Customer stories"],
+  "channelMix": {
+    "x": {"repliesPerDay": 5, "preferredHours": [9, 13, 17], "preferredCommunities": null},
+    "reddit": {"repliesPerDay": 0, "preferredHours": [10, 15], "preferredCommunities": ["r/SaaS"]}
+  },
+  "phaseGoals": {
+    "foundation": "Ship docs and landing page",
+    "audience": "Grow X following to 500",
+    "momentum": "100 signups before launch",
+    "launch": "Hit 1k visits on launch day",
+    "compound": "Convert 1% of visitors to paid",
+    "steady": "Sustain $1k MRR"
+  }
+}
+
+Respond with ONLY the JSON object, no surrounding prose or markdown fences.`;
 
 function isoMondayUTC(d: Date): string {
   const date = new Date(d);

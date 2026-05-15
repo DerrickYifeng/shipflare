@@ -56,12 +56,12 @@ export function StageConnect({ onBack, onContinue }: StageConnectProps) {
 
   const connectX = () => {
     setXState({ state: 'connecting', error: null });
-    window.location.href = `/api/x/connect?returnTo=${encodeURIComponent('/onboarding')}`;
+    window.location.href = `/api/channels/x/connect?returnTo=${encodeURIComponent('/onboarding')}`;
   };
 
   const disconnectX = async () => {
     try {
-      const res = await fetch('/api/x/disconnect', { method: 'DELETE' });
+      const res = await fetch('/api/channels/x/disconnect', { method: 'DELETE' });
       if (!res.ok) throw new Error(`Disconnect failed (${res.status})`);
       setXState({ state: 'idle', error: null });
     } catch (err) {
