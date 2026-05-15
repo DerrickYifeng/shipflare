@@ -30,7 +30,7 @@ export function GlassNav({ isAuthenticated }: GlassNavProps) {
     <header
       className="sticky top-0 backdrop-blur"
       style={{
-        zIndex: 'var(--sf-z-sticky)' as unknown as number,
+        zIndex: 50,
         background: 'var(--sf-glass-dark)',
         backdropFilter: 'var(--sf-glass-blur)',
         WebkitBackdropFilter: 'var(--sf-glass-blur)',

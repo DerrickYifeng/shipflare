@@ -1,12 +1,12 @@
 'use client';
 
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { authClient } from '@/auth-client';
 
 export interface SignInModalProps {
   open: boolean;
   onClose: () => void;
-  onBeforeSignIn?: () => void;
+  onBeforeSignIn?: () => void | Promise<void>;
 }
 
 interface Provider {
@@ -81,6 +81,8 @@ const PROVIDERS: Provider[] = [
 
 export function SignInModal({ open, onClose, onBeforeSignIn }: SignInModalProps) {
   const ref = useRef<HTMLDialogElement>(null);
+  const [pending, setPending] = useState<Provider['id'] | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const dialog = ref.current;
@@ -179,9 +181,17 @@ export function SignInModal({ open, onClose, onBeforeSignIn }: SignInModalProps)
             <button
               key={provider.id}
               type="button"
+              disabled={pending !== null}
               onClick={async () => {
-                onBeforeSignIn?.();
-                await provider.action();
+                try {
+                  setError(null);
+                  setPending(provider.id);
+                  await onBeforeSignIn?.();
+                  await provider.action();
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : 'Sign in failed. Try again.');
+                  setPending(null);
+                }
               }}
               style={{
                 width: '100%',
@@ -198,22 +208,38 @@ export function SignInModal({ open, onClose, onBeforeSignIn }: SignInModalProps)
                 fontSize: 17,
                 fontWeight: 500,
                 letterSpacing: '-0.374px',
-                cursor: 'pointer',
+                cursor: pending !== null ? 'not-allowed' : 'pointer',
+                opacity: pending !== null && pending !== provider.id ? 0.6 : 1,
                 transition: 'background var(--sf-dur-base) var(--sf-ease)',
                 fontFamily: 'inherit',
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.background = BUTTON_STYLE.hoverBackground;
+                if (pending === null) {
+                  e.currentTarget.style.background = BUTTON_STYLE.hoverBackground;
+                }
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.background = BUTTON_STYLE.background;
               }}
             >
               {provider.icon}
-              {provider.label}
+              {pending === provider.id ? 'Signing in…' : provider.label}
             </button>
           ))}
         </div>
+        {error && (
+          <p
+            role="alert"
+            style={{
+              marginTop: 12,
+              marginBottom: 0,
+              color: 'var(--sf-error)',
+              fontSize: 14,
+            }}
+          >
+            {error}
+          </p>
+        )}
       </div>
     </dialog>
   );
