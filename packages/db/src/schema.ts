@@ -106,7 +106,7 @@ export const userPreferences = sqliteTable("user_preferences", {
     .references(() => user.id, { onDelete: "cascade" }),
   timezone: text("timezone").notNull().default("UTC"),
   theme: text("theme", { enum: ["light", "dark"] }).notNull().default("light"),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => new Date()),
 });
 
 export type UserPreferences = typeof userPreferences.$inferSelect;
