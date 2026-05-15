@@ -32,13 +32,32 @@ jobs:
 
       # `wrangler types` writes worker-configuration.d.ts which both apps'
       # tsconfigs depend on. The generated `Cloudflare.Env` includes secret
-      # bindings only when `.dev.vars` exists, so we seed it from the
-      # committed example (values are empty placeholders; we only need the
-      # KEY=... lines so wrangler emits the property types).
-      - name: Seed .dev.vars from example (for wrangler type emit)
+      # bindings only when `.dev.vars` exists. We also need vitest-pool-workers
+      # (which reads the same `.dev.vars`) to find non-empty test-only values
+      # — empty secrets break signJwt + AES-GCM key derive.
+      - name: Seed .dev.vars with test placeholders
         run: |
-          cp apps/core/.dev.vars.example apps/core/.dev.vars
-          cp apps/web/.dev.vars.example apps/web/.dev.vars
+          for app in apps/core apps/web; do
+            cat > "$app/.dev.vars" <<'EOF'
+          MCP_JWT_SECRET=ci-test-mcp-jwt-secret-do-not-deploy
+          EXTERNAL_MCP_SECRET=ci-test-external-mcp-secret-do-not-deploy
+          ANTHROPIC_API_KEY=sk-ci-test-placeholder
+          XAI_API_KEY=ci-test-xai-placeholder
+          CHANNEL_ENC_KEY=ci-test-aes-gcm-key-base64-padding-32b=
+          VAPID_PUBLIC=ci-test-vapid-public-key
+          VAPID_PRIVATE=ci-test-vapid-private-key
+          VAPID_SUBJECT=mailto:ci@example.com
+          BETTER_AUTH_SECRET=ci-test-better-auth-secret
+          BETTER_AUTH_URL=http://localhost:3000
+          CORE_PUBLIC_URL=http://localhost:8788
+          GITHUB_CLIENT_ID=ci-test-github-client-id
+          GITHUB_CLIENT_SECRET=ci-test-github-client-secret
+          X_CLIENT_ID=ci-test-x-client-id
+          X_CLIENT_SECRET=ci-test-x-client-secret
+          REDDIT_CLIENT_ID=ci-test-reddit-client-id
+          REDDIT_CLIENT_SECRET=ci-test-reddit-client-secret
+          EOF
+          done
 
       - name: Generate worker types (apps/core, apps/web)
         run: |
@@ -114,8 +133,25 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Seed .dev.vars from example (for wrangler type emit)
-        run: cp apps/web/.dev.vars.example apps/web/.dev.vars
+      - name: Seed .dev.vars with test placeholders
+        run: |
+          cat > apps/web/.dev.vars <<'EOF'
+          MCP_JWT_SECRET=ci-test-mcp-jwt-secret-do-not-deploy
+          EXTERNAL_MCP_SECRET=ci-test-external-mcp-secret-do-not-deploy
+          CHANNEL_ENC_KEY=ci-test-aes-gcm-key-base64-padding-32b=
+          VAPID_PUBLIC=ci-test-vapid-public-key
+          VAPID_PRIVATE=ci-test-vapid-private-key
+          VAPID_SUBJECT=mailto:ci@example.com
+          BETTER_AUTH_SECRET=ci-test-better-auth-secret
+          BETTER_AUTH_URL=http://localhost:3000
+          CORE_PUBLIC_URL=http://localhost:8788
+          GITHUB_CLIENT_ID=ci-test-github-client-id
+          GITHUB_CLIENT_SECRET=ci-test-github-client-secret
+          X_CLIENT_ID=ci-test-x-client-id
+          X_CLIENT_SECRET=ci-test-x-client-secret
+          REDDIT_CLIENT_ID=ci-test-reddit-client-id
+          REDDIT_CLIENT_SECRET=ci-test-reddit-client-secret
+          EOF
 
       - name: Generate worker types (apps/web)
         run: pnpm --filter @shipflare/web exec wrangler types || true
