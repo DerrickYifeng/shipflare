@@ -28,8 +28,10 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260511.1",
+    "@tailwindcss/postcss": "^4",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "tailwindcss": "^4",
     "typescript": "^5.9.3",
     "vitest": "^4.1.6",
     "wrangler": "^4.90.1"
