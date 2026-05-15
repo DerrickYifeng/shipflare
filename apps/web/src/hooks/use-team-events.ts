@@ -46,6 +46,13 @@ export interface UseTeamEventsOptions {
   teamId: string;
   conversationId?: string | null;
   runId?: string | null;
+  /**
+   * Called when the hook auto-bootstraps a new conversation (because
+   * sendMessage was invoked without one selected). The parent should
+   * persist the new id so subsequent sends reuse it, and ideally refresh
+   * its conversation list.
+   */
+  onConversationCreated?: (id: string) => void;
 }
 
 export interface UseTeamEventsResult {
@@ -68,11 +75,23 @@ function makeId(): string {
 // ---------------------------------------------------------------------------
 
 export function useTeamEvents(opts: UseTeamEventsOptions): UseTeamEventsResult {
-  const { teamId, conversationId } = opts;
+  const { teamId, conversationId, onConversationCreated } = opts;
   const [messages, setMessages] = useState<TeamActivityMessage[]>([]);
   const [status, setStatus] = useState<UseTeamEventsResult['status']>('idle');
   const [error, setError] = useState<string | null>(null);
   const clientRef = useRef<CmoClient | null>(null);
+  // Mirror conversationId in a ref so sendMessage's closure reads the
+  // latest value even when called twice in the same tick (e.g. after the
+  // auto-bootstrap path creates one and immediately reuses it).
+  const conversationIdRef = useRef<string | null>(conversationId ?? null);
+  useEffect(() => {
+    conversationIdRef.current = conversationId ?? null;
+  }, [conversationId]);
+  // Same mirroring for the bootstrap callback so we don't need it in deps.
+  const onConversationCreatedRef = useRef(onConversationCreated);
+  useEffect(() => {
+    onConversationCreatedRef.current = onConversationCreated;
+  }, [onConversationCreated]);
 
   // Connect on mount, close on unmount.
   useEffect(() => {
@@ -112,11 +131,30 @@ export function useTeamEvents(opts: UseTeamEventsOptions): UseTeamEventsResult {
         return;
       }
 
+      // Bootstrap a conversation on the fly if none is selected. The CMO
+      // chat tool rejects empty conversationId with a Zod input error
+      // ("Too small: expected string to have >=1 characters"), so we mint
+      // one here instead of letting the call fail.
+      let convId = conversationIdRef.current;
+      if (!convId) {
+        try {
+          const { conversationId: newId } = await client.startNewConversation();
+          convId = newId;
+          conversationIdRef.current = newId;
+          onConversationCreatedRef.current?.(newId);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'Failed to start conversation';
+          setError(msg);
+          setStatus('error');
+          return;
+        }
+      }
+
       const now = new Date().toISOString();
       const userTurn: TeamActivityMessage = {
         id: makeId(),
         runId: null,
-        conversationId: conversationId ?? null,
+        conversationId: convId,
         teamId,
         from: 'founder',
         to: 'cmo',
@@ -132,7 +170,7 @@ export function useTeamEvents(opts: UseTeamEventsOptions): UseTeamEventsResult {
       const placeholder: TeamActivityMessage = {
         id: assistantId,
         runId: null,
-        conversationId: conversationId ?? null,
+        conversationId: convId,
         teamId,
         from: 'cmo',
         to: 'founder',
@@ -149,7 +187,7 @@ export function useTeamEvents(opts: UseTeamEventsOptions): UseTeamEventsResult {
       try {
         let acc = '';
         const replyText = await client.chat(
-          conversationId ?? '',
+          convId,
           text,
           (chunk) => {
             acc += chunk;
@@ -179,7 +217,7 @@ export function useTeamEvents(opts: UseTeamEventsOptions): UseTeamEventsResult {
         const errorTurn: TeamActivityMessage = {
           id: makeId(),
           runId: null,
-          conversationId: conversationId ?? null,
+          conversationId: convId,
           teamId,
           from: 'cmo',
           to: 'founder',
@@ -195,7 +233,7 @@ export function useTeamEvents(opts: UseTeamEventsOptions): UseTeamEventsResult {
         setStatus('error');
       }
     },
-    [teamId, conversationId],
+    [teamId],
   );
 
   return { messages, sendMessage, status, error };

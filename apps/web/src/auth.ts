@@ -80,6 +80,45 @@ export function getAuth(): BetterAuthInstance {
     databaseHooks: {
       user: {
         create: {
+          // Allowlist gate — runs BEFORE the user row is created so the
+          // sign-up is blocked outright. Throws redirect-style errors that
+          // Better Auth surfaces to the OAuth callback handler; the
+          // /api/auth/[...all] adapter then forwards to /waitlist with the
+          // denied email pre-filled.
+          //
+          // Source of truth: the comma-separated ALLOWED_EMAILS env var
+          // (case-insensitive). SUPER_ADMIN_EMAIL is always allowed so the
+          // founder can never lock themselves out by clearing the list.
+          // Leave ALLOWED_EMAILS unset/empty to disable the gate (early-
+          // alpha workaround; flip on once you actually want gating).
+          before: async (user) => {
+            const rawEmail = user.email;
+            if (!rawEmail || typeof rawEmail !== "string") {
+              throw new Error(
+                "BETTER_AUTH_REDIRECT:/waitlist?from=denied&reason=no-email",
+              );
+            }
+            const email = rawEmail.trim().toLowerCase();
+            const superAdmin = env.SUPER_ADMIN_EMAIL?.trim().toLowerCase();
+            if (superAdmin && email === superAdmin) {
+              return { data: user };
+            }
+            const raw = env.ALLOWED_EMAILS;
+            if (!raw || raw.trim() === "") {
+              // No allowlist configured → gate is off, let everyone in.
+              return { data: user };
+            }
+            const allowed = raw
+              .split(",")
+              .map((s) => s.trim().toLowerCase())
+              .filter(Boolean);
+            if (!allowed.includes(email)) {
+              throw new Error(
+                `BETTER_AUTH_REDIRECT:/waitlist?from=denied&email=${encodeURIComponent(email)}`,
+              );
+            }
+            return { data: user };
+          },
           // First-login CMO init hook. Fire-and-forget — a failure here MUST
           // NOT block sign-in. The CMO's /internal/init endpoint is idempotent
           // (returns "already_initialized" on subsequent calls) so a retry

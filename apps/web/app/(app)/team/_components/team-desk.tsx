@@ -170,6 +170,18 @@ export function TeamDesk({ user }: TeamDeskProps) {
   }, []);
 
   // ---- Chat via useTeamEvents ----
+  const handleConversationBootstrapped = useCallback(async (id: string) => {
+    setSelectedConversationId(id);
+    const client = clientRef.current;
+    if (!client) return;
+    try {
+      const convList = await client.listConversations(20);
+      setConversations(convList);
+    } catch {
+      // non-fatal — list will refresh on next user action
+    }
+  }, []);
+
   const {
     messages,
     sendMessage: _sendMessage,
@@ -178,6 +190,7 @@ export function TeamDesk({ user }: TeamDeskProps) {
   } = useTeamEvents({
     teamId: user.id,
     conversationId: selectedConversationId,
+    onConversationCreated: handleConversationBootstrapped,
   });
 
   // Memoised so the useEffect below has a stable dependency. Reads from

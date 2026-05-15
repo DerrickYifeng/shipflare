@@ -7,45 +7,31 @@ interface UserMessageProps {
   createdAt: string;
 }
 
-export function UserMessage({ content, createdAt }: UserMessageProps) {
-  const time = new Date(createdAt).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+const row: CSSProperties = {
+  display: "flex",
+  justifyContent: "flex-end",
+  marginBottom: 14,
+  animation: "sf-fade-in var(--sf-dur-slow, 300ms) var(--sf-ease-swift)",
+};
 
-  const wrap: CSSProperties = {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "flex-end",
-    gap: 2,
-    padding: "8px 4px",
-  };
+const bubble: CSSProperties = {
+  maxWidth: "78%",
+  background: "var(--sf-accent)",
+  color: "var(--sf-fg-on-dark-1)",
+  padding: "10px 14px",
+  borderRadius: 14,
+  fontFamily: "var(--sf-font-text)",
+  fontSize: 14,
+  letterSpacing: "-0.01em",
+  lineHeight: 1.47,
+  boxShadow: "0 1px 2px rgba(0, 0, 0, 0.06)",
+  whiteSpace: "pre-wrap",
+  wordBreak: "break-word",
+};
 
-  const meta: CSSProperties = {
-    fontSize: 11,
-    fontFamily: "var(--sf-font-mono)",
-    color: "var(--sf-fg-3)",
-    textTransform: "uppercase",
-    letterSpacing: 0.4,
-    paddingRight: 6,
-  };
-
-  const bubble: CSSProperties = {
-    maxWidth: "78%",
-    padding: "10px 14px",
-    background: "var(--sf-accent)",
-    color: "var(--sf-fg-on-dark-1)",
-    borderRadius: "14px 14px 4px 14px",
-    fontFamily: "var(--sf-font-text)",
-    fontSize: 14,
-    lineHeight: 1.55,
-    whiteSpace: "pre-wrap",
-    wordBreak: "break-word",
-  };
-
+export function UserMessage({ content }: UserMessageProps) {
   return (
-    <div style={wrap} role="article" aria-label="You said">
-      <span style={meta}>You · {time}</span>
+    <div style={row} role="article" aria-label="You said">
       <div style={bubble}>{content}</div>
     </div>
   );

@@ -61,6 +61,17 @@ declare global {
     // invalidates every connected channel — they'll need to re-auth.
     //   openssl rand -base64 32
     CHANNEL_ENC_KEY: string;
+
+    // Sign-up allowlist. Comma-separated emails (case-insensitive). When set
+    // to a non-empty value, only those addresses (plus SUPER_ADMIN_EMAIL)
+    // can complete first-time sign-up via Better Auth's
+    // databaseHooks.user.create.before. Leave unset/empty during early-alpha
+    // to allow open sign-ups, flip on once you actually want gating.
+    ALLOWED_EMAILS?: string;
+
+    // Always-allowed sign-up bypass. The founder's email should be here so a
+    // misconfigured / empty ALLOWED_EMAILS table doesn't lock them out.
+    SUPER_ADMIN_EMAIL?: string;
   }
 }
 

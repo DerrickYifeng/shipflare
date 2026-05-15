@@ -14,7 +14,10 @@ import type { ReactNode } from "react";
 import { SWRConfig } from "swr";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { getCloudflareContext } from "@opennextjs/cloudflare";
+import { products, eq } from "@shipflare/db";
 import { getAuth } from "@/auth";
+import { getDb } from "@/db";
 import { ThemeProvider } from "@/components/layout/theme-provider";
 import { ShellChromeProvider } from "@/components/layout/shell-chrome";
 import { ToastProvider } from "@/components/ui/toast";
@@ -44,6 +47,20 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     session = null;
   }
   if (!session?.user) redirect("/");
+
+  // Onboarding gate — every (app) route requires a product row with at
+  // least a name. Without it, send the founder to /onboarding to fill it
+  // in before they see any of the dashboard.
+  const { env } = getCloudflareContext();
+  const db = getDb(env);
+  const product = await db
+    .select({ name: products.name })
+    .from(products)
+    .where(eq(products.userId, session.user.id))
+    .get();
+  if (!product || !product.name) {
+    redirect("/onboarding");
+  }
 
   const user = {
     name: session.user.name ?? null,

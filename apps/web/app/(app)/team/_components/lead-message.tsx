@@ -1,9 +1,8 @@
 "use client";
 
-import type { CSSProperties } from "react";
+import { memo, type CSSProperties } from "react";
 import { ROLE_REGISTRY } from "@shipflare/shared";
 import { AgentDot } from "./agent-dot";
-import { roleCodeForRole } from "./agent-accent";
 import { MessageMarkdown } from "./message-markdown";
 
 interface LeadMessageProps {
@@ -13,30 +12,62 @@ interface LeadMessageProps {
   content: string;
   /** ISO timestamp string. */
   createdAt: string;
-  /** True while chunks are still arriving — appends the pulsing cursor. */
+  /** True while chunks are still arriving — appends a soft breathing dot row. */
   streaming?: boolean;
   /** True when this message is an error result, not normal output. */
   isError?: boolean;
 }
-
-const CURSOR_STYLE: CSSProperties = {
-  display: "inline-block",
-  width: 8,
-  height: 14,
-  marginLeft: 2,
-  verticalAlign: "text-bottom",
-  borderRadius: 2,
-  background: "var(--sf-fg-3)",
-  opacity: 0.7,
-  animation: "sf-blink 0.85s step-start infinite",
-};
 
 function displayNameForRole(role: string): string {
   const entry = (ROLE_REGISTRY as Record<string, { displayName: string } | undefined>)[role];
   return entry?.displayName ?? role;
 }
 
-export function LeadMessage({
+function formatClock(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+const row: CSSProperties = {
+  display: "flex",
+  gap: 10,
+  marginBottom: 14,
+  animation: "sf-fade-in var(--sf-dur-slow, 300ms) var(--sf-ease-swift)",
+};
+
+const body: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 4,
+  minWidth: 0,
+  flex: 1,
+};
+
+const header: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  fontSize: 13,
+};
+
+const name: CSSProperties = {
+  fontWeight: 500,
+  color: "var(--sf-fg-1)",
+  letterSpacing: "-0.01em",
+};
+
+const time: CSSProperties = {
+  fontFamily: "var(--sf-font-mono)",
+  fontSize: 11,
+  color: "rgba(0, 0, 0, 0.48)",
+  fontVariantNumeric: "tabular-nums",
+};
+
+function LeadMessageImpl({
   from,
   content,
   createdAt,
@@ -45,66 +76,79 @@ export function LeadMessage({
 }: LeadMessageProps) {
   const role = from || "cmo";
   const displayName = displayNameForRole(role);
-  const time = new Date(createdAt).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-
-  const row: CSSProperties = {
-    display: "flex",
-    gap: 10,
-    alignItems: "flex-start",
-    padding: "8px 4px",
-  };
-
-  const bubble: CSSProperties = {
-    flex: 1,
-    minWidth: 0,
-    padding: "10px 14px",
-    background: isError ? "var(--sf-error-light)" : "var(--sf-bg-secondary)",
-    color: isError ? "var(--sf-error-ink)" : "var(--sf-fg-1)",
-    border: `1px solid ${isError ? "var(--sf-error-ink)" : "var(--sf-border)"}`,
-    borderRadius: "14px 14px 14px 4px",
-    fontFamily: "var(--sf-font-text)",
-    fontSize: 14,
-    lineHeight: 1.55,
-    boxShadow: "var(--sf-shadow-card)",
-  };
-
-  const header: CSSProperties = {
-    display: "flex",
-    alignItems: "center",
-    gap: 8,
-    marginBottom: 4,
-    fontSize: 11,
-    fontFamily: "var(--sf-font-mono)",
-    color: "var(--sf-fg-3)",
-    textTransform: "uppercase",
-    letterSpacing: 0.4,
-  };
 
   return (
-    <div style={row} role="article" aria-label={`${displayName} said`} aria-busy={streaming}>
+    <div
+      style={row}
+      role="article"
+      aria-label={`${displayName} said`}
+      aria-busy={streaming}
+      data-streaming={streaming ? "true" : "false"}
+    >
       <AgentDot role={role} displayName={displayName} size={28} />
-      <div style={bubble}>
+      <div style={body}>
         <div style={header}>
-          <span style={{ fontWeight: 600, color: "var(--sf-fg-2)" }}>
-            {isError ? "Error" : roleCodeForRole(role, displayName)}
-          </span>
-          <span aria-hidden="true">·</span>
-          <span>{time}</span>
+          <span style={name}>{displayName}</span>
+          <time dateTime={createdAt} style={time}>
+            {formatClock(createdAt)}
+          </time>
         </div>
         {isError ? (
-          <div style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+          <div
+            style={{
+              fontSize: 14,
+              color: "var(--sf-error-ink)",
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+              fontFamily: "var(--sf-font-text)",
+            }}
+          >
             {content}
           </div>
-        ) : (
-          <>
+        ) : content || streaming ? (
+          <div style={{ fontSize: 14, color: "var(--sf-fg-1)" }}>
             <MessageMarkdown source={content} />
-            {streaming && <span style={CURSOR_STYLE} aria-hidden="true" />}
-          </>
-        )}
+            {streaming && <StreamingDots />}
+          </div>
+        ) : null}
       </div>
     </div>
+  );
+}
+
+export const LeadMessage = memo(LeadMessageImpl);
+
+/**
+ * Three-dot breathing indicator, inline at the end of a streaming bubble.
+ * Matches Railway's StreamingDots exactly.
+ */
+function StreamingDots() {
+  const wrap: CSSProperties = {
+    display: "inline-flex",
+    gap: 3,
+    alignItems: "center",
+    marginLeft: 6,
+    verticalAlign: "baseline",
+  };
+  const dot: CSSProperties = {
+    width: 5,
+    height: 5,
+    borderRadius: "50%",
+    background: "currentColor",
+    opacity: 0.35,
+    animation: "sf-breathe 1.2s ease-in-out infinite",
+  };
+  return (
+    <span style={wrap} aria-label="Still streaming">
+      <span style={{ ...dot, animationDelay: "0ms" }} />
+      <span style={{ ...dot, animationDelay: "180ms" }} />
+      <span style={{ ...dot, animationDelay: "360ms" }} />
+      <style>{`
+        @keyframes sf-breathe {
+          0%, 80%, 100% { opacity: 0.2; transform: scale(0.85); }
+          40% { opacity: 0.9; transform: scale(1.1); }
+        }
+      `}</style>
+    </span>
   );
 }
