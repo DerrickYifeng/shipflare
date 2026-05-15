@@ -96,3 +96,18 @@ export const channels = sqliteTable("channels", {
     .notNull()
     .default("active"),
 });
+
+// ─── ShipFlare user preferences (1) ────────────────────────────────────────
+
+export const userPreferences = sqliteTable("user_preferences", {
+  userId: text("user_id")
+    .primaryKey()
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  timezone: text("timezone").notNull().default("UTC"),
+  theme: text("theme", { enum: ["light", "dark"] }).notNull().default("light"),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+export type UserPreferences = typeof userPreferences.$inferSelect;
+export type NewUserPreferences = typeof userPreferences.$inferInsert;
