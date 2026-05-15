@@ -22,19 +22,6 @@ import { createCmoClient, type CmoClient } from "@/lib/mcp-client";
 
 /* ── Types mirroring the CMO tool return shapes ─────────────────────── */
 
-/** Row emitted by `queryPlanItems`. */
-interface PlanItem {
-  id: string;
-  skill: string;
-  channel: string;
-  status: string;
-  owner_role: string;
-  scheduled_for: number | null;
-  started_at: number | null;
-  completed_at: number | null;
-  params_json: string | null;
-}
-
 /** Row emitted by `queryDrafts` (SMM's list_drafts shape). */
 interface Draft {
   id: string;
@@ -52,7 +39,6 @@ interface Draft {
 }
 
 interface BriefingData {
-  planItems: PlanItem[];
   pendingDrafts: Draft[];
 }
 
@@ -87,15 +73,15 @@ function useBriefing(): BriefingState & {
         }
         clientRef.current = c;
         try {
-          const [planItems, pendingDrafts] = await Promise.all([
-            c.queryPlanItems<PlanItem>({ limit: 50 }),
-            c.queryDrafts<Draft>({ status: "ready", limit: 50 }),
-          ]);
+          const pendingDrafts = await c.queryDrafts<Draft>({
+            status: "ready",
+            limit: 50,
+          });
           if (cancelled) return;
           setState((s) => ({
             ...s,
             loading: false,
-            data: { planItems, pendingDrafts },
+            data: { pendingDrafts },
           }));
         } catch (err: unknown) {
           if (cancelled) return;
@@ -167,11 +153,10 @@ export function TodayTab() {
 
   if (!data) return null;
 
-  const { planItems, pendingDrafts } = data;
+  const { pendingDrafts } = data;
 
   return (
-    <div style={{ width: "100%", padding: "0 clamp(16px, 3vw, 32px) 48px" }}>
-      {/* ── Drafts (approval queue) ─────────────────────────────── */}
+    <div style={{ width: "100%", padding: "28px clamp(16px, 3vw, 32px) 48px" }}>
       <Section label="Awaiting approval" count={pendingDrafts.length}>
         {pendingDrafts.length === 0 ? (
           <p
@@ -189,24 +174,6 @@ export function TodayTab() {
                 approving={approvingId === draft.id}
                 onApprove={approveDraft}
               />
-            ))}
-          </div>
-        )}
-      </Section>
-
-      {/* ── Plan items ──────────────────────────────────────────── */}
-      <Section label="Plan" count={planItems.length}>
-        {planItems.length === 0 ? (
-          <p
-            className="sf-mono"
-            style={{ fontSize: "var(--sf-text-xs)", color: "var(--sf-fg-3)", margin: 0 }}
-          >
-            No plan items yet. Chat with your CMO to generate some.
-          </p>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {planItems.map((item) => (
-              <PlanItemRow key={item.id} item={item} />
             ))}
           </div>
         )}
@@ -300,73 +267,6 @@ function DraftCard({ draft, approving, onApprove }: DraftCardProps) {
         {approving ? "Approving…" : "Approve & publish"}
       </button>
     </article>
-  );
-}
-
-/* ── PlanItemRow ─────────────────────────────────────────────────────── */
-
-interface PlanItemRowProps {
-  item: PlanItem;
-}
-
-function PlanItemRow({ item }: PlanItemRowProps) {
-  const rowStyle: CSSProperties = {
-    display: "flex",
-    alignItems: "center",
-    gap: 12,
-    padding: "10px 14px",
-    border: "1px solid var(--sf-border-1, rgba(0,0,0,0.06))",
-    borderRadius: 6,
-    background: "var(--sf-surface-1, #fff)",
-  };
-
-  const labelStyle: CSSProperties = {
-    flex: 1,
-    fontSize: 14,
-    color: "var(--sf-fg-1)",
-    fontWeight: 500,
-  };
-
-  const metaStyle: CSSProperties = {
-    fontSize: 12,
-    color: "var(--sf-fg-3)",
-  };
-
-  const statusColor: Record<string, string> = {
-    completed: "var(--sf-success, #16a34a)",
-    failed: "var(--sf-error, #c33)",
-    in_progress: "var(--sf-warn, #ca8a04)",
-    cancelled: "var(--sf-fg-3)",
-  };
-
-  const dotColor = statusColor[item.status] ?? "var(--sf-fg-3)";
-
-  return (
-    <div style={rowStyle} role="listitem">
-      <span
-        aria-hidden="true"
-        style={{
-          width: 8,
-          height: 8,
-          borderRadius: "50%",
-          background: dotColor,
-          flexShrink: 0,
-        }}
-      />
-      <span style={labelStyle}>
-        {item.skill}
-        {item.channel ? ` · ${item.channel}` : ""}
-      </span>
-      <span style={metaStyle}>{item.status}</span>
-      {item.scheduled_for && (
-        <span style={metaStyle}>
-          {new Date(item.scheduled_for).toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-          })}
-        </span>
-      )}
-    </div>
   );
 }
 

@@ -14,9 +14,5 @@ import { TodayTab } from "./_components/today-tab";
 export const dynamic = "force-dynamic";
 
 export default function BriefingPage() {
-  return (
-    <div style={{ paddingTop: 28 }}>
-      <TodayTab />
-    </div>
-  );
+  return <TodayTab />;
 }
