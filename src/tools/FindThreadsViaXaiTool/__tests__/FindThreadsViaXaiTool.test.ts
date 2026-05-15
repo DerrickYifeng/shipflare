@@ -124,9 +124,15 @@ function makeTweet(overrides: Partial<TweetCandidate> = {}): TweetCandidate {
   };
 }
 
+/**
+ * Inner xAI tool result shape for the X branch. The X code path now
+ * reads from `output` (raw JSON parsed by xAI) via the Zod mirror in
+ * `schemas.ts`, symmetric with the Reddit branch — there is no longer
+ * a `tweets` field on the inner tool's result.
+ */
 function xaiResponse(tweets: TweetCandidate[], notes = 'ok') {
   return {
-    tweets,
+    output: { tweets, notes },
     notes,
     assistantMessage: { role: 'assistant' as const, content: 'json output' },
     usage: { inputTokens: 100, outputTokens: 200, totalTokens: 300 },
@@ -633,7 +639,7 @@ describe('findThreadsViaXaiTool', () => {
 
   it('reports rough costUsd from xAI usage tokens', async () => {
     xaiExecMock.mockResolvedValueOnce({
-      tweets: [makeTweet()],
+      output: { tweets: [makeTweet()], notes: '' },
       notes: '',
       assistantMessage: { role: 'assistant' as const, content: 'x' },
       usage: { inputTokens: 1_000_000, outputTokens: 1_000_000, totalTokens: 2_000_000 },
@@ -649,6 +655,43 @@ describe('findThreadsViaXaiTool', () => {
 
     // 1M in @ $5 + 1M out @ $15 = $20
     expect(result.costUsd).toBeCloseTo(20, 5);
+  });
+
+  /**
+   * REGRESSION GUARD — 2026-05-08
+   *
+   * Pre-fix bug: the X branch read `xaiResult.tweets` directly. After
+   * the 5/7 generalization that field was always `[]` because the
+   * inner xAI tool's caller-supplied-schema path returns data via
+   * `output`. Result: every X discovery silently scanned 0 tweets,
+   * judging never ran, the manager hallucinated reasons.
+   *
+   * This test mocks the inner tool's REAL contract (tweets data lives
+   * in `output`, no top-level `tweets` field) and asserts the X
+   * branch still surfaces candidates to the judge.
+   */
+  it('X branch reads candidates from xaiResult.output (regression guard for 5/7 silent-zero bug)', async () => {
+    xaiExecMock.mockResolvedValueOnce({
+      output: {
+        tweets: [makeTweet({ external_id: 'regress-1' })],
+        notes: 'one match',
+      },
+      notes: 'one match',
+      assistantMessage: { role: 'assistant' as const, content: 'json output' },
+      usage: { inputTokens: 100, outputTokens: 200, totalTokens: 300 },
+    });
+    runForkSkillMock.mockResolvedValueOnce(
+      judgingResponse({ keep: true, score: 0.8 }),
+    );
+
+    const result = await findThreadsViaXaiTool.execute(
+      { trigger: 'daily', maxResults: 1 },
+      makeCtx(store, { userId: 'user-1', productId: 'prod-1' }),
+    );
+
+    expect(result.scanned).toBe(1);
+    expect(result.queued).toBe(1);
+    expect(runForkSkillMock).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -841,5 +884,313 @@ describe('composeRefinementMessage exclude-authors reinforcement', () => {
   it('omits the reinforcement when the list is empty', () => {
     const m = composeRefinementMessage(new Map(), [], []);
     expect(m).not.toMatch(/skip @/i);
+  });
+});
+
+// ---------------------------------------------------------------------
+// Reddit branch (Task 2b)
+// ---------------------------------------------------------------------
+
+import { channels } from '@/lib/db/schema';
+
+interface ChannelRow {
+  id: string;
+  userId: string;
+  platform: string;
+  username: string;
+  oauthTokenEncrypted: string | null;
+  refreshTokenEncrypted: string | null;
+  tokenExpiresAt: Date | null;
+}
+
+interface RedditThread {
+  external_id: string;
+  url: string;
+  subreddit: string;
+  author_username: string;
+  author_karma: number | null;
+  title: string;
+  body: string;
+  posted_at: string;
+  score: number;
+  num_comments: number;
+  num_crossposts: number;
+  is_self: boolean;
+  link_url: string | null;
+  over_18: boolean;
+  locked: boolean;
+  archived: boolean;
+  confidence: number;
+  reason: string;
+}
+
+function makeRedditThread(overrides: Partial<RedditThread> = {}): RedditThread {
+  return {
+    external_id: overrides.external_id ?? '1abc234',
+    url:
+      overrides.url ??
+      'https://www.reddit.com/r/SaaS/comments/1abc234/test',
+    subreddit: overrides.subreddit ?? 'SaaS',
+    author_username: overrides.author_username ?? 'foo',
+    author_karma: overrides.author_karma ?? 500,
+    title: overrides.title ?? 'How do I market my SaaS without burning cash',
+    body: overrides.body ?? 'Lorem ipsum, looking for advice.',
+    posted_at: overrides.posted_at ?? '2026-05-06T10:00:00Z',
+    score: overrides.score ?? 12,
+    num_comments: overrides.num_comments ?? 5,
+    num_crossposts: overrides.num_crossposts ?? 0,
+    is_self: overrides.is_self ?? true,
+    link_url: overrides.link_url ?? null,
+    over_18: overrides.over_18 ?? false,
+    locked: overrides.locked ?? false,
+    archived: overrides.archived ?? false,
+    confidence: overrides.confidence ?? 0.85,
+    reason: overrides.reason ?? 'No marketing person, looking for distribution.',
+  };
+}
+
+/**
+ * Inner xAI tool result shape for the Reddit branch. The Reddit code
+ * path reads from `output` and re-validates against
+ * `redditThreadSearchResponseSchema`.
+ */
+function xaiRedditResponse(threads: RedditThread[], notes = 'ok') {
+  return {
+    output: { threads, notes },
+    notes,
+    assistantMessage: { role: 'assistant' as const, content: 'json output' },
+    usage: { inputTokens: 100, outputTokens: 200, totalTokens: 300 },
+  };
+}
+
+describe('platform: reddit', () => {
+  it('default platform is x — explicit assertion that omitting platform preserves x_search', async () => {
+    // No `platform` field → should default to x and call inner xAI
+    // tool with x_search tool config.
+    xaiExecMock.mockResolvedValueOnce(xaiResponse([makeTweet()]));
+    runForkSkillMock.mockResolvedValueOnce(
+      judgingResponse({ keep: true, score: 0.8 }),
+    );
+
+    await findThreadsViaXaiTool.execute(
+      { trigger: 'daily', maxResults: 1 },
+      makeCtx(store, { userId: 'user-1', productId: 'prod-1' }),
+    );
+
+    const innerCall = xaiExecMock.mock.calls[0]![0] as {
+      tools: Array<Record<string, unknown>>;
+    };
+    expect(innerCall.tools).toEqual([{ type: 'x_search' }]);
+  });
+
+  it('uses web_search with reddit.com domain filter when platform=reddit', async () => {
+    xaiExecMock.mockResolvedValueOnce(xaiRedditResponse([makeRedditThread()]));
+    runForkSkillMock.mockResolvedValueOnce(
+      judgingResponse({ keep: true, score: 0.85 }),
+    );
+
+    await findThreadsViaXaiTool.execute(
+      { trigger: 'daily', maxResults: 1, platform: 'reddit' },
+      makeCtx(store, { userId: 'user-1', productId: 'prod-1' }),
+    );
+
+    const innerCall = xaiExecMock.mock.calls[0]![0] as {
+      tools: Array<Record<string, unknown>>;
+    };
+    expect(innerCall.tools).toHaveLength(1);
+    expect(innerCall.tools[0]).toMatchObject({
+      type: 'web_search',
+      filters: { allowed_domains: ['reddit.com'] },
+    });
+  });
+
+  it('passes Reddit JSON schema + name to the inner xAI tool', async () => {
+    xaiExecMock.mockResolvedValueOnce(xaiRedditResponse([]));
+
+    await findThreadsViaXaiTool.execute(
+      { trigger: 'daily', maxResults: 1, platform: 'reddit' },
+      makeCtx(store, { userId: 'user-1', productId: 'prod-1' }),
+    );
+
+    const innerCall = xaiExecMock.mock.calls[0]![0] as {
+      responseFormatName?: string;
+      responseFormatSchema?: { required?: string[] };
+    };
+    expect(innerCall.responseFormatName).toBe('reddit_thread_search_result');
+    // The Reddit JSON schema's outer envelope requires `threads` (not
+    // `tweets`). Asserting on a stable structural property is more
+    // resilient than asserting deep equality.
+    expect(innerCall.responseFormatSchema?.required).toContain('threads');
+  });
+
+  it('injects u/<handle> self-exclude when channels.username is seeded', async () => {
+    store.register<ChannelRow>(channels, [
+      {
+        id: 'ch-1',
+        userId: 'user-1',
+        platform: 'reddit',
+        username: 'shipflare-founder',
+        oauthTokenEncrypted: null,
+        refreshTokenEncrypted: null,
+        tokenExpiresAt: null,
+      },
+    ]);
+    xaiExecMock.mockResolvedValueOnce(xaiRedditResponse([]));
+
+    await findThreadsViaXaiTool.execute(
+      { trigger: 'daily', maxResults: 1, platform: 'reddit' },
+      makeCtx(store, { userId: 'user-1', productId: 'prod-1' }),
+    );
+
+    const innerCall = xaiExecMock.mock.calls[0]![0] as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    const firstUserMsg = innerCall.messages[0]!.content;
+    expect(firstUserMsg).toContain('u/shipflare-founder');
+    expect(firstUserMsg).toMatch(/founder running this product/i);
+  });
+
+  it('omits self-exclude line when no reddit channel exists', async () => {
+    // No channel row seeded — store.tables has no entry for `channels`.
+    xaiExecMock.mockResolvedValueOnce(xaiRedditResponse([]));
+
+    await findThreadsViaXaiTool.execute(
+      { trigger: 'daily', maxResults: 1, platform: 'reddit' },
+      makeCtx(store, { userId: 'user-1', productId: 'prod-1' }),
+    );
+
+    const innerCall = xaiExecMock.mock.calls[0]![0] as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    const firstUserMsg = innerCall.messages[0]!.content;
+    expect(firstUserMsg).not.toMatch(/founder running this product/i);
+  });
+
+  it('parses { threads, notes } envelope from xAI output and judges each thread', async () => {
+    const threads = [
+      makeRedditThread({ external_id: 'r1' }),
+      makeRedditThread({
+        external_id: 'r2',
+        url: 'https://www.reddit.com/r/SaaS/comments/r2/test',
+      }),
+    ];
+    xaiExecMock.mockResolvedValueOnce(
+      xaiRedditResponse(threads, 'Strong matches in r/SaaS'),
+    );
+    runForkSkillMock.mockResolvedValue(
+      judgingResponse({ keep: true, score: 0.85 }),
+    );
+
+    const result = await findThreadsViaXaiTool.execute(
+      { trigger: 'daily', maxResults: 2, platform: 'reddit' },
+      makeCtx(store, { userId: 'user-1', productId: 'prod-1' }),
+    );
+
+    expect(runForkSkillMock).toHaveBeenCalledTimes(2);
+    expect(result.scanned).toBe(2);
+    // Task 2c wired Reddit persist — the call now fires with platform=reddit.
+    expect(persistExecMock).toHaveBeenCalledTimes(1);
+    const persistArg = persistExecMock.mock.calls[0]![0] as {
+      platform: string;
+      threads: Array<{ external_id: string }>;
+    };
+    expect(persistArg.platform).toBe('reddit');
+    expect(persistArg.threads).toHaveLength(2);
+    expect(result.queued).toBe(2);
+    // topQueued surfaces both threads with confidence from judging.
+    expect(result.topQueued).toHaveLength(2);
+    expect(result.topQueued[0]!.confidence).toBe(0.85);
+    // Reddit topQueued rows have null engagement-stats (X-only fields).
+    expect(result.topQueued[0]!.likesCount).toBeNull();
+    expect(result.topQueued[0]!.repostsCount).toBeNull();
+  });
+
+  it('passes platform=reddit + author_karma into the judging-thread-quality candidate', async () => {
+    xaiExecMock.mockResolvedValueOnce(
+      xaiRedditResponse([
+        makeRedditThread({
+          author_username: 'reddit-user',
+          author_karma: 7891,
+          title: 'r/SaaS title here',
+          body: 'r/SaaS body text',
+        }),
+      ]),
+    );
+    runForkSkillMock.mockResolvedValueOnce(
+      judgingResponse({ keep: true, score: 0.85 }),
+    );
+
+    await findThreadsViaXaiTool.execute(
+      { trigger: 'daily', maxResults: 1, platform: 'reddit' },
+      makeCtx(store, { userId: 'user-1', productId: 'prod-1' }),
+    );
+
+    const argsJson = runForkSkillMock.mock.calls[0]![1] as string;
+    const parsed = JSON.parse(argsJson) as {
+      candidate: {
+        platform: string;
+        title: string;
+        author: string;
+        authorBio: string | null;
+        authorFollowers: number | null;
+      };
+    };
+    expect(parsed.candidate.platform).toBe('reddit');
+    expect(parsed.candidate.title).toBe('r/SaaS title here'); // real title, not a body slice
+    expect(parsed.candidate.author).toBe('reddit-user');
+    expect(parsed.candidate.authorBio).toBeNull();
+    // author_karma stands in for authorFollowers as a rough scale signal.
+    expect(parsed.candidate.authorFollowers).toBe(7891);
+  });
+
+  it('throttles by Reddit-platform engagement, not X-platform', async () => {
+    // Seed a thread + a draft on the Reddit platform with a recent
+    // engagement so listRecentEngagedAuthors returns something. The
+    // exact shape of the throttle data isn't critical — what matters
+    // is that the inner xAI call's prompt mentions u/<author> in
+    // either the self-line or the do-not-surface line under the
+    // Reddit prompt builder. We just verify the platform parameter
+    // got threaded through (tools=web_search) rather than reverting
+    // to x_search.
+    xaiExecMock.mockResolvedValueOnce(xaiRedditResponse([]));
+
+    await findThreadsViaXaiTool.execute(
+      { trigger: 'daily', maxResults: 1, platform: 'reddit' },
+      makeCtx(store, { userId: 'user-1', productId: 'prod-1' }),
+    );
+
+    const innerCall = xaiExecMock.mock.calls[0]![0] as {
+      tools: Array<Record<string, unknown>>;
+    };
+    // If the platform branch had reverted, tools would be x_search.
+    expect(innerCall.tools[0]).toMatchObject({ type: 'web_search' });
+  });
+
+  it('surfaces u/<handle> self-line ONLY in Reddit prompt builder (not @<handle>)', async () => {
+    store.register<ChannelRow>(channels, [
+      {
+        id: 'ch-1',
+        userId: 'user-1',
+        platform: 'reddit',
+        username: 'shipflare-founder',
+        oauthTokenEncrypted: null,
+        refreshTokenEncrypted: null,
+        tokenExpiresAt: null,
+      },
+    ]);
+    xaiExecMock.mockResolvedValueOnce(xaiRedditResponse([]));
+
+    await findThreadsViaXaiTool.execute(
+      { trigger: 'daily', maxResults: 1, platform: 'reddit' },
+      makeCtx(store, { userId: 'user-1', productId: 'prod-1' }),
+    );
+
+    const firstUserMsg = (xaiExecMock.mock.calls[0]![0] as {
+      messages: Array<{ role: string; content: string }>;
+    }).messages[0]!.content;
+    expect(firstUserMsg).toContain('u/shipflare-founder');
+    // No @-prefixed self-handle line — the X builder uses @, the Reddit
+    // builder must use u/.
+    expect(firstUserMsg).not.toContain('@shipflare-founder');
   });
 });

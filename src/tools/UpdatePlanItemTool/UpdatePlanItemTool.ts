@@ -37,7 +37,8 @@ export const updatePlanItemPatchSchema = z
   .object({
     state: z.enum(planItemStateValues).nullish(),
     userAction: z.enum(userActionValues).nullish(),
-    scheduledAt: z.string().min(1).nullish(), // ISO
+    dueDate: z.string().min(1).nullish(), // YYYY-MM-DD
+    sortOrder: z.number().int().min(0).nullish(),
     title: z.string().min(1).max(200).nullish(),
     description: z.string().max(600).nullable().optional(),
   })
@@ -67,7 +68,7 @@ export const updatePlanItemTool: ToolDefinition<
   description:
     'Patch a single plan_items row by id. Editable fields: state ' +
     `(${planItemStateValues.join(', ')}), userAction ` +
-    `(${userActionValues.join(', ')}), scheduledAt (ISO), title, ` +
+    `(${userActionValues.join(', ')}), dueDate (YYYY-MM-DD), sortOrder, title, ` +
     'description. Scoped to the current user + product. REFUSES ' +
     'rows already in `executing` / `completed` / `failed` — those are ' +
     'frozen for audit; use add_plan_item to schedule a follow-up ' +
@@ -130,8 +131,11 @@ export const updatePlanItemTool: ToolDefinition<
     };
     if (patch.state != null) setValues.state = patch.state;
     if (patch.userAction != null) setValues.userAction = patch.userAction;
-    if (patch.scheduledAt != null) {
-      setValues.scheduledAt = new Date(patch.scheduledAt);
+    if (patch.dueDate != null) {
+      setValues.dueDate = new Date(patch.dueDate);
+    }
+    if (patch.sortOrder != null) {
+      setValues.sortOrder = patch.sortOrder;
     }
     if (patch.title != null) setValues.title = patch.title;
     if (patch.description !== undefined) {

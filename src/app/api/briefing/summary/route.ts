@@ -8,7 +8,7 @@ import { weekBounds } from '@/lib/week-bounds';
 /**
  * Briefing summary — aggregate plan_items shape consumed by the new
  * BriefingHeader component. Today / yesterday counts are bucketed by
- * `completedAt`; weekly totals are bucketed by `scheduledAt`. The
+ * `completedAt`; weekly totals are bucketed by `dueDate`. The
  * `isDay1` flag is true for the first 24h after the user finishes
  * onboarding so the UI can show a different welcome state.
  *
@@ -96,15 +96,15 @@ export async function GET() {
       weekQueued: sql<number>`
         count(*) filter (
           where ${planItems.state} in ('planned', 'drafting', 'drafted', 'ready_for_review', 'approved', 'executing')
-            and ${planItems.scheduledAt} >= ${weekStartIso}
-            and ${planItems.scheduledAt} < ${weekEndIso}
+            and ${planItems.dueDate} >= ${weekStartIso}
+            and ${planItems.dueDate} < ${weekEndIso}
         )
       `.mapWith(Number),
       weekShipped: sql<number>`
         count(*) filter (
           where ${planItems.state} = 'completed'
-            and ${planItems.scheduledAt} >= ${weekStartIso}
-            and ${planItems.scheduledAt} < ${weekEndIso}
+            and ${planItems.dueDate} >= ${weekStartIso}
+            and ${planItems.dueDate} < ${weekEndIso}
         )
       `.mapWith(Number),
     })

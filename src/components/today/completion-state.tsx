@@ -5,7 +5,8 @@ import { PLATFORMS } from '@/lib/platform-config';
 export interface YesterdayTop {
   id: string;
   platform: string;
-  community: string;
+  /** NULL for X threads (no Reddit-style subreddit equivalent). */
+  community: string | null;
   externalUrl: string | null;
   postedAt: Date | string;
   draftType: string | null;
@@ -21,9 +22,12 @@ interface CompletionStateProps {
   yesterdayTop: YesterdayTop | null;
 }
 
-function communityLabel(platform: string, community: string): string {
+function communityLabel(platform: string, community: string | null): string {
   // Derive the prefix from platform-config rather than hardcoding platform
-  // literals, so a new platform entry lights up the UI automatically.
+  // literals, so a new platform entry lights up the UI automatically. When
+  // `community` is null (X threads have no subreddit equivalent), fall
+  // back on the platform's display name so the badge still reads.
+  if (!community) return PLATFORMS[platform]?.displayName ?? platform;
   const prefix = PLATFORMS[platform]?.sourcePrefix ?? '';
   return `${prefix}${community}`;
 }

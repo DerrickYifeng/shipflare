@@ -260,22 +260,30 @@ export function OnboardingFlow({ initialStage }: OnboardingFlowProps = {}) {
   }, [initialStage]);
 
   // Keep connected-channels in sync once per mount + on window focus.
+  // Reddit is a no-binding always-on channel — every user always has it
+  // regardless of whether the channels table has a row, because dispatch
+  // is fully handoff (intent URLs / handoff page) and reads use
+  // RedditClient.appOnly(). We surface it to the rest of the flow as if
+  // it were "connected."
   useEffect(() => {
     const refresh = async () => {
       try {
         const res = await fetch('/api/channels');
-        if (!res.ok) return;
+        if (!res.ok) {
+          setConnectedChannels(['reddit']);
+          return;
+        }
         const body = (await res.json()) as {
           channels: Array<{ platform: string }>;
         };
         const platforms = body.channels
           .map((c) => c.platform)
-          .filter((p): p is 'x' | 'reddit' | 'email' =>
-            p === 'x' || p === 'reddit' || p === 'email',
-          );
-        setConnectedChannels(Array.from(new Set(platforms)));
+          .filter((p): p is 'x' | 'email' => p === 'x' || p === 'email');
+        setConnectedChannels(
+          Array.from(new Set<'x' | 'reddit' | 'email'>([...platforms, 'reddit'])),
+        );
       } catch {
-        /* ignore */
+        setConnectedChannels(['reddit']);
       }
     };
     void refresh();

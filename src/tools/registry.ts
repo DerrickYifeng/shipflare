@@ -3,6 +3,7 @@ import { redditSearchTool } from './RedditSearchTool/RedditSearchTool';
 import { redditPostTool } from './RedditPostTool/RedditPostTool';
 import { redditVerifyTool } from './RedditVerifyTool/RedditVerifyTool';
 import { redditSubmitPostTool } from './RedditSubmitPostTool/RedditSubmitPostTool';
+import { getSubredditRulesTool } from './GetSubredditRulesTool/GetSubredditRulesTool';
 import { xPostTool } from './XPostTool/XPostTool';
 import { xaiFindCustomersTool } from './XaiFindCustomersTool/XaiFindCustomersTool';
 import { persistQueueThreadsTool } from './PersistQueueThreadsTool/PersistQueueThreadsTool';
@@ -20,7 +21,9 @@ import { updatePlanItemTool } from './UpdatePlanItemTool/UpdatePlanItemTool';
 import { queryPlanItemsTool } from './QueryPlanItemsTool/QueryPlanItemsTool';
 import { queryStalledItemsTool } from './QueryStalledItemsTool/QueryStalledItemsTool';
 import { queryLastWeekCompletionsTool } from './QueryLastWeekCompletionsTool/QueryLastWeekCompletionsTool';
-import { queryRecentMilestonesTool } from './QueryRecentMilestonesTool/QueryRecentMilestonesTool';
+import { queryCodeChangesTool } from './QueryCodeChangesTool/QueryCodeChangesTool';
+import { webSearchTool } from './WebSearchTool/WebSearchTool';
+import { webFetchTool } from './WebFetchTool/WebFetchTool';
 import { queryRecentXPostsTool } from './QueryRecentXPostsTool/QueryRecentXPostsTool';
 import { queryMetricsTool } from './QueryMetricsTool/QueryMetricsTool';
 import { queryTeamStatusTool } from './QueryTeamStatusTool/QueryTeamStatusTool';
@@ -32,6 +35,7 @@ import { validateDraftTool } from './ValidateDraftTool/ValidateDraftTool';
 import { processRepliesBatchTool } from './ProcessRepliesBatchTool/ProcessRepliesBatchTool';
 import { processPostsBatchTool } from './ProcessPostsBatchTool/ProcessPostsBatchTool';
 import { findThreadsViaXaiTool } from './FindThreadsViaXaiTool/FindThreadsViaXaiTool';
+import { researchRedditChannelsTool } from './ResearchRedditChannelsTool/ResearchRedditChannelsTool';
 
 /**
  * Central tool registry for ShipFlare agents.
@@ -45,6 +49,12 @@ registry.register(redditSearchTool);
 registry.register(redditPostTool);
 registry.register(redditVerifyTool);
 registry.register(redditSubmitPostTool);
+// get_subreddit_rules — read-only public API (no OAuth needed). Drafting
+// skills call this BEFORE writing Reddit content to fetch sub-specific
+// rules ("no self-promotion", "no AI tools", etc.) and either flag the
+// draft or fold the rules verbatim into the prompt context. Failures
+// degrade to [] so drafting proceeds without rules rather than failing.
+registry.register(getSubredditRulesTool);
 
 // X tools
 registry.register(xPostTool);
@@ -69,7 +79,9 @@ registry.register(updatePlanItemTool);
 registry.register(queryPlanItemsTool);
 registry.register(queryStalledItemsTool);
 registry.register(queryLastWeekCompletionsTool);
-registry.register(queryRecentMilestonesTool);
+registry.register(queryCodeChangesTool);
+registry.register(webSearchTool);
+registry.register(webFetchTool);
 registry.register(queryRecentXPostsTool);
 registry.register(queryMetricsTool);
 registry.register(queryTeamStatusTool);
@@ -123,6 +135,14 @@ registry.register(processPostsBatchTool);
 // persist_queue_threads. Replaces the multi-step xAI loop prose
 // formerly inside discovery-agent AGENT.md.
 registry.register(findThreadsViaXaiTool);
+// research_reddit_channels — kickoff-time subreddit discovery. Wraps
+// the same `runRedditChannelResearch` helper the BullMQ worker uses,
+// so the synchronous (tool, via kickoff coordinator parallel spawn)
+// and queued (worker, via onboarding hook) paths share one code
+// path. Returns the active subreddit list inline so the coordinator
+// can immediately inject `params.subreddit` into Reddit content_post
+// plan_items in the same turn-chain.
+registry.register(researchRedditChannelsTool);
 
 export { registry };
 

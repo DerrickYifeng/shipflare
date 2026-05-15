@@ -28,6 +28,12 @@ import { dispatchLeadMessage } from '@/lib/team/dispatch-lead-message';
 import { createAutomationConversation } from '@/lib/team-conversation-helpers';
 import { currentWeekStart } from '@/lib/week-bounds';
 import { createLogger } from '@/lib/logger';
+import { derivePerWeekPosts } from '@/lib/strategic-path-helpers';
+import {
+  listActiveSubreddits,
+  type ActiveSubredditRow,
+} from '@/lib/db/repositories/product-reddit-channels';
+import type { StrategicPath } from '@/tools/schemas';
 
 const log = createLogger('lib:team-kickoff');
 
@@ -90,53 +96,79 @@ export async function ensureKickoffEnqueued(args: {
   }
 
   const channels = await getUserChannels(userId);
-  const primary = channels.includes('x') ? 'x' : channels[0] ?? 'x';
 
-  // Pre-compute the calendar anchor so coordinator can pass it verbatim
-  // to content-planner. Without `weekStart=` / `now=` in the goal the
-  // planner has to infer them from the model's clock and historically
-  // picked next Monday — leaving /today and /calendar empty until the
-  // following ISO week. See coordinator/AGENT.md `trigger: 'kickoff'`.
+  // Pre-compute the calendar anchor so the goal preamble can pass it
+  // verbatim to the coordinator. Without `weekStart=` / `now=` in the
+  // goal the coordinator infers them from the model's clock and
+  // historically picked next Monday — leaving /today and /calendar
+  // empty until the following ISO week.
   const kickoffNow = new Date();
   const kickoffWeekStart = currentWeekStart(kickoffNow).toISOString();
 
-  // Look up the active strategic path so content-planner can anchor its
-  // pillar selection. Optional — kickoff still fires if the path is
-  // missing (the planner will ask). The schema has only one path per
-  // user today, so a single SELECT with a generatedAt tiebreak picks
-  // the latest after any future replan.
+  // Look up the active strategic path so the goal preamble can carry
+  // week-1 post counts + per-channel reply budgets verbatim. Optional:
+  // kickoff still fires if the path is missing (degenerate case at
+  // launch — the goal degrades to "no plan to seed"). The schema has
+  // only one path per user today, so a single SELECT with a
+  // generatedAt tiebreak picks the latest after any future replan.
   const [activePath] = await db
-    .select({ id: strategicPaths.id })
+    .select({
+      id: strategicPaths.id,
+      thesisArc: strategicPaths.thesisArc,
+      channelMix: strategicPaths.channelMix,
+    })
     .from(strategicPaths)
     .where(eq(strategicPaths.userId, userId))
     .orderBy(strategicPaths.generatedAt)
     .limit(1);
   const pathId = activePath?.id ?? null;
 
-  // The kickoff playbook is in coordinator/AGENT.md (`trigger: 'kickoff'`).
-  // The goal text gives the coordinator just enough context to dispatch:
-  // calendar anchor for direct add_plan_item calls, social-media-manager
-  // for combined discovery + drafting, channel list for the skip-with-message
-  // branch. Detailed step ordering lives in the playbook so we can change
-  // it without redeploying API code.
-  const goal =
-    `First-visit kickoff for ${productRow.name}. ` +
-    (pathId ? `Strategic path pathId=${pathId}. ` : '') +
-    `weekStart=${kickoffWeekStart} now=${kickoffNow.toISOString()}. ` +
-    `Connected channels: ${channels.join(', ') || 'none'}. ` +
-    `Trigger: kickoff. ` +
-    `Follow your kickoff playbook end-to-end (plan → social-media-manager): ` +
-    `(1) Generate week-1 plan items directly with your add_plan_item tool — pass weekStart + now verbatim. ` +
-    `(2) Look up today's content_reply slot for the primary channel via query_plan_items (kind=content_reply, today's UTC scheduledAt) and read params.targetCount. ` +
-    `(3) Task({ subagent_type: 'social-media-manager', description: 'fill reply slot', prompt: 'Mode: discover-and-fill-slot\\nplanItemId: <uuid>\\ntargetCount: <slot.targetCount>' }) — the agent runs discovery + judging + drafting internally and returns one StructuredOutput. The description stays a short verb phrase (no UUID); the planItemId travels in the prompt body. ` +
-    `Skip steps 2-3 if no channels are connected.`;
+  // The available-subreddits list drives the round-robin assignment
+  // for Reddit content_post params.subreddit (Task 5's gate rejects
+  // rows without it). Skip the DB hit when Reddit isn't connected —
+  // there are no Reddit content_post slots to seed in that case.
+  const availableSubreddits: ActiveSubredditRow[] = channels.includes('reddit')
+    ? await listActiveSubreddits(productId)
+    : [];
+
+  // The goal preamble is the SOLE owner of kickoff dispatch logic
+  // (per coordinator/AGENT.md "Goal-driven dispatch"). We pre-compute
+  // the per-channel slot facts here — week-1 post counts via
+  // derivePerWeekPosts, and per-channel repliesPerDay budgets — so the
+  // coordinator can read concrete numbers off the goal instead of
+  // inferring or querying.
+  const goal = buildKickoffGoalText({
+    productName: productRow.name,
+    pathId,
+    weekStart: kickoffWeekStart,
+    now: kickoffNow.toISOString(),
+    channels,
+    week1Posts: activePath
+      ? derivePerWeekPosts(
+          activePath as Pick<StrategicPath, 'thesisArc' | 'channelMix'>,
+          0,
+        )
+      : null,
+    channelMix: (activePath?.channelMix ?? null) as Record<
+      string,
+      { repliesPerDay?: number | null } | null | undefined
+    > | null,
+    availableSubreddits,
+  });
 
   let conversationId: string;
   try {
     conversationId = await createAutomationConversation(teamId, 'kickoff');
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const cause =
+      err instanceof Error && err.cause
+        ? err.cause instanceof Error
+          ? err.cause.message
+          : String(err.cause)
+        : null;
     log.warn(
-      `createAutomationConversation failed for kickoff team=${teamId}: ${err instanceof Error ? err.message : String(err)}`,
+      `createAutomationConversation failed for kickoff team=${teamId}: ${message}${cause ? ` | cause: ${cause}` : ''}`,
     );
     return { fired: false, reason: 'enqueue_failed' };
   }
@@ -158,6 +190,9 @@ export async function ensureKickoffEnqueued(args: {
         goal,
         publicSummary,
         trigger: 'kickoff',
+        // B6: founder-initiated one-shot kickoff (signup auto-trigger
+        // or first-visit manual dispatch) → priority lane.
+        priority: 'priority',
       },
       db,
     );
@@ -166,9 +201,236 @@ export async function ensureKickoffEnqueued(args: {
     );
     return { fired: true, runId, conversationId };
   } catch (err) {
+    // Drizzle's Error.message renders only `Failed query: <SQL>\nparams: ...`
+    // and stashes the postgres-side reason on `err.cause`. Without surfacing
+    // the cause, every insert failure looks identical in the dev console
+    // (truncated SQL + params, no clue why). Fold both sides into the warn
+    // string so the next failure says e.g. `column "parent_tool_use_id" does
+    // not exist` instead of leaving the operator to guess.
+    const message = err instanceof Error ? err.message : String(err);
+    const cause =
+      err instanceof Error && err.cause
+        ? err.cause instanceof Error
+          ? err.cause.message
+          : String(err.cause)
+        : null;
     log.warn(
-      `dispatchLeadMessage failed for kickoff team=${teamId}: ${err instanceof Error ? err.message : String(err)}`,
+      `dispatchLeadMessage failed for kickoff team=${teamId}: ${message}${cause ? ` | cause: ${cause}` : ''}`,
     );
     return { fired: false, reason: 'enqueue_failed', conversationId };
   }
+}
+
+export interface KickoffGoalArgs {
+  productName: string;
+  pathId: string | null;
+  weekStart: string;
+  now: string;
+  channels: readonly string[];
+  /** Week-1 per-channel post counts; null when no strategic path. */
+  week1Posts: { x: number; reddit: number; email: number } | null;
+  /** Channel-mix object (read raw — passthrough lets `repliesPerDay` survive). */
+  channelMix: Record<
+    string,
+    { repliesPerDay?: number | null } | null | undefined
+  > | null;
+  /**
+   * Active (not disabled) Reddit subreddits for the product, ordered
+   * by rank ASC. Empty array when reddit isn't connected or the
+   * `reddit-channel-research` worker hasn't finished yet. Drives the
+   * round-robin assignment in the goal body — the coordinator picks
+   * `availableSubreddits[sortOrder % availableSubreddits.length]` for
+   * each Reddit content_post slot. The caller is the one place that
+   * constructs the args, so this is required (no optional) — a future
+   * caller forgetting it should be a compile error.
+   */
+  availableSubreddits: ReadonlyArray<{
+    subreddit: string;
+    rank: number;
+    fitScore: number | null;
+  }>;
+}
+
+/**
+ * Build the kickoff goal preamble. The coordinator reads this verbatim
+ * — every spawn directive, every plan-item directive, every channel ×
+ * mode pair lives here, not in AGENT.md. Adding a new channel = one
+ * branch in this function.
+ *
+ * The goal is structured in three steps:
+ *   1. Seed week-1 plan_items via add_plan_item (post + reply slots).
+ *   2. Spawn ONE Task per (channel × mode) where slots exist for today,
+ *      ALL IN THE SAME ASSISTANT TURN — engine accepts multiple tool_use
+ *      blocks per turn so 4 parallel spawns is one round-trip.
+ *   3. update_plan_item state='drafted' as <task-notification> arrives.
+ *
+ * Pairs with no slot are skipped silently — no spawn, no directive.
+ * Reddit-only setups emit 2 spawns; X+Reddit emit up to 4.
+ */
+export function buildKickoffGoalText(args: KickoffGoalArgs): string {
+  const { productName, pathId, weekStart, now, channels, week1Posts } = args;
+
+  // Pathological at kickoff: onboarding writes a path before /team mounts.
+  // Fall back to a minimal "no plan" goal so the coordinator just
+  // acknowledges and tells the founder what's missing.
+  if (!pathId || !week1Posts) {
+    return (
+      `First-visit kickoff for ${productName}. ` +
+      `weekStart=${weekStart} now=${now}. ` +
+      `Connected channels: ${channels.join(', ') || 'none'}. ` +
+      `Trigger: kickoff. ` +
+      `No active strategic path — acknowledge the founder and tell them ` +
+      `to finish onboarding so the team can seed their plan.`
+    );
+  }
+
+  // Per-channel reply budget. The strategic-path schema marks
+  // `repliesPerDay` as nullish; coerce to 0 when missing.
+  const repliesX = readRepliesPerDay(args.channelMix, 'x');
+  const repliesReddit = readRepliesPerDay(args.channelMix, 'reddit');
+
+  const xConnected = channels.includes('x');
+  const redditConnected = channels.includes('reddit');
+  const subs = args.availableSubreddits;
+  const redditPostCount = redditConnected ? week1Posts.reddit : 0;
+  const redditPostsBlocked =
+    redditConnected && redditPostCount > 0 && subs.length === 0;
+
+  // Build the spawn directives. Each (channel, mode) pair becomes one
+  // line in the goal IF the slot exists for today — pairs with zero
+  // budget are silently dropped so the coordinator doesn't spawn
+  // empty work. Reddit content_post spawn is additionally gated on
+  // the subreddit list being non-empty: AddPlanItemTool rejects Reddit
+  // content_post rows without params.subreddit (Task 5's gate), so an
+  // empty list means no draftable plan_items exist and the post-batch
+  // would crash with "no plan items found".
+  //
+  // When Reddit posts ARE requested but no subreddits are researched
+  // yet (`redditPostsBlocked`), we spawn a parallel research subagent
+  // in Step 2 alongside the reply / X-post drafts. Reddit content_post
+  // plan_items + post-batch spawn get deferred to Step 3a, which runs
+  // once the research <task-notification> returns.
+  // `channel:` is a structured prompt field — the description string
+  // ('fill x reply slot') is human-facing and easy for the agent to
+  // skim past. The agent has been documented (in
+  // social-media-manager/references/patterns-and-examples.md) to read
+  // this field for the discovery `platform` argument. Without it, an
+  // X-slot spawn was found in production calling
+  // find_threads_via_xai({ platform: 'reddit' }) — drafts landed under
+  // thread.platform='reddit' (Reddit slot overflowed by 8) while
+  // /briefing's X slot showed 0/8 drafted (2026-05-13 incident).
+  const spawns: string[] = [];
+  if (xConnected && repliesX > 0) {
+    spawns.push(
+      `- (x, reply): Task({ subagent_type: 'social-media-manager', description: 'fill x reply slot', prompt: 'Mode: discover-and-fill-slot\\nchannel: x\\nplanItemId: <today's x content_reply uuid>\\ntargetCount: ${repliesX}' })`,
+    );
+  }
+  if (redditConnected && repliesReddit > 0) {
+    spawns.push(
+      `- (reddit, reply): Task({ subagent_type: 'social-media-manager', description: 'fill reddit reply slot', prompt: 'Mode: discover-and-fill-slot\\nchannel: reddit\\nplanItemId: <today's reddit content_reply uuid>\\ntargetCount: ${repliesReddit}' })`,
+    );
+  }
+  if (xConnected && week1Posts.x > 0) {
+    spawns.push(
+      `- (x, post): Task({ subagent_type: 'social-media-manager', description: 'draft x post batch', prompt: 'Mode: post-batch\\nchannel: x\\nplanItemIds: <today's x content_post uuids>' })`,
+    );
+  }
+  if (redditConnected && week1Posts.reddit > 0 && subs.length > 0) {
+    spawns.push(
+      `- (reddit, post): Task({ subagent_type: 'social-media-manager', description: 'draft reddit post batch', prompt: 'Mode: post-batch\\nchannel: reddit\\nplanItemIds: <today's reddit content_post uuids>' })`,
+    );
+  }
+  // Reddit research deferred-spawn: fires in parallel with the reply /
+  // X-post drafts above. Once the research <task-notification> returns,
+  // Step 3a adds the Reddit content_post plan_items + dispatches the
+  // Reddit post-batch spawn.
+  if (redditPostsBlocked) {
+    spawns.push(
+      `- (reddit, research): Task({ subagent_type: 'social-media-manager', description: 'research reddit communities', prompt: 'Mode: research-reddit-channels' })`,
+    );
+  }
+
+  const channelsLine = channels.join(', ') || 'none';
+  const lines: string[] = [
+    `First-visit kickoff for ${productName}.`,
+    `Strategic path pathId=${pathId}.`,
+    `weekStart=${weekStart} now=${now}.`,
+    `Connected channels: ${channelsLine}.`,
+    `Trigger: kickoff.`,
+    ``,
+    `Week-1 budget (read off the strategic path):`,
+    `- x: ${week1Posts.x} posts/week, ${repliesX} replies/day`,
+    `- reddit: ${week1Posts.reddit} posts/week, ${repliesReddit} replies/day`,
+    ``,
+    `Step 1 — Seed week-1 plan_items via add_plan_item (one call per row).`,
+    `For each channel above with posts/week > 0: add that many content_post rows for week 1, distributed across this week's UTC days. Set dueDate (YYYY-MM-DD) to the day; sortOrder increments per row on that day (0, 1, 2…).`,
+    `For each channel with replies/day > 0: add one content_reply row per day for week 1 with params.targetCount = repliesPerDay. sortOrder = 0 for replies.`,
+    `Pass weekStart=${weekStart} verbatim. dueDate must be >= today's date.`,
+    ``,
+  ];
+
+  if (redditPostsBlocked) {
+    // Reddit research hasn't finished yet — AddPlanItemTool would
+    // reject every Reddit content_post we tried to insert. Defer
+    // Reddit content_post seeding to Step 3a, which runs once the
+    // (reddit, research) <task-notification> arrives. Replies and
+    // non-Reddit slots proceed normally in Steps 1 + 2.
+    lines.push(
+      `NOTE: Reddit content_post slots requested (${redditPostCount}/week) but no subreddits have been researched yet. In Step 1, SKIP add_plan_item calls for Reddit content_post — they need params.subreddit (which the gate enforces) and we don't have those yet. The (reddit, research) parallel spawn in Step 2 will return the top-3 subreddits; Step 3a then adds the Reddit content_post plan_items and dispatches the Reddit post-batch. Replies and non-Reddit channels proceed normally.`,
+      ``,
+    );
+  } else if (redditConnected && subs.length > 0) {
+    // Round-robin assignment over the researched subreddits. Names
+    // are stored WITHOUT the `r/` prefix throughout the system; the
+    // goal text restates that convention so the coordinator doesn't
+    // double-prefix.
+    lines.push(
+      `Available subreddits for reddit content_post (use these for params.subreddit, NO 'r/' prefix):`,
+      ...subs.map((s) =>
+        s.fitScore !== null
+          ? `  - ${s.subreddit} (fit ${s.fitScore.toFixed(2)})`
+          : `  - ${s.subreddit}`,
+      ),
+      `Rotate evenly: for each Reddit content_post row, set params.subreddit = availableSubreddits[sortOrder % availableSubreddits.length]. Use the bare subreddit name (e.g. "SaaS", not "r/SaaS").`,
+      ``,
+    );
+  }
+
+  if (spawns.length > 0) {
+    lines.push(
+      `Step 2 — Dispatch all of the following Task spawns IN A SINGLE ASSISTANT TURN (engine accepts multiple tool_use blocks per turn — parallelize). Reply slots use the planItemId you just added in step 1; post batches use the same-day content_post uuids:`,
+      ...spawns,
+      ``,
+      `Step 3 — As each <task-notification> arrives, call update_plan_item({ id: <touched uuid>, state: 'drafted' }) for the slot(s) that task drafted for. Don't wait for all to return before updating the first.`,
+    );
+    if (redditPostsBlocked) {
+      lines.push(
+        ``,
+        `Step 3a — When the (reddit, research) <task-notification> arrives:`,
+        `  - Parse the returned StructuredOutput; it carries \`subreddits: [{ subreddit, rank, fitScore }]\` (3 entries).`,
+        `  - For each Reddit content_post slot in week 1 (you skipped these in Step 1 because subreddits weren't known): call add_plan_item with params.subreddit = subreddits[sortOrder % subreddits.length].subreddit (bare name, NO 'r/' prefix). Distribute the ${redditPostCount} rows across this week's UTC days the same way you would have in Step 1.`,
+        `  - Then dispatch ONE Reddit post-batch spawn in the next turn:`,
+        `    Task({ subagent_type: 'social-media-manager', description: 'draft reddit post batch', prompt: 'Mode: post-batch\\nplanItemIds: <the uuids you just added>' })`,
+        `  - As that <task-notification> returns, update_plan_item state='drafted' on the touched rows (same rule as Step 3).`,
+      );
+    }
+  } else {
+    lines.push(
+      `Step 2 — No connected channels with active reply or post budget. Skip dispatch and tell the founder which channel they should connect to start drafting.`,
+    );
+  }
+
+  return lines.join('\n');
+}
+
+function readRepliesPerDay(
+  channelMix: KickoffGoalArgs['channelMix'],
+  ch: 'x' | 'reddit',
+): number {
+  if (!channelMix) return 0;
+  const entry = channelMix[ch];
+  if (!entry) return 0;
+  const v = entry.repliesPerDay;
+  if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) return 0;
+  return Math.floor(v);
 }

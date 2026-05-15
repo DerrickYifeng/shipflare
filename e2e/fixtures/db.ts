@@ -6,7 +6,6 @@ import * as schema from '../../src/lib/db/schema';
 import {
   makeThread,
   makeDraft,
-  makeHealthScore,
   makeActivityEvent,
   makeChannel,
   makeProduct,
@@ -80,12 +79,6 @@ export async function seedDrafts(
   return items;
 }
 
-export async function seedHealthScore(userId: string, score: number) {
-  const values = makeHealthScore(userId, score);
-  await db.insert(schema.healthScores).values(values);
-  return values;
-}
-
 export async function seedActivityEvents(userId: string, count: number) {
   const items = Array.from({ length: count }, (_, i) =>
     makeActivityEvent(userId, i),
@@ -96,10 +89,101 @@ export async function seedActivityEvents(userId: string, count: number) {
 
 export async function seedChannel(
   userId: string,
-  overrides: Partial<{ username: string }> = {},
+  overrides: Partial<{
+    username: string;
+    platform: 'reddit' | 'x';
+    oauthTokenEncrypted: string | null;
+    refreshTokenEncrypted: string | null;
+    tokenExpiresAt: Date | null;
+  }> = {},
 ) {
   const values = makeChannel(userId, overrides);
   await db.insert(schema.channels).values(values);
+  return values;
+}
+
+/**
+ * Seed a single thread with custom fields. Mirrors `makeThread` defaults
+ * but lets the test override title / community / url / author / external
+ * id / platform — used by the Reddit handoff E2E to point at a real-shape
+ * Reddit URL (`/r/<sub>/comments/<id>/...`).
+ */
+export async function seedThread(
+  userId: string,
+  overrides: Partial<{
+    id: string;
+    externalId: string;
+    platform: 'reddit' | 'x';
+    community: string;
+    title: string;
+    url: string;
+    body: string;
+    author: string;
+  }> = {},
+) {
+  const id = overrides.id ?? crypto.randomUUID();
+  const platform = overrides.platform ?? ('reddit' as const);
+  const community = overrides.community ?? 'webdev';
+  const externalId = overrides.externalId ?? `t3_${id.slice(0, 8)}`;
+  const values = {
+    id,
+    userId,
+    externalId,
+    platform,
+    community,
+    title: overrides.title ?? `Test thread ${id.slice(0, 6)}`,
+    url:
+      overrides.url ??
+      `https://www.reddit.com/r/${community}/comments/${externalId}/test`,
+    body: overrides.body ?? 'Test thread body.',
+    author: overrides.author ?? 'someone-else',
+    upvotes: 10,
+    commentCount: 3,
+    relevanceScore: 0.7,
+    discoveredAt: new Date(),
+  };
+  await db.insert(schema.threads).values(values);
+  return values;
+}
+
+/**
+ * Seed a single draft. Used by the Reddit handoff E2E to seed both reply
+ * and original_post drafts with explicit body / title / status fields.
+ */
+export async function seedDraft(
+  userId: string,
+  threadId: string,
+  overrides: Partial<{
+    id: string;
+    status:
+      | 'pending'
+      | 'approved'
+      | 'skipped'
+      | 'posted'
+      | 'failed'
+      | 'flagged'
+      | 'needs_revision'
+      | 'handed_off';
+    draftType: 'reply' | 'original_post';
+    replyBody: string;
+    postTitle: string;
+    confidenceScore: number;
+  }> = {},
+) {
+  const id = overrides.id ?? crypto.randomUUID();
+  const values = {
+    id,
+    userId,
+    threadId,
+    status: overrides.status ?? ('pending' as const),
+    draftType: overrides.draftType ?? 'reply',
+    postTitle: overrides.postTitle ?? null,
+    replyBody: overrides.replyBody ?? 'Test reply body.',
+    confidenceScore: overrides.confidenceScore ?? 0.75,
+    whyItWorks: 'Test rationale.',
+    ftcDisclosure: 'Disclosure: I built this.',
+  };
+  await db.insert(schema.drafts).values(values);
   return values;
 }
 

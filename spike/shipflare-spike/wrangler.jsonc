@@ -1,0 +1,71 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "shipflare-spike",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-05-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true, "head_sampling_rate": 1 },
+
+  // TODO: re-enable in subsequent tasks as DO classes / workflows are added.
+
+  "durable_objects": {
+    "bindings": [
+      { "name": "MCP_EXAMPLE", "class_name": "McpServerExample" },
+      { "name": "AGENT_EXAMPLE", "class_name": "AgentExample" },
+      { "name": "SQLITE_DO", "class_name": "SqliteDO" }
+    ]
+  },
+  // Wrangler migration tags are append-only. Adding a class to "v1" after it's
+  // already been applied to a local .wrangler state won't take effect. New SQLite
+  // classes added in later tasks must use a NEW tag (e.g. "v2"), not modify "v1".
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["McpServerExample", "AgentExample"] },
+    { "tag": "v2", "new_sqlite_classes": ["SqliteDO"] }
+  ],
+
+  // Spike #4: Better Auth + Drizzle + D1.
+  //
+  // The original Phase 0 plan called for Hyperdrive + Neon Postgres. We
+  // pivoted to D1 to eliminate the external-service dependency; spec
+  // (docs/superpowers/specs/2026-05-13-cloudflare-do-migration-design.md
+  // decision D6) is on the Task 11 sweep list.
+  //
+  // `database_id` is a placeholder UUID — wrangler / vitest-pool-workers
+  // only require `binding` + `database_name` for local (miniflare-backed)
+  // operation. For remote provisioning (`wrangler dev --remote` or
+  // production deploy) replace this with the real UUID from
+  // `wrangler d1 create shipflare-spike`.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "shipflare-spike",
+      "database_id": "00000000-0000-0000-0000-000000000001", // PLACEHOLDER — replace with `wrangler d1 create shipflare-spike` UUID before --remote deploy
+      "migrations_dir": "./migrations"
+    }
+  ],
+  "workflows": [
+    {
+      "binding": "EX_WORKFLOW",
+      "name": "example-workflow",
+      "class_name": "ExampleWorkflow"
+    }
+  ],
+  // Spike #8 — Service Binding. `service` must match the callee's
+  // `wrangler.jsonc`.name; wrangler dev discovers the local callee
+  // automatically when both workers run side-by-side. vitest-pool-workers
+  // resolves this binding via an auxiliary worker registered in
+  // `vitest.config.mts` (`cloudflareTest({ miniflare: { workers: [...] } })`);
+  // without that registration miniflare refuses to start.
+  "services": [
+    { "binding": "CALLEE", "service": "shipflare-spike-callee" }
+  ],
+  // Spike #9 — Cron fan-out. `triggers.crons` causes Cloudflare's scheduler
+  // to invoke `scheduled()` on this Worker at the cron times listed. The
+  // every-minute cadence below is for the spike only; Phase 1's inbound-
+  // sweep cron will be hourly. In `wrangler dev` use `--test-scheduled`
+  // and curl `http://localhost:8787/__scheduled?cron=*/1+*+*+*+*` to fire
+  // the handler synthetically. In vitest, use `SELF.scheduled(ctl)` with
+  // `createScheduledController({ scheduledTime, cron })` from
+  // `cloudflare:test`.
+  "triggers": { "crons": ["*/1 * * * *"] }
+}

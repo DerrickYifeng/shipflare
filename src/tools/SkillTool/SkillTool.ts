@@ -123,12 +123,11 @@ export const skillTool: ToolDefinition<SkillToolInput, SkillToolOutput> = buildT
       onEventFn = undefined;
     }
 
-    // Task 1 (2026-05-03 plan): wrap the forwarded onEvent with
-    // spawnMeta so child events attribute to the spawned fork specialist
-    // instead of the lead. Mirrors AgentTool.ts (lines 580-603); the
-    // only behavioral difference is `parentTaskId: null` — skills don't
-    // allocate a `team_tasks` row, so the worker persists only
-    // parent_tool_use_id + agent_name in metadata for fork-skill events.
+    // Wrap the forwarded onEvent with spawnMeta so child events attribute
+    // to the spawned fork specialist instead of the lead. Mirrors
+    // AgentTool's wiring — fork-skills carry parent_tool_use_id +
+    // agent_name in metadata so the UI's delegation card can nest by
+    // tool_use_id.
     //
     // resolveSpecialistMemberId may return null when the ctx isn't
     // team-scoped (CLI / tests / non-team callers); the wrap still
@@ -151,7 +150,6 @@ export const skillTool: ToolDefinition<SkillToolInput, SkillToolOutput> = buildT
         parentToolUseId = '';
       }
       const spawnMeta: StreamEventSpawnMeta = {
-        parentTaskId: null,
         parentToolUseId,
         fromMemberId: specialistMemberId,
         agentName: subAgentDef.name,

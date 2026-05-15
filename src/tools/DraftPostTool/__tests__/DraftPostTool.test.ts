@@ -45,7 +45,8 @@ interface PlanItemRow {
   userAction: string;
   phase: string;
   channel: string | null;
-  scheduledAt: Date;
+  dueDate: Date;
+  sortOrder: number;
   skillName: string | null;
   params: unknown;
   output: unknown;
@@ -80,7 +81,8 @@ function seedHappyPath(store: InMemoryStore): { planItemId: string } {
       userAction: 'approve',
       phase: 'foundation',
       channel: 'x',
-      scheduledAt: new Date('2026-04-22T09:00:00Z'),
+      dueDate: new Date('2026-04-22'),
+      sortOrder: 0,
       skillName: null,
       params: { angle: 'claim', topic: 'first plan' },
       output: null,

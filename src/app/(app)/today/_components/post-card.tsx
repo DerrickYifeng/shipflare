@@ -20,74 +20,42 @@ import { Toggle } from '@/components/ui/toggle';
 import { PLATFORMS } from '@/lib/platform-config';
 import type { TodoItem } from '@/hooks/use-today';
 import { PlatformGlyph } from './platform-glyph';
+import { SubredditPicker } from './subreddit-picker';
 
 interface PostCardProps {
   item: TodoItem;
   onApprove: (id: string) => void;
-  /** Re-enqueue an already-queued draft with delayMs=0. */
-  onPostNow?: (id: string) => void;
   onSkip: (id: string) => void;
   onEdit: (id: string, body: string) => void;
-  onReschedule?: (id: string, scheduledFor: string) => void;
   isActive?: boolean;
   forceEditing?: boolean;
   onEditDone?: () => void;
-}
-
-/**
- * Format a delay window into a terse, mono-friendly label.
- * "Posting now" / "Posting in 2m" / "Posting at 3:14 PM"
- */
-function formatQueuedEta(delayMs: number | undefined): string {
-  if (delayMs === undefined || delayMs <= 30_000) return 'Posting now';
-  const minutes = Math.round(delayMs / 60_000);
-  if (minutes < 60) return `Posting in ${minutes}m`;
-  const fireAt = new Date(Date.now() + delayMs);
-  return `Posting at ${fireAt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}`;
+  /**
+   * Called after an inline subreddit picker successfully patches the
+   * plan_item. The parent should revalidate the today feed so the
+   * picker disappears and the Post button takes its place. Optional —
+   * non-Reddit cards never trigger it.
+   */
+  onSubredditApplied?: () => void;
 }
 
 function platformDisplay(platform: string): string {
   return PLATFORMS[platform]?.displayName ?? platform;
 }
 
-function formatScheduledTime(iso: string | null): string | null {
-  if (!iso) return null;
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toLocaleTimeString('en-US', {
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
-  });
-}
-
-function formatLocalTime(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleString(undefined, {
-    weekday: 'short',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
-}
 
 export function PostCard({
   item,
   onApprove,
-  onPostNow,
   onSkip,
   onEdit,
-  onReschedule,
   isActive = false,
   forceEditing = false,
   onEditDone,
+  onSubredditApplied,
 }: PostCardProps) {
   const [localEditing, setLocalEditing] = useState(false);
   const [editBody, setEditBody] = useState(item.draftBody ?? '');
-  // Tracks whether the user has already opened the X compose tab once.
-  // Drives the button label swap from "Schedule" → "Post now". Local-only
-  // so it resets on a hard refresh — the card itself stays in the feed.
-  const [hasOpenedX, setHasOpenedX] = useState(false);
   const rootRef = useRef<HTMLElement>(null);
 
   const isEditing = localEditing || forceEditing;
@@ -101,8 +69,18 @@ export function PostCard({
   }, [isActive]);
 
   const isOptimistic = item.status !== 'pending';
-  const scheduledAt = formatScheduledTime(item.calendarScheduledAt);
   const contentType = item.calendarContentType ?? 'Original';
+
+  // Reddit content_post safety net: legacy plan_items (or any future
+  // bug in the subreddit-research pipeline) could land here without
+  // `params.subreddit`. dispatchApprove would throw on POST in that
+  // case; instead we swap the Post button for an inline subreddit
+  // picker so the founder can choose one without leaving Today.
+  const subredditOnItem = (item.params as { subreddit?: unknown } | null | undefined)?.subreddit;
+  const needsSubreddit =
+    item.platform === PLATFORMS.reddit.id &&
+    item.calendarContentType === 'content_post' &&
+    (typeof subredditOnItem !== 'string' || subredditOnItem.length === 0);
 
   const handleSaveEdit = () => {
     onEdit(item.id, editBody);
@@ -140,9 +118,19 @@ export function PostCard({
     transition: 'box-shadow var(--sf-dur-base) var(--sf-ease-swift)',
   };
 
+  const subredditOnItemString =
+    typeof subredditOnItem === 'string' && subredditOnItem.length > 0
+      ? subredditOnItem
+      : null;
+
   return (
-    <article ref={rootRef} style={articleStyle} aria-busy={isOptimistic || undefined}>
-      {/* Header: glyph + type + scheduled pill */}
+    <article
+      ref={rootRef}
+      style={articleStyle}
+      aria-busy={isOptimistic || undefined}
+      data-testid="post-card"
+      data-channel={item.platform}
+    >
       <header
         style={{
           display: 'flex',
@@ -183,31 +171,10 @@ export function PostCard({
               }}
             >
               Original · {platformDisplay(item.platform)}
+              {subredditOnItemString ? ` · r/${subredditOnItemString}` : ''}
             </span>
           </div>
         </div>
-        {scheduledAt ? (
-          <span
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: '4px 10px',
-              borderRadius: 'var(--sf-radius-pill)',
-              fontSize: 'var(--sf-text-xs)',
-              fontWeight: 600,
-              fontFamily: 'var(--sf-font-mono)',
-              letterSpacing: 'var(--sf-track-mono)',
-              background: 'var(--sf-accent-light)',
-              color: 'var(--sf-link)',
-              whiteSpace: 'nowrap',
-              flexShrink: 0,
-            }}
-          >
-            <ClockGlyph />
-            {scheduledAt}
-          </span>
-        ) : null}
       </header>
 
       {/* Body — the star of the card */}
@@ -238,9 +205,6 @@ export function PostCard({
             }}
           >
             Drafted by your writer
-            {item.scheduledFor
-              ? ` · scheduled ${formatLocalTime(item.scheduledFor)}`
-              : ''}
           </div>
         ) : null}
 
@@ -318,7 +282,6 @@ export function PostCard({
         </div>
       ) : null}
 
-      {/* Footer: counter + actions */}
       <div
         style={{
           display: 'flex',
@@ -329,106 +292,44 @@ export function PostCard({
           background: 'var(--sf-bg-tertiary)',
         }}
       >
-        {!isEditing ? (() => {
-          // Three render modes by lifecycle:
-          //   X handoff     — has xIntentUrl: open X compose pre-filled.
-          //                   Card stays in feed; user clicks Skip when done.
-          //                   Button toggles "Schedule" → "Post now" after
-          //                   the first click.
-          //   Queued (API)  — Reddit (or future API platforms) where the
-          //                   server queued via BullMQ; show "Post now" + ETA.
-          //   Default       — pre-click; show "Schedule" / "Approve".
-          const isInFlight = item.status === 'pending_approval';
-          const isQueuedApi =
-            item.status === 'queued' ||
-            (item.planState === 'approved' && !!item.draftBody);
-
-          if (item.xIntentUrl) {
-            const intentUrl = item.xIntentUrl;
-            // First click ("Schedule") opens X compose pre-filled so the user
-            // can preview the post in X. Second click ("Post now") fires the
-            // X API directly via /api/today/:id/post-now. Two-step to give the
-            // user a visual safety check before publishing.
-            const handleClick = () => {
-              if (hasOpenedX) {
-                onPostNow?.(item.id);
-              } else {
-                if (typeof window !== 'undefined') {
-                  window.open(intentUrl, '_blank', 'noopener,noreferrer');
-                }
-                setHasOpenedX(true);
-              }
-            };
-            return (
-              <>
-                <Button
-                  size="sm"
-                  disabled={!item.draftBody}
-                  onClick={handleClick}
-                >
-                  {hasOpenedX ? 'Post now' : 'Schedule'}
-                </Button>
-                {item.draftBody ? (
-                  <TextAction onClick={() => setLocalEditing(true)}>Edit</TextAction>
-                ) : null}
-                <TextAction onClick={() => onSkip(item.id)}>Skip</TextAction>
-              </>
-            );
-          }
-
-          if (isQueuedApi && onPostNow) {
-            return (
-              <>
-                <Button size="sm" onClick={() => onPostNow(item.id)}>
-                  Post now
-                </Button>
-                <span
-                  className="sf-mono"
-                  style={{
-                    fontSize: 'var(--sf-text-xs)',
-                    color: 'var(--sf-fg-3)',
-                    letterSpacing: 'var(--sf-track-mono)',
-                    marginLeft: 4,
-                  }}
-                >
-                  {formatQueuedEta(item.queuedDelayMs)}
-                </span>
-                <TextAction onClick={() => onSkip(item.id)}>Skip</TextAction>
-              </>
-            );
-          }
-
-          return (
+        {!isEditing ? (
+          item.status === 'queued' ? (
+            <span
+              className="sf-mono"
+              style={{
+                fontSize: 'var(--sf-text-xs)',
+                fontWeight: 600,
+                color: 'var(--sf-success)',
+                letterSpacing: 'var(--sf-track-mono)',
+                textTransform: 'uppercase',
+                padding: '6px 10px',
+              }}
+            >
+              Posted ✓
+            </span>
+          ) : needsSubreddit ? (
+            <SubredditPicker
+              planItemId={item.id}
+              onApplied={() => onSubredditApplied?.()}
+              onSkip={() => onSkip(item.id)}
+              TextAction={TextAction}
+            />
+          ) : (
             <>
               <Button
                 size="sm"
                 onClick={() => onApprove(item.id)}
-                disabled={isInFlight}
+                disabled={item.status === 'pending_approval' || !item.draftBody}
               >
-                {isInFlight
-                  ? 'Scheduling…'
-                  : item.draftBody
-                  ? 'Schedule'
-                  : 'Approve'}
+                {item.status === 'pending_approval' ? 'Posting…' : 'Post'}
               </Button>
               {item.draftBody ? (
                 <TextAction onClick={() => setLocalEditing(true)}>Edit</TextAction>
               ) : null}
               <TextAction onClick={() => onSkip(item.id)}>Skip</TextAction>
-              {item.source === 'calendar' && onReschedule ? (
-                <TextAction
-                  onClick={() => {
-                    const next = new Date();
-                    next.setDate(next.getDate() + 1);
-                    onReschedule(item.id, next.toISOString());
-                  }}
-                >
-                  Tomorrow
-                </TextAction>
-              ) : null}
             </>
-          );
-        })() : (
+          )
+        ) : (
           <>
             <Button size="sm" onClick={handleSaveEdit}>
               Save
@@ -461,21 +362,6 @@ function capitalize(s: string): string {
   return s[0].toUpperCase() + s.slice(1);
 }
 
-/* ── Clock glyph ──────────────────────────────────────────────────── */
-
-function ClockGlyph() {
-  return (
-    <svg width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-      <circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeWidth="1.25" />
-      <path
-        d="M6 3.5V6l1.5 1.5"
-        stroke="currentColor"
-        strokeWidth="1.25"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
 
 /* ── TextAction mirrors the ReplyCard one (kept local to avoid cycle) ── */
 

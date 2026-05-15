@@ -39,9 +39,36 @@ const baseLog = createLogger('api:today:edit');
 const MAX_BODY = 50_000; // cap as guard against pathological payloads;
                          // platform-specific caps are enforced at post time.
 
-const editPayloadSchema = z.object({
-  body: z.string().min(1).max(MAX_BODY),
-});
+/**
+ * Reddit subreddit name regex: 3-21 chars, letters / digits / underscore.
+ * Mirrors the server's own subreddit-name rules in
+ * `/api/reddit-channels` so the subreddit picker on the post card and
+ * this endpoint agree on what's valid.
+ */
+const SUBREDDIT_REGEX = /^[A-Za-z0-9_]{3,21}$/;
+
+const paramsPatchSchema = z
+  .object({
+    subreddit: z.string().regex(SUBREDDIT_REGEX).optional(),
+  })
+  .strict()
+  // `{ params: {} }` would otherwise pass the outer refine and trigger
+  // a no-op UPDATE (touches updatedAt for nothing). Require at least
+  // one known key so writes are always meaningful.
+  .refine(
+    (p) => Object.keys(p).length > 0,
+    'params must include at least one key',
+  );
+
+const editPayloadSchema = z
+  .object({
+    body: z.string().min(1).max(MAX_BODY).optional(),
+    params: paramsPatchSchema.optional(),
+  })
+  .refine(
+    (d) => typeof d.body === 'string' || d.params !== undefined,
+    'at least one of body or params must be set',
+  );
 
 // State sets used for the edit gate. Listed inline so they read at the
 // call site without a hop into shared state-machine config.
@@ -86,13 +113,22 @@ export async function PATCH(
       { status: 400, headers: { 'x-trace-id': traceId } },
     );
   }
-  const trimmedBody = bodyParse.data.body.trim();
-  if (trimmedBody.length === 0) {
-    return NextResponse.json(
-      { error: 'invalid_body' },
-      { status: 400, headers: { 'x-trace-id': traceId } },
-    );
+  // Normalize the optional fields up-front so the rest of the handler
+  // doesn't have to re-check shape. `bodyText` is only used when the
+  // patch includes a body; empty/whitespace-only bodies still 400 here.
+  const rawBody = bodyParse.data.body;
+  let bodyText: string | null = null;
+  if (typeof rawBody === 'string') {
+    const trimmed = rawBody.trim();
+    if (trimmed.length === 0) {
+      return NextResponse.json(
+        { error: 'invalid_body' },
+        { status: 400, headers: { 'x-trace-id': traceId } },
+      );
+    }
+    bodyText = trimmed;
   }
+  const paramsPatch = bodyParse.data.params;
 
   // Plan-item path first — original posts (content_post) live here, body
   // in output.draft_body. The findOwned* helper scopes to this user, so a
@@ -106,16 +142,36 @@ export async function PATCH(
         { status: 409, headers: { 'x-trace-id': traceId } },
       );
     }
-    // jsonb_set on a missing key inserts it; coalesce defends against
-    // rows where output is NULL (legacy / partially-written rows).
-    await db
-      .update(planItems)
-      .set({
-        output: sql`jsonb_set(coalesce(${planItems.output}, '{}'::jsonb), '{draft_body}', to_jsonb(${trimmedBody}::text))`,
-        updatedAt: sql`now()`,
-      })
-      .where(eq(planItems.id, planRow.id));
-    log.info(`plan_item ${planRow.id} body edited (${trimmedBody.length} chars)`);
+    // Body update: jsonb_set on a missing key inserts it; coalesce
+    // defends against rows where output is NULL (legacy / partially-
+    // written rows).
+    if (bodyText !== null) {
+      await db
+        .update(planItems)
+        .set({
+          output: sql`jsonb_set(coalesce(${planItems.output}, '{}'::jsonb), '{draft_body}', to_jsonb(${bodyText}::text))`,
+          updatedAt: sql`now()`,
+        })
+        .where(eq(planItems.id, planRow.id));
+      log.info(`plan_item ${planRow.id} body edited (${bodyText.length} chars)`);
+    }
+    // Params update: merge onto the existing params jsonb so we don't
+    // clobber sibling keys (e.g. `targetCount`, `templateId`). The
+    // round-trip through findOwnedPlanItem already validated ownership;
+    // we re-read params from there rather than running another query.
+    if (paramsPatch !== undefined) {
+      const nextParams: Record<string, unknown> = {
+        ...(planRow.params ?? {}),
+        ...paramsPatch,
+      };
+      await db
+        .update(planItems)
+        .set({ params: nextParams, updatedAt: sql`now()` })
+        .where(eq(planItems.id, planRow.id));
+      log.info(
+        `plan_item ${planRow.id} params edited (keys: ${Object.keys(paramsPatch).join(',')})`,
+      );
+    }
     return NextResponse.json(
       { success: true, source: 'plan_item' },
       { headers: { 'x-trace-id': traceId } },
@@ -146,12 +202,30 @@ export async function PATCH(
       { status: 409, headers: { 'x-trace-id': traceId } },
     );
   }
+  // The `drafts` table has no `params` column — params patches only
+  // apply to plan_items. Reject up-front rather than silently dropping
+  // the patch on the floor.
+  if (paramsPatch !== undefined) {
+    return NextResponse.json(
+      { error: 'params_not_supported_on_draft' },
+      { status: 400, headers: { 'x-trace-id': traceId } },
+    );
+  }
+  // `bodyText` is guaranteed non-null here: the editPayloadSchema refine
+  // requires at least one of body/params, paramsPatch is undefined on
+  // this branch, so bodyText must be set.
+  if (bodyText === null) {
+    return NextResponse.json(
+      { error: 'invalid_body' },
+      { status: 400, headers: { 'x-trace-id': traceId } },
+    );
+  }
 
   await db
     .update(drafts)
-    .set({ replyBody: trimmedBody, updatedAt: new Date() })
+    .set({ replyBody: bodyText, updatedAt: new Date() })
     .where(eq(drafts.id, draft.id));
-  log.info(`draft ${draft.id} replyBody edited (${trimmedBody.length} chars)`);
+  log.info(`draft ${draft.id} replyBody edited (${bodyText.length} chars)`);
   return NextResponse.json(
     { success: true, source: 'draft' },
     { headers: { 'x-trace-id': traceId } },

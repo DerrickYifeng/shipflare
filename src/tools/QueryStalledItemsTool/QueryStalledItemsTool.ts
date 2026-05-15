@@ -1,12 +1,12 @@
-// query_stalled_items — list plan_items whose scheduledAt has passed but
+// query_stalled_items — list plan_items whose dueDate has passed but
 // whose state is still 'planned' or 'drafted'. Maps to the content-planner's
 // "stalled work" signal — items the founder slipped past without action.
 //
 // Returns structured rows with a derived `stalledReason`:
-//   'overdue_unplanned' — scheduledAt < now AND state = 'planned'
-//   'overdue_drafted'   — scheduledAt < now AND state = 'drafted'
+//   'overdue_unplanned' — dueDate < today AND state = 'planned'
+//   'overdue_drafted'   — dueDate < today AND state = 'drafted'
 //
-// NOTE: The stale-sweeper cron marks rows `stale` after 24h past scheduledAt
+// NOTE: The stale-sweeper cron marks rows `stale` after 24h past dueDate
 // (see src/workers/processors/stale-sweeper.ts). This tool returns items in
 // the 0-24h window — still actionable, not yet swept. Once swept they move
 // to state='stale' and no longer qualify.
@@ -20,10 +20,17 @@ import { readDomainDeps } from '@/tools/context-helpers';
 
 export const QUERY_STALLED_ITEMS_TOOL_NAME = 'query_stalled_items';
 
+function todayDateOnly(d: Date): Date {
+  const out = new Date(d);
+  out.setUTCHours(0, 0, 0, 0);
+  return out;
+}
+
 export interface StalledItemRow {
   id: string;
   title: string;
-  scheduledAt: string;
+  dueDate: string;
+  sortOrder: number;
   stalledReason: 'overdue_unplanned' | 'overdue_drafted';
 }
 
@@ -33,10 +40,9 @@ export const queryStalledItemsTool: ToolDefinition<
 > = buildTool({
   name: QUERY_STALLED_ITEMS_TOOL_NAME,
   description:
-    'List plan_items whose scheduledAt has passed but are still in a ' +
+    'List plan_items whose dueDate has passed but are still in a ' +
     'pre-execution state (planned or drafted). Use this to surface work ' +
-    'the founder missed and decide whether to reschedule, supersede, or ' +
-    'drop.',
+    'the founder missed and decide whether to supersede or drop.',
   inputSchema: z.object({}).strict(),
   isConcurrencySafe: true,
   isReadOnly: true,
@@ -48,7 +54,8 @@ export const queryStalledItemsTool: ToolDefinition<
       .select({
         id: planItems.id,
         title: planItems.title,
-        scheduledAt: planItems.scheduledAt,
+        dueDate: planItems.dueDate,
+        sortOrder: planItems.sortOrder,
         state: planItems.state,
       })
       .from(planItems)
@@ -56,7 +63,7 @@ export const queryStalledItemsTool: ToolDefinition<
         and(
           eq(planItems.userId, userId),
           eq(planItems.productId, productId),
-          lt(planItems.scheduledAt, now),
+          lt(planItems.dueDate, todayDateOnly(now)),
           inArray(planItems.state, ['planned', 'drafted'] as never[]),
         ),
       )
@@ -65,10 +72,11 @@ export const queryStalledItemsTool: ToolDefinition<
     return rows.map((r) => ({
       id: r.id,
       title: r.title,
-      scheduledAt:
-        r.scheduledAt instanceof Date
-          ? r.scheduledAt.toISOString()
-          : String(r.scheduledAt),
+      dueDate:
+        r.dueDate instanceof Date
+          ? r.dueDate.toISOString().slice(0, 10)
+          : String(r.dueDate),
+      sortOrder: r.sortOrder,
       stalledReason:
         r.state === 'drafted' ? 'overdue_drafted' : 'overdue_unplanned',
     }));

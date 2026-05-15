@@ -60,8 +60,8 @@ export async function supersedePlanItems(
 
   const conditions = [
     eq(planItems.userId, userId),
-    gte(planItems.scheduledAt, windowStart),
-    lt(planItems.scheduledAt, windowEnd),
+    gte(planItems.dueDate, windowStart),
+    lt(planItems.dueDate, windowEnd),
     inArray(planItems.state, [...PRE_APPROVAL_STATES]),
     ne(planItems.userAction, 'manual'),
   ];
@@ -258,6 +258,9 @@ export async function runTacticalReplan(
         conversationId: replanConvId,
         goal,
         trigger: 'weekly',
+        // B6: manual replan (POST /api/plan/replan) → priority lane
+        // (founder pressed the button); cron Monday replan → backfill.
+        priority: trigger === 'manual' ? 'priority' : 'backfill',
       },
       db,
     );

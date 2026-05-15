@@ -2,8 +2,7 @@ import { defineConfig } from 'vitest/config';
 import { resolve } from 'path';
 
 /**
- * Vitest 4 removed `environmentMatchGlobs` in favour of per-file
- * `// @vitest-environment happy-dom` directives (or projects). Hook and
+ * Vitest config. The repo standardises on the `node` environment;
  * component tests should add that directive at the top of the file; the
  * rest of the suite runs in `node`.
  */

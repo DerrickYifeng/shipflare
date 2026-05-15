@@ -4,16 +4,13 @@ export {
   type AllowedEmail,
   type NewAllowedEmail,
 } from './allowed-emails';
-export { products } from './products';
-export { channels, threads } from './channels';
 export {
-  drafts,
-  posts,
-  healthScores,
-  activityEvents,
-  draftStatusEnum,
-  postStatusEnum,
-} from './drafts';
+  productRedditChannels,
+  type ProductRedditChannel,
+  type NewProductRedditChannel,
+} from './product-reddit-channels';
+export { channels, threads, channelPosts } from './channels';
+export { channelScores, moduleScores } from './growth';
 export { agentMemories, agentMemoryLogs } from './memories';
 export { codeSnapshots } from './code-snapshots';
 export {
@@ -42,36 +39,11 @@ export {
   type NewThreadFeedback,
 } from './pipeline-events';
 export {
-  strategicPaths,
-  launchPhaseEnum,
-} from './strategic-paths';
-export {
   plans,
   planTriggerEnum,
 } from './plans';
 export {
-  planItems,
-  planItemKindEnum,
-  planItemStateEnum,
-  planItemUserActionEnum,
-} from './plan-items';
-export {
-  teams,
-  teamMembers,
-  teamConversations,
-  teamMessages,
-  teamTasks,
-  agentRuns,
-  type Team,
-  type NewTeam,
-  type TeamMember,
-  type NewTeamMember,
-  type TeamConversation,
-  type NewTeamConversation,
-  type TeamMessage,
-  type NewTeamMessage,
-  type TeamTask,
-  type NewTeamTask,
-  type AgentRun,
-  type NewAgentRun,
-} from './team';
+  waitlistSignups,
+  type WaitlistSignup,
+  type NewWaitlistSignup,
+} from './waitlist-signups';

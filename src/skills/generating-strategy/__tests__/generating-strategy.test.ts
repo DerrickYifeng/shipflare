@@ -35,19 +35,9 @@ describe('generating-strategy schema', () => {
       channels: ['x', 'reddit'],
       launchDate: '2026-06-01',
       launchedAt: null,
-      recentMilestones: [
-        {
-          title: 'shipped v1',
-          summary: 'first cut',
-          source: 'release',
-          atISO: '2026-04-30',
-        },
-      ],
-      voiceProfile: null,
       today: '2026-05-01',
       weekStart: '2026-04-27',
     });
-    expect(parsed.recentMilestones).toHaveLength(1);
     expect(parsed.channels).toEqual(['x', 'reddit']);
   });
 
@@ -109,8 +99,9 @@ describe('generating-strategy skill loader', () => {
   it('exposes the expected allowed-tools', async () => {
     const skill = await loadSkill(SKILL_DIR);
     expect(skill!.allowedTools).toContain('write_strategic_path');
-    expect(skill!.allowedTools).toContain('query_recent_milestones');
     expect(skill!.allowedTools).toContain('query_strategic_path');
+    expect(skill!.allowedTools).toContain('web_search');
+    expect(skill!.allowedTools).toContain('web_fetch');
   });
 
   it('produces a body that mentions the strategic-path workflow', async () => {

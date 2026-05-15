@@ -49,20 +49,16 @@ function dayBounds(now: Date): { start: Date; end: Date } {
 
 /**
  * Priority bucket the UI uses to color the card + sort the rail. We derive
- * it from `scheduledAt` relative to now:
- *   - already past → time_sensitive (overdue, user should act)
- *   - within today → time_sensitive
- *   - tomorrow+   → scheduled
- * The `optional` bucket isn't emitted yet — it's reserved for plan items
- * with userAction='auto' that the user can dismiss but isn't expected to
- * approve; we'll plumb that through when the auto-execute path ships.
+ * it from `dueDate` relative to today:
+ *   - today or past → time_sensitive (due now, user should act)
+ *   - future        → scheduled
  */
 function derivePriority(
-  scheduledAt: Date,
+  dueDate: Date,
   now: Date,
 ): 'time_sensitive' | 'scheduled' | 'optional' {
   const { end } = dayBounds(now);
-  if (scheduledAt.getTime() < end.getTime()) return 'time_sensitive';
+  if (dueDate.getTime() < end.getTime()) return 'time_sensitive';
   return 'scheduled';
 }
 
@@ -97,7 +93,6 @@ interface TodoItemRow {
   community: string | null;
   externalUrl: string | null;
   confidence: number | null;
-  scheduledFor: string | null;
   expiresAt: string;
   createdAt: string;
   draftBody: string | null;
@@ -123,7 +118,15 @@ interface TodoItemRow {
   threadOriginalAuthorUsername: string | null;
   threadSurfacedVia: string[] | null;
   calendarContentType: string | null;
-  calendarScheduledAt: string | null;
+  /**
+   * Plan-item polymorphic params (e.g. `{ subreddit }` for a Reddit
+   * `content_post`). Null for reply-card rows since those flow through
+   * the drafts table. The post-card uses this to detect the
+   * "Reddit content_post missing subreddit" path and swap the Post
+   * button for an inline subreddit picker (Task 9). Shape is loose at
+   * this layer; the consumer narrows.
+   */
+  params: Record<string, unknown> | null;
   /** Sort key (ms) — used only to merge the two sources into a stable
    *  order; not shipped to the client. */
   _sortKey: number;
@@ -154,7 +157,7 @@ function readTargetCount(params: unknown): number | null {
 export interface ReplySlotRow {
   id: string;
   channel: string;
-  scheduledAt: string;
+  dueDate: string;
   targetCount: number;
   draftedToday: number;
   state: 'planned' | 'drafted' | 'completed';
@@ -181,11 +184,13 @@ export async function GET() {
       kind: planItems.kind,
       state: planItems.state,
       channel: planItems.channel,
-      scheduledAt: planItems.scheduledAt,
+      dueDate: planItems.dueDate,
+      sortOrder: planItems.sortOrder,
       title: planItems.title,
       description: planItems.description,
       createdAt: planItems.createdAt,
       output: planItems.output,
+      params: planItems.params,
     })
     .from(planItems)
     .where(
@@ -194,7 +199,7 @@ export async function GET() {
         inArray(planItems.state, PENDING_PLAN_STATES),
       ),
     )
-    .orderBy(planItems.scheduledAt);
+    .orderBy(planItems.dueDate, planItems.sortOrder);
 
   // ------------------------------------------------------------------
   // 2) Pending reply drafts (content-manager output) + joined thread
@@ -262,7 +267,8 @@ export async function GET() {
       id: planItems.id,
       channel: planItems.channel,
       state: planItems.state,
-      scheduledAt: planItems.scheduledAt,
+      dueDate: planItems.dueDate,
+      sortOrder: planItems.sortOrder,
       params: planItems.params,
     })
     .from(planItems)
@@ -270,12 +276,12 @@ export async function GET() {
       and(
         eq(planItems.userId, userId),
         eq(planItems.kind, 'content_reply'),
-        gte(planItems.scheduledAt, todayStart),
-        lt(planItems.scheduledAt, todayEnd),
+        gte(planItems.dueDate, todayStart),
+        lt(planItems.dueDate, todayEnd),
         inArray(planItems.state, ['planned', 'drafted', 'completed']),
       ),
     )
-    .orderBy(planItems.scheduledAt);
+    .orderBy(planItems.dueDate, planItems.sortOrder);
 
   // Count drafts created today on the relevant channel(s) so each
   // slot can render its "drafted Y of N" progress without the client
@@ -364,23 +370,16 @@ export async function GET() {
       draftId: null,
       todoType: 'approve_post' as const,
       source: 'calendar' as const,
-      priority: derivePriority(row.scheduledAt, now),
+      priority: derivePriority(row.dueDate, now),
       status: 'pending' as const,
       planState: row.state as PlanItemState,
-      // Original posts always use the API queue path (Schedule → enqueue at
-      // scheduledAt → "Post now" button when queued). The X programmatic-
-      // post restriction from Feb 2026 only blocks REPLIES on non-Enterprise
-      // tiers — original tweets can still be posted via POST /2/tweets.
       xIntentUrl: null,
       title: row.title,
       platform: row.channel ?? 'x',
       community: null,
       externalUrl: null,
       confidence: null,
-      scheduledFor: row.scheduledAt.toISOString(),
-      // Keep the expiresAt contract that the UI reads as a deadline: we
-      // reuse scheduledAt here until plan_items grows a real SLA column.
-      expiresAt: row.scheduledAt.toISOString(),
+      expiresAt: row.dueDate instanceof Date ? row.dueDate.toISOString().slice(0, 10) : String(row.dueDate),
       createdAt: row.createdAt.toISOString(),
       draftBody,
       draftConfidence: null,
@@ -405,8 +404,11 @@ export async function GET() {
       threadOriginalAuthorUsername: null,
       threadSurfacedVia: null,
       calendarContentType: row.kind,
-      calendarScheduledAt: row.scheduledAt.toISOString(),
-      _sortKey: row.scheduledAt.getTime(),
+      params:
+        row.params && typeof row.params === 'object'
+          ? (row.params as Record<string, unknown>)
+          : null,
+      _sortKey: row.dueDate instanceof Date ? row.dueDate.getTime() + row.sortOrder : 0,
     }));
 
   // Map drafts+threads → TodoItem rows. Drop rows where the draft has
@@ -452,7 +454,6 @@ export async function GET() {
       community: row.threadCommunity,
       externalUrl: row.threadUrl,
       confidence: row.confidenceScore ?? null,
-      scheduledFor: null,
       expiresAt: row.draftCreatedAt.toISOString(),
       createdAt: row.draftCreatedAt.toISOString(),
       draftBody: row.replyBody,
@@ -480,7 +481,7 @@ export async function GET() {
       threadOriginalAuthorUsername: row.threadOriginalAuthorUsername,
       threadSurfacedVia: row.threadSurfacedVia,
       calendarContentType: null,
-      calendarScheduledAt: null,
+      params: null,
       _sortKey: row.draftCreatedAt.getTime(),
     };
   });
@@ -506,7 +507,7 @@ export async function GET() {
       return {
         id: row.id,
         channel: row.channel,
-        scheduledAt: row.scheduledAt.toISOString(),
+        dueDate: row.dueDate instanceof Date ? row.dueDate.toISOString().slice(0, 10) : String(row.dueDate),
         targetCount: target,
         draftedToday: draftCountsByChannel[row.channel] ?? 0,
         state: slotState,

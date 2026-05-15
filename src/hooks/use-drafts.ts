@@ -42,7 +42,8 @@ export interface Draft {
   createdAt: string;
   thread: {
     title: string;
-    community: string;
+    /** NULL for X threads (no equivalent of subreddits). */
+    community: string | null;
     url: string;
   };
 }

@@ -163,13 +163,24 @@ export class XClient {
 
   /**
    * Create an XClient from a channel database record.
+   *
+   * Token columns are nullable in the schema to support handoff-mode
+   * platforms (Reddit). X channels must always carry both tokens — the
+   * X OAuth callback persists them on connect and refresh — so a null
+   * here represents data corruption / a write path that bypassed the
+   * callback. Throwing keeps the failure visible.
    */
   static fromChannel(channel: {
     id: string;
-    oauthTokenEncrypted: string;
-    refreshTokenEncrypted: string;
+    oauthTokenEncrypted: string | null;
+    refreshTokenEncrypted: string | null;
     tokenExpiresAt: Date | null;
   }): XClient {
+    if (!channel.oauthTokenEncrypted || !channel.refreshTokenEncrypted) {
+      throw new Error(
+        `XClient.fromChannel: channel ${channel.id} is missing OAuth tokens. X channels must carry both access and refresh tokens.`,
+      );
+    }
     return new XClient(
       channel.id,
       channel.oauthTokenEncrypted,

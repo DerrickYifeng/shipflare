@@ -12,8 +12,8 @@
  */
 
 export type PublicToolLabel =
-  | 'searching' | 'drafting' | 'reviewing' | 'posting' | 'planning'
-  | 'reading-plan' | 'reading-context' | 'reading-team' | 'reading-metrics'
+  | 'searching' | 'searching-web' | 'drafting' | 'reviewing' | 'posting' | 'planning'
+  | 'reading-plan' | 'reading-context' | 'reading-page' | 'reading-team' | 'reading-metrics'
   | 'reading-history' | 'monitoring' | 'verifying' | 'batching' | 'queueing'
   | 'delegating' | 'messaging' | 'sleeping' | 'cancelling' | 'skill' | 'tool';
 
@@ -36,7 +36,9 @@ const TOOL_LABEL_MAP: Record<string, PublicToolLabel> = {
   query_strategic_path: 'reading-plan',
   query_plan_items: 'reading-plan',
   query_product_context: 'reading-context',
-  query_recent_milestones: 'reading-context',
+  query_code_changes: 'reading-context',
+  web_search: 'searching-web',
+  web_fetch: 'reading-page',
   query_team_status: 'reading-team',
   query_metrics: 'reading-metrics',
   query_stalled_items: 'reading-metrics',

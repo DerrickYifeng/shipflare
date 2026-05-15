@@ -1,16 +1,16 @@
 // allocating-plan-items skill — input + output schemas.
 //
 // The skill is the pure-transformation core that the multi-turn
-// content-planner agent calls once per week. The agent gathers signals
+// coordinator agent calls once per week. The agent gathers signals
 // (strategic_path, stalled items, last-week completions, recent
-// milestones, last-14-days X posts) using its own tool calls, packages
-// them into the input below, and the skill returns the week's
-// plan_items + a list of stalled rows to reschedule. The agent then
-// persists by calling `add_plan_item` / `update_plan_item` on each
-// returned entry.
+// code changes, last-14-days X posts) using its own tool calls,
+// packages them into the input below, and the skill returns the
+// week's plan_items + a list of stalled rows to reschedule. The agent
+// then persists by calling `add_plan_item` / `update_plan_item` on
+// each returned entry.
 //
 // Mirrors the planner-visible subset of `plan_items` — `kind`, `phase`,
-// `userAction`, `channel`, `scheduledAt`, `skillName`, `params`,
+// `userAction`, `channel`, `dueDate`, `sortOrder`, `skillName`, `params`,
 // `title`, `description` — see `src/lib/db/schema/plan-items.ts` and
 // `src/tools/schemas.ts#planItemInputSchema` for the canonical shapes.
 
@@ -74,8 +74,8 @@ const signalsInputSchema = z.object({
   stalledItems: z.array(z.unknown()).default([]),
   /** `query_last_week_completions` output — finished items + engagement. */
   lastWeekCompletions: z.array(z.unknown()).default([]),
-  /** `query_recent_milestones` output — last 14 days of shipping signals. */
-  recentMilestones: z.array(z.unknown()).default([]),
+  /** `query_code_changes` output — commits in the past N days. */
+  recentCodeChanges: z.array(z.unknown()).default([]),
   /** Optional `query_recent_x_posts` output — drives metaphor_ban. */
   recentXPosts: z.array(z.unknown()).optional(),
 });
@@ -113,20 +113,22 @@ const planItemRowSchema = z.object({
   userAction: userActionEnum,
   title: z.string().min(1).max(200),
   description: z.string().max(600).nullable().optional().default(null),
-  scheduledAt: z.string().min(1),
+  dueDate: z.string().min(1), // YYYY-MM-DD
+  sortOrder: z.number().int().min(0).default(0),
   skillName: z.string().nullable().optional().default(null),
   params: z.record(z.string(), z.unknown()).optional().default({}),
 });
 
 /**
  * Carryover instruction for a stalled `plan_items` row — the caller
- * agent translates this into an `update_plan_item({ id, scheduledAt })`
+ * agent translates this into an `update_plan_item({ id, dueDate, sortOrder })`
  * call rather than calling `add_plan_item` (which would create a
  * duplicate row).
  */
 const stalledCarryoverSchema = z.object({
   planItemId: z.string().min(1),
-  newScheduledAt: z.string().min(1),
+  newDueDate: z.string().min(1), // YYYY-MM-DD
+  newSortOrder: z.number().int().min(0).default(0),
 });
 
 export const allocatingPlanItemsOutputSchema = z.object({

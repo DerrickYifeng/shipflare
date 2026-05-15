@@ -1,0 +1,34 @@
+# Test + `wrangler dev` defaults. Production overrides each value via
+# `wrangler secret put <NAME>`. Never commit a real secret here.
+#
+# MCP_JWT_SECRET MUST match the value apps/web uses to sign tokens —
+# both sides verify with the same HS256 secret.
+MCP_JWT_SECRET=
+
+# EXTERNAL_MCP_SECRET signs Phase 2 long-lived (30d) tokens for 3rd-party
+# MCP clients (Claude Desktop, Cursor, the founder's own LLM stack). MUST
+# match apps/web's EXTERNAL_MCP_SECRET — apps/web's /api/external-mcp/issue
+# signs with it, apps/core verifies. Production: `wrangler secret put
+# EXTERNAL_MCP_SECRET` in BOTH workers.
+#   openssl rand -base64 32
+EXTERNAL_MCP_SECRET=
+
+ANTHROPIC_API_KEY=
+XAI_API_KEY=
+
+# 32-byte base64 key used by @shipflare/crypto to AES-GCM encrypt channel
+# OAuth tokens before they hit D1. Rotating this invalidates every connected
+# channel — they will need to re-authenticate.
+#   openssl rand -base64 32
+CHANNEL_ENC_KEY=
+
+# P2-F — Web Push (RFC 8030 / VAPID). Generate ONCE with:
+#   import { generateVapidKeypair } from "./src/lib/web-push";
+#   const { publicKey, privateKey } = await generateVapidKeypair();
+# Then store the values here for local dev and via `wrangler secret put` in
+# staging / production. VAPID_PUBLIC ALSO needs to be set on apps/web as
+# NEXT_PUBLIC_VAPID_PUBLIC so the browser can hand it to PushManager.subscribe.
+# VAPID_SUBJECT must be a mailto: or https: URI.
+VAPID_PUBLIC=
+VAPID_PRIVATE=
+VAPID_SUBJECT=mailto:hello@shipflare.com

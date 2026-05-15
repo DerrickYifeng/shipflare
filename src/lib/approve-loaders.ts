@@ -1,6 +1,7 @@
 import { db } from '@/lib/db';
 import { drafts, threads, channels } from '@/lib/db/schema';
 import { and, eq } from 'drizzle-orm';
+import { PLATFORMS } from '@/lib/platform-config';
 import type { DispatchInput } from '@/lib/approve-dispatch';
 
 /**
@@ -24,9 +25,11 @@ export async function loadDispatchInputForDraft(
       draftType: drafts.draftType,
       replyBody: drafts.replyBody,
       planItemId: drafts.planItemId,
+      postTitle: drafts.postTitle,
       threadId: threads.id,
       threadPlatform: threads.platform,
       threadExternalId: threads.externalId,
+      threadCommunity: threads.community,
     })
     .from(drafts)
     .innerJoin(threads, eq(drafts.threadId, threads.id))
@@ -41,18 +44,21 @@ export async function loadDispatchInputForDraft(
 
   if (!row) return null;
 
-  const [channelRow] = await db
-    .select({ id: channels.id, createdAt: channels.createdAt })
-    .from(channels)
-    .where(and(eq(channels.userId, userId), eq(channels.platform, row.threadPlatform)))
-    .limit(1);
+  // Reddit is always-on no-binding — no `channels` row exists, and
+  // dispatchApprove never reads channelId for Reddit (handoff path). For
+  // every other platform the row is required so the X-post `enqueuePosting`
+  // call has a channel to bind to.
+  let channelId: string | null = null;
+  if (row.threadPlatform !== PLATFORMS.reddit.id) {
+    const [channelRow] = await db
+      .select({ id: channels.id })
+      .from(channels)
+      .where(and(eq(channels.userId, userId), eq(channels.platform, row.threadPlatform)))
+      .limit(1);
 
-  if (!channelRow) return null;
-
-  const connectedAgeDays = Math.max(
-    0,
-    Math.floor((Date.now() - channelRow.createdAt.getTime()) / (24 * 60 * 60 * 1000)),
-  );
+    if (!channelRow) return null;
+    channelId = channelRow.id;
+  }
 
   return {
     draft: {
@@ -62,14 +68,15 @@ export async function loadDispatchInputForDraft(
       draftType: row.draftType === 'original_post' ? 'original_post' : 'reply',
       replyBody: row.replyBody,
       planItemId: row.planItemId,
+      postTitle: row.postTitle,
+      subreddit: row.threadCommunity,
     },
     thread: {
       id: row.threadId,
       platform: row.threadPlatform,
       externalId: row.threadExternalId,
     },
-    channelId: channelRow.id,
-    connectedAgeDays,
+    channelId,
   };
 }
 

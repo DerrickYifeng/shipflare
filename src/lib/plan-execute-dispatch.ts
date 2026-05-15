@@ -49,9 +49,11 @@ export interface DispatchRoute {
  * Per-(kind, channel) route. Channel `null` matches any channel; a
  * concrete channel match wins over the null fallback.
  *
- * Reddit paths intentionally resolve to `null` for now — spec says
- * platform tightening happens in Phase 8+; the processor surfaces
- * "no skill registered" as a typed error instead of exploding.
+ * Reddit content paths share the `posting` execute label with X. The
+ * label is consulted by posting.ts → dispatchApprove, which routes
+ * Reddit to the handoff path (submit URL for posts, handoff page for
+ * replies). The direct-post Reddit branch in posting.ts is unreachable
+ * today but kept intact for a future OAuth path.
  */
 const ROUTES: ReadonlyArray<
   {
@@ -77,6 +79,15 @@ const ROUTES: ReadonlyArray<
       defaultUserAction: 'approve',
     },
   },
+  {
+    kind: 'content_post',
+    channel: 'reddit',
+    route: {
+      draftSkill: null,
+      executeSkill: 'posting',
+      defaultUserAction: 'approve',
+    },
+  },
   // --- content_reply ---
   // Reply drafting is owned end-to-end by the content-manager team-run
   // agent (Phase 6 of the agent-cleanup migration absorbed the
@@ -90,6 +101,15 @@ const ROUTES: ReadonlyArray<
   {
     kind: 'content_reply',
     channel: 'x',
+    route: {
+      draftSkill: null,
+      executeSkill: 'posting',
+      defaultUserAction: 'approve',
+    },
+  },
+  {
+    kind: 'content_reply',
+    channel: 'reddit',
     route: {
       draftSkill: null,
       executeSkill: 'posting',

@@ -19,7 +19,8 @@ type PlanRow = {
   kind: string;
   state: string;
   channel: string | null;
-  scheduledAt: Date;
+  dueDate: Date;
+  sortOrder: number;
   title: string;
   description: string | null;
   createdAt: Date;
@@ -57,7 +58,7 @@ type ReplySlotRow = {
   id: string;
   channel: string | null;
   state: string;
-  scheduledAt: Date;
+  dueDate: Date;
   params: Record<string, unknown> | null;
 };
 type DraftCountRow = {
@@ -82,8 +83,15 @@ vi.mock('@/lib/db', () => ({
       const fields = Object.keys(projection);
       const isStats = fields.includes('anyItems');
       const isDrafts = fields.includes('replyBody');
+      // The reply-slot select carries `params` + `dueDate` but no
+      // `output`; the pending plan-items select (post Task 9 of the
+      // Reddit subreddit-research work) now also surfaces `params` so
+      // the post-card can detect the missing-subreddit case — we
+      // disambiguate via `output`.
       const isReplySlot =
-        fields.includes('params') && fields.includes('scheduledAt');
+        fields.includes('params') &&
+        fields.includes('dueDate') &&
+        !fields.includes('output');
       const isDraftCount =
         fields.length === 2 &&
         fields.includes('platform') &&
@@ -211,7 +219,8 @@ describe('GET /api/today', () => {
         kind: 'content_post',
         state: 'drafted',
         channel: 'x',
-        scheduledAt: tomorrow,
+        dueDate: tomorrow,
+        sortOrder: 0,
         title: 'Ship post A',
         description: null,
         createdAt: now,
@@ -262,7 +271,8 @@ describe('GET /api/today', () => {
         kind: 'content_post',
         state: 'drafted',
         channel: 'x',
-        scheduledAt: now,
+        dueDate: now,
+        sortOrder: 0,
         title: 'Missing body',
         description: null,
         createdAt: now,
@@ -293,7 +303,8 @@ describe('GET /api/today', () => {
         kind: 'content_post',
         state: 'ready_for_review',
         channel: 'x',
-        scheduledAt: now,
+        dueDate: now,
+        sortOrder: 0,
         title: 'Post today',
         description: null,
         createdAt: now,
@@ -396,7 +407,8 @@ describe('GET /api/today', () => {
         kind: 'content_post',
         state: 'drafted',
         channel: 'x',
-        scheduledAt: now,
+        dueDate: now,
+        sortOrder: 0,
         title: 'Scheduled post',
         description: null,
         createdAt: now,
@@ -473,7 +485,7 @@ describe('GET /api/today', () => {
         id: 'slot-x-1',
         channel: 'x',
         state: 'drafted',
-        scheduledAt: now,
+        dueDate: now,
         params: { targetCount: 5 },
       },
     ];
@@ -500,7 +512,7 @@ describe('GET /api/today', () => {
     expect(body.replySlots[0]).toEqual({
       id: 'slot-x-1',
       channel: 'x',
-      scheduledAt: now.toISOString(),
+      dueDate: now.toISOString().slice(0, 10),
       targetCount: 5,
       draftedToday: 3,
       state: 'drafted',
@@ -516,14 +528,14 @@ describe('GET /api/today', () => {
         id: 'slot-no-target',
         channel: 'x',
         state: 'planned',
-        scheduledAt: now,
+        dueDate: now,
         params: {},
       },
       {
         id: 'slot-zero-target',
         channel: 'x',
         state: 'planned',
-        scheduledAt: now,
+        dueDate: now,
         params: { targetCount: 0 },
       },
     ];

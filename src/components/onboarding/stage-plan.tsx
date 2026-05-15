@@ -15,6 +15,10 @@ import { OnbMono } from './_shared/onb-mono';
 import { ArrowRight, Pencil, XClose } from './icons';
 import { COPY } from './_copy';
 import type { StrategicPath } from '@/tools/schemas';
+import {
+  derivePerWeekPosts,
+  sumChannelPostsAcrossArc,
+} from '@/lib/strategic-path-helpers';
 import type { DraftState, ProductState } from './OnboardingFlow';
 
 interface StagePlanProps {
@@ -551,24 +555,40 @@ function TimelinePanel({
   const rows = useMemo(() => {
     // Combine thesisArc (weeks) with milestones for the timeline display.
     // Cap at 4 rows so the tab stays scannable.
+    // Replies don't vary per arc week (no per-week reply schedule), so
+    // weekly counts are a flat `repliesPerDay × 7` per channel for every
+    // row. Computed once outside the loop, reused per row.
+    const repliesPerWeek = {
+      x: (path.channelMix.x?.repliesPerDay ?? 0) * 7,
+      reddit: (path.channelMix.reddit?.repliesPerDay ?? 0) * 7,
+    };
     const arcRows = path.thesisArc.slice(0, 4).map((w, i) => {
       const milestone = path.milestones[i];
+      const allocation = formatWeekAllocation(
+        derivePerWeekPosts(path, i),
+        repliesPerWeek,
+      );
       return {
         period: formatWeekStart(w.weekStart),
         title: w.theme,
+        // Allocation line sits BETWEEN the milestone successMetric and
+        // the angles line so the founder reads the plan top-down:
+        // "what are we doing this week" → "how does that get measured"
+        // → "how many posts where" → "what tonal angles".
         bullets: [
           ...(milestone ? [milestone.title] : []),
           ...(milestone ? [milestone.successMetric] : []),
+          ...(allocation ? [allocation] : []),
           ...(w.angleMix.length > 0
             ? [`Angles: ${w.angleMix.slice(0, 3).join(' · ')}`]
             : []),
-        ].slice(0, 3),
+        ].slice(0, 4),
       };
     });
     return arcRows;
   }, [path]);
 
-  const quotaLabel = computeQuotaLabel(path, state);
+  const quotaLines = computeQuotaLabel(path, state);
 
   return (
     <div
@@ -650,20 +670,27 @@ function TimelinePanel({
           background: 'rgba(0,0,0,0.03)',
           borderRadius: '0 0 12px 12px',
           display: 'flex',
-          alignItems: 'center',
+          alignItems: 'flex-start',
           gap: 10,
         }}
       >
-        <OnbMono>{COPY.stage7.quota}</OnbMono>
-        <span
+        <span style={{ paddingTop: 1 }}>
+          <OnbMono>{COPY.stage7.quota}</OnbMono>
+        </span>
+        <div
           style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 2,
             fontSize: 12,
             letterSpacing: '-0.12px',
             color: 'var(--sf-fg-2)',
           }}
         >
-          {quotaLabel}
-        </span>
+          {quotaLines.map((line, i) => (
+            <span key={i}>{line}</span>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -678,16 +705,94 @@ function formatWeekStart(iso: string): string {
   }
 }
 
+/**
+ * Build the per-week allocation bullet shown inside each timeline row.
+ * Returns null when both X and Reddit posts are zero so the bullet can
+ * be skipped — empty bullets read as a bug, not a gap.
+ *
+ * Email is intentionally NOT in the bullet — email cadence shows up
+ * elsewhere in the founder UI and lumping it in with X+Reddit posts
+ * confuses the read.
+ */
+function formatWeekAllocation(
+  posts: { x: number; reddit: number; email: number },
+  repliesPerWeek: { x: number; reddit: number },
+): string | null {
+  const channelPart = (
+    label: string,
+    count: number,
+    replies: number,
+  ): string | null => {
+    if (count === 0 && replies === 0) return null;
+    const segments: string[] = [];
+    if (count > 0) {
+      segments.push(`${count} ${label} ${count === 1 ? 'post' : 'posts'}`);
+    }
+    if (replies > 0) {
+      segments.push(
+        `${replies} ${label} ${replies === 1 ? 'reply' : 'replies'}`,
+      );
+    }
+    return segments.join(' + ');
+  };
+
+  const parts = [
+    channelPart('X', posts.x, repliesPerWeek.x),
+    channelPart('Reddit', posts.reddit, repliesPerWeek.reddit),
+  ].filter((p): p is string => p !== null);
+
+  if (parts.length === 0) return null;
+  return parts.join(' · ');
+}
+
+/**
+ * Build the QUOTA footer lines. Returns one line per active channel so
+ * the founder can see "X does N posts + M replies" separately from
+ * "Reddit does P posts + Q replies" — the old single-line `total * 5`
+ * math collapsed both channels and was misleading.
+ *
+ * Per-channel math: posts come from the thesis-arc sum;
+ * `replies = channelMix[channel].repliesPerDay * 7 * weeks` when set.
+ * The X-only reply gate was lifted 2026-05-08 — Reddit foundation
+ * default is 3/day with a 7d author cooldown + ≤1/sub/day cap (see
+ * src/skills/generating-strategy/references/channel-cadence.md).
+ * Period covers the full thesis arc so the math represents the whole
+ * plan window, not a single week.
+ *
+ * Returns at minimum one entry — `['—']` when nothing is active —
+ * so the caller doesn't have to special-case empty.
+ */
 function computeQuotaLabel(
   path: StrategicPath,
   state: ProductState,
-): string {
-  const reddit = path.channelMix.reddit?.perWeek ?? 0;
-  const x = path.channelMix.x?.perWeek ?? 0;
-  const total = reddit + x;
-  if (total === 0) return '—';
-  const period = state === 'launching' ? 'launch week' : 'per week';
-  return `~${total * 5} replies · ${total} posts · ${period}`;
+): string[] {
+  const weeks = Math.max(1, path.thesisArc.length);
+
+  const period =
+    weeks === 1
+      ? state === 'launching'
+        ? 'launch week'
+        : 'this week'
+      : `${weeks} wks`;
+
+  const buildLine = (label: string, channel: 'x' | 'reddit'): string | null => {
+    const posts = sumChannelPostsAcrossArc(path, channel);
+    const repliesPerDay = path.channelMix[channel]?.repliesPerDay ?? 0;
+    const replies = repliesPerDay * 7 * weeks;
+    if (posts === 0 && replies === 0) return null;
+    const parts: string[] = [];
+    if (posts > 0) parts.push(`${posts} ${posts === 1 ? 'post' : 'posts'}`);
+    if (replies > 0) {
+      parts.push(`${replies} ${replies === 1 ? 'reply' : 'replies'}`);
+    }
+    return `${label}: ${parts.join(' + ')} / ${period}`;
+  };
+
+  const lines = [buildLine('X', 'x'), buildLine('Reddit', 'reddit')].filter(
+    (line): line is string => line !== null,
+  );
+
+  return lines.length > 0 ? lines : ['—'];
 }
 
 /**

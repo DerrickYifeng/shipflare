@@ -69,7 +69,8 @@ interface PlanItemRow {
   userAction: string;
   phase: string;
   channel: string | null;
-  scheduledAt: Date;
+  dueDate: Date;
+  sortOrder: number;
   skillName: string | null;
   params: Record<string, unknown>;
   output: Record<string, unknown> | null;
@@ -116,7 +117,8 @@ function seedPlanItems(
     userAction: r.userAction ?? 'auto',
     phase: r.phase ?? 'foundation',
     channel: r.channel ?? 'x',
-    scheduledAt: r.scheduledAt ?? now,
+    dueDate: r.dueDate ?? now,
+    sortOrder: r.sortOrder ?? 0,
     skillName: r.skillName ?? null,
     params: r.params ?? {},
     output: r.output ?? null,
@@ -352,6 +354,104 @@ describe('processPostsBatchTool', () => {
     // Mechanical / persist were never invoked because draft was null.
     expect(validateDraftExecMock).not.toHaveBeenCalled();
     expect(draftPostExecMock).not.toHaveBeenCalled();
+  });
+
+  it('short-circuits to skipped_subreddit_rule_conflict when drafting flags the item (no validate_draft)', async () => {
+    seedPlanItems(store, [
+      {
+        id: 'p1',
+        channel: 'reddit',
+        params: { format: 'milestone', subreddit: 'SaaS' },
+      },
+    ]);
+    runForkSkillMock.mockResolvedValueOnce({
+      result: {
+        draftBody: '',
+        whyItWorks: 'no_self_promotion',
+        confidence: 0,
+        flagged: true,
+        flagReason: 'subreddit rule conflict',
+      },
+      usage: {},
+    });
+
+    const result = await processPostsBatchTool.execute(
+      { planItemIds: ['p1'] },
+      makeCtx(store, { userId: 'user-1', productId: 'prod-1' }),
+    );
+
+    expect(result.draftsCreated).toBe(0);
+    expect(result.draftsSkipped).toBe(1);
+    expect(result.details[0]?.status).toBe('skipped_subreddit_rule_conflict');
+    expect(result.details[0]?.reason).toBe('subreddit rule conflict');
+    // Critical: validate_draft must NOT be called on the empty body —
+    // its Zod input rejects empty text with a cryptic message that
+    // would surface as `errored` instead of the safe-skip status.
+    expect(validateDraftExecMock).not.toHaveBeenCalled();
+    expect(draftPostExecMock).not.toHaveBeenCalled();
+    expect(runForkSkillMock).toHaveBeenCalledOnce();
+  });
+
+  it('plumbs params.subreddit into top-level targetSubreddit for reddit posts', async () => {
+    seedPlanItems(store, [
+      {
+        id: 'p1',
+        channel: 'reddit',
+        params: { format: 'milestone', subreddit: 'SaaS' },
+      },
+    ]);
+    runForkSkillMock.mockResolvedValueOnce({
+      result: {
+        draftBody: 'a real reddit body about shipping',
+        whyItWorks: 'milestone',
+        confidence: 0.7,
+      },
+      usage: {},
+    });
+    validateDraftExecMock.mockResolvedValue({ failures: [], warnings: [] });
+    draftPostExecMock.mockResolvedValue({ planItemId: 'p1' });
+
+    await processPostsBatchTool.execute(
+      { planItemIds: ['p1'] },
+      makeCtx(store, { userId: 'user-1', productId: 'prod-1' }),
+    );
+
+    const argsJson = runForkSkillMock.mock.calls[0]![1] as string;
+    const parsed = JSON.parse(argsJson) as {
+      targetSubreddit?: string;
+      channel: string;
+    };
+    expect(parsed.channel).toBe('reddit');
+    expect(parsed.targetSubreddit).toBe('SaaS');
+  });
+
+  it('omits targetSubreddit for non-reddit channels even if params.subreddit exists', async () => {
+    seedPlanItems(store, [
+      {
+        id: 'p1',
+        channel: 'x',
+        params: { format: 'milestone', subreddit: 'SaaS' },
+      },
+    ]);
+    runForkSkillMock.mockResolvedValueOnce({
+      result: {
+        draftBody: 'shipped today',
+        whyItWorks: 'milestone',
+        confidence: 0.7,
+      },
+      usage: {},
+    });
+    validateDraftExecMock.mockResolvedValue({ failures: [], warnings: [] });
+    draftPostExecMock.mockResolvedValue({ planItemId: 'p1' });
+
+    await processPostsBatchTool.execute(
+      { planItemIds: ['p1'] },
+      makeCtx(store, { userId: 'user-1', productId: 'prod-1' }),
+    );
+
+    const argsJson = runForkSkillMock.mock.calls[0]![1] as string;
+    const parsed = JSON.parse(argsJson) as { targetSubreddit?: string };
+    expect(parsed.targetSubreddit).toBeUndefined();
   });
 
   it('emits live progress at start and finish so UI tool card updates in real-time', async () => {

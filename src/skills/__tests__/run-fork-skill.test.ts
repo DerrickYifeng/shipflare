@@ -230,7 +230,6 @@ body`,
       expect(ev.spawnMeta).toBeDefined();
       expect(ev.spawnMeta!.agentName).toBe('skill_judging-thread-quality');
       expect(ev.spawnMeta!.parentToolUseId).toBe('tool_use_xyz');
-      expect(ev.spawnMeta!.parentTaskId).toBeNull();
       // resolveSpecialistMemberId returned null in this test (mocked).
       expect(ev.spawnMeta!.fromMemberId).toBeNull();
     });

@@ -63,8 +63,8 @@ export const queryLastWeekCompletionsTool: ToolDefinition<
           eq(planItems.productId, productId),
           eq(planItems.state, 'completed'),
           // completedAt can be null for rows that transitioned via bulk
-          // patches; exclude those by gating on scheduledAt as a fallback
-          // proxy — scheduledAt is notNull.
+          // patches; exclude those by gating on dueDate as a fallback
+          // proxy — dueDate is notNull.
           gte(planItems.completedAt, start),
           lt(planItems.completedAt, end),
         ),

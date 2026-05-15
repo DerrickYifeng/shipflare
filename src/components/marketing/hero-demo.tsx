@@ -5,6 +5,7 @@ import { PillCta } from '@/components/ui/pill-cta';
 import { StatusDot } from '@/components/ui/status-dot';
 import { Ops } from '@/components/ui/ops';
 import { SignInModal } from '@/components/auth/sign-in-modal';
+import { WaitlistPillLink, AlreadyInvitedButton } from './waitlist-cta';
 
 export interface HeroDemoProps {
   headline?: string;
@@ -95,8 +96,8 @@ export function HeroDemo({ headline = DEFAULT_HEADLINE, isAuthenticated }: HeroD
         </p>
 
         <div
-          className="flex flex-wrap"
-          style={{ marginTop: 40, gap: 12, justifyContent: 'center' }}
+          className="flex flex-col items-center"
+          style={{ marginTop: 40, gap: 12 }}
         >
           {isAuthenticated ? (
             <PillCta
@@ -107,25 +108,11 @@ export function HeroDemo({ headline = DEFAULT_HEADLINE, isAuthenticated }: HeroD
               Open Briefing
             </PillCta>
           ) : (
-            <PillCta onClick={() => setSignInOpen(true)}>
-              Sign up — free while in beta
-            </PillCta>
+            <>
+              <WaitlistPillLink />
+              <AlreadyInvitedButton onClick={() => setSignInOpen(true)} />
+            </>
           )}
-          <a
-            href="#see-it"
-            className="inline-flex items-center"
-            style={{
-              gap: 6,
-              height: 48,
-              padding: '0 16px',
-              color: 'var(--sf-link-dark)',
-              fontSize: 'var(--sf-text-base)',
-              letterSpacing: 'var(--sf-track-normal)',
-              textDecoration: 'none',
-            }}
-          >
-            See it in action ↓
-          </a>
         </div>
 
         {/* Agent roles strip — teases HowItWorks below */}

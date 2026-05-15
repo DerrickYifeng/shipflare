@@ -27,12 +27,10 @@ export default async function SettingsPage() {
     .where(eq(userPreferences.userId, session.user.id))
     .limit(1);
 
+  // Reddit is intentionally omitted: it's a no-binding always-on channel
+  // managed under /growth/reddit-channels, so the settings UI only lists
+  // OAuth-bound platforms (X).
   const connections: SettingsConnection[] = [
-    {
-      platform: 'reddit',
-      username: userChannels.find((c) => c.platform === 'reddit')?.username ?? null,
-      connected: userChannels.some((c) => c.platform === 'reddit'),
-    },
     {
       platform: 'x',
       username: userChannels.find((c) => c.platform === 'x')?.username ?? null,

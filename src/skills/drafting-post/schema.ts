@@ -23,7 +23,7 @@ export const draftingPostInputSchema = z.object({
     title: z.string(),
     description: z.string().optional().default(''),
     channel: channelEnum,
-    scheduledAt: z.string().optional(),
+    dueDate: z.string().optional(),
     params: z.record(z.unknown()).optional().default({}),
   }),
   product: z.object({
@@ -41,9 +41,17 @@ export const draftingPostInputSchema = z.object({
 export type DraftingPostInput = z.infer<typeof draftingPostInputSchema>;
 
 export const draftingPostOutputSchema = z.object({
-  draftBody: z.string().min(1),
+  // `draftBody` may be empty when `flagged: true` (subreddit rule conflict).
+  // Non-flagged drafts MUST emit a non-empty body; the drafting prompt enforces
+  // that in-fork. We don't gate empty bodies at the schema layer because the
+  // safe-skip path (Reddit rule conflict) needs to round-trip through Zod.
+  draftBody: z.string(),
   whyItWorks: z.string().max(800),
   confidence: z.number().min(0).max(1),
+  /** True when the draft was deliberately skipped (e.g., subreddit rule conflict). */
+  flagged: z.boolean().optional(),
+  /** Human-readable reason, paired with `flagged: true`. Callers may surface this in `/today`. */
+  flagReason: z.string().optional(),
 });
 
 export type DraftingPostOutput = z.infer<typeof draftingPostOutputSchema>;

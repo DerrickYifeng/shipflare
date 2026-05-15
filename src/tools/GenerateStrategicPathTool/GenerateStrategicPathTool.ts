@@ -70,7 +70,7 @@ export const generateStrategicPathTool: ToolDefinition<
     'invalidate the active thesis. Pass the skill input as a JSON string ' +
     'in `args` — shape defined by generatingStrategyInputSchema (product, ' +
     'state, currentPhase, channels[], today, weekStart, optional ' +
-    'recentMilestones / launchDate / voiceProfile). Returns ' +
+    'launchDate / launchedAt). Returns ' +
     '{ status, pathId, summary, notes } — paraphrase `summary` for the ' +
     'founder, never paste it verbatim. The tool internally spawns the ' +
     'generating-strategy fork skill which writes the strategic_paths row ' +
@@ -81,7 +81,7 @@ export const generateStrategicPathTool: ToolDefinition<
   async execute(input, ctx): Promise<GenerateStrategicPathResult> {
     log.info('generate_strategic_path: invoking generating-strategy skill');
     // Pass parent ctx through so the skill's tools (write_strategic_path,
-    // query_strategic_path, query_recent_milestones) can read userId /
+    // query_strategic_path, web_search, web_fetch) can read userId /
     // productId / db / teamId / runId / onEvent off the team-run ctx.
     // Without this, runForkSkill would create an empty ctx and the
     // skill's tools would throw "missing required dependency userId".

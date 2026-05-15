@@ -33,7 +33,8 @@ interface PlanItemRow {
   productId: string;
   state: string;
   title: string;
-  scheduledAt: Date;
+  dueDate: Date;
+  sortOrder: number;
 }
 
 function makeCtx(store: InMemoryStore, deps: Record<string, unknown>): ToolContext {
@@ -53,9 +54,9 @@ beforeEach(() => {
 });
 
 describe('queryStalledItemsTool', () => {
-  it('returns planned + drafted rows whose scheduledAt is in the past, scoped to user/product', async () => {
-    const past = new Date(Date.now() - 60 * 60 * 1000);
-    const future = new Date(Date.now() + 60 * 60 * 1000);
+  it('returns planned + drafted rows whose dueDate is in the past, scoped to user/product', async () => {
+    const past = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000); // 2 days ago
+    const future = new Date(Date.now() + 24 * 60 * 60 * 1000); // tomorrow
     store.register<PlanItemRow>(planItems, [
       {
         id: 'stalled-planned',
@@ -63,7 +64,8 @@ describe('queryStalledItemsTool', () => {
         productId: 'prod-1',
         state: 'planned',
         title: 'Stalled planned',
-        scheduledAt: past,
+        dueDate: past,
+        sortOrder: 0,
       },
       {
         id: 'stalled-drafted',
@@ -71,7 +73,8 @@ describe('queryStalledItemsTool', () => {
         productId: 'prod-1',
         state: 'drafted',
         title: 'Stalled drafted',
-        scheduledAt: past,
+        dueDate: past,
+        sortOrder: 1,
       },
       {
         id: 'future-planned',
@@ -79,7 +82,8 @@ describe('queryStalledItemsTool', () => {
         productId: 'prod-1',
         state: 'planned',
         title: 'Future planned',
-        scheduledAt: future,
+        dueDate: future,
+        sortOrder: 0,
       },
       {
         id: 'completed-past',
@@ -87,7 +91,8 @@ describe('queryStalledItemsTool', () => {
         productId: 'prod-1',
         state: 'completed',
         title: 'Completed',
-        scheduledAt: past,
+        dueDate: past,
+        sortOrder: 0,
       },
       {
         id: 'otheruser',
@@ -95,7 +100,8 @@ describe('queryStalledItemsTool', () => {
         productId: 'prod-1',
         state: 'planned',
         title: 'Other user',
-        scheduledAt: past,
+        dueDate: past,
+        sortOrder: 0,
       },
     ]);
 

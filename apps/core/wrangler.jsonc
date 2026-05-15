@@ -1,0 +1,173 @@
+{
+	"$schema": "../../node_modules/wrangler/config-schema.json",
+	"name": "shipflare-core",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-05-01",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	"observability": {
+		"enabled": true,
+		"head_sampling_rate": 1
+	},
+	// D1 binding for cross-team data (user / session / account / verification / channels).
+	//
+	// `database_id` is a PLACEHOLDER. wrangler / vitest-pool-workers only require
+	// `binding` + `database_name` for local (miniflare-backed) operation. Before
+	// a real `wrangler deploy` (production), run:
+	//   wrangler d1 create shipflare-prod
+	// and paste the returned UUID here.
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "shipflare-prod",
+			"database_id": "a34a9f67-0c80-4788-b9bb-ee37728b40fb",
+			"migrations_dir": "../../packages/db/migrations"
+		}
+	],
+	// Durable Object bindings — class declarations come in S2-S5.
+	//
+	// Bindings are listed in this comment so wrangler.jsonc remains the single
+	// source of truth for binding-name → class-name mapping. The names below
+	// MUST match `packages/shared/src/role-registry.ts` ROLE_REGISTRY[*].binding
+	// and the wrangler bindings literal type expected by the DO API. Anything
+	// we name here is what the runtime hands the parent agent when it calls
+	// `addMcpServer(name, env[binding], ...)`.
+	//
+	// Phase 0 spike #2 finding (see RESULTS.md): every `addMcpServer` call
+	// MUST use a per-tenant unique `name` (e.g. `${role}-${userId}`) otherwise
+	// the McpServer DO is shared across tenants. The binding name is the env
+	// key — `name` is the DO id input. See `packages/shared/mcpServerName`.
+	"durable_objects": {
+		"bindings": [
+			// S2 — CMO
+			{
+				"name": "CMO",
+				"class_name": "CMO"
+			},
+			// S3 — Head of Growth
+			{
+				"name": "HEAD_OF_GROWTH",
+				"class_name": "HeadOfGrowth"
+			},
+			// S4 — Social Media Manager
+			{
+				"name": "SOCIAL_MEDIA_MGR",
+				"class_name": "SocialMediaMgr"
+			},
+			// S5 — Platform tool MCPs (landed S5.3 under migration tag v4)
+			{
+				"name": "X_MCP",
+				"class_name": "XMcpAgent"
+			},
+			{
+				"name": "REDDIT_MCP",
+				"class_name": "RedditMcpAgent"
+			}
+		]
+	},
+	// Wrangler migration tags are append-only. Adding a class to an existing tag
+	// after it's already been applied to a running env won't take effect — new
+	// SQLite-backed DO classes must use a NEW tag (v2, v3, ...). Never modify
+	// a tag once applied.
+	//
+	// Per Phase 0 spike #2 finding: omit `new_sqlite_classes` here entirely (vs.
+	// an empty array) — the spike validated that an empty migrations array is
+	// accepted by wrangler at startup. Each tag below comes online with its
+	// DO class in the matching S-task.
+	"migrations": [
+		{
+			"tag": "v1",
+			"new_sqlite_classes": [
+				"CMO"
+			]
+		},
+		{
+			"tag": "v2",
+			"new_sqlite_classes": [
+				"HeadOfGrowth"
+			]
+		},
+		{
+			"tag": "v3",
+			"new_sqlite_classes": [
+				"SocialMediaMgr"
+			]
+		},
+		{
+			"tag": "v4",
+			"new_sqlite_classes": [
+				"XMcpAgent",
+				"RedditMcpAgent"
+			]
+		},
+		// P2-B and P2-E expanded the roster + platform surface beyond what the
+		// design doc called for (3 employees + 2 platform MCPs). v5-v8 created
+		// Copywriter / BrandAnalyst / CommunityManager / LinkedIn / HN / Discord
+		// — v9 retires all six. Wrangler migration tags are append-only; the
+		// previous tags MUST stay in the array even though the classes are gone,
+		// otherwise wrangler refuses to deploy ("missing applied migration").
+		{
+			"tag": "v5",
+			"new_sqlite_classes": [
+				"Copywriter"
+			]
+		},
+		{
+			"tag": "v6",
+			"new_sqlite_classes": [
+				"BrandAnalyst"
+			]
+		},
+		{
+			"tag": "v7",
+			"new_sqlite_classes": [
+				"CommunityManager"
+			]
+		},
+		{
+			"tag": "v8",
+			"new_sqlite_classes": [
+				"LinkedInMcpAgent",
+				"HackerNewsMcpAgent",
+				"DiscordMcpAgent"
+			]
+		},
+		{
+			"tag": "v9",
+			"deleted_classes": [
+				"Copywriter",
+				"BrandAnalyst",
+				"CommunityManager",
+				"LinkedInMcpAgent",
+				"HackerNewsMcpAgent",
+				"DiscordMcpAgent"
+			]
+		}
+	],
+	// Dynamic Workflow binding — class lands in a later task. AgentPlanWorkflow
+	// drives long-running multi-step orchestration spawned by CMO when plans
+	// exceed a single MCP call's lifetime (e.g. multi-platform inbound sweep).
+	"workflows": [
+		// { "binding": "AGENT_PLAN_WORKFLOW", "name": "agent-plan-workflow", "class_name": "AgentPlanWorkflow" }
+	],
+	// Cron trigger — Phase 1 fan-out to active CMOs hourly for inbound sweep.
+	// The cron handler (`scheduled()` in src/index.ts) is wired in S2.6 / S6.
+	// Hourly cadence; tighten in dev by overriding via `wrangler dev` flag if
+	// you need to exercise the path more frequently.
+	"triggers": {
+		"crons": [
+			"0 0/6 * * *"
+		]
+	}
+	// Secrets are NOT declared in wrangler.jsonc (would leak the value into
+	// the generated `Cloudflare.Env` as a literal type, breaking the wider
+	// `string` constraint our `Env` interface declares).
+	//
+	// Instead, `.dev.vars` supplies test + `wrangler dev` defaults and
+	// production runs `wrangler secret put MCP_JWT_SECRET` (and the same
+	// for ANTHROPIC_API_KEY / XAI_API_KEY / CHANNEL_ENC_KEY).
+	//
+	// apps/web must hold the same MCP_JWT_SECRET — both sides verify the
+	// HS256 signature with one shared secret.
+}

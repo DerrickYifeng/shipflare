@@ -55,16 +55,35 @@ export const postingJobSchema = z.object({
 export type PostingJobData = z.input<typeof postingJobSchema>;
 
 // ---------------------------------------------------------------------------
-// Health score
+// Growth rollup (formerly: health-score)
+//
+// Two shapes:
+//   - kind: 'fanout' — cron entry; processor iterates users w/ ≥1 channel
+//                       and enqueues per-user jobs.
+//   - kind: 'user' (default) — per-user rollup work. Legacy payloads
+//                              without `kind` are treated as 'user'.
+// Queue name stays 'health-score' in Redis for stability with any in-flight
+// schedule; the TS identifiers rename to match the new domain.
 // ---------------------------------------------------------------------------
 
-export const healthScoreJobSchema = z.object({
+const growthRollupFanoutJobSchema = z.object({
+  kind: z.literal('fanout'),
+  schemaVersion: SCHEMA_VERSION,
+  traceId: TRACE_ID,
+});
+
+const growthRollupUserJobSchema = z.object({
   kind: z.literal('user').optional(),
   schemaVersion: SCHEMA_VERSION,
   traceId: TRACE_ID,
   userId: z.string().min(1),
 });
-export type HealthScoreJobData = z.input<typeof healthScoreJobSchema>;
+
+export const growthRollupJobSchema = z.union([
+  growthRollupFanoutJobSchema,
+  growthRollupUserJobSchema,
+]);
+export type GrowthRollupJobData = z.input<typeof growthRollupJobSchema>;
 
 // ---------------------------------------------------------------------------
 // Dream / Code scan
@@ -86,8 +105,6 @@ export const codeScanJobSchema = z.object({
   repoFullName: z.string().min(1),
   repoUrl: z.string().min(1),
   githubToken: z.string().min(1),
-  /** When true, perform incremental diff instead of full scan. */
-  isDailyDiff: z.boolean().optional(),
 });
 export type CodeScanJobData = z.input<typeof codeScanJobSchema>;
 
@@ -186,6 +203,26 @@ export const discoveryScanJobSchema = z.object({
 export type DiscoveryScanJobData = z.input<typeof discoveryScanJobSchema>;
 
 // ---------------------------------------------------------------------------
+// Reddit channel research (kickoff subreddit discovery)
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-product subreddit research. `force=true` re-runs even when auto
+ * rows already exist (founder-triggered "Re-research" in settings).
+ */
+export const redditChannelResearchJobSchema = z.object({
+  kind: z.literal('user').optional(),
+  schemaVersion: SCHEMA_VERSION,
+  traceId: TRACE_ID,
+  userId: z.string().min(1),
+  productId: z.string().min(1),
+  force: z.boolean().optional(),
+});
+export type RedditChannelResearchJobData = z.input<
+  typeof redditChannelResearchJobSchema
+>;
+
+// ---------------------------------------------------------------------------
 // Back-compat aliases (will be removed after full migration)
 // ---------------------------------------------------------------------------
 
@@ -196,13 +233,14 @@ export type XAnalyticsJobData = AnalyticsJobData;
 export type JobData =
   | ReviewJobData
   | PostingJobData
-  | HealthScoreJobData
+  | GrowthRollupJobData
   | DreamJobData
   | CodeScanJobData
   | DiscoveryScanJobData
   | EngagementJobData
   | MetricsJobData
-  | AnalyticsJobData;
+  | AnalyticsJobData
+  | RedditChannelResearchJobData;
 
 // ---------------------------------------------------------------------------
 // Runtime helpers for processors

@@ -46,8 +46,8 @@ const COORDINATOR: AgentAccent = {
   soft: 'var(--sf-bg-tertiary)',
   ink: 'var(--sf-fg-1)',
   badgeVariant: 'default',
-  code: 'CHIEF OF STAFF',
-  initial: 'L',
+  code: 'CHIEF MARKETING OFFICER',
+  initial: 'C',
   colorHex: '#1d1d1f',
 };
 const COMMUNITY: AgentAccent = {
@@ -79,9 +79,9 @@ export function colorHexForAgentType(agentType: string): string {
 }
 
 /**
- * Uppercase role code for the left rail row — "CHIEF OF STAFF",
- * "X WRITER", etc. Unknown agent types surface the raw agent_type as a
- * sensible placeholder until we mint a code for it.
+ * Uppercase role code for the left rail row — "CHIEF MARKETING OFFICER",
+ * "SOCIAL MEDIA MANAGER", etc. Unknown agent types surface the raw
+ * agent_type as a sensible placeholder until we mint a code for it.
  */
 export function roleCodeForAgentType(agentType: string): string {
   return accentForAgentType(agentType)?.code ?? agentType.toUpperCase();
@@ -89,9 +89,9 @@ export function roleCodeForAgentType(agentType: string): string {
 
 /**
  * Single-letter monogram. Prefers the curated initial (so we can
- * disambiguate 'Team Lead' → "L" and 'Social Media Manager' → "M") and
- * falls back to the first letter of the display name, then the first
- * letter of the agent label.
+ * disambiguate 'Team Lead' → "C" (for CMO) and 'Social Media Manager'
+ * → "M") and falls back to the first letter of the display name, then
+ * the first letter of the agent label.
  */
 export function initialForAgent(agentType: string, displayName: string): string {
   const curated = accentForAgentType(agentType)?.initial;

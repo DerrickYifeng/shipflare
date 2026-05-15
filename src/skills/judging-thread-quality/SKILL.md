@@ -3,7 +3,7 @@ name: judging-thread-quality
 description: Score a single thread candidate from a discovery scan. Returns keep/skip + 0-1 score + reason + signals tags. Does not call APIs, does not persist — pure transformation. Caller (discovery-agent or scan worker) handles the conversational refinement loop and persistence.
 context: fork
 model: claude-haiku-4-5-20251001
-maxTurns: 1
+maxTurns: 100
 allowed-tools:
 references:
   - thread-quality-rules

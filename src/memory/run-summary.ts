@@ -51,6 +51,11 @@ export async function generateRunSummary(
 ): Promise<RunSummaryOutput> {
   const userMessage = JSON.stringify(data);
 
+  // TODO(B5+): plumb tenantId into sideQuery here. This is the memory subsystem's
+  // indirect Anthropic call path — currently bypasses the per-tenant bucket because
+  // no tenantId is threaded from the worker context. Trace caller: generateRunSummary
+  // needs a new `userId?: string` param sourced from the pipeline worker's job data;
+  // forward as tenantId. Out of B5 scope per plan.
   const response = await sideQuery({
     model: SUMMARY_MODEL,
     system: RUN_SUMMARY_PROMPT,

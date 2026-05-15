@@ -158,8 +158,8 @@ export async function POST(request: NextRequest): Promise<Response> {
         .where(
           and(
             eq(planItems.userId, userId),
-            gte(planItems.scheduledAt, weekStart),
-            lt(planItems.scheduledAt, weekEnd),
+            gte(planItems.dueDate, weekStart),
+            lt(planItems.dueDate, weekEnd),
             inArray(planItems.state, ['planned', 'drafted', 'ready_for_review']),
             ne(planItems.userAction, 'manual'),
           ),
@@ -217,6 +217,8 @@ export async function POST(request: NextRequest): Promise<Response> {
         goal,
         publicSummary,
         trigger: 'phase_transition',
+        // B6: founder pressed the "phase change" button → priority lane.
+        priority: 'priority',
       },
       db,
     );

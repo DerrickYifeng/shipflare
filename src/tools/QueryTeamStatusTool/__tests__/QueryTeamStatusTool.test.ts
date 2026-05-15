@@ -25,7 +25,7 @@ vi.mock('@/lib/logger', () => ({
 }));
 
 import { queryTeamStatusTool } from '../QueryTeamStatusTool';
-import { teamMembers, teamTasks } from '@/lib/db/schema';
+import { agentRuns, teamMembers } from '@/lib/db/schema';
 
 interface MemberRow {
   id: string;
@@ -35,13 +35,16 @@ interface MemberRow {
   status: string;
   lastActiveAt: Date | null;
 }
-interface TaskRow {
+interface AgentRunRow {
   id: string;
-  runId: string;
+  teamId: string;
   memberId: string;
+  agentDefName: string;
+  parentAgentId: string | null;
+  parentToolUseId: string | null;
   status: string;
-  description: string;
-  startedAt: Date | null;
+  spawnedAt: Date;
+  lastActiveAt: Date;
 }
 
 function makeCtx(store: InMemoryStore, deps: Record<string, unknown>): ToolContext {
@@ -88,7 +91,7 @@ describe('queryTeamStatusTool', () => {
         lastActiveAt: null,
       },
     ]);
-    store.register<TaskRow>(teamTasks, []);
+    store.register<AgentRunRow>(agentRuns, []);
 
     const ctx = makeCtx(store, { teamId: 'team-1' });
     const rows = await queryTeamStatusTool.execute({}, ctx);
@@ -100,7 +103,7 @@ describe('queryTeamStatusTool', () => {
     expect(alex.last_active_at).toBe('2026-04-20T12:00:00.000Z');
   });
 
-  it('attaches currentTask when the member has a running task', async () => {
+  it('attaches currentTask when the member has an in-flight agent_run', async () => {
     store.register<MemberRow>(teamMembers, [
       {
         id: 'm-busy',
@@ -112,22 +115,28 @@ describe('queryTeamStatusTool', () => {
       },
     ]);
     const start = new Date('2026-04-20T10:00:00Z');
-    store.register<TaskRow>(teamTasks, [
+    store.register<AgentRunRow>(agentRuns, [
       {
-        id: 't-done',
-        runId: 'run-1',
+        id: 'a-done',
+        teamId: 'team-1',
         memberId: 'm-busy',
+        agentDefName: 'content-planner',
+        parentAgentId: null,
+        parentToolUseId: null,
         status: 'completed',
-        description: 'Prior task',
-        startedAt: new Date('2026-04-19T10:00:00Z'),
+        spawnedAt: new Date('2026-04-19T10:00:00Z'),
+        lastActiveAt: new Date('2026-04-19T10:30:00Z'),
       },
       {
-        id: 't-running',
-        runId: 'run-1',
+        id: 'a-running',
+        teamId: 'team-1',
         memberId: 'm-busy',
+        agentDefName: 'content-planner',
+        parentAgentId: null,
+        parentToolUseId: null,
         status: 'running',
-        description: 'Plan the week',
-        startedAt: start,
+        spawnedAt: start,
+        lastActiveAt: start,
       },
     ]);
 
@@ -135,7 +144,7 @@ describe('queryTeamStatusTool', () => {
     const rows = await queryTeamStatusTool.execute({}, ctx);
     expect(rows).toHaveLength(1);
     expect(rows[0].currentTask).toEqual({
-      description: 'Plan the week',
+      description: 'content-planner',
       startedAt: start.toISOString(),
     });
   });

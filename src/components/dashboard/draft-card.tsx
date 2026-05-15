@@ -43,8 +43,8 @@ const verdictConfig = {
 } as const;
 
 const sourceLabel: Record<string, string> = {
-  monitor: 'Scheduled replies',
-  calendar: 'Scheduled posts',
+  monitor: 'Replies',
+  calendar: 'Posts',
   engagement: 'Engage with my audience',
   discovery: 'Community threads',
 };
@@ -89,7 +89,9 @@ export const DraftCard = memo(function DraftCard({
           <span className="font-mono text-[12px] tracking-[-0.12px] text-sf-text-tertiary uppercase">
             {draft.platform === 'x' ? '𝕏' : draft.platform}
           </span>
-          <Badge variant="accent">{draft.thread.community}</Badge>
+          {draft.thread.community ? (
+            <Badge variant="accent">{draft.thread.community}</Badge>
+          ) : null}
           {/* Source badge */}
           <Badge variant="default">
             {sourceLabel[draft.source] ?? draft.source}

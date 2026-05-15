@@ -28,7 +28,15 @@ export const draftingReplyInputSchema = z.object({
     /** Parent post author handle (no @). */
     inReplyToAuthor: z.string().nullable().optional(),
     platform: channelEnum,
-    community: z.string(),
+    /**
+     * Reddit-only — the subreddit name (no `r/` prefix). Absent for X
+     * threads because X has no equivalent concept; including a placeholder
+     * value here invited the drafter to hand it to `get_subreddit_rules`,
+     * which then 404'd against Reddit. The skill body's
+     * "Reddit-specific drafting" section is the only place that may
+     * reference this field.
+     */
+    community: z.string().min(1).nullable().optional(),
     url: z.string().optional(),
   }),
   product: z.object({
@@ -45,9 +53,17 @@ export const draftingReplyInputSchema = z.object({
 export type DraftingReplyInput = z.infer<typeof draftingReplyInputSchema>;
 
 export const draftingReplyOutputSchema = z.object({
-  draftBody: z.string().min(1),
+  // `draftBody` may be empty when `flagged: true` (subreddit rule conflict).
+  // Non-flagged drafts MUST emit a non-empty body; the drafting prompt enforces
+  // that in-fork. We don't gate empty bodies at the schema layer because the
+  // safe-skip path (Reddit rule conflict) needs to round-trip through Zod.
+  draftBody: z.string(),
   whyItWorks: z.string().max(500),
   confidence: z.number().min(0).max(1),
+  /** True when the draft was deliberately skipped (e.g., subreddit rule conflict). */
+  flagged: z.boolean().optional(),
+  /** Human-readable reason, paired with `flagged: true`. Callers may surface this in `/today`. */
+  flagReason: z.string().optional(),
 });
 
 export type DraftingReplyOutput = z.infer<typeof draftingReplyOutputSchema>;

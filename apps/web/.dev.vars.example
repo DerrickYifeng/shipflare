@@ -1,0 +1,64 @@
+# .dev.vars.example — copy to .dev.vars and fill in.
+# .dev.vars is gitignored and read by `wrangler dev` / OpenNext local proxy.
+# For production: set via `wrangler secret put <NAME>` instead.
+
+# 32-byte random base64. Used by Better Auth to sign session cookies.
+#   openssl rand -base64 32
+BETTER_AUTH_SECRET=
+
+# Origin used by Better Auth for OAuth callback URL construction + CSRF.
+# Must exactly match the URL the browser hits. Localhost is dev-only;
+# staging / production need the deployed origin.
+BETTER_AUTH_URL=http://localhost:3000
+
+# From github.com/settings/developers → New OAuth App.
+# Callback URL must be <BETTER_AUTH_URL>/api/auth/callback/github
+GITHUB_CLIENT_ID=
+GITHUB_CLIENT_SECRET=
+
+# Shared with apps/core. Signs the short-lived JWTs the browser uses to call
+# core's /agents/<role>/<userId>/mcp routes directly. 32-byte random base64.
+#   openssl rand -base64 32
+MCP_JWT_SECRET=
+
+# Shared with apps/core. Signs Phase 2 long-lived (30d) external MCP tokens
+# minted by /api/external-mcp/issue for 3rd-party MCP clients (Claude
+# Desktop, Cursor). MUST match apps/core's EXTERNAL_MCP_SECRET exactly.
+# Distinct from MCP_JWT_SECRET so a leaked browser-session token can't be
+# used to impersonate a 3rd-party client.
+#   openssl rand -base64 32
+EXTERNAL_MCP_SECRET=
+
+# Public origin of apps/core. `/api/mcp-token` returns
+# `${CORE_PUBLIC_URL}/agents/<role>/<userId>/mcp` so the browser can call
+# core directly (per spec D13 — Web Worker isn't a proxy for chat). Defaults
+# to http://localhost:3001 (apps/core's `wrangler dev` port). Override per
+# environment (e.g. https://core.shipflare.app for production).
+CORE_PUBLIC_URL=http://localhost:3001
+
+# X (Twitter) OAuth 2.0 app — developer.twitter.com → App → Keys and tokens →
+# OAuth 2.0 Client ID/Secret. Callback URL on the X side MUST equal
+# ${BETTER_AUTH_URL}/api/channels/x/callback exactly.
+X_CLIENT_ID=
+X_CLIENT_SECRET=
+
+# Reddit OAuth 2.0 app — reddit.com/prefs/apps → "web app". The Redirect URI
+# MUST equal ${BETTER_AUTH_URL}/api/channels/reddit/callback exactly.
+REDDIT_CLIENT_ID=
+REDDIT_CLIENT_SECRET=
+
+# 32-byte base64 key used by @shipflare/crypto to AES-GCM encrypt channel
+# OAuth tokens before they hit D1. Rotating this invalidates every connected
+# channel — they will need to re-authenticate.
+#   openssl rand -base64 32
+CHANNEL_ENC_KEY=
+
+# P2-F — Web Push (VAPID) public key. MUST match apps/core's VAPID_PUBLIC
+# (apps/core holds the matching private key). NEXT_PUBLIC_-prefix is special:
+# Next.js inlines it into the client bundle at build time. This value is
+# safe to expose to the browser by design — it's only used as the
+# `applicationServerKey` argument to `pushManager.subscribe`. Set in
+# `apps/web/.env.local` (gitignored) for local dev; for production pass via
+# wrangler vars / build-time env. Generate with `generateVapidKeypair()` in
+# apps/core/src/lib/web-push.ts.
+NEXT_PUBLIC_VAPID_PUBLIC=

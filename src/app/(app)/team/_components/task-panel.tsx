@@ -1,18 +1,75 @@
 'use client';
 
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
   type CSSProperties,
 } from 'react';
-import type { DelegationTask } from './conversation-reducer';
+import type {
+  AgentRunStatus,
+  AgentRunStatusMap,
+  DelegationTask,
+  ProgressItem,
+} from './conversation-reducer';
 import { accentForAgentType, colorHexForAgentType } from './agent-accent';
+import { MessageMarkdown } from './message-markdown';
 import { TodaysOutput } from './todays-output';
+
+/**
+ * Engine's MCPTool/UI.tsx collapses unknown tool results into a one-line
+ * summary instead of dumping bytes (e.g. "Sent a message to #channel").
+ * Shipflare skills return JSON-shaped `agent_text` (e.g. `reading-plan`
+ * → `[{id, kind, phase, …}]`) which would otherwise leak uuids and
+ * internal column names. This summarizer keeps only the count — no
+ * keys — so the panel never exposes internals.
+ *
+ *   "12 items"   |   "1 item"   |   "(empty)"
+ *
+ * Prose (non-JSON) passes through truncated to 1600 chars with newlines
+ * preserved.
+ */
+const PROSE_TRUNCATE = 1600;
+
+function summarizeProgressText(raw: string): string {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return '';
+  const first = trimmed[0];
+  if (first === '{' || first === '[') {
+    try {
+      const parsed: unknown = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        const n = parsed.length;
+        if (n === 0) return '(empty)';
+        return n === 1 ? '1 item' : `${n} items`;
+      }
+      if (parsed !== null && typeof parsed === 'object') {
+        return '(result)';
+      }
+      return String(parsed).slice(0, 140);
+    } catch {
+      // Falls through to prose path on malformed JSON.
+    }
+  }
+  if (trimmed.length > PROSE_TRUNCATE) {
+    return `${trimmed.slice(0, PROSE_TRUNCATE)}…`;
+  }
+  return trimmed;
+}
 
 export interface TaskPanelProps {
   tasks: readonly DelegationTask[];
+  /**
+   * Live agent_runs status map merged with SSE `agent_status_change`
+   * events. Used to override `task.status` when the conversation
+   * reducer hasn't yet folded the most recent transition into the
+   * DelegationTask field (the bug surface: panel kept showing QUEUED
+   * for teammates that were actively running and emitting tool_calls).
+   * When omitted, the panel falls back to `task.status` only.
+   */
+  liveAgentRunStatus?: AgentRunStatusMap;
   /**
    * Called when the user clicks a task row. Receives the
    * `messageId` + owning `runId` of the originating Task tool_call —
@@ -23,15 +80,15 @@ export interface TaskPanelProps {
   onJumpToTask?: (messageId: string, runId: string | null) => void;
   /**
    * Hover-revealed Stop action on a RUNNING / QUEUED row. Receives the
-   * `taskId` (team_tasks.id). Matches the inline SubtaskCard handler
-   * so both surfaces point at the same backend endpoint.
+   * spawned teammate's `agent_runs.id` so both this surface and the
+   * inline SubtaskCard route through `/api/team/agent/[agentId]/cancel`.
    */
-  onCancelTask?: (taskId: string) => void | Promise<void>;
+  onCancelTask?: (agentId: string) => void | Promise<void>;
   /**
    * Hover-revealed Retry action on a DONE / FAILED row. Spawns a fresh
-   * team_run with the same prompt — caller routes to the new session.
+   * teammate run with the same prompt — caller routes to the new session.
    */
-  onRetryTask?: (taskId: string) => void | Promise<void>;
+  onRetryTask?: (agentId: string) => void | Promise<void>;
   /** Metrics for the THIS WEEK section at the bottom. */
   thisWeek: {
     completed: number;
@@ -40,34 +97,111 @@ export interface TaskPanelProps {
   };
 }
 
+/**
+ * Compute the effective DelegationTask status, preferring the live
+ * agent_runs status when available. The agent_runs lifecycle has more
+ * granularity (`resuming` vs `running` vs `sleeping`); collapse to the
+ * coarser DelegationTask vocabulary so the panel's existing filters and
+ * label logic don't have to fan out.
+ *
+ * Defensive override: if the task is reporting `queued` (from either
+ * source) but has already emitted progress items (tool calls or text
+ * bursts), the agent is provably running — promote to 'working'. This
+ * patches a class of stale-status bugs where the queued → running SSE
+ * event was dropped (e.g. agent_status_change payloads without a runId
+ * filtered out somewhere) but tool_call events still propagated.
+ * Without this, the panel can stall on QUEUED forever even though the
+ * agent is producing output.
+ */
+function effectiveStatus(
+  task: DelegationTask,
+  live: AgentRunStatus | undefined,
+): DelegationTask['status'] {
+  const base: DelegationTask['status'] = (() => {
+    if (!live) return task.status;
+    switch (live.status) {
+      case 'running':
+      case 'resuming':
+        return 'working';
+      case 'queued':
+        return 'queued';
+      case 'sleeping':
+        return 'working';
+      case 'completed':
+        return 'done';
+      case 'failed':
+        return 'failed';
+      case 'killed':
+        return 'failed';
+      default:
+        return task.status;
+    }
+  })();
+  // Progress-items override: if the task is "queued" but has produced
+  // observable work, it's actually running. Doesn't apply to terminal
+  // states (a completed task can have many progress items but should
+  // stay 'done').
+  if (base === 'queued' && task.progressItems.length > 0) {
+    return 'working';
+  }
+  return base;
+}
+
 const RECENT_DEFAULT_LIMIT = 3;
 
 export function TaskPanel({
   tasks,
+  liveAgentRunStatus,
   onJumpToTask,
   onCancelTask,
   onRetryTask,
   thisWeek,
 }: TaskPanelProps) {
+  // Pre-compute the effective status per task once so all downstream
+  // partitions / labels stay consistent. `effectiveStatus` prefers the
+  // live agent_runs map when available — the conversation reducer's
+  // DelegationTask.status field can lag behind the actual run state.
+  const effectiveByMessageId = useMemo(() => {
+    const m = new Map<string, DelegationTask['status']>();
+    for (const t of tasks) {
+      const live = t.agentId
+        ? liveAgentRunStatus?.get(t.agentId)
+        : undefined;
+      m.set(t.messageId, effectiveStatus(t, live));
+    }
+    return m;
+  }, [tasks, liveAgentRunStatus]);
+  const statusFor = useCallback(
+    (t: DelegationTask): DelegationTask['status'] =>
+      effectiveByMessageId.get(t.messageId) ?? t.status,
+    [effectiveByMessageId],
+  );
+
   // Partition by status. Running on top (always expanded), terminal
   // below in a capped RECENT section. `queued` gets bucketed with
   // running — it's transient and visually conveys "about to start".
   const running = useMemo(
     () =>
-      tasks.filter((t) => t.status === 'working' || t.status === 'queued'),
-    [tasks],
+      tasks.filter((t) => {
+        const s = statusFor(t);
+        return s === 'working' || s === 'queued';
+      }),
+    [tasks, statusFor],
   );
   const recentAll = useMemo(
     () =>
       tasks
-        .filter((t) => t.status === 'done' || t.status === 'failed')
+        .filter((t) => {
+          const s = statusFor(t);
+          return s === 'done' || s === 'failed';
+        })
         .slice()
         // Approximate "recency" via messageId reverse — the top-level
         // stitcher emits delegations in chronological order, so later
         // messageIds correspond to later tool_calls. Good enough for
         // a sidebar heuristic; if we wire createdAt later, sort here.
         .reverse(),
-    [tasks],
+    [tasks, statusFor],
   );
 
   const [showAllRecent, setShowAllRecent] = useState(false);
@@ -75,6 +209,15 @@ export function TaskPanel({
     ? recentAll
     : recentAll.slice(0, RECENT_DEFAULT_LIMIT);
   const hiddenCount = Math.max(0, recentAll.length - recentVisible.length);
+
+  // Single-expansion mode: at most one row's live progress feed is
+  // visible at a time. Clicking another running row collapses the
+  // previous and expands the new one — without this, expanding 6
+  // concurrent dispatches makes the panel impossible to scan.
+  const [expandedMessageId, setExpandedMessageId] = useState<string | null>(null);
+  const handleToggleExpand = useCallback((messageId: string) => {
+    setExpandedMessageId((curr) => (curr === messageId ? null : messageId));
+  }, []);
 
   const container: CSSProperties = {
     display: 'flex',
@@ -139,6 +282,9 @@ export function TaskPanel({
             <TaskPanelRow
               key={task.messageId}
               task={task}
+              effectiveStatus={statusFor(task)}
+              expanded={expandedMessageId === task.messageId}
+              onToggleExpand={handleToggleExpand}
               onJump={onJumpToTask}
               onCancel={onCancelTask}
               onRetry={onRetryTask}
@@ -178,6 +324,9 @@ export function TaskPanel({
               <TaskPanelRow
                 key={task.messageId}
                 task={task}
+                effectiveStatus={statusFor(task)}
+                expanded={false}
+                onToggleExpand={handleToggleExpand}
                 onJump={onJumpToTask}
                 onCancel={onCancelTask}
                 onRetry={onRetryTask}
@@ -210,14 +359,31 @@ export function TaskPanel({
 
 interface TaskPanelRowProps {
   task: DelegationTask;
+  /**
+   * Effective status — pre-computed by the parent from
+   * `liveAgentRunStatus` so the row's label / partition stays in sync
+   * with the actual agent_runs lifecycle. Falls back to `task.status`
+   * when no live entry exists.
+   */
+  effectiveStatus: DelegationTask['status'];
+  /**
+   * Controlled-expansion: parent holds at most ONE expanded messageId
+   * at a time so siblings stay visible. Click toggles via
+   * `onToggleExpand`. Terminal rows are always passed `expanded=false`.
+   */
+  expanded: boolean;
+  onToggleExpand: (messageId: string) => void;
   onJump?: (messageId: string, runId: string | null) => void;
-  onCancel?: (taskId: string) => void | Promise<void>;
-  onRetry?: (taskId: string) => void | Promise<void>;
+  onCancel?: (agentId: string) => void | Promise<void>;
+  onRetry?: (agentId: string) => void | Promise<void>;
   variant: 'expanded' | 'compact';
 }
 
 function TaskPanelRow({
   task,
+  effectiveStatus,
+  expanded,
+  onToggleExpand,
   onJump,
   onCancel,
   onRetry,
@@ -225,6 +391,8 @@ function TaskPanelRow({
 }: TaskPanelRowProps) {
   const [hover, setHover] = useState(false);
   const [pending, setPending] = useState(false);
+  const isRunningRow =
+    effectiveStatus === 'working' || effectiveStatus === 'queued';
   // `task.subagentType` is the redacted founder-facing label
   // (e.g. 'Social Media Manager'); when missing fall through to the
   // unknown-label gradient via the empty string.
@@ -286,53 +454,59 @@ function TaskPanelRow({
     marginTop: 2,
   };
 
-  const isRunning = task.status === 'working' || task.status === 'queued';
+  // Use the effective status everywhere user-visible. Falls back to
+  // task.status only when the parent didn't compute one (caller still
+  // wires `effectiveStatus={statusFor(task)}` in both render sites).
+  const status: DelegationTask['status'] = effectiveStatus;
+  const isRunning = status === 'working' || status === 'queued';
   const agentLabel = task.subagentType ?? 'specialist';
   const statusLabel =
-    task.status === 'working'
+    status === 'working'
       ? 'RUNNING'
-      : task.status === 'queued'
+      : status === 'queued'
         ? 'QUEUED'
-        : task.status === 'done'
+        : status === 'done'
           ? 'DONE'
           : 'FAILED';
   const statusColor =
-    task.status === 'done'
+    status === 'done'
       ? 'var(--sf-success-ink)'
-      : task.status === 'failed'
+      : status === 'failed'
         ? 'var(--sf-error-ink)'
         : 'var(--sf-accent)';
 
   const handleCancel = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!onCancel || !task.taskId || pending) return;
+    if (!onCancel || !task.agentId || pending) return;
     setPending(true);
     try {
-      await onCancel(task.taskId);
+      await onCancel(task.agentId);
     } finally {
       setPending(false);
     }
   };
   const handleRetry = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!onRetry || !task.taskId || pending) return;
+    if (!onRetry || !task.agentId || pending) return;
     setPending(true);
     try {
-      await onRetry(task.taskId);
+      await onRetry(task.agentId);
     } finally {
       setPending(false);
     }
   };
 
   // Hover-revealed action: Stop on running/queued, Retry on terminal.
-  // Gated on `task.taskId` because the reducer can surface a coord-side
-  // DelegationTask without a DB row (e.g. pre-insert retries) and we
-  // need a concrete taskId to hit the `/api/team/task/...` endpoints.
-  const canCancel = isRunning && !!onCancel && !!task.taskId;
+  // Gated on `task.agentId` because the reducer can surface a coord-side
+  // DelegationTask before the async dispatch receipt has landed (the
+  // brief window between Task tool_call and the spawned agent_runs row
+  // becoming visible). The `/api/team/agent/[agentId]/...` endpoints
+  // need a concrete agentId.
+  const canCancel = isRunning && !!onCancel && !!task.agentId;
   const canRetry =
-    (task.status === 'failed' || task.status === 'done') &&
+    (status === 'failed' || status === 'done') &&
     !!onRetry &&
-    !!task.taskId;
+    !!task.agentId;
   const showAction = hover && (canCancel || canRetry);
 
   const actionBtn: CSSProperties = {
@@ -350,10 +524,37 @@ function TaskPanelRow({
     marginLeft: 6,
   };
 
+  // Click semantics:
+  //   - On a RUNNING row: toggle expand, revealing the live progress feed.
+  //     Holding shift+click jumps to the inline card (existing behavior).
+  //   - On a TERMINAL row: jump to the inline card (existing behavior).
+  // Pre-A2 the only click action was jump-to-inline. The new toggle is
+  // additive — the right Tasks panel becomes the canonical "see what
+  // this teammate is doing right now" surface.
+  const handleRowClick = (e: React.MouseEvent) => {
+    if (isRunning && !e.shiftKey) {
+      onToggleExpand(task.messageId);
+      return;
+    }
+    if (onJump) onJump(task.messageId, task.runId);
+  };
+
+  const handleKey = (e: React.KeyboardEvent) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    if (isRunning) {
+      onToggleExpand(task.messageId);
+    } else if (onJump) {
+      onJump(task.messageId, task.runId);
+    }
+  };
+
   return (
     <div
       style={row}
-      onClick={onJump ? () => onJump(task.messageId, task.runId) : undefined}
+      onClick={handleRowClick}
+      onKeyDown={onJump || isRunning ? handleKey : undefined}
+      tabIndex={onJump || isRunning ? 0 : undefined}
       onMouseEnter={(e) => {
         setHover(true);
         (e.currentTarget as HTMLDivElement).style.background =
@@ -365,9 +566,11 @@ function TaskPanelRow({
           'var(--sf-bg-secondary)';
       }}
       data-testid={`task-panel-row-${task.messageId}`}
-      data-status={task.status}
-      role={onJump ? 'button' : undefined}
-      aria-label={`${agentLabel}: ${task.label}, ${task.status}`}
+      data-status={status}
+      data-expanded={isRunningRow && expanded ? 'true' : 'false'}
+      role={onJump || isRunning ? 'button' : undefined}
+      aria-expanded={isRunning ? expanded : undefined}
+      aria-label={`${agentLabel}: ${task.label}, ${status}`}
     >
       <span style={leftRule} aria-hidden="true" />
       <div style={topLine}>
@@ -402,12 +605,132 @@ function TaskPanelRow({
         ) : null}
       </div>
       <div style={titleStyle}>{task.label}</div>
-      {variant === 'expanded' && isRunning ? (
+      {variant === 'expanded' && isRunning && !expanded ? (
         <div style={metaLine}>
           <span style={{ color: borderColor }}>⤵</span>
           <span>{deriveLiveActivity(task)}</span>
         </div>
       ) : null}
+      {variant === 'expanded' && isRunning && expanded ? (
+        <ProgressDetail items={task.progressItems} accentColor={borderColor} />
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Inline-expanded progress feed for a running row. Mirrors the chat-
+ * side DelegationCard's progress list pattern but stripped down: the
+ * panel is narrow, so we render tool names + text bursts as a vertical
+ * list without the nested indentation. Caps at the most recent 20
+ * entries so a 60-tool sweep doesn't push the rest of the panel
+ * off-screen.
+ */
+function ProgressDetail({
+  items,
+  accentColor,
+}: {
+  items: readonly ProgressItem[];
+  accentColor: string;
+}) {
+  const wrap: CSSProperties = {
+    marginTop: 8,
+    padding: '8px 8px 8px 10px',
+    borderRadius: 6,
+    background: 'var(--sf-bg-primary)',
+    borderLeft: `2px solid ${accentColor}`,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 6,
+    // Expanded card needs room for tool outputs + multi-line agent text.
+    // 360px ≈ ~15-20 progress rows; inner overflow scrolls older items
+    // without losing sibling cards.
+    maxHeight: 360,
+    overflowY: 'auto',
+  };
+  const row: CSSProperties = {
+    fontFamily: 'var(--sf-font-mono)',
+    fontSize: 11,
+    color: 'var(--sf-fg-3)',
+    lineHeight: 1.45,
+    display: 'flex',
+    alignItems: 'baseline',
+    gap: 6,
+  };
+  const tool: CSSProperties = {
+    fontWeight: 500,
+    color: 'var(--sf-fg-2)',
+  };
+  const text: CSSProperties = {
+    // MessageMarkdown handles whitespace + line wrapping per element.
+    // We just set color + sizing context here; no `pre-wrap` (which
+    // would prevent markdown's natural paragraph collapse) and no
+    // `wordBreak` (let `<pre>` inside MessageMarkdown handle its own
+    // horizontal overflow via its codeBlock style).
+    color: 'var(--sf-fg-2)',
+    fontSize: 12,
+  };
+  const elapsed: CSSProperties = {
+    marginLeft: 'auto',
+    color: 'var(--sf-fg-4)',
+    fontVariantNumeric: 'tabular-nums',
+  };
+
+  const visible = items.slice(-20);
+  const hidden = items.length - visible.length;
+  if (items.length === 0) {
+    return (
+      <div style={wrap}>
+        <div style={{ ...row, fontStyle: 'italic', color: 'var(--sf-fg-4)' }}>
+          thinking…
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div style={wrap} role="region" aria-label="Live progress">
+      {hidden > 0 ? (
+        <div style={row}>
+          <span>+{hidden} earlier {hidden === 1 ? 'event' : 'events'}</span>
+        </div>
+      ) : null}
+      {visible.map((item) => {
+        if (item.kind === 'tool') {
+          // Engine pattern: inline row shows toolName + elapsed only.
+          // Raw tool_result content (uuids, plan_item dumps, etc.) stays
+          // out of the panel so internal data structures don't leak to
+          // the founder. Errors keep their compact text via `errorText`.
+          return (
+            <div key={item.id} style={row}>
+              <span aria-hidden="true">└ ◈</span>
+              <span style={tool}>{item.toolName}</span>
+              {item.errorText ? (
+                <span style={{ color: 'var(--sf-error-ink)' }}>— {item.errorText}</span>
+              ) : null}
+              {item.elapsed ? <span style={elapsed}>{item.elapsed}</span> : null}
+            </div>
+          );
+        }
+        if (item.kind === 'group') {
+          return (
+            <div key={item.id} style={row}>
+              <span aria-hidden="true">└ ⊡</span>
+              <span style={tool}>{item.label}</span>
+            </div>
+          );
+        }
+        // text — JSON-shaped skill outputs collapse to a count summary
+        // ("12 items") so the panel doesn't leak uuids / internal
+        // columns. Prose passes through MessageMarkdown so backticks,
+        // bullets, and fenced code render properly (without it, agents'
+        // markdown showed up as literal `` ` `` and ``` characters).
+        const rendered = summarizeProgressText(item.text);
+        return (
+          <div key={item.id} style={text}>
+            <MessageMarkdown text={rendered} />
+          </div>
+        );
+      })}
     </div>
   );
 }

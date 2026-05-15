@@ -39,6 +39,10 @@ Each memory entry has a name and description. Return the names of the most relev
 Available memories:
 ${manifest}`;
 
+  // TODO(B5+): plumb tenantId into sideQuery here. This is the memory subsystem's
+  // indirect Anthropic call path — currently bypasses the per-tenant bucket because
+  // no tenantId is threaded from the worker context. Trace caller: store.userId is
+  // available on MemoryStore — forward as tenantId. Out of B5 scope per plan.
   const response = await sideQuery({
     model: RETRIEVAL_MODEL,
     system: systemPrompt,

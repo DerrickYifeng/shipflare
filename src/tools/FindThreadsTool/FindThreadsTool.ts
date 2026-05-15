@@ -49,7 +49,8 @@ export type FindThreadsInput = z.infer<typeof findThreadsInputSchema>;
 export interface ThreadRow {
   threadId: string;
   platform: string;
-  community: string;
+  /** NULL for X threads (no Reddit-style subreddit equivalent). */
+  community: string | null;
   title: string;
   body: string | null;
   author: string | null;

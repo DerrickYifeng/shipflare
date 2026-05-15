@@ -3,7 +3,7 @@
  * the channels DB lookup; asserts the tool's contract: shape, window filtering,
  * and the four error-fallback paths.
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { ToolContext } from '@/core/types';
 import {
   createInMemoryStore,
@@ -92,6 +92,17 @@ beforeEach(() => {
   // Default stubs — happy path. Tests override per-case.
   stubGetMe = async () => ({ id: '1234567', username: 'founder' });
   stubGetUserTweets = async () => ({ tweets: [], newestId: undefined });
+  // Pin the wall clock so the `days` window filter inside
+  // queryRecentXPostsTool stays deterministic. Without this, the fixture
+  // dates (created relative to the pinned NOW below) drift past the
+  // window as real-world time advances, and the assertions count 1
+  // tweet instead of 2.
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date(NOW));
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 const NOW = new Date('2026-04-29T12:00:00Z').getTime();

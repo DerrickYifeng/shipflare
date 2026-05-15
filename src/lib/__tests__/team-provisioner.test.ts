@@ -212,7 +212,7 @@ describe('getTeamCompositionForPreset', () => {
     );
     // Plan 3 (2026-05-04): the baseline collapsed to just the
     // coordinator — content-planner's planning work was absorbed by
-    // the chief of staff via direct add_plan_item / generate_strategic_path
+    // the CMO via direct add_plan_item / generate_strategic_path
     // tool calls. Specialist agents layer on top per preset.
     const baseline: AgentType[] = ['coordinator'];
     for (const preset of [
@@ -331,7 +331,7 @@ describe('ensureTeamExists (with preset)', () => {
     const nameByType = Object.fromEntries(
       getTeamMembers().map((m) => [m.agentType, m.displayName]),
     );
-    expect(nameByType['coordinator']).toBe('Chief of Staff');
+    expect(nameByType['coordinator']).toBe('CMO');
     expect(nameByType['social-media-manager']).toBe('Social Media Manager');
   });
 });
@@ -364,9 +364,11 @@ describe('provisionTeamForProduct', () => {
     expect(types).toContain('social-media-manager');
   });
 
-  it('consumer category + reddit channel connected → consumer-squad seeds social-media-manager', async () => {
+  it('consumer category + no channels connected → still consumer-squad (Reddit is always-on)', async () => {
     rows[productsTable].push({ id: 'p-1', userId: 'u-1', category: 'consumer' });
-    rows[channelsTable].push({ id: 'c-1', userId: 'u-1', platform: 'reddit' });
+    // Reddit is a no-binding always-on channel, so `hasReddit` is always
+    // true; the social-media-manager preset seeds even without an X
+    // OAuth row.
     const { provisionTeamForProduct } = await import('@/lib/team-provisioner');
     const res = await provisionTeamForProduct('u-1', 'p-1');
     expect(res.preset).toBe('consumer-squad');
@@ -374,33 +376,37 @@ describe('provisionTeamForProduct', () => {
     expect(types).toContain('social-media-manager');
   });
 
-  it('no channels connected → falls back to default-squad even for dev_tool', async () => {
+  it('no channels connected → still seeds the category preset (Reddit is always-on)', async () => {
     rows[productsTable].push({ id: 'p-1', userId: 'u-1', category: 'dev_tool' });
+    // Pre-no-binding semantics this fell back to `default-squad`. Now
+    // Reddit is implicit, so `hasAnyPlatformChannel` is always true and
+    // the dev-squad preset seeds.
     const { provisionTeamForProduct } = await import('@/lib/team-provisioner');
     const res = await provisionTeamForProduct('u-1', 'p-1');
-    expect(res.preset).toBe('default-squad');
+    expect(res.preset).toBe('dev-squad');
     const types = new Set(getTeamMembers().map((m) => m.agentType));
-    expect(types).toEqual(new Set(['coordinator']));
+    expect(types).toEqual(new Set(['coordinator', 'social-media-manager']));
   });
 
-  it('reconciles when a new channel connects after initial provisioning', async () => {
+  it('reconciles when X connects after initial Reddit-only provisioning', async () => {
     rows[productsTable].push({ id: 'p-1', userId: 'u-1', category: 'consumer' });
-    // No platform channels yet → falls back to default-squad (baseline
-    // only — no social-media-manager because there's no inbox to monitor
-    // and no platform to post to).
+    // Reddit is always-on, so the first provision already lands the
+    // full consumer-squad — there is no longer a "channel-less default
+    // fallback" path. Verify both runs converge on consumer-squad.
     const { provisionTeamForProduct } = await import('@/lib/team-provisioner');
-    await provisionTeamForProduct('u-1', 'p-1');
+    const first = await provisionTeamForProduct('u-1', 'p-1');
+    expect(first.preset).toBe('consumer-squad');
     expect(
       new Set(getTeamMembers().map((m) => m.agentType)),
-    ).not.toContain('social-media-manager');
+    ).toContain('social-media-manager');
 
-    // User connects X, re-run — full consumer-squad now seeds.
+    // User adds X OAuth, re-run — preset stays consumer-squad,
+    // membership unchanged (idempotent).
     rows[channelsTable].push({ id: 'c-1', userId: 'u-1', platform: 'x' });
     const second = await provisionTeamForProduct('u-1', 'p-1');
     expect(second.preset).toBe('consumer-squad');
     const types = new Set(getTeamMembers().map((m) => m.agentType));
     expect(types).toContain('social-media-manager');
-    // Baseline still present.
     expect(types).toContain('coordinator');
   });
 

@@ -17,7 +17,7 @@ Status legend:
 
 - **Real title:** Chief Marketing Officer / VP Marketing
 - **Maps to today:** `coordinator` agent
-- **Job:** Receives founder goals, decomposes, delegates to specialists, synthesizes results into a weekly brief. Owns the strategic path doc and the founder's marketing chief-of-staff role.
+- **Job:** Receives founder goals, decomposes, delegates to specialists, synthesizes results into a weekly brief. Owns the strategic path doc and the founder's marketing CMO role.
 - **Tools:** `Task`, `SendMessage`, `query_plan_items`, `query_strategic_path`, `generate_strategic_path`, `add_plan_item`, `update_plan_item`, `StructuredOutput`
 - **Skills:** none (purely orchestrating; no fork work of its own)
 

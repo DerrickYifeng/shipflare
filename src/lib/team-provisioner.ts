@@ -71,7 +71,7 @@ export interface EnsureTeamResult {
 export interface EnsureTeamOptions {
   /**
    * Optional display-name overrides; when present they replace the default
-   * "Chief of Staff"/"Head of Growth"/etc. labels for the matching agent
+   * "CMO"/"Social Media Manager"/etc. labels for the matching agent
    * types during the INSERT. Existing rows are never re-named.
    */
   displayNames?: Partial<DisplayNameMap>;
@@ -252,17 +252,20 @@ export async function provisionTeamForProduct(
 
   const basePreset = pickPresetByCategory(category);
 
-  // Channel-aware adjustment: if no platform channel is connected at all,
-  // fall back to default-squad — without an inbox to monitor or a
-  // platform to post to, the social-media-manager has nothing to do.
-  // Any of x / reddit being connected is enough to seed the full preset
-  // (social-media-manager is channel-agnostic at the agent layer:
-  // `plan_items.channel` decides which guide it consults at draft time).
+  // Channel-aware adjustment: Reddit is always available (no-binding,
+  // handoff dispatch + RedditClient.appOnly() reads), so every founder
+  // has at least one platform channel by definition. X requires OAuth
+  // binding. Either is sufficient for the social-media preset, so this
+  // gate is effectively always-true today — but we keep the structure
+  // so a future channel that gates on user state can re-introduce the
+  // fallback. social-media-manager is channel-agnostic at the agent
+  // layer: `plan_items.channel` decides which guide it consults at
+  // draft time.
   const userChannels = await db
     .select({ platform: channels.platform })
     .from(channels)
     .where(eq(channels.userId, userId));
-  const hasReddit = userChannels.some((c) => c.platform === 'reddit');
+  const hasReddit = true; // Reddit is always-on no-binding (no channel row ever)
   const hasX = userChannels.some((c) => c.platform === 'x');
   const hasAnyPlatformChannel = hasReddit || hasX;
 

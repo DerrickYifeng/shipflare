@@ -57,6 +57,7 @@ export async function queryLoop<T>(params: QueryParams): Promise<{ output: T; tr
     abortSignal,
     onEvent,
     promptCaching = true,
+    tenantId,
   } = params;
 
   const anthropicTools = tools.map(toAnthropicTool);
@@ -89,14 +90,23 @@ export async function queryLoop<T>(params: QueryParams): Promise<{ output: T; tr
     const textMessageIds = new Map<number, string>();
     const textBuffers = new Map<number, string>();
 
+    // Mark the last message with cache_control:ephemeral so the
+    // conversation prefix gets cached between turns. The system prompt
+    // + tools are already cached by createMessage; this completes the
+    // picture so turn N+1 only pays for the diff since turn N.
+    const cachedConvMessages = promptCaching
+      ? addMessageCacheBreakpoint(conversationMessages)
+      : conversationMessages;
+
     const { response, usage } = await createMessage({
       model,
       system: systemPrompt,
-      messages: conversationMessages,
+      messages: cachedConvMessages,
       tools: anthropicTools.length > 0 ? anthropicTools : undefined,
       maxTokens: currentMaxTokens,
       promptCaching,
       signal: abortSignal,
+      ...(tenantId !== undefined ? { tenantId } : {}),
       onStreamEvent: onEvent
         ? (event) => {
             if (event.type === 'content_block_start') {
@@ -255,7 +265,10 @@ export async function runAgent<T>(
   config: AgentConfig,
   userMessage: string,
   context: ToolContext,
-  outputSchema?: z.ZodType<T>,
+  // Widen input slot so schemas with `.default(...)` / `.optional()`
+  // (input ≠ output) compile when callers parameterize `<T>` to the
+  // output type. runAgent only consumes parsed output.
+  outputSchema?: z.ZodType<T, z.ZodTypeDef, unknown>,
   onProgress?: OnProgress,
   /** Pre-built cache-safe blocks for cross-agent cache sharing. */
   prebuilt?: {
@@ -382,9 +395,18 @@ export async function runAgent<T>(
       }
     }
 
-    // When using pre-built blocks, add cache breakpoint on last message
-    // so the growing conversation prefix is cached between turns.
-    const cachedMessages = prebuilt ? addMessageCacheBreakpoint(messages) : messages;
+    // Add a cache breakpoint on the last message so the growing
+    // conversation prefix is cached between turns. Previously this
+    // was gated on `prebuilt` (the parallel-fork path), but the
+    // breakpoint is additive — it only tells Anthropic "you can cache
+    // up to here", never invalidates anything — and the persistent
+    // team-lead / teammate loops (agent-run.ts) wake hundreds of times
+    // over a session with a growing priorMessages prefix. Without this
+    // breakpoint they re-paid the entire conversation as fresh input
+    // tokens every wake. createMessage below always passes
+    // promptCaching:true, so the system + tools are already cached;
+    // adding the messages-level breakpoint completes the picture.
+    const cachedMessages = addMessageCacheBreakpoint(messages);
 
     // TTFB observability — borrowed from Claude Code's
     // `queryCheckpoint('query_first_chunk_received')` pattern
@@ -488,6 +510,7 @@ export async function runAgent<T>(
       promptCaching: true,
       signal: context.abortSignal,
       systemBlocks: prebuilt?.systemBlocks,
+      ...(config.tenantId !== undefined ? { tenantId: config.tenantId } : {}),
       onStreamEvent: onEvent
         ? (event) => {
             // The earliest signal the API has sent anything back — used

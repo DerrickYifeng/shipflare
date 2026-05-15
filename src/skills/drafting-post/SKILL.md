@@ -3,8 +3,9 @@ name: drafting-post
 description: Draft ONE original post for a single plan_item. Receives the plan_item + product + phase + (optional) voice / pillar / theme inputs, returns a single draftBody + whyItWorks + confidence. Does not validate, does not persist — pure transformation. Caller (content-manager in post_batch mode) handles validate_draft and draft_post persistence. NOTE post review (LLM-based) is not yet wired for posts (DraftPostTool persists to plan_items.output, not drafts table); this skill outputs valid drafts that go through validate_draft mechanical checks only.
 context: fork
 model: claude-sonnet-4-6
-maxTurns: 1
+maxTurns: 100
 allowed-tools:
+  - get_subreddit_rules
 references:
   - x-post-voice
   - reddit-post-voice
@@ -106,6 +107,15 @@ Before emitting your JSON, run this checklist on your own draft:
 
 If any check fails, REWRITE before outputting. You only get one shot.
 
+## Reddit-specific drafting
+
+If `channel === 'reddit'`:
+1. Call `get_subreddit_rules` with the top-level `targetSubreddit` BEFORE writing the draft.
+2. If the returned rules contain text matching "no self-promotion", "no AI tools", or "no founders": DO NOT generate a draft. Emit the safe-skip output shape: `draftBody: ""`, `flagged: true`, `flagReason: "subreddit rule conflict"`, `confidence: 0.0`, and put the conflicting rule's `short_name` in `whyItWorks` so the founder knows why this slot was skipped.
+3. Otherwise, include the relevant rules verbatim in your prompt context. Match tone and avoid any pattern explicitly forbidden.
+
+If `get_subreddit_rules` returns `[]` (network error or no rules), proceed with drafting as normal — the tool degrades gracefully and the absence of rules is not a block.
+
 ## Output
 
 ```json
@@ -117,3 +127,15 @@ If any check fails, REWRITE before outputting. You only get one shot.
 ```
 
 For X drafts, `whyItWorks` MUST identify the resolved phase, voice cluster, and template ID per the X reference's templates section.
+
+Safe-skip output shape (Reddit rule conflict only — see "Reddit-specific drafting" above):
+
+```json
+{
+  "draftBody": "",
+  "whyItWorks": "<short_name of the conflicting rule>",
+  "confidence": 0.0,
+  "flagged": true,
+  "flagReason": "subreddit rule conflict"
+}
+```

@@ -3,8 +3,9 @@ name: drafting-reply
 description: Draft ONE reply body for a single thread. Receives the thread + product context + (optional) voice hint, returns a single draftBody + whyItWorks + confidence. Does not gate, does not validate, does not persist — pure transformation. Caller (content-manager or engagement worker) handles judging-thread-quality, validating-draft, and draft_reply persistence.
 context: fork
 model: claude-sonnet-4-6
-maxTurns: 1
+maxTurns: 100
 allowed-tools:
+  - get_subreddit_rules
 references:
   - x-reply-voice
   - reddit-reply-voice
@@ -25,7 +26,7 @@ markdown fences.
 ## Inputs
 
 A JSON payload with:
-- `thread` — the post you are replying to (title, body, author, platform, community).
+- `thread` — the post you are replying to (title, body, author, platform). On Reddit threads it ALSO carries `community` (the subreddit name). On X threads `community` is ABSENT — never call `get_subreddit_rules` for X.
   May also carry optional author signal:
   - `authorBio` (optional) — OP's profile bio. Use to calibrate voice:
     if their bio mentions a project / specific stack, name-drop it back
@@ -180,6 +181,17 @@ Before emitting your JSON, run this checklist on your own draft:
 If any check fails, REWRITE before outputting. You only get one shot.
 Better to ask a clarifying question than ship slop.
 
+## Reddit-specific drafting
+
+This section runs ONLY when `channel === 'reddit'` AND `thread.community` is present in the input. If `channel === 'x'` (or `community` is absent), SKIP this entire section — `get_subreddit_rules` is a Reddit-only tool and will short-circuit with a warning if you call it with anything else.
+
+If `channel === 'reddit'`:
+1. Call `get_subreddit_rules` with the thread's `community` (the subreddit name) BEFORE writing the draft.
+2. If the returned rules contain text matching "no self-promotion", "no AI tools", or "no founders": DO NOT generate a draft. Emit the safe-skip output shape: `draftBody: ""`, `flagged: true`, `flagReason: "subreddit rule conflict"`, `confidence: 0.0`, and put the conflicting rule's `short_name` in `whyItWorks` so the founder knows why this slot was skipped. This applies even when `canMentionProduct` is true — the subreddit's rule wins.
+3. Otherwise, include the relevant rules verbatim in your prompt context. Match tone and avoid any pattern explicitly forbidden.
+
+If `get_subreddit_rules` returns `[]` (network error or no rules), proceed with drafting as normal — the tool degrades gracefully and the absence of rules is not a block.
+
 ## Output
 
 ```json
@@ -191,3 +203,15 @@ Better to ask a clarifying question than ship slop.
 ```
 
 `confidence` is your honest read on the draft, 0.0–1.0. Use 0.4 or lower when you had to reach for an anchor and aren't sure it'll land — flagging weak drafts up front shortens the founder's review queue.
+
+Safe-skip output shape (Reddit rule conflict only — see "Reddit-specific drafting" above):
+
+```json
+{
+  "draftBody": "",
+  "whyItWorks": "<short_name of the conflicting rule>",
+  "confidence": 0.0,
+  "flagged": true,
+  "flagReason": "subreddit rule conflict"
+}
+```

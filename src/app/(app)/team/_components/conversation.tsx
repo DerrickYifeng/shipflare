@@ -6,6 +6,8 @@ import {
   useMemo,
   useRef,
   type CSSProperties,
+  type ReactNode,
+  type RefObject,
 } from 'react';
 import type {
   PartialLeadMessage,
@@ -19,13 +21,18 @@ import { TypingIndicator } from './typing-indicator';
 import { ToolActivity } from './tool-activity';
 import { useAutoScroll } from './use-auto-scroll';
 import {
+  VirtualConversation,
+  type VirtualConversationHandle,
+} from './virtual-conversation';
+import { EmptyConversation } from './empty-conversation';
+import {
   groupByRun,
   stitchLeadMessages,
   type ActivityNode,
+  type AgentRunStatusMap,
   type ConversationNode,
   type LeadNode,
   type SessionGroup,
-  type TaskLookup,
   type TeamRunLookup,
 } from './conversation-reducer';
 
@@ -52,7 +59,7 @@ export interface ConversationProps {
    * hasn't finished streaming its arguments.
    */
   toolInputPartials?: ReadonlyMap<string, string>;
-  taskLookup?: TaskLookup;
+  agentRunStatus?: AgentRunStatusMap;
   runLookup?: TeamRunLookup;
   activeMemberId: string | null;
   onSelectMember: (memberId: string) => void;
@@ -72,6 +79,12 @@ export interface ConversationProps {
    */
   focusPendingMessageId?: string | null;
   /**
+   * Pixel reservation at the bottom of the scroll container. Defaults
+   * to `DEFAULT_BOTTOM_RESERVATION` (sized for the composer card +
+   * outer padding + a comfort buffer).
+   */
+  bottomReservation?: number;
+  /**
    * Older-history pagination. When `hasOlder` is true and the user
    * scrolls within ~100px of the top of the thread, `onLoadOlder` is
    * invoked. The parent (TeamDesk) flips `loadingOlder` while the
@@ -82,15 +95,52 @@ export interface ConversationProps {
   hasOlder?: boolean;
   loadingOlder?: boolean;
   onLoadOlder?: () => void;
+  /**
+   * Optional ref the conversation populates with a
+   * `ConversationScrollHandle` so the parent's jump-to-task flow can
+   * ensure a target row is mounted before running `scrollIntoView`. In
+   * non-virtualized mode `scrollToId` is a no-op (all rows are always
+   * mounted, so `document.querySelector` already works). In virtualized
+   * mode it forwards to `VirtualConversation.scrollToId` which calls
+   * `virtualizer.scrollToIndex` — fixing the silent failure where
+   * jump-to-task on an off-screen virtualized row returned null from
+   * the parent's querySelector.
+   */
+  scrollHandleRef?: RefObject<ConversationScrollHandle | null>;
 }
+
+/**
+ * Imperative handle exposed via `scrollHandleRef`. The single method
+ * intentionally accepts a node id (DelegationTask.messageId in the
+ * common case) rather than an index, so callers don't need to know
+ * whether the conversation is currently virtualized.
+ */
+export interface ConversationScrollHandle {
+  scrollToId(id: string): void;
+}
+
+/**
+ * Sized for the typical (collapsed) composer: 20 bottom inset +
+ * ~120 card + 40 fade ≈ 180. Bumped by the caller when the A2
+ * bottom rail is present.
+ */
+const DEFAULT_BOTTOM_RESERVATION = 180;
 
 const THREAD_MAX_WIDTH = 740;
 
-const SUGGESTION_CHIPS: readonly string[] = [
-  "Plan next week's posts for my product",
-  'Find 3 Reddit threads I should reply to today',
-  'Draft a launch-day announcement for X',
-];
+/**
+ * Total flat-node count (across all session groups) above which we swap
+ * to a windowed renderer (`VirtualConversation`). Small sessions stay on
+ * the simple render path — no virtualization tax for the common case.
+ * Long discovery sessions (hundreds of nodes) get DOM-windowed so each
+ * stream tick doesn't re-render every prior node.
+ *
+ * Tuned to ~50 so a typical 4-5 turn coordinator conversation
+ * (lead+activity rows easily run to 40-60 nodes) is right at the
+ * threshold, above which we expect things to get sluggish without
+ * windowing. Bump if you measure a different inflection point.
+ */
+const VIRTUALIZATION_NODE_THRESHOLD = 50;
 
 /**
  * Center column conversation. Receives the full message stream (from the
@@ -107,7 +157,7 @@ export function Conversation({
   messages,
   partials,
   toolInputPartials,
-  taskLookup,
+  agentRunStatus,
   runLookup,
   activeMemberId,
   onSelectMember,
@@ -115,9 +165,11 @@ export function Conversation({
   onPrefillComposer,
   onFocusComposer,
   focusPendingMessageId = null,
+  bottomReservation = DEFAULT_BOTTOM_RESERVATION,
   hasOlder = false,
   loadingOlder = false,
   onLoadOlder,
+  scrollHandleRef,
 }: ConversationProps) {
   const memberLookup = useMemo(() => {
     const map = new Map<string, DelegationCardMember>();
@@ -128,8 +180,8 @@ export function Conversation({
   }, [members]);
 
   const nodes: ConversationNode[] = useMemo(
-    () => stitchLeadMessages(messages, taskLookup, partials),
-    [messages, taskLookup, partials],
+    () => stitchLeadMessages(messages, agentRunStatus, partials),
+    [messages, agentRunStatus, partials],
   );
 
   const groups: SessionGroup[] = useMemo(
@@ -142,14 +194,57 @@ export function Conversation({
   // — no visibility decisions here. Empty thread → welcome screen.
   const visibleGroups: SessionGroup[] = groups;
 
-  // Decide whether to show the typing indicator. Shown when:
-  // - a run is live, AND
-  //   - the selected run's status is 'running', OR
-  //   - (all view) any visible group belongs to a running run, OR
-  //   - the last visible node is a user bubble with no reply yet.
+  // Long sessions (> VIRTUALIZATION_NODE_THRESHOLD nodes) swap to a
+  // windowed renderer (`<VirtualConversation>`). Computed up front so
+  // the effects below can disable `loadOlder` while virtualized —
+  // prepend-with-virtualization is a known follow-up gap (estimate-vs-
+  // actual measurement delta breaks the anchor-restore math).
+  const flatNodeCount = useMemo(
+    () => visibleGroups.reduce((sum, g) => sum + g.nodes.length, 0),
+    [visibleGroups],
+  );
+  const useVirtualized = flatNodeCount > VIRTUALIZATION_NODE_THRESHOLD;
+  const effectiveHasOlder = useVirtualized ? false : hasOlder;
+  const effectiveLoadingOlder = useVirtualized ? false : loadingOlder;
+
+  // Any spawned teammate still running? The lead's own turn often ends
+  // immediately after a parallel dispatch — it posts SYNTHESIS, goes to
+  // sleep, and waits for `<task-notification>` arrivals. From the
+  // founder's perspective the team is still busy though, so the
+  // typing indicator must keep pulsing while ANY agent_run is in a
+  // non-terminal state (running, queued, waiting_for_children, etc.).
+  // Without this branch the indicator vanished as soon as the lead
+  // dispatched, even though 4 subagents were grinding for minutes.
+  const anyAgentRunning = useMemo(() => {
+    if (!agentRunStatus) return false;
+    for (const status of agentRunStatus.values()) {
+      const s = status.status;
+      // Active states from `agent_runs.status` (see conversation-reducer.ts
+      // AgentRunStatus). `sleeping` deliberately excluded — the lead row
+      // stays 'sleeping' indefinitely while idle, and we don't want a
+      // permanent indicator just because the lead exists.
+      if (s === 'running' || s === 'queued' || s === 'resuming') {
+        return true;
+      }
+    }
+    return false;
+  }, [agentRunStatus]);
+
+  // Decide whether to show the typing indicator.
+  //
+  // The `agentRunStatus` map is live-merged with SSE `agent_status_change`
+  // events (see team-desk's `liveAgentRunStatus`), so when ANY agent_run
+  // is non-terminal it's the most reliable "this thread is alive" signal
+  // we have — bypasses the legacy `isLive` prop, which relies on
+  // `team_messages.runId` markers that Phase E+ flows no longer write
+  // (see team-desk.tsx `threadIsLive` and page.tsx's "runId is NULL for
+  // new flows" comment). Without this bypass the indicator silently
+  // refused to render during kickoff, the most important moment to
+  // reassure the founder that something's happening.
   const showTyping = useMemo(() => {
-    if (!isLive) return false;
     if (visibleGroups.length === 0) return false;
+    if (anyAgentRunning) return true;
+    if (!isLive) return false;
     const lastGroup = visibleGroups[visibleGroups.length - 1];
     const runIsRunning = lastGroup.run?.status === 'running';
     const lastNode = lastGroup.nodes[lastGroup.nodes.length - 1];
@@ -157,7 +252,7 @@ export function Conversation({
     const lastIsPendingActivity =
       lastNode?.kind === 'activity' && !lastNode.complete;
     return runIsRunning || lastIsUser || lastIsPendingActivity;
-  }, [isLive, visibleGroups]);
+  }, [isLive, visibleGroups, anyAgentRunning]);
 
   // Scroll container and its direct child (the "content" element the
   // ResizeObserver watches for grow events). `useAutoScroll` pins the
@@ -166,6 +261,34 @@ export function Conversation({
   // re-stick.
   const threadRef = useRef<HTMLElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
+  // Imperative handle the virtualized renderer populates. Used below
+  // by the `scrollHandleRef` bridge so callers (team-desk's
+  // `focusCardNow`) can mount-then-scroll virtualized rows that
+  // currently sit outside the window. Null when not virtualized.
+  const virtualHandleRef = useRef<VirtualConversationHandle | null>(null);
+
+  // Bridge parent's `scrollHandleRef` ↔ internal renderer. In
+  // virtualized mode we forward to the virtualizer's scrollToIndex via
+  // `virtualHandleRef`; in non-virtualized mode `scrollToId` is a no-op
+  // because every row is already mounted (the caller's `querySelector +
+  // scrollIntoView` already works without our help). We re-write the
+  // handle on every render so toggling between virtualized/non-
+  // virtualized while the parent's ref identity stays stable continues
+  // to work without manual unsubscribe.
+  useEffect(() => {
+    if (!scrollHandleRef) return;
+    scrollHandleRef.current = {
+      scrollToId: (id: string): void => {
+        if (useVirtualized) {
+          virtualHandleRef.current?.scrollToId(id);
+        }
+        // Non-virtualized: caller's own scrollIntoView is sufficient.
+      },
+    };
+    return () => {
+      if (scrollHandleRef) scrollHandleRef.current = null;
+    };
+  }, [scrollHandleRef, useVirtualized]);
 
   const { paused, jumpToBottom, unstick } = useAutoScroll({
     containerRef: threadRef,
@@ -222,10 +345,13 @@ export function Conversation({
   // Mirror the latest props onto refs in an effect (render-time `.current`
   // writes trip the react-hooks/immutability rule). Runs every render so
   // the scroll handler — registered once per onLoadOlder identity — always
-  // sees fresh values without re-binding.
+  // sees fresh values without re-binding. Note: the virtualized branch
+  // below writes the *effective* hasOlder (forced false while windowed)
+  // here too so the scroll handler can't fire a load-older during
+  // virtualization (prepend-with-virtualization is its own task).
   useEffect(() => {
-    hasOlderRef.current = hasOlder;
-    loadingOlderRef.current = loadingOlder;
+    hasOlderRef.current = effectiveHasOlder;
+    loadingOlderRef.current = effectiveLoadingOlder;
     messagesRef.current = messages;
   });
 
@@ -291,12 +417,14 @@ export function Conversation({
   //
   // `paddingBottom` reserves airspace for the fixed composer plus a
   // comfort gap so the last bubble never grazes the composer's fade.
-  // Sized for the typical (collapsed) composer: 20 bottom inset +
-  // ~120 card + 40 fade ≈ 180. When the user expands the textarea
-  // toward its 200px MAX_HEIGHT the topmost messages slide a bit
-  // further behind the composer fade, but the user is focused on the
-  // textarea at that point — this is the right tradeoff vs. burning
-  // ~220px of empty whitespace on every collapsed view.
+  // Default (DEFAULT_BOTTOM_RESERVATION = 180) is sized for the typical
+  // (collapsed) composer: 20 bottom inset + ~120 card + 40 fade. The
+  // caller bumps `bottomReservation` when the A2 bottom rail is
+  // rendered so the last messages stay readable above the rail's
+  // translucent backdrop. When the user expands the textarea toward
+  // its 200px MAX_HEIGHT the topmost messages slide a bit further
+  // behind the composer fade, but the user is focused on the textarea
+  // at that point — that tradeoff is preserved.
   const wrap: CSSProperties = {
     display: 'flex',
     flexDirection: 'column',
@@ -304,7 +432,7 @@ export function Conversation({
     flex: 1,
     minHeight: 0,
     overflowY: 'auto',
-    paddingBottom: 180,
+    paddingBottom: bottomReservation,
     // Disable Chrome's automatic scroll anchoring. Without this the
     // browser re-anchors to an element above the new content when the
     // list grows, which *subtracts* from `scrollTop` and masks the
@@ -372,6 +500,7 @@ export function Conversation({
     return (
       <LeadMessage
         key={node.id}
+        messageId={node.id}
         agentType={agentType}
         displayName={displayName}
         createdAt={node.createdAt}
@@ -396,15 +525,14 @@ export function Conversation({
 
   const renderActivityNode = (node: ActivityNode) => {
     // Natural attribution: "Nova used Grep" vs "Team Lead used Grep".
-    // parentTaskId present → subagent context; prefer `agentName` meta
-    // (shipped today) and only fall back to the raw member displayName
-    // once Phase F provisions a team_members row per spawn. Main-thread
-    // calls attribute to the coordinator — looked up by id, else
-    // "Team Lead" as a neutral, always-correct label.
+    // `agentName` is stamped on spawned events by `wrapOnEventWithSpawnMeta`
+    // — when present, the row was emitted inside a specialist's run, so we
+    // attribute it to that specialist. Otherwise it's a coordinator call
+    // — looked up by id, else "Team Lead" as a neutral, always-correct
+    // label.
     let actor: string | null = null;
-    if (node.parentTaskId) {
-      const member = node.agentName ? null : null;
-      actor = node.agentName ?? member ?? 'Specialist';
+    if (node.agentName) {
+      actor = node.agentName;
     } else {
       const coord = coordinatorId ? memberLookup.get(coordinatorId) : null;
       actor = coord?.displayName ?? 'Team Lead';
@@ -447,47 +575,113 @@ export function Conversation({
     );
   };
 
+  // Flatten groups into VirtualConversation-compatible items. Session
+  // dividers are first-class items in the windowed list so they scroll
+  // with their group instead of being yanked out into a sticky header.
+  // Each item carries a stable `id` so the virtualizer's measurement
+  // cache survives streaming deltas and `loadOlder` prepends.
+  type FlatItem =
+    | { kind: 'divider'; id: string; group: SessionGroup }
+    | { kind: 'node'; id: string; node: ConversationNode };
+  const flatItems: FlatItem[] = useMemo(() => {
+    if (!useVirtualized) return [];
+    const out: FlatItem[] = [];
+    for (const group of visibleGroups) {
+      out.push({
+        kind: 'divider',
+        id: `divider:${group.key}`,
+        group,
+      });
+      for (const node of group.nodes) {
+        out.push({ kind: 'node', id: node.id, node });
+      }
+    }
+    return out;
+  }, [useVirtualized, visibleGroups]);
+
+  const renderFlatItem = (item: FlatItem): ReactNode => {
+    if (item.kind === 'divider') {
+      return (
+        <SessionDivider
+          runId={item.group.runId}
+          run={item.group.run}
+        />
+      );
+    }
+    return renderNode(item.node);
+  };
+
   return (
     <section
       style={wrap}
       aria-label="Conversation"
       ref={threadRef}
       data-testid="conversation-thread"
+      data-virtualized={useVirtualized ? 'true' : 'false'}
     >
       <div style={threadWrap}>
-        <div style={thread} ref={contentRef} data-testid="conversation-thread-content">
-          {visibleGroups.length > 0 && (hasOlder || loadingOlder) ? (
-            <OlderHistoryIndicator loading={loadingOlder} />
-          ) : null}
-          {visibleGroups.length === 0 ? (
+        {visibleGroups.length > 0 && (effectiveHasOlder || effectiveLoadingOlder) ? (
+          <OlderHistoryIndicator loading={effectiveLoadingOlder} />
+        ) : null}
+        {visibleGroups.length === 0 ? (
+          <div style={thread} ref={contentRef} data-testid="conversation-thread-content">
             <EmptyConversation
               onPrefillComposer={onPrefillComposer}
               onFocusComposer={onFocusComposer}
             />
-          ) : (
-            <>
-              {visibleGroups.map((group) => (
-                <div
-                  key={group.key}
-                  data-testid="session-group"
-                  data-run-id={group.runId ?? ''}
-                >
-                  <SessionDivider runId={group.runId} run={group.run} />
-                  {group.nodes.map(renderNode)}
-                </div>
-              ))}
-              {showTyping ? (
-                <TypingIndicator
-                  label={
-                    toolInputPartials && toolInputPartials.size > 0
-                      ? 'dispatching'
-                      : 'working'
-                  }
-                />
-              ) : null}
-            </>
-          )}
-        </div>
+          </div>
+        ) : useVirtualized ? (
+          <>
+            <VirtualConversation
+              ref={contentRef}
+              nodes={flatItems}
+              renderNode={renderFlatItem}
+              scrollElementRef={threadRef}
+              imperativeRef={virtualHandleRef}
+              estimateSize={120}
+              overscan={6}
+            />
+            {showTyping ? (
+              <TypingIndicator
+                // "dispatching" is a meaningful state name (coordinator
+                // between text_stop and the subagent's first event), so
+                // we keep that explicit. Otherwise let the indicator
+                // pick a random spinner verb on mount — engine pattern.
+                label={
+                  toolInputPartials && toolInputPartials.size > 0
+                    ? 'dispatching'
+                    : undefined
+                }
+              />
+            ) : null}
+          </>
+        ) : (
+          <div style={thread} ref={contentRef} data-testid="conversation-thread-content">
+            {visibleGroups.map((group) => (
+              <div
+                key={group.key}
+                data-testid="session-group"
+                data-run-id={group.runId ?? ''}
+              >
+                <SessionDivider runId={group.runId} run={group.run} />
+                {group.nodes.map(renderNode)}
+              </div>
+            ))}
+            {showTyping ? (
+              <TypingIndicator
+                // "dispatching" is a meaningful state name (coordinator
+                // between text_stop and the subagent's first event), so
+                // we keep that explicit. Otherwise let the indicator
+                // pick a random spinner verb on mount — engine pattern.
+                label={
+                  toolInputPartials && toolInputPartials.size > 0
+                    ? 'dispatching'
+                    : undefined
+                }
+              />
+            ) : null}
+          </div>
+        )}
         {paused && visibleGroups.length > 0 ? (
           <button
             type="button"
@@ -590,97 +784,3 @@ function PreparingDispatchIndicator({ count }: { count: number }) {
   );
 }
 
-interface EmptyStateProps {
-  onPrefillComposer?: (text: string) => void;
-  onFocusComposer?: () => void;
-}
-
-function EmptyConversation({
-  onPrefillComposer,
-  onFocusComposer,
-}: EmptyStateProps) {
-  const wrap: CSSProperties = {
-    padding: '32px 20px',
-    background: 'var(--sf-bg-primary)',
-    borderRadius: 12,
-    textAlign: 'center',
-    color: 'rgba(0, 0, 0, 0.48)',
-    fontSize: 13,
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: 14,
-  };
-  return (
-    <div style={wrap}>
-      <span>Send your Team Lead a message below — it&apos;s always here, ready to spin up specialists in parallel.</span>
-      <SuggestionChips
-        onPrefillComposer={onPrefillComposer}
-        onFocusComposer={onFocusComposer}
-      />
-    </div>
-  );
-}
-
-interface SuggestionChipsProps {
-  onPrefillComposer?: (text: string) => void;
-  onFocusComposer?: () => void;
-}
-
-function SuggestionChips({
-  onPrefillComposer,
-  onFocusComposer,
-}: SuggestionChipsProps) {
-  if (!onPrefillComposer && !onFocusComposer) return null;
-  const row: CSSProperties = {
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: 8,
-    justifyContent: 'center',
-  };
-  const chip: CSSProperties = {
-    display: 'inline-flex',
-    alignItems: 'center',
-    padding: '8px 12px',
-    borderRadius: 8,
-    background: 'var(--sf-bg-tertiary)',
-    color: 'var(--sf-fg-1)',
-    fontSize: 12,
-    fontFamily: 'inherit',
-    lineHeight: 1.3,
-    border: 'none',
-    cursor: 'pointer',
-    textAlign: 'left',
-    transition: 'background 160ms var(--sf-ease-swift)',
-  };
-  const handleClick = (text: string) => {
-    if (onPrefillComposer) {
-      onPrefillComposer(text);
-      return;
-    }
-    onFocusComposer?.();
-  };
-  return (
-    <div style={row} data-testid="suggestion-chips">
-      {SUGGESTION_CHIPS.map((text) => (
-        <button
-          key={text}
-          type="button"
-          style={chip}
-          onClick={() => handleClick(text)}
-          onMouseEnter={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.background =
-              'var(--sf-bg-primary)';
-          }}
-          onMouseLeave={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.background =
-              'var(--sf-bg-tertiary)';
-          }}
-          data-testid="suggestion-chip"
-        >
-          {text}
-        </button>
-      ))}
-    </div>
-  );
-}

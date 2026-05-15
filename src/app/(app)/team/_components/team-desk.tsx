@@ -11,11 +11,16 @@ import {
 } from 'react';
 import {
   useTeamEvents,
+  type PartialLeadMessage,
   type TeamActivityMessage,
 } from '@/hooks/use-team-events';
 import { useToast } from '@/components/ui/toast';
 import { LeftRail, type LeftRailMember } from './left-rail';
-import { Conversation, type ConversationMember } from './conversation';
+import {
+  Conversation,
+  type ConversationMember,
+  type ConversationScrollHandle,
+} from './conversation';
 import { TaskPanel } from './task-panel';
 import {
   StickyComposer,
@@ -24,15 +29,24 @@ import {
 } from './sticky-composer';
 import { StatusBanner } from './status-banner';
 import { OnboardingBanner } from './onboarding-banner';
+// A2's bottom rail was removed (2026-05-13): the right Tasks panel already
+// surfaces running teammates with live activity, and a second surface at the
+// bottom was redundant. Click-to-expand on the panel replaces the rail.
 import {
+  applyStatusChanges,
   stitchLeadMessages,
+  type AgentRunStatus,
+  type AgentRunStatusMap,
   type DelegationTask,
-  type TaskLookup,
   type TeamRunLookup,
   type TeamRunMeta,
 } from './conversation-reducer';
 import type { ConversationMeta } from './conversation-meta';
 import { useNewConversation } from './use-new-conversation';
+import {
+  StreamingProvider,
+  useStreamingDispatch,
+} from './streaming-context';
 
 export interface TeamDeskMember {
   id: string;
@@ -59,7 +73,7 @@ export interface TeamDeskProps {
   inReview: number;
   approvedReady: number;
   turns: number;
-  taskLookup?: TaskLookup;
+  agentRunStatus?: AgentRunStatusMap;
   runLookup?: TeamRunLookup;
   /** ChatGPT-style conversation list for the sidebar. */
   conversations?: readonly ConversationMeta[];
@@ -71,7 +85,6 @@ const LEFT_WIDTH = 280;
 const RIGHT_WIDTH = 380;
 const GRID_GAP = 20;
 const H_PAD = 24;
-
 /**
  * Team desk — ChatGPT-style chat surface. State model:
  *
@@ -85,7 +98,14 @@ const H_PAD = 24;
  * only ever sees messages, grouped by the conversation they belong to.
  * Per-run dividers inside the thread are purely cosmetic.
  */
-export function TeamDesk({
+/**
+ * Inner body. Wrapped by `TeamDesk` (below) in `<StreamingProvider>` so
+ * that `useStreamingDispatch()` resolves inside the dispatch-piping
+ * effect. Splitting the function lets the provider sit ABOVE every
+ * consumer (`<Conversation>` + leaves) without changing the public
+ * signature.
+ */
+function TeamDeskInner({
   teamId,
   coordinatorId,
   fromOnboarding = false,
@@ -99,7 +119,7 @@ export function TeamDesk({
   draftsInFlight,
   inReview,
   approvedReady,
-  taskLookup,
+  agentRunStatus,
   runLookup,
   conversations,
   initialConversationId,
@@ -139,6 +159,17 @@ export function TeamDesk({
   const inFlightFetchRef = useRef<Set<string>>(new Set());
 
   const composerRef = useRef<StickyComposerHandle | null>(null);
+  // Imperative handle into `<Conversation>` — lets `focusCardNow` mount
+  // the target row when the conversation is virtualized BEFORE querying
+  // for `subtask-card-${messageId}` and calling `scrollIntoView`. Without
+  // this, rail clicks on subagents whose card sits outside the
+  // virtualizer's visible window silently no-op (querySelector returns
+  // null for unmounted virtual rows). Null in non-virtualized mode (the
+  // bridge in Conversation makes `scrollToId` a no-op there since every
+  // row is already mounted).
+  const conversationScrollHandleRef = useRef<ConversationScrollHandle | null>(
+    null,
+  );
 
   const focusComposer = useCallback(() => {
     composerRef.current?.focus();
@@ -161,6 +192,14 @@ export function TeamDesk({
     initialMessages,
     onStall: handleStall,
   });
+
+  // Pipe streaming bytes from `useTeamEvents`'s partial maps into the
+  // per-tree `StreamingStore` so leaves can subscribe per-messageId via
+  // `useStreamingPartial` without re-rendering on every token. A2 will
+  // drop the partials prop entirely once the bottom rail takes over
+  // placeholder rendering; for now this runs alongside the existing
+  // prop path so the UI cannot regress.
+  useStreamingPartialPipe(partials, toolInputPartials);
 
   // Union of SSE stream + on-demand conversation fetches.
   // De-duped by id; keeps the SSE version (newer) when collision.
@@ -436,9 +475,27 @@ export function TeamDesk({
     [conversationList, titleByConv],
   );
 
+  // Merge SSE-delivered `agent_status_change` events on top of the
+  // SSR-seeded `agentRunStatus` once per render so every downstream
+  // consumer (rail, conversation reducer call sites that pass their own
+  // map, etc.) sees the same up-to-date view. `agentRunStatus` (prop) is
+  // frozen at page-load time; `liveAgentRunStatus` IS the fresh map.
+  // This was the bug: the rail used to read from `agentRunStatus`
+  // directly and never saw the queued→running transition.
+  const liveAgentRunStatus = useMemo(
+    () => applyStatusChanges(liveMessages, agentRunStatus ?? new Map()),
+    [liveMessages, agentRunStatus],
+  );
+
   // ---------- Delegation tasks (task panel, global view) ----------
+  // Pass `liveAgentRunStatus` (SSR seed + SSE deltas applied) so the
+  // DelegationCard's status pill flips QUEUED→RUNNING as the spawned
+  // teammates wake up. Passing the frozen `agentRunStatus` prop here was
+  // the bug — subtasks lied as QUEUED for the entire session, matching
+  // the same class of stale-status bug we already fixed for the right
+  // TaskPanel.
   const allDelegationTasks = useMemo<DelegationTask[]>(() => {
-    const nodes = stitchLeadMessages(liveMessages, taskLookup, partials);
+    const nodes = stitchLeadMessages(liveMessages, liveAgentRunStatus, partials);
     const out: DelegationTask[] = [];
     for (const n of nodes) {
       if (n.kind === 'lead') {
@@ -446,7 +503,7 @@ export function TeamDesk({
       }
     }
     return out;
-  }, [liveMessages, taskLookup, partials]);
+  }, [liveMessages, liveAgentRunStatus, partials]);
 
   // ---------- Handlers ----------
   const handleSelectConversation = useCallback((conversationId: string) => {
@@ -528,21 +585,54 @@ export function TeamDesk({
   }, [threadMessages]);
 
   const focusCardNow = useCallback((messageId: string): void => {
-    const el = document.querySelector<HTMLElement>(
-      `[data-testid="subtask-card-${messageId}"]`,
-    );
+    // Notify subscribers (LeadMessage / DelegationCard) so they can
+    // expand or auto-scroll their internal panes. Fire-and-forget; no
+    // dependency on whether the target card mounts.
     window.dispatchEvent(
       new CustomEvent('sf:task-focus', { detail: { messageId } }),
     );
-    if (!el) return;
-    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
-    el.animate(
-      [
-        { boxShadow: '0 0 0 2px var(--sf-accent)' },
-        { boxShadow: '0 0 0 2px transparent' },
-      ],
-      { duration: 900, easing: 'ease-out' },
-    );
+
+    // Phase 1: ensure the row is in the DOM. In virtualized mode,
+    // off-window rows are unmounted — querySelector would return null
+    // and the jump would silently no-op. `scrollToId` calls into the
+    // virtualizer's scrollToIndex and the next animation frame is
+    // enough for the row to mount + measure. In non-virtualized mode
+    // `scrollToId` is a no-op (every row is already mounted) and the
+    // double-RAF is harmless overhead measured in tens of micros.
+    const handle = conversationScrollHandleRef.current;
+    if (handle) handle.scrollToId(messageId);
+
+    // Phase 2: find the inner SubtaskCard (which the row's renderer
+    // creates) and run the fine-grained centering + pulse animation.
+    // Wrapped in a double-RAF because the virtualizer may need one
+    // frame to mount the row and a second for the measureElement
+    // ResizeObserver to settle the row's final height. The animation
+    // call is wrapped in a null-check so legacy/raw runs without a
+    // SubtaskCard still trigger the sf:task-focus event above without
+    // a console error.
+    let frame1 = 0;
+    let frame2 = 0;
+    frame1 = requestAnimationFrame(() => {
+      frame2 = requestAnimationFrame(() => {
+        const el = document.querySelector<HTMLElement>(
+          `[data-testid="subtask-card-${messageId}"]`,
+        );
+        if (!el) return;
+        el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        el.animate(
+          [
+            { boxShadow: '0 0 0 2px var(--sf-accent)' },
+            { boxShadow: '0 0 0 2px transparent' },
+          ],
+          { duration: 900, easing: 'ease-out' },
+        );
+      });
+    });
+    // Best-effort: the closure exits before the frames fire so we
+    // can't return a teardown directly, but reassigning the timers
+    // through let-bindings keeps them GC-able once the frames resolve.
+    void frame1;
+    void frame2;
   }, []);
 
   const handleJumpToTask = useCallback(
@@ -574,6 +664,8 @@ export function TeamDesk({
     [allMessages, runLookup, selectedConversationId, focusCardNow],
   );
 
+  // Rail click → scroll the matching SubtaskCard into view + pulse it,
+  // matching the engine TaskListV2 pattern ("tap a task → jump to it").
   // After a cross-conversation jump, wait for the new cards to hit the
   // DOM then scroll + pulse the target.
   useEffect(() => {
@@ -626,10 +718,10 @@ export function TeamDesk({
   );
 
   const handleCancelTask = useCallback(
-    async (taskId: string) => {
+    async (agentId: string) => {
       try {
         const res = await fetch(
-          `/api/team/task/${encodeURIComponent(taskId)}/cancel`,
+          `/api/team/agent/${encodeURIComponent(agentId)}/cancel`,
           { method: 'POST' },
         );
         if (!res.ok && res.status !== 200) {
@@ -639,7 +731,7 @@ export function TeamDesk({
             error?: string;
           };
           toast(
-            detail.error === 'task_not_found'
+            detail.error === 'agent_not_found'
               ? "Couldn't find that subtask to cancel."
               : `Couldn't cancel subtask: ${detail.error ?? `HTTP ${res.status}`}`,
             'error',
@@ -650,56 +742,6 @@ export function TeamDesk({
           err instanceof Error
             ? `Network error: ${err.message}`
             : 'Network error — subtask cancel not delivered.',
-          'error',
-        );
-      }
-    },
-    [toast],
-  );
-
-  const handleRetryTask = useCallback(
-    async (taskId: string) => {
-      try {
-        const res = await fetch(
-          `/api/team/task/${encodeURIComponent(taskId)}/retry`,
-          { method: 'POST' },
-        );
-        if (!res.ok) {
-          const detail = (await res
-            .json()
-            .catch(() => ({ error: `HTTP ${res.status}` }))) as {
-            error?: string;
-          };
-          toast(
-            detail.error === 'task_not_found'
-              ? "Couldn't find that subtask to retry."
-              : `Couldn't retry subtask: ${detail.error ?? `HTTP ${res.status}`}`,
-            'error',
-          );
-          return;
-        }
-        const body = (await res.json().catch(() => ({}))) as {
-          runId?: string;
-          conversationId?: string | null;
-        };
-        if (typeof body.conversationId === 'string') {
-          const convId = body.conversationId;
-          const nowIso = new Date().toISOString();
-          setConversationList((prev) =>
-            prev
-              .map((c) =>
-                c.id === convId ? { ...c, updatedAt: nowIso } : c,
-              )
-              .sort((a, b) => (a.updatedAt > b.updatedAt ? -1 : 1)),
-          );
-          setSelectedConversationId(convId);
-          toast('Retrying subtask.', 'success');
-        }
-      } catch (err) {
-        toast(
-          err instanceof Error
-            ? `Network error: ${err.message}`
-            : 'Network error — retry not delivered.',
           'error',
         );
       }
@@ -872,7 +914,7 @@ export function TeamDesk({
             messages={deferredThreadMessages}
             partials={deferredPartials}
             toolInputPartials={deferredToolInputPartials}
-            taskLookup={taskLookup}
+            agentRunStatus={liveAgentRunStatus}
             runLookup={threadRunLookup}
             activeMemberId={null}
             onSelectMember={noopSelectMember}
@@ -880,6 +922,11 @@ export function TeamDesk({
             onPrefillComposer={prefillComposer}
             onFocusComposer={focusComposer}
             focusPendingMessageId={pendingFocusMessageId}
+            // Base reservation: composer (~96px) + outer padding (~20px) +
+            // breathing room above the keyboard so the last message clears
+            // the sticky composer footer. The A2 bottom rail used to bump
+            // this; removed 2026-05-13 along with the rail itself.
+            bottomReservation={180}
             hasOlder={
               selectedConversationId
                 ? convWindowMap[selectedConversationId]?.hasMore ?? false
@@ -895,15 +942,16 @@ export function TeamDesk({
                 ? () => handleLoadOlder(selectedConversationId)
                 : undefined
             }
+            scrollHandleRef={conversationScrollHandleRef}
           />
         </div>
 
         <div className="ai-team-right" style={rightRail}>
           <TaskPanel
             tasks={allDelegationTasks}
+            liveAgentRunStatus={liveAgentRunStatus}
             onJumpToTask={handleJumpToTask}
             onCancelTask={handleCancelTask}
-            onRetryTask={handleRetryTask}
             thisWeek={{
               completed: approvedReady,
               awaiting: inReview,
@@ -1012,4 +1060,91 @@ export function TeamDesk({
       `}</style>
     </div>
   );
+}
+
+/**
+ * Public wrapper. Hosts the per-tree `<StreamingProvider>` so leaves
+ * inside `<Conversation>` (LeadMessage, DelegationCard) can subscribe to
+ * streaming-partial state without forcing the conversation reducer to
+ * re-run on every token.
+ */
+export function TeamDesk(props: TeamDeskProps) {
+  return (
+    <StreamingProvider>
+      <TeamDeskInner {...props} />
+    </StreamingProvider>
+  );
+}
+
+/**
+ * Diff `partials` / `toolInputPartials` from `useTeamEvents` against the
+ * previous render's snapshot. Forwards the suffix of newly-arrived bytes
+ * to the streaming dispatch. When a partial vanishes from the map (final
+ * `agent_text` landed, or stall sweep dropped it), call the matching
+ * finalizer so any subscribed leaf clears its live-text override.
+ *
+ * Partials and tool-inputs are routed through independent finalize calls
+ * so their keyspaces stay separated even if a messageId and a toolUseId
+ * happen to collide on the same string (see `streaming-context.tsx`).
+ *
+ * Lives inside `<StreamingProvider>` so `useStreamingDispatch()` resolves.
+ * The diff lives on a ref (not state) because we never want this effect
+ * itself to trigger a re-render of `TeamDeskInner`.
+ */
+function useStreamingPartialPipe(
+  partials: ReadonlyMap<string, PartialLeadMessage>,
+  toolInputPartials: ReadonlyMap<string, string>,
+): void {
+  const dispatch = useStreamingDispatch();
+  const prevPartialTextRef = useRef<Map<string, string>>(new Map());
+  const prevToolInputRef = useRef<Map<string, string>>(new Map());
+
+  useEffect(() => {
+    const prev = prevPartialTextRef.current;
+    const seen = new Set<string>();
+    for (const [id, p] of partials) {
+      seen.add(id);
+      const prior = prev.get(id) ?? '';
+      const next = p.content;
+      if (next.length > prior.length && next.startsWith(prior)) {
+        dispatch.appendDelta(id, next.slice(prior.length));
+      } else if (next !== prior) {
+        // Non-monotonic edit (rare; happens on reconnect when the hook
+        // wipes its partials map — see `use-team-events.ts`'s `connected`
+        // branch). Replay the whole content as a single delta after
+        // finalizing the stale entry.
+        dispatch.finalizePartial(id);
+        if (next.length > 0) dispatch.appendDelta(id, next);
+      }
+    }
+    // Anything that was in the previous snapshot but isn't now → drop.
+    for (const id of prev.keys()) {
+      if (!seen.has(id)) dispatch.finalizePartial(id);
+    }
+    // Replace snapshot with the new view (content snapshot only).
+    const nextSnap = new Map<string, string>();
+    for (const [id, p] of partials) nextSnap.set(id, p.content);
+    prevPartialTextRef.current = nextSnap;
+  }, [partials, dispatch]);
+
+  useEffect(() => {
+    const prev = prevToolInputRef.current;
+    const seen = new Set<string>();
+    for (const [id, content] of toolInputPartials) {
+      seen.add(id);
+      const prior = prev.get(id) ?? '';
+      if (content.length > prior.length && content.startsWith(prior)) {
+        dispatch.appendToolInput(id, content.slice(prior.length));
+      } else if (content !== prior) {
+        dispatch.finalizeToolInput(id);
+        if (content.length > 0) dispatch.appendToolInput(id, content);
+      }
+    }
+    for (const id of prev.keys()) {
+      if (!seen.has(id)) dispatch.finalizeToolInput(id);
+    }
+    const nextSnap = new Map<string, string>();
+    for (const [id, content] of toolInputPartials) nextSnap.set(id, content);
+    prevToolInputRef.current = nextSnap;
+  }, [toolInputPartials, dispatch]);
 }

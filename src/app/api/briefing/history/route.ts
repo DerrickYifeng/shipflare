@@ -1,19 +1,16 @@
 import { NextResponse } from 'next/server';
-import { and, desc, eq, gte, inArray } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNotNull, sql } from 'drizzle-orm';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { drafts, threads } from '@/lib/db/schema';
+import { activityEvents, drafts, planItems, threads } from '@/lib/db/schema';
 import { PLATFORMS } from '@/lib/platform-config';
 import { buildXIntentUrl } from '@/lib/x-intent-url';
 
-// Briefing → History tab. Surfaces reply drafts the founder has already
-// acted on within the trailing window so they can re-open the X compose
-// tab (handoff items) or jump back to a posted Reddit thread. The shape
-// mirrors the Today feed's reply rows so <ReplyCard /> can render either
+// Briefing → History tab. Surfaces (a) reply drafts the founder has
+// already acted on within the trailing window, AND (b) completed
+// content_post plan_items in the same window. Both project into the
+// same BriefingHistoryItem shape so <ReplyCard /> can render either
 // without branching on the data source.
-//
-// v1 = replies only. Posted-original-post history (plan_items.state =
-// 'completed') is a follow-up.
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HISTORY_WINDOW_DAYS = 7;
@@ -40,8 +37,8 @@ export interface BriefingHistoryItem {
   community: string | null;
   externalUrl: string | null;
   confidence: number | null;
-  scheduledFor: null;
-  /** Server-side `updated_at` of the underlying draft — when the user acted. */
+  /** Server-side `updated_at` of the underlying draft (or `completed_at`
+   *  for posted plan_items) — when the user acted. */
   expiresAt: string;
   createdAt: string;
   draftBody: string | null;
@@ -67,7 +64,13 @@ export interface BriefingHistoryItem {
   threadOriginalAuthorUsername: string | null;
   threadSurfacedVia: string[] | null;
   calendarContentType: null;
-  calendarScheduledAt: null;
+}
+
+/** Extract `draft_body` from `plan_items.output` without trusting its shape. */
+function readDraftBody(output: unknown): string | null {
+  if (output === null || typeof output !== 'object') return null;
+  const value = (output as Record<string, unknown>).draft_body;
+  return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
 export async function GET() {
@@ -122,7 +125,62 @@ export async function GET() {
     )
     .orderBy(desc(drafts.updatedAt));
 
-  const items: BriefingHistoryItem[] = rows
+  // Completed content_post plan_items in the same trailing window.
+  // These are original posts the founder shipped (queue worker or
+  // inline post path flips state='completed' + sets completedAt).
+  const planRows = await db
+    .select({
+      id: planItems.id,
+      output: planItems.output,
+      title: planItems.title,
+      channel: planItems.channel,
+      completedAt: planItems.completedAt,
+      createdAt: planItems.createdAt,
+    })
+    .from(planItems)
+    .where(
+      and(
+        eq(planItems.userId, userId),
+        eq(planItems.state, 'completed'),
+        eq(planItems.kind, 'content_post'),
+        isNotNull(planItems.completedAt),
+        gte(planItems.completedAt, since),
+      ),
+    )
+    .orderBy(desc(planItems.completedAt));
+
+  // Best-effort externalUrl lookup from activity_events (post_published)
+  // keyed by planItemId. Both the inline post path and the queue worker
+  // write `planItemId` + `externalUrl` to the event metadata. Posts that
+  // pre-date the activity_events instrumentation won't have a URL, in
+  // which case externalUrl stays null and the History card body still
+  // renders. PG's `->>` operator returns `text` (nullable) — annotate
+  // honestly and let the runtime guard below filter null pairs.
+  const planItemIds = planRows.map((r) => r.id);
+  const eventRows =
+    planItemIds.length === 0
+      ? []
+      : await db
+          .select({
+            planItemId: sql<string | null>`(${activityEvents.metadataJson} ->> 'planItemId')`,
+            externalUrl: sql<string | null>`(${activityEvents.metadataJson} ->> 'externalUrl')`,
+          })
+          .from(activityEvents)
+          .where(
+            and(
+              eq(activityEvents.userId, userId),
+              eq(activityEvents.eventType, 'post_published'),
+              gte(activityEvents.createdAt, since),
+            ),
+          );
+  const externalUrlByPlanItem = new Map<string, string>();
+  for (const ev of eventRows) {
+    if (ev.planItemId && ev.externalUrl) {
+      externalUrlByPlanItem.set(ev.planItemId, ev.externalUrl);
+    }
+  }
+
+  const replyItems: BriefingHistoryItem[] = rows
     .filter((row) => {
       const hasBody =
         typeof row.replyBody === 'string' && row.replyBody.trim().length > 0;
@@ -158,7 +216,6 @@ export async function GET() {
         community: row.threadCommunity,
         externalUrl: row.threadUrl,
         confidence: row.confidenceScore ?? null,
-        scheduledFor: null,
         expiresAt: row.draftUpdatedAt.toISOString(),
         createdAt: row.draftCreatedAt.toISOString(),
         draftBody: row.replyBody,
@@ -186,9 +243,63 @@ export async function GET() {
         threadOriginalAuthorUsername: row.threadOriginalAuthorUsername,
         threadSurfacedVia: row.threadSurfacedVia,
         calendarContentType: null,
-        calendarScheduledAt: null,
       };
     });
+
+  // Project completed content_post plan_items into the same shape.
+  // Settled cards (status='posted') are read-only — no xIntentUrl
+  // handoff, no thread join. Reuse plan_item.id as the card id.
+  const postItems: BriefingHistoryItem[] = planRows.map((row) => {
+    const completedAt = row.completedAt ?? row.createdAt;
+    const body = readDraftBody(row.output);
+    const externalUrl = externalUrlByPlanItem.get(row.id) ?? null;
+    return {
+      id: row.id,
+      draftId: row.id,
+      todoType: 'reply_thread' as const,
+      source: 'discovery' as const,
+      priority: 'time_sensitive' as const,
+      status: 'posted' as const,
+      planState: null,
+      xIntentUrl: null,
+      title: row.title,
+      platform: row.channel ?? 'x',
+      community: null,
+      externalUrl,
+      confidence: null,
+      expiresAt: completedAt.toISOString(),
+      createdAt: completedAt.toISOString(),
+      draftBody: body,
+      draftConfidence: null,
+      draftWhyItWorks: null,
+      draftType: 'original_post',
+      draftPostTitle: null,
+      draftMedia: null,
+      threadTitle: null,
+      threadBody: null,
+      threadAuthor: null,
+      threadUrl: null,
+      threadUpvotes: null,
+      threadCommentCount: null,
+      threadPostedAt: null,
+      threadDiscoveredAt: null,
+      threadLikesCount: null,
+      threadRepostsCount: null,
+      threadRepliesCount: null,
+      threadViewsCount: null,
+      threadIsRepost: false,
+      threadOriginalUrl: null,
+      threadOriginalAuthorUsername: null,
+      threadSurfacedVia: null,
+      calendarContentType: null,
+    };
+  });
+
+  // Merge both streams, newest first by expiresAt
+  // (draft updatedAt for replies, completedAt for posts).
+  const items: BriefingHistoryItem[] = [...replyItems, ...postItems].sort(
+    (a, b) => Date.parse(b.expiresAt) - Date.parse(a.expiresAt),
+  );
 
   return NextResponse.json({ items, windowDays: HISTORY_WINDOW_DAYS });
 }

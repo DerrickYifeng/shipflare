@@ -1,6 +1,7 @@
-// Stage 4 — Connect. Two OAuth cards (Reddit + X) whose state is derived
-// from /api/channels. Clicking Connect redirects to the existing OAuth
-// routes — on callback the user lands back at /onboarding and the Redis
+// Stage 4 — Connect. Only X uses OAuth; Reddit is a no-binding always-on
+// channel (handoff-only dispatch + RedditClient.appOnly() reads), so no
+// Connect step is required for it. State is derived from /api/channels —
+// on the X callback the user lands back at /onboarding and the Redis
 // draft resumes at this stage.
 
 'use client';
@@ -13,9 +14,8 @@ import {
   AccountCard,
   type AccountCardState,
 } from './_shared/account-card';
-import { ArrowRight, Reddit, X } from './icons';
+import { ArrowRight, X } from './icons';
 import { COPY } from './_copy';
-import { REDDIT_DRAFT_ENABLED } from './_feature-flags';
 
 interface ChannelRow {
   id: string;
@@ -28,40 +28,25 @@ interface StageConnectProps {
   onContinue: () => void;
 }
 
-type Platform = 'reddit' | 'x';
-
 interface PlatformState {
   state: AccountCardState;
   error: string | null;
 }
 
-const INITIAL: Record<Platform, PlatformState> = {
-  reddit: { state: 'idle', error: null },
-  x: { state: 'idle', error: null },
-};
+const INITIAL: PlatformState = { state: 'idle', error: null };
 
 export function StageConnect({ onBack, onContinue }: StageConnectProps) {
-  const [byPlatform, setByPlatform] =
-    useState<Record<Platform, PlatformState>>(INITIAL);
+  const [xState, setXState] = useState<PlatformState>(INITIAL);
 
   const refreshChannels = useCallback(async () => {
     try {
       const res = await fetch('/api/channels');
       if (!res.ok) return;
       const body = (await res.json()) as { channels: ChannelRow[] };
-      setByPlatform((prev) => {
-        const next = { ...prev };
-        const redditConn = body.channels.some((c) => c.platform === 'reddit');
-        const xConn = body.channels.some((c) => c.platform === 'x');
-        next.reddit = {
-          state: redditConn ? 'connected' : 'idle',
-          error: null,
-        };
-        next.x = { state: xConn ? 'connected' : 'idle', error: null };
-        return next;
-      });
+      const xConn = body.channels.some((c) => c.platform === 'x');
+      setXState({ state: xConn ? 'connected' : 'idle', error: null });
     } catch {
-      /* best effort — fall through with idle cards */
+      /* best effort — fall through with idle card */
     }
   }, []);
 
@@ -69,45 +54,25 @@ export function StageConnect({ onBack, onContinue }: StageConnectProps) {
     void refreshChannels();
   }, [refreshChannels]);
 
-  const connect = (platform: Platform) => {
-    setByPlatform((prev) => ({
-      ...prev,
-      [platform]: { state: 'connecting', error: null },
-    }));
-    // Redirect to the existing OAuth initiator route; the callback will
-    // write the channels row and bring us back to the onboarding flow.
-    window.location.href = `/api/${platform}/connect?returnTo=${encodeURIComponent('/onboarding')}`;
+  const connectX = () => {
+    setXState({ state: 'connecting', error: null });
+    window.location.href = `/api/x/connect?returnTo=${encodeURIComponent('/onboarding')}`;
   };
 
-  const disconnect = async (platform: Platform) => {
+  const disconnectX = async () => {
     try {
-      const res = await fetch(`/api/${platform}/disconnect`, {
-        method: 'DELETE',
-      });
+      const res = await fetch('/api/x/disconnect', { method: 'DELETE' });
       if (!res.ok) throw new Error(`Disconnect failed (${res.status})`);
-      setByPlatform((prev) => ({
-        ...prev,
-        [platform]: { state: 'idle', error: null },
-      }));
+      setXState({ state: 'idle', error: null });
     } catch (err) {
-      setByPlatform((prev) => ({
-        ...prev,
-        [platform]: {
-          state: 'error',
-          error:
-            err instanceof Error
-              ? err.message
-              : platform === 'reddit'
-                ? COPY.stage4.errorReddit
-                : COPY.stage4.errorX,
-        },
-      }));
+      setXState({
+        state: 'error',
+        error: err instanceof Error ? err.message : COPY.stage4.errorX,
+      });
     }
   };
 
-  const anyConnected =
-    byPlatform.reddit.state === 'connected' ||
-    byPlatform.x.state === 'connected';
+  const xConnected = xState.state === 'connected';
 
   return (
     <div>
@@ -118,32 +83,16 @@ export function StageConnect({ onBack, onContinue }: StageConnectProps) {
       />
 
       <AccountCard
-        state={byPlatform.reddit.state}
-        iconColor="#ff4500"
-        icon={<Reddit />}
-        title={COPY.stage4.cards.reddit.title}
-        desc={COPY.stage4.cards.reddit.desc}
-        sample={COPY.stage4.cards.reddit.sample}
-        errorMessage={byPlatform.reddit.error ?? COPY.stage4.errorReddit}
-        onConnect={() => connect('reddit')}
-        onDisconnect={() => void disconnect('reddit')}
-        onRetry={() => connect('reddit')}
-        comingSoon={!REDDIT_DRAFT_ENABLED}
-        comingSoonLabel={COPY.stage4.comingSoon}
-        comingSoonTooltip={COPY.stage4.comingSoonTooltip}
-      />
-      <div style={{ height: 12 }} />
-      <AccountCard
-        state={byPlatform.x.state}
+        state={xState.state}
         iconColor="#000"
         icon={<X />}
         title={COPY.stage4.cards.x.title}
         desc={COPY.stage4.cards.x.desc}
         sample={COPY.stage4.cards.x.sample}
-        errorMessage={byPlatform.x.error ?? COPY.stage4.errorX}
-        onConnect={() => connect('x')}
-        onDisconnect={() => void disconnect('x')}
-        onRetry={() => connect('x')}
+        errorMessage={xState.error ?? COPY.stage4.errorX}
+        onConnect={connectX}
+        onDisconnect={() => void disconnectX()}
+        onRetry={connectX}
       />
 
       <div
@@ -197,7 +146,7 @@ export function StageConnect({ onBack, onContinue }: StageConnectProps) {
           <OnbButton
             size="lg"
             variant="primary"
-            disabled={!anyConnected}
+            disabled={!xConnected}
             onClick={onContinue}
           >
             {COPY.stage4.nextCta}

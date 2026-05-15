@@ -37,7 +37,8 @@ interface CalendarItemDTO {
   kind: CalendarKind;
   state: PlanItemState;
   channel: string | null;
-  scheduledAt: string;
+  dueDate: string;
+  sortOrder: number;
   title: string;
   description: string | null;
   phase: string;
@@ -97,7 +98,8 @@ export async function GET(request: NextRequest): Promise<Response> {
       kind: planItems.kind,
       state: planItems.state,
       channel: planItems.channel,
-      scheduledAt: planItems.scheduledAt,
+      dueDate: planItems.dueDate,
+      sortOrder: planItems.sortOrder,
       title: planItems.title,
       description: planItems.description,
       phase: planItems.phase,
@@ -106,13 +108,13 @@ export async function GET(request: NextRequest): Promise<Response> {
     .where(
       and(
         eq(planItems.userId, userId),
-        gte(planItems.scheduledAt, weekStart),
-        lt(planItems.scheduledAt, weekEnd),
+        gte(planItems.dueDate, weekStart),
+        lt(planItems.dueDate, weekEnd),
         ne(planItems.state, 'superseded'),
         ne(planItems.state, 'stale'),
       ),
     )
-    .orderBy(planItems.scheduledAt);
+    .orderBy(planItems.dueDate, planItems.sortOrder);
 
   // Bucket by UTC YYYY-MM-DD. Seed all 7 days so the UI can render empty
   // columns without a client-side gap-filling pass.
@@ -125,7 +127,8 @@ export async function GET(request: NextRequest): Promise<Response> {
   let completed = 0;
   let skipped = 0;
   for (const r of rows) {
-    const key = toYmd(r.scheduledAt);
+    const dueDateObj = r.dueDate instanceof Date ? r.dueDate : new Date(r.dueDate as string);
+    const key = toYmd(dueDateObj);
     const bucket = byDay.get(key);
     if (!bucket) continue; // shouldn't happen — weekEnd exclusive bound
     bucket.push({
@@ -133,7 +136,8 @@ export async function GET(request: NextRequest): Promise<Response> {
       kind: r.kind as CalendarKind,
       state: r.state as PlanItemState,
       channel: r.channel ?? null,
-      scheduledAt: r.scheduledAt.toISOString(),
+      dueDate: dueDateObj.toISOString().slice(0, 10),
+      sortOrder: r.sortOrder,
       title: r.title,
       description: r.description ?? null,
       phase: r.phase,

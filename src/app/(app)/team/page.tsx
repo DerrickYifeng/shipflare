@@ -10,7 +10,6 @@ import {
   teamMembers,
   agentRuns,
   teamMessages,
-  teamTasks,
   teamConversations,
   products,
 } from '@/lib/db/schema';
@@ -26,8 +25,8 @@ import type {
 } from '@/hooks/use-team-events';
 import { TeamDesk, type TeamDeskMember } from './_components/team-desk';
 import type {
-  TaskLookup,
-  TaskLookupEntry,
+  AgentRunStatus,
+  AgentRunStatusMap,
   TeamRunLookup,
   TeamRunMeta,
 } from './_components/conversation-reducer';
@@ -47,30 +46,16 @@ function isoOrNull(value: Date | null): string | null {
   return value instanceof Date ? value.toISOString() : null;
 }
 
-/**
- * Pull a short human-readable summary off a spawn's `team_tasks.output`.
- * Subagents that use StructuredOutput land a `{ status, summary, ... }`
- * object in this column; free-form agents may land plain text. Anything
- * else (null, arrays, raw objects without a `summary` key) returns null —
- * the dispatch card skips the summary block rather than printing JSON.
- */
-function extractOutputSummary(output: unknown): string | null {
-  if (typeof output === 'string') {
-    const trimmed = output.trim();
-    return trimmed.length > 0 ? trimmed : null;
-  }
-  if (output && typeof output === 'object' && !Array.isArray(output)) {
-    const obj = output as Record<string, unknown>;
-    const summary = obj['summary'];
-    if (typeof summary === 'string' && summary.trim().length > 0) {
-      return summary.trim();
-    }
-    const notes = obj['notes'];
-    if (typeof notes === 'string' && notes.trim().length > 0) {
-      return notes.trim();
-    }
-  }
-  return null;
+function isAgentRunStatusValue(v: string): v is AgentRunStatus['status'] {
+  return (
+    v === 'queued' ||
+    v === 'running' ||
+    v === 'sleeping' ||
+    v === 'resuming' ||
+    v === 'completed' ||
+    v === 'failed' ||
+    v === 'killed'
+  );
 }
 
 export default async function TeamPage({
@@ -129,7 +114,7 @@ export default async function TeamPage({
     activeRunRows,
     lastRunRows,
     rawMessages,
-    taskRows,
+    agentRunRows,
     conversationRows,
   ] = await Promise.all([
     db
@@ -210,24 +195,25 @@ export default async function TeamPage({
       )
       .orderBy(desc(teamMessages.createdAt))
       .limit(INITIAL_MESSAGE_WINDOW),
-    // Recent-tasks list: same migration — chain via teamMembers.
-    // Onboarding-trigger filter dropped (the new dispatch path doesn't
-    // create teamTasks for onboarding kickoffs anyway).
+    // Recent agent_runs for this team — the SSOT for dispatch lifecycle.
+    // Returns every teammate spawn (parent_tool_use_id present means it
+    // was launched via the Task tool; null means it was the lead's own
+    // run). Used to seed the AgentRunStatusMap so the UI's dispatch cards
+    // show truthful status from first paint. Limit caps the SSR payload —
+    // older rows that aren't visible in the conversation window don't
+    // need to be in the map.
     db
       .select({
-        id: teamTasks.id,
-        memberId: teamTasks.memberId,
-        status: teamTasks.status,
-        description: teamTasks.description,
-        startedAt: teamTasks.startedAt,
-        completedAt: teamTasks.completedAt,
-        output: teamTasks.output,
-        input: teamTasks.input,
+        id: agentRuns.id,
+        memberId: agentRuns.memberId,
+        status: agentRuns.status,
+        parentToolUseId: agentRuns.parentToolUseId,
+        spawnedAt: agentRuns.spawnedAt,
+        lastActiveAt: agentRuns.lastActiveAt,
       })
-      .from(teamTasks)
-      .innerJoin(teamMembers, eq(teamMembers.id, teamTasks.memberId))
-      .where(eq(teamMembers.teamId, team.id))
-      .orderBy(desc(teamTasks.startedAt))
+      .from(agentRuns)
+      .where(eq(agentRuns.teamId, team.id))
+      .orderBy(desc(agentRuns.spawnedAt))
       .limit(200),
     db
       .select({
@@ -258,12 +244,19 @@ export default async function TeamPage({
   const coordinator = members.find((m) => m.agentType === 'coordinator') ?? null;
   const specialistsRaw = members.filter((m) => m.id !== coordinator?.id);
 
+  // Count in-flight agent_runs per teammate so the roster sidebar can show
+  // a "2 active" badge. Anything not in a terminal state counts as open.
   const openTaskCountByMember = new Map<string, number>();
-  for (const t of taskRows) {
-    if (t.status === 'pending' || t.status === 'running') {
+  for (const r of agentRunRows) {
+    if (
+      r.status === 'queued' ||
+      r.status === 'running' ||
+      r.status === 'resuming' ||
+      r.status === 'sleeping'
+    ) {
       openTaskCountByMember.set(
-        t.memberId,
-        (openTaskCountByMember.get(t.memberId) ?? 0) + 1,
+        r.memberId,
+        (openTaskCountByMember.get(r.memberId) ?? 0) + 1,
       );
     }
   }
@@ -332,34 +325,28 @@ export default async function TeamPage({
       };
     });
 
-  // Dual-key lookup: the coordinator's Task tool_call metadata carries
-  // the LLM-issued `toolUseId`, but `team_tasks` rows are keyed by a
-  // server-generated UUID — two different ids that point at the same
-  // logical spawn. The worker stashes the toolUseId into
-  // `team_tasks.input.toolUseId` (see AgentTool.recordTaskStart), so
-  // we index the same entry under both keys here and the reducer can
-  // join on whichever id is available. Without this the UI defaults
-  // every dispatched subtask to QUEUED because lookups always miss.
-  const taskLookup: TaskLookup = (() => {
-    const map = new Map<string, TaskLookupEntry>();
-    for (const t of taskRows) {
-      const entry: TaskLookupEntry = {
-        id: t.id,
-        status: t.status,
-        description: t.description ?? null,
-        startedAt: isoOrNull(t.startedAt),
-        completedAt: isoOrNull(t.completedAt),
-        outputSummary: extractOutputSummary(t.output),
-      };
-      map.set(t.id, entry);
-      const inputObj =
-        t.input && typeof t.input === 'object' && !Array.isArray(t.input)
-          ? (t.input as Record<string, unknown>)
-          : null;
-      const toolUseId = inputObj?.['toolUseId'];
-      if (typeof toolUseId === 'string' && toolUseId.length > 0) {
-        map.set(toolUseId, entry);
-      }
+  // AgentRunStatusMap: `agent_runs` is the single source of truth for
+  // dispatch lifecycle. The reducer's buildDelegationTask joins each
+  // Task tool_call to its spawned row by `parentToolUseId === toolUseId`,
+  // reads `status`, and renders the dispatch card with the truthful state
+  // (queued → running → done / failed / killed). The map is also kept
+  // fresh live through `agent_status_change` SSE events — see
+  // `applyStatusChanges` in conversation-reducer.ts.
+  const agentRunStatus: AgentRunStatusMap = (() => {
+    const map = new Map<string, AgentRunStatus>();
+    for (const r of agentRunRows) {
+      if (!isAgentRunStatusValue(r.status)) continue;
+      map.set(r.id, {
+        agentId: r.id,
+        status: r.status,
+        parentToolUseId: r.parentToolUseId,
+        spawnedAt: isoOrNull(r.spawnedAt),
+        lastActiveAt: isoOrNull(r.lastActiveAt),
+        // outputSummary is back-filled by the reducer from the matching
+        // task_notification team_messages row — agent_runs itself doesn't
+        // store the human-readable summary text.
+        outputSummary: null,
+      });
     }
     return map;
   })();
@@ -400,14 +387,18 @@ export default async function TeamPage({
   const lastRun = !activeRun && lastRunRows[0] ? lastRunRows[0] : null;
   const isLive = Boolean(activeRun);
 
-  const draftsInFlight = taskRows.filter(
-    (t) => t.status === 'pending' || t.status === 'running',
+  const draftsInFlight = agentRunRows.filter(
+    (r) =>
+      r.status === 'queued' ||
+      r.status === 'running' ||
+      r.status === 'resuming' ||
+      r.status === 'sleeping',
   ).length;
   const inReview = members.filter(
     (m) => m.status === 'waiting_approval',
   ).length;
-  const approvedReady = taskRows.filter(
-    (t) => t.status === 'completed',
+  const approvedReady = agentRunRows.filter(
+    (r) => r.status === 'completed',
   ).length;
 
   let leadMessage: string;
@@ -445,7 +436,7 @@ export default async function TeamPage({
       inReview={inReview}
       approvedReady={approvedReady}
       turns={turns}
-      taskLookup={taskLookup}
+      agentRunStatus={agentRunStatus}
       runLookup={runLookup}
       conversations={conversations}
       initialConversationId={initialConversationId}

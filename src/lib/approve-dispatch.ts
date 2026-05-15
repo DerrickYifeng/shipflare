@@ -1,6 +1,7 @@
 import { enqueuePosting } from '@/lib/queue';
-import { computeNextSlot } from '@/lib/posting-pacer';
 import { buildXIntentUrl } from '@/lib/x-intent-url';
+import { buildRedditSubmitUrl } from '@/lib/reddit-intent-url';
+import { buildRedditHandoffPageUrl } from '@/lib/reddit-handoff-url';
 import { PLATFORMS } from '@/lib/platform-config';
 
 export interface DispatchInput {
@@ -11,36 +12,39 @@ export interface DispatchInput {
     draftType: 'reply' | 'original_post';
     replyBody: string;
     planItemId: string | null;
+    /** Reddit posts only — the subreddit (without r/ prefix). */
+    subreddit?: string | null;
+    /** Reddit posts only — the title (drafts.postTitle column). */
+    postTitle?: string | null;
   };
   thread: {
     id: string;
     platform: string;
     externalId: string | null;
   };
-  channelId: string;
-  /** Days since the user connected this channel. Tier input for the pacer. */
-  connectedAgeDays: number;
+  /**
+   * Only required for the `enqueuePosting` path (X original_post). Reddit
+   * is always-on no-binding so its dispatch is a handoff that never reads
+   * channelId; loaders return null in that case.
+   */
+  channelId: string | null;
 }
 
 export type DispatchResult =
   | { kind: 'handoff'; intentUrl: string }
-  | { kind: 'queued'; delayMs: number }
-  | {
-      kind: 'deferred';
-      reason: 'over_daily_cap' | 'no_pacer_config';
-      retryAfterMs: number;
-    };
+  | { kind: 'queued' };
 
 /**
  * Decide what to do when the user (or auto-approve) approves a draft.
- * - X replies → browser handoff via intent URL (TOS-compliant; X's Feb 2026
- *   API restriction blocks programmatic replies on non-Enterprise tiers).
- * - X original posts + Reddit anything → direct API call via the posting
- *   processor, paced by `computeNextSlot`.
+ *
+ * Status transition responsibility (caller writes these):
+ * - X reply        → handoff via X intent URL.    Caller flips to 'handed_off'.
+ * - X post         → queued via posting.ts.       Caller flips to 'approved'.
+ * - Reddit post    → handoff via submit URL.      Caller flips to 'handed_off'.
+ * - Reddit reply   → handoff via handoff page.    Caller flips to 'handed_off' on dispatch.
  *
  * NOTE: This function only computes the routing decision. The caller is
- * responsible for the matching DB writes (set draft.status to 'handed_off'
- * for handoff, 'approved' for queued; transition plan_item state).
+ * responsible for the matching DB writes.
  */
 export async function dispatchApprove(
   input: DispatchInput,
@@ -64,30 +68,54 @@ export async function dispatchApprove(
     };
   }
 
-  const slot = await computeNextSlot({
-    userId: input.draft.userId,
-    platform: input.thread.platform,
-    kind: input.draft.draftType === 'reply' ? 'reply' : 'post',
-    connectedAgeDays: input.connectedAgeDays,
-  });
+  const isRedditPost =
+    input.thread.platform === PLATFORMS.reddit.id &&
+    input.draft.draftType === 'original_post';
 
-  if (slot.deferred) {
+  if (isRedditPost) {
+    if (!input.draft.subreddit) {
+      throw new Error(
+        `dispatchApprove: Reddit post requires subreddit (draft ${input.draft.id})`,
+      );
+    }
+    if (!input.draft.postTitle) {
+      throw new Error(
+        `dispatchApprove: Reddit post requires postTitle (draft ${input.draft.id})`,
+      );
+    }
     return {
-      kind: 'deferred',
-      reason: slot.reason,
-      retryAfterMs: slot.delayMs,
+      kind: 'handoff',
+      intentUrl: buildRedditSubmitUrl({
+        subreddit: input.draft.subreddit,
+        title: input.draft.postTitle,
+        body: input.draft.replyBody,
+      }),
     };
   }
 
-  await enqueuePosting(
-    {
-      userId: input.draft.userId,
-      draftId: input.draft.id,
-      channelId: input.channelId,
-      mode: 'direct',
-    },
-    { delayMs: slot.delayMs },
-  );
+  const isRedditReply =
+    input.thread.platform === PLATFORMS.reddit.id &&
+    input.draft.draftType === 'reply';
 
-  return { kind: 'queued', delayMs: slot.delayMs };
+  if (isRedditReply) {
+    return {
+      kind: 'handoff',
+      intentUrl: buildRedditHandoffPageUrl(input.draft.id),
+    };
+  }
+
+  if (!input.channelId) {
+    throw new Error(
+      `dispatchApprove: posting path requires channelId (draft ${input.draft.id}, platform ${input.thread.platform})`,
+    );
+  }
+
+  await enqueuePosting({
+    userId: input.draft.userId,
+    draftId: input.draft.id,
+    channelId: input.channelId,
+    mode: 'direct',
+  });
+
+  return { kind: 'queued' };
 }

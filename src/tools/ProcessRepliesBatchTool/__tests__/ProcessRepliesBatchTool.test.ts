@@ -63,7 +63,8 @@ interface ThreadRow {
   userId: string;
   externalId: string;
   platform: string;
-  community: string;
+  /** NULL for X threads (no Reddit-style subreddit equivalent). */
+  community: string | null;
   title: string;
   url: string;
   body: string | null;
@@ -108,7 +109,8 @@ function seedThreads(
     userId: r.userId ?? 'user-1',
     externalId: r.externalId ?? `ext-${i}`,
     platform: r.platform ?? 'x',
-    community: r.community ?? 'home',
+    // X threads default to NULL community; Reddit fixtures pass it explicitly.
+    community: r.community ?? null,
     title: r.title ?? `thread ${i}`,
     url: r.url ?? `https://x.com/u/status/${i}`,
     body: r.body ?? 'we tried railway and it broke',
@@ -173,6 +175,56 @@ describe('processRepliesBatchTool', () => {
     // Drafting-reply only — no validating-draft fork.
     expect(runForkSkillMock).toHaveBeenCalledOnce();
     expect(runForkSkillMock.mock.calls[0]![0]).toBe('drafting-reply');
+  });
+
+  it('plumbs `planItemId` through to draftReplyTool so drafts link to the slot (2026-05-13)', async () => {
+    // Tier 2 regression: production incident showed reply drafts
+    // landing orphaned (drafts.planItemId NULL) so the coordinator
+    // couldn't verify which slot they belonged to. With planItemId
+    // passed in, every drafted reply must carry it through.
+    seedThreads(store, [{ id: 't1' }]);
+    runForkSkillMock.mockResolvedValueOnce({
+      result: {
+        draftBody: 'short reply',
+        whyItWorks: 'fits voice',
+        confidence: 0.8,
+      },
+      usage: {},
+    });
+    validateDraftExecMock.mockResolvedValue({ failures: [], warnings: [] });
+    draftReplyExecMock.mockResolvedValue({ id: 'd1' });
+
+    await processRepliesBatchTool.execute(
+      { threadIds: ['t1'], planItemId: 'pi-x-reply-uuid' },
+      makeCtx(store, { userId: 'user-1', productId: 'prod-1' }),
+    );
+
+    expect(draftReplyExecMock).toHaveBeenCalledOnce();
+    const args = draftReplyExecMock.mock.calls[0]![0];
+    expect(args.planItemId).toBe('pi-x-reply-uuid');
+  });
+
+  it('omits `planItemId` when caller did not pass one (ad-hoc / fallback paths)', async () => {
+    seedThreads(store, [{ id: 't1' }]);
+    runForkSkillMock.mockResolvedValueOnce({
+      result: {
+        draftBody: 'short reply',
+        whyItWorks: 'fits voice',
+        confidence: 0.8,
+      },
+      usage: {},
+    });
+    validateDraftExecMock.mockResolvedValue({ failures: [], warnings: [] });
+    draftReplyExecMock.mockResolvedValue({ id: 'd1' });
+
+    await processRepliesBatchTool.execute(
+      { threadIds: ['t1'] },
+      makeCtx(store, { userId: 'user-1', productId: 'prod-1' }),
+    );
+
+    expect(draftReplyExecMock).toHaveBeenCalledOnce();
+    const args = draftReplyExecMock.mock.calls[0]![0];
+    expect(args.planItemId).toBeUndefined();
   });
 
   it('rejects on mechanical fail and short-circuits before persisting', async () => {
@@ -467,6 +519,36 @@ describe('processRepliesBatchTool', () => {
     // Mechanical / persist were never invoked because draft was null.
     expect(validateDraftExecMock).not.toHaveBeenCalled();
     expect(draftReplyExecMock).not.toHaveBeenCalled();
+  });
+
+  it('short-circuits to skipped_subreddit_rule_conflict when drafting flags the thread (no validate_draft)', async () => {
+    seedThreads(store, [{ id: 't1', platform: 'reddit', community: 'SaaS' }]);
+    runForkSkillMock.mockResolvedValueOnce({
+      result: {
+        draftBody: '',
+        whyItWorks: 'no_self_promotion',
+        confidence: 0,
+        flagged: true,
+        flagReason: 'subreddit rule conflict',
+      },
+      usage: {},
+    });
+
+    const result = await processRepliesBatchTool.execute(
+      { threadIds: ['t1'] },
+      makeCtx(store, { userId: 'user-1', productId: 'prod-1' }),
+    );
+
+    expect(result.draftsCreated).toBe(0);
+    expect(result.draftsSkipped).toBe(1);
+    expect(result.details[0]?.status).toBe('skipped_subreddit_rule_conflict');
+    expect(result.details[0]?.reason).toBe('subreddit rule conflict');
+    // Critical: validate_draft must NOT be called on the empty body —
+    // its Zod input rejects empty text with a cryptic message that
+    // would surface as `errored` instead of the safe-skip status.
+    expect(validateDraftExecMock).not.toHaveBeenCalled();
+    expect(draftReplyExecMock).not.toHaveBeenCalled();
+    expect(runForkSkillMock).toHaveBeenCalledOnce();
   });
 
   it('emits live progress at start and finish so UI tool card updates in real-time', async () => {

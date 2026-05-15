@@ -44,18 +44,22 @@ export const writeStrategicPathTool: ToolDefinition<
     '    { "atDayOffset": -14, "title": "Beta launch", "successMetric": "50 signups", "phase": "launch" }\n' +
     '  ],\n' +
     '  "thesisArc": [\n' +
-    '    { "weekStart": "2026-04-28T00:00:00Z", "theme": "Pain-point hooks", "angleMix": ["claim", "story"] }\n' +
+    '    { "weekStart": "2026-04-28T00:00:00Z", "theme": "Pain-point hooks", "angleMix": ["claim", "story"], "posts": { "x": 3, "reddit": 1 } }\n' +
     '  ],\n' +
     '  "contentPillars": ["CI pain", "cost savings", "indie founder life"],\n' +
     '  "channelMix": {\n' +
-    '    "x": { "perWeek": 5, "repliesPerDay": 3, "preferredHours": [9, 14, 18] },\n' +
+    '    "x": { "repliesPerDay": 3, "preferredHours": [9, 14, 18] },\n' +
     '    "reddit": null\n' +
     '  },\n' +
     '  "phaseGoals": {\n' +
     '    "foundation": "Set up profile + first 10 posts",\n' +
     '    "audience": null\n' +
     '  }\n' +
-    '}',
+    '}\n\n' +
+    'NOTE: Per-week post quotas live on `thesisArc[i].posts.{ch}` so ' +
+    'each week can ramp differently (foundation: 1-2/ch, momentum/launch: ' +
+    '2-4/ch). `channelMix[ch]` carries cadence preferences only — ' +
+    '`repliesPerDay`, `preferredHours`, `preferredCommunities`.',
   inputSchema: strategicPathSchema,
   isConcurrencySafe: false,
   isReadOnly: false,

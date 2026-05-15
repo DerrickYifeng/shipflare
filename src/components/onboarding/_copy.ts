@@ -133,14 +133,9 @@ export const COPY = {
   },
   stage4: {
     kicker: 'Step 2 · Channels',
-    title: 'Connect your accounts',
-    sub: 'We post as you, but only with your approval. Connect at least one to enable the agents.',
+    title: 'Connect your account',
+    sub: 'Connect X so ShipFlare can draft replies on your behalf. Reddit is always on via handoff — no connection needed.',
     cards: {
-      reddit: {
-        title: 'Reddit',
-        desc: 'Posts, comments, and subreddit discovery',
-        sample: 'r/SaaS, r/indiehackers, r/nextjs',
-      },
       x: {
         title: 'X',
         desc: 'Replies, quote-posts, and thread discovery',
@@ -154,9 +149,6 @@ export const COPY = {
     skipCta: 'Skip for now',
     nextCta: "Next · Where's your product at?",
     errorX: "Couldn't reach X. This usually clears in a minute.",
-    errorReddit: "Couldn't reach Reddit. Retry in a moment.",
-    comingSoon: 'Coming soon',
-    comingSoonTooltip: 'Reddit drafting is coming soon',
   },
   stage5: {
     kicker: 'Step 3 · State',

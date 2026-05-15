@@ -15,6 +15,7 @@ import {
   loadDispatchInputForDraft,
   findDraftIdForPlanItem,
 } from '@/lib/approve-loaders';
+import { synthesizeContentPostDraft } from '@/lib/synthesize-content-post-draft';
 
 const baseLog = createLogger('api:today:approve');
 
@@ -24,14 +25,23 @@ const baseLog = createLogger('api:today:approve');
  * Approves a plan_item or a draft (reply-card path).
  *
  * - plan_item id: transitions to 'approved', then dispatches via
- *   dispatchApprove if a linked draft exists; falls back to legacy
- *   enqueuePlanExecute if no draft row is found.
+ *   dispatchApprove using one of three strategies:
+ *
+ *   1. Linked draft found (content_reply path): load it and dispatch.
+ *   2. No linked draft + kind='content_post': synthesise a draft from
+ *      plan_items.output.draft_body (Task 13) and dispatch. The sweeper
+ *      only creates drafts rows for state='planned' rows, so content_post
+ *      plan_items that reach 'approved' via the /today click don't have a
+ *      pre-existing draft until we create one here.
+ *   3. Everything else: fall back to legacy enqueuePlanExecute so
+ *      email_send / interview / setup_task etc. still flow through
+ *      the plan-execute worker.
+ *
  * - draft id (status='pending'): dispatches directly via dispatchApprove.
  *
  * Dispatcher outcomes:
  *   handoff  → 200 { success: true, browserHandoff: { intentUrl } }
- *   queued   → 200 { success: true, queued: { delayMs } }
- *   deferred → 202 { success: false, deferred: true, reason, retryAfterMs }
+ *   queued   → 200 { success: true }
  *
  * Error codes:
  *   400 invalid_id
@@ -84,9 +94,25 @@ export async function PATCH(
       }
     }
 
-    // Legacy fallback: no linked draft (content_post drafts live in
-    // plan_items.output.draft_body for now). Enqueue plan-execute as
-    // before — Task 13 will route this through the dispatcher too.
+    // Task 13: synthesise a draft for content_post plan_items that don't
+    // yet have a drafts row (the sweeper only creates drafts for
+    // state='planned'; the /today click approves them directly).
+    if (planRow.kind === 'content_post' && planRow.channel) {
+      const synth = await synthesizeContentPostDraft(planRow, session.user.id);
+      if (synth) {
+        const dispatchInput = await loadDispatchInputForDraft(
+          synth.draftId,
+          planRow.userId,
+        );
+        if (dispatchInput) {
+          const decision = await dispatchApprove(dispatchInput);
+          return applyDispatchResult(decision, synth.draftId, traceId, log);
+        }
+      }
+    }
+
+    // True fallback: still enqueue plan-execute for kinds we don't handle
+    // here (email_send, interview, setup_task, etc.).
     await enqueuePlanExecute({
       schemaVersion: 1,
       planItemId: planRow.id,
@@ -138,25 +164,14 @@ async function applyDispatchResult(
       { headers: { 'x-trace-id': traceId } },
     );
   }
-  if (decision.kind === 'deferred') {
-    return NextResponse.json(
-      {
-        success: false,
-        deferred: true,
-        reason: decision.reason,
-        retryAfterMs: decision.retryAfterMs,
-      },
-      { status: 202, headers: { 'x-trace-id': traceId } },
-    );
-  }
   // queued
   await db
     .update(drafts)
     .set({ status: 'approved', updatedAt: new Date() })
     .where(eq(drafts.id, draftId));
-  log.info(`draft ${draftId} queued for posting (delay ${decision.delayMs}ms)`);
+  log.info(`draft ${draftId} queued for posting`);
   return NextResponse.json(
-    { success: true, queued: { delayMs: decision.delayMs } },
+    { success: true },
     { headers: { 'x-trace-id': traceId } },
   );
 }

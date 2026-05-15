@@ -19,34 +19,6 @@ export interface PlatformCharLimits {
   reply: number;
 }
 
-/**
- * Per-platform pacing configuration for the API direct posting path.
- * Tiered by `connectedAgeDays` (= now - channels.connectedAt) since we
- * don't yet have account-age + karma fetched from the platform itself.
- *
- * Caps and spacing values come from the conservative end of published
- * shadowban-avoidance research (Reddit ReddiReach guide, OpenTweet X
- * automation guide, bitbrowser shadowban thresholds).
- */
-export interface PostingTier {
-  /** Inclusive lower bound on connected age in days. */
-  minAgeDays: number;
-  /** Max replies (Reddit comments / X replies) per 24h. */
-  maxRepliesPerDay: number;
-  /** Max top-level posts (Reddit submissions / X tweets) per 24h. */
-  maxPostsPerDay: number;
-  /** Minimum seconds between any two posts of any kind, before jitter. */
-  minSpacingSec: number;
-  /** ± seconds of uniform random jitter added to the spacing. */
-  jitterSec: number;
-}
-
-export interface PostingConfig {
-  /** Quiet-hours window in UTC (no posting). [startHour, endHour], 0-23. */
-  quietHoursUTC: [number, number];
-  /** Tiers ordered ascending by minAgeDays; first matching tier wins. */
-  tiers: readonly PostingTier[];
-}
 
 export interface PlatformConfig {
   /** Unique identifier used in DB, queue jobs, and routing. */
@@ -104,17 +76,13 @@ export interface PlatformConfig {
    * `find_threads` + `draft_reply`. Set to 0 to disable. Default 7.
    */
   replyAuthorCooldownDays?: number;
-  /** Pacing config for the direct API posting path. Optional — platforms
-   *  without a posting code path (e.g. read-only sources) leave it unset. */
-  posting?: PostingConfig;
 }
 
 export const PLATFORMS: Record<string, PlatformConfig> = {
   reddit: {
     id: 'reddit',
     displayName: 'Reddit',
-    // MVP ships X-only. Flip to `true` to re-enable Reddit across the product.
-    enabled: false,
+    enabled: true,
     defaultSources: ['SideProject', 'startups', 'webdev'],
     sourceLabel: 'subreddit',
     sourcePrefix: 'r/',
@@ -126,14 +94,6 @@ export const PLATFORMS: Record<string, PlatformConfig> = {
     // Reddit IDs are base-36 — letters + digits. No stable discriminator regex.
     buildContentUrl: (_username, contentId) =>
       `https://reddit.com/comments/${contentId}`,
-    posting: {
-      quietHoursUTC: [6, 11],
-      tiers: [
-        { minAgeDays: 0,  maxRepliesPerDay: 2,  maxPostsPerDay: 0, minSpacingSec: 900, jitterSec: 180 },
-        { minAgeDays: 14, maxRepliesPerDay: 5,  maxPostsPerDay: 1, minSpacingSec: 600, jitterSec: 120 },
-        { minAgeDays: 30, maxRepliesPerDay: 12, maxPostsPerDay: 3, minSpacingSec: 240, jitterSec: 90 },
-      ],
-    },
   },
   x: {
     id: 'x',
@@ -155,14 +115,6 @@ export const PLATFORMS: Record<string, PlatformConfig> = {
     externalIdPattern: /^\d+$/,
     buildContentUrl: (username, contentId) =>
       `https://x.com/${username}/status/${contentId}`,
-    posting: {
-      quietHoursUTC: [6, 11], // 23:00-04:00 US Pacific
-      tiers: [
-        { minAgeDays: 0,  maxRepliesPerDay: 3,  maxPostsPerDay: 1, minSpacingSec: 480, jitterSec: 180 },
-        { minAgeDays: 14, maxRepliesPerDay: 8,  maxPostsPerDay: 2, minSpacingSec: 240, jitterSec: 120 },
-        { minAgeDays: 30, maxRepliesPerDay: 20, maxPostsPerDay: 4, minSpacingSec: 120, jitterSec: 60 },
-      ],
-    },
   },
 };
 

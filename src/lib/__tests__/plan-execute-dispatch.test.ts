@@ -60,21 +60,30 @@ describe('dispatchPlanItem — happy paths', () => {
   });
 });
 
-describe('dispatchPlanItem — reddit not wired yet', () => {
-  it('returns null for content_post + reddit (dispatch table only has x; writer branch owns draft)', () => {
+describe('dispatchPlanItem — reddit handoff routes', () => {
+  it('routes reddit content_post to null draft / posting execute / approve', () => {
+    // Reddit posts use the handoff path (submit URL) at execute time.
+    // The execute label `posting` flows through posting.ts → dispatchApprove,
+    // which routes Reddit posts to handoff (Task 4b).
     const route = dispatchPlanItem({
       kind: 'content_post',
       channel: 'reddit',
     });
-    expect(route).toBeNull();
+    expect(route).toEqual({
+      draftSkill: null,
+      executeSkill: 'posting',
+      defaultUserAction: 'approve',
+    });
   });
 
-  it('returns null for content_reply + reddit', () => {
+  it('routes reddit content_reply to null draft / posting execute / approve', () => {
     const route = dispatchPlanItem({
       kind: 'content_reply',
       channel: 'reddit',
     });
-    expect(route).toBeNull();
+    expect(route?.executeSkill).toBe('posting');
+    expect(route?.draftSkill).toBeNull();
+    expect(route?.defaultUserAction).toBe('approve');
   });
 });
 
@@ -117,11 +126,21 @@ describe('DISPATCH_TABLE_SNAPSHOT', () => {
     }
   });
 
-  it('content_post has only the x route (reddit execute TBD in Phase F)', () => {
+  it('content_post has both x and reddit routes', () => {
     const postRoutes = DISPATCH_TABLE_SNAPSHOT.filter(
       (r) => r.kind === 'content_post',
     );
-    expect(postRoutes).toHaveLength(1);
-    expect(postRoutes[0].channel).toBe('x');
+    expect(postRoutes).toHaveLength(2);
+    const channels = postRoutes.map((r) => r.channel).sort();
+    expect(channels).toEqual(['reddit', 'x']);
+  });
+
+  it('content_reply has both x and reddit routes', () => {
+    const replyRoutes = DISPATCH_TABLE_SNAPSHOT.filter(
+      (r) => r.kind === 'content_reply',
+    );
+    expect(replyRoutes).toHaveLength(2);
+    const channels = replyRoutes.map((r) => r.channel).sort();
+    expect(channels).toEqual(['reddit', 'x']);
   });
 });

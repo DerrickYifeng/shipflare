@@ -1,12 +1,12 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { eq, and, isNull, isNotNull, asc } from 'drizzle-orm';
+import { eq, and, isNull, isNotNull, asc, desc } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import {
+  agentRuns,
   teams,
   teamMembers,
   teamMessages,
-  teamTasks,
   users,
 } from '@/lib/db/schema';
 
@@ -20,8 +20,9 @@ import {
  *   2. Activity — every team_messages row whose runId = <param>,
  *      ordered ascending. Carries the response timeline (agent_text /
  *      tool_call / tool_result / thinking / etc.).
- *   3. Tasks — every team_tasks row whose runId = <param>, with
- *      teamMembers join for the spawned agent's display name.
+ *   3. Spawned agents — every agent_runs row spawned within this
+ *      request's activity window (joined via parent_tool_use_id ↔
+ *      tool_call messages), with teamMembers join for display names.
  *
  * Renders the same Conversation / FoldedRow / KeyValue components as
  * the pre-Phase-G detail page (preserves the user's recent
@@ -85,27 +86,49 @@ export default async function AdminTeamRunDetailPage({ params }: PageProps) {
     .orderBy(asc(teamMessages.createdAt))
     .limit(500);
 
-  // Query 3: spawned tasks for this request. team_tasks.runId now points
-  // at the user_prompt.id (post-migration 0016) — same correlation as
-  // the activity query above.
-  const tasks = await db
+  // Query 3: spawned agents for this request. team_tasks is gone —
+  // agent_runs is the SSOT for task lifecycle. Match by the activity
+  // stream's tool_call rows: each Task tool_call's tool_use_id is
+  // stamped on `agent_runs.parent_tool_use_id` at spawn time, so we can
+  // narrow agent_runs to "spawned during this request" by intersecting
+  // with the tool_use_ids surfaced by the activity query above.
+  const toolUseIdsInActivity = new Set<string>();
+  for (const msg of activity) {
+    if (msg.type !== 'tool_call' || !msg.metadata) continue;
+    const meta = msg.metadata as Record<string, unknown>;
+    const useId = meta['toolUseId'] ?? meta['tool_use_id'];
+    if (typeof useId === 'string' && useId.length > 0) {
+      toolUseIdsInActivity.add(useId);
+    }
+  }
+
+  const spawnedAgents = await db
     .select({
-      id: teamTasks.id,
-      parentTaskId: teamTasks.parentTaskId,
-      memberId: teamTasks.memberId,
+      id: agentRuns.id,
+      parentAgentId: agentRuns.parentAgentId,
+      parentToolUseId: agentRuns.parentToolUseId,
+      memberId: agentRuns.memberId,
       agentType: teamMembers.agentType,
       displayName: teamMembers.displayName,
-      description: teamTasks.description,
-      status: teamTasks.status,
-      costUsd: teamTasks.costUsd,
-      turns: teamTasks.turns,
-      startedAt: teamTasks.startedAt,
-      completedAt: teamTasks.completedAt,
+      agentDefName: agentRuns.agentDefName,
+      status: agentRuns.status,
+      totalTokens: agentRuns.totalTokens,
+      toolUses: agentRuns.toolUses,
+      spawnedAt: agentRuns.spawnedAt,
+      lastActiveAt: agentRuns.lastActiveAt,
     })
-    .from(teamTasks)
-    .leftJoin(teamMembers, eq(teamMembers.id, teamTasks.memberId))
-    .where(eq(teamTasks.runId, runId))
-    .orderBy(asc(teamTasks.startedAt));
+    .from(agentRuns)
+    .leftJoin(teamMembers, eq(teamMembers.id, agentRuns.memberId))
+    .where(eq(agentRuns.teamId, request.teamId))
+    .orderBy(desc(agentRuns.spawnedAt))
+    .limit(200);
+
+  const tasks = spawnedAgents.filter((a) =>
+    // Lead's own agent_runs row (parentToolUseId = null) is skipped —
+    // this section is "spawned tasks", not "the request itself".
+    a.parentToolUseId !== null &&
+    toolUseIdsInActivity.has(a.parentToolUseId),
+  );
 
   // Build memberById from the tasks' member joins (the activity rows
   // carry fromMemberId but no display name; tasks carry both, so this
@@ -222,18 +245,18 @@ export default async function AdminTeamRunDetailPage({ params }: PageProps) {
             <thead>
               <tr style={{ textAlign: 'left', color: 'var(--sf-fg-3)' }}>
                 <Th>Agent</Th>
-                <Th>Description</Th>
+                <Th>Definition</Th>
                 <Th>Status</Th>
-                <Th align="right">Cost</Th>
-                <Th align="right">Turns</Th>
+                <Th align="right">Tokens</Th>
+                <Th align="right">Tool uses</Th>
                 <Th>Duration</Th>
               </tr>
             </thead>
             <tbody>
               {tasks.map((task) => {
                 const taskDuration =
-                  task.completedAt && task.startedAt
-                    ? task.completedAt.getTime() - task.startedAt.getTime()
+                  task.lastActiveAt && task.spawnedAt
+                    ? task.lastActiveAt.getTime() - task.spawnedAt.getTime()
                     : null;
                 return (
                   <tr
@@ -244,7 +267,7 @@ export default async function AdminTeamRunDetailPage({ params }: PageProps) {
                       {task.displayName ?? task.agentType ?? (
                         <code>{task.memberId?.slice(0, 8)}</code>
                       )}
-                      {task.parentTaskId && (
+                      {task.parentAgentId && (
                         <span
                           style={{
                             marginLeft: 6,
@@ -256,14 +279,10 @@ export default async function AdminTeamRunDetailPage({ params }: PageProps) {
                         </span>
                       )}
                     </Td>
-                    <Td>{task.description}</Td>
+                    <Td>{task.agentDefName}</Td>
                     <Td>{task.status}</Td>
-                    <Td align="right">
-                      {task.costUsd != null
-                        ? `$${Number(task.costUsd).toFixed(4)}`
-                        : '—'}
-                    </Td>
-                    <Td align="right">{task.turns ?? '—'}</Td>
+                    <Td align="right">{task.totalTokens ?? '—'}</Td>
+                    <Td align="right">{task.toolUses ?? '—'}</Td>
                     <Td>
                       {taskDuration !== null
                         ? formatDuration(taskDuration)

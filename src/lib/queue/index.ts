@@ -5,23 +5,25 @@ import { createLogger } from '@/lib/logger';
 import {
   reviewJobSchema,
   postingJobSchema,
-  healthScoreJobSchema,
+  growthRollupJobSchema,
   dreamJobSchema,
   codeScanJobSchema,
   engagementJobSchema,
   metricsJobSchema,
   analyticsJobSchema,
+  redditChannelResearchJobSchema,
 } from './types';
 import type {
   ReviewJobData,
   PostingJobData,
-  HealthScoreJobData,
+  GrowthRollupJobData,
   DreamJobData,
   CodeScanJobData,
   DiscoveryScanJobData,
   EngagementJobData,
   MetricsJobData,
   AnalyticsJobData,
+  RedditChannelResearchJobData,
 } from './types';
 
 const log = createLogger('lib:queue');
@@ -64,7 +66,7 @@ export const postingQueue = new Queue<PostingJobData>('posting', {
     attempts: 1, // Never retry posts — avoid duplicate publishes
   },
 });
-export const healthScoreQueue = new Queue<HealthScoreJobData>('health-score', {
+export const growthRollupQueue = new Queue<GrowthRollupJobData>('health-score', {
   ...connection,
   defaultJobOptions,
 });
@@ -106,6 +108,28 @@ export const analyticsQueue = new Queue<AnalyticsJobData>('analytics', {
   ...connection,
   defaultJobOptions,
 });
+
+/**
+ * Per-product Reddit subreddit research. Runs the
+ * `researching-reddit-channels` fork-skill, enriches the top candidates
+ * via Reddit's public JSON API, and persists the top-3 as
+ * `source='auto'` rows on `product_reddit_channels`. Idempotent on
+ * `(productId)` — when `force` is false (default) and the product
+ * already has at least one auto row, the processor no-ops.
+ *
+ * `enqueueRedditChannelResearch` further guards with a deterministic
+ * jobId so concurrent enqueues for the same product collapse at the
+ * BullMQ layer before they can race the in-DB idempotency gate.
+ */
+export const redditChannelResearchQueue =
+  new Queue<RedditChannelResearchJobData>('reddit-channel-research', {
+    ...connection,
+    defaultJobOptions: {
+      ...DEFAULT_RETENTION,
+      attempts: 2,
+      backoff: { type: 'exponential', delay: 5000 },
+    },
+  });
 
 // Backward-compat aliases (will be removed after full migration)
 export const xEngagementQueue = engagementQueue;
@@ -159,35 +183,34 @@ export async function enqueueReview(data: ReviewJobData): Promise<void> {
 }
 
 /**
- * Enqueue posting an approved draft. Caller controls timing via `delayMs`
- * (the pacer is responsible for computing this). 0 retries: never risk
- * duplicate posts.
+ * Enqueue posting an approved draft. 0 retries: never risk duplicate posts.
  */
 export async function enqueuePosting(
   data: PostingJobData,
-  opts: { delayMs?: number } = {},
 ): Promise<void> {
   const payload = postingJobSchema.parse(withEnvelope(data));
-  const delayMs = Math.max(0, opts.delayMs ?? 0);
-  log.debug(`Enqueued posting for draft ${payload.draftId} (delay ${Math.round(delayMs / 1000)}s, mode ${payload.mode})`);
+  log.debug(`Enqueued posting for draft ${payload.draftId} (mode ${payload.mode})`);
   await postingQueue.add('post', payload, {
     attempts: 1,
-    delay: delayMs,
   });
 }
 
 /**
- * Enqueue health score recalculation.
+ * Enqueue growth rollup (fanout or per-user).
  */
-export async function enqueueHealthScore(
-  data: HealthScoreJobData,
+export async function enqueueGrowthRollup(
+  data: GrowthRollupJobData,
 ): Promise<void> {
-  const payload = healthScoreJobSchema.parse(withEnvelope(data));
-  log.debug(`Enqueued health-score for user ${payload.userId}`);
-  await healthScoreQueue.add('calculate', payload, {
-    attempts: 3,
-    backoff: { type: 'exponential', delay: 2000 },
-  });
+  const payload = growthRollupJobSchema.parse(withEnvelope(data));
+  log.debug(`Enqueued growth-rollup kind=${payload.kind ?? 'user'}`);
+  await growthRollupQueue.add(
+    payload.kind === 'fanout' ? 'fanout' : 'calculate',
+    payload,
+    {
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 2000 },
+    },
+  );
 }
 
 /**
@@ -209,10 +232,16 @@ export async function enqueueDream(data: DreamJobData): Promise<void> {
 /**
  * Enqueue a code scan for a GitHub repo.
  * Runs in worker: clone → scan → save snapshot.
+ *
+ * Idempotent on (userId, repoFullName): rapid re-POSTs from the onboarding
+ * SSE-stream pattern collapse to one job. Slash in repoFullName is escaped
+ * so BullMQ doesn't choke on it in the Redis key. Without this dedupe each
+ * client retry re-clones the repo and disk I/O contention compounds.
  */
 export async function enqueueCodeScan(data: CodeScanJobData): Promise<string> {
   const payload = codeScanJobSchema.parse(withEnvelope(data));
-  const jobId = `code-scan-${payload.userId}-${Date.now()}`;
+  const repoSlug = payload.repoFullName.replace(/\//g, '__');
+  const jobId = `code-scan-${payload.userId}-${repoSlug}`;
   log.debug(`Enqueued code-scan for ${payload.repoFullName}`);
   await codeScanQueue.add('scan', payload, {
     jobId,
@@ -271,6 +300,31 @@ export async function enqueueAnalytics(data: AnalyticsJobData): Promise<void> {
   });
 }
 
+/**
+ * Enqueue Reddit subreddit kickoff research for a product.
+ *
+ * - The non-force path uses a deterministic `rcr:<productId>` jobId so
+ *   BullMQ rejects duplicate enqueues while a prior job is still
+ *   waiting/active. This collapses concurrent kickoff triggers (onboard
+ *   commit, retry-from-UI) at the queue level before they can race the
+ *   in-DB idempotency gate against the `(productId, subreddit)` UNIQUE
+ *   constraint.
+ * - The force path appends a timestamp so the founder-driven
+ *   "Re-research" stays enqueueable; concurrent forces are tolerated
+ *   because force is itself the "I want this to run now" signal.
+ */
+export async function enqueueRedditChannelResearch(
+  data: Omit<RedditChannelResearchJobData, 'schemaVersion'>,
+): Promise<void> {
+  const payload = redditChannelResearchJobSchema.parse(withEnvelope(data));
+  log.debug(`Enqueued reddit-channel-research for product ${payload.productId}`);
+  await redditChannelResearchQueue.add('research', payload, {
+    jobId: payload.force
+      ? `rcr:${payload.productId}:force:${Date.now()}`
+      : `rcr:${payload.productId}`,
+  });
+}
+
 // Backward-compat function aliases (will be removed after full migration)
 export const enqueueXEngagement = enqueueEngagement;
 export const enqueueXMetrics = enqueueMetrics;
@@ -286,6 +340,7 @@ export {
   planExecuteJobSchema,
 } from './plan-execute';
 export type { PlanExecuteJobData } from './plan-execute';
+export type { RedditChannelResearchJobData } from './types';
 
 // ----------------------------------------------------------------
 //  Agent-run queue (Phase B Task 7)

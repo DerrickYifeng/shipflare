@@ -34,7 +34,8 @@ interface PlanItemRow {
   state: string;
   title: string;
   description: string | null;
-  scheduledAt: Date;
+  dueDate: Date;
+  sortOrder: number;
 }
 
 function makeCtx(store: InMemoryStore, deps: Record<string, unknown>): ToolContext {
@@ -59,7 +60,8 @@ beforeEach(() => {
       state: 'planned',
       title: 'Original title',
       description: null,
-      scheduledAt: new Date('2026-04-22T09:00:00.000Z'),
+      dueDate: new Date('2026-04-22'),
+      sortOrder: 0,
     },
     {
       id: 'pi-other',
@@ -68,7 +70,8 @@ beforeEach(() => {
       state: 'planned',
       title: 'Other user row',
       description: null,
-      scheduledAt: new Date('2026-04-22T09:00:00.000Z'),
+      dueDate: new Date('2026-04-22'),
+      sortOrder: 0,
     },
     {
       id: 'pi-completed',
@@ -77,7 +80,8 @@ beforeEach(() => {
       state: 'completed',
       title: 'Completed row',
       description: null,
-      scheduledAt: new Date('2026-04-20T09:00:00.000Z'),
+      dueDate: new Date('2026-04-20'),
+      sortOrder: 0,
     },
     {
       id: 'pi-executing',
@@ -86,7 +90,8 @@ beforeEach(() => {
       state: 'executing',
       title: 'In flight',
       description: null,
-      scheduledAt: new Date('2026-04-23T09:00:00.000Z'),
+      dueDate: new Date('2026-04-23'),
+      sortOrder: 0,
     },
   ]);
 });
@@ -189,7 +194,8 @@ describe('updatePlanItemTool', () => {
         patch: {
           title: 'Renamed',
           state: null,
-          scheduledAt: null,
+          dueDate: null,
+          sortOrder: null,
           userAction: null,
         },
       } as never,

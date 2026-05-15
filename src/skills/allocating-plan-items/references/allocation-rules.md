@@ -29,7 +29,7 @@ The skill input carries:
 - `signals.stalledItems` — last week's `planned`-but-undone items.
 - `signals.lastWeekCompletions` — last week's finished items with their
   engagement metrics (where available).
-- `signals.recentMilestones` — last 14 days of shipping signals.
+- `signals.recentCodeChanges` — commits in the past N days.
 - `signals.recentXPosts` — last 14 days of the founder's X timeline,
   when available; absent or empty when the user has no X channel or
   the timeline is empty.
@@ -45,18 +45,24 @@ The `theme` is the single claim every `content_post` you schedule will
 anchor to via `params.anchor_theme`. The `angleMix` constrains which
 angles from the 7 (see "7-angles") your content items may use.
 
-## Step 2 — Allocate content slots per `channelMix`
+## Step 2 — Allocate content slots per `thesisArc[i].posts`
 
 For each channel the user has connected (X / Reddit / Email):
 
-- Channel distribution MUST match input `channelMix` **exactly**,
-  item-for-item. `channelMix` is not a hint — it's a binding allocation.
-  If `channelMix` says `{ x: { perWeek: 3 }, reddit: { perWeek: 1 }, email: { perWeek: 1 } }`
-  and email is connected, you emit exactly 3 X posts + 1 reddit post +
-  1 `email_send` item — not 2 reddit + 3 X + 0 email. Over-producing one
+- Channel distribution MUST match the active week's
+  `thesisArc[i].posts` **exactly**, item-for-item. `posts` is not a
+  hint — it's a binding allocation. If
+  `thesisArc[i].posts === { x: 3, reddit: 1, email: 1 }` and email is
+  connected, you emit exactly 3 X posts + 1 reddit post + 1
+  `email_send` item — not 2 reddit + 3 X + 0 email. Over-producing one
   channel to compensate for skipping another is a rejection condition.
-- Schedule `channelMix[channel].perWeek` content items, spread across
-  the week — not all on one day.
+- Schedule `thesisArc[i].posts[channel]` content items per channel,
+  spread across the week — not all on one day. A missing channel key
+  in `posts` (or `0`) means zero items for that channel that week.
+- Legacy fallback: if `thesisArc[i].posts` is absent (path was
+  generated before per-week posts existed), fall back to
+  `channelMix[channel].perWeek` for every week. New paths always carry
+  `posts`.
 - Use `channelMix[channel].preferredHours` to pick `scheduledAt` UTC
   times. Spread across the list — don't stack two items in the same hour.
 - Rotate through `contentPillars` (TOPIC pillars) for `params.theme` —
@@ -85,9 +91,9 @@ For each channel where `channelMix[channel].repliesPerDay > 0`:
   skip past dates per the "never schedule in the past" rule.)
 - Each slot:
   - `kind: 'content_reply'`
-  - `channel: <channel>` (X only at this stage; reddit's
-    `repliesPerDay` is null/omitted by the strategist, so this loop
-    naturally skips reddit.)
+  - `channel: <channel>` (loop over every channel whose
+    `repliesPerDay > 0`; today that's X and Reddit. The strategist
+    sets per-channel rates per `channel-cadence.md`.)
   - `userAction: 'approve'`
   - `skillName: null` (the daily reply-sweep cron + content-manager
     own this end-to-end)
@@ -102,10 +108,11 @@ For each channel where `channelMix[channel].repliesPerDay > 0`:
     discovery + drafting and surface up to `targetCount` reply drafts
     on the Briefing page for approval.
 
-If `channelMix.x.repliesPerDay` is null/0/omitted, skip this step
-entirely — reply automation is opt-in per channel. The cap of one
-slot per day per channel keeps the calendar uncluttered and matches
-the cron's "once per UTC day per user" throttle.
+If a channel's `repliesPerDay` is null/0/omitted, skip THAT channel
+in this step — reply automation is opt-in per channel. Other channels
+with `repliesPerDay > 0` still emit slots. The cap of one slot per day
+per channel keeps the calendar uncluttered and matches the cron's
+"once per UTC day per user" throttle.
 
 ## Step 3 — Schedule phase-appropriate setup_tasks / interviews
 
@@ -252,10 +259,10 @@ emit `skillName: null` and `userAction: 'manual'`.
   weekend planning), the planning window collapses to
   `[max(now + 1 hour, targetWeekStart), weekEnd]`. Pick `scheduledAt`
   only from this remaining window. If there's not enough remaining
-  window for the full `channelMix.perWeek` cadence (e.g. onboarding
-  fires Saturday with perWeek=3 and only Sat/Sun left), schedule what
-  fits and emit the rest with `notes` flagging the truncation. Better
-  to ship 1 item Saturday than 3 items in the past.
+  window for the full per-week post cadence (e.g. onboarding
+  fires Saturday with `posts.x = 3` and only Sat/Sun left), schedule
+  what fits and emit the rest with `notes` flagging the truncation.
+  Better to ship 1 item Saturday than 3 items in the past.
 - Minimum 3 items per week. Maximum 40.
 
 ## Stalled-item carryover
@@ -268,8 +275,8 @@ rather than stamping a duplicate). Report the count in your `notes`.
 
 ## When inputs are thin
 
-- `signals.recentMilestones: []` — still allocate the full `channelMix`
-  cadence. Pillars rotate without a fresh ship story.
+- `signals.recentCodeChanges: []` — still allocate the full week's
+  `thesisArc[i].posts` cadence. Pillars rotate without a fresh ship story.
 - `signals.stalledItems: [...]` — do NOT auto-reschedule everything;
   prefer writing a short `notes` line flagging them.
 - `signals.lastWeekCompletions: []` — fine. Early week, nothing yet.

@@ -4,18 +4,10 @@ import type { ToolDefinition } from '@/core/types';
 import { XAIClient } from '@/lib/xai-client';
 import type { ConversationalMessage } from '@/lib/xai-client';
 import { createLogger } from '@/lib/logger';
-import { toXaiJsonSchema } from './json-schema-helper';
-import {
-  xaiFindCustomersResponseSchema,
-  type TweetCandidate,
-} from './schema';
 
 const log = createLogger('tool:xai_find_customers');
 
 export const XAI_FIND_CUSTOMERS_TOOL_NAME = 'xai_find_customers';
-
-/** Stable JSON schema name xAI sees in the response_format envelope. */
-const RESPONSE_FORMAT_NAME = 'CustomerTweets';
 
 const productContextSchema = z.object({
   name: z.string().min(1),
@@ -39,16 +31,50 @@ const inputSchema = z.object({
    *  (the agent decides when/how to render them — usually only on the
    *  first turn since xAI history carries them forward). */
   productContext: productContextSchema,
-  /** Default false → fast non-reasoning Grok variant. Agent escalates to
-   *  true after 2 weak rounds. See discovery-agent AGENT.md. */
+  /** Default false → fast non-reasoning Grok variant. Caller escalates to
+   *  true after weak rounds. */
   reasoning: z.boolean().default(false),
+  /**
+   * xAI `tools` array. Caller-owned: X discovery passes
+   * `[{ type: 'x_search' }]`; Reddit discovery passes a `web_search`
+   * tool with a reddit.com domain filter. We do not validate the shape
+   * — xAI's API surface defines what is accepted.
+   */
+  tools: z.array(z.unknown()).min(1),
+  /**
+   * JSON schema literal for `response_format.json_schema.schema`, in
+   * xAI's strict shape (every property required, nullable as type unions,
+   * `additionalProperties: false` on every object). Caller-owned per
+   * platform — see `FindThreadsViaXaiTool/schemas.ts` for the X / Reddit
+   * pairs (each JSON literal is paired with a Zod mirror the caller uses
+   * to safeParse the returned `output`).
+   */
+  responseFormatSchema: z.unknown().refine((v) => v !== undefined && v !== null, {
+    message: 'responseFormatSchema is required',
+  }),
+  /** Stable JSON schema name xAI sees in the response_format envelope.
+   *  Caller-owned per platform (e.g. `tweet_search_result`,
+   *  `reddit_thread_search_result`). */
+  responseFormatName: z.string().min(1),
 });
 
 export interface XaiFindCustomersResult {
-  tweets: TweetCandidate[];
+  /**
+   * Raw parsed JSON from xAI's structured output. `null` when xAI ignored
+   * `response_format` and returned prose (see degraded-path branch below).
+   * Caller validates against its own Zod schema (the mirror of the JSON
+   * literal it passed in `responseFormatSchema`).
+   */
+  output: unknown;
+  /**
+   * String pulled from the parsed output's top-level `notes` field when
+   * present (both shipped schemas use that field name). Empty when the
+   * output has no `notes`. On the degraded path this is the raw prose
+   * Grok returned, truncated to 1000 chars.
+   */
   notes: string;
   assistantMessage: ConversationalMessage;
-  /** Token usage so the agent / observability layer can report. */
+  /** Token usage so the caller / observability layer can report. */
   usage: {
     inputTokens: number;
     outputTokens: number;
@@ -70,53 +96,56 @@ function resolveModel(reasoning: boolean): string {
   return process.env.XAI_MODEL_FAST ?? 'grok-4.20-non-reasoning';
 }
 
+/**
+ * Walk a parsed JSON object, return the length of the first array-typed
+ * value found. Used to detect the prose-vs-structured Grok hallucination
+ * pattern: `notes` claims matches were found but every array property is
+ * empty. Returns 0 when no array property exists.
+ */
+function firstArrayLength(output: unknown): number {
+  if (!output || typeof output !== 'object') return 0;
+  for (const v of Object.values(output as Record<string, unknown>)) {
+    if (Array.isArray(v)) return v.length;
+  }
+  return 0;
+}
+
+const FOUND_PROSE_RE = /\b(found|matches|strong|relevant|spotted|surfaced)\b/i;
+
 export const xaiFindCustomersTool = buildTool({
   name: XAI_FIND_CUSTOMERS_TOOL_NAME,
   description:
-    'Conversational X/Twitter search via xAI Grok with structured JSON ' +
-    'output. Pass the FULL prior xAI message history each call (you own ' +
+    'Conversational xAI Grok search with caller-owned structured-output ' +
+    'schema. Pass the FULL prior xAI message history each call (you own ' +
     'the conversation state — append the previous assistant reply before ' +
-    'sending your next refinement). Returns tweets matching the product ' +
-    'ICP with engagement stats + author bios. Set `reasoning: true` to ' +
-    'escalate to the reasoning-enabled Grok model after weak initial ' +
-    'rounds (2-5x cost, deeper analysis). ' +
-    '\n\n' +
-    'INPUT SHAPE (literal — `messages` MUST be an array of objects, NOT a string):\n' +
-    '{\n' +
-    '  "messages": [\n' +
-    '    { "role": "user", "content": "Find tweets where indie founders ..." }\n' +
-    '  ],\n' +
-    '  "productContext": { "name": "...", "description": "...", "valueProp": "...", "targetAudience": "...", "keywords": ["..."] },\n' +
-    '  "reasoning": false\n' +
-    '}\n\n' +
-    'On the SECOND call, append the prior assistant turn:\n' +
-    '{\n' +
-    '  "messages": [\n' +
-    '    { "role": "user", "content": "<your first prompt>" },\n' +
-    '    { "role": "assistant", "content": "<verbatim assistantMessage.content from the previous tool result>" },\n' +
-    '    { "role": "user", "content": "<your refinement, e.g. \'drop bot accounts, focus on <500 followers\'>" }\n' +
-    '  ],\n' +
-    '  "productContext": { ...same as before... },\n' +
-    '  "reasoning": false\n' +
-    '}',
+    'sending your next refinement). The caller supplies `tools` (xAI ' +
+    "search tool config — `x_search` for X, `web_search` filtered to " +
+    'reddit.com for Reddit), `responseFormatSchema` (JSON schema literal ' +
+    'in xAI strict shape), and `responseFormatName`. Returns the raw ' +
+    'parsed JSON in `output` for caller-side Zod validation. Set ' +
+    '`reasoning: true` to escalate to the reasoning-enabled Grok model ' +
+    '(2-5x cost, deeper analysis).',
   inputSchema,
   isConcurrencySafe: false,
   isReadOnly: true,
   async execute(input, ctx): Promise<XaiFindCustomersResult> {
     const model = resolveModel(input.reasoning ?? false);
     const modeLabel = (input.reasoning ?? false) ? 'reasoning' : 'fast';
+    const formatName = input.responseFormatName;
 
     ctx.emitProgress?.(
       'xai_find_customers',
-      `Asking Grok (${modeLabel}) for ICP-matching tweets…`,
+      `Asking Grok (${modeLabel}) for matches…`,
       { model, reasoning: input.reasoning, messageCount: input.messages.length },
     );
+
+    const callTools = input.tools as Array<Record<string, unknown>>;
 
     const responseFormat = {
       type: 'json_schema' as const,
       json_schema: {
-        name: RESPONSE_FORMAT_NAME,
-        schema: toXaiJsonSchema(xaiFindCustomersResponseSchema),
+        name: formatName,
+        schema: input.responseFormatSchema as object,
         strict: true,
       },
     };
@@ -124,20 +153,20 @@ export const xaiFindCustomersTool = buildTool({
     const result = await getClient().respondConversational({
       model,
       messages: input.messages,
-      tools: [{ type: 'x_search' }],
+      tools: callTools,
       responseFormat,
       signal: ctx.abortSignal,
     });
 
     // Degraded path: Grok ignored response_format and returned prose.
-    // Empirically common when x_search finds nothing — Grok writes a
-    // sentence like "No strong matches found." instead of returning
-    // `{ tweets: [], notes: ... }`. Synthesize the equivalent so the
-    // agent still has a structured response to reason about.
+    // Empirically common when search finds nothing — Grok writes a
+    // sentence like "No strong matches found." instead of returning the
+    // expected JSON envelope. Surface the prose as `notes` so the caller
+    // can still reason about it.
     if (result.output === null) {
       log.warn(
-        `xai_find_customers (${modeLabel}): xAI returned non-JSON; ` +
-          `synthesizing { tweets: [], notes: <prose> }. parseError=${result.parseError ?? 'unknown'}`,
+        `xai_find_customers (${modeLabel}, schema=${formatName}): xAI returned non-JSON; ` +
+          `surfacing prose as notes. parseError=${result.parseError ?? 'unknown'}`,
       );
       ctx.emitProgress?.(
         'xai_find_customers',
@@ -150,42 +179,53 @@ export const xaiFindCustomersTool = buildTool({
         },
       );
       return {
-        tweets: [],
+        output: null,
         notes: result.assistantMessage.content.slice(0, 1000),
         assistantMessage: result.assistantMessage,
         usage: result.usage,
       };
     }
 
-    // Strict path: xAI honored response_format and we got JSON. Validate
-    // against the zod schema; a failure here means a real schema-shape
-    // mismatch (e.g. xAI returned `{ tweets: [...] }` but a tweet is
-    // missing a required field). Throw — the agent can retry.
-    const parsed = xaiFindCustomersResponseSchema.safeParse(result.output);
-    if (!parsed.success) {
-      throw new Error(
-        `xai_find_customers: parsed JSON failed schema validation: ${parsed.error.message}`,
+    const rawOutput = result.output;
+    const extractedNotes =
+      typeof rawOutput === 'object' &&
+      rawOutput !== null &&
+      typeof (rawOutput as Record<string, unknown>).notes === 'string'
+        ? ((rawOutput as Record<string, unknown>).notes as string)
+        : '';
+    const candidateCount = firstArrayLength(rawOutput);
+
+    // Hallucination guard: Grok occasionally narrates "found 5 matches"
+    // in `notes` while the structured array is empty. Surface this loudly
+    // so callers (and observers reading the agent transcript) don't
+    // assume the judging / persistence layer dropped them.
+    if (candidateCount === 0 && FOUND_PROSE_RE.test(extractedNotes)) {
+      log.warn(
+        `xai_find_customers (${modeLabel}, schema=${formatName}): notes claims ` +
+          `matches but structured output array is empty — Grok prose hallucination. ` +
+          `notes="${extractedNotes.slice(0, 200)}"`,
       );
     }
 
     log.info(
-      `xai_find_customers (${modeLabel}, model=${model}): ${parsed.data.tweets.length} tweets · ` +
+      `xai_find_customers (${modeLabel}, model=${model}, schema=${formatName}): ` +
+        `${candidateCount} candidates · ` +
         `tokens in/out=${result.usage.inputTokens}/${result.usage.outputTokens}`,
     );
 
     ctx.emitProgress?.(
       'xai_find_customers',
-      `Got ${parsed.data.tweets.length} candidate${parsed.data.tweets.length === 1 ? '' : 's'}`,
+      `Got ${candidateCount} candidate${candidateCount === 1 ? '' : 's'}`,
       {
-        candidateCount: parsed.data.tweets.length,
+        candidateCount,
         inputTokens: result.usage.inputTokens,
         outputTokens: result.usage.outputTokens,
       },
     );
 
     return {
-      tweets: parsed.data.tweets,
-      notes: parsed.data.notes,
+      output: rawOutput,
+      notes: extractedNotes,
       assistantMessage: result.assistantMessage,
       usage: result.usage,
     };

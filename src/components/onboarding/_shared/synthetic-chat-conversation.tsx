@@ -1,5 +1,5 @@
 // Renders the onboarding "Building plan" stage as a `/team`-style chat
-// transcript: a `LeadMessage` from the Chief of Staff coordinator,
+// transcript: a `LeadMessage` from the CMO coordinator,
 // followed by a Strategist subtask card whose tool list is driven by
 // real `tool_progress` SSE events.
 //
@@ -52,6 +52,10 @@ export function SyntheticChatConversation({
       aria-label="Plan-building conversation"
     >
       <LeadMessage
+        // Synthetic surface has no SSE; pass a stable id so `LeadMessage`'s
+        // `useStreamingPartial` subscription resolves to a no-op against
+        // the module-scoped no-op store (no `<StreamingProvider>` here).
+        messageId="onboarding-synthetic-coordinator"
         agentType="Team Lead"
         displayName={coordinator.name}
         createdAt={coordinator.timestamp.toISOString()}

@@ -1,5 +1,4 @@
 import { testWithProduct, expect } from '../fixtures/auth';
-import { seedChannel } from '../fixtures/db';
 
 testWithProduct.describe('Settings', () => {
   testWithProduct('displays profile and connection status', async ({
@@ -15,28 +14,22 @@ testWithProduct.describe('Settings', () => {
     await expect(page.getByText(testUser.name)).toBeVisible();
     await expect(page.getByText(testUser.email)).toBeVisible();
 
-    // Verify Reddit not connected
-    await expect(page.getByText('Reddit')).toBeVisible();
-    await expect(page.getByText('Not connected')).toBeVisible();
+    // X is not connected by default; Connect button should be visible.
+    await expect(page.getByText('X / Twitter')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Connect' })).toBeVisible();
+
+    // Reddit row no longer lives in Settings — moved to /growth/reddit-channels
+    // (covered by e2e/tests/growth.spec.ts "Settings no longer shows a Reddit row").
 
     // Verify danger zone
     await expect(page.getByText('Danger zone')).toBeVisible();
   });
 
-  testWithProduct('shows connected Reddit when channel exists', async ({
-    authenticatedPageWithProduct: page,
-    testUser,
-  }) => {
-    await seedChannel(testUser.id, { username: 'testreddituser' });
-    await page.goto('/settings');
-
-    await expect(page.getByText('Connected', { exact: true })).toBeVisible();
-    await expect(page.getByText('u/testreddituser')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Disconnect' })).toBeVisible();
-  });
-
-  testWithProduct('deletes account with DELETE confirmation', async ({
+  // Verifies the delete dialog opens and the typed-DELETE gate works.
+  // We DO NOT actually click "Delete permanently" in CI — that would destroy
+  // the shared test user. The full end-to-end flow (redirect to /) is covered
+  // by the unit tests in apps/web/test/api-account.test.ts.
+  testWithProduct('settings account deletion dialog opens with typed-DELETE gate', async ({
     authenticatedPageWithProduct: page,
   }) => {
     await page.goto('/settings');
@@ -44,23 +37,23 @@ testWithProduct.describe('Settings', () => {
     // Open delete dialog
     await page.getByRole('button', { name: 'Delete account' }).click();
 
-    // Verify dialog
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+
+    // Verify dialog content
     await expect(page.getByText('Type DELETE to confirm', { exact: false })).toBeVisible();
 
-    // Button should be disabled
+    // Button should be disabled until "DELETE" is typed
     const deleteBtn = page.getByRole('button', { name: 'Delete permanently' });
     await expect(deleteBtn).toBeDisabled();
 
-    // Type DELETE to enable
+    // Type DELETE to enable the button
     await page.getByPlaceholder('Type DELETE').fill('DELETE');
     await expect(deleteBtn).toBeEnabled();
 
-    // Click delete
-    await deleteBtn.click();
-
-    // Should redirect to sign-in page
-    await page.waitForURL('/');
-    await expect(page.getByText('ShipFlare')).toBeVisible();
+    // DO NOT actually click delete in CI — would destroy the test user.
+    // The full happy-path (D1 deletion + redirect to /) is covered by
+    // unit tests on /api/account in apps/web/test/api-account.test.ts.
   });
 
   testWithProduct('cancels deletion dialog', async ({

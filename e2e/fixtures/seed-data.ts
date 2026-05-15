@@ -72,20 +72,6 @@ export function makeDraft(
   };
 }
 
-export function makeHealthScore(userId: string, score: number) {
-  return {
-    id: crypto.randomUUID(),
-    userId,
-    score,
-    s1Pipeline: score * 0.2,
-    s2Quality: score * 0.22,
-    s3Engagement: score * 0.18,
-    s4Consistency: score * 0.2,
-    s5Safety: score * 0.2,
-    calculatedAt: new Date(),
-  };
-}
-
 export function makeActivityEvent(userId: string, index: number) {
   const eventType = EVENT_TYPES[index % EVENT_TYPES.length];
   return {
@@ -99,16 +85,31 @@ export function makeActivityEvent(userId: string, index: number) {
 
 export function makeChannel(
   userId: string,
-  overrides: Partial<{ username: string }> = {},
+  overrides: Partial<{
+    username: string;
+    platform: 'reddit' | 'x';
+    oauthTokenEncrypted: string | null;
+    refreshTokenEncrypted: string | null;
+    tokenExpiresAt: Date | null;
+  }> = {},
 ) {
   return {
     id: crypto.randomUUID(),
     userId,
-    platform: 'reddit' as const,
+    platform: overrides.platform ?? ('reddit' as const),
     username: overrides.username ?? 'testreddituser',
-    oauthTokenEncrypted: 'fake-encrypted-token',
-    refreshTokenEncrypted: 'fake-encrypted-refresh',
-    tokenExpiresAt: new Date(Date.now() + 3600_000),
+    oauthTokenEncrypted:
+      overrides.oauthTokenEncrypted === undefined
+        ? 'fake-encrypted-token'
+        : overrides.oauthTokenEncrypted,
+    refreshTokenEncrypted:
+      overrides.refreshTokenEncrypted === undefined
+        ? 'fake-encrypted-refresh'
+        : overrides.refreshTokenEncrypted,
+    tokenExpiresAt:
+      overrides.tokenExpiresAt === undefined
+        ? new Date(Date.now() + 3600_000)
+        : overrides.tokenExpiresAt,
   };
 }
 

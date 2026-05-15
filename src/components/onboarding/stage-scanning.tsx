@@ -139,14 +139,22 @@ export function StageScanning({
   const steps =
     source.kind === 'github' ? COPY.stage2.stepsGithub : COPY.stage2.stepsUrl;
 
+  // Depend on PRIMITIVE source fields, NOT the `source` object reference.
+  // The parent's source is a fresh object literal on every render, and
+  // SixStepAnimator's tick re-renders this subtree every animation frame —
+  // a `[source]` dep would re-fire useEffect each tick, abort the in-flight
+  // fetch, and re-POST /api/onboarding/extract-repo. Worker would re-clone
+  // the repo on each spurious call; the user sees the scanning step hang.
+  const sourceKind = source.kind;
+  const sourceKey = source.kind === 'github' ? source.repoFullName : source.url;
   useEffect(() => {
     const controller = new AbortController();
     (async () => {
       try {
         const profile =
-          source.kind === 'url'
-            ? await extractFromUrl(source.url)
-            : await extractFromRepo(source.repoFullName, controller.signal);
+          sourceKind === 'url'
+            ? await extractFromUrl(sourceKey)
+            : await extractFromRepo(sourceKey, controller.signal);
         extractedRef.current = profile;
         setRealCallComplete(true);
       } catch (err) {
@@ -155,7 +163,7 @@ export function StageScanning({
       }
     })();
     return () => controller.abort();
-  }, [source]);
+  }, [sourceKind, sourceKey]);
 
   // Surface error to orchestrator after a small delay so user sees the red
   // state before we bounce back to Stage 1.
