@@ -178,6 +178,21 @@ export const taskStopTool: ToolDefinition<TaskStopInput, TaskStopResult> =
       //    drain doesn't fire for a beat, the row already reflects the
       //    intent. The teammate's loop checks status before each turn and
       //    bails if it sees 'killed'.
+      //
+      //    B7 batcher invalidate gap: when the lead and target share a
+      //    worker process, agent-run's status batcher may have a buffered
+      //    transient ('running' / 'resuming') for the TARGET that hasn't
+      //    flushed yet. Without invalidating, the next batcher tick can
+      //    land AFTER our 'killed' write and overwrite it with stale state.
+      //    Drop the buffered transient for the target before the sync
+      //    write. Dynamic import to avoid any potential module cycle.
+      //    (When lead and target are in different worker processes the
+      //    target's own batcher remains a window — wake() below kicks
+      //    the target's loop, which re-reads status and exits cleanly.)
+      const { invalidateAgentStatusFor } = await import(
+        '@/workers/processors/agent-run'
+      );
+      invalidateAgentStatusFor(input.task_id);
       await db
         .update(agentRuns)
         .set({

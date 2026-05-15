@@ -1,5 +1,5 @@
 import * as cheerio from 'cheerio';
-import Anthropic from '@anthropic-ai/sdk';
+import { createMessage } from '@/core/api-client';
 import { createLogger } from '@/lib/logger';
 import type { ProductAnalysis } from '@/types/code-scanner';
 
@@ -258,12 +258,16 @@ Respond with ONLY a JSON object matching this shape:
 /**
  * Use Claude to analyze scraped website content and extract structured product info.
  * Sends full page markdown (from Turndown) instead of just meta tags.
+ *
+ * `userId` (Phase B5) — when provided, the underlying createMessage
+ * call participates in the hierarchical Anthropic token bucket. The
+ * onboarding-extract route always has a session.user.id; future
+ * anonymous flows may leave it undefined.
  */
 export async function analyzeWebsite(
   scrape: WebScrapeResult,
+  userId?: string,
 ): Promise<ProductAnalysis> {
-  const client = new Anthropic();
-
   const content = [
     `URL: ${scrape.url}`,
     scrape.title ? `Title: ${scrape.title}` : '',
@@ -272,11 +276,14 @@ export async function analyzeWebsite(
   ].filter(Boolean).join('\n');
 
   try {
-    const response = await client.messages.create({
+    // Route through createMessage for shared retry logic on
+    // 429/529/5xx + prompt caching of the static ANALYZE_PROMPT.
+    const { response } = await createMessage({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 400,
+      maxTokens: 400,
       system: ANALYZE_PROMPT,
       messages: [{ role: 'user', content }],
+      ...(userId !== undefined ? { tenantId: userId } : {}),
     });
 
     const text = response.content[0]?.type === 'text' ? response.content[0].text : '';

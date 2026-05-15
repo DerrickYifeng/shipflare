@@ -258,6 +258,9 @@ export async function runTacticalReplan(
         conversationId: replanConvId,
         goal,
         trigger: 'weekly',
+        // B6: manual replan (POST /api/plan/replan) → priority lane
+        // (founder pressed the button); cron Monday replan → backfill.
+        priority: trigger === 'manual' ? 'priority' : 'backfill',
       },
       db,
     );

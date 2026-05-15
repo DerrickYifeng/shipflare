@@ -1,8 +1,84 @@
 # E2E tests
 
-Playwright specs for ShipFlare — run against the dev server (auto-started
-by `playwright.config.ts`'s `webServer`). Specs live in `e2e/tests/`;
-fixtures in `e2e/fixtures/`; shared helpers in `e2e/helpers/`.
+This directory holds **two** test suites that share the `tests/` folder:
+
+1. **Cloudflare Phase 1 smoke** (`@shipflare/e2e` workspace package) — driven
+   by `e2e/playwright.config.ts` + `e2e/package.json`. Scoped to three specs
+   via `testMatch`: `landing.spec.ts`, `healthz.spec.ts`, `session-gate.spec.ts`.
+   See the **Phase 1 smoke** section below.
+2. **Legacy v1/v2 specs** — driven by the **root** `playwright.config.ts`
+   and `pnpm test:e2e`. Everything else in `tests/` (`onboarding.spec.ts`,
+   `*.live-smoke.ts`, etc.) belongs to this suite. Continues to run against
+   the legacy `next dev` stack until v2 is decommissioned.
+
+---
+
+## Phase 1 smoke (`@shipflare/e2e`)
+
+Minimal regression guard for the Cloudflare migration's `apps/web`. Real
+flows (OAuth dance, chat, approve→post) land when staging has seeded test
+users.
+
+### Running locally
+
+```bash
+# Install browsers once
+pnpm --filter @shipflare/e2e install:browsers
+
+# Start the web worker
+pnpm --filter @shipflare/web dev   # listens on :3000
+
+# In another terminal, run the smoke
+pnpm --filter @shipflare/e2e test
+```
+
+For headed mode (browser window visible):
+
+```bash
+pnpm --filter @shipflare/e2e test:headed
+```
+
+### Running against staging / prod
+
+```bash
+SHIPFLARE_URL=https://staging.shipflare.com pnpm --filter @shipflare/e2e test
+```
+
+### CI
+
+The `.github/workflows/e2e.yml` job is **manual-trigger only**
+(`workflow_dispatch`). It assumes the target URL already has a worker
+deployed — for an automated pipeline, build/deploy first, then run E2E
+against the deploy URL.
+
+### Coverage
+
+| File | Tests | What it guards |
+|---|---|---|
+| `landing.spec.ts` | 2 | Public landing renders + GitHub sign-in link present |
+| `healthz.spec.ts` | 1 | Web worker `/api/healthz` route |
+| `session-gate.spec.ts` | 3 | Protected routes (`/chat`, `/team`, `/drafts`) redirect unauthenticated users |
+
+Total: 6 smoke tests.
+
+### What's NOT covered (Phase 1 deferral)
+
+- GitHub OAuth dance (requires a test GitHub OAuth app with mock identity)
+- Channel OAuth (X / Reddit — same constraint)
+- Chat with CMO (requires Anthropic key + connected workers)
+- /drafts approve flow (needs seeded drafts in SMM DO state)
+
+Phase 2 plan: add `playwright-auth-state.json` fixture from a seeded test
+user, then run the full happy path.
+
+---
+
+## Legacy v1/v2 suite (root config)
+
+Playwright specs for the legacy ShipFlare stack — run against the legacy
+dev server (auto-started by the **root** `playwright.config.ts`'s
+`webServer`). Specs live in `e2e/tests/`; fixtures in `e2e/fixtures/`;
+shared helpers in `e2e/helpers/`.
 
 ## Running
 

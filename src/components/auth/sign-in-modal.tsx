@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, type ReactNode } from 'react';
-import { signInWithGitHub } from '@/app/actions/auth';
+import { signInWithGitHub, signInWithGoogle } from '@/app/actions/auth';
 
 export interface SignInModalProps {
   open: boolean;
@@ -10,7 +10,7 @@ export interface SignInModalProps {
 }
 
 interface Provider {
-  id: 'github';
+  id: 'github' | 'google';
   label: string;
   icon: ReactNode;
   action: () => Promise<void>;
@@ -28,7 +28,45 @@ function GitHubIcon() {
   );
 }
 
+function GoogleIcon() {
+  // Standard 4-color "G" mark. Path data from Google's official brand asset.
+  return (
+    <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+      <path
+        fill="#4285F4"
+        d="M19.6 10.23c0-.68-.06-1.34-.18-1.97H10v3.73h5.39a4.6 4.6 0 0 1-2 3.02v2.51h3.23c1.89-1.74 2.98-4.3 2.98-7.29z"
+      />
+      <path
+        fill="#34A853"
+        d="M10 20c2.7 0 4.96-.9 6.62-2.43l-3.23-2.51c-.9.6-2.04.96-3.39.96-2.6 0-4.81-1.76-5.6-4.12H1.06v2.59A9.99 9.99 0 0 0 10 20z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M4.4 11.9a6 6 0 0 1 0-3.8V5.51H1.06a10 10 0 0 0 0 8.98L4.4 11.9z"
+      />
+      <path
+        fill="#EA4335"
+        d="M10 3.96c1.47 0 2.79.5 3.83 1.5l2.87-2.87C14.96.99 12.7 0 10 0A9.99 9.99 0 0 0 1.06 5.51L4.4 8.1C5.19 5.74 7.4 3.96 10 3.96z"
+      />
+    </svg>
+  );
+}
+
+const BUTTON_STYLE = {
+  background: 'var(--sf-bg-dark)',
+  hoverBackground: 'var(--sf-bg-dark-surface)',
+  color: 'var(--sf-fg-on-dark-1)',
+} as const;
+
 const PROVIDERS: Provider[] = [
+  // Google first: friction-reduction is the goal, so lead with the
+  // broader-reach option. See docs/superpowers/specs/2026-05-11-google-auth-design.md.
+  {
+    id: 'google',
+    label: 'Continue with Google',
+    icon: <GoogleIcon />,
+    action: signInWithGoogle,
+  },
   {
     id: 'github',
     label: 'Continue with GitHub',
@@ -140,8 +178,8 @@ export function SignInModal({ open, onClose, onBeforeSignIn }: SignInModalProps)
                   gap: 10,
                   minHeight: 44,
                   padding: '10px 20px',
-                  background: 'var(--sf-bg-dark)',
-                  color: 'var(--sf-fg-on-dark-1)',
+                  background: BUTTON_STYLE.background,
+                  color: BUTTON_STYLE.color,
                   borderRadius: 'var(--sf-radius-md)',
                   border: 'none',
                   fontSize: 'var(--sf-text-base)',
@@ -152,10 +190,10 @@ export function SignInModal({ open, onClose, onBeforeSignIn }: SignInModalProps)
                   fontFamily: 'inherit',
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.background = 'var(--sf-bg-dark-surface)';
+                  e.currentTarget.style.background = BUTTON_STYLE.hoverBackground;
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'var(--sf-bg-dark)';
+                  e.currentTarget.style.background = BUTTON_STYLE.background;
                 }}
               >
                 {provider.icon}

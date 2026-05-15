@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { groupByRun, stitchLeadMessages } from '../conversation-reducer';
 import type {
+  AgentRunStatus,
+  AgentRunStatusMap,
   ConversationNode,
   UserNode,
   LeadNode,
@@ -57,7 +59,7 @@ describe('stitchLeadMessages — subagent routing (regression)', () => {
   it('routes subagent agent_text away from top-level even when parentToolUseId is missing — backstop on agentName', () => {
     // This is the production bug: parentToolUseId was missing on a
     // subagent agent_text row, so the row bubbled up and the UI rendered
-    // it as the coordinator (Chief of Staff). The agentName backstop
+    // it as the coordinator (CMO). The agentName backstop
     // catches this case.
     const messages = [
       msg({
@@ -103,6 +105,131 @@ describe('stitchLeadMessages — subagent routing (regression)', () => {
     ];
     const nodes = stitchLeadMessages(messages);
     expect(nodes.filter((n) => n.kind === 'lead')).toHaveLength(0);
+  });
+});
+
+describe('stitchLeadMessages — streaming partial subagent filter (2026-05-13)', () => {
+  it('renders a coordinator partial as a top-level streaming LeadNode', () => {
+    const partials = new Map([
+      [
+        'blk-coord',
+        {
+          id: 'blk-coord',
+          runId: 'run-1',
+          teamId: 'team-1',
+          from: 'coord-member',
+          to: null,
+          content: 'Drafting plan…',
+          createdAt: '2026-05-13T00:00:00.000Z',
+          lastActivityAt: Date.now(),
+          parentToolUseId: null,
+          agentName: null,
+        },
+      ],
+    ]);
+    const nodes = stitchLeadMessages([], new Map(), partials);
+    const leads = nodes.filter((n) => n.kind === 'lead');
+    expect(leads).toHaveLength(1);
+    expect((leads[0] as LeadNode).text).toBe('Drafting plan…');
+  });
+
+  it('filters subagent partials with parentToolUseId from the top-level thread', () => {
+    // Production bug 2026-05-13: a teammate's mid-stream agent_text was
+    // rendering under the lead's persona because the streaming SSE
+    // envelope omitted spawnMeta. The worker now stamps it on the wire
+    // and the reducer routes subagent partials out of the top-level
+    // append — they surface in the DelegationCard / TaskPanel instead.
+    const partials = new Map([
+      [
+        'blk-sub',
+        {
+          id: 'blk-sub',
+          runId: 'run-1',
+          teamId: 'team-1',
+          from: 'social-member',
+          to: null,
+          content: "I'm drafting for X in the foundation phase…",
+          createdAt: '2026-05-13T00:00:00.000Z',
+          lastActivityAt: Date.now(),
+          parentToolUseId: 'toolu_abc',
+          agentName: 'social-media-manager',
+        },
+      ],
+    ]);
+    const nodes = stitchLeadMessages([], new Map(), partials);
+    expect(nodes.filter((n) => n.kind === 'lead')).toHaveLength(0);
+  });
+
+  it('filters subagent partials on agentName alone — defensive backstop', () => {
+    // Mirrors the durable agent_text path's defensive backstop: if
+    // parentToolUseId fails to land for any reason, agentName alone is
+    // enough to route the partial away from the top-level thread.
+    const partials = new Map([
+      [
+        'blk-sub',
+        {
+          id: 'blk-sub',
+          runId: 'run-1',
+          teamId: 'team-1',
+          from: 'social-member',
+          to: null,
+          content: 'thinking…',
+          createdAt: '2026-05-13T00:00:00.000Z',
+          lastActivityAt: Date.now(),
+          parentToolUseId: null,
+          agentName: 'social-media-manager',
+        },
+      ],
+    ]);
+    const nodes = stitchLeadMessages([], new Map(), partials);
+    expect(nodes.filter((n) => n.kind === 'lead')).toHaveLength(0);
+  });
+});
+
+describe('stitchLeadMessages — stripping hallucinated <task-notification> XML', () => {
+  it('strips a fabricated task-notification block from lead agent_text (2026-05-12 bug)', () => {
+    // Production bug: CMO occasionally hallucinates a
+    // stylized <task-notification> block in its own SYNTHESIS turn —
+    // a paraphrase of the user-role notification injected by
+    // synthAndDeliverNotification. coordinator/AGENT.md §4 forbids it,
+    // but we keep the UI strip as a defense-in-depth backstop.
+    const hallucinated = [
+      'May 12 X post marked drafted. Waiting on the remaining 3 agents.',
+      '',
+      '<task-notification> <task-id>c17f190c-…</task-id> <agent-type>social-media-manager</agent-type> <description>draft x post batch</description> <result>{"status":"completed","summary":"Drafted 1 X post"}</result> </task-notification>',
+      '',
+      'Reddit research complete. Top 3 subreddits: SaaS, indiehackers, entrepreneur.',
+    ].join('\n');
+    const messages = [
+      msg({
+        type: 'agent_text',
+        from: 'coord-member',
+        content: hallucinated,
+        metadata: null,
+      }),
+    ];
+    const nodes = stitchLeadMessages(messages);
+    expect(nodes).toHaveLength(1);
+    const lead = nodes[0] as LeadNode;
+    expect(lead.kind).toBe('lead');
+    expect(lead.text).not.toContain('<task-notification');
+    expect(lead.text).not.toContain('</task-notification>');
+    expect(lead.text).toContain('May 12 X post marked drafted');
+    expect(lead.text).toContain('Reddit research complete');
+  });
+
+  it('leaves agent_text untouched when it contains no task-notification block', () => {
+    const messages = [
+      msg({
+        type: 'agent_text',
+        from: 'coord-member',
+        content: 'Plan looks good — dispatching now.',
+        metadata: null,
+      }),
+    ];
+    const nodes = stitchLeadMessages(messages);
+    const lead = nodes[0] as LeadNode;
+    expect(lead.text).toBe('Plan looks good — dispatching now.');
   });
 });
 
@@ -272,21 +399,44 @@ describe('stitchLeadMessages — async Task dispatch (run_in_background)', () =>
     ];
   }
 
-  it('async dispatch receipt does NOT flip task to DONE — keeps status=working and stamps agentId', () => {
+  function makeStatusMap(entry: Partial<AgentRunStatus> & { agentId: string; status: AgentRunStatus['status'] }): AgentRunStatusMap {
+    const full: AgentRunStatus = {
+      parentToolUseId: TASK_USE_ID,
+      spawnedAt: '2026-05-08T17:30:01.500Z',
+      lastActiveAt: '2026-05-08T17:30:01.500Z',
+      outputSummary: null,
+      ...entry,
+    };
+    return new Map([[entry.agentId, full]]);
+  }
+
+  it('default (no agent_runs entry yet) renders as QUEUED — the truthful state, not the legacy RUNNING lie', () => {
     const nodes = stitchLeadMessages(asyncDispatchScenario());
     const lead = nodes.find((n): n is LeadNode => n.kind === 'lead');
     expect(lead).toBeDefined();
     expect(lead!.delegation).toHaveLength(1);
     const task = lead!.delegation[0]!;
-    // The bug we're regressing-against: pre-fix the immediate tool_result
-    // flipped this to 'done' even though the spawned agent was queued.
-    expect(task.status).toBe('working');
+    // Pre-refactor default was 'working' — the original sin of the bug.
+    // Now the truthful default is 'queued' because no agent_runs row has
+    // landed yet (or the agent_runs INSERT lost a race with the SSE
+    // rebroadcast).
+    expect(task.status).toBe('queued');
+    // The async dispatch receipt is still parsed, so agentId is captured
+    // for the eventual task_notification join.
     expect(task.agentId).toBe(AGENT_ID);
-    // Elapsed should NOT be set yet — the task hasn't actually completed.
     expect(task.elapsed).toBeNull();
   });
 
-  it('matching task_notification with status=completed flips task to DONE with summary', () => {
+  it('agent_runs status=running renders as WORKING', () => {
+    const statusMap = makeStatusMap({ agentId: AGENT_ID, status: 'running' });
+    const nodes = stitchLeadMessages(asyncDispatchScenario(), statusMap);
+    const task = nodes.find((n): n is LeadNode => n.kind === 'lead')!.delegation[0]!;
+    expect(task.status).toBe('working');
+    expect(task.agentId).toBe(AGENT_ID);
+  });
+
+  it('agent_runs status=completed renders as DONE; task_notification back-fills outputSummary', () => {
+    const statusMap = makeStatusMap({ agentId: AGENT_ID, status: 'completed' });
     const messages = [
       ...asyncDispatchScenario(),
       msg({
@@ -301,121 +451,89 @@ describe('stitchLeadMessages — async Task dispatch (run_in_background)', () =>
         createdAt: '2026-05-08T17:34:12.000Z',
       }),
     ];
-    const nodes = stitchLeadMessages(messages);
-    const lead = nodes.find((n): n is LeadNode => n.kind === 'lead');
-    const task = lead!.delegation[0]!;
+    const nodes = stitchLeadMessages(messages, statusMap);
+    const task = nodes.find((n): n is LeadNode => n.kind === 'lead')!.delegation[0]!;
     expect(task.status).toBe('done');
     expect(task.progress).toBe(100);
     expect(task.outputSummary).toBe('8 replies drafted');
-    // Elapsed should be measured against the originating tool_call,
-    // NOT against the immediate dispatch receipt.
     expect(task.elapsed).not.toBeNull();
   });
 
-  it('task_notification with status=failed flips task to FAILED', () => {
-    const messages = [
-      ...asyncDispatchScenario(),
-      msg({
-        id: 'm-notif-fail',
-        type: 'task_notification',
-        metadata: {
-          agentId: AGENT_ID,
-          status: 'failed',
-          summary: 'xAI rate-limited after 3 retries',
-        },
-        createdAt: '2026-05-08T17:34:12.000Z',
-      }),
-    ];
-    const nodes = stitchLeadMessages(messages);
+  it('agent_runs status=failed renders as FAILED', () => {
+    const statusMap = makeStatusMap({ agentId: AGENT_ID, status: 'failed' });
+    const nodes = stitchLeadMessages(asyncDispatchScenario(), statusMap);
     const task = nodes.find((n): n is LeadNode => n.kind === 'lead')!.delegation[0]!;
     expect(task.status).toBe('failed');
   });
 
-  it('task_notification with status=killed flips task to FAILED', () => {
-    const messages = [
-      ...asyncDispatchScenario(),
-      msg({
-        id: 'm-notif-killed',
-        type: 'task_notification',
-        metadata: {
-          agentId: AGENT_ID,
-          status: 'killed',
-          summary: 'Cancelled by founder',
-        },
-        createdAt: '2026-05-08T17:34:12.000Z',
-      }),
-    ];
-    const nodes = stitchLeadMessages(messages);
+  it('agent_runs status=killed renders as FAILED', () => {
+    const statusMap = makeStatusMap({ agentId: AGENT_ID, status: 'killed' });
+    const nodes = stitchLeadMessages(asyncDispatchScenario(), statusMap);
     const task = nodes.find((n): n is LeadNode => n.kind === 'lead')!.delegation[0]!;
     expect(task.status).toBe('failed');
   });
 
-  it('task_notification fields read from top-level wire (SSE spread) AND metadata', () => {
-    // SSE rebroadcast spreads the publisher's JSON onto the message — the
-    // fields land at top-level, not in metadata. Same code path as the
-    // activity feed's readField helper.
-    const messages = [
-      ...asyncDispatchScenario(),
-      // Top-level fields, no metadata.
-      {
-        ...msg({ id: 'm-notif-top', type: 'task_notification' }),
-        // Cast through unknown so we can attach SSE-shaped extra fields
-        // that aren't in the TeamActivityMessage type.
-        ...({
-          agentId: AGENT_ID,
-          status: 'completed',
-          summary: 'top-level fields work too',
-        } as Record<string, unknown>),
-      } as TeamActivityMessage,
-    ];
-    const nodes = stitchLeadMessages(messages);
+  it('agent_runs status=sleeping renders as WORKING (teammate yielded its worker slot, not terminal)', () => {
+    const statusMap = makeStatusMap({ agentId: AGENT_ID, status: 'sleeping' });
+    const nodes = stitchLeadMessages(asyncDispatchScenario(), statusMap);
     const task = nodes.find((n): n is LeadNode => n.kind === 'lead')!.delegation[0]!;
-    expect(task.status).toBe('done');
-    expect(task.outputSummary).toBe('top-level fields work too');
+    expect(task.status).toBe('working');
   });
 
-  it('REGRESSION: synchronous Task results still flip to DONE (does not break sync path)', () => {
-    const SYNC_USE_ID = 'toolu_sync_001';
+  it('live agent_status_change events apply on top of the SSR-seeded map (latest-wins)', () => {
+    // Seed: queued. Live event: running. Expected: working.
+    const statusMap = makeStatusMap({ agentId: AGENT_ID, status: 'queued' });
     const messages = [
+      ...asyncDispatchScenario(),
       msg({
-        id: 'm-coord-text',
-        type: 'agent_text',
-        from: 'coord-member',
-        content: 'Running sync sub-agent.',
-        createdAt: '2026-05-08T17:30:00.000Z',
-      }),
-      msg({
-        id: 'm-task-call',
-        type: 'tool_call',
-        from: 'coord-member',
+        id: 'm-status-running',
+        type: 'agent_status_change',
         metadata: {
-          toolName: 'delegating',
-          toolUseId: SYNC_USE_ID,
-          input: { agent: 'Researcher', description: 'one-shot lookup' },
+          agentId: AGENT_ID,
+          status: 'running',
+          lastActiveAt: '2026-05-08T17:30:05.000Z',
+          parentToolUseId: TASK_USE_ID,
         },
-        createdAt: '2026-05-08T17:30:01.000Z',
+        createdAt: '2026-05-08T17:30:05.000Z',
       }),
+      // Then completed:
       msg({
-        id: 'm-task-result',
-        type: 'tool_result',
-        from: 'coord-member',
-        // Sync Task: `status` is omitted (or 'completed'), result has data.
-        content: JSON.stringify({
-          result: { summary: 'found 3 papers' },
-          cost: 0.012,
-          duration: 8400,
-          turns: 5,
+        id: 'm-status-completed',
+        type: 'agent_status_change',
+        metadata: {
+          agentId: AGENT_ID,
           status: 'completed',
-        }),
-        metadata: { toolUseId: SYNC_USE_ID },
-        createdAt: '2026-05-08T17:30:09.400Z',
+          lastActiveAt: '2026-05-08T17:34:00.000Z',
+          parentToolUseId: TASK_USE_ID,
+        },
+        createdAt: '2026-05-08T17:34:00.000Z',
+      }),
+    ];
+    const nodes = stitchLeadMessages(messages, statusMap);
+    const task = nodes.find((n): n is LeadNode => n.kind === 'lead')!.delegation[0]!;
+    expect(task.status).toBe('done');
+  });
+
+  it('live agent_status_change works even without an SSR seed (parentToolUseId carries the join key)', () => {
+    // No SSR map — agent_runs row only reaches the client via the live
+    // SSE channel. The reducer should still join on parentToolUseId and
+    // render the truthful status.
+    const messages = [
+      ...asyncDispatchScenario(),
+      msg({
+        id: 'm-status',
+        type: 'agent_status_change',
+        metadata: {
+          agentId: AGENT_ID,
+          status: 'running',
+          parentToolUseId: TASK_USE_ID,
+        },
+        createdAt: '2026-05-08T17:30:05.000Z',
       }),
     ];
     const nodes = stitchLeadMessages(messages);
     const task = nodes.find((n): n is LeadNode => n.kind === 'lead')!.delegation[0]!;
-    expect(task.status).toBe('done');
-    expect(task.agentId).toBeNull();
-    expect(task.elapsed).not.toBeNull();
+    expect(task.status).toBe('working');
   });
 });
 

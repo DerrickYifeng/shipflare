@@ -29,9 +29,11 @@ export async function POST(request: Request) {
   // Scrape website with Turndown (full page → markdown)
   const scraped = await scrapeWebsite(url);
 
-  // Run AI analysis and SEO audit in parallel
+  // Run AI analysis and SEO audit in parallel.
+  // Phase B5: forward session.user.id so analyzeWebsite's Anthropic
+  // call decrements the per-tenant + global token bucket.
   const [analysis, seoAudit] = await Promise.all([
-    analyzeWebsite(scraped),
+    analyzeWebsite(scraped, session.user.id),
     auditSeo(url),
   ]);
 

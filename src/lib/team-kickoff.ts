@@ -29,6 +29,10 @@ import { createAutomationConversation } from '@/lib/team-conversation-helpers';
 import { currentWeekStart } from '@/lib/week-bounds';
 import { createLogger } from '@/lib/logger';
 import { derivePerWeekPosts } from '@/lib/strategic-path-helpers';
+import {
+  listActiveSubreddits,
+  type ActiveSubredditRow,
+} from '@/lib/db/repositories/product-reddit-channels';
 import type { StrategicPath } from '@/tools/schemas';
 
 const log = createLogger('lib:team-kickoff');
@@ -119,6 +123,14 @@ export async function ensureKickoffEnqueued(args: {
     .limit(1);
   const pathId = activePath?.id ?? null;
 
+  // The available-subreddits list drives the round-robin assignment
+  // for Reddit content_post params.subreddit (Task 5's gate rejects
+  // rows without it). Skip the DB hit when Reddit isn't connected —
+  // there are no Reddit content_post slots to seed in that case.
+  const availableSubreddits: ActiveSubredditRow[] = channels.includes('reddit')
+    ? await listActiveSubreddits(productId)
+    : [];
+
   // The goal preamble is the SOLE owner of kickoff dispatch logic
   // (per coordinator/AGENT.md "Goal-driven dispatch"). We pre-compute
   // the per-channel slot facts here — week-1 post counts via
@@ -141,6 +153,7 @@ export async function ensureKickoffEnqueued(args: {
       string,
       { repliesPerDay?: number | null } | null | undefined
     > | null,
+    availableSubreddits,
   });
 
   let conversationId: string;
@@ -177,6 +190,9 @@ export async function ensureKickoffEnqueued(args: {
         goal,
         publicSummary,
         trigger: 'kickoff',
+        // B6: founder-initiated one-shot kickoff (signup auto-trigger
+        // or first-visit manual dispatch) → priority lane.
+        priority: 'priority',
       },
       db,
     );
@@ -205,7 +221,7 @@ export async function ensureKickoffEnqueued(args: {
   }
 }
 
-interface KickoffGoalArgs {
+export interface KickoffGoalArgs {
   productName: string;
   pathId: string | null;
   weekStart: string;
@@ -218,6 +234,21 @@ interface KickoffGoalArgs {
     string,
     { repliesPerDay?: number | null } | null | undefined
   > | null;
+  /**
+   * Active (not disabled) Reddit subreddits for the product, ordered
+   * by rank ASC. Empty array when reddit isn't connected or the
+   * `reddit-channel-research` worker hasn't finished yet. Drives the
+   * round-robin assignment in the goal body — the coordinator picks
+   * `availableSubreddits[sortOrder % availableSubreddits.length]` for
+   * each Reddit content_post slot. The caller is the one place that
+   * constructs the args, so this is required (no optional) — a future
+   * caller forgetting it should be a compile error.
+   */
+  availableSubreddits: ReadonlyArray<{
+    subreddit: string;
+    rank: number;
+    fitScore: number | null;
+  }>;
 }
 
 /**
@@ -260,30 +291,62 @@ export function buildKickoffGoalText(args: KickoffGoalArgs): string {
 
   const xConnected = channels.includes('x');
   const redditConnected = channels.includes('reddit');
+  const subs = args.availableSubreddits;
+  const redditPostCount = redditConnected ? week1Posts.reddit : 0;
+  const redditPostsBlocked =
+    redditConnected && redditPostCount > 0 && subs.length === 0;
 
   // Build the spawn directives. Each (channel, mode) pair becomes one
   // line in the goal IF the slot exists for today — pairs with zero
   // budget are silently dropped so the coordinator doesn't spawn
-  // empty work.
+  // empty work. Reddit content_post spawn is additionally gated on
+  // the subreddit list being non-empty: AddPlanItemTool rejects Reddit
+  // content_post rows without params.subreddit (Task 5's gate), so an
+  // empty list means no draftable plan_items exist and the post-batch
+  // would crash with "no plan items found".
+  //
+  // When Reddit posts ARE requested but no subreddits are researched
+  // yet (`redditPostsBlocked`), we spawn a parallel research subagent
+  // in Step 2 alongside the reply / X-post drafts. Reddit content_post
+  // plan_items + post-batch spawn get deferred to Step 3a, which runs
+  // once the research <task-notification> returns.
+  // `channel:` is a structured prompt field — the description string
+  // ('fill x reply slot') is human-facing and easy for the agent to
+  // skim past. The agent has been documented (in
+  // social-media-manager/references/patterns-and-examples.md) to read
+  // this field for the discovery `platform` argument. Without it, an
+  // X-slot spawn was found in production calling
+  // find_threads_via_xai({ platform: 'reddit' }) — drafts landed under
+  // thread.platform='reddit' (Reddit slot overflowed by 8) while
+  // /briefing's X slot showed 0/8 drafted (2026-05-13 incident).
   const spawns: string[] = [];
   if (xConnected && repliesX > 0) {
     spawns.push(
-      `- (x, reply): Task({ subagent_type: 'social-media-manager', description: 'fill x reply slot', prompt: 'Mode: discover-and-fill-slot\\nplanItemId: <today's x content_reply uuid>\\ntargetCount: ${repliesX}' })`,
+      `- (x, reply): Task({ subagent_type: 'social-media-manager', description: 'fill x reply slot', prompt: 'Mode: discover-and-fill-slot\\nchannel: x\\nplanItemId: <today's x content_reply uuid>\\ntargetCount: ${repliesX}' })`,
     );
   }
   if (redditConnected && repliesReddit > 0) {
     spawns.push(
-      `- (reddit, reply): Task({ subagent_type: 'social-media-manager', description: 'fill reddit reply slot', prompt: 'Mode: discover-and-fill-slot\\nplanItemId: <today's reddit content_reply uuid>\\ntargetCount: ${repliesReddit}' })`,
+      `- (reddit, reply): Task({ subagent_type: 'social-media-manager', description: 'fill reddit reply slot', prompt: 'Mode: discover-and-fill-slot\\nchannel: reddit\\nplanItemId: <today's reddit content_reply uuid>\\ntargetCount: ${repliesReddit}' })`,
     );
   }
   if (xConnected && week1Posts.x > 0) {
     spawns.push(
-      `- (x, post): Task({ subagent_type: 'social-media-manager', description: 'draft x post batch', prompt: 'Mode: post-batch\\nplanItemIds: <today's x content_post uuids>' })`,
+      `- (x, post): Task({ subagent_type: 'social-media-manager', description: 'draft x post batch', prompt: 'Mode: post-batch\\nchannel: x\\nplanItemIds: <today's x content_post uuids>' })`,
     );
   }
-  if (redditConnected && week1Posts.reddit > 0) {
+  if (redditConnected && week1Posts.reddit > 0 && subs.length > 0) {
     spawns.push(
-      `- (reddit, post): Task({ subagent_type: 'social-media-manager', description: 'draft reddit post batch', prompt: 'Mode: post-batch\\nplanItemIds: <today's reddit content_post uuids>' })`,
+      `- (reddit, post): Task({ subagent_type: 'social-media-manager', description: 'draft reddit post batch', prompt: 'Mode: post-batch\\nchannel: reddit\\nplanItemIds: <today's reddit content_post uuids>' })`,
+    );
+  }
+  // Reddit research deferred-spawn: fires in parallel with the reply /
+  // X-post drafts above. Once the research <task-notification> returns,
+  // Step 3a adds the Reddit content_post plan_items + dispatches the
+  // Reddit post-batch spawn.
+  if (redditPostsBlocked) {
+    spawns.push(
+      `- (reddit, research): Task({ subagent_type: 'social-media-manager', description: 'research reddit communities', prompt: 'Mode: research-reddit-channels' })`,
     );
   }
 
@@ -306,6 +369,33 @@ export function buildKickoffGoalText(args: KickoffGoalArgs): string {
     ``,
   ];
 
+  if (redditPostsBlocked) {
+    // Reddit research hasn't finished yet — AddPlanItemTool would
+    // reject every Reddit content_post we tried to insert. Defer
+    // Reddit content_post seeding to Step 3a, which runs once the
+    // (reddit, research) <task-notification> arrives. Replies and
+    // non-Reddit slots proceed normally in Steps 1 + 2.
+    lines.push(
+      `NOTE: Reddit content_post slots requested (${redditPostCount}/week) but no subreddits have been researched yet. In Step 1, SKIP add_plan_item calls for Reddit content_post — they need params.subreddit (which the gate enforces) and we don't have those yet. The (reddit, research) parallel spawn in Step 2 will return the top-3 subreddits; Step 3a then adds the Reddit content_post plan_items and dispatches the Reddit post-batch. Replies and non-Reddit channels proceed normally.`,
+      ``,
+    );
+  } else if (redditConnected && subs.length > 0) {
+    // Round-robin assignment over the researched subreddits. Names
+    // are stored WITHOUT the `r/` prefix throughout the system; the
+    // goal text restates that convention so the coordinator doesn't
+    // double-prefix.
+    lines.push(
+      `Available subreddits for reddit content_post (use these for params.subreddit, NO 'r/' prefix):`,
+      ...subs.map((s) =>
+        s.fitScore !== null
+          ? `  - ${s.subreddit} (fit ${s.fitScore.toFixed(2)})`
+          : `  - ${s.subreddit}`,
+      ),
+      `Rotate evenly: for each Reddit content_post row, set params.subreddit = availableSubreddits[sortOrder % availableSubreddits.length]. Use the bare subreddit name (e.g. "SaaS", not "r/SaaS").`,
+      ``,
+    );
+  }
+
   if (spawns.length > 0) {
     lines.push(
       `Step 2 — Dispatch all of the following Task spawns IN A SINGLE ASSISTANT TURN (engine accepts multiple tool_use blocks per turn — parallelize). Reply slots use the planItemId you just added in step 1; post batches use the same-day content_post uuids:`,
@@ -313,6 +403,17 @@ export function buildKickoffGoalText(args: KickoffGoalArgs): string {
       ``,
       `Step 3 — As each <task-notification> arrives, call update_plan_item({ id: <touched uuid>, state: 'drafted' }) for the slot(s) that task drafted for. Don't wait for all to return before updating the first.`,
     );
+    if (redditPostsBlocked) {
+      lines.push(
+        ``,
+        `Step 3a — When the (reddit, research) <task-notification> arrives:`,
+        `  - Parse the returned StructuredOutput; it carries \`subreddits: [{ subreddit, rank, fitScore }]\` (3 entries).`,
+        `  - For each Reddit content_post slot in week 1 (you skipped these in Step 1 because subreddits weren't known): call add_plan_item with params.subreddit = subreddits[sortOrder % subreddits.length].subreddit (bare name, NO 'r/' prefix). Distribute the ${redditPostCount} rows across this week's UTC days the same way you would have in Step 1.`,
+        `  - Then dispatch ONE Reddit post-batch spawn in the next turn:`,
+        `    Task({ subagent_type: 'social-media-manager', description: 'draft reddit post batch', prompt: 'Mode: post-batch\\nplanItemIds: <the uuids you just added>' })`,
+        `  - As that <task-notification> returns, update_plan_item state='drafted' on the touched rows (same rule as Step 3).`,
+      );
+    }
   } else {
     lines.push(
       `Step 2 — No connected channels with active reply or post budget. Skip dispatch and tell the founder which channel they should connect to start drafting.`,

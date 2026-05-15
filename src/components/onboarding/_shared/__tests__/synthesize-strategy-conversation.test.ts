@@ -27,7 +27,7 @@ describe('synthesizeStrategyConversation', () => {
   it('returns DISPATCH coordinator + RUNNING subtask with no tool calls when no events have arrived', () => {
     const state = callSynthesize({});
     expect(state.coordinator.phase).toBe('DISPATCH');
-    expect(state.coordinator.name).toBe('Chief of Staff');
+    expect(state.coordinator.name).toBe('CMO');
     expect(state.coordinator.body).toMatch(/strategist/i);
     expect(state.subtask.status).toBe('RUNNING');
     expect(state.subtask.toolCalls).toHaveLength(0);

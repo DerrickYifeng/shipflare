@@ -177,6 +177,56 @@ describe('processRepliesBatchTool', () => {
     expect(runForkSkillMock.mock.calls[0]![0]).toBe('drafting-reply');
   });
 
+  it('plumbs `planItemId` through to draftReplyTool so drafts link to the slot (2026-05-13)', async () => {
+    // Tier 2 regression: production incident showed reply drafts
+    // landing orphaned (drafts.planItemId NULL) so the coordinator
+    // couldn't verify which slot they belonged to. With planItemId
+    // passed in, every drafted reply must carry it through.
+    seedThreads(store, [{ id: 't1' }]);
+    runForkSkillMock.mockResolvedValueOnce({
+      result: {
+        draftBody: 'short reply',
+        whyItWorks: 'fits voice',
+        confidence: 0.8,
+      },
+      usage: {},
+    });
+    validateDraftExecMock.mockResolvedValue({ failures: [], warnings: [] });
+    draftReplyExecMock.mockResolvedValue({ id: 'd1' });
+
+    await processRepliesBatchTool.execute(
+      { threadIds: ['t1'], planItemId: 'pi-x-reply-uuid' },
+      makeCtx(store, { userId: 'user-1', productId: 'prod-1' }),
+    );
+
+    expect(draftReplyExecMock).toHaveBeenCalledOnce();
+    const args = draftReplyExecMock.mock.calls[0]![0];
+    expect(args.planItemId).toBe('pi-x-reply-uuid');
+  });
+
+  it('omits `planItemId` when caller did not pass one (ad-hoc / fallback paths)', async () => {
+    seedThreads(store, [{ id: 't1' }]);
+    runForkSkillMock.mockResolvedValueOnce({
+      result: {
+        draftBody: 'short reply',
+        whyItWorks: 'fits voice',
+        confidence: 0.8,
+      },
+      usage: {},
+    });
+    validateDraftExecMock.mockResolvedValue({ failures: [], warnings: [] });
+    draftReplyExecMock.mockResolvedValue({ id: 'd1' });
+
+    await processRepliesBatchTool.execute(
+      { threadIds: ['t1'] },
+      makeCtx(store, { userId: 'user-1', productId: 'prod-1' }),
+    );
+
+    expect(draftReplyExecMock).toHaveBeenCalledOnce();
+    const args = draftReplyExecMock.mock.calls[0]![0];
+    expect(args.planItemId).toBeUndefined();
+  });
+
   it('rejects on mechanical fail and short-circuits before persisting', async () => {
     seedThreads(store, [{ id: 't1' }]);
     runForkSkillMock.mockResolvedValueOnce({

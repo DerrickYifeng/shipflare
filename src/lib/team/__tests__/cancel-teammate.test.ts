@@ -91,6 +91,6 @@ describe('cancelTeammate', () => {
     });
     await cancelTeammate('agent-xyz', db as never);
     expect(wakeMock).toHaveBeenCalledOnce();
-    expect(wakeMock).toHaveBeenCalledWith('agent-xyz');
+    expect(wakeMock).toHaveBeenCalledWith('agent-xyz', 'priority');
   });
 });

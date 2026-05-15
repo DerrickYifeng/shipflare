@@ -83,8 +83,15 @@ vi.mock('@/lib/db', () => ({
       const fields = Object.keys(projection);
       const isStats = fields.includes('anyItems');
       const isDrafts = fields.includes('replyBody');
+      // The reply-slot select carries `params` + `dueDate` but no
+      // `output`; the pending plan-items select (post Task 9 of the
+      // Reddit subreddit-research work) now also surfaces `params` so
+      // the post-card can detect the missing-subreddit case — we
+      // disambiguate via `output`.
       const isReplySlot =
-        fields.includes('params') && fields.includes('dueDate');
+        fields.includes('params') &&
+        fields.includes('dueDate') &&
+        !fields.includes('output');
       const isDraftCount =
         fields.length === 2 &&
         fields.includes('platform') &&

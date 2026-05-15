@@ -18,9 +18,8 @@ testWithProduct.describe('Settings', () => {
     await expect(page.getByText('X / Twitter')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Connect' })).toBeVisible();
 
-    // Reddit appears as a read-only "Always on" tile (no-binding channel).
-    await expect(page.getByText('Reddit')).toBeVisible();
-    await expect(page.getByText(/always on/i)).toBeVisible();
+    // Reddit row no longer lives in Settings — moved to /growth/reddit-channels
+    // (covered by e2e/tests/growth.spec.ts "Settings no longer shows a Reddit row").
 
     // Verify danger zone
     await expect(page.getByText('Danger zone')).toBeVisible();

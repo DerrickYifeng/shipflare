@@ -8,18 +8,19 @@ export interface DelegationTask {
   /** team_messages.id of the originating tool_call row. */
   messageId: string;
   /**
-   * team_runs.id this task belongs to. Needed by the right-rail Task
-   * panel so clicking a Recent task can switch the active session
-   * when the target subtask lives in a different run than the one
-   * currently rendered in the conversation column.
+   * Free-text grouping handle pointing at the originating user_prompt
+   * team_messages.id. Needed by the right-rail Task panel so clicking a
+   * Recent task can switch the active session when the target subtask
+   * lives in a different request than the one currently rendered in the
+   * conversation column.
    */
   runId: string | null;
-  /** team_tasks.id when we can derive it from tool metadata; nullable. */
-  taskId: string | null;
   /**
    * Anthropic tool_use_id the coordinator stamped on its Task call. This
    * is what the reducer's `progressByParentToolUse` map is keyed by —
    * every subagent event carries the same id in `metadata.parentToolUseId`.
+   * Also the join key against `agent_runs.parentToolUseId` for status
+   * lookups.
    */
   toolUseId: string | null;
   /** Target member id for this dispatched task (from metadata). */
@@ -36,26 +37,24 @@ export interface DelegationTask {
   subagentType: string | null;
   /** Short label for the task — "agentType" fallback if none. */
   label: string;
-  /** High-level status derived from the join with team_tasks. */
+  /** High-level status derived from the matching `agent_runs` row. */
   status: 'queued' | 'working' | 'done' | 'failed';
   /** Percent done, 0-100. working = 50 until status flips. */
   progress: number;
   /** Pre-formatted elapsed string when the task completed, else null. */
   elapsed: string | null;
   /**
-   * Subagent-produced result summary. Pulled from `team_tasks.output.summary`
-   * when the spawn completed with StructuredOutput, else null while the task
-   * is still running or produced free-form text we haven't paraphrased.
+   * Subagent-produced result summary. Back-filled from the
+   * `task_notification` row's `summary` field by `reconcileAsyncCompletion`
+   * once the teammate exits. Null while the task is still running.
    */
   outputSummary: string | null;
   /**
-   * `agent_runs.id` when this task was dispatched in async mode
-   * (`Task({..., run_in_background: true})`). The Task tool returns a
-   * `tool_result` IMMEDIATELY with `{status: 'async_launched', agentId}`
-   * — that's a dispatch receipt, not completion. Real completion arrives
-   * later as a `task_notification` message keyed by this `agentId`, which
-   * `reconcileAsyncCompletion` uses to flip status. Null for synchronous
-   * Task calls (the immediate tool_result IS the completion).
+   * `agent_runs.id` of the spawned teammate. Pulled either from the Task
+   * tool's async dispatch receipt (`tool_result` content with
+   * `{status: 'async_launched', agentId}`) or via the parent-tool-use
+   * index against the AgentRunStatusMap. Null for sync Task calls or
+   * before the dispatch receipt lands.
    */
   agentId: string | null;
   /**
@@ -161,17 +160,10 @@ export interface ActivityNode {
   /** Truncated error content for `variant === 'error'`. */
   errorText: string | null;
   /**
-   * `team_tasks.id` of the spawn this tool ran inside, or null when the
-   * tool was called directly by the top-level coordinator. Lets the UI
-   * attribute the row to the right specialist ("Nova used Grep") and
-   * open a door to folding subagent tools into their subtask card once
-   * the coordinator's Task tool_call ↔ team_tasks.id link is plumbed.
-   */
-  parentTaskId: string | null;
-  /**
-   * `AGENT.md` name of the subagent that emitted the tool call — useful
-   * when `parentTaskId` is present but the team hasn't provisioned a
-   * member row for this spawn yet (Phase F gap). Null on main thread.
+   * `AGENT.md` name of the subagent that emitted the tool call when the
+   * tool ran inside a spawn (via `spawnMeta.agentName`). Null on the
+   * main thread. Used by the activity-log UI to label rows like
+   * "Researcher used Grep" vs surface them under the coordinator.
    */
   agentName: string | null;
   /**
@@ -215,21 +207,48 @@ export interface SessionGroup {
   nodes: ConversationNode[];
 }
 
-export interface TaskLookupEntry {
-  id: string;
-  status: string;
-  description: string | null;
-  startedAt: Date | string | null;
-  completedAt: Date | string | null;
+/**
+ * Status snapshot of an `agent_runs` row. The team page seeds this from
+ * SSR (recent agent_runs rows scoped to the user's team) and the live
+ * SSE channel keeps it fresh via `agent_status_change` events. The reducer
+ * joins each DelegationTask to its matching entry by `parentToolUseId`
+ * (which equals the coordinator's Task tool_use_id) — making `agent_runs`
+ * the single source of truth for "is this dispatch still running?".
+ */
+export interface AgentRunStatus {
+  agentId: string;
   /**
-   * Paraphrased subagent output surfaced on dispatch cards. Server side
-   * extracts this from `team_tasks.output.summary` (StructuredOutput) or
-   * leaves it null when the output is free text too long to show inline.
+   * Literal `agent_runs.status` value. The reducer maps this to the
+   * DelegationTask's compact `'queued' | 'working' | 'done' | 'failed'`
+   * status via `deriveStatus()`.
+   */
+  status:
+    | 'queued'
+    | 'running'
+    | 'sleeping'
+    | 'resuming'
+    | 'completed'
+    | 'failed'
+    | 'killed';
+  /**
+   * Anthropic tool_use_id of the parent's `Task` call that spawned this
+   * agent. Stamped at spawn time in AgentTool.launchAsyncTeammate so the
+   * reducer can index agent_runs rows by the same key DelegationTask uses
+   * for its `toolUseId` field. Null for top-level lead runs.
+   */
+  parentToolUseId: string | null;
+  spawnedAt: string | null;
+  lastActiveAt: string | null;
+  /**
+   * Paraphrased subagent output surfaced on dispatch cards. Back-filled
+   * from the `task_notification` row's `summary` field by
+   * `reconcileAsyncCompletion` once the teammate exits. Null while running.
    */
   outputSummary: string | null;
 }
 
-export type TaskLookup = ReadonlyMap<string, TaskLookupEntry>;
+/** Keyed by `agent_runs.id`. */
+export type AgentRunStatusMap = ReadonlyMap<string, AgentRunStatus>;
 
 /** Window (ms) within which an adjacent tool_call is attributed to the preceding lead text. */
 const STITCH_WINDOW_MS = 5_000;
@@ -240,8 +259,8 @@ function parseTime(iso: string): number {
 }
 
 // The worker writes metadata with camelCase keys (`toolName`, `toolUseId`,
-// `input`, `parentTaskId`) — see `emitToolEvent` in
-// `src/workers/processors/team-run.ts`. We read camelCase first and fall
+// `input`) — see the assistant_text_stop / tool_call insert blocks in
+// `src/workers/processors/agent-run.ts`. We read camelCase first and fall
 // back to snake_case only to stay compatible with any pre-existing rows
 // written under the older convention.
 function readString(
@@ -273,19 +292,6 @@ function extractToolInputString(
   return null;
 }
 
-function extractTaskId(metadata: Record<string, unknown> | null): string | null {
-  return (
-    readString(metadata, 'taskId', 'task_id') ??
-    readString(metadata, 'toolUseId', 'tool_use_id')
-  );
-}
-
-function extractParentTaskId(
-  metadata: Record<string, unknown> | null,
-): string | null {
-  return readString(metadata, 'parentTaskId', 'parent_task_id');
-}
-
 function extractParentToolUseId(
   metadata: Record<string, unknown> | null,
 ): string | null {
@@ -315,16 +321,28 @@ function formatElapsed(
 }
 
 function deriveStatus(
-  raw: string,
+  raw: AgentRunStatus['status'] | undefined,
 ): 'queued' | 'working' | 'done' | 'failed' {
+  // Missing row → render as QUEUED. That's the truthful answer: the lead
+  // just emitted a Task tool_call but the agent_runs INSERT either hasn't
+  // landed yet (live race) or never will (sync test/CLI path). Don't
+  // default to RUNNING — that's the exact lie this refactor exists to kill.
+  if (!raw) return 'queued';
   switch (raw) {
     case 'completed':
       return 'done';
     case 'running':
+    case 'resuming':
       return 'working';
     case 'failed':
+    case 'killed':
       return 'failed';
-    case 'pending':
+    case 'sleeping':
+      // Sleeping teammates haven't terminated — they're yielding their
+      // worker slot until a wake() fires. Surface as 'working' so the card
+      // keeps its RUNNING badge instead of falsely appearing settled.
+      return 'working';
+    case 'queued':
     default:
       return 'queued';
   }
@@ -346,40 +364,39 @@ function deriveProgress(status: 'queued' | 'working' | 'done' | 'failed'): numbe
 
 function buildDelegationTask(
   message: TeamActivityMessage,
-  taskLookup: TaskLookup,
+  agentRunByParentToolUse: ReadonlyMap<string, AgentRunStatus>,
 ): DelegationTask {
   const metadata = message.metadata;
-  const taskId = extractTaskId(metadata);
-  const lookupEntry = taskId ? taskLookup.get(taskId) : undefined;
+  const toolUseId = readString(metadata, 'toolUseId', 'tool_use_id');
 
   const description =
     extractToolInputString(metadata, 'description') ??
-    lookupEntry?.description ??
     extractToolInputString(metadata, 'agent') ??
     'Dispatched task';
 
-  // A task_call with no matching team_tasks row in `taskLookup` is
-  // almost always a live, just-spawned dispatch the SSR snapshot didn't
-  // capture. `QUEUED` would lie — the worker fires `recordTaskStart`
-  // synchronously before spawnSubagent, so by the time this tool_call
-  // reaches the client the subagent is already running. Default to
-  // `running` in that case; only trust `lookupEntry.status` when we
-  // actually have one.
-  const rawStatus = lookupEntry?.status ?? 'running';
-  const status = deriveStatus(rawStatus);
+  // Look up the spawned agent_runs row by the Task tool's tool_use_id —
+  // launchAsyncTeammate stamps `agent_runs.parentToolUseId` with this
+  // exact value at spawn time, so the join is direct. A miss means we
+  // haven't seen the agent_runs row yet (live SSE race, or a sync
+  // Task path in tests/CLI). Either way the truthful answer is QUEUED
+  // — `deriveStatus(undefined)` returns 'queued', not the legacy
+  // 'running' default that caused dispatch cards to lie forever.
+  const lookupEntry = toolUseId ? agentRunByParentToolUse.get(toolUseId) : undefined;
+  const status = deriveStatus(lookupEntry?.status);
   const progress = deriveProgress(status);
-  const elapsed = lookupEntry
-    ? formatElapsed(lookupEntry.startedAt, lookupEntry.completedAt)
-    : null;
+  const elapsed =
+    lookupEntry && lookupEntry.spawnedAt && lookupEntry.lastActiveAt
+      ? // Only show elapsed once terminal — for in-flight rows the lastActiveAt
+        // keeps moving with each turn and a stale elapsed would be misleading.
+        status === 'done' || status === 'failed'
+        ? formatElapsed(lookupEntry.spawnedAt, lookupEntry.lastActiveAt)
+        : null
+      : null;
 
   return {
     messageId: message.id,
     runId: message.runId,
-    taskId: lookupEntry?.id ?? taskId ?? null,
-    // `extractTaskId` falls back to `tool_use_id` on legacy metadata,
-    // but new worker writes store them under `toolUseId` directly —
-    // either way that's the anchor `progressByParentToolUse` uses.
-    toolUseId: readString(metadata, 'toolUseId', 'tool_use_id'),
+    toolUseId,
     toMemberId: message.to,
     subagentType: extractToolInputString(metadata, 'agent'),
     label: description,
@@ -387,9 +404,13 @@ function buildDelegationTask(
     progress,
     elapsed,
     outputSummary: lookupEntry?.outputSummary ?? null,
-    // Populated by `reconcileDelegationCompletion` if this dispatch is an
-    // async launch — at build-time the tool_result hasn't been matched yet.
-    agentId: null,
+    // Populated below from the lookup entry when available — the
+    // agent_runs row carries `id` (agentId). Pre-existing reducer code
+    // also stamped `agentId` from the async dispatch receipt via
+    // `reconcileDelegationCompletion`; that path still works as a
+    // fallback for the brief window between Task-tool return and the
+    // agent_runs SELECT landing on the client.
+    agentId: lookupEntry?.agentId ?? null,
     // Populated by `populateDelegationProgress` after stitching the full
     // message stream — at build-time we don't yet have the subagent's
     // downstream events in hand.
@@ -422,13 +443,17 @@ function isCompletionLeadMessage(message: TeamActivityMessage): boolean {
 function extractCompletionText(raw: string | null): string {
   if (!raw) return '';
   const trimmed = raw.trim();
-  if (!trimmed.startsWith('{')) return trimmed;
+  if (!trimmed.startsWith('{')) return stripTaskNotificationXml(trimmed);
   try {
     const parsed = JSON.parse(trimmed) as Record<string, unknown>;
     const summary = parsed['summary'];
-    if (typeof summary === 'string' && summary.length > 0) return summary;
+    if (typeof summary === 'string' && summary.length > 0) {
+      return stripTaskNotificationXml(summary);
+    }
     const notes = parsed['notes'];
-    if (typeof notes === 'string' && notes.length > 0) return notes;
+    if (typeof notes === 'string' && notes.length > 0) {
+      return stripTaskNotificationXml(notes);
+    }
     return trimmed;
   } catch {
     return trimmed;
@@ -446,6 +471,25 @@ function truncate(text: string, max: number): string {
   return `${text.slice(0, max).trimEnd()}…`;
 }
 
+// Backstop for an LLM-side bug: the lead occasionally hallucinates a
+// `<task-notification>` XML block in its own assistant text — a
+// stylized paraphrase of the user-role notification that was injected
+// into its inbox (see synthesize-notification.ts for the real shape).
+// `coordinator/AGENT.md` §4 forbids this, but the model still slips,
+// and react-markdown renders the raw tag as visible text. Strip the
+// block on the render path so legacy / cached transcripts don't show
+// XML in the SYNTHESIS message either.
+const TASK_NOTIFICATION_XML_PATTERN =
+  /<task-notification\b[^>]*>[\s\S]*?<\/task-notification>/gi;
+
+function stripTaskNotificationXml(text: string): string {
+  if (!text || !text.includes('<task-notification')) return text;
+  return text
+    .replace(TASK_NOTIFICATION_XML_PATTERN, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 /**
  * Walk `messages` in chronological order and collapse adjacent lead
  * `agent_text` + subsequent `Task` tool_call events (within a 5-second
@@ -459,7 +503,7 @@ function truncate(text: string, max: number): string {
  */
 export function stitchLeadMessages(
   messages: readonly TeamActivityMessage[],
-  taskLookup: TaskLookup = new Map(),
+  agentRunStatus: AgentRunStatusMap = new Map(),
   /**
    * In-flight streaming text keyed by messageId. Each partial gets
    * folded into the node stream as a `LeadNode` with `streaming: true`
@@ -470,6 +514,21 @@ export function stitchLeadMessages(
    */
   partials: ReadonlyMap<string, PartialLeadMessage> = new Map(),
 ): ConversationNode[] {
+  // Apply any `agent_status_change` events that arrived through the SSE
+  // stream on top of the SSR-seeded map. The hook delivers each one as a
+  // TeamActivityMessage of type `agent_status_change` with the status
+  // payload nested in `metadata`. Latest-wins keeps the map fresh without
+  // requiring a separate hook subscription.
+  const liveAgentRunStatus = applyStatusChanges(messages, agentRunStatus);
+
+  // Secondary index for buildDelegationTask: the join key is the Task
+  // tool's tool_use_id, which equals `agent_runs.parentToolUseId`.
+  const byParentToolUseId = new Map<string, AgentRunStatus>();
+  for (const entry of liveAgentRunStatus.values()) {
+    if (entry.parentToolUseId) {
+      byParentToolUseId.set(entry.parentToolUseId, entry);
+    }
+  }
   // Pre-pass: bucket any message whose metadata carries
   // `parentToolUseId` (i.e. it came from a subagent spawn) by that
   // anchor. These don't flow as top-level nodes — they live *inside*
@@ -497,7 +556,7 @@ export function stitchLeadMessages(
   // Without #2, subagent text whose parentToolUseId failed to land would
   // bubble up as a LeadNode and the UI's `node.fromMemberId ?? coordinatorId`
   // fallback (conversation.tsx:256) would render it as the coordinator's
-  // avatar — which is exactly the "Chief of Staff SYNTHESIS pasting JSON"
+  // avatar — which is exactly the "CMO SYNTHESIS pasting JSON"
   // mis-attribution observed in production traces 2026-05-02.
   const hasSubagentName = (metadata: Record<string, unknown> | null): boolean => {
     // Use extractAgentName so both `agentName` (camelCase, defensively
@@ -527,6 +586,12 @@ export function stitchLeadMessages(
   const activityById = new Map<string, ActivityNode>();
 
   for (const msg of messages) {
+    // `agent_status_change` events flow through the message stream so
+    // the SSE channel keeps the AgentRunStatusMap fresh, but they don't
+    // render as nodes themselves. `applyStatusChanges` above already
+    // folded them into `liveAgentRunStatus`.
+    if (msg.type === 'agent_status_change') continue;
+
     // Subagent-scoped events live inside their parent's DelegationTask
     // (via `populateDelegationProgress` below) — skip them in the
     // top-level flow so the thread only shows the coordinator's own
@@ -553,7 +618,7 @@ export function stitchLeadMessages(
         createdAt: msg.createdAt,
         runId: msg.runId,
         fromMemberId: msg.from,
-        text: msg.content ?? '',
+        text: stripTaskNotificationXml(msg.content ?? ''),
         delegation: [],
         // Filled in by `assignPhases` after all nodes are built — the
         // phase decision depends on the presence of a later Task tool_call
@@ -623,7 +688,7 @@ export function stitchLeadMessages(
     // lead's (if within the stitch window) or the freshly-minted phantom
     // above. The dispatch card hangs off that delegation.
     if (isTaskCall && currentLead) {
-      currentLead.delegation.push(buildDelegationTask(msg, taskLookup));
+      currentLead.delegation.push(buildDelegationTask(msg, byParentToolUseId));
       continue;
     }
 
@@ -639,7 +704,6 @@ export function stitchLeadMessages(
         elapsed: null,
         complete: false,
         errorText: null,
-        parentTaskId: extractParentTaskId(msg.metadata),
         agentName: extractAgentName(msg.metadata),
         progress: [],
       };
@@ -737,7 +801,6 @@ export function stitchLeadMessages(
         elapsed: null,
         complete: true,
         errorText: msg.content ? truncate(msg.content.trim(), ERROR_TRUNCATE_LEN) : null,
-        parentTaskId: extractParentTaskId(msg.metadata),
         agentName: extractAgentName(msg.metadata),
         progress: [],
       });
@@ -759,9 +822,18 @@ export function stitchLeadMessages(
   // (rare but possible) surface in the right order. Since deltas land
   // after any non-streaming message the client has already seen, this
   // puts the typing bubble correctly at the tail.
+  //
+  // Subagent partials are filtered out — they carry parentToolUseId (the
+  // parent Task's tool_use_id) or agentName from the worker's spawnMeta
+  // stamp. Without this filter, a teammate's mid-stream text would render
+  // as the LEAD'S bubble, then vanish when the durable agent_text lands
+  // (which gets correctly routed under the DelegationCard via the
+  // `belongsToSubagent` check above). Founder UX: keep the main thread
+  // showing the lead's persona only; subagent activity surfaces inside
+  // the DelegationCard and the right-side TaskPanel.
   if (partials.size > 0) {
     const partialNodes = Array.from(partials.values())
-      .slice()
+      .filter((p) => p.parentToolUseId === null && p.agentName === null)
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     for (const p of partialNodes) {
       nodes.push({
@@ -770,7 +842,7 @@ export function stitchLeadMessages(
         createdAt: p.createdAt,
         runId: p.runId,
         fromMemberId: p.from,
-        text: p.content,
+        text: stripTaskNotificationXml(p.content),
         delegation: [],
         phase: 'PLAN',
         streaming: true,
@@ -779,10 +851,76 @@ export function stitchLeadMessages(
   }
 
   populateDelegationProgress(nodes, progressByParentToolUse, partials);
-  reconcileDelegationCompletion(nodes, messages);
+  reconcileAsyncDispatchReceipts(nodes, messages, liveAgentRunStatus);
   reconcileAsyncCompletion(nodes, messages);
   assignPhases(nodes);
   return nodes;
+}
+
+/**
+ * Merge SSE-delivered `agent_status_change` events on top of the
+ * SSR-seeded `AgentRunStatusMap`. Each event lands as a TeamActivityMessage
+ * of type `agent_status_change` with the payload nested in `metadata`
+ * (see `publishStatusChange` in `src/workers/processors/agent-run.ts`).
+ * Latest-wins across the iteration order.
+ *
+ * Returns a fresh map; the original `seed` is left untouched so the prop
+ * identity is stable when no live events have landed (lets React's memo
+ * boundaries dedup downstream).
+ */
+export function applyStatusChanges(
+  messages: readonly TeamActivityMessage[],
+  seed: AgentRunStatusMap,
+): Map<string, AgentRunStatus> {
+  // Skip the copy when neither SSR nor SSE contributed anything — the
+  // common case during empty-state renders and tests.
+  let hasUpdate = false;
+  for (const m of messages) {
+    if (m.type === 'agent_status_change') {
+      hasUpdate = true;
+      break;
+    }
+  }
+  if (!hasUpdate) return new Map(seed);
+
+  const merged = new Map<string, AgentRunStatus>(seed);
+  for (const m of messages) {
+    if (m.type !== 'agent_status_change') continue;
+    const meta = (m.metadata ?? {}) as Record<string, unknown>;
+    const agentId = typeof meta['agentId'] === 'string' ? meta['agentId'] : null;
+    const status = typeof meta['status'] === 'string' ? meta['status'] : null;
+    if (!agentId || !isAgentRunStatusValue(status)) continue;
+    const existing = merged.get(agentId);
+    const parentToolUseId =
+      typeof meta['parentToolUseId'] === 'string' && meta['parentToolUseId'].length > 0
+        ? (meta['parentToolUseId'] as string)
+        : existing?.parentToolUseId ?? null;
+    const lastActiveAt =
+      typeof meta['lastActiveAt'] === 'string'
+        ? (meta['lastActiveAt'] as string)
+        : m.createdAt;
+    merged.set(agentId, {
+      agentId,
+      status,
+      parentToolUseId,
+      spawnedAt: existing?.spawnedAt ?? lastActiveAt,
+      lastActiveAt,
+      outputSummary: existing?.outputSummary ?? null,
+    });
+  }
+  return merged;
+}
+
+function isAgentRunStatusValue(v: unknown): v is AgentRunStatus['status'] {
+  return (
+    v === 'queued' ||
+    v === 'running' ||
+    v === 'sleeping' ||
+    v === 'resuming' ||
+    v === 'completed' ||
+    v === 'failed' ||
+    v === 'killed'
+  );
 }
 
 /**
@@ -898,6 +1036,12 @@ function buildProgressItems(
         result.content
           ? truncate(result.content.trim(), ERROR_TRUNCATE_LEN)
           : null;
+      // Engine pattern (engine/tools/AgentTool/UI.tsx): the inline
+      // tool row shows toolName + elapsed only — never the raw payload
+      // — so we don't leak internal IDs (uuids, plan_item rows, etc.)
+      // to the founder. Errors stay visible via `errorText`. A future
+      // verbose/transcript drawer can read the full content from the
+      // durable team_messages row.
       raw.push({
         kind: 'tool',
         id: msg.id,
@@ -919,7 +1063,7 @@ function buildProgressItems(
         kind: 'text',
         id: msg.id,
         createdAt: msg.createdAt,
-        text: msg.content,
+        text: stripTaskNotificationXml(msg.content),
         streaming: false,
       });
       continue;
@@ -1003,25 +1147,30 @@ function parseElapsedMs(elapsed: string): number | null {
 }
 
 /**
- * Cross-reference Task tool_call DelegationTasks with their matching
- * tool_result rows and flip status/elapsed/outputSummary live — without
- * waiting on a page refetch of taskLookup.
+ * Capture the spawned `agent_runs.id` from each Task tool's async dispatch
+ * receipt and stash it on the DelegationTask.
  *
- * Why: the SSR-seeded `taskLookup` is static. When a subagent finishes
- * mid-session, team_tasks.status flips to 'completed' in the DB but the
- * client's lookup never re-reads, so the subtask card stuck at RUNNING
- * forever ("179s thinking..."). The tool_result message itself is the
- * authoritative DONE signal — it carries the same `toolUseId` the
- * DelegationTask was built from, plus `isError` and the full output
- * content. Match on that, settle the task locally.
+ * The Task tool returns immediately with
+ * `{status: 'async_launched', agentId}` — that's a dispatch receipt, not
+ * completion. Two consumers need the agentId:
  *
- * Runs as a post-stitch pass because DelegationTasks are only populated
- * as leads are built; we need the full message list to find matching
- * tool_results that may land in a later turn.
+ *  1. `buildDelegationTask` already looks up status via the
+ *     `agent_runs.parentToolUseId` index; this pass adds the agentId as
+ *     a fallback when the agent_runs row hasn't reached the client yet
+ *     (live SSE race / brief window between Task tool return and the
+ *     periodic agent_runs refetch).
+ *  2. `reconcileAsyncCompletion` keys task_notifications by agentId to
+ *     back-fill `outputSummary` once the teammate exits.
+ *
+ * This pass does NOT touch `status` — that is sourced exclusively from
+ * the AgentRunStatusMap. Status inference from tool_result content was
+ * the original sin behind the "stuck at RUNNING" bug, so it's gone for
+ * good.
  */
-function reconcileDelegationCompletion(
+function reconcileAsyncDispatchReceipts(
   nodes: ConversationNode[],
   messages: readonly TeamActivityMessage[],
+  liveAgentRunStatus: ReadonlyMap<string, AgentRunStatus>,
 ): void {
   // Index tool_result messages by the tool_use_id they answer.
   const resultByUseId = new Map<string, TeamActivityMessage>();
@@ -1032,60 +1181,28 @@ function reconcileDelegationCompletion(
   }
   if (resultByUseId.size === 0) return;
 
-  // Index the originating tool_call messages so we can compute elapsed
-  // against *its* createdAt (the DelegationTask.messageId is the
-  // tool_call's id — use the message directly).
-  const toolCallByUseId = new Map<string, TeamActivityMessage>();
-  for (const msg of messages) {
-    if (msg.type !== 'tool_call') continue;
-    const useId = readString(msg.metadata, 'toolUseId', 'tool_use_id');
-    if (useId) toolCallByUseId.set(useId, msg);
-  }
-
   for (const node of nodes) {
     if (node.kind !== 'lead') continue;
     if (node.delegation.length === 0) continue;
     for (const task of node.delegation) {
-      // The DelegationTask's taskId is the coord's tool_use_id when no
-      // team_tasks row matched on SSR (our dual-key lookup falls back
-      // to it). Treat whichever id we have as a potential use_id — the
-      // resultByUseId map is keyed by tool_use_id, so a mismatch just
-      // quietly misses and we keep the existing status.
-      const useId = task.taskId;
+      if (task.agentId) continue; // already known (e.g. from agent_runs row)
+      const useId = task.toolUseId;
       if (!useId) continue;
       const result = resultByUseId.get(useId);
       if (!result) continue;
-
-      // Already settled by a real taskLookup entry — don't overwrite
-      // authoritative server state with our inferred one.
-      if (task.status === 'done' || task.status === 'failed') continue;
-
-      // Async dispatch receipt — the Task tool was invoked with
-      // `run_in_background: true` and returned IMMEDIATELY with
-      // `{status: 'async_launched', agentId}`. That is NOT completion —
-      // the spawned agent_runs row is queued and the BullMQ wake is
-      // pending. Real completion arrives later as a `task_notification`
-      // message keyed by `agentId`, picked up by
-      // `reconcileAsyncCompletion`. Stash the agentId here so that pass
-      // can match, and leave status at `working` so the card keeps its
-      // RUNNING badge instead of falsely flipping to DONE.
       const asyncDispatch = parseAsyncDispatchPayload(result.content);
-      if (asyncDispatch) {
-        task.agentId = asyncDispatch.agentId;
-        continue;
-      }
-
-      const isError =
-        result.metadata !== null &&
-        (result.metadata as Record<string, unknown>)['isError'] === true;
-      task.status = isError ? 'failed' : 'done';
-      task.progress = isError ? 100 : 100;
-      const callMsg = toolCallByUseId.get(useId);
-      if (callMsg) {
-        task.elapsed = formatElapsed(callMsg.createdAt, result.createdAt);
-      }
-      if (!task.outputSummary) {
-        task.outputSummary = extractSummaryFromResultContent(result.content);
+      if (!asyncDispatch) continue;
+      task.agentId = asyncDispatch.agentId;
+      // Opportunistically refresh status if the agent_runs row reached
+      // the client between buildDelegationTask and now. Otherwise the
+      // existing 'queued' default holds until the next status event.
+      const entry = liveAgentRunStatus.get(asyncDispatch.agentId);
+      if (entry) {
+        task.status = deriveStatus(entry.status);
+        task.progress = deriveProgress(task.status);
+        if (!task.outputSummary && entry.outputSummary) {
+          task.outputSummary = entry.outputSummary;
+        }
       }
     }
   }
@@ -1118,22 +1235,12 @@ function parseAsyncDispatchPayload(
 }
 
 /**
- * Settle async-dispatched DelegationTasks when their `task_notification`
- * arrives. The Task tool's immediate `tool_result` only proves the agent
- * was QUEUED (see `reconcileDelegationCompletion`'s asyncDispatch branch);
- * the durable terminal signal is a `team_messages` row of `messageType =
- * 'task_notification'` published by `agent-run.ts publishTaskNotification`
- * after the spawned teammate exits. That row carries `agentId`, `status`
- * (`completed | failed | killed`), `summary`, and `teammateName` either
- * at top-level or in `metadata`.
- *
- * We index notifications by `agentId` and walk every DelegationTask with
- * a non-null `agentId`; on a hit we flip status, stamp elapsed against
- * the originating `tool_call`, and back-fill the summary so the card
- * shows the same line the activity feed does.
- *
- * Runs after `reconcileDelegationCompletion` so async dispatches stamped
- * with `agentId` in that pass are visible here.
+ * Back-fill `outputSummary` on async-dispatched DelegationTasks once their
+ * `task_notification` arrives. Status itself is sourced exclusively from
+ * the AgentRunStatusMap (the `agent_status_change` SSE channel keeps it
+ * fresh, the SSR query seeds the initial state), so this pass touches
+ * only the summary text + the elapsed string the card displays once the
+ * teammate exits.
  */
 function reconcileAsyncCompletion(
   nodes: ConversationNode[],
@@ -1160,19 +1267,21 @@ function reconcileAsyncCompletion(
     if (node.delegation.length === 0) continue;
     for (const task of node.delegation) {
       if (!task.agentId) continue;
-      if (task.status === 'done' || task.status === 'failed') continue;
       const notification = notificationByAgentId.get(task.agentId);
       if (!notification) continue;
 
-      const status = readNotificationField(notification, 'status');
-      task.status = status === 'failed' || status === 'killed' ? 'failed' : 'done';
-      task.progress = 100;
-      const callMsg = toolCallByMessageId.get(task.messageId);
-      if (callMsg) {
-        task.elapsed = formatElapsed(callMsg.createdAt, notification.createdAt);
-      }
       if (!task.outputSummary) {
         task.outputSummary = readNotificationField(notification, 'summary');
+      }
+      // Stamp elapsed against the originating tool_call when the agent_runs
+      // status hasn't given us one yet. (buildDelegationTask only fills
+      // elapsed if the row is in a terminal state — task_notification is
+      // another reliable terminal signal, so use it when available.)
+      if (!task.elapsed) {
+        const callMsg = toolCallByMessageId.get(task.messageId);
+        if (callMsg) {
+          task.elapsed = formatElapsed(callMsg.createdAt, notification.createdAt);
+        }
       }
     }
   }
@@ -1195,40 +1304,6 @@ function readNotificationField(
   const inMeta = meta?.[key];
   if (typeof inMeta === 'string' && inMeta.length > 0) return inMeta;
   return null;
-}
-
-/**
- * Best-effort `outputSummary` pull from a tool_result's raw `content`
- * string. Subagents that terminate with `StructuredOutput` emit a JSON
- * blob whose `summary` (or `notes`) field is the human-readable line
- * we want on the card. Free-form results fall back to a truncated
- * first-line preview; if the content is empty or looks like a stack
- * trace we return null and let the card's error display handle it.
- */
-function extractSummaryFromResultContent(content: string | null): string | null {
-  if (!content) return null;
-  const trimmed = content.trim();
-  if (trimmed.length === 0) return null;
-  if (trimmed.startsWith('{')) {
-    try {
-      const parsed = JSON.parse(trimmed) as Record<string, unknown>;
-      const summary = parsed['summary'];
-      if (typeof summary === 'string' && summary.trim().length > 0) {
-        return summary.trim();
-      }
-      const notes = parsed['notes'];
-      if (typeof notes === 'string' && notes.trim().length > 0) {
-        return notes.trim();
-      }
-    } catch {
-      // not JSON — fall through to text truncation
-    }
-  }
-  const firstLine = trimmed.split('\n')[0] ?? trimmed;
-  if (firstLine.length > 240) {
-    return `${firstLine.slice(0, 240).trimEnd()}…`;
-  }
-  return firstLine;
 }
 
 /**

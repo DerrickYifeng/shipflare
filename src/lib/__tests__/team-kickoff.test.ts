@@ -58,6 +58,10 @@ function buildSelectChain(rows: unknown[]) {
  *   3. team_members
  *   4. strategic_paths
  *
+ * When `reddit` is in the connected channels list, a 5th SELECT
+ * fires against `product_reddit_channels` via `listActiveSubreddits`
+ * (Task 6 — used to round-robin Reddit content_post params.subreddit).
+ *
  * Helper to wire mocks for the "happy path" with a customizable
  * strategic_path row. Defaults to a path with x: 2 posts and 5
  * replies/day to exercise the parallel-spawn branches.
@@ -66,8 +70,17 @@ function setupHappyPath(opts?: {
   channels?: string[];
   pathRow?: Record<string, unknown> | null;
   productName?: string;
+  /** Rows returned from `listActiveSubreddits`. Only consulted when
+   *  `reddit` is among the connected channels — otherwise the helper
+   *  skips the DB hit entirely. */
+  availableSubreddits?: Array<{
+    subreddit: string;
+    rank: number;
+    fitScore: number | null;
+  }>;
 }): void {
   const productName = opts?.productName ?? 'Shipflare';
+  const channels = opts?.channels ?? ['x'];
   const pathRow =
     opts?.pathRow === null
       ? null
@@ -86,9 +99,7 @@ function setupHappyPath(opts?: {
           },
         };
 
-  if (opts?.channels) {
-    getUserChannelsMock.mockResolvedValueOnce(opts.channels);
-  }
+  getUserChannelsMock.mockResolvedValueOnce(channels);
 
   // 1. team_messages lookup → empty (no past kickoff).
   dbSelectMock.mockReturnValueOnce(buildSelectChain([]));
@@ -100,6 +111,12 @@ function setupHappyPath(opts?: {
   );
   // 4. strategic_paths lookup.
   dbSelectMock.mockReturnValueOnce(buildSelectChain(pathRow ? [pathRow] : []));
+  // 5. listActiveSubreddits — only fires when reddit is connected.
+  if (channels.includes('reddit')) {
+    dbSelectMock.mockReturnValueOnce(
+      buildSelectChain(opts?.availableSubreddits ?? []),
+    );
+  }
 
   dispatchLeadMessageMock.mockResolvedValueOnce({
     runId: 'run-new',
@@ -218,6 +235,10 @@ describe('ensureKickoffEnqueued', () => {
           reddit: { repliesPerDay: 2, preferredHours: [15] },
         },
       },
+      availableSubreddits: [
+        { subreddit: 'SaaS', rank: 1, fitScore: 0.9 },
+        { subreddit: 'indiehackers', rank: 2, fitScore: 0.8 },
+      ],
     });
 
     await ensureKickoffEnqueued({
@@ -252,6 +273,10 @@ describe('ensureKickoffEnqueued', () => {
           reddit: { repliesPerDay: 2, preferredHours: [15] },
         },
       },
+      availableSubreddits: [
+        { subreddit: 'SaaS', rank: 1, fitScore: 0.9 },
+        { subreddit: 'indiehackers', rank: 2, fitScore: 0.8 },
+      ],
     });
 
     await ensureKickoffEnqueued({
@@ -286,6 +311,9 @@ describe('ensureKickoffEnqueued', () => {
           reddit: { repliesPerDay: 0, preferredHours: [15] },
         },
       },
+      availableSubreddits: [
+        { subreddit: 'SaaS', rank: 1, fitScore: 0.9 },
+      ],
     });
 
     await ensureKickoffEnqueued({
@@ -399,6 +427,7 @@ describe('buildKickoffGoalText (pure)', () => {
       channelMix: {
         x: { repliesPerDay: 5 },
       },
+      availableSubreddits: [],
     });
     expect(goal).toContain('Acme');
     expect(goal).toContain('weekStart=2026-05-04T00:00:00.000Z');
@@ -407,6 +436,35 @@ describe('buildKickoffGoalText (pure)', () => {
     expect(goal).toContain('(x, reply)');
     expect(goal).toContain('(x, post)');
     expect(goal).not.toContain('(reddit,');
+  });
+
+  it('every social-media-manager spawn carries a structured `channel:` field (2026-05-13 regression)', () => {
+    // Production incident: kickoff dispatched "fill x reply slot" with a
+    // prompt that named the channel only in the human-facing
+    // `description`. The agent skimmed past it, inferred Reddit from
+    // `Channels connected`, called find_threads_via_xai({ platform:
+    // 'reddit' }), and the 8 X drafts landed in the Reddit slot. The
+    // structured `channel:` field is the single source of truth — assert
+    // it appears on every (channel, mode) spawn directive in the prompt.
+    const goal = buildKickoffGoalText({
+      productName: 'Acme',
+      pathId: 'p1',
+      weekStart: '2026-05-11',
+      now: '2026-05-13T00:00:00Z',
+      channels: ['x', 'reddit'],
+      week1Posts: { x: 2, reddit: 3, email: 0 },
+      channelMix: {
+        x: { repliesPerDay: 8 },
+        reddit: { repliesPerDay: 3 },
+      },
+      availableSubreddits: [
+        { subreddit: 'SaaS', rank: 1, fitScore: 0.91 },
+      ],
+    });
+    expect(goal).toMatch(/\(x, reply\)[\s\S]*?channel: x/);
+    expect(goal).toMatch(/\(reddit, reply\)[\s\S]*?channel: reddit/);
+    expect(goal).toMatch(/\(x, post\)[\s\S]*?channel: x/);
+    expect(goal).toMatch(/\(reddit, post\)[\s\S]*?channel: reddit/);
   });
 
   it('returns a fallback goal when pathId is null', () => {
@@ -418,6 +476,7 @@ describe('buildKickoffGoalText (pure)', () => {
       channels: ['x'],
       week1Posts: null,
       channelMix: null,
+      availableSubreddits: [],
     });
     expect(goal).toContain('No active strategic path');
     expect(goal).not.toContain('Task(');
@@ -435,9 +494,100 @@ describe('buildKickoffGoalText (pure)', () => {
       channelMix: {
         x: { repliesPerDay: -3 },
       },
+      availableSubreddits: [],
     });
     expect(goal).not.toContain('(x, reply)');
     expect(goal).not.toContain('(x, post)');
     expect(goal).toContain('No connected channels with active reply or post budget');
+  });
+
+  it('injects available subreddits into the goal text when reddit is connected', () => {
+    const goal = buildKickoffGoalText({
+      productName: 'Test',
+      pathId: 'p1',
+      weekStart: '2026-05-11',
+      now: '2026-05-11T00:00:00Z',
+      channels: ['reddit'],
+      week1Posts: { x: 0, reddit: 4, email: 0 },
+      channelMix: {
+        reddit: { repliesPerDay: 0 },
+      },
+      availableSubreddits: [
+        { subreddit: 'SaaS', rank: 1, fitScore: 0.91 },
+        { subreddit: 'indiehackers', rank: 2, fitScore: 0.85 },
+        { subreddit: 'microsaas', rank: 3, fitScore: 0.72 },
+      ],
+    });
+    expect(goal).toMatch(/Available subreddits for reddit content_post/);
+    expect(goal).toContain('SaaS');
+    expect(goal).toContain('indiehackers');
+    expect(goal).toContain('microsaas');
+    expect(goal).toContain('fit 0.91');
+    expect(goal).toMatch(/Rotate evenly[\s\S]*sortOrder/);
+    // The reddit post-batch spawn line is still present (subs > 0).
+    expect(goal).toMatch(/draft reddit post batch/);
+  });
+
+  it('spawns reddit research in parallel + defers Reddit posts to Step 3a when no subreddits researched yet', () => {
+    const goal = buildKickoffGoalText({
+      productName: 'Test',
+      pathId: 'p1',
+      weekStart: '2026-05-11',
+      now: '2026-05-11T00:00:00Z',
+      channels: ['reddit'],
+      week1Posts: { x: 0, reddit: 4, email: 0 },
+      channelMix: {
+        reddit: { repliesPerDay: 0 },
+      },
+      availableSubreddits: [],
+    });
+    // The NOTE about deferring still appears so the coordinator
+    // doesn't try to add Reddit content_post in Step 1.
+    expect(goal).toMatch(
+      /no subreddits have been researched yet|Reddit research not yet complete/,
+    );
+    // New: research spawn appears in Step 2 alongside reply / X-post
+    // drafts (will run in parallel, ~30-60s).
+    expect(goal).toMatch(/\(reddit, research\)/);
+    expect(goal).toMatch(/research reddit communities/);
+    expect(goal).toMatch(/Mode: research-reddit-channels/);
+    // New: Step 3a section explaining what to do once the research
+    // <task-notification> returns.
+    expect(goal).toMatch(/Step 3a/);
+    expect(goal).toMatch(
+      /subreddits\[sortOrder % subreddits\.length\]\.subreddit/,
+    );
+    // The initial Step 2 list MUST NOT include the (reddit, post)
+    // spawn — that gets dispatched in Step 3a after research
+    // returns. (The string "draft reddit post batch" appears once,
+    // inside the Step 3a deferred dispatch.)
+    expect(goal).not.toMatch(/\(reddit, post\)/);
+    const draftRedditPostBatchMatches = goal.match(
+      /draft reddit post batch/g,
+    );
+    expect(draftRedditPostBatchMatches).toHaveLength(1);
+  });
+
+  it('omits research spawn when reddit is connected but reddit posts/week is 0', () => {
+    // No research is needed when reddit is connected but the founder
+    // chose 0 reddit posts/week — the (reddit, research) spawn would
+    // be useless work. Reply spawns still proceed.
+    const goal = buildKickoffGoalText({
+      productName: 'Test',
+      pathId: 'p1',
+      weekStart: '2026-05-11',
+      now: '2026-05-11T00:00:00Z',
+      channels: ['reddit'],
+      week1Posts: { x: 0, reddit: 0, email: 0 },
+      channelMix: {
+        reddit: { repliesPerDay: 2 },
+      },
+      availableSubreddits: [],
+    });
+    expect(goal).not.toMatch(/\(reddit, research\)/);
+    expect(goal).not.toMatch(/Step 3a/);
+    expect(goal).not.toMatch(/Mode: research-reddit-channels/);
+    // Reddit reply spawn still appears.
+    expect(goal).toMatch(/\(reddit, reply\)/);
   });
 });

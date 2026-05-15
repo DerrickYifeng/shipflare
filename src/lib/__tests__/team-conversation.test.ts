@@ -188,7 +188,7 @@ describe('loadConversationHistory', () => {
     expect((userMsg.content as Array<unknown>).length).toBe(2);
   });
 
-  it('drops messages belonging to subagents (parentTaskId set)', async () => {
+  it('drops messages belonging to subagents (parent_tool_use_id set)', async () => {
     hoisted.rows.push(
       makeRow({ type: 'user_prompt', content: 'ask coordinator' }),
       // Coordinator-scope Task call
@@ -207,7 +207,7 @@ describe('loadConversationHistory', () => {
           toolName: 'xai_find_customers',
           toolUseId: 'tu-internal',
           input: {},
-          parentTaskId: 'parent-1',
+          parent_tool_use_id: 'tu-task',
         },
       }),
       makeRow({
@@ -215,7 +215,7 @@ describe('loadConversationHistory', () => {
         content: 'scout internal result',
         metadata: {
           toolUseId: 'tu-internal',
-          parentTaskId: 'parent-1',
+          parent_tool_use_id: 'tu-task',
         },
       }),
       // Coordinator sees the Task's final tool_result
@@ -283,10 +283,10 @@ describe('loadConversationHistory', () => {
   });
 
   it('drops tool_results whose tool_use_id was never declared in history', async () => {
-    // Scenario: tool_call was emitted with parentTaskId set (subagent
-    // scope, filtered out by isCoordinatorScope), but the tool_result
-    // row was written WITHOUT parentTaskId — leaving an orphan
-    // result whose tool_use the loader never saw. If we let it
+    // Scenario: tool_call was emitted with parent_tool_use_id set
+    // (subagent scope, filtered out by isCoordinatorScope), but the
+    // tool_result row was written WITHOUT parent_tool_use_id — leaving
+    // an orphan result whose tool_use the loader never saw. If we let it
     // through, Anthropic returns 400 "unexpected tool_use_id in
     // tool_result".
     hoisted.rows.push(
@@ -297,13 +297,13 @@ describe('loadConversationHistory', () => {
           toolName: 'xai_find_customers',
           toolUseId: 'tu-orphan-result',
           input: {},
-          parentTaskId: 'parent-1', // filtered out
+          parent_tool_use_id: 'tu-task', // filtered out
         },
       }),
       makeRow({
         type: 'tool_result',
         content: 'ghost result',
-        metadata: { toolUseId: 'tu-orphan-result' }, // no parentTaskId — slips through
+        metadata: { toolUseId: 'tu-orphan-result' }, // no parent_tool_use_id — slips through
       }),
       makeRow({ type: 'completion', content: 'done' }),
     );

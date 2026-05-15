@@ -169,10 +169,11 @@ export function StageReview({
             label={COPY.stage3.fields.audience.label}
             hint={COPY.stage3.fields.audience.hint}
           >
-            <OnbInput
+            <OnbTextarea
               value={value.audience}
               onChange={(e) => update('audience', e.target.value)}
               placeholder="Indie developers, engineering leads"
+              rows={2}
             />
           </Field>
         </FieldReveal>

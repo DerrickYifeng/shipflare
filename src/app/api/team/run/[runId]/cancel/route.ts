@@ -101,7 +101,9 @@ export async function POST(
   // 1-second window via BullMQ jobId dedupe; failures are swallowed
   // by wake() itself, the cron is the durable backstop.
   try {
-    await wake(leadAgentId);
+    // B6: founder-initiated cancel → priority lane so the shutdown is
+    // processed promptly rather than queueing behind teammate spawns.
+    await wake(leadAgentId, 'priority');
   } catch (err) {
     // Defense in depth: even if wake() throws (it shouldn't), the
     // shutdown_request row is the durable contract — log and continue.

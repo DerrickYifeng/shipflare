@@ -119,6 +119,8 @@ export async function ensureDailyRunEnqueued(args: {
         goal,
         publicSummary,
         trigger: 'daily',
+        // B6: cron-driven daily fan-out → backfill lane (not founder traffic).
+        priority: 'backfill',
       },
       db,
     );
@@ -174,15 +176,20 @@ export function buildDailyGoalText(args: DailyGoalArgs): string {
   const xConnected = platforms.includes('x');
   const redditConnected = platforms.includes('reddit');
 
+  // `channel:` is a structured prompt field — pairs with the kickoff
+  // builder (team-kickoff.ts). The description string is human-facing
+  // and the agent skims past it; the structured field is what
+  // patterns-and-examples.md tells the agent to read for the discovery
+  // platform argument. See team-kickoff.ts for the incident write-up.
   const replySpawns: string[] = [];
   if (xConnected && repliesX > 0) {
     replySpawns.push(
-      `- (x, reply): Task({ subagent_type: 'social-media-manager', description: 'fill x reply slot', prompt: 'Mode: discover-and-fill-slot\\nplanItemId: <today's x content_reply uuid, or "(none)" if no slot exists>\\ntargetCount: ${repliesX}' })`,
+      `- (x, reply): Task({ subagent_type: 'social-media-manager', description: 'fill x reply slot', prompt: 'Mode: discover-and-fill-slot\\nchannel: x\\nplanItemId: <today's x content_reply uuid, or "(none)" if no slot exists>\\ntargetCount: ${repliesX}' })`,
     );
   }
   if (redditConnected && repliesReddit > 0) {
     replySpawns.push(
-      `- (reddit, reply): Task({ subagent_type: 'social-media-manager', description: 'fill reddit reply slot', prompt: 'Mode: discover-and-fill-slot\\nplanItemId: <today's reddit content_reply uuid, or "(none)" if no slot exists>\\ntargetCount: ${repliesReddit}' })`,
+      `- (reddit, reply): Task({ subagent_type: 'social-media-manager', description: 'fill reddit reply slot', prompt: 'Mode: discover-and-fill-slot\\nchannel: reddit\\nplanItemId: <today's reddit content_reply uuid, or "(none)" if no slot exists>\\ntargetCount: ${repliesReddit}' })`,
     );
   }
 

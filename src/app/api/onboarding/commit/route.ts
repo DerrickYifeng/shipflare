@@ -16,6 +16,7 @@ import { deleteDraft } from '@/lib/onboarding-draft';
 import { recordPipelineEvent } from '@/lib/pipeline-events';
 import { createLogger, loggerForRequest } from '@/lib/logger';
 import { provisionTeamForProduct } from '@/lib/team-provisioner';
+import { enqueueRedditChannelResearch } from '@/lib/queue';
 
 const baseLog = createLogger('api:onboarding:commit');
 
@@ -294,6 +295,31 @@ export async function POST(request: NextRequest): Promise<Response> {
     log.warn(
       `provisionTeamForProduct failed (non-fatal) user=${userId}: ${err instanceof Error ? err.message : String(err)}`,
     );
+  }
+
+  // Kickoff Reddit-channel research when Reddit is in the active channel
+  // mix. `channelMix.reddit` is a non-null settings object iff the user
+  // (or the strategy skill) chose Reddit as one of the active channels —
+  // `strategicPathSchema` enforces that at least one channel exists.
+  // `force: false` so concurrent commits collapse on the deterministic
+  // `rcr:<productId>` BullMQ jobId; the founder-triggered "Re-research"
+  // path uses force=true.
+  if (body.path.channelMix.reddit) {
+    try {
+      await enqueueRedditChannelResearch({
+        userId,
+        productId,
+        force: false,
+      });
+      enqueued.push(`reddit-channel-research:${productId}`);
+      log.info(`enqueued reddit-channel-research for product ${productId}`);
+    } catch (err) {
+      // Non-fatal: research can be retried from the settings page. Logging
+      // at warn so an outage of BullMQ doesn't 500 the commit response.
+      log.warn(
+        `enqueueRedditChannelResearch failed (non-fatal) user=${userId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   // Kickoff is now triggered on the user's first visit to /team — see

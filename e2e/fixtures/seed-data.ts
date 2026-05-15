@@ -72,20 +72,6 @@ export function makeDraft(
   };
 }
 
-export function makeHealthScore(userId: string, score: number) {
-  return {
-    id: crypto.randomUUID(),
-    userId,
-    score,
-    s1Pipeline: score * 0.2,
-    s2Quality: score * 0.22,
-    s3Engagement: score * 0.18,
-    s4Consistency: score * 0.2,
-    s5Safety: score * 0.2,
-    calculatedAt: new Date(),
-  };
-}
-
 export function makeActivityEvent(userId: string, index: number) {
   const eventType = EVENT_TYPES[index % EVENT_TYPES.length];
   return {

@@ -3,7 +3,7 @@ import { promisify } from 'node:util';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import fg from 'fast-glob';
-import Anthropic from '@anthropic-ai/sdk';
+import { createMessage } from '@/core/api-client';
 import { createLogger } from '@/lib/logger';
 import type {
   TechStack,
@@ -341,9 +341,14 @@ async function analyzeCodebase(params: {
   manifest: ManifestInfo | null;
   keyFiles: KeyFile[];
   techStack: TechStack;
+  /**
+   * Shipflare userId (Phase B5). When set, the underlying createMessage
+   * call participates in the hierarchical Anthropic token bucket.
+   * Threaded down from `scanRepo` which receives it from the
+   * code-scan worker (`job.data.userId`).
+   */
+  userId?: string;
 }): Promise<ProductAnalysis> {
-  const client = new Anthropic();
-
   const sections = [
     params.techStack.languages.length > 0
       ? `Tech Stack: ${params.techStack.languages.join(', ')} / ${params.techStack.frameworks.join(', ')}`
@@ -362,11 +367,14 @@ async function analyzeCodebase(params: {
   const content = sections.join('\n');
 
   try {
-    const response = await client.messages.create({
+    // Route through createMessage for shared retry logic on
+    // 429/529/5xx + prompt caching of the static CODEBASE_ANALYZE_PROMPT.
+    const { response } = await createMessage({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 400,
+      maxTokens: 400,
       system: CODEBASE_ANALYZE_PROMPT,
       messages: [{ role: 'user', content }],
+      ...(params.userId !== undefined ? { tenantId: params.userId } : {}),
     });
 
     const text = response.content[0]?.type === 'text' ? response.content[0].text : '';
@@ -399,8 +407,16 @@ async function analyzeCodebase(params: {
  * Scan a cloned repository to understand the product it builds.
  * Adapted from engine tools: GlobTool (fast-glob), FileReadTool (fs),
  * GrepTool (regex).
+ *
+ * `userId` (Phase B5) — forwarded into the underlying analyzeCodebase
+ * createMessage call so the LLM round-trip participates in the
+ * hierarchical Anthropic token bucket. The code-scan worker reads
+ * userId from `job.data.userId`.
  */
-export async function scanRepo(repoDir: string): Promise<ScanResult> {
+export async function scanRepo(
+  repoDir: string,
+  userId?: string,
+): Promise<ScanResult> {
   log.info(`Scanning ${repoDir}`);
 
   // Phase 1: Structure discovery + docs + manifest (parallel)
@@ -426,6 +442,7 @@ export async function scanRepo(repoDir: string): Promise<ScanResult> {
     manifest,
     keyFiles,
     techStack,
+    ...(userId !== undefined ? { userId } : {}),
   });
 
   // Build tree (truncated to top-level + one level deep for storage)

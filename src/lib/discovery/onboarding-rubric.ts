@@ -108,6 +108,9 @@ export async function generateOnboardingRubric(
     maxTokens: 2048,
     promptCaching: false,
     signal: opts?.signal,
+    // Phase B5: input already carries userId — forward it so this LLM
+    // call decrements the per-tenant + global Anthropic token bucket.
+    tenantId: input.userId,
   });
 
   const rubric = response.content

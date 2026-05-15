@@ -307,17 +307,18 @@ export function ActivityLog({
 }
 
 /**
- * Threading depth. Phase D Day 2 supports a single level of indent —
- * messages whose `metadata.parentTaskId` is populated were emitted from
- * inside a specialist's subagent run (spawned by the coordinator's Task
- * tool). We render those indented so the coordinator→specialist
- * delegation is visible at a glance. Deeper nesting is possible but
- * rare in the Phase B 3-agent roster; when it matters we can walk the
- * parentTaskId chain to compute true depth.
+ * Threading depth. A single level of indent is enough — messages whose
+ * `metadata.parent_tool_use_id` is populated were emitted from inside a
+ * specialist's subagent run (spawned by the coordinator's Task tool). We
+ * render those indented so the coordinator→specialist delegation is
+ * visible at a glance. Deeper nesting is possible but rare; when it
+ * matters we can walk the parent_tool_use_id chain to compute true depth.
  */
 function messageDepth(msg: TeamActivityMessage): number {
-  const parentTaskId = msg.metadata?.['parentTaskId'];
-  return typeof parentTaskId === 'string' && parentTaskId.length > 0 ? 1 : 0;
+  const parentToolUseId = msg.metadata?.['parent_tool_use_id'];
+  return typeof parentToolUseId === 'string' && parentToolUseId.length > 0
+    ? 1
+    : 0;
 }
 
 // ---------------------------------------------------------------------------

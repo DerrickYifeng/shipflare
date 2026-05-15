@@ -26,6 +26,7 @@ import { teamMessages } from '@/lib/db/schema';
 import type { Database } from '@/lib/db';
 import { ensureLeadAgentRun } from './spawn-lead';
 import { wake } from '@/workers/processors/lib/wake';
+import type { AgentRunPriority } from '@/lib/queue/agent-run';
 
 export interface DispatchLeadInput {
   teamId: string;
@@ -44,6 +45,13 @@ export interface DispatchLeadInput {
    * routing instructions, etc.
    */
   publicSummary?: string;
+  /**
+   * B6: wake-lane priority. Defaults to `'standard'` — appropriate for
+   * internal callers. Founder-originated dispatches should pass
+   * `'priority'`; cron-driven (daily-run, weekly-replan, phase
+   * transitions when not founder-initiated) should pass `'backfill'`.
+   */
+  priority?: AgentRunPriority;
 }
 
 export interface DispatchLeadResult {
@@ -85,7 +93,7 @@ export async function dispatchLeadMessage(
     metadata,
   });
 
-  await wake(leadAgentId);
+  await wake(leadAgentId, input.priority ?? 'standard');
 
   return {
     runId: messageId,

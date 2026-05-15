@@ -5,6 +5,7 @@ import { users, sessions } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { createLogger } from '@/lib/logger';
 import { getGitHubToken, revokeGitHubGrant } from '@/lib/github';
+import { getGoogleToken, revokeGoogleGrant } from '@/lib/google';
 
 const log = createLogger('api:account');
 
@@ -13,17 +14,18 @@ const log = createLogger('api:account');
  * Delete the current user's account and all associated data.
  *
  * Order matters:
- *   1. Revoke the GitHub OAuth grant FIRST, while we still have the token.
- *      If we delete the DB first, the plaintext token is gone and GitHub
- *      keeps trusting the app, which shows up as "GitHub still connected"
- *      on the next sign-in click.
+ *   1. Revoke OAuth grants FIRST, while we still have the tokens. If we
+ *      delete the DB first, the plaintext tokens are gone and the provider
+ *      keeps trusting the app, which shows up as "still connected" on the
+ *      next sign-in click. We do this for every connected provider
+ *      (GitHub, Google).
  *   2. Then cascade-delete the user. FK `onDelete: cascade` handles
  *      accounts, sessions, products, channels, threads, drafts, posts,
  *      health_scores, activity_events, and all user-owned rows.
  *
- * Revocation is best-effort: if GitHub is unreachable or the token is already
- * invalid, we still delete the account. The user asked to leave; we do not
- * trap them because of an upstream API blip.
+ * Revocation is best-effort: if any provider is unreachable or the token is
+ * already invalid, we still delete the account. The user asked to leave; we
+ * do not trap them because of an upstream API blip.
  *
  * GDPR/CCPA compliant.
  */
@@ -40,6 +42,12 @@ export async function DELETE() {
   if (githubToken) {
     const revoked = await revokeGitHubGrant(githubToken);
     log.info(`GitHub grant revoke for ${userId}: ${revoked ? 'ok' : 'best-effort-failed'}`);
+  }
+
+  const googleToken = await getGoogleToken(userId);
+  if (googleToken) {
+    const revoked = await revokeGoogleGrant(googleToken);
+    log.info(`Google grant revoke for ${userId}: ${revoked ? 'ok' : 'best-effort-failed'}`);
   }
 
   await db.transaction(async (tx) => {

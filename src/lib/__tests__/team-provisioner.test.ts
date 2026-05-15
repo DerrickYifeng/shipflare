@@ -212,7 +212,7 @@ describe('getTeamCompositionForPreset', () => {
     );
     // Plan 3 (2026-05-04): the baseline collapsed to just the
     // coordinator — content-planner's planning work was absorbed by
-    // the chief of staff via direct add_plan_item / generate_strategic_path
+    // the CMO via direct add_plan_item / generate_strategic_path
     // tool calls. Specialist agents layer on top per preset.
     const baseline: AgentType[] = ['coordinator'];
     for (const preset of [
@@ -331,7 +331,7 @@ describe('ensureTeamExists (with preset)', () => {
     const nameByType = Object.fromEntries(
       getTeamMembers().map((m) => [m.agentType, m.displayName]),
     );
-    expect(nameByType['coordinator']).toBe('Chief of Staff');
+    expect(nameByType['coordinator']).toBe('CMO');
     expect(nameByType['social-media-manager']).toBe('Social Media Manager');
   });
 });

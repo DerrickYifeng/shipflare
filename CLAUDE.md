@@ -73,6 +73,12 @@ When adding a new channel (e.g., LinkedIn):
       selects it for plan items with `channel: '<new>'`.
 - [ ] Update `allowed-tools` in relevant SKILL.md frontmatters
 - [ ] Set `replyAuthorCooldownDays` in `PLATFORMS[id]` (omit to inherit 7-day default)
+- [ ] Add an entry to `PLATFORM_LEAK_TERMS` in
+      `src/lib/content/validators/platform-leak.ts` — explicitly enumerate the
+      platform's sibling-leak vocabulary as typed `LeakTerm`s (`word` /
+      `substring` / `regex`). There is no `displayName` fallback; missing
+      entries mean drafts for sibling platforms won't be checked against
+      leaks of this platform's vocabulary.
 - [ ] NO changes needed to: skill-runner, swarm, query-loop, schemas, core agent .md files,
       `full-scan.ts`, `discovery.ts`, `posting.ts`, or `/api/automation/run`
 
@@ -248,139 +254,51 @@ If you are considering adding a new agent: first ask whether 1
 existing agent + 1-2 new skills could express the same work. The
 default answer is yes.
 
-## Agent Teams Architecture
+## Agent Teams Architecture (post-CF migration)
 
-The multi-agent runtime (Phases A→G, landed 2026-05-02) follows engine
-PDF §3.5.1 and §9 invariants. **The following architectural rules are
-non-negotiable** — code review must reject violations.
+ShipFlare's multi-agent runtime is built on Cloudflare Durable Objects + Agents SDK
++ Dynamic Workflows. Most invariants are now framework guarantees. Code review
+must reject violations of these two:
 
-### Tool routing — four-layer SSOT
+1. **CMO SQLite is the per-team source of truth.** Other employees never write
+   CMO SQLite directly; all writes go through CMO's exposed MCP tools
+   (`commitStrategicPath`, `addPlanItem`, `approveDraft`, etc.). Direct cross-DO
+   SQL access = review reject.
 
-`assembleToolPool(role, def, registry)` in
-`src/tools/AgentTool/assemble-tool-pool.ts` is the SINGLE place that
-decides "what tools does agent X see". Layers in order:
+2. **Peer-DM shadow MUST NOT trigger CMO's onMessage / chat handler.** Use
+   `env.CMO.idFromName(uid).fetch('/internal/peer-dm-shadow')`, not RPC tool
+   calls. The shadow handler appends to `employee_log` and returns; CMO sees
+   it on next natural wake.
 
-1. Global registry pool
-2. Role whitelist (`src/tools/AgentTool/role-tools.ts`)
-3. Role blacklist (`src/tools/AgentTool/blacklists.ts`) — architecture-level
-   invariants (`INTERNAL_TEAMMATE_TOOLS` / `INTERNAL_SUBAGENT_TOOLS`)
-4. AgentDefinition `tools:` allow + `disallowedTools:` subtract
+Framework guarantees (no longer hand-enforced):
+- Single-threaded message processing per DO (replaces mailbox row lock)
+- Hibernation on idle (replaces sleep / slot-yield protocol)
+- Tool authorization via props (replaces 4-layer assembleToolPool)
+- RPC connection persistence across hibernation
+- Role-based tool visibility via props.caller / props.role checks inside McpAgent
 
-**Any code that does role-based tool filtering OUTSIDE this function is a
-review reject.** No `if (role === 'lead')` ad-hoc gating; everything
-flows through `assembleToolPool`.
+See `docs/superpowers/specs/2026-05-13-cloudflare-do-migration-design.md` for full design,
+including the 15-finding S2-S6 implementation log at §9.
 
-### Messages are the conversation
+## Security TODO (post-CF migration)
 
-Worker-to-worker / lead-to-worker / system-to-lead communication ALL flows
-through `team_messages`:
-- Worker results: `messageType='task_notification'`, `type='user_prompt'`
-  — appears as user-role message in parent's transcript
-- Inter-teammate DM: `messageType='message'`
-- Coordinator commands: `messageType='shutdown_request'`,
-  `'plan_approval_response'`, `'broadcast'`
-- Founder UI input: same shape, `toAgentId=lead.agentId`
+Phase 1 baseline:
 
-`agent-run` is the SOLE driver for both lead and teammate (Phase E).
-The legacy `team-run.ts` was deleted.
+- **`apps/core/src/lib/channel.ts` is the SOLE sanctioned reader of `channels.oauthTokenEncrypted`.**
+  Platform MCP tools (XMcpAgent, RedditMcpAgent) call `getChannel(env, userId, platform)`.
+  Routes that select from the `channels` table (e.g. `/settings/channels`) MUST use an explicit
+  projection that omits the encrypted columns. Audit: grep `oauthTokenEncrypted` — should only
+  appear in `apps/core/src/lib/channel.ts`, `packages/db/src/schema.ts`, and the
+  OAuth-callback routes that write it.
 
-### Critical invariants (review-reject if violated)
+- **Token encryption: WebCrypto AES-GCM via `@shipflare/crypto`** with `CHANNEL_ENC_KEY` (32 bytes,
+  base64). Identical between apps/core + apps/web (see `scripts/cf-deploy-checklist.md`).
 
-1. **Teammates cannot fan out**: `INTERNAL_TEAMMATE_TOOLS` includes
-   `Task` (sync subagent spawning) — teammates can only spawn via
-   forbidden routes. Removing `Task` from this set is a review reject.
-2. **`SyntheticOutputTool` is system-only**: `isEnabled()` returns false;
-   tool is in `INTERNAL_TEAMMATE_TOOLS`. Adding it to a whitelist or
-   removing the isEnabled gate is a review reject.
-3. **Peer-DM shadow MUST NOT call `wake()`**: peer DMs (teammate↔teammate
-   `type:message`) insert a summary-only shadow to lead's mailbox via
-   `peer-dm-shadow.ts`. The lead picks it up on its NEXT NATURAL wake
-   (task notification or founder message). Adding `wake()` to peer-DM
-   would burn the lead's API budget on every chatter.
-4. **`agent_runs.role` is immutable**: changing role requires deleting
-   the row and spawning fresh. The role is part of the teammate's
-   contract; changing mid-run breaks blacklist invariants.
-5. **`<task-notification>` XML is synthesized in ONE place**:
-   `src/workers/processors/lib/synthesize-notification.ts`. When engine
-   evolves the schema, only this file changes. No inline XML construction
-   anywhere else.
-6. **`delivered_at` is the only mailbox idempotency key**: drainMailbox
-   uses `for update` row lock + `delivered_at` marker. No in-memory
-   deduping. Bypassing this allows double-delivery.
-7. **`assembleToolPool` is the SSOT** (re-stating for emphasis): never
-   compute "agent X's tools" anywhere else.
+- **JWT for browser → core: HS256 via `MCP_JWT_SECRET`**. Short-lived (60s), signed by web,
+  verified by core. Identical between workers.
 
-### When adding a new agent
-
-1. Create `src/tools/AgentTool/agents/<name>/AGENT.md` with `role: lead`
-   or `role: member` declared
-2. Add the agent's `agentType` to `team_members` table seed/migration
-3. The 4-layer filter handles tool resolution automatically — no code
-   change needed unless you also need a new tool
-
-### When adding a new tool
-
-1. Add the tool name constant to its tool file
-2. Decide: should `member` agents have it? If NO, add to
-   `INTERNAL_TEAMMATE_TOOLS` in `blacklists.ts`
-3. Should sync `subagent` invocations have it? If NO, add to
-   `INTERNAL_SUBAGENT_TOOLS`
-4. Register the tool in `src/tools/registry.ts` (or `registry-team.ts`)
-5. Update the relevant AGENT.md `tools:` allow-list to include the new
-   tool by name (optional — only needed if you want the agent to default-have it)
-
-### Async lifecycle quick reference
-
-- `Task({subagent_type, prompt})` → sync subagent (await result)
-- `Task({subagent_type, prompt, run_in_background: true})` → async
-  teammate (returns `{agentId}`; result later as `<task-notification>`)
-- `SendMessage({type, to, content})` → continue / DM / broadcast / etc.
-- `TaskStop({task_id})` → graceful shutdown (lead-only)
-- `Sleep({duration_ms})` → yield BullMQ slot until duration or
-  `SendMessage` arrives (member only — not subagents)
-
-The `agent-run` BullMQ worker drives all teammate lifecycles. Each
-teammate's transcript is persisted to `team_messages` per assistant turn
-for resume-from-sleep continuity.
-
-### Founder UI mental model
-
-The team-lead is **always present** as a sleeping `agent_runs` row. Founders
-don't "start runs" — they send messages to the lead. Each message wakes
-the lead; the lead processes (potentially spawning parallel teammates),
-replies, and goes back to sleep.
-
-UI implications:
-- The "Start a run" CTA is replaced with "Send a message"
-- The lead's status pill is always visible (sleeping/running/resuming)
-- Teammates appear in the roster sidebar when spawned, disappear when terminal
-- Activity feed shows cross-agent events (peer-DM, status changes, completions)
-- Cancel = SendMessage with type='shutdown_request' (eventually consistent;
-  takes seconds to propagate, not synchronous)
-- Per-teammate cancel button POSTs to /api/team/agent/[agentId]/cancel
-  (lead-only restriction is enforced separately by SendMessage's runtime
-  validation when the cancel comes from inside an agent context)
-
-## Security TODO
-
-Tracking pending security hardening beyond what `feat/security-hardening` already shipped.
-
-- **`accounts.access_token` / `accounts.refresh_token` encryption — DONE (approach a).**
-  The `accounts` table (Auth.js Drizzle adapter, `src/lib/db/schema/users.ts`) stores
-  GitHub OAuth tokens envelope-encrypted via the wrapped DrizzleAdapter in
-  `src/lib/auth/index.ts`. Encrypt/decrypt helpers live in
-  `src/lib/auth/account-encryption.ts`; reads outside the adapter use
-  `maybeDecrypt` (via `getGitHubToken`) so legacy plaintext rows keep working
-  until backfilled by `scripts/encrypt-account-tokens.ts --commit`. Run that
-  script once per environment after deploy. `DELETE /api/account` also now
-  calls GitHub's `DELETE /applications/{client_id}/grant` before DB cascade so
-  re-signing-in after deletion re-prompts consent instead of silently relinking.
-- **Only the three helpers in `src/lib/platform-deps.ts` (`createPlatformDeps`,
-  `createClientFromChannel`, `createPublicPlatformDeps`) plus `RedditClient.fromChannel`
-  / `XClient.fromChannel` / `RedditClient.appOnly` are allowed to read
-  `channels.oauth_token_encrypted`.** Every other `select().from(channels)` in
-  `src/app/api/**` and `src/workers/**` MUST use an explicit projection
-  (`select({ id, userId, platform, username, ... })`) and omit token columns.
-  Enforced by audit Theme 4 item 3. `createPublicPlatformDeps` is the exception that
-  proves the rule: it never touches the `channels` table because it runs before any
-  user has connected a channel.
+Phase 2 follow-ups:
+- External MCP exposure adds an OAuth provider wrapper for `McpAgent.serve()` paths
+  (`withOAuthProvider`) so external clients' identity flows into `props`.
+- Audit log on a periodic basis: scan `apps/core` for any new direct reads of
+  `oauthTokenEncrypted` that didn't go through `channel.ts`.

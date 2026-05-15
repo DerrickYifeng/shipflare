@@ -134,6 +134,13 @@ export interface TodoItem {
   threadSurfacedVia: string[] | null;
   // Joined from calendar
   calendarContentType: string | null;
+  /**
+   * Plan-item polymorphic params (e.g. `{ subreddit }` for Reddit
+   * `content_post`). Null for reply-card rows. Loosely typed at the
+   * hook layer — the post card narrows for its own purposes (Reddit
+   * subreddit picker, Task 9).
+   */
+  params: Record<string, unknown> | null;
   // Derived
   cardFormat: 'post' | 'reply';
 }

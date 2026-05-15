@@ -57,6 +57,7 @@ export async function queryLoop<T>(params: QueryParams): Promise<{ output: T; tr
     abortSignal,
     onEvent,
     promptCaching = true,
+    tenantId,
   } = params;
 
   const anthropicTools = tools.map(toAnthropicTool);
@@ -105,6 +106,7 @@ export async function queryLoop<T>(params: QueryParams): Promise<{ output: T; tr
       maxTokens: currentMaxTokens,
       promptCaching,
       signal: abortSignal,
+      ...(tenantId !== undefined ? { tenantId } : {}),
       onStreamEvent: onEvent
         ? (event) => {
             if (event.type === 'content_block_start') {
@@ -263,7 +265,10 @@ export async function runAgent<T>(
   config: AgentConfig,
   userMessage: string,
   context: ToolContext,
-  outputSchema?: z.ZodType<T>,
+  // Widen input slot so schemas with `.default(...)` / `.optional()`
+  // (input ≠ output) compile when callers parameterize `<T>` to the
+  // output type. runAgent only consumes parsed output.
+  outputSchema?: z.ZodType<T, z.ZodTypeDef, unknown>,
   onProgress?: OnProgress,
   /** Pre-built cache-safe blocks for cross-agent cache sharing. */
   prebuilt?: {
@@ -505,6 +510,7 @@ export async function runAgent<T>(
       promptCaching: true,
       signal: context.abortSignal,
       systemBlocks: prebuilt?.systemBlocks,
+      ...(config.tenantId !== undefined ? { tenantId: config.tenantId } : {}),
       onStreamEvent: onEvent
         ? (event) => {
             // The earliest signal the API has sent anything back — used

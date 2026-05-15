@@ -1,0 +1,9 @@
+node_modules/
+.wrangler/
+.dev.vars
+.next/
+.open-next/
+out/
+worker-configuration.d.ts
+next-env.d.ts
+*.log

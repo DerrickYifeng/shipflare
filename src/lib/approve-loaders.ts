@@ -1,6 +1,7 @@
 import { db } from '@/lib/db';
 import { drafts, threads, channels } from '@/lib/db/schema';
 import { and, eq } from 'drizzle-orm';
+import { PLATFORMS } from '@/lib/platform-config';
 import type { DispatchInput } from '@/lib/approve-dispatch';
 
 /**
@@ -43,13 +44,21 @@ export async function loadDispatchInputForDraft(
 
   if (!row) return null;
 
-  const [channelRow] = await db
-    .select({ id: channels.id })
-    .from(channels)
-    .where(and(eq(channels.userId, userId), eq(channels.platform, row.threadPlatform)))
-    .limit(1);
+  // Reddit is always-on no-binding — no `channels` row exists, and
+  // dispatchApprove never reads channelId for Reddit (handoff path). For
+  // every other platform the row is required so the X-post `enqueuePosting`
+  // call has a channel to bind to.
+  let channelId: string | null = null;
+  if (row.threadPlatform !== PLATFORMS.reddit.id) {
+    const [channelRow] = await db
+      .select({ id: channels.id })
+      .from(channels)
+      .where(and(eq(channels.userId, userId), eq(channels.platform, row.threadPlatform)))
+      .limit(1);
 
-  if (!channelRow) return null;
+    if (!channelRow) return null;
+    channelId = channelRow.id;
+  }
 
   return {
     draft: {
@@ -67,7 +76,7 @@ export async function loadDispatchInputForDraft(
       platform: row.threadPlatform,
       externalId: row.threadExternalId,
     },
-    channelId: channelRow.id,
+    channelId,
   };
 }
 

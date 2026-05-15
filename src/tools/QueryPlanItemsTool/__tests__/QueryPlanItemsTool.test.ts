@@ -25,7 +25,7 @@ vi.mock('@/lib/logger', () => ({
 }));
 
 import { queryPlanItemsTool, weekBoundsForOffset } from '../QueryPlanItemsTool';
-import { planItems } from '@/lib/db/schema';
+import { drafts, planItems } from '@/lib/db/schema';
 
 interface PlanItemRow {
   id: string;
@@ -161,5 +161,80 @@ describe('queryPlanItemsTool', () => {
       ctx,
     );
     expect(rows.map((r) => r.id).sort()).toEqual(['a', 'b']);
+  });
+
+  it('content_reply: counts drafts table rows linked to the plan_item (2026-05-13 verification regression)', async () => {
+    // Tier 2: the coordinator uses `draftCount` to mechanically verify
+    // a specialist's claim before flipping state to `drafted`. For
+    // content_reply rows, draftCount must count only this plan_item's
+    // own `pending` drafts, scoped to the same userId.
+    store.register<PlanItemRow>(planItems, [
+      seed({ id: 'pi-x', kind: 'content_reply', channel: 'x' }),
+      seed({ id: 'pi-reddit', kind: 'content_reply', channel: 'reddit' }),
+    ]);
+    store.register(drafts, [
+      // 3 live drafts on the X slot
+      { id: 'd1', userId: 'user-1', planItemId: 'pi-x', status: 'pending' },
+      { id: 'd2', userId: 'user-1', planItemId: 'pi-x', status: 'pending' },
+      { id: 'd3', userId: 'user-1', planItemId: 'pi-x', status: 'pending' },
+      // rejected → excluded
+      { id: 'd4', userId: 'user-1', planItemId: 'pi-x', status: 'rejected' },
+      // other user's draft → excluded
+      { id: 'd5', userId: 'user-2', planItemId: 'pi-x', status: 'pending' },
+      // 1 draft on the Reddit slot
+      { id: 'd6', userId: 'user-1', planItemId: 'pi-reddit', status: 'pending' },
+      // orphaned draft (planItemId null) → excluded
+      { id: 'd7', userId: 'user-1', planItemId: null, status: 'pending' },
+    ]);
+    const ctx = makeCtx(store, { userId: 'user-1', productId: 'prod-1' });
+    const rows = await queryPlanItemsTool.execute({}, ctx);
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    expect(byId.get('pi-x')?.draftCount).toBe(3);
+    expect(byId.get('pi-reddit')?.draftCount).toBe(1);
+  });
+
+  it('returns draftCount: 0 when no drafts exist for a plan_item', async () => {
+    store.register<PlanItemRow>(planItems, [seed({ id: 'pi-empty' })]);
+    const ctx = makeCtx(store, { userId: 'user-1', productId: 'prod-1' });
+    const rows = await queryPlanItemsTool.execute({}, ctx);
+    expect(rows[0]?.draftCount).toBe(0);
+  });
+
+  it('content_post: draftCount = 1 when `output.draft_body` is non-empty (2026-05-13 false-positive fix)', async () => {
+    // Production incident: content_post slots persist body inline via
+    // DraftPostTool (`plan_items.output.draft_body` + state='drafted'),
+    // NEVER inserting a `drafts` row. Before this branch, the
+    // coordinator's Tier 2 verification saw `draftCount: 0` for every
+    // drafted post and warned the founder of a phantom persistence
+    // failure. Body presence = 1, absence = 0.
+    store.register<PlanItemRow>(planItems, [
+      seed({
+        id: 'pi-post-drafted',
+        kind: 'content_post',
+        state: 'drafted',
+        // @ts-expect-error — `output` exists on the runtime schema but
+        // isn't in the test fixture's narrow PlanItemRow type
+        output: { draft_body: 'A first-week ShipFlare post body.' },
+      }),
+      seed({
+        id: 'pi-post-empty',
+        kind: 'content_post',
+        state: 'planned',
+        // No draft_body → counts as 0.
+      }),
+      seed({
+        id: 'pi-post-whitespace',
+        kind: 'content_post',
+        state: 'planned',
+        // @ts-expect-error
+        output: { draft_body: '   ' }, // whitespace-only → 0
+      }),
+    ]);
+    const ctx = makeCtx(store, { userId: 'user-1', productId: 'prod-1' });
+    const rows = await queryPlanItemsTool.execute({}, ctx);
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    expect(byId.get('pi-post-drafted')?.draftCount).toBe(1);
+    expect(byId.get('pi-post-empty')?.draftCount).toBe(0);
+    expect(byId.get('pi-post-whitespace')?.draftCount).toBe(0);
   });
 });

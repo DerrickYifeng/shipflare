@@ -29,11 +29,18 @@ type SectionId = 'appearance' | 'account' | 'billing' | 'integrations' | 'safety
 // convention because it's a cosmetic tab. The `'appearance'` key is preserved
 // for URL-hash stability (no existing deep links to `/settings#appearance`, but
 // we keep the identifier stable in case external links appear).
+//
+// Safety tab hidden (2026-05-12) — its toggles (autoApproveEnabled,
+// notifyOnNewDraft, notifyOnAutoApprove) advertise automation behaviors
+// that aren't fully wired yet, so surfacing them would be a lie.
+// `SafetySection` + the `'safety'` SectionId / render branch are left
+// intact so re-enabling is one line (re-add the entry below). The
+// readInitialSection hash filter rejects `#safety` automatically when
+// the entry is missing, so no one can deep-link to a hidden tab.
 const SECTIONS: { id: SectionId; label: string }[] = [
   { id: 'account', label: 'Account' },
   { id: 'billing', label: 'Billing' },
   { id: 'integrations', label: 'Integrations' },
-  { id: 'safety', label: 'Safety' },
   { id: 'appearance', label: 'Appearance' },
 ];
 
@@ -63,7 +70,10 @@ function readInitialSection(): SectionId {
   return SECTIONS.some((s) => s.id === hash) ? hash : 'account';
 }
 
-export function SettingsContent({ user, connections }: SettingsContentProps) {
+export function SettingsContent({
+  user,
+  connections,
+}: SettingsContentProps) {
   // Lazy init so we read the URL hash once on mount, not inside an effect —
   // avoids the react-hooks/set-state-in-effect lint rule and the cascading
   // render it protects against.
@@ -773,126 +783,128 @@ function IntegrationsSection({
 
   const xConn = connections.find((c) => c.platform === 'x');
 
-  // Reddit is intentionally absent from this list. It's a no-binding
-  // always-on channel (handoff dispatch + RedditClient.appOnly() reads),
-  // so there's no Connect / Disconnect surface for it — every user has
-  // Reddit drafts surfaced regardless.
-  const integrations: Array<{
-    name: string;
-    badge: string;
-    connected: boolean;
-    readOnly?: boolean;
-    onConnect?: () => void;
-    onDisconnect?: () => void;
-    icon: ReactNode;
-  }> = [
-    {
-      name: 'X / Twitter',
-      badge: xConn?.username ? `@${xConn.username} · OAuth` : 'Not connected',
-      connected: xConn?.connected ?? false,
-      onConnect: handleConnectX,
-      onDisconnect: () => void handleDisconnectX(),
-      icon: <XTileIcon />,
-    },
-    {
-      name: 'Reddit',
-      badge: 'Always on · handoff',
-      connected: true,
-      readOnly: true,
-      icon: <RedditTileIcon />,
-    },
-    {
-      name: 'Hacker News',
-      badge: 'Read-only · public API',
-      connected: true,
-      readOnly: true,
-      icon: <HnTileIcon />,
-    },
-    {
-      name: 'Slack',
-      badge: 'Coming soon',
-      connected: false,
-      readOnly: true,
-      icon: <SlackTileIcon />,
-    },
-    {
-      name: 'Webhook',
-      badge: 'Coming soon',
-      connected: false,
-      readOnly: true,
-      icon: <WebhookTileIcon />,
-    },
-  ];
+  // Only X lives in Settings — it's the OAuth-bound channel. Reddit is
+  // managed under /growth/reddit-channels (always-on, no OAuth, no
+  // Settings tile). Slack / Webhook / Hacker News were removed earlier
+  // (2026-05-12) — none were actually wired.
+  const xIntegration = {
+    name: 'X / Twitter',
+    badge: xConn?.username ? `@${xConn.username} · OAuth` : 'Not connected',
+    connected: xConn?.connected ?? false,
+    onConnect: handleConnectX,
+    onDisconnect: () => void handleDisconnectX(),
+    icon: <XTileIcon />,
+  };
 
   return (
     <SettingsPanel title="Integrations" desc="Connect the rails. Disconnect anytime.">
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {integrations.map((it) => (
-          <div
-            key={it.name}
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 12,
-              padding: 14,
-              borderRadius: 'var(--sf-radius-md)',
-              background: 'var(--sf-bg-tertiary)',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-              <div
-                style={{
-                  width: 36,
-                  height: 36,
-                  borderRadius: 8,
-                  background: 'var(--sf-bg-primary)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  border: '1px solid var(--sf-border-subtle)',
-                  flexShrink: 0,
-                }}
-              >
-                {it.icon}
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div
-                  style={{
-                    fontSize: 'var(--sf-text-sm)',
-                    fontWeight: 600,
-                    color: 'var(--sf-fg-1)',
-                  }}
-                >
-                  {it.name}
-                </div>
-                <div
-                  style={{
-                    fontSize: 11,
-                    color: 'var(--sf-fg-3)',
-                    marginTop: 2,
-                    fontFamily: 'var(--sf-font-mono)',
-                    letterSpacing: 'var(--sf-track-mono)',
-                  }}
-                >
-                  {it.badge}
-                </div>
-              </div>
-              {it.readOnly ? (
-                <Badge>{it.connected ? 'Active' : 'Locked'}</Badge>
-              ) : it.connected ? (
-                <Button variant="ghost" size="sm" onClick={it.onDisconnect}>
-                  Disconnect
-                </Button>
-              ) : (
-                <Button size="sm" onClick={it.onConnect}>
-                  Connect
-                </Button>
-              )}
-            </div>
-          </div>
-        ))}
+        <IntegrationRow
+          name={xIntegration.name}
+          badge={xIntegration.badge}
+          icon={xIntegration.icon}
+          action={
+            xIntegration.connected ? (
+              <Button variant="ghost" size="sm" onClick={xIntegration.onDisconnect}>
+                Disconnect
+              </Button>
+            ) : (
+              <Button size="sm" onClick={xIntegration.onConnect}>
+                Connect
+              </Button>
+            )
+          }
+        />
       </div>
     </SettingsPanel>
+  );
+}
+
+/**
+ * Generic integration row — single line with icon, name, badge, and an
+ * action slot on the right. Used for X.
+ */
+function IntegrationRow({
+  name,
+  badge,
+  icon,
+  action,
+}: {
+  name: string;
+  badge: string;
+  icon: ReactNode;
+  action: ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 12,
+        padding: 14,
+        borderRadius: 'var(--sf-radius-md)',
+        background: 'var(--sf-bg-tertiary)',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+        <IntegrationTile>{icon}</IntegrationTile>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <IntegrationName>{name}</IntegrationName>
+          <IntegrationBadge>{badge}</IntegrationBadge>
+        </div>
+        {action}
+      </div>
+    </div>
+  );
+}
+
+function IntegrationTile({ children }: { children: ReactNode }) {
+  return (
+    <div
+      style={{
+        width: 36,
+        height: 36,
+        borderRadius: 8,
+        background: 'var(--sf-bg-primary)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        border: '1px solid var(--sf-border-subtle)',
+        flexShrink: 0,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function IntegrationName({ children }: { children: ReactNode }) {
+  return (
+    <div
+      style={{
+        fontSize: 'var(--sf-text-sm)',
+        fontWeight: 600,
+        color: 'var(--sf-fg-1)',
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function IntegrationBadge({ children }: { children: ReactNode }) {
+  return (
+    <div
+      style={{
+        fontSize: 11,
+        color: 'var(--sf-fg-3)',
+        marginTop: 2,
+        fontFamily: 'var(--sf-font-mono)',
+        letterSpacing: 'var(--sf-track-mono)',
+      }}
+    >
+      {children}
+    </div>
   );
 }
 
@@ -1004,57 +1016,4 @@ function XTileIcon() {
   );
 }
 
-function RedditTileIcon() {
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" aria-label="Reddit">
-      <circle cx="12" cy="12" r="12" fill="#FF4500" />
-      <g fill="#ffffff">
-        <circle cx="12" cy="13.5" r="6.5" />
-      </g>
-      <g fill="#FF4500">
-        <circle cx="9.6" cy="13" r="1.2" />
-        <circle cx="14.4" cy="13" r="1.2" />
-      </g>
-      <path
-        d="M9 15.8 Q12 17.8 15 15.8"
-        stroke="#FF4500"
-        strokeWidth="1.1"
-        fill="none"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
 
-function HnTileIcon() {
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" aria-label="Hacker News">
-      <rect width="24" height="24" rx="2" fill="#FF6600" />
-      <path d="M11 13.5 7.3 6.5h1.9l2.3 4.5 2.3-4.5h1.9L12 13.5V17h-1z" fill="#ffffff" />
-    </svg>
-  );
-}
-
-function SlackTileIcon() {
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" aria-label="Slack">
-      <rect x="5" y="5" width="5" height="5" rx="1.5" fill="#2EB67D" />
-      <rect x="14" y="5" width="5" height="5" rx="1.5" fill="#E01E5A" />
-      <rect x="14" y="14" width="5" height="5" rx="1.5" fill="#ECB22E" />
-      <rect x="5" y="14" width="5" height="5" rx="1.5" fill="#36C5F0" />
-    </svg>
-  );
-}
-
-function WebhookTileIcon() {
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" aria-label="Webhook">
-      <rect width="24" height="24" rx="4" fill="#C73A63" />
-      <g fill="#ffffff">
-        <circle cx="9" cy="16" r="2" />
-        <circle cx="15" cy="16" r="2" />
-        <circle cx="12" cy="8" r="2" />
-      </g>
-    </svg>
-  );
-}

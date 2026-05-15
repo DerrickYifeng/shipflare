@@ -28,8 +28,8 @@ export default async function SettingsPage() {
     .limit(1);
 
   // Reddit is intentionally omitted: it's a no-binding always-on channel
-  // (handoff dispatch + RedditClient.appOnly() reads), so the settings UI
-  // surfaces it as a read-only "Always on" tile rather than a connection.
+  // managed under /growth/reddit-channels, so the settings UI only lists
+  // OAuth-bound platforms (X).
   const connections: SettingsConnection[] = [
     {
       platform: 'x',

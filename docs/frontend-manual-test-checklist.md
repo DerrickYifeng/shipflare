@@ -56,7 +56,7 @@ Before starting:
 **Expected on Stage 7**:
 - [ ] "Meet your team" section is visible alongside the plan
 - [ ] Shows **3-5 member preview cards** side-by-side (grid)
-- [ ] Each card has: display name (e.g. "Chief of Staff", "Head of Growth", "Head of Content") + role subtitle + colored avatar/gradient
+- [ ] Each card has: display name (e.g. "CMO", "Head of Growth", "Head of Content") + role subtitle + colored avatar/gradient
 - [ ] Copy reads something like: "Your team is ready to launch. They'll start working the moment you approve your first plan."
 - [ ] **No add/remove/rename buttons** visible — purely read-only
 - [ ] Member composition matches the product category:
@@ -100,7 +100,7 @@ SELECT agent_type, display_name, status FROM team_members WHERE team_id = '<team
 
 1. [ ] Stay on `/team` after Test 3
 2. [ ] Open DevTools Network tab → filter for "EventStream"
-3. [ ] Click on the **coordinator** (Chief of Staff) member card — lands on `/team/[memberId]`
+3. [ ] Click on the **coordinator** (CMO) member card — lands on `/team/[memberId]`
 4. [ ] In another tab, trigger a run. Easiest ways:
    - Re-plan: `/today` page → "Re-plan this week" button
    - Or via API (use Postman or `curl`):
@@ -158,7 +158,7 @@ Then unblock the request / restart dev server:
 1. [ ] Start a new team run (same as Test 4). Watch the activity log.
 2. [ ] Before the run completes (while status is `active`), scroll to the send-message-form **below the activity log**
 3. [ ] Check the placeholder text — it should be **role-aware**:
-   - On coordinator page: "Ask Chief of Staff to replan this week…"
+   - On coordinator page: "Ask CMO to replan this week…"
    - On growth-strategist page: "Direct the growth strategist to rewrite the thesis…"
    - On content-planner page: "Tell the content planner what to slot in next…"
 4. [ ] Type a message: `"Please note: this is a test injection — keep going."`
@@ -168,7 +168,7 @@ Then unblock the request / restart dev server:
 
 **Expected**:
 - [ ] Pending state shows (button disabled, spinner or "Sending…" text)
-- [ ] Success toast: "Message sent to Chief of Staff" or similar
+- [ ] Success toast: "Message sent to CMO" or similar
 - [ ] Form clears
 - [ ] A new `user_prompt` message appears in the activity log within 1-2s (via SSE)
 - [ ] On the coordinator's **next turn** (watch activity log), the coordinator references your message in its thinking or reply (e.g. "I see you asked me to note that — will continue…")

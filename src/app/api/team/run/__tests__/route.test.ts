@@ -191,7 +191,7 @@ describe('POST /api/team/run — Phase E founder UI roundtrip', () => {
 
     // 3. wake called with the lead agent id (single BullMQ enqueue point)
     expect(wakeMock).toHaveBeenCalledOnce();
-    expect(wakeMock).toHaveBeenCalledWith('lead-agent-1');
+    expect(wakeMock).toHaveBeenCalledWith('lead-agent-1', 'priority');
 
     // 4. response shape: runId is the new message id, traceId is the lead.
     const payload = (await res.json()) as {
@@ -229,7 +229,7 @@ describe('POST /api/team/run — Phase E founder UI roundtrip', () => {
 
     // The chain still fires.
     expect(ensureLeadAgentRunMock).toHaveBeenCalledWith('team-1');
-    expect(wakeMock).toHaveBeenCalledWith('lead-agent-1');
+    expect(wakeMock).toHaveBeenCalledWith('lead-agent-1', 'priority');
   });
 
   it('returns 401 when unauthenticated and skips the chain entirely', async () => {

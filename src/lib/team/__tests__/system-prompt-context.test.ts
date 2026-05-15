@@ -132,10 +132,10 @@ describe('substitutePlaceholders', () => {
       itemCount: 5,
       statusBreakdown: 'planned: 3, drafted: 2',
       founderName: 'Alex',
-      teamRoster: '- coordinator: Chief of Staff',
+      teamRoster: '- coordinator: CMO',
     });
     expect(out).toBe(
-      'P:Acme D:a thing S:launched F:growth C:x, reddit A:sp_123 I:5 B:planned: 3, drafted: 2 T:- coordinator: Chief of Staff N:Alex',
+      'P:Acme D:a thing S:launched F:growth C:x, reddit A:sp_123 I:5 B:planned: 3, drafted: 2 T:- coordinator: CMO N:Alex',
     );
   });
 
@@ -268,7 +268,7 @@ describe('loadSystemPromptContext', () => {
       if (name === 'coordinator') {
         return {
           name: 'coordinator',
-          description: 'Chief of Staff',
+          description: 'CMO',
           tools: ['Task', 'SendMessage'],
         };
       }

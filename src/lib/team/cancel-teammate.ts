@@ -67,5 +67,7 @@ export async function cancelTeammate(
   // Wake the target so it drains the request promptly. The
   // `reconcile-mailbox` cron is the durable backstop if this fails for
   // any reason.
-  await wake(agentId);
+  //
+  // B6: founder-initiated teammate cancel → priority lane.
+  await wake(agentId, 'priority');
 }

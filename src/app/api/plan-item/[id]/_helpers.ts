@@ -20,6 +20,13 @@ export interface OwnedRow {
   kind: string;
   channel: string | null;
   skillName: string | null;
+  /**
+   * Polymorphic per-kind payload (e.g. `{ subreddit }` for Reddit
+   * content_post). Surfaced so the edit endpoint can merge inbound
+   * `params` patches onto the existing object without dropping keys.
+   * Shape is intentionally loose at this layer — callers narrow as needed.
+   */
+  params: Record<string, unknown> | null;
 }
 
 /**
@@ -40,6 +47,7 @@ export async function findOwnedPlanItem(
       kind: planItems.kind,
       channel: planItems.channel,
       skillName: planItems.skillName,
+      params: planItems.params,
     })
     .from(planItems)
     .where(and(eq(planItems.id, itemId), eq(planItems.userId, userId)))
@@ -54,6 +62,10 @@ export async function findOwnedPlanItem(
     kind: row.kind,
     channel: row.channel ?? null,
     skillName: row.skillName ?? null,
+    params:
+      row.params && typeof row.params === 'object'
+        ? (row.params as Record<string, unknown>)
+        : null,
   };
 }
 

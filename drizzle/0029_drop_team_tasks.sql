@@ -1,0 +1,17 @@
+-- Drop the team_tasks table.
+--
+-- The team task lifecycle (queued / running / completed / failed / killed)
+-- is now sourced from `agent_runs` directly. Previously the UI maintained
+-- two parallel stores: `team_tasks` for the sync Task path and
+-- `agent_runs` for async teammate spawns. The sync path stopped writing
+-- `team_tasks` for async dispatches (the default for teammates), so the
+-- UI's `taskLookup` always missed and dispatch cards defaulted to a
+-- hardcoded "running" status that could never flip to DONE if the
+-- `task_notification` was delayed or dropped.
+--
+-- Consolidating onto `agent_runs` makes the UI truthful: every dispatch
+-- card reads from a single status column that the agent-run worker
+-- writes through on every lifecycle transition.
+--
+-- IF EXISTS keeps the migration idempotent on dev DBs.
+DROP TABLE IF EXISTS "team_tasks" CASCADE;

@@ -217,6 +217,8 @@ export async function POST(request: NextRequest): Promise<Response> {
         goal,
         publicSummary,
         trigger: 'phase_transition',
+        // B6: founder pressed the "phase change" button → priority lane.
+        priority: 'priority',
       },
       db,
     );

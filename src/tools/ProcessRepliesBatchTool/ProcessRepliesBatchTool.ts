@@ -36,6 +36,16 @@ const inputSchema = z.object({
   threadIds: z.array(z.string()).min(1).max(10),
   voice: z.string().optional(),
   founderVoiceBlock: z.string().optional(),
+  /**
+   * Optional `content_reply` plan_item this batch fills. When set,
+   * every successfully-persisted draft gets `drafts.planItemId` stamped
+   * so the coordinator can verify completion mechanically via
+   * `query_plan_items` (`draftCount > 0`) instead of trusting the
+   * specialist's prose `notes` field. Mirrors how
+   * `ProcessPostsBatchTool` already plumbs planItemId per row. Omit
+   * for ad-hoc / fallback paths where no slot exists.
+   */
+  planItemId: z.string().optional(),
 });
 
 type ProcessRepliesBatchInput = z.infer<typeof inputSchema>;
@@ -83,7 +93,8 @@ export const processRepliesBatchTool: ToolDefinition<
     'with canMentionProduct=null are skipped as legacy. The drafting skill ' +
     'self-audits in-fork; no second LLM-validation fork. Returns a per-thread ' +
     'result summary in the response.\n\n' +
-    'INPUT: { "threadIds": ["uuid1",...up to 10], "voice"?: string, "founderVoiceBlock"?: string }\n' +
+    'INPUT: { "threadIds": ["uuid1",...up to 10], "planItemId"?: string, "voice"?: string, "founderVoiceBlock"?: string }\n' +
+    '  Pass `planItemId` from your spawn prompt when filling a slot — every drafted reply gets linked to it.\n' +
     'OUTPUT: { itemsScanned, draftsCreated, draftsSkipped, notes, details[] }',
   inputSchema,
   isConcurrencySafe: false,
@@ -245,13 +256,18 @@ async function processOne(
     };
   }
 
-  // Step 3: persist (or skip if last-mile throttle trips)
+  // Step 3: persist (or skip if last-mile throttle trips). When the
+  // caller (typically social-media-manager filling a slot) passed
+  // `planItemId`, stamp it on the draft so the coordinator can
+  // mechanically verify `draftCount > 0` against the plan_item before
+  // marking it drafted. Omitted on ad-hoc / fallback paths.
   const persisted = await draftReplyTool.execute(
     {
       threadId: thread.id,
       draftBody: draft.draftBody,
       confidence: draft.confidence,
       whyItWorks: draft.whyItWorks,
+      ...(input.planItemId ? { planItemId: input.planItemId } : {}),
     },
     ctx,
   );

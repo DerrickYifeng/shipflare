@@ -91,11 +91,11 @@ async function executeSingleTool(
     const validatedInput = tool.inputSchema.parse(inputToValidate);
     // Per-call ctx proxy that exposes this tool invocation's
     // `tool_use_id` under the `toolUseId` key. Tools that need it
-    // (AgentTool uses it to link team_tasks back to the coordinator's
-    // tool_call so the UI's taskLookup can join on it) read via
-    // `ctx.get<string>('toolUseId')`. Spreading `context` first keeps
-    // ChildToolContext fields (depth, parentTaskId) intact so nested
-    // spawns continue to see them — only `get` is overridden.
+    // (AgentTool uses it to stamp `agent_runs.parentToolUseId` so the UI
+    // can bucket subagent events under the parent's dispatch card) read
+    // via `ctx.get<string>('toolUseId')`. Spreading `context` first keeps
+    // ChildToolContext fields (depth) intact so nested spawns continue to
+    // see them — only `get` is overridden.
     const perCallCtx: ToolContext = {
       ...context,
       get<V>(key: string): V {

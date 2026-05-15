@@ -128,6 +128,19 @@ export const sleepTool: ToolDefinition<SleepInput, SleepResult> = buildTool({
     //    and the early-exit path in Task 4, status='sleeping' is the
     //    correct fail-safe state — reconcile-mailbox will eventually
     //    re-enqueue an overdue sleepUntil row.
+    //
+    //    B7 batcher invalidate gap: agent-run's status batcher may have
+    //    a buffered transient ('running' / 'resuming') for THIS agentId
+    //    that hasn't flushed yet. Without invalidating, the next batcher
+    //    tick can land AFTER our synchronous UPDATE and overwrite
+    //    'sleeping' with the stale buffered value. Drop the buffered
+    //    transient before the durable write. Dynamic import to avoid the
+    //    potential cycle SleepTool → agent-run → lead-step → SleepTool
+    //    (lead-step pulls SleepTool's constant export).
+    const { invalidateAgentStatusFor } = await import(
+      '@/workers/processors/agent-run'
+    );
+    invalidateAgentStatusFor(agentId);
     await db
       .update(agentRuns)
       .set({
@@ -141,6 +154,12 @@ export const sleepTool: ToolDefinition<SleepInput, SleepResult> = buildTool({
     //    near-simultaneous SendMessage→wake() calls onto the same job
     //    within BullMQ's removeOnComplete window — the earlier wake
     //    wins; the delayed job no-ops if the agent is already running.
+    //
+    //    B6: Sleep resume → standard lane (default). By the time the
+    //    sleep expires (typically minutes-to-hours later), the original
+    //    urgency has elapsed; treating the resumed turn as background
+    //    work is correct. Inbound SendMessage→wake on the same agent
+    //    can still bypass this on the priority lane.
     await enqueueAgentRun(
       { agentId },
       {

@@ -1,18 +1,19 @@
 // query_team_status — list team_members for the caller's team plus each
-// member's current in-flight task (if any).
+// member's current in-flight agent run (if any).
 //
 // Called by: coordinator — lets the orchestrator check "who is doing
 // what" before deciding whether to spawn more parallel work.
 //
-// `currentTask` is derived from the most recent `team_tasks` row for the
-// member with status='running'. A member with no running task reports
-// status + lastActiveAt but no currentTask.
+// `currentTask` is derived from the most recent `agent_runs` row for the
+// member that is still in flight (queued / running / resuming / sleeping).
+// A member with no in-flight run reports status + lastActiveAt but no
+// currentTask.
 
 import { z } from 'zod';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import { buildTool } from '@/core/tool-system';
 import type { ToolDefinition } from '@/core/types';
-import { teamMembers, teamTasks } from '@/lib/db/schema';
+import { agentRuns, teamMembers } from '@/lib/db/schema';
 import { readTeamScopedDeps } from '@/tools/context-helpers';
 
 export const QUERY_TEAM_STATUS_TOOL_NAME = 'query_team_status';
@@ -29,6 +30,13 @@ export interface TeamMemberStatusRow {
   };
 }
 
+const ACTIVE_AGENT_RUN_STATUSES = [
+  'queued',
+  'running',
+  'resuming',
+  'sleeping',
+] as const;
+
 export const queryTeamStatusTool: ToolDefinition<
   Record<string, never>,
   TeamMemberStatusRow[]
@@ -36,7 +44,7 @@ export const queryTeamStatusTool: ToolDefinition<
   name: QUERY_TEAM_STATUS_TOOL_NAME,
   description:
     'List team members with their live status + last-active timestamp. ' +
-    'Includes the member\'s current running task (description + startedAt) ' +
+    'Includes the member\'s current running task (agent_def_name + spawnedAt) ' +
     'when one exists. Use this to decide whether to parallelize or wait.',
   inputSchema: z.object({}).strict(),
   isConcurrencySafe: true,
@@ -58,22 +66,23 @@ export const queryTeamStatusTool: ToolDefinition<
 
     const result: TeamMemberStatusRow[] = [];
     for (const m of members) {
-      // Latest running task for this member, if any. We look at team_tasks
-      // rather than team_messages because team_tasks carries the
-      // description / startedAt fields we need structurally.
+      // Latest in-flight agent_run for this member, if any. `agent_runs`
+      // is the SSOT for task lifecycle — `team_tasks` no longer exists.
+      // The `agent_def_name` describes what the teammate is doing (the
+      // AGENT.md name), which is what the coordinator wants to read.
       const running = await db
         .select({
-          description: teamTasks.description,
-          startedAt: teamTasks.startedAt,
+          agentDefName: agentRuns.agentDefName,
+          spawnedAt: agentRuns.spawnedAt,
         })
-        .from(teamTasks)
+        .from(agentRuns)
         .where(
           and(
-            eq(teamTasks.memberId, m.id),
-            eq(teamTasks.status, 'running'),
+            eq(agentRuns.memberId, m.id),
+            inArray(agentRuns.status, [...ACTIVE_AGENT_RUN_STATUSES]),
           ),
         )
-        .orderBy(desc(teamTasks.startedAt))
+        .orderBy(desc(agentRuns.spawnedAt))
         .limit(1);
 
       const row: TeamMemberStatusRow = {
@@ -88,13 +97,13 @@ export const queryTeamStatusTool: ToolDefinition<
               ? String(m.lastActiveAt)
               : null,
       };
-      if (running.length > 0 && running[0].startedAt) {
+      if (running.length > 0 && running[0].spawnedAt) {
         row.currentTask = {
-          description: running[0].description,
+          description: running[0].agentDefName,
           startedAt:
-            running[0].startedAt instanceof Date
-              ? running[0].startedAt.toISOString()
-              : String(running[0].startedAt),
+            running[0].spawnedAt instanceof Date
+              ? running[0].spawnedAt.toISOString()
+              : String(running[0].spawnedAt),
         };
       }
       result.push(row);

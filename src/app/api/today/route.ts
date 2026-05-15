@@ -118,6 +118,15 @@ interface TodoItemRow {
   threadOriginalAuthorUsername: string | null;
   threadSurfacedVia: string[] | null;
   calendarContentType: string | null;
+  /**
+   * Plan-item polymorphic params (e.g. `{ subreddit }` for a Reddit
+   * `content_post`). Null for reply-card rows since those flow through
+   * the drafts table. The post-card uses this to detect the
+   * "Reddit content_post missing subreddit" path and swap the Post
+   * button for an inline subreddit picker (Task 9). Shape is loose at
+   * this layer; the consumer narrows.
+   */
+  params: Record<string, unknown> | null;
   /** Sort key (ms) — used only to merge the two sources into a stable
    *  order; not shipped to the client. */
   _sortKey: number;
@@ -181,6 +190,7 @@ export async function GET() {
       description: planItems.description,
       createdAt: planItems.createdAt,
       output: planItems.output,
+      params: planItems.params,
     })
     .from(planItems)
     .where(
@@ -394,6 +404,10 @@ export async function GET() {
       threadOriginalAuthorUsername: null,
       threadSurfacedVia: null,
       calendarContentType: row.kind,
+      params:
+        row.params && typeof row.params === 'object'
+          ? (row.params as Record<string, unknown>)
+          : null,
       _sortKey: row.dueDate instanceof Date ? row.dueDate.getTime() + row.sortOrder : 0,
     }));
 
@@ -467,6 +481,7 @@ export async function GET() {
       threadOriginalAuthorUsername: row.threadOriginalAuthorUsername,
       threadSurfacedVia: row.threadSurfacedVia,
       calendarContentType: null,
+      params: null,
       _sortKey: row.draftCreatedAt.getTime(),
     };
   });
