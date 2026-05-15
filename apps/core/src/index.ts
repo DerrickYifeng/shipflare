@@ -41,7 +41,12 @@ import { verifyJwt } from "./lib/jwt";
 import { validateExternalAccess } from "./lib/external-auth";
 import { transportName } from "./lib/do-name";
 import { ROLE_REGISTRY, isValidRole, type RoleSlug } from "@shipflare/shared";
-import { createDb, user as userTable } from "@shipflare/db";
+import {
+  createDb,
+  user as userTable,
+  channels as channelsTable,
+  growthSnapshots as growthSnapshotsTable,
+} from "@shipflare/db";
 
 import { CMO } from "./agents/cmo/CMO";
 import { HeadOfGrowth } from "./agents/head-of-growth/HeadOfGrowth";
@@ -209,8 +214,88 @@ export default {
       // Cron should be self-healing — log + swallow. The next tick retries.
       console.error("[scheduled] cron fan-out failed:", err);
     }
+
+    // Growth snapshots: capture per-(user, platform) metrics into D1 every
+    // 6h tick. Phase 1 stores empty metrics {}; a later task wires real
+    // collection. Per-(user, platform) failures are isolated via the
+    // try/catch inside snapshotGrowth.
+    try {
+      await snapshotGrowth(env);
+    } catch (err) {
+      console.error("[scheduled] growth snapshot fan-out failed:", err);
+    }
   },
 } satisfies ExportedHandler<Env>;
+
+// ──────────────────────────────────────────────────────────────────────────
+// Growth snapshot helpers — called from `scheduled()` every 6h.
+//
+// Phase 1: `fetchPlatformMetrics` returns an empty object. A future task
+// will wire real metric collection via the platform DO stubs (env.X_MCP /
+// env.REDDIT_MCP). The schema + cron cadence are stable; only the metric
+// payload needs to be filled in later.
+// ──────────────────────────────────────────────────────────────────────────
+
+/**
+ * Snapshot growth metrics for every (userId, platform) channel row in D1.
+ *
+ * Failures are per-(user, platform) — one bad row doesn't block the rest.
+ * The function itself is wrapped in try/catch in `scheduled()`.
+ */
+async function snapshotGrowth(env: Env): Promise<void> {
+  const db = createDb(env.DB);
+  // Distinct (userId, platform) pairs from channels rows. Only platforms
+  // with a channel row are snapshotted — Reddit "always-on" rows that have
+  // no channel entry are excluded until real collection lands.
+  const rows = await db
+    .selectDistinct({
+      userId: channelsTable.userId,
+      platform: channelsTable.platform,
+    })
+    .from(channelsTable);
+
+  await Promise.all(
+    rows.map(async ({ userId, platform }) => {
+      if (platform !== "x" && platform !== "reddit") return;
+      try {
+        const metrics = await fetchPlatformMetrics(env, userId, platform);
+        await db.insert(growthSnapshotsTable).values({
+          id: crypto.randomUUID(),
+          userId,
+          platform,
+          capturedAt: new Date(),
+          metrics,
+          createdAt: new Date(),
+        });
+      } catch (err) {
+        console.warn(
+          `[snapshotGrowth] failed for ${userId}/${platform}:`,
+          err,
+        );
+      }
+    }),
+  );
+}
+
+/**
+ * Fetch engagement metrics for a given user + platform.
+ *
+ * Phase 1: returns an empty record so the /growth page renders zeros while
+ * the real collection pipeline is wired in a later task. The signature is
+ * stable so the caller (`snapshotGrowth`) needs no changes when real
+ * collection lands — only this function body changes.
+ */
+async function fetchPlatformMetrics(
+  _env: Env,
+  _userId: string,
+  _platform: "x" | "reddit",
+): Promise<Record<string, number>> {
+  // Phase 1 stub — returns empty object.
+  // Phase 2: call env.X_MCP / env.REDDIT_MCP DO stubs via
+  //   stub.fetch(new Request("https://internal/internal/metrics", {...}))
+  // and parse the JSON response into { followers, impressions, ... }.
+  return {};
+}
 
 // ──────────────────────────────────────────────────────────────────────────
 // CORS — browser at `https://shipflare.ai` calls core at
