@@ -28,6 +28,7 @@ interface CopywriterState {
 export class Copywriter extends McpAgent<Env, CopywriterState, McpProps> {
   server = new McpServer({ name: "shipflare-copywriter", version: "1.0.0" });
   initialState: CopywriterState = { lastWakeAt: 0 };
+  private _toolsRegistered = false;
 
   /**
    * Narrow accessors so tool-registration modules (which live outside the
@@ -55,6 +56,8 @@ export class Copywriter extends McpAgent<Env, CopywriterState, McpProps> {
   }
 
   async init(): Promise<void> {
+    if (this._toolsRegistered) return;
+    this._toolsRegistered = true;
     registerChatTool(this);
     registerRewriteInVoiceTool(this);
     registerDraftHeadlinesTool(this);

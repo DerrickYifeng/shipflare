@@ -65,6 +65,14 @@ export function getAuth(): BetterAuthInstance {
     // before secrets are wired; OAuth callbacks will not function until a
     // real URL is configured.
     baseURL: env.BETTER_AUTH_URL ?? "http://localhost:3000",
+    // Cloudflare strips the original client IP from `request.headers.get('x-forwarded-for')`
+    // but injects the real one as `cf-connecting-ip`. Without this Better Auth's
+    // rate limiter falls back to "unknown" and warns on every request.
+    advanced: {
+      ipAddress: {
+        ipAddressHeaders: ["cf-connecting-ip"],
+      },
+    },
     databaseHooks: {
       user: {
         create: {

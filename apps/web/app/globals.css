@@ -1,5 +1,159 @@
+/* ShipFlare Design System — Tokens + Base
+ * Apple-inspired. All variables defined here, used everywhere via var(--sf-*).
+ */
+
+:root {
+  /* ── Backgrounds (light) ─────────────────────────────────────── */
+  --sf-bg-primary:      #f5f5f7;
+  --sf-bg-secondary:    #ffffff;
+  --sf-bg-tertiary:     #ebebed;
+
+  /* ── Backgrounds (dark) ──────────────────────────────────────── */
+  --sf-bg-dark:         #000000;
+  --sf-bg-dark-surface: #1d1d1f;
+  --sf-dark-1:          #272729;
+  --sf-dark-2:          #262628;
+  --sf-dark-3:          #28282a;
+  --sf-dark-4:          #2a2a2d;
+  --sf-dark-5:          #242426;
+
+  /* ── Text (light bg) ─────────────────────────────────────────── */
+  --sf-fg-1: #1d1d1f;
+  --sf-fg-2: rgba(0, 0, 0, 0.80);
+  --sf-fg-3: rgba(0, 0, 0, 0.56);
+  --sf-fg-4: rgba(0, 0, 0, 0.48);
+
+  /* ── Text (dark bg) ──────────────────────────────────────────── */
+  --sf-fg-on-dark-1: #ffffff;
+  --sf-fg-on-dark-2: rgba(255, 255, 255, 0.80);
+  --sf-fg-on-dark-3: rgba(255, 255, 255, 0.56);
+  --sf-fg-on-dark-4: rgba(255, 255, 255, 0.48);
+
+  /* ── Borders ─────────────────────────────────────────────────── */
+  --sf-border:        rgba(0, 0, 0, 0.08);
+  --sf-border-subtle: rgba(0, 0, 0, 0.04);
+
+  /* ── Accent (Apple Blue) ─────────────────────────────────────── */
+  --sf-accent:       #0071e3;
+  --sf-accent-hover: #0077ed;
+  --sf-accent-light: #e8f2fc;
+  --sf-link:         #0066cc;
+  --sf-link-dark:    #2997ff;
+
+  /* ── Semantic ─────────────────────────────────────────────────── */
+  --sf-success:       #34c759;
+  --sf-success-light: #eef9f1;
+  --sf-success-ink:   #248a3d;
+  --sf-warning:       #ff9f0a;
+  --sf-warning-light: #fff8eb;
+  --sf-warning-ink:   #c67a05;
+  --sf-error:         #ff3b30;
+  --sf-error-light:   #fff0ef;
+  --sf-error-ink:     #d70015;
+
+  /* ── Typography ──────────────────────────────────────────────── */
+  --sf-font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display",
+                     "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --sf-font-text:    -apple-system, BlinkMacSystemFont, "SF Pro Text",
+                     "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --sf-font-mono:    "SF Mono", ui-monospace, "JetBrains Mono",
+                     "Cascadia Code", "Fira Code", Menlo, monospace;
+
+  /* ── Spacing (8px base) ──────────────────────────────────────── */
+  --sf-space-0:  2px;
+  --sf-space-1:  4px;
+  --sf-space-2:  8px;
+  --sf-space-3:  12px;
+  --sf-space-4:  16px;
+  --sf-space-5:  20px;
+  --sf-space-6:  24px;
+  --sf-space-8:  32px;
+  --sf-space-10: 40px;
+  --sf-space-12: 48px;
+  --sf-max-width: 980px;
+
+  /* ── Radius ──────────────────────────────────────────────────── */
+  --sf-radius-sm:   5px;
+  --sf-radius-md:   8px;
+  --sf-radius-lg:   11px;
+  --sf-radius-xl:   12px;
+  --sf-radius-pill: 980px;
+  --sf-radius-full: 9999px;
+
+  /* ── Shadow ──────────────────────────────────────────────────── */
+  --sf-shadow-card:     0 3px 5px rgba(0,0,0,0.04), 0 6px 20px rgba(0,0,0,0.06);
+  --sf-shadow-elevated: 3px 5px 30px 0 rgba(0,0,0,0.12);
+  --sf-shadow-focus:    0 0 0 3px rgba(0,113,227,0.12);
+
+  /* ── Glass / Blur ────────────────────────────────────────────── */
+  --sf-glass-bg:   rgba(255, 255, 255, 0.72);
+  --sf-glass-blur: saturate(180%) blur(20px);
+
+  /* ── Motion ──────────────────────────────────────────────────── */
+  --sf-ease:         cubic-bezier(0.16, 1, 0.3, 1);
+  --sf-ease-inout:   cubic-bezier(0.4, 0, 0.6, 1);
+  --sf-dur-fast:     150ms;
+  --sf-dur-base:     200ms;
+  --sf-dur-slow:     300ms;
+  --sf-dur-entrance: 600ms;
+}
+
+/* ── Reset ───────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* ── Base ────────────────────────────────────────────────────────── */
+html { height: 100%; }
+
 body {
-  font-family: system-ui, -apple-system, sans-serif;
-  margin: 0;
-  padding: 2rem;
+  font-family: var(--sf-font-text);
+  font-size: 17px;
+  font-weight: 400;
+  line-height: 1.47;
+  letter-spacing: -0.374px;
+  color: var(--sf-fg-1);
+  background: var(--sf-bg-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  height: 100%;
+}
+
+#__next, html body > div:first-child { height: 100%; }
+
+a { color: var(--sf-link); text-decoration: none; }
+a:hover { color: var(--sf-accent-hover); }
+
+/* ── Type utilities ──────────────────────────────────────────────── */
+.sf-caption {
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.29;
+  letter-spacing: -0.224px;
+  color: var(--sf-fg-3);
+}
+.sf-micro {
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.33;
+  letter-spacing: -0.12px;
+}
+.sf-micro-mono {
+  font-family: var(--sf-font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.33;
+  letter-spacing: -0.12px;
+  text-transform: uppercase;
+}
+
+/* ── Motion ──────────────────────────────────────────────────────── */
+@keyframes sf-fade-in  { from { opacity: 0 } to { opacity: 1 } }
+@keyframes sf-slide-up { from { opacity: 0; transform: translateY(8px) } to { opacity: 1; transform: translateY(0) } }
+@keyframes sf-pulse    { 0%,100% { opacity: 1 } 50% { opacity: 0.5 } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

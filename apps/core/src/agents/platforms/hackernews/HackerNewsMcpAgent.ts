@@ -40,6 +40,7 @@ export class HackerNewsMcpAgent extends McpAgent<
     version: "1.0.0",
   });
   initialState: HackerNewsState = { lastWakeAt: 0 };
+  private _toolsRegistered = false;
 
   get sqlStorage(): SqlStorage {
     return this.ctx.storage.sql;
@@ -55,6 +56,8 @@ export class HackerNewsMcpAgent extends McpAgent<
   }
 
   async init(): Promise<void> {
+    if (this._toolsRegistered) return;
+    this._toolsRegistered = true;
     registerHackerNewsSearchTool(this);
   }
 }

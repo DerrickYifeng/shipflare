@@ -30,6 +30,7 @@ interface HogState {
 export class HeadOfGrowth extends McpAgent<Env, HogState, McpProps> {
   server = new McpServer({ name: "shipflare-hog", version: "1.0.0" });
   initialState: HogState = { lastWakeAt: 0 };
+  private _toolsRegistered = false;
 
   /**
    * Narrow accessors so tool-registration modules (which live outside the
@@ -64,6 +65,8 @@ export class HeadOfGrowth extends McpAgent<Env, HogState, McpProps> {
   }
 
   async init(): Promise<void> {
+    if (this._toolsRegistered) return;
+    this._toolsRegistered = true;
     registerStrategicPathTool(this);
     registerAuditTool(this);
   }

@@ -36,6 +36,7 @@
  * tests invoke `worker.scheduled!(ctl, env, ctx)` directly instead.
  */
 
+import { getAgentByName } from "agents";
 import { verifyJwt } from "./lib/jwt";
 import { validateExternalAccess } from "./lib/external-auth";
 import { ROLE_REGISTRY, isValidRole, type RoleSlug } from "@shipflare/shared";
@@ -82,6 +83,9 @@ export { DiscordMcpAgent } from "./agents/platforms/discord/DiscordMcpAgent";
 
 export interface Env {
   DB: D1Database;
+  // Alias binding used for `wrangler d1 execute ... --remote` in local dev.
+  // Declared here so Cloudflare.Env constraint is satisfied; not used in code.
+  shipflare_prod: D1Database;
   // DO bindings — uncomment as classes come online (S2-S5).
   CMO: DurableObjectNamespace<CMO>;
   HEAD_OF_GROWTH: DurableObjectNamespace<HeadOfGrowth>; // S3
@@ -193,40 +197,19 @@ export default {
   ): Promise<Response> {
     const url = new URL(request.url);
 
-    if (url.pathname === "/healthz") {
-      return Response.json({ ok: true, ts: Date.now() });
+    // CORS — apps/web (shipflare.ai) talks to core (core.shipflare.ai)
+    // directly via the MCP streamable HTTP transport. Browser preflight
+    // (OPTIONS) MUST short-circuit before any auth gate, otherwise CF
+    // returns 401 with no CORS headers and the browser drops the request
+    // with "Failed to fetch". Non-browser callers (CLI, service-binding
+    // sibling agents, claude-desktop) ignore these headers harmlessly.
+    const cors = corsHeadersFor(request);
+    if (request.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: cors });
     }
 
-    // External MCP route MUST match BEFORE the Phase 1 `/agents/...` route.
-    // The Phase 1 MCP_ROUTE regex (`/^\/agents\/.../`) would never see
-    // `/external/agents/...` anyway (it's anchored at the start), but we
-    // run the external check first for clarity + to short-circuit a
-    // potentially-expensive DO spin-up if the JWT is bad.
-    const externalMatch = EXTERNAL_MCP_ROUTE.exec(url.pathname);
-    if (externalMatch) {
-      const [, role, userId] = externalMatch;
-      return handleExternalMcpRequest(request, env, ctx, role!, userId!);
-    }
-
-    const internalMatch = INTERNAL_ROUTE.exec(url.pathname);
-    if (internalMatch) {
-      const [, role, userId, internalPath] = internalMatch;
-      return handleInternalRequest(
-        request,
-        env,
-        role!,
-        userId!,
-        internalPath!,
-      );
-    }
-
-    const mcpMatch = MCP_ROUTE.exec(url.pathname);
-    if (mcpMatch) {
-      const [, role, userId] = mcpMatch;
-      return handleMcpRequest(request, env, role!, userId!);
-    }
-
-    return new Response("not found", { status: 404 });
+    const res = await routeRequest(request, env, ctx, url);
+    return withCorsHeaders(res, cors);
   },
 
   async scheduled(
@@ -246,7 +229,7 @@ export default {
       const subset = users.slice(0, CRON_FANOUT_CAP);
       await Promise.allSettled(
         subset.map(({ id: userId }) => {
-          const stub = env.CMO.get(env.CMO.idFromName(userId));
+          const stub = env.CMO.get(env.CMO.idFromName(`streamable-http:${userId}`));
           return stub.fetch(
             new Request("https://internal/internal/cron-tick", {
               method: "POST",
@@ -261,6 +244,87 @@ export default {
     }
   },
 } satisfies ExportedHandler<Env>;
+
+// ──────────────────────────────────────────────────────────────────────────
+// CORS — browser at `https://shipflare.ai` calls core at
+// `https://core.shipflare.ai`. Allowlist is small and hardcoded; bump it
+// here if we add a new public web origin (preview deploys, etc).
+// ──────────────────────────────────────────────────────────────────────────
+const CORS_ALLOWED_ORIGINS = new Set([
+  "https://shipflare.ai",
+  "https://shipflare-web.cdhyfpp.workers.dev",
+  "http://localhost:3000",
+  "http://localhost:8788",
+]);
+
+function corsHeadersFor(request: Request): Record<string, string> {
+  const origin = request.headers.get("origin");
+  if (!origin || !CORS_ALLOWED_ORIGINS.has(origin)) return {};
+  return {
+    "access-control-allow-origin": origin,
+    "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
+    // `mcp-session-id` is sent by the SDK on subsequent calls after init.
+    // `accept` is explicit because the MCP transport asks for both
+    // application/json and text/event-stream.
+    "access-control-allow-headers":
+      "authorization, content-type, accept, mcp-session-id, mcp-protocol-version",
+    // Browser needs to read `mcp-session-id` off the init response so it
+    // can echo it back on subsequent posts.
+    "access-control-expose-headers": "mcp-session-id",
+    "access-control-max-age": "86400",
+    vary: "Origin",
+  };
+}
+
+function withCorsHeaders(
+  res: Response,
+  cors: Record<string, string>,
+): Response {
+  if (Object.keys(cors).length === 0) return res;
+  const headers = new Headers(res.headers);
+  for (const [k, v] of Object.entries(cors)) headers.set(k, v);
+  return new Response(res.body, {
+    status: res.status,
+    statusText: res.statusText,
+    headers,
+  });
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Pure routing logic, extracted from `fetch()` so the entry point only
+// handles CORS + dispatch. Returns the inner response without CORS headers
+// — the caller wraps it via `withCorsHeaders`.
+// ──────────────────────────────────────────────────────────────────────────
+async function routeRequest(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+  url: URL,
+): Promise<Response> {
+  if (url.pathname === "/healthz") {
+    return Response.json({ ok: true, ts: Date.now() });
+  }
+
+  const externalMatch = EXTERNAL_MCP_ROUTE.exec(url.pathname);
+  if (externalMatch) {
+    const [, role, userId] = externalMatch;
+    return handleExternalMcpRequest(request, env, ctx, role!, userId!);
+  }
+
+  const internalMatch = INTERNAL_ROUTE.exec(url.pathname);
+  if (internalMatch) {
+    const [, role, userId, internalPath] = internalMatch;
+    return handleInternalRequest(request, env, role!, userId!, internalPath!);
+  }
+
+  const mcpMatch = MCP_ROUTE.exec(url.pathname);
+  if (mcpMatch) {
+    const [, role, userId] = mcpMatch;
+    return handleMcpRequest(request, env, role!, userId!);
+  }
+
+  return new Response("not found", { status: 404 });
+}
 
 // ──────────────────────────────────────────────────────────────────────────
 // /agents/<role>/<userId>/internal/<path>
@@ -295,7 +359,10 @@ async function handleInternalRequest(
       status: 503,
     });
   }
-  const stub = ns.get(ns.idFromName(userId));
+  // McpAgent.getTransportType() requires a transport prefix on the DO name.
+  // All DO lookups — MCP and internal alike — must use this form because
+  // onStart() → initTransport() runs before fetch() on every cold start.
+  const stub = ns.get(ns.idFromName(`streamable-http:${userId}`));
 
   // Strip the public path prefix — the DO's fetch handler expects
   // `/internal/<path>`, not `/agents/<role>/<userId>/internal/<path>`.
@@ -304,15 +371,25 @@ async function handleInternalRequest(
 
 // ──────────────────────────────────────────────────────────────────────────
 // /agents/<role>/<userId>/mcp
-// External MCP entry. JWT-protected. Token must carry `{ userId }` matching
-// the URL.
+// JWT-protected internal MCP entry for the browser → CMO DO path.
 //
-// Phase 1: only `cmo` is exposed externally (founder UI → CMO). Other roles
-// (Head of Growth, Social Media Manager) ride along on the CMO's
-// `addMcpServer` in-process pipe and are unreachable from /agents/<role>.
-// Phase 2 will open a separate `/external/agents/...` prefix with stricter
-// scope checks.
+// The Agents SDK (agents@0.12.4) does NOT support plain HTTP forwarding to
+// a DO. `McpAgent.serve()` internally wraps `createStreamingHttpHandler`
+// which converts HTTP POST/GET requests into WebSocket upgrades with custom
+// Cloudflare headers (`cf-mcp-method`, `cf-mcp-message`) before calling
+// agent.fetch(). Bypassing that with a bare stub.fetch(request) results in
+// "Not implemented".
+//
+// We implement `streamableHttpProxy` — the same Worker→DO protocol as
+// `createStreamingHttpHandler`, but keying the DO by `userId` instead of a
+// random sessionId. This gives a stable per-user CMO DO (persistent SQLite
+// state across browser sessions), which the random-session approach can't.
 // ──────────────────────────────────────────────────────────────────────────
+
+// Custom MCP header names used by the Agents SDK (agents@0.12.4 source).
+const CF_MCP_METHOD = "cf-mcp-method";
+const CF_MCP_MESSAGE = "cf-mcp-message";
+
 async function handleMcpRequest(
   request: Request,
   env: Env,
@@ -340,10 +417,142 @@ async function handleMcpRequest(
     return new Response("token userId mismatch", { status: 403 });
   }
 
-  // Forward to the CMO DO. The DO's McpAgent transport handles JSON-RPC
-  // framing, session id, etc.
-  const stub = env.CMO.get(env.CMO.idFromName(userId));
-  return stub.fetch(request);
+  return streamableHttpProxy(request, env.CMO, userId, { userId });
+}
+
+/**
+ * Implements the Agents SDK's Worker→DO streamable HTTP protocol, keyed by
+ * userId for stable per-user DO instances.
+ *
+ * The SDK's createStreamingHttpHandler (not exported) converts browser HTTP
+ * POST/GET into a WebSocket upgrade with `cf-mcp-method` + `cf-mcp-message`
+ * headers, calls agent.fetch(), then streams WebSocket messages back as SSE.
+ * We replicate that here, substituting userId for the random sessionId so
+ * all of the founder's browser sessions share one CMO DO (and its SQLite).
+ */
+async function streamableHttpProxy(
+  request: Request,
+  namespace: DurableObjectNamespace<CMO>,
+  userId: string,
+  props: Record<string, unknown>,
+): Promise<Response> {
+  const method = request.method.toUpperCase();
+
+  if (method === "POST") {
+    const accept = request.headers.get("accept") ?? "";
+    const ct = request.headers.get("content-type") ?? "";
+    if (!accept.includes("application/json") || !accept.includes("text/event-stream")) {
+      return mcpJsonError(-32000, "Not Acceptable: must accept application/json and text/event-stream", 406);
+    }
+    if (!ct.includes("application/json")) {
+      return mcpJsonError(-32000, "Unsupported Media Type: Content-Type must be application/json", 415);
+    }
+
+    let raw: unknown;
+    try {
+      raw = await request.json();
+    } catch {
+      return mcpJsonError(-32700, "Parse error: Invalid JSON", 400);
+    }
+    const messages = Array.isArray(raw) ? raw : [raw];
+
+    const agent = await getAgentByName(namespace, `streamable-http:${userId}`, { props });
+
+    const isInit = messages.some(
+      (m): boolean =>
+        typeof m === "object" && m !== null && (m as Record<string, unknown>)["method"] === "initialize",
+    );
+    if (isInit) {
+      await agent.setInitializeRequest(messages[0]);
+    } else if (!(await agent.getInitializeRequest())) {
+      return mcpJsonError(-32001, "Session not found", 404);
+    }
+
+    const fwd: Record<string, string> = {};
+    request.headers.forEach((v, k) => { fwd[k] = v; });
+
+    const wsRes = await agent.fetch(
+      new Request(request.url, {
+        headers: {
+          ...fwd,
+          [CF_MCP_METHOD]: "POST",
+          [CF_MCP_MESSAGE]: Buffer.from(JSON.stringify(messages)).toString("base64"),
+          Upgrade: "websocket",
+        },
+      }),
+    );
+    return sseFromWebSocket(wsRes.webSocket, userId);
+  }
+
+  if (method === "GET") {
+    const agent = await getAgentByName(namespace, `streamable-http:${userId}`, { props });
+    const fwd: Record<string, string> = {};
+    request.headers.forEach((v, k) => { fwd[k] = v; });
+    const wsRes = await agent.fetch(
+      new Request(request.url, {
+        headers: { ...fwd, [CF_MCP_METHOD]: "GET", Upgrade: "websocket" },
+      }),
+    );
+    return sseFromWebSocket(wsRes.webSocket, userId);
+  }
+
+  if (method === "DELETE") {
+    const agent = await getAgentByName(namespace, `streamable-http:${userId}`, { props });
+    const fwd: Record<string, string> = {};
+    request.headers.forEach((v, k) => { fwd[k] = v; });
+    await agent.fetch(
+      new Request(request.url, {
+        headers: { ...fwd, [CF_MCP_METHOD]: "DELETE", Upgrade: "websocket" },
+      }),
+    );
+    return new Response(null, { status: 200 });
+  }
+
+  return new Response("Method Not Allowed", { status: 405 });
+}
+
+function sseFromWebSocket(ws: WebSocket | null, sessionId: string): Response {
+  if (!ws) return mcpJsonError(-32001, "Failed to establish WebSocket connection to DO", 500);
+  ws.accept();
+  const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
+  const writer = writable.getWriter();
+  const enc = new TextEncoder();
+  ws.addEventListener("message", (event) => {
+    // The DO sends messages as: { type: "cf_mcp_agent_event", event: "<sse-string>", close?: true }
+    // `event` is already SSE-formatted ("data: ...\n\n") — write it directly.
+    // Ignore non-MCP messages (e.g. internal DO keepalives).
+    async function onMessage(ev: MessageEvent) {
+      try {
+        const raw = typeof ev.data === "string" ? ev.data : new TextDecoder().decode(ev.data as ArrayBuffer);
+        const msg = JSON.parse(raw) as { type?: string; event?: string; close?: boolean };
+        if (msg.type !== "cf_mcp_agent_event") return;
+        if (msg.event) await writer.write(enc.encode(msg.event));
+        if (msg.close) {
+          ws?.close();
+          await writer.close().catch(() => {});
+        }
+      } catch (err) {
+        console.error("[sseFromWebSocket] message parse error:", err);
+      }
+    }
+    void onMessage(event);
+  });
+  ws.addEventListener("close", () => void writer.close().catch(() => {}));
+  ws.addEventListener("error", () => void writer.close().catch(() => {}));
+  return new Response(readable, {
+    headers: {
+      "content-type": "text/event-stream",
+      "mcp-session-id": sessionId,
+      "cache-control": "no-cache",
+    },
+  });
+}
+
+function mcpJsonError(code: number, message: string, status: number): Response {
+  return new Response(
+    JSON.stringify({ jsonrpc: "2.0", id: null, error: { code, message } }),
+    { status, headers: { "content-type": "application/json" } },
+  );
 }
 
 // ──────────────────────────────────────────────────────────────────────────

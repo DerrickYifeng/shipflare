@@ -42,6 +42,7 @@ export class XMcpAgent extends McpAgent<
 > {
   server = new McpServer({ name: "shipflare-x-mcp", version: "1.0.0" });
   initialState: XState = { lastWakeAt: 0 };
+  private _toolsRegistered = false;
 
   /**
    * Narrow accessors so tool-registration modules (which live outside the
@@ -79,6 +80,8 @@ export class XMcpAgent extends McpAgent<
    *   - x_metrics — read, OAuth-required (any role) (OAuth via getChannel)
    */
   async init(): Promise<void> {
+    if (this._toolsRegistered) return;
+    this._toolsRegistered = true;
     registerXSearchTool(this);
     registerXPostTool(this);
     registerXMetricsTool(this);

@@ -29,6 +29,7 @@ export class BrandAnalyst extends McpAgent<Env, BrandAnalystState, McpProps> {
     version: "1.0.0",
   });
   initialState: BrandAnalystState = { lastWakeAt: 0 };
+  private _toolsRegistered = false;
 
   get sqlStorage(): SqlStorage {
     return this.ctx.storage.sql;
@@ -45,6 +46,8 @@ export class BrandAnalyst extends McpAgent<Env, BrandAnalystState, McpProps> {
   }
 
   async init(): Promise<void> {
+    if (this._toolsRegistered) return;
+    this._toolsRegistered = true;
     registerChatTool(this);
     registerAnalyzeCompetitorsTool(this);
     registerSuggestPositioningTool(this);

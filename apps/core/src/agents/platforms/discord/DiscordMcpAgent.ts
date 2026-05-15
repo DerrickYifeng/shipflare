@@ -43,6 +43,7 @@ export class DiscordMcpAgent extends McpAgent<
     version: "1.0.0",
   });
   initialState: DiscordState = { lastWakeAt: 0 };
+  private _toolsRegistered = false;
 
   get sqlStorage(): SqlStorage {
     return this.ctx.storage.sql;
@@ -58,6 +59,8 @@ export class DiscordMcpAgent extends McpAgent<
   }
 
   async init(): Promise<void> {
+    if (this._toolsRegistered) return;
+    this._toolsRegistered = true;
     registerDiscordPostTool(this);
     registerDiscordSearchTool(this);
   }

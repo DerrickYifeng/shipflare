@@ -44,6 +44,7 @@ interface SmmState {
 export class SocialMediaMgr extends McpAgent<Env, SmmState, McpProps> {
   server = new McpServer({ name: "shipflare-smm", version: "1.0.0" });
   initialState: SmmState = { lastWakeAt: 0 };
+  private _toolsRegistered = false;
 
   /**
    * Narrow accessors so tool-registration modules (which live outside the
@@ -77,6 +78,8 @@ export class SocialMediaMgr extends McpAgent<Env, SmmState, McpProps> {
   }
 
   async init(): Promise<void> {
+    if (this._toolsRegistered) return;
+    this._toolsRegistered = true;
     registerFindThreadsViaXaiTool(this);
     registerFindThreadsTool(this);
     registerListDraftsTool(this);

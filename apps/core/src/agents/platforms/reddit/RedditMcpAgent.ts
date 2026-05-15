@@ -45,6 +45,7 @@ export class RedditMcpAgent extends McpAgent<
 > {
   server = new McpServer({ name: "shipflare-reddit-mcp", version: "1.0.0" });
   initialState: RedditState = { lastWakeAt: 0 };
+  private _toolsRegistered = false;
 
   /**
    * Narrow accessors so tool-registration modules (which live outside
@@ -88,6 +89,8 @@ export class RedditMcpAgent extends McpAgent<
    *                           subscriber count as ICP-fit proxy)
    */
   async init(): Promise<void> {
+    if (this._toolsRegistered) return;
+    this._toolsRegistered = true;
     registerRedditSearchTool(this);
     registerRedditPostTool(this);
     registerResearchSubredditsTool(this);

@@ -24,6 +24,7 @@ type CMOState = {
   lastWakeAt: number;
 };
 
+
 /**
  * CMO — the founder-facing orchestrator employee.
  *
@@ -48,6 +49,9 @@ type CMOState = {
 export class CMO extends McpAgent<Env, CMOState, McpProps> {
   server = new McpServer({ name: "shipflare-cmo", version: "1.0.0" });
   initialState: CMOState = { initialized: false, lastWakeAt: 0 };
+  // McpAgent.onStart() calls init() on every new MCP session but this.server
+  // persists on the same DO instance — guard so tools register exactly once.
+  private _toolsRegistered = false;
 
   /**
    * Narrow accessors so tool-registration modules (which live outside the
@@ -170,6 +174,8 @@ export class CMO extends McpAgent<Env, CMOState, McpProps> {
   }
 
   async init(): Promise<void> {
+    if (this._toolsRegistered) return;
+    this._toolsRegistered = true;
     // S2.1: chat tool — founder's primary entrypoint.
     registerChatTool(this);
     // S2.2: conversation + roster management.

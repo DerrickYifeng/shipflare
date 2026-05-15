@@ -47,7 +47,7 @@ export async function logPeerDmShadow<T extends Rpc.DurableObjectBranded | undef
   userId: string,
   shadow: PeerDmShadow,
 ): Promise<void> {
-  const cmoId = cmoNamespace.idFromName(userId);
+  const cmoId = cmoNamespace.idFromName(`streamable-http:${userId}`);
   const cmoStub = cmoNamespace.get(cmoId);
   const res = await cmoStub.fetch(
     new Request("https://internal/internal/peer-dm-shadow", {

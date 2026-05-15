@@ -33,6 +33,7 @@ export class CommunityManager extends McpAgent<
     version: "1.0.0",
   });
   initialState: CommunityManagerState = { lastWakeAt: 0 };
+  private _toolsRegistered = false;
 
   get sqlStorage(): SqlStorage {
     return this.ctx.storage.sql;
@@ -49,6 +50,8 @@ export class CommunityManager extends McpAgent<
   }
 
   async init(): Promise<void> {
+    if (this._toolsRegistered) return;
+    this._toolsRegistered = true;
     registerChatTool(this);
     registerAnalyzeCommunityPulseTool(this);
     registerSummarizeMentionsTool(this);
