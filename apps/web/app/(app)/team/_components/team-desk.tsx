@@ -108,7 +108,7 @@ export function TeamDesk({ user }: TeamDeskProps) {
           client.queryRoster(),
           client.listConversations(20),
           client.queryPlanItems<PlanItemRow>({ limit: 50 }),
-          client.queryDrafts<DraftRow>({ status: "pending", limit: 20 }),
+          client.queryDrafts<DraftRow>({ status: "ready", limit: 20 }),
         ]);
 
         if (cancelled) return;
@@ -157,7 +157,7 @@ export function TeamDesk({ user }: TeamDeskProps) {
     try {
       const [items, pendingDrafts] = await Promise.all([
         client.queryPlanItems<PlanItemRow>({ limit: 50 }),
-        client.queryDrafts<DraftRow>({ status: "pending", limit: 20 }),
+        client.queryDrafts<DraftRow>({ status: "ready", limit: 20 }),
       ]);
       setPlanItems(items);
       setDrafts(pendingDrafts);

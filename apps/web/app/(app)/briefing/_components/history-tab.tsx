@@ -27,7 +27,10 @@ interface Draft {
   updated_at: number;
 }
 
-const HISTORY_STATUSES = ["approved", "posted", "handed_off"] as const;
+// Must match the Zod enum in apps/core/.../cmo/tools/shared-state.ts's
+// queryDrafts inputSchema: drafting | ready | posted | failed | rejected.
+// "history" = anything no longer pending the founder's review.
+const HISTORY_STATUSES = ["posted", "failed", "rejected"] as const;
 
 interface State {
   loading: boolean;
@@ -149,15 +152,15 @@ export function HistoryTab() {
 }
 
 const STATUS_LABEL: Record<string, string> = {
-  approved: "Approved",
   posted: "Posted",
-  handed_off: "Handed off",
+  failed: "Failed",
+  rejected: "Rejected",
 };
 
 const STATUS_COLOR: Record<string, string> = {
-  approved: "var(--sf-fg-2)",
   posted: "var(--sf-success, #16a34a)",
-  handed_off: "var(--sf-accent, #0071e3)",
+  failed: "var(--sf-error, #c33)",
+  rejected: "var(--sf-fg-3)",
 };
 
 function HistoryCard({ draft }: { draft: Draft }) {

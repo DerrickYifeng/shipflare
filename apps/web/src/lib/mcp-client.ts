@@ -36,6 +36,7 @@ interface ToolContentBlock {
 
 interface CallToolResultLike {
   content?: ToolContentBlock[] | unknown;
+  isError?: boolean;
 }
 
 /**
@@ -331,8 +332,22 @@ export class CmoClient {
       arguments: args,
     })) as CallToolResultLike;
     const text = extractText(result);
+    // Tool returned an error result — surface it with the tool name so the
+    // caller sees `<tool>: <server message>` instead of a generic JSON
+    // parse failure. Also catches the case where `isError` isn't set but
+    // the server still returned an MCP error string in the text block.
+    if (result.isError || text.startsWith("MCP error")) {
+      throw new Error(`${name}: ${text || "unknown MCP error"}`);
+    }
     if (!text) return {} as T;
-    return JSON.parse(text) as T;
+    try {
+      return JSON.parse(text) as T;
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `${name}: invalid JSON response — ${msg}. First 120 chars: ${text.slice(0, 120)}`,
+      );
+    }
   }
 }
 
