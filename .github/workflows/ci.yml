@@ -203,12 +203,18 @@ jobs:
       - name: next build
         run: pnpm --filter @shipflare/web build
 
-      # `opennextjs-cloudflare build` defaults to invoking the project's
-      # build script via `bun run build` — bun isn't in the CI runner.
-      # We already ran `next build` in the prior step; pass --skipNextBuild
-      # so OpenNext only does its post-processing (worker bundling).
+      # OpenNext's default build path invokes the project's build script
+      # via `bun run build`. Install Bun on the runner so the call doesn't
+      # crash with 'Command failed: bun run build'. (Using --skipNextBuild
+      # is also an option, but then OpenNext expects `output: 'standalone'`
+      # in next.config — sticking with the default flow keeps next.config
+      # minimal.)
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
       - name: opennextjs-cloudflare build
-        run: pnpm --filter @shipflare/web exec opennextjs-cloudflare build --skipNextBuild
+        run: pnpm --filter @shipflare/web exec opennextjs-cloudflare build
 
   # Deployment is NOT wired into CI. Production deploy is operator-driven via
   # `./scripts/deploy-cf.sh` after the first-deploy checklist
