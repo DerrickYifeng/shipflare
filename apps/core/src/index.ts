@@ -280,20 +280,65 @@ async function snapshotGrowth(env: Env): Promise<void> {
 /**
  * Fetch engagement metrics for a given user + platform.
  *
- * Phase 1: returns an empty record so the /growth page renders zeros while
- * the real collection pipeline is wired in a later task. The signature is
- * stable so the caller (`snapshotGrowth`) needs no changes when real
- * collection lands — only this function body changes.
+ * Routes to the platform DO's `/internal/<tool>` endpoint via a
+ * service-binding fetch. The DO re-checks the `x-shipflare-internal: 1`
+ * header defensively; Cloudflare strips this from public-edge traffic.
+ *
+ * Failures return an empty record so one user's error doesn't break the
+ * rest of the cron fan-out. Errors are logged with user/platform context.
  */
 async function fetchPlatformMetrics(
-  _env: Env,
-  _userId: string,
-  _platform: "x" | "reddit",
+  env: Env,
+  userId: string,
+  platform: "x" | "reddit",
 ): Promise<Record<string, number>> {
-  // Phase 1 stub — returns empty object.
-  // Phase 2: call env.X_MCP / env.REDDIT_MCP DO stubs via
-  //   stub.fetch(new Request("https://internal/internal/metrics", {...}))
-  // and parse the JSON response into { followers, impressions, ... }.
+  try {
+    if (platform === "x") {
+      const id = env.X_MCP.idFromName(userId);
+      const stub = env.X_MCP.get(id);
+      const res = await stub.fetch(
+        new Request("https://internal/internal/x_aggregate_metrics", {
+          method: "GET",
+          headers: { "x-shipflare-internal": "1" },
+        }),
+      );
+      if (!res.ok) {
+        console.warn(
+          `[fetchPlatformMetrics] x/${userId} DO returned ${res.status}`,
+        );
+        return {};
+      }
+      const json = (await res.json()) as Record<string, unknown>;
+      // capturedAt is a string — strip it; caller stores it separately.
+      const { capturedAt: _, error: __, ...numeric } = json;
+      return numeric as Record<string, number>;
+    }
+
+    if (platform === "reddit") {
+      const id = env.REDDIT_MCP.idFromName(userId);
+      const stub = env.REDDIT_MCP.get(id);
+      const res = await stub.fetch(
+        new Request("https://internal/internal/reddit_local_metrics", {
+          method: "GET",
+          headers: { "x-shipflare-internal": "1" },
+        }),
+      );
+      if (!res.ok) {
+        console.warn(
+          `[fetchPlatformMetrics] reddit/${userId} DO returned ${res.status}`,
+        );
+        return {};
+      }
+      const json = (await res.json()) as Record<string, unknown>;
+      const { capturedAt: _, error: __, ...numeric } = json;
+      return numeric as Record<string, number>;
+    }
+  } catch (err) {
+    console.warn(
+      `[fetchPlatformMetrics] ${platform}/${userId} threw:`,
+      err instanceof Error ? err.message : String(err),
+    );
+  }
   return {};
 }
 

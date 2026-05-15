@@ -6,6 +6,7 @@ import { applyRedditSchema } from "./schema";
 import { registerRedditSearchTool } from "./tools/reddit-search";
 import { registerRedditPostTool } from "./tools/reddit-post";
 import { registerResearchSubredditsTool } from "./tools/research-subreddits";
+import { registerRedditLocalMetricsTool, computeRedditLocalMetrics } from "./tools/reddit-local-metrics";
 
 interface RedditState {
   lastWakeAt: number;
@@ -94,5 +95,39 @@ export class RedditMcpAgent extends McpAgent<
     registerRedditSearchTool(this);
     registerRedditPostTool(this);
     registerResearchSubredditsTool(this);
+    registerRedditLocalMetricsTool(this);
+  }
+
+  /**
+   * Route `/internal/*` requests. All endpoints are gated on
+   * `x-shipflare-internal: 1` (set by the cron worker; Cloudflare strips
+   * this header from public-edge traffic).
+   *
+   * `/internal/reddit_local_metrics` — called by the growth-snapshot cron
+   * to read local posted_externals counts for this user without going
+   * through the MCP protocol layer.
+   */
+  async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    const internal = request.headers.get("x-shipflare-internal") === "1";
+    if (!internal && url.pathname.startsWith("/internal/")) {
+      return new Response("forbidden", { status: 403 });
+    }
+    if (url.pathname === "/internal/reddit_local_metrics") {
+      try {
+        const metrics = computeRedditLocalMetrics(this);
+        return new Response(JSON.stringify(metrics), {
+          headers: { "content-type": "application/json" },
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(
+          "[RedditMcpAgent] /internal/reddit_local_metrics failed:",
+          msg,
+        );
+        return new Response(JSON.stringify({ error: msg }), { status: 500 });
+      }
+    }
+    return super.fetch(request);
   }
 }

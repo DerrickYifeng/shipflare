@@ -10,6 +10,20 @@ interface ChannelCardProps {
   footerSlot?: ReactNode;
 }
 
+const METRIC_LABELS: Record<string, string> = {
+  // X metrics
+  impressions: "Impressions",
+  likes: "Likes",
+  replies: "Replies",
+  reposts: "Reposts",
+  followers: "Followers",
+  posts_7d: "Posts (7d)",
+  // Reddit metrics
+  post_count: "Posts",
+  comment_count: "Comments",
+  karma_7d: "Karma (7d)",
+};
+
 const PLATFORM_DISPLAY: Record<string, { label: string; bg: string; glyph: string }> = {
   x: { label: "X (Twitter)", bg: "#000", glyph: "𝕏" },
   reddit: { label: "Reddit", bg: "#ff4500", glyph: "R" },
@@ -125,7 +139,7 @@ export function ChannelCard({ channel, footerSlot }: ChannelCardProps) {
               }}
             >
               {metricEntries.map(([key, val]) => (
-                <Metric key={key} label={key} value={val} />
+                <Metric key={key} label={METRIC_LABELS[key] ?? key} value={val} />
               ))}
             </div>
           ) : (
