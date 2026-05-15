@@ -12,6 +12,8 @@ interface RightPanelProps {
   onApproveDraft: (id: string) => Promise<void>;
   onRejectDraft: (id: string) => Promise<void>;
   loadingDraftId: string | null;
+  onCancelPlanItem?: (id: string) => Promise<void>;
+  cancellingPlanId?: string | null;
 }
 
 const PANEL: CSSProperties = {
@@ -119,9 +121,30 @@ interface RunningRow {
   startedAt: number | null;
 }
 
-function RunningCard({ row }: { row: RunningRow }) {
+function RunningCard({
+  row,
+  onCancel,
+  cancelling,
+}: {
+  row: RunningRow;
+  onCancel?: () => Promise<void>;
+  cancelling: boolean;
+}) {
   const displayName = displayNameForRole(row.role);
   const time = relativeTime(row.startedAt);
+
+  const cancelBtn: CSSProperties = {
+    background: "transparent",
+    border: "none",
+    color: "var(--sf-fg-4)",
+    cursor: cancelling ? "not-allowed" : "pointer",
+    fontSize: 14,
+    padding: 4,
+    borderRadius: 4,
+    opacity: cancelling ? 0.4 : 1,
+    transition: "color var(--sf-dur-fast) var(--sf-ease-swift)",
+  };
+
   return (
     <div
       style={{
@@ -163,6 +186,28 @@ function RunningCard({ row }: { row: RunningRow }) {
         </div>
       </div>
       <PhaseTag label={row.status} tone={statusTone(row.status)} />
+      {onCancel && (
+        <button
+          type="button"
+          style={cancelBtn}
+          disabled={cancelling}
+          onClick={() => void onCancel()}
+          onMouseEnter={(e) => {
+            if (!cancelling) {
+              (e.currentTarget as HTMLButtonElement).style.color =
+                "var(--sf-error)";
+            }
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.color =
+              "var(--sf-fg-4)";
+          }}
+          aria-label={`Cancel ${row.skill}`}
+          title="Cancel this task"
+        >
+          {cancelling ? "⋯" : "✕"}
+        </button>
+      )}
     </div>
   );
 }
@@ -327,6 +372,8 @@ export function RightPanel({
   onApproveDraft,
   onRejectDraft,
   loadingDraftId,
+  onCancelPlanItem,
+  cancellingPlanId,
 }: RightPanelProps) {
   const running: RunningRow[] = planItems
     .filter((p) => {
@@ -363,7 +410,14 @@ export function RightPanel({
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {running.map((r) => (
-              <RunningCard key={r.id} row={r} />
+              <RunningCard
+                key={r.id}
+                row={r}
+                onCancel={
+                  onCancelPlanItem ? () => onCancelPlanItem(r.id) : undefined
+                }
+                cancelling={cancellingPlanId === r.id}
+              />
             ))}
           </div>
         )}

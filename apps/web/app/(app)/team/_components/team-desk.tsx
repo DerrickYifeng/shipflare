@@ -11,6 +11,10 @@ import { Conversation } from "./conversation";
 import { StickyComposer } from "./sticky-composer";
 import { StatusBanner } from "./status-banner";
 import { RightPanel } from "./right-panel";
+import {
+  TeammateTranscriptDrawer,
+  type TranscriptDrawerTarget,
+} from "./teammate-transcript-drawer";
 
 // ---------------------------------------------------------------------------
 // Props
@@ -86,6 +90,12 @@ export function TeamDesk({ user }: TeamDeskProps) {
   const [planItems, setPlanItems] = useState<PlanItemRow[]>([]);
   const [drafts, setDrafts] = useState<DraftRow[]>([]);
   const [loadingDraftId, setLoadingDraftId] = useState<string | null>(null);
+  const [cancellingPlanId, setCancellingPlanId] = useState<string | null>(null);
+
+  // ---- Transcript drawer ----
+  const [drawerTarget, setDrawerTarget] = useState<TranscriptDrawerTarget | null>(
+    null,
+  );
 
   // ---- Connection / init ----
   const [connectError, setConnectError] = useState<string | null>(null);
@@ -282,6 +292,37 @@ export function TeamDesk({ user }: TeamDeskProps) {
     [toast],
   );
 
+  const handleCancelPlanItem = useCallback(
+    async (id: string) => {
+      const client = clientRef.current;
+      if (!client) return;
+      setCancellingPlanId(id);
+      try {
+        await client.cancelPlanItem(id);
+        // Optimistically flip status in local state; next refresh will
+        // confirm.
+        setPlanItems((prev) =>
+          prev.map((p) =>
+            p.id === id ? { ...p, status: "cancelled" } : p,
+          ),
+        );
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Cancel failed";
+        toast(`Couldn't cancel task: ${msg}`, "error");
+      } finally {
+        setCancellingPlanId(null);
+      }
+    },
+    [toast],
+  );
+
+  const handleSelectEmployee = useCallback((employee: RosterEmployee) => {
+    setDrawerTarget({
+      role: employee.role,
+      displayName: employee.displayName,
+    });
+  }, []);
+
   // ---- Render ----
   const composerDisabled = !initDone || status === "connecting" || status === "sending" || !!connectError;
   const displayError = connectError ?? chatError;
@@ -295,6 +336,7 @@ export function TeamDesk({ user }: TeamDeskProps) {
         selectedConversationId={selectedConversationId}
         onSelectConversation={setSelectedConversationId}
         onNewConversation={() => void handleNewConversation()}
+        onSelectEmployee={handleSelectEmployee}
         creating={creating}
       />
 
@@ -341,6 +383,13 @@ export function TeamDesk({ user }: TeamDeskProps) {
         onApproveDraft={handleApproveDraft}
         onRejectDraft={handleRejectDraft}
         loadingDraftId={loadingDraftId}
+        onCancelPlanItem={handleCancelPlanItem}
+        cancellingPlanId={cancellingPlanId}
+      />
+
+      <TeammateTranscriptDrawer
+        target={drawerTarget}
+        onClose={() => setDrawerTarget(null)}
       />
     </main>
   );

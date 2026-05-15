@@ -221,6 +221,39 @@ export class CmoClient {
   }
 
   /**
+   * List recent `employee_log` rows authored by a given role: task
+   * completions, peer-DM shadows, requests for input. Used by the team
+   * page's teammate transcript drawer.
+   */
+  async queryAgentTranscript(
+    role: string,
+    limit = 100,
+  ): Promise<
+    Array<{
+      id: number;
+      conversation_id: string | null;
+      from_role: string;
+      kind: string;
+      summary: string | null;
+      payload_json: string | null;
+      ts: number;
+    }>
+  > {
+    return this.callJsonTool("queryAgentTranscript", { role, limit });
+  }
+
+  /**
+   * Cancel an in-flight plan_item. Flips status to 'cancelled' and stamps
+   * completed_at. Throws if the item is already terminal (completed /
+   * failed / cancelled).
+   */
+  async cancelPlanItem(
+    id: string,
+  ): Promise<{ id: string; status: "cancelled" }> {
+    return this.callJsonTool("cancelPlanItem", { id });
+  }
+
+  /**
    * Hire an employee role. Idempotent — re-hiring a fired role flips status
    * back to "active". CMO is implicit, so `hireEmployee("cmo")` is rejected
    * server-side.

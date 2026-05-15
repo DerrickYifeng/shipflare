@@ -12,6 +12,7 @@ interface LeftRailProps {
   selectedConversationId: string | null;
   onSelectConversation: (id: string) => void;
   onNewConversation: () => void;
+  onSelectEmployee?: (employee: RosterEmployee) => void;
   creating: boolean;
 }
 
@@ -22,14 +23,26 @@ function rosterStatusToPill(s: RosterEmployee["status"], taskCount?: number): Ag
   return "active";
 }
 
-function EmployeeRow({ employee }: { employee: RosterEmployee }) {
+function EmployeeRow({
+  employee,
+  onSelect,
+}: {
+  employee: RosterEmployee;
+  onSelect?: () => void;
+}) {
+  const interactive = !!onSelect && employee.status !== "fired";
   const row: CSSProperties = {
     display: "flex",
     alignItems: "center",
     gap: 10,
     padding: "8px 10px",
     borderRadius: "var(--sf-radius-md)",
-    cursor: "default",
+    cursor: interactive ? "pointer" : "default",
+    border: "none",
+    background: "transparent",
+    width: "100%",
+    textAlign: "left",
+    transition: "background var(--sf-dur-fast) var(--sf-ease-swift)",
   };
 
   const name: CSSProperties = {
@@ -55,14 +68,40 @@ function EmployeeRow({ employee }: { employee: RosterEmployee }) {
 
   const pillStatus = rosterStatusToPill(employee.status, employee.taskCount);
 
-  return (
-    <div style={row} role="listitem">
+  const content = (
+    <>
       <AgentDot role={employee.role} displayName={employee.displayName} size={28} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={name}>{employee.displayName}</div>
         <div style={roleTag}>{roleCodeForRole(employee.role, employee.displayName)}</div>
       </div>
       <AgentStatusPill status={pillStatus} taskCount={employee.taskCount} />
+    </>
+  );
+
+  if (interactive) {
+    return (
+      <button
+        type="button"
+        style={row}
+        onClick={onSelect}
+        onMouseEnter={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.background =
+            "var(--sf-bg-tertiary)";
+        }}
+        onMouseLeave={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.background = "transparent";
+        }}
+        aria-label={`Open transcript for ${employee.displayName}`}
+      >
+        {content}
+      </button>
+    );
+  }
+
+  return (
+    <div style={row} role="listitem">
+      {content}
     </div>
   );
 }
@@ -123,6 +162,7 @@ export function LeftRail({
   selectedConversationId,
   onSelectConversation,
   onNewConversation,
+  onSelectEmployee,
   creating,
 }: LeftRailProps) {
   const outer: CSSProperties = {
@@ -174,7 +214,13 @@ export function LeftRail({
         </div>
         <div role="list" aria-label="Employees">
           {employees.map((emp) => (
-            <EmployeeRow key={emp.role} employee={emp} />
+            <EmployeeRow
+              key={emp.role}
+              employee={emp}
+              onSelect={
+                onSelectEmployee ? () => onSelectEmployee(emp) : undefined
+              }
+            />
           ))}
           {employees.length === 0 && (
             <div

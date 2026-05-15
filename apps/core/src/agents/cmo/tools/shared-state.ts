@@ -417,6 +417,102 @@ export function registerSharedStateTools(agent: CMO): void {
       };
     },
   );
+
+  // ── queryAgentTranscript ────────────────────────────────────────────
+  // Returns the employee_log rows for a given role: task completions,
+  // peer-DM shadows, requests for input. Powers the /team teammate
+  // transcript drawer so the founder can see what each agent has been
+  // doing without scrolling the main conversation.
+  agent.server.registerTool(
+    "queryAgentTranscript",
+    {
+      description:
+        "List recent employee_log entries authored by the given role, " +
+        "newest first. Used by the team UI's transcript drawer.",
+      inputSchema: {
+        role: z.string().min(1),
+        limit: z.number().int().positive().max(200).default(100),
+      },
+    },
+    async ({ role, limit }) => {
+      const rows = agent.sqlStorage
+        .exec<{
+          id: number;
+          conversation_id: string | null;
+          from_role: string;
+          kind: string;
+          summary: string | null;
+          payload_json: string | null;
+          ts: number;
+        }>(
+          `SELECT id, conversation_id, from_role, kind, summary, payload_json, ts
+           FROM employee_log
+           WHERE from_role = ?
+           ORDER BY ts DESC
+           LIMIT ?`,
+          role,
+          limit,
+        )
+        .toArray();
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(rows) }],
+      };
+    },
+  );
+
+  // ── cancelPlanItem ──────────────────────────────────────────────────
+  // Founder cancels a plan_item. Thin wrapper over updatePlanItem with
+  // status='cancelled' so the UI doesn't need to know the enum. Returns
+  // the updated row id + new status; throws if the item is already
+  // terminal (completed / failed / cancelled).
+  agent.server.registerTool(
+    "cancelPlanItem",
+    {
+      description:
+        "Cancel an in-flight plan_item by id. Flips status to 'cancelled' " +
+        "and stamps completed_at. Throws if the item is already terminal.",
+      inputSchema: {
+        id: z.string().min(1),
+      },
+    },
+    async ({ id }) => {
+      const now = Date.now();
+      const existing = agent.sqlStorage
+        .exec<{ id: string; status: string }>(
+          "SELECT id, status FROM plan_items WHERE id = ?",
+          id,
+        )
+        .toArray();
+      const row = existing[0];
+      if (!row) {
+        throw new Error(`plan_item not found: ${id}`);
+      }
+      if (
+        row.status === "completed" ||
+        row.status === "failed" ||
+        row.status === "cancelled"
+      ) {
+        throw new Error(
+          `plan_item ${id} is already terminal (${row.status}); cannot cancel`,
+        );
+      }
+      agent.sqlStorage.exec(
+        `UPDATE plan_items
+         SET status = 'cancelled', completed_at = ?
+         WHERE id = ?`,
+        now,
+        id,
+      );
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify({ id, status: "cancelled" }),
+          },
+        ],
+      };
+    },
+  );
 }
 
 /**
