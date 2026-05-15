@@ -20,19 +20,22 @@
     "@shipflare/db": "workspace:*",
     "@shipflare/shared": "workspace:*",
     "better-auth": "^1.6.11",
+    "cheerio": "^1.2.0",
     "eventsource-parser": "^3.0.0",
     "next": "16.2.6",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
-    "swr": "^2.4.1"
+    "swr": "^2.4.1",
+    "turndown": "^7.2.4"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260511.1",
     "@tailwindcss/postcss": "^4",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/turndown": "^5.0.6",
     "tailwindcss": "^4",
     "typescript": "^5.9.3",
     "vitest": "^4.1.6",
