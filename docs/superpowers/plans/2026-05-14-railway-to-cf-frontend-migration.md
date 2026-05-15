@@ -242,10 +242,10 @@ Open `apps/web/app/globals.css` and append (before the closing of the file, afte
   border: none;
   border-radius: var(--sf-radius-pill);
   font-family: var(--sf-font-text);
-  font-size: var(--sf-text-base);
+  font-size: 17px;
   font-weight: 500;
   cursor: pointer;
-  transition: background var(--sf-duration-fast) var(--sf-ease-swift);
+  transition: background var(--sf-dur-fast) var(--sf-ease);
 }
 .sf-cta-primary:hover { background: var(--sf-accent-hover); }
 
@@ -259,12 +259,12 @@ Open `apps/web/app/globals.css` and append (before the closing of the file, afte
   border: 1px solid var(--sf-fg-3);
   border-radius: var(--sf-radius-pill);
   font-family: var(--sf-font-text);
-  font-size: var(--sf-text-base);
+  font-size: 17px;
   font-weight: 500;
   cursor: pointer;
-  transition: background var(--sf-duration-fast) var(--sf-ease-swift);
+  transition: background var(--sf-dur-fast) var(--sf-ease);
 }
-.sf-cta-secondary:hover { background: var(--sf-fg-5); }
+.sf-cta-secondary:hover { background: var(--sf-bg-primary); }
 ```
 
 - [ ] **Step 3: Typecheck**
