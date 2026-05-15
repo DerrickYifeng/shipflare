@@ -12,7 +12,7 @@ import type { CMO } from "../CMO";
  * - queryFounderContext / setFounderContext — identity-level KV
  * - commitStrategicPath — HoG records a new strategy version
  * - addPlanItem / queryPlanItems / updatePlanItem — plan tickets
- * - approveDraft — founder approval, later wires to publish
+ * - approveDraft / rejectDraft — founder approval/rejection, later wires to publish
  * - queryDrafts — RPCs to SMM.list_drafts (returns [] if SMM not connected)
  */
 export function registerSharedStateTools(agent: CMO): void {
@@ -242,6 +242,41 @@ export function registerSharedStateTools(agent: CMO): void {
           {
             type: "text" as const,
             text: JSON.stringify({ draftId, decision: "approved" }),
+          },
+        ],
+      };
+    },
+  );
+
+  agent.server.registerTool(
+    "rejectDraft",
+    {
+      description:
+        "Founder rejects a draft. Marks the approval_queue row decided='rejected'. " +
+        "Optional reason is accepted for future use but not persisted until " +
+        "approval_queue.reason column lands.",
+      inputSchema: {
+        draftId: z.string().min(1),
+        // reason is parsed but not persisted until approval_queue.reason column lands
+        reason: z.string().max(500).optional(),
+      },
+    },
+    async ({ draftId }) => {
+      const result = agent.sqlStorage.exec(
+        `UPDATE approval_queue
+         SET decided_at = ?, decision = 'rejected'
+         WHERE draft_id = ?`,
+        Date.now(),
+        draftId,
+      );
+      if (result.rowsWritten === 0) {
+        throw new Error(`draft not in approval_queue: ${draftId}`);
+      }
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify({ draftId, decision: "rejected" }),
           },
         ],
       };

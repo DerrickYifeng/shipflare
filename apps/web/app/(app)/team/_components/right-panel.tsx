@@ -7,6 +7,7 @@ interface RightPanelProps {
   planItems: PlanItemRow[];
   drafts: DraftRow[];
   onApproveDraft: (id: string) => Promise<void>;
+  onRejectDraft: (id: string) => Promise<void>;
   loadingDraftId: string | null;
 }
 
@@ -108,10 +109,12 @@ function PlanItemCard({ item }: { item: PlanItemRow }) {
 function DraftCard({
   draft,
   onApprove,
+  onReject,
   loading,
 }: {
   draft: DraftRow;
   onApprove: () => Promise<void>;
+  onReject: () => Promise<void>;
   loading: boolean;
 }) {
   const content = typeof draft.content === "string" ? draft.content : "";
@@ -153,6 +156,21 @@ function DraftCard({
     transition: `opacity var(--sf-dur-fast) var(--sf-ease)`,
   };
 
+  const rejectBtn: CSSProperties = {
+    flex: 1,
+    padding: "5px 0",
+    borderRadius: "var(--sf-radius-md)",
+    border: "1px solid var(--sf-fg-3)",
+    background: "transparent",
+    color: "var(--sf-fg-1)",
+    fontSize: 12,
+    fontFamily: "var(--sf-font-text)",
+    fontWeight: 500,
+    cursor: loading ? "not-allowed" : "pointer",
+    opacity: loading ? 0.5 : 1,
+    transition: `opacity var(--sf-dur-fast) var(--sf-ease), background var(--sf-dur-fast) var(--sf-ease)`,
+  };
+
   return (
     <div style={CARD}>
       <span style={pill}>{platform}</span>
@@ -177,6 +195,25 @@ function DraftCard({
         >
           Approve
         </button>
+        <button
+          type="button"
+          style={rejectBtn}
+          disabled={loading}
+          onClick={() => void onReject()}
+          onMouseEnter={(e) => {
+            if (!loading) {
+              (e.currentTarget as HTMLButtonElement).style.background =
+                "var(--sf-bg-primary)";
+            }
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.background =
+              "transparent";
+          }}
+          aria-label="Reject draft"
+        >
+          Reject
+        </button>
       </div>
     </div>
   );
@@ -186,6 +223,7 @@ export function RightPanel({
   planItems,
   drafts,
   onApproveDraft,
+  onRejectDraft,
   loadingDraftId,
 }: RightPanelProps) {
   return (
@@ -216,6 +254,7 @@ export function RightPanel({
                 key={d.id}
                 draft={d}
                 onApprove={() => onApproveDraft(d.id)}
+                onReject={() => onRejectDraft(d.id)}
                 loading={loadingDraftId === d.id}
               />
             ))}

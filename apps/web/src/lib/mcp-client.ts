@@ -184,6 +184,24 @@ export class CmoClient {
   }
 
   /**
+   * Reject a draft. Flips the matching `approval_queue` row to
+   * `decision='rejected'`. Throws if the draft isn't in the queue (e.g.
+   * already decided, or never enqueued).
+   *
+   * `reason` is forwarded to the server but not persisted until
+   * `approval_queue.reason` column lands (see shared-state.ts comment).
+   */
+  async rejectDraft(
+    draftId: string,
+    reason?: string,
+  ): Promise<{ draftId: string; decision: "rejected" }> {
+    return this.callJsonTool(
+      "rejectDraft",
+      reason !== undefined ? { draftId, reason } : { draftId },
+    );
+  }
+
+  /**
    * Hire an employee role. Idempotent — re-hiring a fired role flips status
    * back to "active". CMO is implicit, so `hireEmployee("cmo")` is rejected
    * server-side.

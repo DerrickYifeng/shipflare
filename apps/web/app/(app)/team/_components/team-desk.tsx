@@ -207,9 +207,6 @@ export function TeamDesk({ user }: TeamDeskProps) {
   }, [creating]);
 
   // ---- Draft actions ----
-  // Reject is intentionally not exposed: CmoClient has no rejectDraft tool
-  // yet, and a UI-only "Reject" is misleading. Approve is wired through to
-  // CMO's approveDraft tool; errors surface via toast.
   const handleApproveDraft = useCallback(
     async (id: string) => {
       const client = clientRef.current;
@@ -221,6 +218,24 @@ export function TeamDesk({ user }: TeamDeskProps) {
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Approve failed";
         toast(`Couldn't approve draft: ${msg}`, "error");
+      } finally {
+        setLoadingDraftId(null);
+      }
+    },
+    [toast],
+  );
+
+  const handleRejectDraft = useCallback(
+    async (id: string) => {
+      const client = clientRef.current;
+      if (!client) return;
+      setLoadingDraftId(id);
+      try {
+        await client.rejectDraft(id);
+        setDrafts((prev) => prev.filter((d) => d.id !== id));
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Reject failed";
+        toast(`Couldn't reject draft: ${msg}`, "error");
       } finally {
         setLoadingDraftId(null);
       }
@@ -282,6 +297,7 @@ export function TeamDesk({ user }: TeamDeskProps) {
         planItems={planItems}
         drafts={drafts}
         onApproveDraft={handleApproveDraft}
+        onRejectDraft={handleRejectDraft}
         loadingDraftId={loadingDraftId}
       />
     </main>
