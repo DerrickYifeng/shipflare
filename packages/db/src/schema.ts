@@ -82,7 +82,7 @@ export const channels = sqliteTable("channels", {
     .notNull()
     .references(() => user.id, { onDelete: "cascade" }),
   platform: text("platform", {
-    enum: ["x", "reddit", "linkedin", "hackernews", "discord"],
+    enum: ["x", "reddit"],
   }).notNull(),
   externalUserId: text("externalUserId").notNull(),
   username: text("username"),

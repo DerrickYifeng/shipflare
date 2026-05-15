@@ -32,10 +32,6 @@ const VALID_ROLES = new Set<string>([
   "cmo",
   "head-of-growth",
   "social-media-manager",
-  // P2-B — Pro tier opt-in roles
-  "copywriter",
-  "brand-analyst",
-  "community-manager",
 ]);
 
 /** 30 days in seconds. */

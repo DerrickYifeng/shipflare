@@ -141,23 +141,14 @@ export const TOOL_SCOPE_MAP: Record<string, ExternalScope> = {
   process_posts_batch: "draft",
   list_drafts: "read",
   research_reddit_channels: "draft",
-  polishWithCopywriter: "draft", // P2-C — SMM → Copywriter peer-DM
-  // Platform tool MCPs (Phase 2 — not exposed at /external yet but
-  // registered here so the map stays the single source of truth).
+  // Platform tool MCPs (not exposed at /external yet but registered here so
+  // the map stays the single source of truth).
   x_search: "read",
   x_post: "publish",
   x_metrics: "read",
   reddit_search: "read",
   reddit_post: "publish",
   research_subreddits: "draft",
-  // P2-B — Phase 2 expanded roster. `chat` already maps to `read` above;
-  // these are the role-specific specialty tools.
-  rewriteInVoice: "draft",
-  draftHeadlines: "draft",
-  analyzeCompetitors: "read",
-  suggestPositioning: "read",
-  analyzeCommunityPulse: "read",
-  summarizeMentions: "read",
 };
 
 /**

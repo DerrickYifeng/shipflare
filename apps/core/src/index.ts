@@ -45,22 +45,11 @@ import { createDb, user as userTable } from "@shipflare/db";
 import { CMO } from "./agents/cmo/CMO";
 import { HeadOfGrowth } from "./agents/head-of-growth/HeadOfGrowth";
 import { SocialMediaMgr } from "./agents/social-media-manager/SocialMediaMgr";
-// P2-B — Phase 2 Pro-tier opt-in roster. Imported as values so they can
-// register in the EMPLOYEE_CLASSES dispatch table and be re-exported below
-// for wrangler module-graph discovery (v5/v6/v7 migrations).
-import { Copywriter } from "./agents/copywriter/Copywriter";
-import { BrandAnalyst } from "./agents/brand-analyst/BrandAnalyst";
-import { CommunityManager } from "./agents/community-manager/CommunityManager";
 // `XMcpAgent` / `RedditMcpAgent` are type-imported here (Env declaration).
 // The value re-exports below put the classes on the module graph so wrangler
 // can discover them once S5.3 uncomments the X_MCP / REDDIT_MCP bindings.
 import type { XMcpAgent } from "./agents/platforms/x/XMcpAgent";
 import type { RedditMcpAgent } from "./agents/platforms/reddit/RedditMcpAgent";
-// P2-E platform MCPs. Type-only imports (re-exported below as values for
-// wrangler module-graph discovery + Env namespace declarations).
-import type { LinkedInMcpAgent } from "./agents/platforms/linkedin/LinkedInMcpAgent";
-import type { HackerNewsMcpAgent } from "./agents/platforms/hackernews/HackerNewsMcpAgent";
-import type { DiscordMcpAgent } from "./agents/platforms/discord/DiscordMcpAgent";
 
 // Value re-export so wrangler can discover the DO classes via the module
 // graph rooted at `main`. (We `import` the classes above as values so they
@@ -68,38 +57,22 @@ import type { DiscordMcpAgent } from "./agents/platforms/discord/DiscordMcpAgent
 // MCP route — `export { X }` is enough on its own when there's already an
 // `import { X }` above, but we keep the explicit re-export for grep-ability.)
 export { CMO, HeadOfGrowth, SocialMediaMgr };
-export { Copywriter, BrandAnalyst, CommunityManager };
-// Re-export the platform DO classes so wrangler can discover them; the
-// bindings in wrangler.jsonc + the Env entries below stay COMMENTED until
-// S5.3 wires migration tag v4. Re-exporting the classes now keeps the
-// import graph reachable for schema tests that getByName-cast another
-// binding.
+// Re-export the platform DO classes so wrangler can discover them via the
+// module graph rooted at `main`.
 export { XMcpAgent } from "./agents/platforms/x/XMcpAgent";
 export { RedditMcpAgent } from "./agents/platforms/reddit/RedditMcpAgent";
-// P2-E — three new platform tool MCPs (migration tag v8).
-export { LinkedInMcpAgent } from "./agents/platforms/linkedin/LinkedInMcpAgent";
-export { HackerNewsMcpAgent } from "./agents/platforms/hackernews/HackerNewsMcpAgent";
-export { DiscordMcpAgent } from "./agents/platforms/discord/DiscordMcpAgent";
 
 export interface Env {
   DB: D1Database;
   // Alias binding used for `wrangler d1 execute ... --remote` in local dev.
   // Declared here so Cloudflare.Env constraint is satisfied; not used in code.
   shipflare_prod: D1Database;
-  // DO bindings — uncomment as classes come online (S2-S5).
+  // DO bindings — 3 employee agents + 2 platform tool MCPs.
   CMO: DurableObjectNamespace<CMO>;
-  HEAD_OF_GROWTH: DurableObjectNamespace<HeadOfGrowth>; // S3
-  SOCIAL_MEDIA_MGR: DurableObjectNamespace<SocialMediaMgr>; // S4
-  X_MCP: DurableObjectNamespace<XMcpAgent>; // S5.3 — migration tag v4
-  REDDIT_MCP: DurableObjectNamespace<RedditMcpAgent>; // S5.3 — migration tag v4
-  COPYWRITER: DurableObjectNamespace<Copywriter>; // P2-B — migration tag v5
-  BRAND_ANALYST: DurableObjectNamespace<BrandAnalyst>; // P2-B — migration tag v6
-  COMMUNITY_MGR: DurableObjectNamespace<CommunityManager>; // P2-B — migration tag v7
-  // P2-E — three new platform tool MCPs (migration tag v8). HN has no
-  // channels row (anonymous via Algolia); LinkedIn + Discord do.
-  LINKEDIN_MCP: DurableObjectNamespace<LinkedInMcpAgent>;
-  HN_MCP: DurableObjectNamespace<HackerNewsMcpAgent>;
-  DISCORD_MCP: DurableObjectNamespace<DiscordMcpAgent>;
+  HEAD_OF_GROWTH: DurableObjectNamespace<HeadOfGrowth>;
+  SOCIAL_MEDIA_MGR: DurableObjectNamespace<SocialMediaMgr>;
+  X_MCP: DurableObjectNamespace<XMcpAgent>;
+  REDDIT_MCP: DurableObjectNamespace<RedditMcpAgent>;
   // Workflow binding — added when AgentPlanWorkflow lands (S6).
   // AGENT_PLAN_WORKFLOW: Workflow;
   // Secrets (wrangler secret put ...)
@@ -145,10 +118,6 @@ const EMPLOYEE_CLASSES: Record<string, any> = {
   cmo: CMO,
   "head-of-growth": HeadOfGrowth,
   "social-media-manager": SocialMediaMgr,
-  // P2-B — Phase 2 expanded roster
-  copywriter: Copywriter,
-  "brand-analyst": BrandAnalyst,
-  "community-manager": CommunityManager,
 };
 
 /**

@@ -164,9 +164,9 @@ describe("CMO /internal/peer-dm-shadow", () => {
         body: JSON.stringify({
           conversationId: "c-abc",
           fromRole: "social-media-manager",
-          toRole: "copywriter",
-          tool: "rewriteInVoice",
-          summary: "SMM asked Copywriter to rewrite draft xyz",
+          toRole: "head-of-growth",
+          tool: "audit_plan",
+          summary: "SMM asked HoG to audit plan xyz",
         }),
       }),
     );

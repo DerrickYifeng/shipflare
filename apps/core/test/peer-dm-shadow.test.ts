@@ -36,9 +36,9 @@ describe("logPeerDmShadow", () => {
     await logPeerDmShadow(env.CMO, userId, {
       conversationId: "conv-1",
       fromRole: "social-media-manager",
-      toRole: "copywriter",
-      tool: "rewriteInVoice",
-      summary: "SMM polished a 280-char draft",
+      toRole: "head-of-growth",
+      tool: "audit_plan",
+      summary: "SMM asked HoG to audit",
       payload: { originalLength: 280, rewrittenLength: 260 },
     });
 
@@ -63,7 +63,7 @@ describe("logPeerDmShadow", () => {
         from_role: "social-media-manager",
         notified_founder: 0,
         conversation_id: "conv-1",
-        summary: "SMM polished a 280-char draft",
+        summary: "SMM asked HoG to audit",
       });
       const payload = JSON.parse(row.payload_json) as {
         to: string;
@@ -71,8 +71,8 @@ describe("logPeerDmShadow", () => {
         payload: { originalLength: number; rewrittenLength: number };
       };
       expect(payload).toMatchObject({
-        to: "copywriter",
-        tool: "rewriteInVoice",
+        to: "head-of-growth",
+        tool: "audit_plan",
         payload: { originalLength: 280, rewrittenLength: 260 },
       });
     });
@@ -86,8 +86,8 @@ describe("logPeerDmShadow", () => {
     for (let i = 0; i < 3; i++) {
       await logPeerDmShadow(env.CMO, userId, {
         fromRole: "social-media-manager",
-        toRole: "copywriter",
-        tool: "rewriteInVoice",
+        toRole: "head-of-growth",
+        tool: "audit_plan",
         summary: `shadow ${i}`,
       });
     }

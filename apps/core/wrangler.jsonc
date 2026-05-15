@@ -69,35 +69,6 @@
 			{
 				"name": "REDDIT_MCP",
 				"class_name": "RedditMcpAgent"
-			},
-			// P2-B — Phase 2 expanded roster (Pro tier, opt-in hires)
-			{
-				"name": "COPYWRITER",
-				"class_name": "Copywriter"
-			},
-			{
-				"name": "BRAND_ANALYST",
-				"class_name": "BrandAnalyst"
-			},
-			{
-				"name": "COMMUNITY_MGR",
-				"class_name": "CommunityManager"
-			},
-			// P2-E — Phase 2 expanded platform surface (LinkedIn, HN, Discord).
-			// HN is anonymous (no channels row); the other two carry tokens
-			// through `channels.oauthTokenEncrypted` (LinkedIn = real OAuth,
-			// Discord = pasted bot token via lo-fi form-POST).
-			{
-				"name": "LINKEDIN_MCP",
-				"class_name": "LinkedInMcpAgent"
-			},
-			{
-				"name": "HN_MCP",
-				"class_name": "HackerNewsMcpAgent"
-			},
-			{
-				"name": "DISCORD_MCP",
-				"class_name": "DiscordMcpAgent"
 			}
 		]
 	},
@@ -136,10 +107,12 @@
 				"RedditMcpAgent"
 			]
 		},
-		// P2-B — Phase 2 expanded roster. Append-only; do NOT merge these into
-		// v1-v4 even though all three are landing in the same commit, because
-		// wrangler tracks applied tags by name and once a tag has run in any
-		// environment it cannot be modified.
+		// P2-B and P2-E expanded the roster + platform surface beyond what the
+		// design doc called for (3 employees + 2 platform MCPs). v5-v8 created
+		// Copywriter / BrandAnalyst / CommunityManager / LinkedIn / HN / Discord
+		// — v9 retires all six. Wrangler migration tags are append-only; the
+		// previous tags MUST stay in the array even though the classes are gone,
+		// otherwise wrangler refuses to deploy ("missing applied migration").
 		{
 			"tag": "v5",
 			"new_sqlite_classes": [
@@ -158,12 +131,20 @@
 				"CommunityManager"
 			]
 		},
-		// P2-E — three new platform tool MCPs land together. Append-only
-		// tag; do NOT merge into v4 (the X / Reddit tag) even though both
-		// groups are platform MCPs.
 		{
 			"tag": "v8",
 			"new_sqlite_classes": [
+				"LinkedInMcpAgent",
+				"HackerNewsMcpAgent",
+				"DiscordMcpAgent"
+			]
+		},
+		{
+			"tag": "v9",
+			"deleted_classes": [
+				"Copywriter",
+				"BrandAnalyst",
+				"CommunityManager",
 				"LinkedInMcpAgent",
 				"HackerNewsMcpAgent",
 				"DiscordMcpAgent"
