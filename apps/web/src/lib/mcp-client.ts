@@ -86,7 +86,7 @@ export class CmoClient {
 
   /**
    * Create a fresh conversation. Returns the new conversationId for the
-   * caller to navigate to (e.g. `/chat/<id>`).
+   * caller to navigate to (e.g. `/team/<id>`).
    *
    * The CMO tool serialises its return as a single JSON text block; we parse
    * it here so callers don't need to know the wire shape.
@@ -138,7 +138,7 @@ export class CmoClient {
 
   /**
    * List active (non-archived) conversations, newest first. Used by the
-   * `/chat` index page so founders can resume an old thread or start a new
+   * `/team` page so founders can resume an old thread or start a new
    * one.
    */
   async listConversations(
@@ -164,7 +164,7 @@ export class CmoClient {
    *   const drafts = await client.queryDrafts<Draft>({ status: 'ready' });
    *
    * Defaults to `Record<string, unknown>` for callers that don't declare a
-   * shape (e.g. the `/drafts` page which uses its own local `Draft` type).
+   * shape (e.g. the `/briefing` page which uses its own local `Draft` type).
    */
   async queryDrafts<R = Record<string, unknown>>(
     opts: { status?: string; limit?: number } = {},

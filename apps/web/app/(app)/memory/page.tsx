@@ -3,7 +3,7 @@
  *
  * Lists every active `cross_conversation_memory` row from the CMO DO. Each
  * row was added by the founder clicking "Remember" on a CMO message in
- * `/chat`. Clicking "Forget" soft-deletes (sets `active=0`); audit trail is
+ * `/team`. Clicking "Forget" soft-deletes (sets `active=0`); audit trail is
  * preserved server-side.
  *
  * Server component is a thin wrapper; the MCP fetch + forget loop runs in
@@ -20,7 +20,7 @@ export default function MemoryPage() {
       <p style={{ color: "#666" }}>
         Things your CMO remembers across all conversations. Click
         &ldquo;Forget&rdquo; to deactivate. Add new memories by clicking
-        &ldquo;Remember&rdquo; on CMO messages in chat.
+        &ldquo;Remember&rdquo; on CMO messages in the Team page.
       </p>
       <MemoryClient />
     </div>
