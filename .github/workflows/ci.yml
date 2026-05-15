@@ -203,8 +203,12 @@ jobs:
       - name: next build
         run: pnpm --filter @shipflare/web build
 
+      # `opennextjs-cloudflare build` defaults to invoking the project's
+      # build script via `bun run build` — bun isn't in the CI runner.
+      # We already ran `next build` in the prior step; pass --skipNextBuild
+      # so OpenNext only does its post-processing (worker bundling).
       - name: opennextjs-cloudflare build
-        run: pnpm --filter @shipflare/web exec opennextjs-cloudflare build
+        run: pnpm --filter @shipflare/web exec opennextjs-cloudflare build --skipNextBuild
 
   # Deployment is NOT wired into CI. Production deploy is operator-driven via
   # `./scripts/deploy-cf.sh` after the first-deploy checklist
