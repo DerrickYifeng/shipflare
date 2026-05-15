@@ -91,7 +91,10 @@ pnpm exec wrangler secret put REDDIT_CLIENT_SECRET
 pnpm exec wrangler secret put MCP_JWT_SECRET           # SAME value as apps/core
 pnpm exec wrangler secret put CHANNEL_ENC_KEY          # SAME value as apps/core
 pnpm exec wrangler secret put CORE_PUBLIC_URL          # https://shipflare-core.<account>.workers.dev
+pnpm exec wrangler secret put ANTHROPIC_API_KEY        # required for /api/onboarding/{extract,extract-repo,plan} — distinct from apps/core key
 ```
+
+> The onboarding routes return 503 `anthropic_not_configured` when this secret is unset. The key can be the same as apps/core's or a separate budget-scoped key.
 
 ## Step 5 — Deploy
 
