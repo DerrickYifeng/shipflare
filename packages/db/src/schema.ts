@@ -174,3 +174,52 @@ export const growthSnapshots = sqliteTable(
 
 export type GrowthSnapshot = typeof growthSnapshots.$inferSelect;
 export type NewGrowthSnapshot = typeof growthSnapshots.$inferInsert;
+
+// ─── ShipFlare allowlist (1) ───────────────────────────────────────────────
+//
+// Source of truth for "who can sign up". Better Auth's
+// databaseHooks.user.create.before queries this on every new sign-up;
+// existing accounts are unaffected. Admins manage via /admin/invites.
+// SUPER_ADMIN_EMAIL is an env-var bypass so the founder can never lock
+// themselves out by clearing the table.
+
+export const allowedEmails = sqliteTable("allowed_emails", {
+  /** Lowercased, trimmed email — primary key. */
+  email: text("email").primaryKey(),
+  /** Admin who invited this address (their email). */
+  invitedBy: text("invitedBy").notNull(),
+  /** Free-form note (e.g. "Founder of XYZ, met at SF Tech Week"). */
+  note: text("note"),
+  invitedAt: integer("invitedAt", { mode: "timestamp_ms" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+  /** When set, sign-up is blocked. Soft delete to preserve history. */
+  revokedAt: integer("revokedAt", { mode: "timestamp_ms" }),
+});
+
+export type AllowedEmail = typeof allowedEmails.$inferSelect;
+export type NewAllowedEmail = typeof allowedEmails.$inferInsert;
+
+// ─── ShipFlare waitlist signups (1) ────────────────────────────────────────
+//
+// Captures public /waitlist form submissions. Admins triage each entry in
+// /admin/invites → Waitlist tab and either approve (inserts into
+// allowed_emails) or dismiss (soft-reject). Idempotent on email so the same
+// person submitting twice doesn't create duplicate rows.
+
+export const waitlistSignups = sqliteTable("waitlist_signups", {
+  id: text("id").primaryKey(),
+  email: text("email").notNull().unique(),
+  submittedAt: integer("submittedAt", { mode: "timestamp_ms" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+  approvedAt: integer("approvedAt", { mode: "timestamp_ms" }),
+  /** Admin who approved (their email). */
+  approvedBy: text("approvedBy"),
+  dismissedAt: integer("dismissedAt", { mode: "timestamp_ms" }),
+  /** Admin who dismissed (their email). */
+  dismissedBy: text("dismissedBy"),
+});
+
+export type WaitlistSignup = typeof waitlistSignups.$inferSelect;
+export type NewWaitlistSignup = typeof waitlistSignups.$inferInsert;

@@ -6,6 +6,7 @@ import {
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import * as schema from "@shipflare/db";
+import { allowedEmails, and, eq, isNull } from "@shipflare/db";
 import { getDb } from "./db";
 
 // Per-isolate Better Auth singleton. Better Auth's setup walks the schema +
@@ -86,11 +87,18 @@ export function getAuth(): BetterAuthInstance {
           // /api/auth/[...all] adapter then forwards to /waitlist with the
           // denied email pre-filled.
           //
-          // Source of truth: the comma-separated ALLOWED_EMAILS env var
-          // (case-insensitive). SUPER_ADMIN_EMAIL is always allowed so the
-          // founder can never lock themselves out by clearing the list.
-          // Leave ALLOWED_EMAILS unset/empty to disable the gate (early-
-          // alpha workaround; flip on once you actually want gating).
+          // Source of truth (in priority order):
+          //   1. SUPER_ADMIN_EMAIL env (always allowed — safety net).
+          //   2. The `allowed_emails` D1 table (admin-managed via
+          //      /admin/invites). A row with revokedAt IS NULL = allowed.
+          //   3. ALLOWED_EMAILS env var (comma-sep, case-insensitive) —
+          //      bootstrap fallback used ONLY when the D1 table is empty.
+          //      The intended migration path is: set the env var once to
+          //      seed the founder, add invites through /admin/invites,
+          //      then clear the env var.
+          //
+          // If neither source has any entries the gate stays open so the
+          // very first sign-up isn't a chicken-and-egg problem.
           before: async (user) => {
             const rawEmail = user.email;
             if (!rawEmail || typeof rawEmail !== "string") {
@@ -103,21 +111,49 @@ export function getAuth(): BetterAuthInstance {
             if (superAdmin && email === superAdmin) {
               return { data: user };
             }
-            const raw = env.ALLOWED_EMAILS;
-            if (!raw || raw.trim() === "") {
-              // No allowlist configured → gate is off, let everyone in.
+
+            // 2. DB lookup — primary source of truth.
+            const dbRow = await db
+              .select({ email: allowedEmails.email })
+              .from(allowedEmails)
+              .where(
+                and(
+                  eq(allowedEmails.email, email),
+                  isNull(allowedEmails.revokedAt),
+                ),
+              )
+              .get();
+            if (dbRow) {
               return { data: user };
             }
-            const allowed = raw
-              .split(",")
-              .map((s) => s.trim().toLowerCase())
-              .filter(Boolean);
-            if (!allowed.includes(email)) {
-              throw new Error(
-                `BETTER_AUTH_REDIRECT:/waitlist?from=denied&email=${encodeURIComponent(email)}`,
-              );
+
+            // 3. Env-var fallback (bootstrap).
+            const raw = env.ALLOWED_EMAILS;
+            if (raw && raw.trim() !== "") {
+              const allowed = raw
+                .split(",")
+                .map((s) => s.trim().toLowerCase())
+                .filter(Boolean);
+              if (allowed.includes(email)) {
+                return { data: user };
+              }
             }
-            return { data: user };
+
+            // If both DB and env are empty, leave the gate open. Otherwise
+            // bounce to the waitlist with the denied email pre-filled.
+            const dbHasAny = await db
+              .select({ email: allowedEmails.email })
+              .from(allowedEmails)
+              .where(isNull(allowedEmails.revokedAt))
+              .limit(1)
+              .get();
+            const envHasAny = !!(raw && raw.trim() !== "");
+            if (!dbHasAny && !envHasAny) {
+              return { data: user };
+            }
+            throw new Error(
+              `BETTER_AUTH_REDIRECT:/waitlist?from=denied&email=${encodeURIComponent(email)}`,
+            );
           },
           // First-login CMO init hook. Fire-and-forget — a failure here MUST
           // NOT block sign-in. The CMO's /internal/init endpoint is idempotent

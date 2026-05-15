@@ -72,6 +72,10 @@ declare global {
     // Always-allowed sign-up bypass. The founder's email should be here so a
     // misconfigured / empty ALLOWED_EMAILS table doesn't lock them out.
     SUPER_ADMIN_EMAIL?: string;
+
+    // Comma-separated admin emails (case-insensitive). Gates /admin/* — the
+    // layout 404s non-admins. SUPER_ADMIN_EMAIL is also implicitly admin.
+    ADMIN_EMAILS?: string;
   }
 }
 

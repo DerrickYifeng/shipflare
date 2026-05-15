@@ -7,7 +7,7 @@ export * from "./schema";
 // Keeping this surface in `@shipflare/db` rather than asking each app to add
 // its own `drizzle-orm` dep means the ORM version is pinned in exactly one
 // place (this package's `package.json`).
-export { and, eq, or, inArray } from "drizzle-orm";
+export { and, eq, or, inArray, desc, isNull, isNotNull, sql } from "drizzle-orm";
 
 export type DB = DrizzleD1Database<typeof schema>;
 
