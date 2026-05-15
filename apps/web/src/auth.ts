@@ -56,6 +56,14 @@ export function getAuth(): BetterAuthInstance {
       github: {
         clientId: env.GITHUB_CLIENT_ID,
         clientSecret: env.GITHUB_CLIENT_SECRET,
+        // `public_repo` is required by the onboarding flow's GitHub repo
+        // picker (`/api/onboarding/github-repos`) — Better Auth stores the
+        // resulting access token in the `account` table; the route uses it
+        // to call api.github.com/user/repos and api.github.com/repos/.../readme.
+        // Existing GitHub-linked users must sign in once after this change
+        // to upgrade their stored token's scope. Better Auth does not
+        // auto-refresh scopes.
+        scope: ["read:user", "user:email", "public_repo"],
       },
       google: {
         clientId: env.GOOGLE_CLIENT_ID,
