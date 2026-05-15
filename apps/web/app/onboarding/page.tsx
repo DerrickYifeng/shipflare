@@ -4,7 +4,7 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { products, eq } from "@shipflare/db";
 import { getAuth } from "@/auth";
 import { getDb } from "@/db";
-import { OnboardingForm } from "./_components/onboarding-form";
+import { OnboardingFlow } from "./_components/OnboardingFlow";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +13,6 @@ export const metadata = {
 };
 
 export default async function OnboardingPage() {
-  // Auth gate — unauthenticated users get bounced to the landing page.
   let session = null;
   try {
     session = await getAuth().api.getSession({ headers: await headers() });
@@ -22,9 +21,6 @@ export default async function OnboardingPage() {
   }
   if (!session?.user) redirect("/");
 
-  // If the founder already has a product, skip onboarding and send them
-  // straight to the briefing. Re-onboarding lives at /product (edit page)
-  // for now.
   const { env } = getCloudflareContext();
   const db = getDb(env);
   const existing = await db
@@ -32,15 +28,12 @@ export default async function OnboardingPage() {
     .from(products)
     .where(eq(products.userId, session.user.id))
     .get();
-  if (existing && existing.name) {
+
+  // If onboarding has already been completed, skip the flow and route the
+  // founder to the briefing. Re-onboarding lives at /product (edit page).
+  if (existing?.onboardingCompletedAt) {
     redirect("/briefing");
   }
 
-  return (
-    <OnboardingForm
-      initialName={existing?.name ?? ""}
-      initialUrl={existing?.url ?? ""}
-      initialDescription={existing?.description ?? ""}
-    />
-  );
+  return <OnboardingFlow />;
 }
