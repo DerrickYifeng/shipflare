@@ -25,6 +25,10 @@ testWithProduct.describe('Settings', () => {
     await expect(page.getByText('Danger zone')).toBeVisible();
   });
 
+  // Account deletion endpoint is not yet implemented post-CF migration.
+  // The dialog opens and the "DELETE" gate works, but clicking confirm shows
+  // an unavailable-feature toast instead of completing deletion.
+  // Re-enable the full happy-path assertion when /api/account ships.
   testWithProduct('deletes account with DELETE confirmation', async ({
     authenticatedPageWithProduct: page,
   }) => {
@@ -44,12 +48,11 @@ testWithProduct.describe('Settings', () => {
     await page.getByPlaceholder('Type DELETE').fill('DELETE');
     await expect(deleteBtn).toBeEnabled();
 
-    // Click delete
+    // Click delete — surfaces "not yet available" toast during beta.
     await deleteBtn.click();
-
-    // Should redirect to sign-in page
-    await page.waitForURL('/');
-    await expect(page.getByText('ShipFlare')).toBeVisible();
+    await expect(page.getByText(/not yet available/i)).toBeVisible();
+    // Still on /settings (no redirect because the route doesn't exist yet).
+    await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
   });
 
   testWithProduct('cancels deletion dialog', async ({

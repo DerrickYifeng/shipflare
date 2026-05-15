@@ -142,10 +142,8 @@ function SettingsTabs({
           <button
             key={s.id}
             type="button"
-            role="tab"
             onClick={() => onSelect(s.id)}
             aria-current={isActive ? 'page' : undefined}
-            aria-selected={isActive}
             style={{
               textAlign: 'left',
               padding: '10px 14px',
@@ -219,8 +217,9 @@ function AppearanceSection({ initialTheme }: { initialTheme: 'light' | 'dark' })
       setTheme(next);
       try {
         await update({ theme: next });
-      } catch {
-        // Non-critical — localStorage already persists it
+      } catch (err) {
+        // Non-critical for UI (localStorage already updated by setTheme), but log so we see failures.
+        console.error('[Settings] failed to persist theme to /api/preferences', err);
       }
     },
     [setTheme, update],
@@ -408,6 +407,7 @@ function AppearanceSection({ initialTheme }: { initialTheme: 'light' | 'dark' })
                     borderRadius: '50%',
                     border: `2px solid ${selected ? 'var(--sf-accent)' : 'var(--sf-border)'}`,
                     background: selected ? 'var(--sf-accent)' : 'transparent',
+                    color: 'var(--sf-fg-on-dark-1)',
                     flexShrink: 0,
                     marginTop: 2,
                     position: 'relative',
@@ -424,7 +424,7 @@ function AppearanceSection({ initialTheme }: { initialTheme: 'light' | 'dark' })
                     >
                       <path
                         d="M2.5 6L5 8.5L9.5 3.5"
-                        stroke="#fff"
+                        stroke="currentColor"
                         strokeWidth="1.75"
                         strokeLinecap="round"
                         strokeLinejoin="round"
@@ -533,6 +533,13 @@ function DeleteAccountDialog({
       role="dialog"
       aria-modal="true"
       aria-labelledby="delete-dialog-title"
+      tabIndex={-1}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          onClose();
+        }
+      }}
       style={{
         position: 'fixed',
         inset: 0,
@@ -630,7 +637,6 @@ function AccountSection({
   user: { name: string | null; email: string | null; image: string | null };
   timezone: string;
 }) {
-  const router = useRouter();
   const { toast } = useToast();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -638,9 +644,9 @@ function AccountSection({
   const handleDelete = async () => {
     setDeleting(true);
     try {
-      const res = await fetch('/api/account', { method: 'DELETE' });
-      if (!res.ok) throw new Error('Delete failed');
-      router.push('/');
+      // Account deletion is not yet implemented. Surface this to the user instead
+      // of calling a 404 route. Track follow-up: see Phase 2 design.
+      throw new Error('Account deletion is not yet available during beta.');
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Could not delete account');
       setDeleting(false);
@@ -1046,19 +1052,23 @@ function IntegrationBadge({ children }: { children: ReactNode }) {
    ═══════════════════════════════════════════════════════════════════ */
 
 function XTileIcon() {
+  // The wrapping <span> sets `color` to the white-on-dark foreground token; the
+  // glyph path inherits via `fill="currentColor"`. The rect background uses its
+  // own fill token directly so the two layers can stay themed independently.
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" aria-label="X">
-      <rect
-        width="24"
-        height="24"
-        rx="4"
-        fill="currentColor"
-        style={{ color: 'var(--sf-bg-dark)' }}
-      />
-      <path
-        d="M16.8 5.5h2.3l-5 5.7L20 18.5h-4.6l-3.6-4.7-4.1 4.7H5.3l5.4-6.1L5 5.5h4.7l3.2 4.3 3.9-4.3z"
-        fill="#fff"
-      />
-    </svg>
+    <span style={{ color: 'var(--sf-fg-on-dark-1)', display: 'inline-flex' }}>
+      <svg width="22" height="22" viewBox="0 0 24 24" aria-label="X">
+        <rect
+          width="24"
+          height="24"
+          rx="4"
+          fill="var(--sf-bg-dark)"
+        />
+        <path
+          d="M16.8 5.5h2.3l-5 5.7L20 18.5h-4.6l-3.6-4.7-4.1 4.7H5.3l5.4-6.1L5 5.5h4.7l3.2 4.3 3.9-4.3z"
+          fill="currentColor"
+        />
+      </svg>
+    </span>
   );
 }
