@@ -2,7 +2,7 @@
 
 import useSWR from 'swr';
 
-const fetcher = <T>(url: string): Promise<T> => fetch(url).then((r) => r.json() as T);
+import { fetcher } from '@/lib/fetcher';
 
 interface ActivityEvent {
   id: string;

@@ -108,7 +108,7 @@ const VIEWPORT_STYLE: CSSProperties = {
   bottom: 24,
   left: '50%',
   transform: 'translateX(-50%)',
-  zIndex: '300' as unknown as number,
+  zIndex: 300,
   pointerEvents: 'none',
   display: 'flex',
   justifyContent: 'center',

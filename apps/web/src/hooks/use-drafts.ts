@@ -4,7 +4,7 @@ import useSWR from 'swr';
 import { useCallback } from 'react';
 import { useSSEChannel } from './use-sse-channel';
 
-const fetcher = <T>(url: string): Promise<T> => fetch(url).then((r) => r.json() as T);
+import { fetcher } from '@/lib/fetcher';
 
 interface DraftReview {
   verdict: string;

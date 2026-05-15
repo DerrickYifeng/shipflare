@@ -3,7 +3,7 @@
 import useSWR from 'swr';
 import { useCallback } from 'react';
 
-const fetcher = <T>(url: string): Promise<T> => fetch(url).then((r) => r.json() as T);
+import { fetcher } from '@/lib/fetcher';
 
 export interface Preferences {
   autoApproveEnabled: boolean;

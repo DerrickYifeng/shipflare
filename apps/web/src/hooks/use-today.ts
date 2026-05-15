@@ -3,7 +3,7 @@
 import useSWR from 'swr';
 import { useCallback } from 'react';
 
-const fetcher = <T>(url: string): Promise<T> => fetch(url).then((r) => r.json() as T);
+import { fetcher } from '@/lib/fetcher';
 
 /**
  * Error thrown by the today mutations when the server responds with a
