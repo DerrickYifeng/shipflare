@@ -191,3 +191,7 @@ a:hover { color: var(--sf-accent-hover); }
   transition: background var(--sf-dur-fast) var(--sf-ease);
 }
 .sf-cta-secondary:hover { background: var(--sf-bg-primary); }
+
+/* AppCanvas <main> wrapper — fills remaining vertical space inside the
+   flex column without forcing intrinsic overflow on long children. */
+.sf-app-main { flex: 1; min-height: 0; }

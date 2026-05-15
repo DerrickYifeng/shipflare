@@ -36,7 +36,11 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   let session = null;
   try {
     session = await getAuth().api.getSession({ headers: await headers() });
-  } catch {
+  } catch (err) {
+    // Surface infra errors to logs without crashing the layout.
+    // Unauthenticated visitors will still redirect to "/" via the
+    // !session?.user check below.
+    console.error("[AppLayout] getSession failed", err);
     session = null;
   }
   if (!session?.user) redirect("/");
@@ -62,7 +66,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
               <Sidebar user={user} />
               <AppCanvas>
                 <TopNav userImage={user.image} />
-                <main style={{ flex: 1 }}>{children}</main>
+                <main className="sf-app-main">{children}</main>
               </AppCanvas>
             </AppShell>
           </ToastProvider>
