@@ -32,6 +32,7 @@ export default async function ProductPage() {
         launchDate: row.launchDate ? row.launchDate.toISOString() : null,
         launchedAt: row.launchedAt ? row.launchedAt.toISOString() : null,
         updatedAt: row.updatedAt ? row.updatedAt.toISOString() : null,
+        createdAt: row.createdAt ? row.createdAt.toISOString() : null,
       }
     : {
         name: null,
@@ -43,6 +44,7 @@ export default async function ProductPage() {
         launchDate: null,
         launchedAt: null,
         updatedAt: null,
+        createdAt: null,
       };
 
   return <ProductContent initial={initial} />;

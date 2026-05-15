@@ -68,7 +68,9 @@ function derivePhase({
   if (state === 'launched' || state === 'growing') {
     if (!launchedAt) return 'steady';
     const daysSince = (now - new Date(launchedAt).getTime()) / 86_400_000;
-    if (state === 'growing') return 'steady';
+    // Fresh launch (within 30d) → compound momentum; older → steady.
+    // Same semantic for both 'launched' and 'growing' so the early-return
+    // dead branch is gone.
     return daysSince <= 30 ? 'compound' : 'steady';
   }
 
@@ -81,6 +83,12 @@ function derivePhase({
   return 'foundation';
 }
 
+/**
+ * Wire shape for product data. All date fields are ISO 8601 strings on the
+ * wire (serialized from D1 timestamp_ms by either `page.tsx` for the
+ * initial snapshot or `/api/product` GET for revalidation). Use
+ * `new Date(snap.launchDate)` directly — do not divide by 1000.
+ */
 export interface ProductSnapshot {
   name: string | null;
   description: string | null;
@@ -94,7 +102,14 @@ export interface ProductSnapshot {
   launchedAt: string | null;
   /** ISO date string for display. */
   updatedAt: string | null;
+  /** ISO date string for display. */
+  createdAt: string | null;
 }
+
+/** Subset of ProductSnapshot the founder edits inline via PATCH /api/product. */
+type FieldPatch = Partial<
+  Pick<ProductSnapshot, 'name' | 'description' | 'valueProp' | 'url' | 'keywords'>
+>;
 
 interface ProductContentProps {
   initial: ProductSnapshot;
@@ -102,29 +117,23 @@ interface ProductContentProps {
 
 const fetcher = async (url: string): Promise<ProductSnapshot> => {
   const res = await fetch(url);
-  if (!res.ok) throw new Error('Failed to load product');
-  const data = await res.json() as {
-    name?: string | null;
-    description?: string | null;
-    keywords?: string[] | null;
-    valueProp?: string | null;
-    url?: string | null;
-    state?: State;
-    launchDate?: string | number | null;
-    launchedAt?: string | number | null;
-    updatedAt?: string | number | null;
-  };
-  // Normalize timestamp_ms fields to ISO strings
+  if (!res.ok) throw new Error(`product fetch failed: ${res.status}`);
+  // The `/api/product` route returns the raw drizzle row; Date columns get
+  // serialized to ISO strings by JSON.stringify on the server, so the wire
+  // shape matches ProductSnapshot directly. Keep null-safe defaults for the
+  // first-time-user case where no row exists yet.
+  const data = (await res.json()) as Partial<ProductSnapshot>;
   return {
     name: data.name ?? null,
     description: data.description ?? null,
     keywords: data.keywords ?? [],
     valueProp: data.valueProp ?? null,
     url: data.url ?? null,
-    state: (data.state ?? 'draft') as State,
-    launchDate: data.launchDate ? new Date(data.launchDate as number).toISOString() : null,
-    launchedAt: data.launchedAt ? new Date(data.launchedAt as number).toISOString() : null,
-    updatedAt: data.updatedAt ? new Date(data.updatedAt as number).toISOString() : null,
+    state: data.state ?? 'draft',
+    launchDate: data.launchDate ?? null,
+    launchedAt: data.launchedAt ?? null,
+    updatedAt: data.updatedAt ?? null,
+    createdAt: data.createdAt ?? null,
   };
 };
 
@@ -144,22 +153,23 @@ export function ProductContent({ initial }: ProductContentProps) {
     launchedAt: product.launchedAt,
   });
 
-  const commitField = async (patch: Partial<ProductSnapshot>) => {
+  const commitField = async (patch: FieldPatch) => {
     const previous = product;
-    const next = { ...product, ...patch } as ProductSnapshot;
+    const next: ProductSnapshot = { ...product, ...patch };
     // Optimistic
     await mutate(next, { revalidate: false });
     try {
+      const body: FieldPatch = {
+        url: next.url,
+        name: next.name,
+        description: next.description,
+        keywords: next.keywords ?? [],
+        valueProp: next.valueProp ?? null,
+      };
       const res = await fetch('/api/product', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          url: next.url,
-          name: next.name,
-          description: next.description,
-          keywords: next.keywords ?? [],
-          valueProp: next.valueProp ?? null,
-        }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) {
         const payload = (await res.json().catch(() => null)) as { error?: string } | null;
@@ -377,17 +387,19 @@ function StateEditor({
   const [draftLaunchDate, setDraftLaunchDate] = useState<string>(
     isoToYmd(launchDate) || ymdPlusDays(7),
   );
-  const [draftLaunchedAt, setDraftLaunchedAt] = useState<string>(
-    isoToYmd(launchedAt) || todayYmd(),
-  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
 
+  // `launchedAt` is server-managed (set when a row's state transitions to
+  // `launched` for the first time). The PATCH route rejects client writes
+  // to it, so we surface it as read-only here rather than offering a date
+  // picker that silently no-ops.
+  const launchedAtDisplay = isoToYmd(launchedAt);
+
   const reset = () => {
     setDraftState(state);
     setDraftLaunchDate(isoToYmd(launchDate) || ymdPlusDays(7));
-    setDraftLaunchedAt(isoToYmd(launchedAt) || todayYmd());
     setError(null);
     setEditing(false);
   };
@@ -399,21 +411,19 @@ function StateEditor({
       return date ? `${STATE_LABEL['pre-launch']} · ${date}` : STATE_LABEL['pre-launch'];
     }
     if (state === 'launched') {
-      const date = isoToYmd(launchedAt);
-      return date ? `${STATE_LABEL.launched} · ${date}` : STATE_LABEL.launched;
+      return launchedAtDisplay
+        ? `${STATE_LABEL.launched} · ${launchedAtDisplay}`
+        : STATE_LABEL.launched;
     }
     // growing
-    return STATE_LABEL.growing;
+    return launchedAtDisplay
+      ? `${STATE_LABEL.growing} · launched ${launchedAtDisplay}`
+      : STATE_LABEL.growing;
   })();
 
   const hasChanges = (() => {
     if (draftState !== state) return true;
     if (draftState === 'pre-launch' && draftLaunchDate !== isoToYmd(launchDate)) return true;
-    if (
-      (draftState === 'launched' || draftState === 'growing') &&
-      draftLaunchedAt !== isoToYmd(launchedAt)
-    )
-      return true;
     return false;
   })();
 
@@ -421,13 +431,16 @@ function StateEditor({
     setError(null);
     setSaving(true);
     try {
-      // Build PATCH body — send launchDate as unix ms (number) per the API contract
-      const body: Record<string, unknown> = { state: draftState };
-      if (draftState === 'pre-launch') {
-        body.launchDate = new Date(`${draftLaunchDate}T00:00:00.000Z`).getTime() / 1000;
-      } else {
-        body.launchDate = null;
-      }
+      // Build PATCH body. API contract: `launchDate` is Unix SECONDS (a
+      // number) or null to clear. `launchedAt` is NOT writable from this
+      // client — the route ignores any client-supplied value.
+      const body: { state: State; launchDate: number | null } = {
+        state: draftState,
+        launchDate:
+          draftState === 'pre-launch'
+            ? Math.floor(new Date(`${draftLaunchDate}T00:00:00.000Z`).getTime() / 1000)
+            : null,
+      };
 
       const res = await fetch('/api/product', {
         method: 'PATCH',
@@ -544,6 +557,19 @@ function StateEditor({
             }}
           />
         </label>
+      )}
+      {(draftState === 'launched' || draftState === 'growing') && launchedAtDisplay && (
+        <span
+          style={{
+            fontSize: '12px',
+            color: 'var(--sf-fg-3)',
+          }}
+        >
+          Launched on{' '}
+          <span className="sf-mono" style={{ letterSpacing: 'var(--sf-track-mono)' }}>
+            {launchedAtDisplay}
+          </span>
+        </span>
       )}
       {hasChanges && (
         <div
