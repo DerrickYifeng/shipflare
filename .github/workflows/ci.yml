@@ -107,6 +107,39 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # vitest-pool-workers reads .dev.vars for binding values — empty secrets
+      # break signJwt / AES-GCM keys / Better Auth at runtime. Seed both
+      # before tests start. (Mirrors the Typecheck job's seed step.)
+      - name: Seed .dev.vars with test placeholders
+        run: |
+          cat > apps/core/.dev.vars <<'EOF'
+          MCP_JWT_SECRET=ci-test-mcp-jwt-secret-do-not-deploy
+          EXTERNAL_MCP_SECRET=ci-test-external-mcp-secret-do-not-deploy
+          ANTHROPIC_API_KEY=sk-ci-test-placeholder
+          XAI_API_KEY=ci-test-xai-placeholder
+          CHANNEL_ENC_KEY=ci-test-aes-gcm-key-base64-padding-32b=
+          VAPID_PUBLIC=ci-test-vapid-public-key
+          VAPID_PRIVATE=ci-test-vapid-private-key
+          VAPID_SUBJECT=mailto:ci@example.com
+          EOF
+          cat > apps/web/.dev.vars <<'EOF'
+          MCP_JWT_SECRET=ci-test-mcp-jwt-secret-do-not-deploy
+          EXTERNAL_MCP_SECRET=ci-test-external-mcp-secret-do-not-deploy
+          CHANNEL_ENC_KEY=ci-test-aes-gcm-key-base64-padding-32b=
+          VAPID_PUBLIC=ci-test-vapid-public-key
+          VAPID_PRIVATE=ci-test-vapid-private-key
+          VAPID_SUBJECT=mailto:ci@example.com
+          BETTER_AUTH_SECRET=ci-test-better-auth-secret
+          BETTER_AUTH_URL=http://localhost:3000
+          CORE_PUBLIC_URL=http://localhost:8788
+          GITHUB_CLIENT_ID=ci-test-github-client-id
+          GITHUB_CLIENT_SECRET=ci-test-github-client-secret
+          X_CLIENT_ID=ci-test-x-client-id
+          X_CLIENT_SECRET=ci-test-x-client-secret
+          REDDIT_CLIENT_ID=ci-test-reddit-client-id
+          REDDIT_CLIENT_SECRET=ci-test-reddit-client-secret
+          EOF
+
       - name: Generate worker types (apps/core, apps/web)
         run: |
           pnpm --filter @shipflare/core exec wrangler types || true
