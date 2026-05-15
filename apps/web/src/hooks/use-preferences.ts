@@ -5,23 +5,15 @@ import { useCallback } from 'react';
 
 import { fetcher } from '@/lib/fetcher';
 
+export type Theme = 'light' | 'dark';
+
 export interface Preferences {
-  autoApproveEnabled: boolean;
-  autoApproveThreshold: number;
-  autoApproveTypes: string[];
-  maxAutoApprovalsPerDay: number;
-  postingHoursUtc: number[];
-  contentMixMetric: number;
-  contentMixEducational: number;
-  contentMixEngagement: number;
-  contentMixProduct: number;
-  notifyOnNewDraft: boolean;
-  notifyOnAutoApprove: boolean;
   timezone: string;
+  theme: Theme;
 }
 
 export function usePreferences() {
-  const { data, error, isLoading, mutate } = useSWR<{ preferences: Preferences }>(
+  const { data, error, isLoading, mutate } = useSWR<Preferences>(
     '/api/preferences',
     fetcher,
   );
@@ -29,26 +21,26 @@ export function usePreferences() {
   const update = useCallback(
     async (patch: Partial<Preferences>) => {
       const res = await fetch('/api/preferences', {
-        method: 'PUT',
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch),
       });
 
       if (!res.ok) {
-        const body = await res.json().catch(() => ({}) as { error?: string });
+        const body = await res.json().catch(() => ({} as { error?: string }));
         const bodyTyped = body as { error?: string };
         throw new Error(bodyTyped.error ?? 'Failed to save preferences');
       }
 
-      const result = await res.json() as { preferences: Preferences };
-      mutate(result, false);
-      return result.preferences;
+      const next = await res.json() as Preferences;
+      mutate(next, false);
+      return next;
     },
     [mutate],
   );
 
   return {
-    preferences: data?.preferences ?? null,
+    preferences: data ?? null,
     isLoading,
     error,
     update,
