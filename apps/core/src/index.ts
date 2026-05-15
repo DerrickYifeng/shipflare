@@ -64,9 +64,6 @@ export { RedditMcpAgent } from "./agents/platforms/reddit/RedditMcpAgent";
 
 export interface Env {
   DB: D1Database;
-  // Alias binding used for `wrangler d1 execute ... --remote` in local dev.
-  // Declared here so Cloudflare.Env constraint is satisfied; not used in code.
-  shipflare_prod: D1Database;
   // DO bindings — 3 employee agents + 2 platform tool MCPs.
   CMO: DurableObjectNamespace<CMO>;
   HEAD_OF_GROWTH: DurableObjectNamespace<HeadOfGrowth>;

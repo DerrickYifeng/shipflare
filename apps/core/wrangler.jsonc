@@ -23,12 +23,6 @@
 			"database_name": "shipflare-prod",
 			"database_id": "a34a9f67-0c80-4788-b9bb-ee37728b40fb",
 			"migrations_dir": "../../packages/db/migrations"
-		},
-		{
-			"binding": "shipflare_prod",
-			"database_name": "shipflare-prod",
-			"database_id": "a34a9f67-0c80-4788-b9bb-ee37728b40fb",
-			"remote": true
 		}
 	],
 	// Durable Object bindings — class declarations come in S2-S5.
