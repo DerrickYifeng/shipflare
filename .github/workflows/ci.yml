@@ -35,14 +35,26 @@ jobs:
       # bindings only when `.dev.vars` exists. We also need vitest-pool-workers
       # (which reads the same `.dev.vars`) to find non-empty test-only values
       # — empty secrets break signJwt + AES-GCM key derive.
+      # Per-app secret sets — each app's Env declares only the secrets it
+      # uses, and `wrangler types` derives Cloudflare.Env from these keys.
+      # Adding stray secrets to either side makes Cloudflare.Env wider than
+      # our hand-written Env interface and breaks the McpAgent constraint
+      # `Env extends Cloudflare.Env` check.
       - name: Seed .dev.vars with test placeholders
         run: |
-          for app in apps/core apps/web; do
-            cat > "$app/.dev.vars" <<'EOF'
+          cat > apps/core/.dev.vars <<'EOF'
           MCP_JWT_SECRET=ci-test-mcp-jwt-secret-do-not-deploy
           EXTERNAL_MCP_SECRET=ci-test-external-mcp-secret-do-not-deploy
           ANTHROPIC_API_KEY=sk-ci-test-placeholder
           XAI_API_KEY=ci-test-xai-placeholder
+          CHANNEL_ENC_KEY=ci-test-aes-gcm-key-base64-padding-32b=
+          VAPID_PUBLIC=ci-test-vapid-public-key
+          VAPID_PRIVATE=ci-test-vapid-private-key
+          VAPID_SUBJECT=mailto:ci@example.com
+          EOF
+          cat > apps/web/.dev.vars <<'EOF'
+          MCP_JWT_SECRET=ci-test-mcp-jwt-secret-do-not-deploy
+          EXTERNAL_MCP_SECRET=ci-test-external-mcp-secret-do-not-deploy
           CHANNEL_ENC_KEY=ci-test-aes-gcm-key-base64-padding-32b=
           VAPID_PUBLIC=ci-test-vapid-public-key
           VAPID_PRIVATE=ci-test-vapid-private-key
@@ -57,7 +69,6 @@ jobs:
           REDDIT_CLIENT_ID=ci-test-reddit-client-id
           REDDIT_CLIENT_SECRET=ci-test-reddit-client-secret
           EOF
-          done
 
       - name: Generate worker types (apps/core, apps/web)
         run: |
