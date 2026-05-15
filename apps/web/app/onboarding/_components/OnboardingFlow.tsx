@@ -5,8 +5,8 @@
 // Redis draft sync, and routing between stages.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ExtractedProfile } from '@/types/onboarding';
-import type { StrategicPath } from '@/tools/schemas';
+import type { ExtractedProfile } from '@/lib/types/onboarding';
+import type { StrategicPath } from '@/lib/strategic-path-schema';
 import { ProgressRail } from './progress-rail';
 import { MobileHeader } from './mobile-header';
 import { TopChevron } from './top-chevron';

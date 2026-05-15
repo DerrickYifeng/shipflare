@@ -13,7 +13,7 @@ import { useEffect, useRef, useState } from 'react';
 import { OnbMono } from './_shared/onb-mono';
 import { SixStepAnimator } from './_shared/six-step-animator';
 import { COPY } from './_copy';
-import type { ExtractedProfile } from '@/types/onboarding';
+import type { ExtractedProfile } from '@/lib/types/onboarding';
 
 type Source =
   | { kind: 'url'; url: string }

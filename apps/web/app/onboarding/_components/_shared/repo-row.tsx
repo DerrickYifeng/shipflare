@@ -3,7 +3,16 @@
 
 import { useState } from 'react';
 import { Check, GitHub } from '../icons';
-import type { GitHubRepo } from '@/types/code-scanner';
+/** Inlined from src/types/code-scanner.ts — avoids server-side import */
+interface GitHubRepo {
+  fullName: string;
+  name: string;
+  description: string | null;
+  homepage: string | null;
+  language: string | null;
+  stargazersCount: number;
+  pushedAt: string;
+}
 
 export interface RepoRowData extends GitHubRepo {
   /** Computed client-side: user-relative "2h ago", "yesterday", etc. */

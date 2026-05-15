@@ -14,7 +14,9 @@ interface ProgressRailProps {
 
 export function ProgressRail({ step, productName }: ProgressRailProps) {
   const steps = COPY.rail.steps;
-  const active = steps[step] ?? steps[0];
+  // step is typed 0|1|2|3 and COPY.rail.steps has exactly 4 entries
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+  const active = steps[step]!;
   return (
     <aside
       aria-label="Onboarding progress"

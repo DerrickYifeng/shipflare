@@ -14,7 +14,7 @@ import { OnbButton } from './_shared/onb-button';
 import { OnbMono } from './_shared/onb-mono';
 import { ArrowRight, Pencil, XClose } from './icons';
 import { COPY } from './_copy';
-import type { StrategicPath } from '@/tools/schemas';
+import type { StrategicPath } from '@/lib/strategic-path-schema';
 import {
   derivePerWeekPosts,
   sumChannelPostsAcrossArc,

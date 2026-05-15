@@ -22,7 +22,7 @@ import { StepHeader } from './step-header';
 import { ActionBar } from './action-bar';
 import { ArrowRight, GitHub, Globe } from './icons';
 import { COPY } from './_copy';
-import type { ExtractedProfile } from '@/types/onboarding';
+import type { ExtractedProfile } from '@/lib/types/onboarding';
 
 type Method = 'choose' | 'github' | 'url';
 

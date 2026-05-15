@@ -18,11 +18,12 @@
 'use client';
 
 import type { CSSProperties } from 'react';
-import { LeadMessage } from '@/app/(app)/team/_components/lead-message';
+// CF agent-accent uses role slugs, not display-name strings.
+// Map: "Team Lead" → "cmo", "Social Media Manager" → "social-media-manager"
 import {
-  accentForAgentType,
-  colorHexForAgentType,
-} from '@/app/(app)/team/_components/agent-accent';
+  accentForRole,
+  colorHexForRole,
+} from '../../../(app)/team/_components/agent-accent';
 import type {
   SyntheticConversationState,
   SyntheticToolCall,
@@ -45,34 +46,77 @@ export function SyntheticChatConversation({
     padding: '4px 0',
   };
 
+  // CF LeadMessage has a different API (from/content, no children).
+  // Render the coordinator row inline to avoid the mismatch.
+  const cmoAccent = accentForRole('cmo');
+  const coordinatorDotColor = cmoAccent?.solid ?? '#1d1d1f';
+
+  const coordinatorRow: CSSProperties = {
+    display: 'flex',
+    gap: 10,
+    marginBottom: 4,
+  };
+  const dot: CSSProperties = {
+    width: 28,
+    height: 28,
+    borderRadius: '50%',
+    background: coordinatorDotColor,
+    color: '#fff',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontFamily: 'var(--sf-font-mono)',
+    fontSize: 11,
+    fontWeight: 700,
+    flexShrink: 0,
+  };
+  const coordinatorBody: CSSProperties = {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 4,
+    minWidth: 0,
+    flex: 1,
+  };
+  const coordinatorHeader: CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    fontSize: 13,
+  };
+
   return (
     <section
       style={wrap}
       data-testid="synthetic-chat-conversation"
       aria-label="Plan-building conversation"
     >
-      <LeadMessage
-        // Synthetic surface has no SSE; pass a stable id so `LeadMessage`'s
-        // `useStreamingPartial` subscription resolves to a no-op against
-        // the module-scoped no-op store (no `<StreamingProvider>` here).
-        messageId="onboarding-synthetic-coordinator"
-        agentType="Team Lead"
-        displayName={coordinator.name}
-        createdAt={coordinator.timestamp.toISOString()}
-        text={coordinator.body}
-        phase={coordinator.phase}
-      >
-        <SubtaskShell
-          title={subtask.title}
-          specialistName={subtask.specialistName}
-          specialistRole={subtask.specialistRole}
-          firstMessage={subtask.firstMessage}
-          status={subtask.status}
-          toolCalls={subtask.toolCalls}
-          errorMessage={subtask.errorMessage}
-          elapsedMs={elapsedMs}
-        />
-      </LeadMessage>
+      <div style={coordinatorRow} role="article" aria-label={`${coordinator.name} said`}>
+        <span style={dot} aria-hidden="true">C</span>
+        <div style={coordinatorBody}>
+          <div style={coordinatorHeader}>
+            <span style={{ fontWeight: 500, color: 'var(--sf-fg-1)', letterSpacing: '-0.01em' }}>
+              {coordinator.name}
+            </span>
+            <time dateTime={coordinator.timestamp.toISOString()}
+              style={{ fontFamily: 'var(--sf-font-mono)', fontSize: 11, color: 'rgba(0,0,0,0.48)' }}>
+              {coordinator.timestamp.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
+            </time>
+          </div>
+          <p style={{ margin: 0, fontSize: 14, color: 'var(--sf-fg-1)', lineHeight: 1.5 }}>
+            {coordinator.body}
+          </p>
+          <SubtaskShell
+            title={subtask.title}
+            specialistName={subtask.specialistName}
+            specialistRole={subtask.specialistRole}
+            firstMessage={subtask.firstMessage}
+            status={subtask.status}
+            toolCalls={subtask.toolCalls}
+            errorMessage={subtask.errorMessage}
+            elapsedMs={elapsedMs}
+          />
+        </div>
+      </div>
     </section>
   );
 }
@@ -155,9 +199,10 @@ function SubtaskBody({
   // (community purple — distinct from the Team Lead's neutral disc).
   // Falls back through the same grey path the team page uses for
   // unknown labels. Keys here match `agent-accent.ts` (public labels).
-  const agentLabel = 'Social Media Manager';
-  const accent = accentForAgentType(agentLabel);
-  const borderColor = accent?.solid ?? colorHexForAgentType(agentLabel);
+  // CF agent-accent keys on role slugs; 'social-media-manager' maps to the purple palette
+  const agentRole = 'social-media-manager';
+  const accent = accentForRole(agentRole);
+  const borderColor = accent?.solid ?? colorHexForRole(agentRole);
 
   const card: CSSProperties = {
     position: 'relative',
