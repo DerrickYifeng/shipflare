@@ -59,6 +59,30 @@
   --sf-font-mono:    "SF Mono", ui-monospace, "JetBrains Mono",
                      "Cascadia Code", "Fira Code", Menlo, monospace;
 
+  /* Type scale */
+  --sf-text-hero:         56px;
+  --sf-text-h1:           34px;
+  --sf-text-h2:           21px;
+  --sf-text-h3:           21px;
+  --sf-text-lg:           18px;
+  --sf-text-base:         16px;
+  --sf-text-sm:           14px;
+  --sf-text-xs:           12px;
+  --sf-text-2xs:          10px;
+
+  /* Tracking — SF Pro metrics */
+  --sf-track-hero:        -0.28px;
+  --sf-track-tight:       -0.374px;
+  --sf-track-normal:      -0.224px;
+  --sf-track-loose:       0em;
+  --sf-track-mono:        -0.12px;
+
+  /* Line-heights */
+  --sf-lh-tight:          1.07;
+  --sf-lh-snug:           1.19;
+  --sf-lh-normal:         1.47;
+  --sf-lh-relaxed:        1.6;
+
   /* ── Spacing (8px base) ──────────────────────────────────────── */
   --sf-space-0:  2px;
   --sf-space-1:  4px;
@@ -71,6 +95,14 @@
   --sf-space-10: 40px;
   --sf-space-12: 48px;
   --sf-max-width: 980px;
+
+  /* ── Z-index scale ─── */
+  --sf-z-base:            0;
+  --sf-z-raised:          10;
+  --sf-z-sticky:          50;
+  --sf-z-overlay:         100;
+  --sf-z-modal:           200;
+  --sf-z-toast:           300;
 
   /* ── Radius ──────────────────────────────────────────────────── */
   --sf-radius-sm:   5px;
@@ -91,7 +123,9 @@
 
   /* ── Motion ──────────────────────────────────────────────────── */
   --sf-ease:         cubic-bezier(0.16, 1, 0.3, 1);
+  --sf-ease-swift:   cubic-bezier(0.16, 1, 0.3, 1); /* alias of --sf-ease */
   --sf-ease-inout:   cubic-bezier(0.4, 0, 0.6, 1);
+  --sf-ease-smooth:  cubic-bezier(0.4, 0, 0.6, 1); /* alias of --sf-ease-inout */
   --sf-dur-fast:     150ms;
   --sf-dur-base:     200ms;
   --sf-dur-slow:     300ms;

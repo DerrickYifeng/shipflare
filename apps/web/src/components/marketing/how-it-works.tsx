@@ -111,10 +111,10 @@ export function HowItWorks() {
               </div>
               <div
                 style={{
-                  fontSize: '17px',
+                  fontSize: 'var(--sf-text-base)',
                   fontWeight: 600,
                   color: 'var(--sf-fg-1)',
-                  letterSpacing: '-0.374px',
+                  letterSpacing: 'var(--sf-track-tight)',
                   marginBottom: 6,
                 }}
               >
@@ -123,9 +123,9 @@ export function HowItWorks() {
               <div
                 className="sf-mono"
                 style={{
-                  fontSize: '12px',
+                  fontSize: 'var(--sf-text-xs)',
                   color: 'var(--sf-fg-3)',
-                  letterSpacing: '-0.12px',
+                  letterSpacing: 'var(--sf-track-mono)',
                   lineHeight: 'var(--sf-lh-normal)',
                 }}
               >

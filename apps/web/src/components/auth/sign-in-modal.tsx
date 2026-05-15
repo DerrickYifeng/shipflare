@@ -131,9 +131,9 @@ export function SignInModal({ open, onClose, onBeforeSignIn }: SignInModalProps)
             id="sign-in-modal-title"
             style={{
               margin: 0,
-              fontSize: 21,
+              fontSize: 'var(--sf-text-h3)',
               fontWeight: 600,
-              letterSpacing: '-0.374px',
+              letterSpacing: 'var(--sf-track-tight)',
               color: 'var(--sf-fg-1)',
             }}
           >
@@ -169,9 +169,9 @@ export function SignInModal({ open, onClose, onBeforeSignIn }: SignInModalProps)
           style={{
             marginTop: 0,
             marginBottom: 20,
-            fontSize: 14,
+            fontSize: 'var(--sf-text-sm)',
             color: 'var(--sf-fg-2)',
-            letterSpacing: '-0.224px',
+            letterSpacing: 'var(--sf-track-normal)',
           }}
         >
           Choose how you want to sign in.
@@ -205,9 +205,9 @@ export function SignInModal({ open, onClose, onBeforeSignIn }: SignInModalProps)
                 color: BUTTON_STYLE.color,
                 borderRadius: 'var(--sf-radius-md)',
                 border: 'none',
-                fontSize: 17,
+                fontSize: 'var(--sf-text-base)',
                 fontWeight: 500,
-                letterSpacing: '-0.374px',
+                letterSpacing: 'var(--sf-track-tight)',
                 cursor: pending !== null ? 'not-allowed' : 'pointer',
                 opacity: pending !== null && pending !== provider.id ? 0.6 : 1,
                 transition: 'background var(--sf-dur-base) var(--sf-ease)',
@@ -234,7 +234,7 @@ export function SignInModal({ open, onClose, onBeforeSignIn }: SignInModalProps)
               marginTop: 12,
               marginBottom: 0,
               color: 'var(--sf-error)',
-              fontSize: 14,
+              fontSize: 'var(--sf-text-sm)',
             }}
           >
             {error}

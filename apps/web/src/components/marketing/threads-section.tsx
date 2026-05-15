@@ -161,7 +161,7 @@ function ThreadCard({ thread }: ThreadCardProps) {
             style={{
               padding: '2px 7px',
               borderRadius: 'var(--sf-radius-sm)',
-              fontSize: '12px',
+              fontSize: 'var(--sf-text-xs)',
               fontWeight: 500,
               background: 'rgba(0,113,227,0.18)',
               color: 'var(--sf-link-dark)',
@@ -174,7 +174,7 @@ function ThreadCard({ thread }: ThreadCardProps) {
             style={{
               padding: '2px 7px',
               borderRadius: 'var(--sf-radius-sm)',
-              fontSize: '12px',
+              fontSize: 'var(--sf-text-xs)',
               fontWeight: 500,
               background: 'rgba(52,199,89,0.18)',
               color: 'var(--sf-success)',
@@ -186,7 +186,7 @@ function ThreadCard({ thread }: ThreadCardProps) {
             className="sf-mono"
             style={{
               marginLeft: 'auto',
-              fontSize: '10px',
+              fontSize: 'var(--sf-text-2xs)',
               color: 'var(--sf-fg-on-dark-4)',
             }}
           >
@@ -195,10 +195,10 @@ function ThreadCard({ thread }: ThreadCardProps) {
         </div>
         <div
           style={{
-            fontSize: '17px',
+            fontSize: 'var(--sf-text-base)',
             fontWeight: 500,
             color: 'var(--sf-fg-on-dark-1)',
-            letterSpacing: '-0.374px',
+            letterSpacing: 'var(--sf-track-tight)',
             lineHeight: 'var(--sf-lh-snug)',
           }}
         >
@@ -228,7 +228,7 @@ function ThreadCard({ thread }: ThreadCardProps) {
             className="sf-mono"
             style={{
               marginLeft: 'auto',
-              fontSize: '10px',
+              fontSize: 'var(--sf-text-2xs)',
               color: 'var(--sf-fg-on-dark-4)',
             }}
           >
@@ -237,9 +237,9 @@ function ThreadCard({ thread }: ThreadCardProps) {
         </div>
         <div
           style={{
-            fontSize: '14px',
+            fontSize: 'var(--sf-text-sm)',
             color: 'var(--sf-fg-on-dark-1)',
-            letterSpacing: '-0.224px',
+            letterSpacing: 'var(--sf-track-normal)',
             lineHeight: 'var(--sf-lh-normal)',
           }}
         >

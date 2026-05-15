@@ -22,11 +22,11 @@ export function WaitlistPillLink() {
         background: hover ? 'var(--sf-accent-hover)' : 'var(--sf-accent)',
         color: 'var(--sf-fg-on-dark-1)',
         borderRadius: 'var(--sf-radius-pill)',
-        fontSize: '17px',
+        fontSize: 'var(--sf-text-base)',
         fontWeight: 500,
-        letterSpacing: '-0.224px',
+        letterSpacing: 'var(--sf-track-normal)',
         textDecoration: 'none',
-        transition: 'background var(--sf-dur-base) var(--sf-ease)',
+        transition: 'background var(--sf-dur-base) var(--sf-ease-swift)',
       }}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}

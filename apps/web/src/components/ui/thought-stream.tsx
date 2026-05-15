@@ -55,7 +55,7 @@ export function ThoughtStream({
             alignItems: 'flex-start',
             gap: 12,
             opacity: i > activeIdx ? 0.3 : 1,
-            transition: 'opacity var(--sf-dur-slow) var(--sf-ease)',
+            transition: 'opacity var(--sf-dur-slow) var(--sf-ease-swift)',
           };
           return (
             <li key={i} style={itemStyle}>
@@ -65,7 +65,7 @@ export function ThoughtStream({
               <div>
                 <div
                   style={{
-                    fontSize: '17px',
+                    fontSize: 'var(--sf-text-base)',
                     fontWeight: 500,
                     color: labelColor,
                   }}
@@ -75,7 +75,7 @@ export function ThoughtStream({
                 {step.detail ? (
                   <div
                     style={{
-                      fontSize: '14px',
+                      fontSize: 'var(--sf-text-sm)',
                       color: detailColor,
                       marginTop: 2,
                     }}

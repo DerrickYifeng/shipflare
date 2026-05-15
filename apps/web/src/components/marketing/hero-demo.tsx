@@ -74,7 +74,7 @@ export function HeroDemo({ headline = DEFAULT_HEADLINE, isAuthenticated }: HeroD
           style={{
             margin: 0,
             color: 'var(--sf-fg-on-dark-1)',
-            fontSize: 'clamp(44px, 7vw, clamp(3rem, 1rem + 7vw, 8rem))',
+            fontSize: 'clamp(44px, 7vw, var(--sf-text-hero))',
             textWrap: 'balance',
             maxWidth: 960,
             marginInline: 'auto',
@@ -86,7 +86,7 @@ export function HeroDemo({ headline = DEFAULT_HEADLINE, isAuthenticated }: HeroD
           className="sf-lede"
           style={{
             marginTop: 24,
-            fontSize: '18px',
+            fontSize: 'var(--sf-text-lg)',
             maxWidth: 640,
             marginInline: 'auto',
           }}
@@ -129,8 +129,8 @@ export function HeroDemo({ headline = DEFAULT_HEADLINE, isAuthenticated }: HeroD
               <span
                 style={{
                   fontFamily: 'var(--sf-font-mono)',
-                  fontSize: '12px',
-                  letterSpacing: '-0.12px',
+                  fontSize: 'var(--sf-text-xs)',
+                  letterSpacing: 'var(--sf-track-mono)',
                   color: 'var(--sf-fg-on-dark-3)',
                   fontWeight: 600,
                 }}

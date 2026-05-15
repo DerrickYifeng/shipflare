@@ -11,9 +11,9 @@ export interface GlassNavProps {
 }
 
 const LINK_STYLE: CSSProperties = {
-  fontSize: '14px',
+  fontSize: 'var(--sf-text-sm)',
   color: 'var(--sf-fg-on-dark-2)',
-  letterSpacing: '-0.224px',
+  letterSpacing: 'var(--sf-track-normal)',
   textDecoration: 'none',
   cursor: 'pointer',
 };
@@ -30,7 +30,7 @@ export function GlassNav({ isAuthenticated }: GlassNavProps) {
     <header
       className="sticky top-0 backdrop-blur"
       style={{
-        zIndex: 50,
+        zIndex: 'var(--sf-z-sticky)' as unknown as number,
         background: 'var(--sf-glass-dark)',
         backdropFilter: 'var(--sf-glass-blur)',
         WebkitBackdropFilter: 'var(--sf-glass-blur)',
@@ -54,10 +54,10 @@ export function GlassNav({ isAuthenticated }: GlassNavProps) {
           <ShipFlareLogo size={32} />
           <span
             style={{
-              fontSize: '17px',
+              fontSize: 'var(--sf-text-base)',
               fontWeight: 600,
               color: 'var(--sf-fg-on-dark-1)',
-              letterSpacing: '-0.374px',
+              letterSpacing: 'var(--sf-track-tight)',
             }}
           >
             ShipFlare
@@ -78,9 +78,9 @@ export function GlassNav({ isAuthenticated }: GlassNavProps) {
             <Link
               href="/briefing"
               style={{
-                fontSize: '14px',
+                fontSize: 'var(--sf-text-sm)',
                 color: 'var(--sf-fg-on-dark-1)',
-                letterSpacing: '-0.224px',
+                letterSpacing: 'var(--sf-track-normal)',
                 padding: '8px 16px',
                 borderRadius: 'var(--sf-radius-pill)',
                 background: 'var(--sf-accent)',
@@ -96,9 +96,9 @@ export function GlassNav({ isAuthenticated }: GlassNavProps) {
               type="button"
               onClick={() => setSignInOpen(true)}
               style={{
-                fontSize: '14px',
+                fontSize: 'var(--sf-text-sm)',
                 color: 'var(--sf-fg-on-dark-1)',
-                letterSpacing: '-0.224px',
+                letterSpacing: 'var(--sf-track-normal)',
                 padding: '8px 16px',
                 borderRadius: 'var(--sf-radius-pill)',
                 background: 'var(--sf-accent)',

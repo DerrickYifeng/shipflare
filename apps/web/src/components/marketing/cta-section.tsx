@@ -55,7 +55,7 @@ export function CTASection({ isAuthenticated }: CTASectionProps) {
           style={{
             margin: 0,
             color: 'var(--sf-fg-on-dark-1)',
-            fontSize: 'clamp(40px, 5.5vw, clamp(3rem, 1rem + 7vw, 8rem))',
+            fontSize: 'clamp(40px, 5.5vw, var(--sf-text-hero))',
             textWrap: 'balance',
           }}
         >
@@ -67,7 +67,7 @@ export function CTASection({ isAuthenticated }: CTASectionProps) {
           className="sf-lede"
           style={{
             marginTop: 20,
-            fontSize: '18px',
+            fontSize: 'var(--sf-text-lg)',
             color: 'var(--sf-fg-on-dark-2)',
           }}
         >

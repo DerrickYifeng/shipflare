@@ -44,11 +44,11 @@ export const PillCta = forwardRef<HTMLButtonElement, PillCtaProps>(
       borderRadius: 'var(--sf-radius-pill)',
       border: 'none',
       cursor: 'pointer',
-      fontSize: '17px',
+      fontSize: 'var(--sf-text-base)',
       fontWeight: 500,
-      letterSpacing: '-0.224px',
+      letterSpacing: 'var(--sf-track-normal)',
       fontFamily: 'inherit',
-      transition: 'background var(--sf-dur-base) var(--sf-ease)',
+      transition: 'background var(--sf-dur-base) var(--sf-ease-swift)',
       ...styleOverride,
     };
     return (

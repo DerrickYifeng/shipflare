@@ -155,7 +155,7 @@ export function DemoWindow() {
     borderRadius: 'var(--sf-radius-md)',
     padding: '10px 14px',
     fontFamily: 'var(--sf-font-mono)',
-    fontSize: '14px',
+    fontSize: 'var(--sf-text-sm)',
     color: 'var(--sf-fg-on-dark-1)',
   };
 
@@ -216,12 +216,12 @@ export function DemoWindow() {
             border: 'none',
             background: phase === 'typing' ? 'var(--sf-bg-dark)' : 'var(--sf-accent)',
             color: 'var(--sf-fg-on-dark-1)',
-            fontSize: '14px',
-            letterSpacing: '-0.224px',
+            fontSize: 'var(--sf-text-sm)',
+            letterSpacing: 'var(--sf-track-normal)',
             fontFamily: 'inherit',
             fontWeight: 500,
             opacity: phase === 'typing' ? 0.5 : 1,
-            transition: 'background var(--sf-dur-base) var(--sf-ease), opacity var(--sf-dur-base) var(--sf-ease)',
+            transition: 'background var(--sf-dur-base) var(--sf-ease-swift), opacity var(--sf-dur-base) var(--sf-ease-swift)',
             cursor: 'default',
           }}
         >
@@ -266,7 +266,7 @@ function ResultsList({ threadIdx }: ResultsListProps) {
               style={{
                 opacity: hidden ? 0 : 1,
                 transform: hidden ? 'translateY(8px)' : 'translateY(0)',
-                transition: 'opacity 400ms var(--sf-ease), transform 400ms var(--sf-ease)',
+                transition: 'opacity 400ms var(--sf-ease-swift), transform 400ms var(--sf-ease-swift)',
                 background: 'oklch(16% 0.012 260)',
                 border: '1px solid var(--sf-border-on-dark)',
                 borderRadius: 'var(--sf-radius-md)',
@@ -280,7 +280,7 @@ function ResultsList({ threadIdx }: ResultsListProps) {
                   style={{
                     padding: '1px 7px',
                     borderRadius: 'var(--sf-radius-sm)',
-                    fontSize: '12px',
+                    fontSize: 'var(--sf-text-xs)',
                     fontWeight: 500,
                     background: 'var(--sf-accent-light)',
                     color: 'var(--sf-link)',
@@ -293,7 +293,7 @@ function ResultsList({ threadIdx }: ResultsListProps) {
                   style={{
                     padding: '1px 7px',
                     borderRadius: 'var(--sf-radius-sm)',
-                    fontSize: '12px',
+                    fontSize: 'var(--sf-text-xs)',
                     fontWeight: 500,
                     background:
                       t.score >= 85 ? 'var(--sf-success-light)' : 'var(--sf-bg-tertiary)',
@@ -306,7 +306,7 @@ function ResultsList({ threadIdx }: ResultsListProps) {
                   className="sf-mono"
                   style={{
                     marginLeft: 'auto',
-                    fontSize: '10px',
+                    fontSize: 'var(--sf-text-2xs)',
                     color: 'var(--sf-fg-on-dark-4)',
                   }}
                 >
@@ -315,9 +315,9 @@ function ResultsList({ threadIdx }: ResultsListProps) {
               </div>
               <div
                 style={{
-                  fontSize: '14px',
+                  fontSize: 'var(--sf-text-sm)',
                   color: 'var(--sf-fg-on-dark-1)',
-                  letterSpacing: '-0.224px',
+                  letterSpacing: 'var(--sf-track-normal)',
                   lineHeight: 'var(--sf-lh-snug)',
                 }}
               >

@@ -181,17 +181,17 @@ function SafetyItem({ title, detail }: SafetyItemProps) {
       <div>
         <div
           style={{
-            fontSize: '17px',
+            fontSize: 'var(--sf-text-base)',
             fontWeight: 600,
             color: 'var(--sf-fg-1)',
-            letterSpacing: '-0.374px',
+            letterSpacing: 'var(--sf-track-tight)',
           }}
         >
           {title}
         </div>
         <div
           style={{
-            fontSize: '14px',
+            fontSize: 'var(--sf-text-sm)',
             color: 'var(--sf-fg-2)',
             marginTop: 2,
             lineHeight: 'var(--sf-lh-normal)',
@@ -225,7 +225,7 @@ function ReviewLogCard() {
           className="sf-mono"
           style={{
             marginLeft: 'auto',
-            fontSize: '10px',
+            fontSize: 'var(--sf-text-2xs)',
             color: 'var(--sf-fg-4)',
           }}
         >
@@ -268,14 +268,14 @@ function ReviewLogCard() {
             </Badge>
             <span
               className="sf-mono"
-              style={{ fontSize: '14px', color: 'var(--sf-fg-2)' }}
+              style={{ fontSize: 'var(--sf-text-sm)', color: 'var(--sf-fg-2)' }}
             >
               {c.tone}
             </span>
             <span
               className="sf-mono"
               style={{
-                fontSize: '14px',
+                fontSize: 'var(--sf-text-sm)',
                 color: c.accuracy === '✓' ? 'var(--sf-success-ink)' : 'var(--sf-error-ink)',
               }}
             >
@@ -283,13 +283,13 @@ function ReviewLogCard() {
             </span>
             <span
               className="sf-mono"
-              style={{ fontSize: '14px', color: 'var(--sf-fg-2)' }}
+              style={{ fontSize: 'var(--sf-text-sm)', color: 'var(--sf-fg-2)' }}
             >
               {c.spam}
             </span>
             <span
               style={{
-                fontSize: '14px',
+                fontSize: 'var(--sf-text-sm)',
                 color: 'var(--sf-fg-2)',
                 lineHeight: 'var(--sf-lh-normal)',
               }}

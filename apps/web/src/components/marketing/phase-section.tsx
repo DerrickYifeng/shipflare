@@ -154,10 +154,10 @@ function PhaseColumn({ phase }: PhaseColumnProps) {
       </div>
       <div
         style={{
-          fontSize: '17px',
+          fontSize: 'var(--sf-text-base)',
           fontWeight: 700,
           color: 'var(--sf-fg-1)',
-          letterSpacing: '-0.374px',
+          letterSpacing: 'var(--sf-track-tight)',
           marginBottom: 6,
         }}
       >
@@ -165,7 +165,7 @@ function PhaseColumn({ phase }: PhaseColumnProps) {
       </div>
       <div
         style={{
-          fontSize: '14px',
+          fontSize: 'var(--sf-text-sm)',
           color: 'var(--sf-fg-2)',
           lineHeight: 'var(--sf-lh-normal)',
         }}

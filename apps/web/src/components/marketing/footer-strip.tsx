@@ -23,8 +23,8 @@ export function FooterStrip() {
     textDecoration: 'none',
     fontFamily: 'var(--sf-font-mono)',
     textTransform: 'uppercase',
-    fontSize: '10px',
-    letterSpacing: '-0.12px',
+    fontSize: 'var(--sf-text-2xs)',
+    letterSpacing: 'var(--sf-track-mono)',
   };
 
   return (
@@ -48,9 +48,9 @@ export function FooterStrip() {
           <ShipFlareLogo size={32} />
           <span
             style={{
-              fontSize: '14px',
+              fontSize: 'var(--sf-text-sm)',
               color: 'var(--sf-fg-2)',
-              letterSpacing: '-0.224px',
+              letterSpacing: 'var(--sf-track-normal)',
               fontWeight: 500,
             }}
           >
