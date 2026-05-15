@@ -237,3 +237,77 @@ function emptyResult(
     error,
   };
 }
+
+import { getAnthropic, type ProductAnalysis } from "./anthropic";
+
+const ANALYZE_PROMPT = `You analyze websites to understand what product or service they offer.
+Given the page content below, extract:
+
+1. productName — the actual product/brand name (not the domain)
+2. oneLiner — one sentence describing what it does, in plain language
+3. targetAudience — who this product is for (be specific: "indie developers", "small business owners", etc.)
+4. keywords — 5-8 topic keywords a potential user would search for (lowercase, no brand names)
+5. valueProp — the core value proposition in one sentence
+
+Respond with ONLY a JSON object matching this shape:
+{"productName":"...","oneLiner":"...","targetAudience":"...","keywords":["..."],"valueProp":"..."}`;
+
+export async function analyzeWebsite(
+  scrape: WebScrapeResult,
+  anthropicApiKey: string,
+): Promise<ProductAnalysis> {
+  const content = [
+    `URL: ${scrape.url}`,
+    scrape.title ? `Title: ${scrape.title}` : "",
+    scrape.description ? `Meta Description: ${scrape.description}` : "",
+    scrape.pageMarkdown ? `\nPage Content:\n${scrape.pageMarkdown}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const client = getAnthropic(anthropicApiKey);
+  try {
+    const response = await client.messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 400,
+      system: ANALYZE_PROMPT,
+      messages: [{ role: "user", content }],
+    });
+    const text =
+      response.content[0]?.type === "text" ? response.content[0].text : "";
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error("No JSON in response");
+    const parsed = JSON.parse(jsonMatch[0]) as ProductAnalysis;
+    return {
+      productName: parsed.productName || fallbackName(scrape.title || "", scrape.url),
+      oneLiner: parsed.oneLiner || scrape.description || "",
+      targetAudience: parsed.targetAudience || "",
+      keywords: Array.isArray(parsed.keywords) ? parsed.keywords : [],
+      valueProp: parsed.valueProp || "",
+    };
+  } catch (error) {
+    console.error(`analyzeWebsite failed:`, error);
+    return {
+      productName: fallbackName(scrape.title || "", scrape.url),
+      oneLiner: scrape.description || "",
+      targetAudience: "",
+      keywords: [],
+      valueProp: "",
+    };
+  }
+}
+
+function fallbackName(title: string, url: string): string {
+  const separators = /\s*[–\-|:·]\s*/;
+  const parts = title.split(separators).map((p) => p.trim()).filter(Boolean);
+  if (parts.length > 1 && parts[0] && parts[0].split(/\s+/).length <= 4) {
+    return parts[0];
+  }
+  try {
+    const hostname = new URL(url).hostname.replace(/^www\./, "");
+    const part = hostname.split(".")[0];
+    return part || "Unknown";
+  } catch {
+    return title || "Unknown";
+  }
+}
