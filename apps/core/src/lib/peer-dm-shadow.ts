@@ -20,6 +20,8 @@
  * Shape of a peer-DM shadow log entry. Matches the request body shape
  * expected by `apps/core/src/agents/cmo/CMO.ts → handlePeerShadow`.
  */
+import { transportName } from "./do-name";
+
 export interface PeerDmShadow {
   /** Optional CMO conversation correlation id. */
   conversationId?: string;
@@ -47,7 +49,7 @@ export async function logPeerDmShadow<T extends Rpc.DurableObjectBranded | undef
   userId: string,
   shadow: PeerDmShadow,
 ): Promise<void> {
-  const cmoId = cmoNamespace.idFromName(`streamable-http:${userId}`);
+  const cmoId = cmoNamespace.idFromName(transportName(userId));
   const cmoStub = cmoNamespace.get(cmoId);
   const res = await cmoStub.fetch(
     new Request("https://internal/internal/peer-dm-shadow", {

@@ -30,7 +30,9 @@ async function bootstrap(stub: DurableObjectStub<CMO>): Promise<void> {
 describe("logPeerDmShadow", () => {
   it("writes an employee_log row with kind='peer_dm_shadow' and notified_founder=0", async () => {
     const userId = "peer-dm-test-user-1";
-    const stub = env.CMO.getByName(userId);
+    // logPeerDmShadow looks up the CMO by `transportName(userId)`
+    // (`streamable-http:<id>`); bootstrap the same DO instance.
+    const stub = env.CMO.getByName(`streamable-http:${userId}`);
     await bootstrap(stub);
 
     await logPeerDmShadow(env.CMO, userId, {
@@ -80,7 +82,7 @@ describe("logPeerDmShadow", () => {
 
   it("multiple shadows accumulate in employee_log", async () => {
     const userId = "peer-dm-test-user-2";
-    const stub = env.CMO.getByName(userId);
+    const stub = env.CMO.getByName(`streamable-http:${userId}`);
     await bootstrap(stub);
 
     for (let i = 0; i < 3; i++) {

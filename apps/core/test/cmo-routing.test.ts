@@ -39,7 +39,10 @@ const INTERNAL_HEADERS = {
  * see `cmo-internal.test.ts`.
  */
 async function bootstrapCmoFor(userId: string): Promise<void> {
-  const stub = env.CMO.get(env.CMO.idFromName(userId));
+  // The Worker route forwards to `idFromName(transportName(userId))` — the
+  // McpAgent transport's required name shape (`streamable-http:<id>`) — so
+  // we must bootstrap schema on the SAME DO instance the route will hit.
+  const stub = env.CMO.get(env.CMO.idFromName(`streamable-http:${userId}`));
   await runInDurableObject(stub, async (_instance: CMO, state) => {
     applyCmoSchema(state.storage.sql);
   });

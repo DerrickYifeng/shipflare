@@ -39,6 +39,7 @@
 import { getAgentByName } from "agents";
 import { verifyJwt } from "./lib/jwt";
 import { validateExternalAccess } from "./lib/external-auth";
+import { transportName } from "./lib/do-name";
 import { ROLE_REGISTRY, isValidRole, type RoleSlug } from "@shipflare/shared";
 import { createDb, user as userTable } from "@shipflare/db";
 
@@ -195,7 +196,7 @@ export default {
       const subset = users.slice(0, CRON_FANOUT_CAP);
       await Promise.allSettled(
         subset.map(({ id: userId }) => {
-          const stub = env.CMO.get(env.CMO.idFromName(`streamable-http:${userId}`));
+          const stub = env.CMO.get(env.CMO.idFromName(transportName(userId)));
           return stub.fetch(
             new Request("https://internal/internal/cron-tick", {
               method: "POST",
@@ -328,7 +329,7 @@ async function handleInternalRequest(
   // McpAgent.getTransportType() requires a transport prefix on the DO name.
   // All DO lookups — MCP and internal alike — must use this form because
   // onStart() → initTransport() runs before fetch() on every cold start.
-  const stub = ns.get(ns.idFromName(`streamable-http:${userId}`));
+  const stub = ns.get(ns.idFromName(transportName(userId)));
 
   // Strip the public path prefix — the DO's fetch handler expects
   // `/internal/<path>`, not `/agents/<role>/<userId>/internal/<path>`.
@@ -422,7 +423,7 @@ async function streamableHttpProxy(
     }
     const messages = Array.isArray(raw) ? raw : [raw];
 
-    const agent = await getAgentByName(namespace, `streamable-http:${userId}`, { props });
+    const agent = await getAgentByName(namespace, transportName(userId), { props });
 
     const isInit = messages.some(
       (m): boolean =>
@@ -451,7 +452,7 @@ async function streamableHttpProxy(
   }
 
   if (method === "GET") {
-    const agent = await getAgentByName(namespace, `streamable-http:${userId}`, { props });
+    const agent = await getAgentByName(namespace, transportName(userId), { props });
     const fwd: Record<string, string> = {};
     request.headers.forEach((v, k) => { fwd[k] = v; });
     const wsRes = await agent.fetch(
@@ -463,7 +464,7 @@ async function streamableHttpProxy(
   }
 
   if (method === "DELETE") {
-    const agent = await getAgentByName(namespace, `streamable-http:${userId}`, { props });
+    const agent = await getAgentByName(namespace, transportName(userId), { props });
     const fwd: Record<string, string> = {};
     request.headers.forEach((v, k) => { fwd[k] = v; });
     await agent.fetch(
