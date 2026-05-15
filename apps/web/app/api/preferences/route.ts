@@ -20,8 +20,6 @@ import { userPreferences, eq } from "@shipflare/db";
 
 export const dynamic = "force-dynamic";
 
-type PatchBody = Partial<{ timezone: string; theme: "light" | "dark" }>;
-
 export async function GET(req: Request): Promise<Response> {
   const auth = getAuth();
   const session = await auth.api.getSession({ headers: req.headers });
@@ -50,47 +48,85 @@ export async function PATCH(req: Request): Promise<Response> {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  let body: PatchBody;
+  let raw: unknown;
   try {
-    body = (await req.json()) as PatchBody;
+    raw = await req.json();
   } catch {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
+  if (typeof raw !== "object" || raw === null) {
+    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+  }
+  const body = raw as Record<string, unknown>;
 
-  if (body.theme !== undefined && body.theme !== "light" && body.theme !== "dark") {
-    return NextResponse.json({ error: "invalid_theme" }, { status: 400 });
+  let nextTimezone: string | undefined;
+  if (body.timezone !== undefined) {
+    if (typeof body.timezone !== "string" || body.timezone.length === 0) {
+      return NextResponse.json({ error: "invalid_timezone" }, { status: 400 });
+    }
+    nextTimezone = body.timezone;
+  }
+
+  let nextTheme: "light" | "dark" | undefined;
+  if (body.theme !== undefined) {
+    if (body.theme !== "light" && body.theme !== "dark") {
+      return NextResponse.json({ error: "invalid_theme" }, { status: 400 });
+    }
+    nextTheme = body.theme;
+  }
+
+  if (nextTimezone === undefined && nextTheme === undefined) {
+    return NextResponse.json({ error: "empty_patch" }, { status: 400 });
   }
 
   const { env } = getCloudflareContext();
   const db = getDb(env);
   const now = new Date();
 
+  // Merge with existing row so a partial PATCH never clobbers the other
+  // field. Without this, a first-time `{ theme: "dark" }` PATCH would
+  // permanently write `timezone: "UTC"` even if the user later wants a
+  // different timezone.
+  const existing = await db
+    .select()
+    .from(userPreferences)
+    .where(eq(userPreferences.userId, session.user.id))
+    .get();
+
+  const merged = {
+    userId: session.user.id,
+    timezone: nextTimezone ?? existing?.timezone ?? "UTC",
+    theme: nextTheme ?? existing?.theme ?? "light",
+    updatedAt: now,
+  } as const;
+
   await db
     .insert(userPreferences)
-    .values({
-      userId: session.user.id,
-      timezone: body.timezone ?? "UTC",
-      theme: body.theme ?? "light",
-      updatedAt: now,
-    })
+    .values(merged)
     .onConflictDoUpdate({
       target: userPreferences.userId,
       set: {
-        ...(body.timezone !== undefined ? { timezone: body.timezone } : {}),
-        ...(body.theme !== undefined ? { theme: body.theme } : {}),
+        timezone: merged.timezone,
+        theme: merged.theme,
         updatedAt: now,
       },
     });
 
-  // Return the resulting row so the client can sync its SWR cache
+  // Read back so the client can sync its SWR cache. If the row is missing
+  // here the upsert silently failed — surface that as 500 instead of
+  // returning fabricated defaults.
   const row = await db
     .select()
     .from(userPreferences)
     .where(eq(userPreferences.userId, session.user.id))
     .get();
 
+  if (!row) {
+    return NextResponse.json({ error: "write_lost" }, { status: 500 });
+  }
+
   return NextResponse.json({
-    timezone: row?.timezone ?? "UTC",
-    theme: (row?.theme ?? "light") as "light" | "dark",
+    timezone: row.timezone,
+    theme: row.theme as "light" | "dark",
   });
 }

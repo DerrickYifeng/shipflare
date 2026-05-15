@@ -4,7 +4,7 @@
  * Like `mcp-token.test.ts` and `oauth-state.test.ts`, the route handler
  * itself can't mount in vitest without a Cloudflare context (it calls
  * `getCloudflareContext()` to obtain the D1 binding). We exercise the
- * validation logic directly here — particularly the theme field narrowing
+ * validation logic directly here — particularly the field narrowing
  * that runs before any DB access.
  *
  * End-to-end coverage (session gate, D1 read/upsert, and response shape)
@@ -14,34 +14,51 @@
 import { describe, it, expect } from "vitest";
 
 // ---------------------------------------------------------------------------
-// Inline the theme validation helper so we can test it without needing
-// the Cloudflare Workers runtime. The same logic lives in the PATCH handler.
+// Inline the validation helper so we can test it without needing the
+// Cloudflare Workers runtime. The logic mirrors the PATCH handler.
 // ---------------------------------------------------------------------------
 
 type Theme = "light" | "dark";
 
-function isValidTheme(value: unknown): value is Theme {
-  return value === "light" || value === "dark";
+interface ValidatedPatch {
+  timezone?: string;
+  theme?: Theme;
 }
 
-function validatePatchBody(raw: unknown):
-  | { ok: true; body: Partial<{ timezone: string; theme: Theme }> }
-  | { ok: false; error: string; status: number } {
+type ValidationResult =
+  | { ok: true; body: ValidatedPatch }
+  | { ok: false; error: string; status: number };
+
+function validatePatchBody(raw: unknown): ValidationResult {
   if (typeof raw !== "object" || raw === null) {
-    return { ok: false, error: "invalid_json", status: 400 };
+    return { ok: false, error: "invalid_body", status: 400 };
+  }
+  const body = raw as Record<string, unknown>;
+
+  let nextTimezone: string | undefined;
+  if (body.timezone !== undefined) {
+    if (typeof body.timezone !== "string" || body.timezone.length === 0) {
+      return { ok: false, error: "invalid_timezone", status: 400 };
+    }
+    nextTimezone = body.timezone;
   }
 
-  const obj = raw as Record<string, unknown>;
-
-  if (obj.theme !== undefined && !isValidTheme(obj.theme)) {
-    return { ok: false, error: "invalid_theme", status: 400 };
+  let nextTheme: Theme | undefined;
+  if (body.theme !== undefined) {
+    if (body.theme !== "light" && body.theme !== "dark") {
+      return { ok: false, error: "invalid_theme", status: 400 };
+    }
+    nextTheme = body.theme;
   }
 
-  const body: Partial<{ timezone: string; theme: Theme }> = {};
-  if (typeof obj.timezone === "string") body.timezone = obj.timezone;
-  if (isValidTheme(obj.theme)) body.theme = obj.theme;
+  if (nextTimezone === undefined && nextTheme === undefined) {
+    return { ok: false, error: "empty_patch", status: 400 };
+  }
 
-  return { ok: true, body };
+  const out: ValidatedPatch = {};
+  if (nextTimezone !== undefined) out.timezone = nextTimezone;
+  if (nextTheme !== undefined) out.theme = nextTheme;
+  return { ok: true, body: out };
 }
 
 // ---------------------------------------------------------------------------
@@ -71,7 +88,10 @@ describe("/api/preferences — validation logic", () => {
   });
 
   it("accepts both timezone and theme together", () => {
-    const result = validatePatchBody({ timezone: "Europe/London", theme: "light" });
+    const result = validatePatchBody({
+      timezone: "Europe/London",
+      theme: "light",
+    });
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.body.timezone).toBe("Europe/London");
@@ -91,11 +111,63 @@ describe("/api/preferences — validation logic", () => {
   it("rejects an invalid theme value (empty string)", () => {
     const result = validatePatchBody({ theme: "" });
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.status).toBe(400);
+    if (!result.ok) {
+      expect(result.error).toBe("invalid_theme");
+      expect(result.status).toBe(400);
+    }
   });
 
-  it("accepts an empty patch body (no-op update)", () => {
+  it("rejects a non-string timezone (number)", () => {
+    const result = validatePatchBody({ timezone: 42 });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBe("invalid_timezone");
+      expect(result.status).toBe(400);
+    }
+  });
+
+  it("rejects an empty-string timezone", () => {
+    const result = validatePatchBody({ timezone: "" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBe("invalid_timezone");
+      expect(result.status).toBe(400);
+    }
+  });
+
+  it("rejects a non-string timezone (object)", () => {
+    const result = validatePatchBody({ timezone: { tz: "UTC" } });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBe("invalid_timezone");
+      expect(result.status).toBe(400);
+    }
+  });
+
+  it("rejects an empty patch body (no fields supplied)", () => {
     const result = validatePatchBody({});
-    expect(result.ok).toBe(true);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBe("empty_patch");
+      expect(result.status).toBe(400);
+    }
+  });
+
+  it("rejects a non-object body (string)", () => {
+    const result = validatePatchBody("nope");
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBe("invalid_body");
+      expect(result.status).toBe(400);
+    }
+  });
+
+  it("rejects a null body", () => {
+    const result = validatePatchBody(null);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBe("invalid_body");
+      expect(result.status).toBe(400);
+    }
   });
 });
