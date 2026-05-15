@@ -53,7 +53,7 @@ const SEND_BTN: CSSProperties = {
   height: 32,
   borderRadius: "var(--sf-radius-md)",
   background: "var(--sf-accent)",
-  color: "#fff",
+  color: "var(--sf-fg-on-dark-1)",
   border: "none",
   cursor: "pointer",
   display: "flex",
@@ -130,7 +130,6 @@ export function StickyComposer({
           onKeyDown={handleKeyDown}
           disabled={disabled || sending}
           aria-label="Message composer"
-          aria-multiline="true"
         />
         <button
           type="button"

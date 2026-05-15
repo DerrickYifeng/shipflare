@@ -54,7 +54,7 @@ function MessageBubble({ msg }: { msg: TeamActivityMessage }) {
     color: isError
       ? "var(--sf-error-ink)"
       : isUser
-        ? "#fff"
+        ? "var(--sf-fg-on-dark-1)"
         : "var(--sf-fg-1)",
     boxShadow: isUser ? "none" : "var(--sf-shadow-card)",
   };

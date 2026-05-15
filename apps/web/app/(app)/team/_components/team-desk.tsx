@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { useTeamEvents } from "@/hooks/use-team-events";
 import { createCmoClient, type CmoClient } from "@/lib/mcp-client";
+import { useToast } from "@/components/ui/toast";
 import { ROLE_REGISTRY } from "@shipflare/shared";
 import type { TeamUser, RosterEmployee, ConversationMeta, PlanItemRow, DraftRow } from "./types";
 import { LeftRail } from "./left-rail";
@@ -69,6 +70,9 @@ function toRosterEmployee(raw: {
 // ---------------------------------------------------------------------------
 
 export function TeamDesk({ user }: TeamDeskProps) {
+  // ---- Toast (for surfacing approve / new-conversation errors) ----
+  const { toast } = useToast();
+
   // ---- Client ref (used for one-shot queries, separate from chat) ----
   const clientRef = useRef<CmoClient | null>(null);
 
@@ -145,6 +149,23 @@ export function TeamDesk({ user }: TeamDeskProps) {
     conversationId: selectedConversationId,
   });
 
+  // Memoised so the useEffect below has a stable dependency. Reads from
+  // clientRef.current only, so no closure deps needed.
+  const refreshPanelData = useCallback(async () => {
+    const client = clientRef.current;
+    if (!client) return;
+    try {
+      const [items, pendingDrafts] = await Promise.all([
+        client.queryPlanItems<PlanItemRow>({ limit: 50 }),
+        client.queryDrafts<DraftRow>({ status: "pending", limit: 20 }),
+      ]);
+      setPlanItems(items);
+      setDrafts(pendingDrafts);
+    } catch {
+      // non-fatal — panel will show stale data on next user action
+    }
+  }, []);
+
   // After each message completion, refresh plan items + drafts.
   const prevMessageCount = useRef(0);
   useEffect(() => {
@@ -157,22 +178,7 @@ export function TeamDesk({ user }: TeamDeskProps) {
         void refreshPanelData();
       }
     }
-  }, [messages]);
-
-  async function refreshPanelData() {
-    const client = clientRef.current;
-    if (!client) return;
-    try {
-      const [items, pendingDrafts] = await Promise.all([
-        client.queryPlanItems<PlanItemRow>({ limit: 50 }),
-        client.queryDrafts<DraftRow>({ status: "pending", limit: 20 }),
-      ]);
-      setPlanItems(items);
-      setDrafts(pendingDrafts);
-    } catch {
-      // non-fatal — panel will show stale data
-    }
-  }
+  }, [messages, refreshPanelData]);
 
   // ---- Composer submit ----
   const handleSend = useCallback(
@@ -201,25 +207,26 @@ export function TeamDesk({ user }: TeamDeskProps) {
   }, [creating]);
 
   // ---- Draft actions ----
-  const handleApproveDraft = useCallback(async (id: string) => {
-    const client = clientRef.current;
-    if (!client) return;
-    setLoadingDraftId(id);
-    try {
-      await client.approveDraft(id);
-      setDrafts((prev) => prev.filter((d) => d.id !== id));
-    } catch {
-      // surface via refresh
-    } finally {
-      setLoadingDraftId(null);
-    }
-  }, []);
-
-  const handleRejectDraft = useCallback(async (id: string) => {
-    // CmoClient doesn't expose rejectDraft yet — remove from local state
-    // and let the next refresh reconcile.
-    setDrafts((prev) => prev.filter((d) => d.id !== id));
-  }, []);
+  // Reject is intentionally not exposed: CmoClient has no rejectDraft tool
+  // yet, and a UI-only "Reject" is misleading. Approve is wired through to
+  // CMO's approveDraft tool; errors surface via toast.
+  const handleApproveDraft = useCallback(
+    async (id: string) => {
+      const client = clientRef.current;
+      if (!client) return;
+      setLoadingDraftId(id);
+      try {
+        await client.approveDraft(id);
+        setDrafts((prev) => prev.filter((d) => d.id !== id));
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Approve failed";
+        toast(`Couldn't approve draft: ${msg}`, "error");
+      } finally {
+        setLoadingDraftId(null);
+      }
+    },
+    [toast],
+  );
 
   // ---- Render ----
   const composerDisabled = !initDone || status === "connecting" || status === "sending" || !!connectError;
@@ -275,7 +282,6 @@ export function TeamDesk({ user }: TeamDeskProps) {
         planItems={planItems}
         drafts={drafts}
         onApproveDraft={handleApproveDraft}
-        onRejectDraft={handleRejectDraft}
         loadingDraftId={loadingDraftId}
       />
     </main>

@@ -7,7 +7,6 @@ interface RightPanelProps {
   planItems: PlanItemRow[];
   drafts: DraftRow[];
   onApproveDraft: (id: string) => Promise<void>;
-  onRejectDraft: (id: string) => Promise<void>;
   loadingDraftId: string | null;
 }
 
@@ -109,12 +108,10 @@ function PlanItemCard({ item }: { item: PlanItemRow }) {
 function DraftCard({
   draft,
   onApprove,
-  onReject,
   loading,
 }: {
   draft: DraftRow;
   onApprove: () => Promise<void>;
-  onReject: () => Promise<void>;
   loading: boolean;
 }) {
   const content = typeof draft.content === "string" ? draft.content : "";
@@ -147,22 +144,7 @@ function DraftCard({
     borderRadius: "var(--sf-radius-md)",
     border: "none",
     background: "var(--sf-success)",
-    color: "#fff",
-    fontSize: 12,
-    fontFamily: "var(--sf-font-text)",
-    fontWeight: 500,
-    cursor: loading ? "not-allowed" : "pointer",
-    opacity: loading ? 0.5 : 1,
-    transition: `opacity var(--sf-dur-fast) var(--sf-ease)`,
-  };
-
-  const rejectBtn: CSSProperties = {
-    flex: 1,
-    padding: "5px 0",
-    borderRadius: "var(--sf-radius-md)",
-    border: "1px solid var(--sf-border)",
-    background: "transparent",
-    color: "var(--sf-fg-2)",
+    color: "var(--sf-fg-on-dark-1)",
     fontSize: 12,
     fontFamily: "var(--sf-font-text)",
     fontWeight: 500,
@@ -195,15 +177,6 @@ function DraftCard({
         >
           Approve
         </button>
-        <button
-          type="button"
-          style={rejectBtn}
-          disabled={loading}
-          onClick={() => void onReject()}
-          aria-label="Reject draft"
-        >
-          Reject
-        </button>
       </div>
     </div>
   );
@@ -213,7 +186,6 @@ export function RightPanel({
   planItems,
   drafts,
   onApproveDraft,
-  onRejectDraft,
   loadingDraftId,
 }: RightPanelProps) {
   return (
@@ -244,7 +216,6 @@ export function RightPanel({
                 key={d.id}
                 draft={d}
                 onApprove={() => onApproveDraft(d.id)}
-                onReject={() => onRejectDraft(d.id)}
                 loading={loadingDraftId === d.id}
               />
             ))}
