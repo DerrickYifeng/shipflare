@@ -16,6 +16,8 @@ export interface RosterEmployee {
   displayName: string;
   status: "active" | "fired" | "idle";
   hired_at: number;
+  /** Count of plan items the employee currently owns (running + pending). */
+  taskCount?: number;
 }
 
 export interface ConversationMeta {

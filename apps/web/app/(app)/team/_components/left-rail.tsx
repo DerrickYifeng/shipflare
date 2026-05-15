@@ -2,6 +2,9 @@
 
 import type { CSSProperties } from "react";
 import type { RosterEmployee, ConversationMeta } from "./types";
+import { AgentDot } from "./agent-dot";
+import { AgentStatusPill, type AgentStatus } from "./agent-status-pill";
+import { roleCodeForRole } from "./agent-accent";
 
 interface LeftRailProps {
   employees: RosterEmployee[];
@@ -12,26 +15,19 @@ interface LeftRailProps {
   creating: boolean;
 }
 
-const STATUS_DOT: Record<string, CSSProperties> = {
-  active: { background: "var(--sf-success)" },
-  fired: { background: "var(--sf-error)" },
-  idle: { background: "var(--sf-fg-4)" },
-};
+function rosterStatusToPill(s: RosterEmployee["status"], taskCount?: number): AgentStatus {
+  if (s === "fired") return "fired";
+  if (s === "idle") return "idle";
+  if (taskCount !== undefined && taskCount > 0) return "working";
+  return "active";
+}
 
 function EmployeeRow({ employee }: { employee: RosterEmployee }) {
-  const dot: CSSProperties = {
-    width: 7,
-    height: 7,
-    borderRadius: "var(--sf-radius-full)",
-    flexShrink: 0,
-    ...(STATUS_DOT[employee.status] ?? STATUS_DOT.idle),
-  };
-
   const row: CSSProperties = {
     display: "flex",
     alignItems: "center",
     gap: 10,
-    padding: "8px 12px",
+    padding: "8px 10px",
     borderRadius: "var(--sf-radius-md)",
     cursor: "default",
   };
@@ -41,7 +37,6 @@ function EmployeeRow({ employee }: { employee: RosterEmployee }) {
     fontFamily: "var(--sf-font-text)",
     fontWeight: 500,
     color: "var(--sf-fg-1)",
-    flex: 1,
     whiteSpace: "nowrap",
     overflow: "hidden",
     textOverflow: "ellipsis",
@@ -53,15 +48,21 @@ function EmployeeRow({ employee }: { employee: RosterEmployee }) {
     color: "var(--sf-fg-3)",
     textTransform: "uppercase",
     letterSpacing: 0.4,
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
   };
+
+  const pillStatus = rosterStatusToPill(employee.status, employee.taskCount);
 
   return (
     <div style={row} role="listitem">
-      <div style={dot} aria-label={`Status: ${employee.status}`} />
+      <AgentDot role={employee.role} displayName={employee.displayName} size={28} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={name}>{employee.displayName}</div>
-        <div style={roleTag}>{employee.role}</div>
+        <div style={roleTag}>{roleCodeForRole(employee.role, employee.displayName)}</div>
       </div>
+      <AgentStatusPill status={pillStatus} taskCount={employee.taskCount} />
     </div>
   );
 }

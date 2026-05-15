@@ -113,7 +113,28 @@ export function TeamDesk({ user }: TeamDeskProps) {
 
         if (cancelled) return;
 
-        setEmployees(rosterRaw.map(toRosterEmployee));
+        // Compute per-role task counts from in-flight plan items so the
+        // left rail can render real workload signal (badge after status pill).
+        const activeStatuses = new Set([
+          "pending",
+          "drafting",
+          "executing",
+          "in_progress",
+        ]);
+        const counts = new Map<string, number>();
+        for (const item of items) {
+          const role = (item as { owner_role?: string }).owner_role;
+          const status = (item as { status?: string }).status;
+          if (!role || !status) continue;
+          if (!activeStatuses.has(status)) continue;
+          counts.set(role, (counts.get(role) ?? 0) + 1);
+        }
+        setEmployees(
+          rosterRaw.map((raw) => {
+            const base = toRosterEmployee(raw);
+            return { ...base, taskCount: counts.get(base.role) ?? 0 };
+          }),
+        );
         setConversations(convList);
         // Select the most-recent conversation if any.
         if (convList.length > 0 && convList[0]) {
@@ -161,6 +182,24 @@ export function TeamDesk({ user }: TeamDeskProps) {
       ]);
       setPlanItems(items);
       setDrafts(pendingDrafts);
+      // Recompute per-role task counts so the left-rail badges stay live.
+      const activeStatuses = new Set([
+        "pending",
+        "drafting",
+        "executing",
+        "in_progress",
+      ]);
+      const counts = new Map<string, number>();
+      for (const item of items) {
+        const role = (item as { owner_role?: string }).owner_role;
+        const status = (item as { status?: string }).status;
+        if (!role || !status) continue;
+        if (!activeStatuses.has(status)) continue;
+        counts.set(role, (counts.get(role) ?? 0) + 1);
+      }
+      setEmployees((prev) =>
+        prev.map((e) => ({ ...e, taskCount: counts.get(e.role) ?? 0 })),
+      );
     } catch {
       // non-fatal — panel will show stale data on next user action
     }
@@ -277,7 +316,10 @@ export function TeamDesk({ user }: TeamDeskProps) {
           </div>
         )}
 
-        <Conversation messages={messages} />
+        <Conversation
+          messages={messages}
+          onPromptSelect={(p) => void handleSend(p)}
+        />
 
         <StickyComposer
           onSend={handleSend}

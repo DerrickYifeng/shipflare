@@ -2,6 +2,9 @@
 
 import type { CSSProperties } from "react";
 import type { PlanItemRow, DraftRow } from "./types";
+import { AgentDot } from "./agent-dot";
+import { PhaseTag } from "./phase-tag";
+import { ROLE_REGISTRY } from "@shipflare/shared";
 
 interface RightPanelProps {
   planItems: PlanItemRow[];
@@ -16,7 +19,7 @@ const PANEL: CSSProperties = {
   flexShrink: 0,
   display: "flex",
   flexDirection: "column",
-  gap: 16,
+  gap: 20,
   overflowY: "auto",
   maxHeight: "calc(100vh - 88px)",
   position: "sticky",
@@ -31,7 +34,16 @@ const SECTION_TITLE: CSSProperties = {
   textTransform: "uppercase",
   letterSpacing: 0.4,
   color: "var(--sf-fg-3)",
-  padding: "6px 0 4px",
+  padding: "6px 0 8px",
+  display: "flex",
+  alignItems: "baseline",
+  gap: 8,
+};
+
+const COUNT_BADGE: CSSProperties = {
+  fontSize: 10,
+  color: "var(--sf-fg-3)",
+  fontWeight: 400,
 };
 
 const CARD: CSSProperties = {
@@ -49,62 +61,155 @@ const EMPTY_TEXT: CSSProperties = {
   fontFamily: "var(--sf-font-text)",
   color: "var(--sf-fg-4)",
   padding: "4px 0",
+  margin: 0,
 };
 
-function statusColor(status: string | null | undefined): string {
+const ACTIVE_STATUSES = new Set([
+  "pending",
+  "drafting",
+  "executing",
+  "in_progress",
+]);
+
+function displayNameForRole(role: string): string {
+  const entry = (ROLE_REGISTRY as Record<string, { displayName: string } | undefined>)[role];
+  return entry?.displayName ?? role;
+}
+
+function relativeTime(ts: number | null | undefined): string | null {
+  if (!ts) return null;
+  const diffMs = Date.now() - ts;
+  const sec = Math.round(diffMs / 1000);
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.round(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.round(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  return `${Math.round(hr / 24)}d ago`;
+}
+
+function statusTone(status: string | null | undefined): "neutral" | "accent" | "success" | "warning" | "error" {
   switch (status) {
+    case "completed":
     case "done":
-    case "complete":
-      return "var(--sf-success-ink)";
+      return "success";
+    case "executing":
     case "in_progress":
-    case "active":
-      return "var(--sf-accent)";
+    case "drafting":
+      return "warning";
     case "pending":
-      return "var(--sf-warning-ink)";
+    case "ready":
+      return "accent";
+    case "failed":
+    case "rejected":
+      return "error";
     default:
-      return "var(--sf-fg-3)";
+      return "neutral";
   }
 }
 
-function PlanItemCard({ item }: { item: PlanItemRow }) {
-  const badge: CSSProperties = {
-    display: "inline-block",
-    fontSize: 10,
-    fontFamily: "var(--sf-font-mono)",
-    color: statusColor(item.status),
-    background: "var(--sf-bg-primary)",
-    borderRadius: "var(--sf-radius-pill)",
-    padding: "2px 8px",
-    marginTop: 4,
-    textTransform: "uppercase",
-    letterSpacing: 0.3,
-  };
+/* ── Running-now card ──────────────────────────────────────────────── */
 
+interface RunningRow {
+  id: string;
+  role: string;
+  skill: string;
+  channel: string;
+  status: string;
+  startedAt: number | null;
+}
+
+function RunningCard({ row }: { row: RunningRow }) {
+  const displayName = displayNameForRole(row.role);
+  const time = relativeTime(row.startedAt);
   return (
-    <div style={CARD}>
-      <div style={{ fontWeight: 500, marginBottom: 2 }}>
-        {item.title ?? `Task #${item.id}`}
-      </div>
-      {item.description && (
+    <div
+      style={{
+        ...CARD,
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        padding: "8px 12px",
+      }}
+    >
+      <AgentDot role={row.role} displayName={displayName} size={24} />
+      <div style={{ flex: 1, minWidth: 0 }}>
         <div
           style={{
-            fontSize: 12,
-            color: "var(--sf-fg-3)",
-            marginBottom: 4,
-            lineHeight: 1.4,
-            display: "-webkit-box",
-            WebkitLineClamp: 2,
-            WebkitBoxOrient: "vertical",
+            fontSize: 13,
+            fontWeight: 500,
+            color: "var(--sf-fg-1)",
+            whiteSpace: "nowrap",
             overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+          title={`${row.skill} · ${row.channel}`}
+        >
+          {row.skill}
+        </div>
+        <div
+          style={{
+            fontSize: 11,
+            color: "var(--sf-fg-3)",
+            fontFamily: "var(--sf-font-mono)",
+            display: "flex",
+            gap: 6,
+            alignItems: "center",
           }}
         >
-          {item.description}
+          <span>{row.channel || displayName}</span>
+          {time && <span aria-hidden="true">·</span>}
+          {time && <span>{time}</span>}
         </div>
-      )}
-      {item.status && <span style={badge}>{item.status}</span>}
+      </div>
+      <PhaseTag label={row.status} tone={statusTone(row.status)} />
     </div>
   );
 }
+
+/* ── Plan card (read-only roadmap) ─────────────────────────────────── */
+
+function PlanItemCard({ item }: { item: PlanItemRow }) {
+  const skill = typeof item.skill === "string" ? item.skill : null;
+  const channel = typeof item.channel === "string" ? item.channel : null;
+  const ownerRole = typeof item.owner_role === "string" ? item.owner_role : "cmo";
+  const status = typeof item.status === "string" ? item.status : null;
+  const displayName = displayNameForRole(ownerRole);
+
+  return (
+    <div style={{ ...CARD, display: "flex", alignItems: "center", gap: 10, padding: "8px 12px" }}>
+      <AgentDot role={ownerRole} displayName={displayName} size={22} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div
+          style={{
+            fontSize: 13,
+            fontWeight: 500,
+            color: "var(--sf-fg-1)",
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+        >
+          {skill ?? item.title ?? `Task #${item.id}`}
+        </div>
+        {channel && (
+          <div
+            style={{
+              fontSize: 11,
+              color: "var(--sf-fg-3)",
+              fontFamily: "var(--sf-font-mono)",
+            }}
+          >
+            {channel}
+          </div>
+        )}
+      </div>
+      {status && <PhaseTag label={status} tone={statusTone(status)} />}
+    </div>
+  );
+}
+
+/* ── Draft card (approval / reject) ────────────────────────────────── */
 
 function DraftCard({
   draft,
@@ -117,23 +222,16 @@ function DraftCard({
   onReject: () => Promise<void>;
   loading: boolean;
 }) {
-  const content = typeof draft.content === "string" ? draft.content : "";
+  const content =
+    typeof draft.content === "string"
+      ? draft.content
+      : typeof (draft as { body?: string }).body === "string"
+        ? ((draft as { body?: string }).body ?? "")
+        : "";
   const preview = content.length > 140 ? content.slice(0, 137) + "…" : content;
   const platform =
     typeof draft.platform === "string" ? draft.platform : "draft";
-
-  const pill: CSSProperties = {
-    display: "inline-block",
-    fontSize: 10,
-    fontFamily: "var(--sf-font-mono)",
-    color: "var(--sf-fg-3)",
-    background: "var(--sf-bg-primary)",
-    borderRadius: "var(--sf-radius-pill)",
-    padding: "2px 8px",
-    marginBottom: 6,
-    textTransform: "uppercase",
-    letterSpacing: 0.3,
-  };
+  const kind = typeof (draft as { kind?: string }).kind === "string" ? (draft as { kind?: string }).kind : null;
 
   const btnRow: CSSProperties = {
     display: "flex",
@@ -153,7 +251,7 @@ function DraftCard({
     fontWeight: 500,
     cursor: loading ? "not-allowed" : "pointer",
     opacity: loading ? 0.5 : 1,
-    transition: `opacity var(--sf-dur-fast) var(--sf-ease)`,
+    transition: `opacity var(--sf-dur-fast) var(--sf-ease-swift)`,
   };
 
   const rejectBtn: CSSProperties = {
@@ -168,12 +266,15 @@ function DraftCard({
     fontWeight: 500,
     cursor: loading ? "not-allowed" : "pointer",
     opacity: loading ? 0.5 : 1,
-    transition: `opacity var(--sf-dur-fast) var(--sf-ease), background var(--sf-dur-fast) var(--sf-ease)`,
+    transition: `opacity var(--sf-dur-fast) var(--sf-ease-swift), background var(--sf-dur-fast) var(--sf-ease-swift)`,
   };
 
   return (
     <div style={CARD}>
-      <span style={pill}>{platform}</span>
+      <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+        <PhaseTag label={platform} tone="neutral" />
+        {kind && <PhaseTag label={kind} tone="accent" />}
+      </div>
       <div
         style={{
           fontSize: 13,
@@ -193,7 +294,7 @@ function DraftCard({
           onClick={() => void onApprove()}
           aria-label="Approve draft"
         >
-          Approve
+          {loading ? "…" : "Approve"}
         </button>
         <button
           type="button"
@@ -207,8 +308,7 @@ function DraftCard({
             }
           }}
           onMouseLeave={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.background =
-              "transparent";
+            (e.currentTarget as HTMLButtonElement).style.background = "transparent";
           }}
           aria-label="Reject draft"
         >
@@ -219,6 +319,8 @@ function DraftCard({
   );
 }
 
+/* ── Panel ─────────────────────────────────────────────────────────── */
+
 export function RightPanel({
   planItems,
   drafts,
@@ -226,17 +328,42 @@ export function RightPanel({
   onRejectDraft,
   loadingDraftId,
 }: RightPanelProps) {
+  const running: RunningRow[] = planItems
+    .filter((p) => {
+      const status = typeof p.status === "string" ? p.status : null;
+      return status !== null && ACTIVE_STATUSES.has(status);
+    })
+    .map((p) => ({
+      id: p.id,
+      role: (p as { owner_role?: string }).owner_role || "cmo",
+      skill: typeof p.skill === "string" ? p.skill : (p.title ?? `Task #${p.id}`),
+      channel: typeof p.channel === "string" ? p.channel : "",
+      status: typeof p.status === "string" ? p.status : "pending",
+      startedAt:
+        (p as { started_at?: number | null }).started_at ??
+        (p as { created_at?: number | null }).created_at ??
+        null,
+    }));
+
+  const upcoming = planItems.filter((p) => {
+    const status = typeof p.status === "string" ? p.status : null;
+    return !status || !ACTIVE_STATUSES.has(status);
+  });
+
   return (
     <aside style={PANEL} aria-label="Plan and drafts">
-      {/* Plan items */}
+      {/* Running now */}
       <div>
-        <div style={SECTION_TITLE}>Plan Items</div>
-        {planItems.length === 0 ? (
-          <p style={EMPTY_TEXT}>No plan items yet.</p>
+        <div style={SECTION_TITLE}>
+          <span>Running now</span>
+          <span style={COUNT_BADGE}>{running.length}</span>
+        </div>
+        {running.length === 0 ? (
+          <p style={EMPTY_TEXT}>The team is idle.</p>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {planItems.map((item) => (
-              <PlanItemCard key={item.id} item={item} />
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {running.map((r) => (
+              <RunningCard key={r.id} row={r} />
             ))}
           </div>
         )}
@@ -244,7 +371,10 @@ export function RightPanel({
 
       {/* Pending drafts */}
       <div>
-        <div style={SECTION_TITLE}>Pending Drafts</div>
+        <div style={SECTION_TITLE}>
+          <span>Awaiting your review</span>
+          <span style={COUNT_BADGE}>{drafts.length}</span>
+        </div>
         {drafts.length === 0 ? (
           <p style={EMPTY_TEXT}>No pending drafts.</p>
         ) : (
@@ -257,6 +387,23 @@ export function RightPanel({
                 onReject={() => onRejectDraft(d.id)}
                 loading={loadingDraftId === d.id}
               />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Roadmap */}
+      <div>
+        <div style={SECTION_TITLE}>
+          <span>Roadmap</span>
+          <span style={COUNT_BADGE}>{upcoming.length}</span>
+        </div>
+        {upcoming.length === 0 ? (
+          <p style={EMPTY_TEXT}>No plan items yet.</p>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {upcoming.map((item) => (
+              <PlanItemCard key={item.id} item={item} />
             ))}
           </div>
         )}
