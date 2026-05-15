@@ -9,10 +9,10 @@
  * roll back and toast on failure.
  *
  * CF adaptation notes:
- * - State enum is draft | pre-launch | launched | growing (not mvp/launching/launched)
+ * - State enum is mvp | launching | launched (Task A1 migration from draft/pre-launch/launched/growing)
  * - State changes go through PATCH /api/product (no separate /phase route)
  * - launchDate / launchedAt come from page.tsx as ISO strings (serialized from Date|null)
- * - derivePhase logic is inlined here, adapted to CF's state enum
+ * - derivePhase logic is inlined here; TODO: replace with import from @/lib/launch-phase (Task A2)
  */
 
 import { useState } from 'react';
@@ -26,8 +26,8 @@ import { FieldRow } from '@/components/ui/field-row';
 import { useToast } from '@/components/ui/toast';
 import { EditableValue } from './_components/editable-value';
 
-// CF schema state enum
-type State = 'draft' | 'pre-launch' | 'launched' | 'growing';
+// CF schema state enum (mvp/launching/launched — migrated from draft/pre-launch/launched/growing)
+type State = 'mvp' | 'launching' | 'launched';
 
 type LaunchPhase =
   | 'foundation'
@@ -38,10 +38,9 @@ type LaunchPhase =
   | 'steady';
 
 const STATE_LABEL: Record<State, string> = {
-  draft: 'Draft',
-  'pre-launch': 'Pre-launch',
+  mvp: 'Building',
+  launching: 'Launching',
   launched: 'Launched',
-  growing: 'Growing',
 };
 
 const PHASE_LABEL: Record<LaunchPhase, string> = {
@@ -53,7 +52,8 @@ const PHASE_LABEL: Record<LaunchPhase, string> = {
   steady: 'Steady',
 };
 
-// Adapted derivePhase for CF state enum (draft/pre-launch/launched/growing)
+// Adapted derivePhase for new state enum (mvp/launching/launched)
+// TODO(Task A2): replace with import { derivePhase } from "@/lib/launch-phase"
 function derivePhase({
   state,
   launchDate,
@@ -65,22 +65,28 @@ function derivePhase({
 }): LaunchPhase {
   const now = Date.now();
 
-  if (state === 'launched' || state === 'growing') {
+  if (state === 'launched') {
     if (!launchedAt) return 'steady';
     const daysSince = (now - new Date(launchedAt).getTime()) / 86_400_000;
     // Fresh launch (within 30d) → compound momentum; older → steady.
-    // Same semantic for both 'launched' and 'growing' so the early-return
-    // dead branch is gone.
     return daysSince <= 30 ? 'compound' : 'steady';
   }
 
-  if (!launchDate) return 'foundation';
+  if (state === 'mvp') {
+    if (!launchDate) return 'foundation';
+    const daysToLaunch = (new Date(launchDate).getTime() - now) / 86_400_000;
+    if (daysToLaunch <= 0) return 'launch';
+    if (daysToLaunch <= 7) return 'momentum';
+    if (daysToLaunch <= 28) return 'audience';
+    return 'foundation';
+  }
 
+  // state === 'launching'
+  if (!launchDate) return 'audience';
   const daysToLaunch = (new Date(launchDate).getTime() - now) / 86_400_000;
   if (daysToLaunch <= 0) return 'launch';
   if (daysToLaunch <= 7) return 'momentum';
-  if (daysToLaunch <= 28) return 'audience';
-  return 'foundation';
+  return 'audience';
 }
 
 /**
@@ -96,9 +102,9 @@ export interface ProductSnapshot {
   valueProp: string | null;
   url: string | null;
   state: State;
-  /** ISO date string — set when state='pre-launch'. */
+  /** ISO date string — set when state='launching'. */
   launchDate: string | null;
-  /** ISO date string — set when state='launched' or 'growing'. */
+  /** ISO date string — set when state='launched'. */
   launchedAt: string | null;
   /** ISO date string for display. */
   updatedAt: string | null;
@@ -129,7 +135,7 @@ const fetcher = async (url: string): Promise<ProductSnapshot> => {
     keywords: data.keywords ?? [],
     valueProp: data.valueProp ?? null,
     url: data.url ?? null,
-    state: data.state ?? 'draft',
+    state: data.state ?? 'mvp',
     launchDate: data.launchDate ?? null,
     launchedAt: data.launchedAt ?? null,
     updatedAt: data.updatedAt ?? null,
@@ -345,15 +351,14 @@ function phaseVariant(phase: LaunchPhase): 'warning' | 'success' | 'accent' {
 }
 
 // ----------------------------------------------------------------
-// State editor — picker for draft / pre-launch / launched / growing
+// State editor — picker for mvp / launching / launched
 // + the matching launch date. Saves via PATCH /api/product.
 // ----------------------------------------------------------------
 
 const STATE_OPTIONS: { id: State; label: string; sub: string }[] = [
-  { id: 'draft', label: 'Draft', sub: 'Building, no launch date yet' },
-  { id: 'pre-launch', label: 'Pre-launch', sub: 'Has a launch date set' },
+  { id: 'mvp', label: 'Building', sub: 'MVP phase, no launch date yet' },
+  { id: 'launching', label: 'Launching', sub: 'Has a launch date set' },
   { id: 'launched', label: 'Launched', sub: 'Already in market' },
-  { id: 'growing', label: 'Growing', sub: 'Post-launch, building momentum' },
 ];
 
 function todayYmd(): string {
@@ -405,25 +410,20 @@ function StateEditor({
   };
 
   const summary = (() => {
-    if (state === 'draft') return STATE_LABEL.draft;
-    if (state === 'pre-launch') {
+    if (state === 'mvp') return STATE_LABEL.mvp;
+    if (state === 'launching') {
       const date = isoToYmd(launchDate);
-      return date ? `${STATE_LABEL['pre-launch']} · ${date}` : STATE_LABEL['pre-launch'];
+      return date ? `${STATE_LABEL.launching} · ${date}` : STATE_LABEL.launching;
     }
-    if (state === 'launched') {
-      return launchedAtDisplay
-        ? `${STATE_LABEL.launched} · ${launchedAtDisplay}`
-        : STATE_LABEL.launched;
-    }
-    // growing
+    // launched
     return launchedAtDisplay
-      ? `${STATE_LABEL.growing} · launched ${launchedAtDisplay}`
-      : STATE_LABEL.growing;
+      ? `${STATE_LABEL.launched} · ${launchedAtDisplay}`
+      : STATE_LABEL.launched;
   })();
 
   const hasChanges = (() => {
     if (draftState !== state) return true;
-    if (draftState === 'pre-launch' && draftLaunchDate !== isoToYmd(launchDate)) return true;
+    if (draftState === 'launching' && draftLaunchDate !== isoToYmd(launchDate)) return true;
     return false;
   })();
 
@@ -437,7 +437,7 @@ function StateEditor({
       const body: { state: State; launchDate: number | null } = {
         state: draftState,
         launchDate:
-          draftState === 'pre-launch'
+          draftState === 'launching'
             ? Math.floor(new Date(`${draftLaunchDate}T00:00:00.000Z`).getTime() / 1000)
             : null,
       };
@@ -528,7 +528,7 @@ function StateEditor({
           );
         })}
       </div>
-      {draftState === 'pre-launch' && (
+      {draftState === 'launching' && (
         <label
           style={{
             display: 'flex',
@@ -558,7 +558,7 @@ function StateEditor({
           />
         </label>
       )}
-      {(draftState === 'launched' || draftState === 'growing') && launchedAtDisplay && (
+      {draftState === 'launched' && launchedAtDisplay && (
         <span
           style={{
             fontSize: '12px',

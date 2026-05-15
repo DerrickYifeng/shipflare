@@ -19,12 +19,11 @@ import { products, eq } from "@shipflare/db";
 
 export const dynamic = "force-dynamic";
 
-type ProductState = "draft" | "pre-launch" | "launched" | "growing";
+type ProductState = "mvp" | "launching" | "launched";
 const PRODUCT_STATES: readonly ProductState[] = [
-  "draft",
-  "pre-launch",
+  "mvp",
+  "launching",
   "launched",
-  "growing",
 ] as const;
 
 export async function GET(req: Request): Promise<Response> {
@@ -51,7 +50,7 @@ export async function GET(req: Request): Promise<Response> {
       keywords: [],
       valueProp: null,
       url: null,
-      state: "draft" as ProductState,
+      state: "mvp" as ProductState,
       launchDate: null,
       launchedAt: null,
     });
@@ -192,7 +191,7 @@ export async function PATCH(req: Request): Promise<Response> {
     state: (
       patch.state !== undefined
         ? patch.state
-        : (existing?.state ?? "draft")
+        : (existing?.state ?? "mvp")
     ) as ProductState,
     launchDate:
       patch.launchDate !== undefined
@@ -200,6 +199,15 @@ export async function PATCH(req: Request): Promise<Response> {
         : (existing?.launchDate ?? null),
     // launchedAt is NOT user-settable — preserved from existing row only.
     launchedAt: existing?.launchedAt ?? null,
+    // Onboarding-owned fields. The PATCH route doesn't accept these from
+    // clients, but they're written by /api/onboarding/commit. Preserve the
+    // existing values across the upsert so a product-page PATCH doesn't
+    // clobber them to NULL.
+    category: existing?.category ?? null,
+    targetAudience: existing?.targetAudience ?? null,
+    launchChannel: existing?.launchChannel ?? null,
+    usersBucket: existing?.usersBucket ?? null,
+    onboardingCompletedAt: existing?.onboardingCompletedAt ?? null,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   };
@@ -215,8 +223,13 @@ export async function PATCH(req: Request): Promise<Response> {
         valueProp: merged.valueProp,
         url: merged.url,
         keywords: merged.keywords,
+        category: merged.category,
+        targetAudience: merged.targetAudience,
         state: merged.state,
         launchDate: merged.launchDate,
+        launchChannel: merged.launchChannel,
+        usersBucket: merged.usersBucket,
+        onboardingCompletedAt: merged.onboardingCompletedAt,
         updatedAt: now,
       },
     });

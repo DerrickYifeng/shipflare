@@ -15,13 +15,12 @@ import { describe, it, expect } from "vitest";
 // Inline validation helper — mirrors the PATCH handler's narrowing logic.
 // ---------------------------------------------------------------------------
 
-type ProductState = "draft" | "pre-launch" | "launched" | "growing";
+type ProductState = "mvp" | "launching" | "launched";
 
 const PRODUCT_STATES: readonly ProductState[] = [
-  "draft",
-  "pre-launch",
+  "mvp",
+  "launching",
   "launched",
-  "growing",
 ];
 
 interface ValidatedPatch {
@@ -136,7 +135,7 @@ describe("/api/product — PATCH validation logic", () => {
     if (result.ok) expect(result.body.state).toBe("launched");
   });
 
-  it("accepts all four valid states", () => {
+  it("accepts all three valid states", () => {
     for (const s of PRODUCT_STATES) {
       const result = validatePatchBody({ state: s });
       expect(result.ok).toBe(true);
@@ -175,13 +174,13 @@ describe("/api/product — PATCH validation logic", () => {
   it("accepts a multi-field patch", () => {
     const result = validatePatchBody({
       name: "Acme",
-      state: "pre-launch",
+      state: "launching",
       keywords: ["growth"],
     });
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.body.name).toBe("Acme");
-      expect(result.body.state).toBe("pre-launch");
+      expect(result.body.state).toBe("launching");
       expect(result.body.keywords).toEqual(["growth"]);
     }
   });
@@ -208,6 +207,16 @@ describe("/api/product — PATCH validation logic", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toBe("invalid_state");
   });
+
+  // Legacy enum values (pre-migration 006_onboarding_schema) must be rejected.
+  it.each(["draft", "pre-launch", "growing"])(
+    "rejects legacy state value: %s",
+    (legacy) => {
+      const result = validatePatchBody({ state: legacy });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toBe("invalid_state");
+    },
+  );
 
   // ── invalid name ──────────────────────────────────────────────────────────
 

@@ -125,13 +125,34 @@ export const products = sqliteTable("products", {
   keywords: text("keywords", { mode: "json" }).$type<string[]>(),
   valueProp: text("valueProp"),
   url: text("url"),
+  category: text("category", {
+    enum: [
+      "dev_tool",
+      "saas",
+      "consumer",
+      "creator_tool",
+      "agency",
+      "ai_app",
+      "other",
+    ],
+  }),
+  targetAudience: text("targetAudience"),
   state: text("state", {
-    enum: ["draft", "pre-launch", "launched", "growing"],
+    enum: ["mvp", "launching", "launched"],
   })
     .notNull()
-    .default("draft"),
+    .default("mvp"),
   launchDate: integer("launchDate", { mode: "timestamp_ms" }),
   launchedAt: integer("launchedAt", { mode: "timestamp_ms" }),
+  launchChannel: text("launchChannel", {
+    enum: ["producthunt", "showhn", "both", "other"],
+  }),
+  usersBucket: text("usersBucket", {
+    enum: ["<100", "100-1k", "1k-10k", "10k+"],
+  }),
+  onboardingCompletedAt: integer("onboardingCompletedAt", {
+    mode: "timestamp_ms",
+  }),
   createdAt: integer("createdAt", { mode: "timestamp_ms" })
     .notNull()
     .$defaultFn(() => new Date()),
@@ -223,3 +244,23 @@ export const waitlistSignups = sqliteTable("waitlist_signups", {
 
 export type WaitlistSignup = typeof waitlistSignups.$inferSelect;
 export type NewWaitlistSignup = typeof waitlistSignups.$inferInsert;
+
+// ─── ShipFlare onboarding draft (1) ────────────────────────────────────────
+//
+// One row per user. Holds the in-progress onboarding state across page
+// refreshes. Cleared by /api/onboarding/commit on success. Schema is
+// intentionally a free-form JSON blob so frontend can add fields between
+// stages without a migration.
+
+export const onboardingDrafts = sqliteTable("onboarding_drafts", {
+  userId: text("userId")
+    .primaryKey()
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  payload: text("payload", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
+  updatedAt: integer("updatedAt", { mode: "timestamp_ms" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+export type OnboardingDraftRow = typeof onboardingDrafts.$inferSelect;

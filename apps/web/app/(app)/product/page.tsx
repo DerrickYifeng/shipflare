@@ -8,6 +8,20 @@ import { ProductContent, type ProductSnapshot } from "./product-content";
 
 export const dynamic = "force-dynamic";
 
+// Migration 006 dropped the SQL-level CHECK on products.state, so the column
+// is now plain TEXT. Guard against stale/hand-edited rows that contain values
+// outside the new enum surfacing into the React tree.
+const VALID_STATES = ["mvp", "launching", "launched"] as const;
+
+function toProductState(
+  raw: string | null | undefined,
+): ProductSnapshot["state"] {
+  if (raw && (VALID_STATES as readonly string[]).includes(raw)) {
+    return raw as ProductSnapshot["state"];
+  }
+  return "mvp";
+}
+
 export default async function ProductPage() {
   const session = await getAuth().api.getSession({ headers: await headers() });
   if (!session?.user) return null;
@@ -28,7 +42,7 @@ export default async function ProductPage() {
         keywords: row.keywords ?? [],
         valueProp: row.valueProp,
         url: row.url,
-        state: row.state as ProductSnapshot["state"],
+        state: toProductState(row.state),
         launchDate: row.launchDate ? row.launchDate.toISOString() : null,
         launchedAt: row.launchedAt ? row.launchedAt.toISOString() : null,
         updatedAt: row.updatedAt ? row.updatedAt.toISOString() : null,
@@ -40,7 +54,7 @@ export default async function ProductPage() {
         keywords: [],
         valueProp: null,
         url: null,
-        state: "draft" as const,
+        state: "mvp" as const,
         launchDate: null,
         launchedAt: null,
         updatedAt: null,
