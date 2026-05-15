@@ -111,3 +111,33 @@ export const userPreferences = sqliteTable("user_preferences", {
 
 export type UserPreferences = typeof userPreferences.$inferSelect;
 export type NewUserPreferences = typeof userPreferences.$inferInsert;
+
+// ─── ShipFlare product profile (1) ─────────────────────────────────────────
+
+export const products = sqliteTable("products", {
+  userId: text("userId")
+    .primaryKey()
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  name: text("name"),
+  description: text("description"),
+  keywords: text("keywords", { mode: "json" }).$type<string[]>(),
+  valueProp: text("valueProp"),
+  url: text("url"),
+  state: text("state", {
+    enum: ["draft", "pre-launch", "launched", "growing"],
+  })
+    .notNull()
+    .default("draft"),
+  launchDate: integer("launchDate", { mode: "timestamp_ms" }),
+  launchedAt: integer("launchedAt", { mode: "timestamp_ms" }),
+  createdAt: integer("createdAt", { mode: "timestamp_ms" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+  updatedAt: integer("updatedAt", { mode: "timestamp_ms" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+export type Product = typeof products.$inferSelect;
+export type NewProduct = typeof products.$inferInsert;
