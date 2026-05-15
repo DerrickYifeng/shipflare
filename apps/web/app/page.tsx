@@ -22,7 +22,15 @@ import { FooterStrip } from "@/components/marketing/footer-strip";
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
-  const session = await getAuth().api.getSession({ headers: await headers() });
+  let session: Awaited<
+    ReturnType<ReturnType<typeof getAuth>["api"]["getSession"]>
+  > | null = null;
+  try {
+    session = await getAuth().api.getSession({ headers: await headers() });
+  } catch {
+    // Treat any auth lookup error as unauthenticated — landing should render.
+    session = null;
+  }
   const isAuthenticated = !!session?.user?.id;
 
   return (
