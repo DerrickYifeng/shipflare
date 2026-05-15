@@ -6,9 +6,14 @@ import type { CMO } from "../CMO";
  * CMO `chat` tool — the founder's primary conversational entrypoint.
  *
  * Persists the user turn, loads conversation-scoped history (per spec D11)
- * plus identity-level `founder_context`, calls Anthropic, persists the
- * assistant reply, and returns the text as an MCP tool result. No tool
- * calls / delegation yet — those wire up in S2.4.
+ * plus identity-level `founder_context`, calls Anthropic with streaming,
+ * pushes chunks via MCP `notifications/progress`, persists the assistant
+ * reply, and returns the full text as an MCP tool result so non-streaming
+ * clients still work.
+ *
+ * Streaming: if the caller passes a `progressToken` in `_meta`, each text
+ * delta is sent as a `notifications/progress` notification with the chunk
+ * in `params.message`. Failures are best-effort (logged, not thrown).
  *
  * Scope rules (D11):
  * - `founder_messages` filter by `conversation_id`; chat history resets
@@ -28,7 +33,7 @@ export function registerChatTool(agent: CMO): void {
         message: z.string().min(1),
       },
     },
-    async ({ conversationId, message }) => {
+    async ({ conversationId, message }, extra) => {
       const ts = Date.now();
 
       // 1. Persist user message
@@ -70,11 +75,16 @@ export function registerChatTool(agent: CMO): void {
         )
         .toArray();
 
-      // 4. Call Anthropic
+      // 4. Call Anthropic with streaming.
+      // `progressToken` lives in the request's `_meta` object, exposed via
+      // the `extra._meta` field that `registerTool` passes to the handler.
+      const progressToken = extra._meta?.progressToken;
+
       const client = new Anthropic({
         apiKey: agent.bindings.ANTHROPIC_API_KEY,
       });
-      const response = await client.messages.create({
+
+      const stream = client.messages.stream({
         model: "claude-sonnet-4-6",
         max_tokens: 2048,
         system: buildSystemPrompt(founderContext, memories),
@@ -86,24 +96,49 @@ export function registerChatTool(agent: CMO): void {
         })),
       });
 
-      const replyText = response.content
-        .filter((c): c is Anthropic.TextBlock => c.type === "text")
-        .map((c) => c.text)
-        .join("\n");
+      let acc = "";
+      let chunkIdx = 0;
 
-      // 5. Persist assistant reply
+      // Consume the stream, accumulating the full text and pushing progress
+      // notifications when the caller supplied a progressToken.
+      stream.on("text", (delta: string) => {
+        acc += delta;
+        if (progressToken !== undefined) {
+          chunkIdx += 1;
+          // Fire-and-forget: progress notifications are best-effort.
+          // We do NOT await here — the text handler is synchronous and
+          // sendNotification returns a promise we handle with .catch().
+          extra
+            .sendNotification({
+              method: "notifications/progress",
+              params: {
+                progressToken,
+                progress: chunkIdx,
+                message: delta,
+              },
+            })
+            .catch((err: unknown) => {
+              console.warn("[chat] progress notification failed:", err);
+            });
+        }
+      });
+
+      // Wait for the stream to fully complete.
+      await stream.finalMessage();
+
+      // 5. Persist assistant reply (using the fully accumulated text).
       agent.sqlStorage.exec(
         `INSERT INTO founder_messages (conversation_id, role, content, ts)
          VALUES (?, ?, ?, ?)`,
         conversationId,
         "assistant",
-        replyText,
+        acc,
         Date.now(),
       );
 
-      // 6. Return MCP result
+      // 6. Return MCP result — the full text so non-streaming clients get it.
       return {
-        content: [{ type: "text" as const, text: replyText }],
+        content: [{ type: "text" as const, text: acc }],
       };
     },
   );

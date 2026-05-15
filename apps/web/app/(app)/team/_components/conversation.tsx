@@ -30,9 +30,23 @@ const SCROLL_CONTAINER: CSSProperties = {
   padding: "16px 20px",
 };
 
+// Pulsing cursor shown at the end of streaming assistant bubbles.
+const CURSOR_STYLE: CSSProperties = {
+  display: "inline-block",
+  width: 8,
+  height: 14,
+  marginLeft: 2,
+  verticalAlign: "text-bottom",
+  borderRadius: 2,
+  background: "var(--sf-fg-3)",
+  opacity: 0.7,
+  animation: "sf-blink 0.85s step-start infinite",
+};
+
 function MessageBubble({ msg }: { msg: TeamActivityMessage }) {
   const isUser = msg.type === "user_prompt";
   const isError = msg.type === "error";
+  const isStreaming = !isUser && !isError && msg.metadata?.streaming === true;
 
   const bubble: CSSProperties = {
     maxWidth: "80%",
@@ -90,9 +104,20 @@ function MessageBubble({ msg }: { msg: TeamActivityMessage }) {
     >
       <span style={meta}>
         {label} · {time}
+        {isStreaming && (
+          <span style={{ marginLeft: 6, opacity: 0.6 }} aria-hidden="true">
+            streaming…
+          </span>
+        )}
       </span>
-      <div style={bubble} role="article" aria-label={`${label} said`}>
+      <div
+        style={bubble}
+        role="article"
+        aria-label={`${label} said`}
+        aria-busy={isStreaming}
+      >
         {msg.content ?? ""}
+        {isStreaming && <span style={CURSOR_STYLE} aria-hidden="true" />}
       </div>
     </div>
   );

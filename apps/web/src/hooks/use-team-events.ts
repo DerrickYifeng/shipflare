@@ -125,29 +125,57 @@ export function useTeamEvents(opts: UseTeamEventsOptions): UseTeamEventsResult {
         metadata: null,
         createdAt: now,
       };
-      setMessages((prev) => [...prev, userTurn]);
+
+      // Insert a streaming placeholder for the assistant reply immediately so
+      // chunks paint to the UI as they arrive, before the tool result lands.
+      const assistantId = makeId();
+      const placeholder: TeamActivityMessage = {
+        id: assistantId,
+        runId: null,
+        conversationId: conversationId ?? null,
+        teamId,
+        from: 'cmo',
+        to: 'founder',
+        type: 'agent_text',
+        content: '',
+        metadata: { streaming: true },
+        createdAt: new Date().toISOString(),
+      };
+
+      setMessages((prev) => [...prev, userTurn, placeholder]);
       setStatus('sending');
       setError(null);
 
       try {
-        const replyText = await client.chat(conversationId ?? '', text);
-        const assistantTurn: TeamActivityMessage = {
-          id: makeId(),
-          runId: null,
-          conversationId: conversationId ?? null,
-          teamId,
-          from: 'cmo',
-          to: 'founder',
-          type: 'agent_text',
-          content: replyText,
-          metadata: null,
-          createdAt: new Date().toISOString(),
-        };
-        setMessages((prev) => [...prev, assistantTurn]);
+        let acc = '';
+        const replyText = await client.chat(
+          conversationId ?? '',
+          text,
+          (chunk) => {
+            acc += chunk;
+            // Update the placeholder content in-place as chunks arrive.
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantId ? { ...m, content: acc } : m,
+              ),
+            );
+          },
+        );
+
+        // Final reconciliation: use the server's authoritative text and clear
+        // the streaming flag so the UI shows the stable finished state.
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId
+              ? { ...m, content: replyText, metadata: null }
+              : m,
+          ),
+        );
         setStatus('ready');
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : 'chat failed';
         setError(errMsg);
+        // Remove the streaming placeholder and replace with an error turn.
         const errorTurn: TeamActivityMessage = {
           id: makeId(),
           runId: null,
@@ -160,7 +188,10 @@ export function useTeamEvents(opts: UseTeamEventsOptions): UseTeamEventsResult {
           metadata: null,
           createdAt: new Date().toISOString(),
         };
-        setMessages((prev) => [...prev, errorTurn]);
+        setMessages((prev) => [
+          ...prev.filter((m) => m.id !== assistantId),
+          errorTurn,
+        ]);
         setStatus('error');
       }
     },

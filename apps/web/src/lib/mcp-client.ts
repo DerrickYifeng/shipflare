@@ -68,19 +68,37 @@ export class CmoClient {
   /**
    * Send a founder message to the CMO. Returns the full assistant reply.
    *
-   * Phase 1 is request/response (no token streaming) — the chat tool returns
-   * the entire reply in one MCP result. Phase 2 will upgrade to a streamable
-   * tool (chunked SSE). The wrapper signature can stay synchronous-shaped
-   * because callers already await the reply.
+   * When `onChunk` is provided, the client passes a `progressToken` so the
+   * server will emit `notifications/progress` notifications for each text
+   * delta. Each chunk's `message` field is forwarded to `onChunk` as it
+   * arrives, enabling a streaming UI. The returned promise still resolves
+   * with the complete authoritative reply from the tool result.
+   *
+   * Callers without `onChunk` receive the full reply in one shot — backward
+   * compatible with all existing call sites.
    */
-  async chat(conversationId: string, message: string): Promise<string> {
+  async chat(
+    conversationId: string,
+    message: string,
+    onChunk?: (chunk: string) => void,
+  ): Promise<string> {
     if (!this.client) {
       throw new Error("CmoClient.chat called before connect()");
     }
-    const result = (await this.client.callTool({
-      name: "chat",
-      arguments: { conversationId, message },
-    })) as CallToolResultLike;
+    const result = (await this.client.callTool(
+      {
+        name: "chat",
+        arguments: { conversationId, message },
+      },
+      undefined, // resultSchema — use SDK default
+      onChunk
+        ? {
+            onprogress: (p: { message?: string }) => {
+              if (p.message) onChunk(p.message);
+            },
+          }
+        : undefined,
+    )) as CallToolResultLike;
     return extractText(result);
   }
 

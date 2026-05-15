@@ -1,5 +1,5 @@
 import { env, runInDurableObject } from "cloudflare:test";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { CMO } from "../src/agents/cmo/CMO";
 
 /**
@@ -19,6 +19,7 @@ import type { CMO } from "../src/agents/cmo/CMO";
  */
 
 import { applyCmoSchema } from "../src/agents/cmo/schema";
+import { buildSystemPrompt } from "../src/agents/cmo/tools/chat";
 
 describe("CMO chat tool — persistence shape", () => {
   it("user + assistant messages persist with correct ts ordering", async () => {
@@ -133,5 +134,145 @@ describe("CMO chat tool — persistence shape", () => {
       expect(ctx.productName).toBe("ShipFlare");
       expect(ctx.voice).toBe("tech founder, no fluff");
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildSystemPrompt unit tests — no DO needed, pure function.
+// ---------------------------------------------------------------------------
+
+describe("buildSystemPrompt", () => {
+  it("uses fallbacks when context is empty", () => {
+    const prompt = buildSystemPrompt({});
+    expect(prompt).toContain("the founder's product");
+    expect(prompt).toContain("(not yet set)");
+  });
+
+  it("injects productName and voice from context", () => {
+    const prompt = buildSystemPrompt({ productName: "Acme", voice: "bold" });
+    expect(prompt).toContain("Acme");
+    expect(prompt).toContain("bold");
+  });
+
+  it("omits memory block when memories array is empty", () => {
+    const prompt = buildSystemPrompt({}, []);
+    expect(prompt).not.toContain("Things to always remember");
+  });
+
+  it("includes memories when provided", () => {
+    const prompt = buildSystemPrompt({ productName: "Acme" }, [
+      { content: "Always be bold" },
+    ]);
+    expect(prompt).toContain("Always be bold");
+    expect(prompt).toContain("Things to always remember");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Streaming / progress notification contract — pure helper test.
+//
+// The isolatedModules Cloudflare Vitest environment does not support
+// vi.doMock for ES module interception, so we test the streaming accumulator
+// contract through a thin pure helper that replicates the same logic the
+// tool handler uses. This exercises:
+//   - chunk accumulation into `acc`
+//   - sendNotification called once per chunk with method + message
+//   - best-effort: notification failures do NOT throw
+// ---------------------------------------------------------------------------
+
+/** Replicates the streaming core of the chat tool handler (extracted for unit testing). */
+async function runStreamingAccumulator(
+  chunks: string[],
+  progressToken: string | number | undefined,
+  sendNotification: (n: {
+    method: string;
+    params: {
+      progressToken: string | number;
+      progress: number;
+      message: string;
+    };
+  }) => Promise<void>,
+): Promise<string> {
+  let acc = "";
+  let chunkIdx = 0;
+  for (const delta of chunks) {
+    acc += delta;
+    if (progressToken !== undefined) {
+      chunkIdx += 1;
+      await sendNotification({
+        method: "notifications/progress",
+        params: {
+          progressToken,
+          progress: chunkIdx,
+          message: delta,
+        },
+      }).catch((err: unknown) => {
+        console.warn("[chat] progress notification failed:", err);
+      });
+    }
+  }
+  return acc;
+}
+
+describe("chat tool — streaming progress notifications (pure helper)", () => {
+  it("accumulates chunks and fires sendNotification once per chunk", async () => {
+    const chunks = ["Hello ", "world", "!"];
+    const notifsSent: Array<{
+      method: string;
+      params: { progressToken: string | number; progress: number; message: string };
+    }> = [];
+
+    const acc = await runStreamingAccumulator(
+      chunks,
+      "test-token-42",
+      async (n) => {
+        notifsSent.push(n);
+      },
+    );
+
+    // Full text accumulated correctly.
+    expect(acc).toBe("Hello world!");
+
+    // One notification per chunk.
+    expect(notifsSent).toHaveLength(3);
+    for (const notif of notifsSent) {
+      expect(notif.method).toBe("notifications/progress");
+      expect(typeof notif.params.message).toBe("string");
+      expect(notif.params.message.length).toBeGreaterThan(0);
+    }
+
+    // Chunks reconstruct the full reply.
+    const reconstructed = notifsSent.map((n) => n.params.message).join("");
+    expect(reconstructed).toBe("Hello world!");
+
+    // Progress index increments monotonically.
+    const progresses = notifsSent.map((n) => n.params.progress);
+    expect(progresses).toEqual([1, 2, 3]);
+  });
+
+  it("skips sendNotification when progressToken is undefined", async () => {
+    const chunks = ["a", "b", "c"];
+    const notifsSent: unknown[] = [];
+
+    const acc = await runStreamingAccumulator(chunks, undefined, async (n) => {
+      notifsSent.push(n);
+    });
+
+    expect(acc).toBe("abc");
+    // No notifications when there's no progressToken.
+    expect(notifsSent).toHaveLength(0);
+  });
+
+  it("best-effort: notification failure does not throw", async () => {
+    const chunks = ["ok"];
+    const acc = await runStreamingAccumulator(
+      chunks,
+      "tok",
+      async () => {
+        throw new Error("network gone");
+      },
+    );
+    // Should not throw, and still returns the accumulated text.
+    expect(acc).toBe("ok");
   });
 });

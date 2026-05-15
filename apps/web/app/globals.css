@@ -195,3 +195,15 @@ a:hover { color: var(--sf-accent-hover); }
 /* AppCanvas <main> wrapper — fills remaining vertical space inside the
    flex column without forcing intrinsic overflow on long children. */
 .sf-app-main { flex: 1; min-height: 0; }
+
+/* Streaming cursor blink animation used in conversation bubbles. */
+@keyframes sf-blink {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @keyframes sf-blink {
+    0%, 100% { opacity: 0.7; }
+  }
+}
