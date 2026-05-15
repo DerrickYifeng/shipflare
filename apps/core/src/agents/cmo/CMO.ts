@@ -222,6 +222,9 @@ export class CMO extends McpAgent<Env, CMOState, McpProps> {
     if (url.pathname === "/internal/destroy") {
       return this.handleDestroy();
     }
+    if (url.pathname === "/internal/commit-strategic-path") {
+      return this.handleCommitStrategicPath(request);
+    }
 
     // Fall through to McpAgent's default fetch (handles /mcp, WebSocket
     // upgrades, etc. — S2.6 routes /mcp before this DO sees it; this is
@@ -443,6 +446,49 @@ export class CMO extends McpAgent<Env, CMOState, McpProps> {
       this.sqlStorage.exec(`DROP TABLE IF EXISTS "${t.name}"`);
     }
     return new Response("destroyed", { status: 200 });
+  }
+
+  /**
+   * Onboarding commit — writes a new strategic_path version from the
+   * onboarding flow directly into CMO SQLite, bypassing the MCP tool
+   * round-trip. This mirrors the `commitStrategicPath` MCP tool
+   * (see `tools/shared-state.ts`) but is triggered via Service Binding
+   * from `apps/web`'s `/api/onboarding/commit` route.
+   *
+   * Body: `{ theme: string, narrative: Record<string, unknown>, generatedBy: string }`
+   *
+   * Returns: `{ id: string, version: number }`
+   */
+  private async handleCommitStrategicPath(
+    request: Request,
+  ): Promise<Response> {
+    if (request.headers.get("x-shipflare-internal") !== "1") {
+      return new Response("forbidden", { status: 403 });
+    }
+    const body = (await request.json()) as {
+      theme: string;
+      narrative: Record<string, unknown>;
+      generatedBy: string;
+    };
+    const id = crypto.randomUUID();
+    const latest = this.sqlStorage
+      .exec<{ v: number }>(
+        "SELECT COALESCE(MAX(version), 0) as v FROM strategic_path",
+      )
+      .one();
+    const version = latest.v + 1;
+    this.sqlStorage.exec(
+      `INSERT INTO strategic_path
+         (id, version, theme, narrative_json, status, generated_at, generated_by)
+       VALUES (?, ?, ?, ?, 'pending_approval', ?, ?)`,
+      id,
+      version,
+      body.theme,
+      JSON.stringify(body.narrative),
+      Date.now(),
+      body.generatedBy,
+    );
+    return Response.json({ id, version });
   }
 
   /**
