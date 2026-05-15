@@ -14,6 +14,7 @@
 // channels.(userId, platform)) are emitted in migrations/001_initial.sql
 // since SQLite does not auto-index FK columns.
 
+import { sql } from "drizzle-orm";
 import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
 
 // ─── Better Auth standard tables (4) ────────────────────────────────────────
@@ -166,7 +167,7 @@ export const growthSnapshots = sqliteTable(
     userPlatformCaptured: index("idx_growth_user_platform_captured").on(
       t.userId,
       t.platform,
-      t.capturedAt,
+      sql`${t.capturedAt} DESC`,
     ),
   }),
 );
