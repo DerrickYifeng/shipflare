@@ -120,14 +120,20 @@ export class CmoClient {
 
   /**
    * List plan_items. Optionally filter by `status` / `ownerRole` and cap
-   * `limit` (CMO clamps at 200). Returns rows in the row-shape emitted by
-   * `queryPlanItems` — fields stay loosely typed because the UI just renders
-   * the columns it knows about.
+   * `limit` (CMO clamps at 200).
+   *
+   * The type parameter `R` lets callers bind the row shape so they don't
+   * need `as unknown as SomeType[]` at every use site:
+   *
+   *   const items = await client.queryPlanItems<PlanItem>({ limit: 50 });
+   *
+   * Defaults to `Record<string, unknown>` for backward-compat callers that
+   * just render whatever columns arrive.
    */
-  async queryPlanItems(
+  async queryPlanItems<R = Record<string, unknown>>(
     opts: { status?: string; ownerRole?: string; limit?: number } = {},
-  ): Promise<Array<Record<string, unknown>>> {
-    return this.callJsonTool("queryPlanItems", opts);
+  ): Promise<R[]> {
+    return this.callJsonTool<R[]>("queryPlanItems", opts);
   }
 
   /**
@@ -153,15 +159,17 @@ export class CmoClient {
    * `list_drafts` and returns `[]` if SMM isn't hired yet (forward-compat
    * with cron ticks that run before the founder hires an SMM).
    *
-   * The row shape is whatever SMM's `list_drafts` emits — we type as
-   * `Record<string, unknown>` so adding columns server-side doesn't require
-   * a client redeploy. The `/drafts` page narrows to its own `Draft`
-   * interface for rendering.
+   * The type parameter `R` lets callers bind the draft row shape:
+   *
+   *   const drafts = await client.queryDrafts<Draft>({ status: 'ready' });
+   *
+   * Defaults to `Record<string, unknown>` for callers that don't declare a
+   * shape (e.g. the `/drafts` page which uses its own local `Draft` type).
    */
-  async queryDrafts(
+  async queryDrafts<R = Record<string, unknown>>(
     opts: { status?: string; limit?: number } = {},
-  ): Promise<Array<Record<string, unknown>>> {
-    return this.callJsonTool("queryDrafts", opts);
+  ): Promise<R[]> {
+    return this.callJsonTool<R[]>("queryDrafts", opts);
   }
 
   /**
