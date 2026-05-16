@@ -2,6 +2,10 @@ import { z } from "zod";
 import Anthropic from "@anthropic-ai/sdk";
 import { mcpServerName } from "@shipflare/shared";
 import type { HeadOfGrowth } from "../HeadOfGrowth";
+import {
+  extractTrace,
+  withSubAgentToolTracing,
+} from "../../../lib/subagent-activity";
 
 /**
  * generate_strategic_path — produce a marketing strategy for the founder.
@@ -40,150 +44,165 @@ export function registerStrategicPathTool(agent: HeadOfGrowth): void {
           .string()
           .min(1)
           .describe("Current founder conversation id for scoping"),
+        _trace: z.unknown().optional(),
       },
     },
-    async ({ goal, conversationId }) => {
-      const userId = agent.props?.userId;
-      if (!userId) {
-        throw new Error("HoG has no userId in props; cannot generate plan");
-      }
+    async (args) => {
+      const trace = extractTrace(args);
+      const { goal, conversationId } = args as {
+        goal: string;
+        conversationId: string;
+      };
+      return withSubAgentToolTracing(
+        agent.runtimeCtx,
+        agent.bindings,
+        trace,
+        "head-of-growth",
+        "generate_strategic_path",
+        args,
+        async () => {
+          const userId = agent.props?.userId;
+          if (!userId) {
+            throw new Error("HoG has no userId in props; cannot generate plan");
+          }
 
-      // Step 1: pull founder_context via CMO RPC
-      const cmoServerName = mcpServerName("cmo", userId);
-      const servers = agent.mcp.listServers();
-      const cmo = servers.find((s) => s.name === cmoServerName);
+          // Step 1: pull founder_context via CMO RPC
+          const cmoServerName = mcpServerName("cmo", userId);
+          const servers = agent.mcp.listServers();
+          const cmo = servers.find((s) => s.name === cmoServerName);
 
-      let founderContext: Record<string, string> = {};
-      if (cmo) {
-        try {
-          const result = await agent.mcp.callTool({
-            serverId: cmo.id,
-            name: "queryFounderContext",
-            arguments: {},
+          let founderContext: Record<string, string> = {};
+          if (cmo) {
+            try {
+              const result = await agent.mcp.callTool({
+                serverId: cmo.id,
+                name: "queryFounderContext",
+                arguments: {},
+              });
+              // result.content[0].text is JSON of {key:value}
+              const text = extractText(result);
+              founderContext = JSON.parse(text) as Record<string, string>;
+            } catch (err) {
+              console.warn(`[HoG ${userId}] queryFounderContext failed:`, err);
+              // continue with empty context — the LLM will be honest about
+              // not knowing product details
+            }
+          } else {
+            console.warn(
+              `[HoG ${userId}] CMO not connected; planning without context`,
+            );
+          }
+
+          // Step 2: load prior planning_chat for this conversation
+          const priorChat = agent.sqlStorage
+            .exec<{
+              role: string;
+              content: string;
+            }>("SELECT role, content FROM planning_chat WHERE conversation_id = ? ORDER BY ts ASC", conversationId)
+            .toArray();
+
+          // Step 3: Anthropic call
+          const client = new Anthropic({
+            apiKey: agent.bindings.ANTHROPIC_API_KEY,
           });
-          // result.content[0].text is JSON of {key:value}
-          const text = extractText(result);
-          founderContext = JSON.parse(text) as Record<string, string>;
-        } catch (err) {
-          console.warn(`[HoG ${userId}] queryFounderContext failed:`, err);
-          // continue with empty context — the LLM will be honest about
-          // not knowing product details
-        }
-      } else {
-        console.warn(
-          `[HoG ${userId}] CMO not connected; planning without context`,
-        );
-      }
+          const response = await client.messages.create({
+            model: "claude-sonnet-4-6",
+            max_tokens: 4096,
+            system: buildSystemPrompt(founderContext),
+            messages: [
+              // include prior planning conversation as context
+              ...priorChat.map((m) => ({
+                role: (m.role === "assistant" ? "assistant" : "user") as
+                  | "user"
+                  | "assistant",
+                content: m.content,
+              })),
+              { role: "user" as const, content: goal },
+            ],
+          });
 
-      // Step 2: load prior planning_chat for this conversation
-      const priorChat = agent.sqlStorage
-        .exec<{ role: string; content: string }>(
-          "SELECT role, content FROM planning_chat WHERE conversation_id = ? ORDER BY ts ASC",
-          conversationId,
-        )
-        .toArray();
+          const replyText = response.content
+            .filter((c): c is Anthropic.TextBlock => c.type === "text")
+            .map((c) => c.text)
+            .join("\n");
 
-      // Step 3: Anthropic call
-      const client = new Anthropic({ apiKey: agent.bindings.ANTHROPIC_API_KEY });
-      const response = await client.messages.create({
-        model: "claude-sonnet-4-6",
-        max_tokens: 4096,
-        system: buildSystemPrompt(founderContext),
-        messages: [
-          // include prior planning conversation as context
-          ...priorChat.map((m) => ({
-            role: (m.role === "assistant" ? "assistant" : "user") as
-              | "user"
-              | "assistant",
-            content: m.content,
-          })),
-          { role: "user" as const, content: goal },
-        ],
-      });
+          // Step 4: persist planning_chat (user goal + assistant reasoning)
+          const ts = Date.now();
+          agent.sqlStorage.exec(
+            "INSERT INTO planning_chat (conversation_id, role, content, ts) VALUES (?, ?, ?, ?)",
+            conversationId,
+            "user",
+            goal,
+            ts,
+          );
+          agent.sqlStorage.exec(
+            "INSERT INTO planning_chat (conversation_id, role, content, ts) VALUES (?, ?, ?, ?)",
+            conversationId,
+            "assistant",
+            replyText,
+            ts + 1,
+          );
 
-      const replyText = response.content
-        .filter((c): c is Anthropic.TextBlock => c.type === "text")
-        .map((c) => c.text)
-        .join("\n");
+          // Step 5: extract structured plan from the LLM output (JSON in code block or raw)
+          const parsed = parsePlan(replyText);
 
-      // Step 4: persist planning_chat (user goal + assistant reasoning)
-      const ts = Date.now();
-      agent.sqlStorage.exec(
-        "INSERT INTO planning_chat (conversation_id, role, content, ts) VALUES (?, ?, ?, ?)",
-        conversationId,
-        "user",
-        goal,
-        ts,
-      );
-      agent.sqlStorage.exec(
-        "INSERT INTO planning_chat (conversation_id, role, content, ts) VALUES (?, ?, ?, ?)",
-        conversationId,
-        "assistant",
-        replyText,
-        ts + 1,
-      );
-
-      // Step 5: extract structured plan from the LLM output (JSON in code block or raw)
-      const parsed = parsePlan(replyText);
-
-      // Step 6: write proposal_draft (HoG working space)
-      const proposalId = crypto.randomUUID();
-      agent.sqlStorage.exec(
-        `INSERT INTO proposal_drafts
+          // Step 6: write proposal_draft (HoG working space)
+          const proposalId = crypto.randomUUID();
+          agent.sqlStorage.exec(
+            `INSERT INTO proposal_drafts
            (id, theme, narrative_md, status, alternatives_json, confidence, created_at)
          VALUES (?, ?, ?, 'pending', ?, ?, ?)`,
-        proposalId,
-        parsed.theme,
-        parsed.narrativeMd,
-        JSON.stringify(parsed.alternatives ?? []),
-        parsed.confidence,
-        Date.now(),
-      );
-
-      // Step 7: commit canonical version to CMO via RPC
-      let committedVersion: number | null = null;
-      if (cmo) {
-        try {
-          const result = await agent.mcp.callTool({
-            serverId: cmo.id,
-            name: "commitStrategicPath",
-            arguments: {
-              theme: parsed.theme,
-              narrative: parsed.narrative,
-              generatedBy: "head-of-growth",
-            },
-          });
-          const text = extractText(result);
-          const parsedResult = JSON.parse(text) as {
-            id: string;
-            version: number;
-          };
-          committedVersion = parsedResult.version;
-        } catch (err) {
-          console.error(
-            `[HoG ${userId}] commitStrategicPath failed:`,
-            err,
+            proposalId,
+            parsed.theme,
+            parsed.narrativeMd,
+            JSON.stringify(parsed.alternatives ?? []),
+            parsed.confidence,
+            Date.now(),
           );
-          // Proposal is in HoG's working space; CMO didn't get the canonical
-          // version. Return the proposal anyway so the caller can retry the
-          // commit via CMO's tool directly.
-        }
-      }
 
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: JSON.stringify({
-              proposalId,
-              theme: parsed.theme,
-              summary: parsed.rationale,
-              version: committedVersion,
-              committed: committedVersion !== null,
-            }),
-          },
-        ],
-      };
+          // Step 7: commit canonical version to CMO via RPC
+          let committedVersion: number | null = null;
+          if (cmo) {
+            try {
+              const result = await agent.mcp.callTool({
+                serverId: cmo.id,
+                name: "commitStrategicPath",
+                arguments: {
+                  theme: parsed.theme,
+                  narrative: parsed.narrative,
+                  generatedBy: "head-of-growth",
+                },
+              });
+              const text = extractText(result);
+              const parsedResult = JSON.parse(text) as {
+                id: string;
+                version: number;
+              };
+              committedVersion = parsedResult.version;
+            } catch (err) {
+              console.error(`[HoG ${userId}] commitStrategicPath failed:`, err);
+              // Proposal is in HoG's working space; CMO didn't get the canonical
+              // version. Return the proposal anyway so the caller can retry the
+              // commit via CMO's tool directly.
+            }
+          }
+
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify({
+                  proposalId,
+                  theme: parsed.theme,
+                  summary: parsed.rationale,
+                  version: committedVersion,
+                  committed: committedVersion !== null,
+                }),
+              },
+            ],
+          };
+        },
+      );
     },
   );
 }
