@@ -38,5 +38,38 @@
   "assets": {
     "directory": ".open-next/assets",
     "binding": "ASSETS"
+  },
+
+  // --- Environments ---
+  //
+  // Deploy to staging:   ./scripts/deploy-staging.sh
+  //   or manually:       wrangler deploy --env staging   (after building)
+  //
+  // Staging uses a separate D1 database (shipflare-staging) and points its
+  // CORE service binding at shipflare-core-staging instead of production core.
+  //
+  // One-time staging setup:
+  //   Provision D1 in apps/core first (see apps/core/wrangler.jsonc comment),
+  //   then paste the same database_id into REPLACE_WITH_STAGING_DB_ID below.
+  //   Set secrets with --env staging flag for both apps/core and apps/web.
+  //   OAuth callback URLs for staging workers:
+  //     GitHub:  https://shipflare-web-staging.<account>.workers.dev/api/auth/callback/github
+  //     X:       https://shipflare-web-staging.<account>.workers.dev/api/channels/x/callback
+  //     Reddit:  https://shipflare-web-staging.<account>.workers.dev/api/channels/reddit/callback
+  "env": {
+    "staging": {
+      "name": "shipflare-web-staging",
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "shipflare-staging",
+          "database_id": "REPLACE_WITH_STAGING_DB_ID",
+          "migrations_dir": "../../packages/db/migrations"
+        }
+      ],
+      "services": [
+        { "binding": "CORE", "service": "shipflare-core-staging" }
+      ]
+    }
   }
 }

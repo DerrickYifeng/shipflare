@@ -159,7 +159,7 @@
 		"crons": [
 			"0 0/6 * * *"
 		]
-	}
+	},
 	// Secrets are NOT declared in wrangler.jsonc (would leak the value into
 	// the generated `Cloudflare.Env` as a literal type, breaking the wider
 	// `string` constraint our `Env` interface declares).
@@ -170,4 +170,32 @@
 	//
 	// apps/web must hold the same MCP_JWT_SECRET — both sides verify the
 	// HS256 signature with one shared secret.
+
+	// --- Environments ---
+	//
+	// Deploy to staging:   ./scripts/deploy-staging.sh
+	//   or manually:       wrangler deploy --env staging
+	//
+	// Staging uses a separate D1 database (shipflare-staging) so schema
+	// experiments can't corrupt production data. All other bindings
+	// (DO classes, migrations, crons) are inherited from the top-level config.
+	//
+	// One-time staging setup:
+	//   cd apps/core && pnpm exec wrangler d1 create shipflare-staging
+	//   paste the returned database_id below AND in apps/web/wrangler.jsonc
+	//   pnpm exec wrangler d1 migrations apply shipflare-staging --remote --env staging
+	//   set secrets:  wrangler secret put ANTHROPIC_API_KEY --env staging  (etc.)
+	"env": {
+		"staging": {
+			"name": "shipflare-core-staging",
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "shipflare-staging",
+					"database_id": "REPLACE_WITH_STAGING_DB_ID",
+					"migrations_dir": "../../packages/db/migrations"
+				}
+			]
+		}
+	}
 }
