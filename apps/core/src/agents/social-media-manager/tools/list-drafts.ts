@@ -1,5 +1,9 @@
 import { z } from "zod";
 import type { SocialMediaMgr } from "../SocialMediaMgr";
+import {
+  extractTrace,
+  withSubAgentToolTracing,
+} from "../../../lib/subagent-activity";
 
 /**
  * list_drafts — list drafts by status.
@@ -25,37 +29,53 @@ export function registerListDraftsTool(agent: SocialMediaMgr): void {
           .enum(["drafting", "ready", "posted", "failed", "rejected"])
           .default("ready"),
         limit: z.number().int().min(1).max(200).default(50),
+        _trace: z.unknown().optional(),
       },
     },
-    async ({ status, limit }) => {
-      const rows = agent.sqlStorage
-        .exec<{
-          id: string;
-          conversation_id: string | null;
-          kind: string;
-          plan_item_id: string | null;
-          platform: string;
-          thread_id: string | null;
-          body: string;
-          why_it_works: string | null;
-          confidence: number | null;
-          status: string;
-          created_at: number;
-          updated_at: number;
-        }>(
-          `SELECT id, conversation_id, kind, plan_item_id, platform, thread_id,
+    async (args) => {
+      const trace = extractTrace(args);
+      const { status, limit } = args as {
+        status: "drafting" | "ready" | "posted" | "failed" | "rejected";
+        limit: number;
+      };
+      return withSubAgentToolTracing(
+        agent.runtimeCtx,
+        agent.bindings,
+        trace,
+        "social-media-manager",
+        "list_drafts",
+        args,
+        async () => {
+          const rows = agent.sqlStorage
+            .exec<{
+              id: string;
+              conversation_id: string | null;
+              kind: string;
+              plan_item_id: string | null;
+              platform: string;
+              thread_id: string | null;
+              body: string;
+              why_it_works: string | null;
+              confidence: number | null;
+              status: string;
+              created_at: number;
+              updated_at: number;
+            }>(
+              `SELECT id, conversation_id, kind, plan_item_id, platform, thread_id,
                   body, why_it_works, confidence, status, created_at, updated_at
            FROM drafts
            WHERE status = ?
            ORDER BY updated_at DESC
            LIMIT ?`,
-          status,
-          limit,
-        )
-        .toArray();
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify(rows) }],
-      };
+              status,
+              limit,
+            )
+            .toArray();
+          return {
+            content: [{ type: "text" as const, text: JSON.stringify(rows) }],
+          };
+        },
+      );
     },
   );
 }

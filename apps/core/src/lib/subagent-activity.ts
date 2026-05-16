@@ -27,11 +27,11 @@ export interface SubAgentTrace {
  * strips `_trace` before the handler runs, and `extractTrace` will return
  * null. See `sub-agent-forwarding.test.ts` for the canonical example.
  *
- * TODO(activity-feed-followup): wrap production HoG/SMM tools with this
- * helper and add `_trace: z.unknown().optional()` to each tool's input
- * schema. Tools to wrap (non-exhaustive):
- *   HoG:  generate_strategic_path, audit_plan
- *   SMM:  find_threads_via_xai, find_threads, process_replies_batch,
+ * All production HoG/SMM tools wrap their handlers with
+ * `withSubAgentToolTracing` and declare `_trace: z.unknown().optional()` in
+ * their input schemas:
+ *   HoG:  ping, generate_strategic_path, audit_plan
+ *   SMM:  ping, find_threads_via_xai, find_threads, process_replies_batch,
  *         process_posts_batch, research_reddit_channels, list_drafts
  */
 export function extractTrace(args: unknown): SubAgentTrace | null {

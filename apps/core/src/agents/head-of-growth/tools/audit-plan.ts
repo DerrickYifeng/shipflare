@@ -2,6 +2,10 @@ import { z } from "zod";
 import Anthropic from "@anthropic-ai/sdk";
 import { mcpServerName } from "@shipflare/shared";
 import type { HeadOfGrowth } from "../HeadOfGrowth";
+import {
+  extractTrace,
+  withSubAgentToolTracing,
+} from "../../../lib/subagent-activity";
 
 /**
  * audit_plan — review the current plan_items list for gaps, redundancies, risks.
@@ -42,108 +46,129 @@ export function registerAuditTool(agent: HeadOfGrowth): void {
           .describe(
             "Optional: only audit plan_items in this status. Default: all",
           ),
+        _trace: z.unknown().optional(),
       },
     },
-    async ({ conversationId, statusFilter }) => {
-      const userId = agent.props?.userId;
-      if (!userId) {
-        throw new Error("HoG has no userId in props; cannot audit");
-      }
+    async (args) => {
+      const trace = extractTrace(args);
+      const { conversationId, statusFilter } = args as {
+        conversationId: string;
+        statusFilter?:
+          | "pending"
+          | "in_progress"
+          | "completed"
+          | "failed"
+          | "cancelled";
+      };
+      return withSubAgentToolTracing(
+        agent.runtimeCtx,
+        agent.bindings,
+        trace,
+        "head-of-growth",
+        "audit_plan",
+        args,
+        async () => {
+          const userId = agent.props?.userId;
+          if (!userId) {
+            throw new Error("HoG has no userId in props; cannot audit");
+          }
 
-      // Step 1: pull plan_items from CMO via RPC
-      const cmoServerName = mcpServerName("cmo", userId);
-      const cmo = agent.mcp
-        .listServers()
-        .find((s) => s.name === cmoServerName);
+          // Step 1: pull plan_items from CMO via RPC
+          const cmoServerName = mcpServerName("cmo", userId);
+          const cmo = agent.mcp
+            .listServers()
+            .find((s) => s.name === cmoServerName);
 
-      let planItems: Array<Record<string, unknown>> = [];
-      if (cmo) {
-        try {
-          const result = await agent.mcp.callTool({
-            serverId: cmo.id,
-            name: "queryPlanItems",
-            arguments: {
-              status: statusFilter,
-              limit: 200,
-            },
+          let planItems: Array<Record<string, unknown>> = [];
+          if (cmo) {
+            try {
+              const result = await agent.mcp.callTool({
+                serverId: cmo.id,
+                name: "queryPlanItems",
+                arguments: {
+                  status: statusFilter,
+                  limit: 200,
+                },
+              });
+              const text = extractText(result);
+              planItems = JSON.parse(text) as Array<Record<string, unknown>>;
+            } catch (err) {
+              console.warn(`[HoG ${userId}] queryPlanItems failed:`, err);
+              // continue with empty list — the LLM will note an empty plan
+            }
+          } else {
+            console.warn(
+              `[HoG ${userId}] CMO not connected; auditing empty plan`,
+            );
+          }
+
+          // Step 2: pull founder_context for product-aware audit
+          let founderContext: Record<string, string> = {};
+          if (cmo) {
+            try {
+              const result = await agent.mcp.callTool({
+                serverId: cmo.id,
+                name: "queryFounderContext",
+                arguments: {},
+              });
+              founderContext = JSON.parse(extractText(result)) as Record<
+                string,
+                string
+              >;
+            } catch {
+              // non-fatal — audit still runs without context
+            }
+          }
+
+          // Step 3: Anthropic call
+          const client = new Anthropic({
+            apiKey: agent.bindings.ANTHROPIC_API_KEY,
           });
-          const text = extractText(result);
-          planItems = JSON.parse(text) as Array<Record<string, unknown>>;
-        } catch (err) {
-          console.warn(`[HoG ${userId}] queryPlanItems failed:`, err);
-          // continue with empty list — the LLM will note an empty plan
-        }
-      } else {
-        console.warn(
-          `[HoG ${userId}] CMO not connected; auditing empty plan`,
-        );
-      }
-
-      // Step 2: pull founder_context for product-aware audit
-      let founderContext: Record<string, string> = {};
-      if (cmo) {
-        try {
-          const result = await agent.mcp.callTool({
-            serverId: cmo.id,
-            name: "queryFounderContext",
-            arguments: {},
+          const response = await client.messages.create({
+            model: "claude-sonnet-4-6",
+            max_tokens: 2048,
+            system: buildSystemPrompt(founderContext),
+            messages: [
+              {
+                role: "user",
+                content: `Audit the following plan items. Find gaps, redundancies, risks.\n\nPlan items:\n${JSON.stringify(planItems, null, 2)}`,
+              },
+            ],
           });
-          founderContext = JSON.parse(extractText(result)) as Record<
-            string,
-            string
-          >;
-        } catch {
-          // non-fatal — audit still runs without context
-        }
-      }
 
-      // Step 3: Anthropic call
-      const client = new Anthropic({
-        apiKey: agent.bindings.ANTHROPIC_API_KEY,
-      });
-      const response = await client.messages.create({
-        model: "claude-sonnet-4-6",
-        max_tokens: 2048,
-        system: buildSystemPrompt(founderContext),
-        messages: [
-          {
-            role: "user",
-            content: `Audit the following plan items. Find gaps, redundancies, risks.\n\nPlan items:\n${JSON.stringify(planItems, null, 2)}`,
-          },
-        ],
-      });
+          const replyText = response.content
+            .filter((c): c is Anthropic.TextBlock => c.type === "text")
+            .map((c) => c.text)
+            .join("\n");
 
-      const replyText = response.content
-        .filter((c): c is Anthropic.TextBlock => c.type === "text")
-        .map((c) => c.text)
-        .join("\n");
-
-      // Step 4: parse + persist findings
-      const findings = parseFindings(replyText);
-      for (const f of findings) {
-        agent.sqlStorage.exec(
-          `INSERT INTO audit_findings
+          // Step 4: parse + persist findings
+          const findings = parseFindings(replyText);
+          for (const f of findings) {
+            agent.sqlStorage.exec(
+              `INSERT INTO audit_findings
              (conversation_id, target_id, severity, finding, suggested_fix, status)
            VALUES (?, ?, ?, ?, ?, 'open')`,
-          conversationId,
-          f.targetId ?? null,
-          f.severity,
-          f.finding,
-          f.suggestedFix ?? null,
-        );
-      }
+              conversationId,
+              f.targetId ?? null,
+              f.severity,
+              f.finding,
+              f.suggestedFix ?? null,
+            );
+          }
 
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: JSON.stringify({
-              findingsCount: findings.length,
-              findings,
-            }),
-          },
-        ],
-      };
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify({
+                  findingsCount: findings.length,
+                  findings,
+                }),
+              },
+            ],
+          };
+        },
+      );
     },
   );
 }
@@ -232,8 +257,7 @@ function parseFindings(text: string): Array<{
         severity: (["high", "med", "low"].includes(f.severity as string)
           ? f.severity
           : "low") as "high" | "med" | "low",
-        finding:
-          typeof f.finding === "string" ? f.finding : "(no description)",
+        finding: typeof f.finding === "string" ? f.finding : "(no description)",
         suggestedFix:
           typeof f.suggestedFix === "string" ? f.suggestedFix : undefined,
         targetId: typeof f.targetId === "string" ? f.targetId : undefined,

@@ -1,5 +1,9 @@
 import { z } from "zod";
 import type { SocialMediaMgr } from "../SocialMediaMgr";
+import {
+  extractTrace,
+  withSubAgentToolTracing,
+} from "../../../lib/subagent-activity";
 
 /**
  * find_threads — read threads_inbox without re-running discovery.
@@ -33,37 +37,53 @@ export function registerFindThreadsTool(agent: SocialMediaMgr): void {
           .default(["x"])
           .describe("Which platforms to read from (defaults to ['x'])"),
         limit: z.number().int().min(1).max(100).default(20),
+        _trace: z.unknown().optional(),
       },
     },
-    async ({ platforms, limit }) => {
-      // Dynamic IN-clause: SqlStorage.exec is varargs so we expand
-      // placeholders to match `platforms.length` and spread the values
-      // through. Caller-provided values flow through bind parameters, not
-      // string interpolation — no injection surface.
-      const placeholders = platforms.map(() => "?").join(",");
-      const rows = agent.sqlStorage
-        .exec<{
-          id: string;
-          platform: string;
-          external_id: string;
-          author: string | null;
-          content: string;
-          score: number | null;
-          judged_at: number | null;
-          expires_at: number | null;
-        }>(
-          `SELECT id, platform, external_id, author, content, score, judged_at, expires_at
+    async (args) => {
+      const trace = extractTrace(args);
+      const { platforms, limit } = args as {
+        platforms: Array<"x" | "reddit">;
+        limit: number;
+      };
+      return withSubAgentToolTracing(
+        agent.runtimeCtx,
+        agent.bindings,
+        trace,
+        "social-media-manager",
+        "find_threads",
+        args,
+        async () => {
+          // Dynamic IN-clause: SqlStorage.exec is varargs so we expand
+          // placeholders to match `platforms.length` and spread the values
+          // through. Caller-provided values flow through bind parameters, not
+          // string interpolation — no injection surface.
+          const placeholders = platforms.map(() => "?").join(",");
+          const rows = agent.sqlStorage
+            .exec<{
+              id: string;
+              platform: string;
+              external_id: string;
+              author: string | null;
+              content: string;
+              score: number | null;
+              judged_at: number | null;
+              expires_at: number | null;
+            }>(
+              `SELECT id, platform, external_id, author, content, score, judged_at, expires_at
            FROM threads_inbox
            WHERE platform IN (${placeholders})
            ORDER BY judged_at IS NULL, judged_at DESC
            LIMIT ?`,
-          ...platforms,
-          limit,
-        )
-        .toArray();
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify(rows) }],
-      };
+              ...platforms,
+              limit,
+            )
+            .toArray();
+          return {
+            content: [{ type: "text" as const, text: JSON.stringify(rows) }],
+          };
+        },
+      );
     },
   );
 }
