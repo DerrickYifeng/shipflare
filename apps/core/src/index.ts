@@ -567,6 +567,17 @@ async function handleMcpRequest(
   if (claims["userId"] !== userId) {
     return new Response("token userId mismatch", { status: 403 });
   }
+  // Scope-claim guard: closes the cross-replay between /api/cmo-ws-token
+  // (mints scope:'activity' for the activity WS) and /api/mcp-token (no
+  // scope today). CMO.onConnect already requires scope === 'activity' on
+  // the WS path, but until this check, an exfiltrated activity token
+  // could be replayed here for a full MCP session. We accept undefined
+  // (back-compat with current /api/mcp-token) or 'mcp' (forward-compat
+  // when we add it) and reject anything else.
+  const scope = (claims as { scope?: unknown }).scope;
+  if (scope !== undefined && scope !== "mcp") {
+    return new Response("token scope not valid for mcp", { status: 403 });
+  }
 
   return streamableHttpProxy(request, env.CMO, userId, { userId });
 }
