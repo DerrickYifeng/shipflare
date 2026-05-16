@@ -1,12 +1,14 @@
 import { McpAgent } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
+  ActivityEventInputSchema,
   ROLE_REGISTRY,
   mcpServerName,
   type McpProps,
   type RoleSlug,
 } from "@shipflare/shared";
 import type { Env } from "../../index";
+import { emitActivity } from "../../lib/activity";
 import { applyCmoSchema } from "./schema";
 import { registerChatTool } from "./tools/chat";
 import { registerConversationTools } from "./tools/conversation";
@@ -224,6 +226,9 @@ export class CMO extends McpAgent<Env, CMOState, McpProps> {
     }
     if (url.pathname === "/internal/commit-strategic-path") {
       return this.handleCommitStrategicPath(request);
+    }
+    if (url.pathname === "/internal/log-activity") {
+      return this.handleLogActivity(request);
     }
 
     // Fall through to McpAgent's default fetch (handles /mcp, WebSocket
@@ -489,6 +494,41 @@ export class CMO extends McpAgent<Env, CMOState, McpProps> {
       body.generatedBy,
     );
     return Response.json({ id, version });
+  }
+
+  /**
+   * Cross-DO activity ingest — spec 2026-05-15-agent-activity-feed-design §5.2.
+   *
+   * Sub-agents (HoG, SMM, onboarding, etc.) fire-and-forget POST
+   * `ActivityEventInput` payloads here via Service Binding. We validate
+   * with the shared Zod schema, then route through the single sanctioned
+   * writer (`emitActivity`) so the row lands in `activity_events` AND
+   * the WebSocket broadcast fans out to every connected /activity client.
+   *
+   * Body: `ActivityEventInput` (JSON).
+   *
+   * Returns 204 on success, 400 on validation failure, 405 on non-POST.
+   * The `x-shipflare-internal: 1` gate is enforced by the outer `fetch()`
+   * pre-check (lines 205-208) — no need to repeat it here.
+   */
+  private async handleLogActivity(request: Request): Promise<Response> {
+    if (request.method !== "POST") {
+      return new Response("method not allowed", { status: 405 });
+    }
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return new Response("invalid json", { status: 400 });
+    }
+    const parsed = ActivityEventInputSchema.safeParse(body);
+    if (!parsed.success) {
+      return new Response(`invalid event: ${parsed.error.message}`, {
+        status: 400,
+      });
+    }
+    await emitActivity(this, parsed.data);
+    return new Response(null, { status: 204 });
   }
 
   /**
