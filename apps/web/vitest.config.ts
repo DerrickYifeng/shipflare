@@ -1,4 +1,5 @@
 import { defineConfig } from "vitest/config";
+import react from "@vitejs/plugin-react";
 
 // apps/web's vitest config has two test surfaces:
 //
@@ -9,7 +10,8 @@ import { defineConfig } from "vitest/config";
 //   2. React hook / component tests under src/** -- happy-dom environment so
 //      renderHook from @testing-library/react can mount a tree. Kept narrow
 //      so we don't accidentally run server-side Cloudflare-context code under
-//      jsdom.
+//      jsdom. Uses @vitejs/plugin-react so .tsx files compile (tsconfig
+//      sets `"jsx": "preserve"` which leaves JSX un-transformed otherwise).
 export default defineConfig({
   test: {
     projects: [
@@ -21,6 +23,7 @@ export default defineConfig({
         },
       },
       {
+        plugins: [react()],
         test: {
           name: "dom",
           environment: "happy-dom",
