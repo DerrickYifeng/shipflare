@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, type CSSProperties } from "react";
+import { useEffect, useRef, type CSSProperties, type ReactNode } from "react";
 import type { TeamActivityMessage } from "@/hooks/use-team-events";
 import { LeadMessage } from "./lead-message";
 import { UserMessage } from "./user-message";
@@ -10,6 +10,13 @@ import { TypingIndicator } from "./typing-indicator";
 interface ConversationProps {
   messages: TeamActivityMessage[];
   onPromptSelect?: (prompt: string) => void;
+  /**
+   * Optional slot rendered immediately after each assistant (CMO / lead)
+   * message bubble. Used by `TeamDesk` to inject an `<ActivityTrail>`
+   * scoped to the turn's `parentTurnId`. Returning `null` skips injection
+   * for that message (older messages without a `parentTurnId`).
+   */
+  renderMessageExtras?: (msg: TeamActivityMessage) => ReactNode;
 }
 
 const SCROLL_CONTAINER: CSSProperties = {
@@ -22,7 +29,11 @@ const SCROLL_CONTAINER: CSSProperties = {
   padding: "16px 20px",
 };
 
-export function Conversation({ messages, onPromptSelect }: ConversationProps) {
+export function Conversation({
+  messages,
+  onPromptSelect,
+  renderMessageExtras,
+}: ConversationProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom when new messages arrive or the last message
@@ -77,15 +88,18 @@ export function Conversation({ messages, onPromptSelect }: ConversationProps) {
           return null;
         }
 
+        const extras = renderMessageExtras?.(msg);
         return (
-          <LeadMessage
-            key={msg.id}
-            from={msg.from ?? "cmo"}
-            content={msg.content ?? ""}
-            createdAt={msg.createdAt}
-            streaming={isStreaming}
-            isError={isError}
-          />
+          <div key={msg.id}>
+            <LeadMessage
+              from={msg.from ?? "cmo"}
+              content={msg.content ?? ""}
+              createdAt={msg.createdAt}
+              streaming={isStreaming}
+              isError={isError}
+            />
+            {extras}
+          </div>
         );
       })}
       {showTyping && <TypingIndicator role={last.from ?? "cmo"} />}

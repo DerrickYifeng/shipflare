@@ -1,10 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
-import { useTeamEvents } from "@/hooks/use-team-events";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useTeamEvents, type TeamActivityMessage } from "@/hooks/use-team-events";
+import { useCmoActivity } from "@/hooks/use-cmo-activity";
+import { ActivityTrail } from "@/components/activity/activity-trail";
 import { createCmoClient, type CmoClient } from "@/lib/mcp-client";
 import { useToast } from "@/components/ui/toast";
-import { ROLE_REGISTRY } from "@shipflare/shared";
+import { ROLE_REGISTRY, type ActivityEvent } from "@shipflare/shared";
 import type { TeamUser, RosterEmployee, ConversationMeta, PlanItemRow, DraftRow } from "./types";
 import { LeftRail } from "./left-rail";
 import { Conversation } from "./conversation";
@@ -193,6 +195,53 @@ export function TeamDesk({ user }: TeamDeskProps) {
     onConversationCreated: handleConversationBootstrapped,
   });
 
+  // ---- Activity feed (per-turn ActivityTrail under each CMO bubble) ----
+  //
+  // `useCmoActivity` opens a WS to the founder's CMO Durable Object and
+  // streams every emitted ActivityEvent. We filter by the current
+  // conversation so a forgotten subscription on /team doesn't leak events
+  // from a different thread. When nothing is selected we pass a sentinel
+  // `runId` filter that never matches — the hook still opens the WS, but
+  // no events surface, keeping the UI quiet.
+  const activityFilter = useMemo(
+    () =>
+      selectedConversationId
+        ? { conversationId: selectedConversationId }
+        : { runId: "__none__" as const },
+    [selectedConversationId],
+  );
+  const { events: activityEvents } = useCmoActivity(activityFilter);
+
+  // Group events by `parentTurnId` so each assistant bubble's
+  // `renderMessageExtras` slot can look up just its own slice in O(1).
+  const eventsByTurn = useMemo(() => {
+    const map = new Map<string, ActivityEvent[]>();
+    for (const e of activityEvents) {
+      if (!e.parentTurnId) continue;
+      const arr = map.get(e.parentTurnId);
+      if (arr) arr.push(e);
+      else map.set(e.parentTurnId, [e]);
+    }
+    return map;
+  }, [activityEvents]);
+
+  const renderMessageExtras = useCallback(
+    (msg: TeamActivityMessage) => {
+      if (msg.type !== "agent_text" || msg.from !== "cmo") return null;
+      const parentTurnId = (msg.metadata as { parentTurnId?: string } | null)
+        ?.parentTurnId;
+      if (!parentTurnId) return null;
+      const turnEvents = eventsByTurn.get(parentTurnId) ?? [];
+      if (turnEvents.length === 0) return null;
+      return (
+        <div style={{ marginLeft: 38, marginBottom: 14 }}>
+          <ActivityTrail events={turnEvents} />
+        </div>
+      );
+    },
+    [eventsByTurn],
+  );
+
   // Memoised so the useEffect below has a stable dependency. Reads from
   // clientRef.current only, so no closure deps needed.
   const refreshPanelData = useCallback(async () => {
@@ -374,6 +423,7 @@ export function TeamDesk({ user }: TeamDeskProps) {
         <Conversation
           messages={messages}
           onPromptSelect={(p) => void handleSend(p)}
+          renderMessageExtras={renderMessageExtras}
         />
 
         <StickyComposer
