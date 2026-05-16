@@ -10,11 +10,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { OnbMono } from './_shared/onb-mono';
 import { OnbButton } from './_shared/onb-button';
-import { SyntheticChatConversation } from './_shared/synthetic-chat-conversation';
-import {
-  synthesizeStrategyConversation,
-  type ToolProgressEvent,
-} from './_shared/synthesize-strategy-conversation';
+import { PlanBuildActivity } from './_shared/plan-build-activity';
 import { COPY } from './_copy';
 import type { StrategicPath } from '@shipflare/shared';
 import type { DraftState, ProductState } from './OnboardingFlow';
@@ -22,6 +18,12 @@ import type { DraftState, ProductState } from './OnboardingFlow';
 const PLAN_TIMEOUT_MS = 180_000;
 
 interface PlanRequest {
+  /**
+   * Activity-feed correlation id. The core strategic-path SSE handler
+   * scopes `subagent_*` / `tool_call_*` events to this runId so the
+   * client can subscribe via `useCmoActivity({ runId })`.
+   */
+  runId: string;
   product: {
     name: string;
     description: string;
@@ -65,21 +67,16 @@ interface PlanEventError {
   error: string;
 }
 
-interface PlanEventToolProgress {
-  type: 'tool_progress';
-  phase: 'start' | 'done' | 'error';
-  toolName: string;
-  toolUseId: string;
-  durationMs?: number;
-  errorMessage?: string;
-}
-
 // Tolerant shape — backend may emit progress pings, keepalives, or events we
 // don't care about. We switch on `type` and ignore anything else.
+//
+// Note: `tool_progress` SSE events are no longer consumed here. The real
+// strategist activity (subagent dispatches, tool calls) is broadcast to
+// the founder's CMO Durable Object and surfaced via
+// `useCmoActivity({ runId })` inside `PlanBuildActivity`.
 type PlanEvent =
   | PlanEventStrategicDone
   | PlanEventError
-  | PlanEventToolProgress
   | { type: string; [key: string]: unknown };
 
 interface StagePlanBuildingProps {
@@ -109,33 +106,17 @@ export function StagePlanBuilding({
 }: StagePlanBuildingProps) {
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Append-only log of `tool_progress` SSE frames emitted by the
-  // generating-strategy skill. Drives the synthetic chat hook; the
-  // ordering here matches arrival order from the server, which is
-  // the order the user should see in the subtask card.
-  const [toolProgressEvents, setToolProgressEvents] = useState<
-    readonly ToolProgressEvent[]
-  >([]);
-  // Wall-clock now, ticked once per second so the RUNNING pill keeps
-  // counting up without the chat hook needing its own clock.
-  const [now, setNow] = useState(() => Date.now());
-  const startedAtRef = useRef<number>(Date.now());
+  // One runId per mount of this stage. Used twice:
+  //   1. POST body to /api/onboarding/plan, where the strategic-path SSE
+  //      handler forwards activity events to CMO scoped by this id.
+  //   2. <PlanBuildActivity runId={runId} /> subscribes to the same id.
+  // We mint via the state initializer so StrictMode's double-invoke of
+  // the mount effect doesn't churn the id (the startedRef latch in the
+  // effect below stops the duplicate POST, but state init still runs
+  // twice — useState guarantees the second value is discarded).
+  const [runId] = useState(() => crypto.randomUUID());
   const responseRef = useRef<PlanStrategicResult | null>(null);
   const stateLabel = draft.productState ?? 'launching';
-
-  useEffect(() => {
-    if (done || error) return;
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, [done, error]);
-
-  const conversationState = synthesizeStrategyConversation({
-    toolProgressEvents,
-    done,
-    error,
-    startedAt: startedAtRef.current,
-    now,
-  });
 
   // Auto-advance once the response has resolved. The previous
   // SixStepAnimator design waited for an internal animation timer
@@ -175,6 +156,7 @@ export function StagePlanBuilding({
         const ch = channelsRef.current;
         const state = d.productState ?? 'launching';
         const body: PlanRequest = {
+          runId,
           product: {
             name: d.product?.name ?? '',
             description: d.product?.description ?? '',
@@ -239,20 +221,6 @@ export function StagePlanBuilding({
             if (parsed.type === 'error') {
               const ev = parsed as PlanEventError;
               throw new Error(ev.error || 'Plan generation failed');
-            }
-            if (parsed.type === 'tool_progress') {
-              const ev = parsed as PlanEventToolProgress;
-              setToolProgressEvents((prev) => [
-                ...prev,
-                {
-                  toolName: ev.toolName,
-                  phase: ev.phase,
-                  toolUseId: ev.toolUseId,
-                  durationMs: ev.durationMs,
-                  errorMessage: ev.errorMessage,
-                },
-              ]);
-              continue;
             }
             if (parsed.type === 'strategic_done') {
               const ev = parsed as PlanEventStrategicDone;
@@ -350,7 +318,7 @@ export function StagePlanBuilding({
         <span>{COPY.stage6.durationCaption}</span>
       </p>
 
-      <SyntheticChatConversation state={conversationState} />
+      <PlanBuildActivity runId={runId} />
 
       {!error && !done && (
         <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end' }}>
