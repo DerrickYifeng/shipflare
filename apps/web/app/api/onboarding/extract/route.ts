@@ -15,7 +15,7 @@ export async function POST(req: Request): Promise<Response> {
   } catch {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
-  const { env } = getCloudflareContext();
+  const { env } = await getCloudflareContext({ async: true });
   const coreRes = await env.CORE.fetch(
     "https://internal/internal/onboarding/analyze-url",
     {

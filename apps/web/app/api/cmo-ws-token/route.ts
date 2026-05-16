@@ -32,13 +32,15 @@ interface CmoWsTokenResponseBody {
 }
 
 export async function GET(req: Request): Promise<Response> {
+  // Resolve env before any await — see /api/mcp-token/route.ts comment for
+  // the v1.19.x reason (`{async:true}` avoids sync overload's post-await throw).
+  const { env } = await getCloudflareContext({ async: true });
+
   const auth = getAuth();
   const session = await auth.api.getSession({ headers: req.headers });
   if (!session) {
     return new Response("unauthorized", { status: 401 });
   }
-
-  const { env } = getCloudflareContext();
   const token = await signJwt(
     { userId: session.user.id, scope: "activity" },
     env.MCP_JWT_SECRET,

@@ -20,12 +20,12 @@ import { getDb } from "@/db";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request): Promise<Response> {
+  const { env } = await getCloudflareContext({ async: true });
   const session = await getAuth().api.getSession({ headers: req.headers });
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { env } = getCloudflareContext();
   const db = getDb(env);
 
   const rows = await db

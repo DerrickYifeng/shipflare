@@ -30,7 +30,7 @@ export async function GET(req: Request): Promise<Response> {
     });
   }
 
-  const { env } = getCloudflareContext();
+  const { env } = await getCloudflareContext({ async: true });
   const publicUrl = env.BETTER_AUTH_URL ?? new URL(req.url).origin;
 
   const state = generateState();

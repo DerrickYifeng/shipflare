@@ -71,6 +71,7 @@ async function destroyAgentState(
 }
 
 export async function DELETE(req: Request): Promise<Response> {
+  const { env } = await getCloudflareContext({ async: true });
   const auth = getAuth();
   const session = await auth.api.getSession({ headers: req.headers });
   if (!session?.user) {
@@ -78,7 +79,6 @@ export async function DELETE(req: Request): Promise<Response> {
   }
 
   const userId = session.user.id;
-  const { env } = getCloudflareContext();
 
   // 1. Best-effort: wipe per-DO SQLite for each agent (don't await serially —
   //    run in parallel and swallow failures).

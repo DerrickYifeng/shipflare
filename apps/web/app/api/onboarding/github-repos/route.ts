@@ -9,7 +9,7 @@ export async function GET(req: Request): Promise<Response> {
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const { env } = getCloudflareContext();
+  const { env } = await getCloudflareContext({ async: true });
   // Pass (url, init) instead of `new Request(...)` — OpenNext's dev-mode
   // service-binding shim doesn't accept a Request object and throws
   // "Failed to parse URL from [object Request]".

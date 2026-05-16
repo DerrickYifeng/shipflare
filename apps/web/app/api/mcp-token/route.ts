@@ -31,13 +31,17 @@ interface McpTokenResponseBody {
 }
 
 export async function GET(req: Request): Promise<Response> {
+  // Resolve the Cloudflare env before any await so the sync context lookup
+  // always sees the current request's AsyncLocalStorage slot. In v1.19.x
+  // the sync overload throws if called after an `await`; `{async:true}` uses
+  // the wrangler proxy path which works at any point in the handler.
+  const { env } = await getCloudflareContext({ async: true });
+
   const auth = getAuth();
   const session = await auth.api.getSession({ headers: req.headers });
   if (!session) {
     return new Response("unauthorized", { status: 401 });
   }
-
-  const { env } = getCloudflareContext();
   const token = await signJwt(
     { userId: session.user.id },
     env.MCP_JWT_SECRET,

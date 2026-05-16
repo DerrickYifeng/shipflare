@@ -6,6 +6,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 180;
 
 export async function POST(req: Request): Promise<Response> {
+  const { env } = await getCloudflareContext({ async: true });
   const session = await getAuth().api.getSession({ headers: req.headers });
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -16,7 +17,6 @@ export async function POST(req: Request): Promise<Response> {
   } catch {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
-  const { env } = getCloudflareContext();
   // SECURITY: spread `body` FIRST, then overwrite `userId` from the session.
   // Reversing this order would let an authenticated caller pass
   // `{ userId: "victim" }` in the body and inject events into another

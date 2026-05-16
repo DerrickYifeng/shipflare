@@ -21,13 +21,13 @@ import { userPreferences, eq } from "@shipflare/db";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request): Promise<Response> {
+  const { env } = await getCloudflareContext({ async: true });
   const auth = getAuth();
   const session = await auth.api.getSession({ headers: req.headers });
   if (!session) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const { env } = getCloudflareContext();
   const db = getDb(env);
   const row = await db
     .select()
@@ -42,6 +42,7 @@ export async function GET(req: Request): Promise<Response> {
 }
 
 export async function PATCH(req: Request): Promise<Response> {
+  const { env } = await getCloudflareContext({ async: true });
   const auth = getAuth();
   const session = await auth.api.getSession({ headers: req.headers });
   if (!session) {
@@ -79,7 +80,6 @@ export async function PATCH(req: Request): Promise<Response> {
     return NextResponse.json({ error: "empty_patch" }, { status: 400 });
   }
 
-  const { env } = getCloudflareContext();
   const db = getDb(env);
   const now = new Date();
 

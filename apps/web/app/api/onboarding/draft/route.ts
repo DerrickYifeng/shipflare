@@ -37,7 +37,7 @@ export async function GET(req: Request): Promise<Response> {
   const userOrResp = await requireUserId(req);
   if (userOrResp instanceof Response) return userOrResp;
 
-  const { env } = getCloudflareContext();
+  const { env } = await getCloudflareContext({ async: true });
   const db = getDb(env);
   const draft = await getDraft(db, userOrResp);
 
@@ -63,7 +63,7 @@ export async function PUT(req: Request): Promise<Response> {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
 
-  const { env } = getCloudflareContext();
+  const { env } = await getCloudflareContext({ async: true });
   const db = getDb(env);
   const next = await putDraft(db, userOrResp, patch as Partial<OnboardingDraft>);
 
@@ -74,7 +74,7 @@ export async function DELETE(req: Request): Promise<Response> {
   const userOrResp = await requireUserId(req);
   if (userOrResp instanceof Response) return userOrResp;
 
-  const { env } = getCloudflareContext();
+  const { env } = await getCloudflareContext({ async: true });
   const db = getDb(env);
   await deleteDraft(db, userOrResp);
 

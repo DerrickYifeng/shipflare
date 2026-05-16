@@ -40,7 +40,7 @@ export async function POST(req: Request): Promise<Response> {
     return NextResponse.json({ error: "invalid_email" }, { status: 400 });
   }
 
-  const { env } = getCloudflareContext();
+  const { env } = await getCloudflareContext({ async: true });
   const db = getDb(env);
 
   // Look first so duplicate submits return the existing id without churning

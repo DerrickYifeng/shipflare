@@ -87,7 +87,7 @@ export async function POST(req: Request): Promise<Response> {
   const _phase = derivePhase({ state: body.state, launchDate, launchedAt });
   const now = new Date();
 
-  const { env } = getCloudflareContext();
+  const { env } = await getCloudflareContext({ async: true });
   const db = getDb(env);
 
   try {

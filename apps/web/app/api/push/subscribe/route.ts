@@ -30,6 +30,7 @@ interface PushSubscriptionJson {
 }
 
 export async function POST(req: Request): Promise<Response> {
+  const { env } = await getCloudflareContext({ async: true });
   const auth = getAuth();
   const session = await auth.api.getSession({ headers: req.headers });
   if (!session) {
@@ -53,7 +54,6 @@ export async function POST(req: Request): Promise<Response> {
     return new Response("invalid subscription", { status: 400 });
   }
 
-  const { env } = getCloudflareContext();
   const res = await env.CORE.fetch(
     `https://internal/agents/cmo/${session.user.id}/internal/push-subscribe`,
     {
