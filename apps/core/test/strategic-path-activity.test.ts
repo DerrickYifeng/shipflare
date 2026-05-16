@@ -118,9 +118,16 @@ describe("onboarding strategic-path — emits activity events", () => {
 
     const kinds = rows.map((r) => r.kind);
     expect(kinds.length).toBeGreaterThanOrEqual(3);
-    expect(kinds[0]).toBe("subagent_dispatch");
-    expect(kinds[kinds.length - 1]).toBe("subagent_finish");
+    // Order is not asserted: forwardActivityToCmo uses ctx.waitUntil to fire
+    // parallel fetches at the receiver; under suite contention the arrival
+    // order at CMO can differ from caller emission order. The receiver's
+    // monotonic createdAt counter stamps insert-order, not emission-order.
+    // The user-visible ActivityTrail (Task 13) applies a defensive sort that
+    // puts *_start before *_finish for same-ms ties, so the UI is correct
+    // regardless. Here we just verify the three event kinds were persisted.
+    expect(kinds).toContain("subagent_dispatch");
     expect(kinds).toContain("subagent_text_delta");
+    expect(kinds).toContain("subagent_finish");
 
     // Every row must carry sourceAgent='strategic-planner' + the runId we
     // passed in, so the web feed can group them under the right run.
