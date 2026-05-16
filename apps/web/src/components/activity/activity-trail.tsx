@@ -91,40 +91,102 @@ function derive(finish?: ActivityEvent): Group['status'] {
   return p.status === 'error' ? 'error' : 'done';
 }
 
+/** Build the composite key used to pair a start event with its finish. */
+function finishKey(
+  sourceAgent: string,
+  parentEventId: string | null,
+  finishKind: ActivityKind,
+): string {
+  return `${sourceAgent}|${parentEventId ?? ''}|${finishKind}`;
+}
+
 /**
  * Pair starts with finishes and build a 2-level group tree. Top-level
  * groups are starts with `parentEventId === null`; children are starts
  * whose `parentEventId` points at a top-level start.
  *
  * Assumes the input is already sorted (start-before-finish at same ms).
+ *
+ * Implementation is O(n): a single pass builds three indexes
+ *   - childrenByParent : parent event id → starts that point at it
+ *   - finishBuckets    : (sourceAgent, parentEventId, finishKind) → finishes
+ *                        (kept in insertion order so we can pop the earliest
+ *                         unconsumed finish for each start)
+ *   - latestDeltaByParent : parent start id → latest streaming text
+ *
+ * Then a second pass walks top-level starts in order, pairing each with
+ * the first unconsumed finish whose createdAt >= the start's createdAt.
+ * Consumption avoids cross-pairing when several start/finish pairs share
+ * the same (sourceAgent, parentEventId).
  */
-function buildGroups(events: ActivityEvent[]): Group[] {
-  // Quick lookup of finishes by their parent start: same parentEventId +
-  // sourceAgent + a matching kind and a non-earlier createdAt. We resolve
-  // greedily — the first matching finish AFTER the start wins.
-  const findFinish = (start: ActivityEvent): ActivityEvent | undefined => {
-    const wantKind = matchingFinishKind(start.kind);
-    if (!wantKind) return undefined;
-    return events.find(
-      (c) =>
-        c.kind === wantKind &&
-        c.parentEventId === start.parentEventId &&
-        c.sourceAgent === start.sourceAgent &&
-        c.createdAt >= start.createdAt &&
-        c.id !== start.id,
-    );
-  };
-
-  // Latest text delta for a given parent start id (used as sub line).
+export function buildGroups(events: ActivityEvent[]): Group[] {
+  // Index 1: parentEventId → child start events (in input order).
+  const childrenByParent = new Map<string, ActivityEvent[]>();
+  // Index 2: composite key → queue of finish events (in input order).
+  // Use a head-pointer object so we don't pay O(n) shift() per consume.
+  type Bucket = { events: ActivityEvent[]; head: number };
+  const finishBuckets = new Map<string, Bucket>();
+  // Index 3: latest text delta keyed by its parent start id.
   const latestDeltaByParent = new Map<string, string>();
+
   for (const e of events) {
-    if (e.kind === 'subagent_text_delta' && e.parentEventId) {
-      const p = e.payload as { text?: string };
-      if (typeof p.text === 'string') {
-        latestDeltaByParent.set(e.parentEventId, p.text);
+    if (e.kind === 'subagent_text_delta') {
+      if (e.parentEventId) {
+        const p = e.payload as { text?: string };
+        if (typeof p.text === 'string') {
+          latestDeltaByParent.set(e.parentEventId, p.text);
+        }
       }
+      continue;
+    }
+
+    if (FINISH_KINDS.has(e.kind)) {
+      const key = finishKey(e.sourceAgent, e.parentEventId, e.kind);
+      let bucket = finishBuckets.get(key);
+      if (!bucket) {
+        bucket = { events: [], head: 0 };
+        finishBuckets.set(key, bucket);
+      }
+      bucket.events.push(e);
+      continue;
+    }
+
+    // Start-like (or other non-finish, non-delta) event: index as a child
+    // if it has a parent.
+    if (e.parentEventId) {
+      const list = childrenByParent.get(e.parentEventId) ?? [];
+      list.push(e);
+      childrenByParent.set(e.parentEventId, list);
     }
   }
+
+  // Resolve a finish for `start` by popping the earliest unconsumed finish
+  // from the appropriate bucket whose createdAt >= start.createdAt.
+  const consumeFinish = (start: ActivityEvent): ActivityEvent | undefined => {
+    const wantKind = matchingFinishKind(start.kind);
+    if (!wantKind) return undefined;
+    const bucket = finishBuckets.get(
+      finishKey(start.sourceAgent, start.parentEventId, wantKind),
+    );
+    if (!bucket) return undefined;
+    // Skip past any finishes that are earlier than this start (they must
+    // already have been consumed by an earlier start, but be safe).
+    while (bucket.head < bucket.events.length) {
+      const candidate = bucket.events[bucket.head]!;
+      if (candidate.id === start.id) {
+        // Shouldn't happen (start vs finish kinds differ), but guard.
+        bucket.head++;
+        continue;
+      }
+      if (candidate.createdAt >= start.createdAt) {
+        bucket.head++;
+        return candidate;
+      }
+      // Finish predates this start — discard it (already orphaned).
+      bucket.head++;
+    }
+    return undefined;
+  };
 
   const groups: Group[] = [];
   for (const e of events) {
@@ -133,24 +195,20 @@ function buildGroups(events: ActivityEvent[]): Group[] {
     if (e.parentEventId !== null) continue; // children attached below
     if (!isStartLike(e.kind)) continue;
 
-    const finish = findFinish(e);
-    const children: Group[] = events
-      .filter(
-        (c) =>
-          c.parentEventId === e.id &&
-          isStartLike(c.kind) &&
-          c.kind !== 'subagent_text_delta',
-      )
-      .map((c) => {
-        const cFinish = findFinish(c);
-        return {
-          start: c,
-          finish: cFinish,
-          children: [],
-          status: derive(cFinish),
-          latestDelta: latestDeltaByParent.get(c.id),
-        };
-      });
+    const finish = consumeFinish(e);
+    const childStarts = (childrenByParent.get(e.id) ?? []).filter(
+      (c) => isStartLike(c.kind) && c.kind !== 'subagent_text_delta',
+    );
+    const children: Group[] = childStarts.map((c) => {
+      const cFinish = consumeFinish(c);
+      return {
+        start: c,
+        finish: cFinish,
+        children: [],
+        status: derive(cFinish),
+        latestDelta: latestDeltaByParent.get(c.id),
+      };
+    });
 
     groups.push({
       start: e,

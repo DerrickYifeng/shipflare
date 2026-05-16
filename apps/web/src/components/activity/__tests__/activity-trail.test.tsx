@@ -10,7 +10,7 @@
 
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { render, fireEvent, act } from '@testing-library/react';
-import { ActivityTrail } from '../activity-trail';
+import { ActivityTrail, buildGroups } from '../activity-trail';
 import type { ActivityEvent } from '@shipflare/shared';
 
 const baseEvent = (over: Partial<ActivityEvent>): ActivityEvent => ({
@@ -209,6 +209,191 @@ describe('ActivityTrail', () => {
     expect(rows[0]?.textContent).toContain('Head of Growth finished');
     // And no running ticker is rendered (no ellipsis).
     expect(textContent(container)).not.toMatch(/Asking Head of Growth…/);
+  });
+
+  describe('buildGroups', () => {
+    it('pairs a top-level start with its matching finish', () => {
+      const events: ActivityEvent[] = [
+        baseEvent({
+          id: 's1',
+          createdAt: 1000,
+          kind: 'subagent_dispatch',
+          payload: { kind: 'subagent_dispatch', subAgent: 'head-of-growth' },
+        }),
+        baseEvent({
+          id: 'f1',
+          createdAt: 2000,
+          kind: 'subagent_finish',
+          payload: {
+            kind: 'subagent_finish',
+            subAgent: 'head-of-growth',
+            status: 'ok',
+            durationMs: 100,
+          },
+        }),
+      ];
+      const groups = buildGroups(events);
+      expect(groups).toHaveLength(1);
+      expect(groups[0]?.start.id).toBe('s1');
+      expect(groups[0]?.finish?.id).toBe('f1');
+      expect(groups[0]?.status).toBe('done');
+    });
+
+    it('attaches children to their parent group', () => {
+      const events: ActivityEvent[] = [
+        baseEvent({
+          id: 'p',
+          createdAt: 1000,
+          kind: 'subagent_dispatch',
+          payload: { kind: 'subagent_dispatch', subAgent: 'head-of-growth' },
+        }),
+        baseEvent({
+          id: 'c1',
+          createdAt: 1100,
+          parentEventId: 'p',
+          sourceAgent: 'head-of-growth',
+          kind: 'subagent_tool_call_start',
+          payload: {
+            kind: 'subagent_tool_call_start',
+            subAgent: 'head-of-growth',
+            tool: 'x_search',
+          },
+        }),
+        baseEvent({
+          id: 'c1f',
+          createdAt: 1200,
+          parentEventId: 'p',
+          sourceAgent: 'head-of-growth',
+          kind: 'subagent_tool_call_finish',
+          payload: {
+            kind: 'subagent_tool_call_finish',
+            subAgent: 'head-of-growth',
+            tool: 'x_search',
+            status: 'ok',
+            durationMs: 50,
+          },
+        }),
+      ];
+      const groups = buildGroups(events);
+      expect(groups).toHaveLength(1);
+      expect(groups[0]?.children).toHaveLength(1);
+      expect(groups[0]?.children[0]?.start.id).toBe('c1');
+      expect(groups[0]?.children[0]?.finish?.id).toBe('c1f');
+      expect(groups[0]?.children[0]?.status).toBe('done');
+    });
+
+    it('does not cross-pair two starts that share parent + sourceAgent + kind', () => {
+      // Two sibling tool calls under the same parent. Each should pair with
+      // its own finish, in order.
+      const events: ActivityEvent[] = [
+        baseEvent({
+          id: 'p',
+          createdAt: 1000,
+          kind: 'subagent_dispatch',
+          payload: { kind: 'subagent_dispatch', subAgent: 'head-of-growth' },
+        }),
+        baseEvent({
+          id: 'a',
+          createdAt: 1100,
+          parentEventId: 'p',
+          sourceAgent: 'head-of-growth',
+          kind: 'subagent_tool_call_start',
+          payload: {
+            kind: 'subagent_tool_call_start',
+            subAgent: 'head-of-growth',
+            tool: 'x_search',
+          },
+        }),
+        baseEvent({
+          id: 'a_f',
+          createdAt: 1150,
+          parentEventId: 'p',
+          sourceAgent: 'head-of-growth',
+          kind: 'subagent_tool_call_finish',
+          payload: {
+            kind: 'subagent_tool_call_finish',
+            subAgent: 'head-of-growth',
+            tool: 'x_search',
+            status: 'ok',
+            durationMs: 50,
+          },
+        }),
+        baseEvent({
+          id: 'b',
+          createdAt: 1200,
+          parentEventId: 'p',
+          sourceAgent: 'head-of-growth',
+          kind: 'subagent_tool_call_start',
+          payload: {
+            kind: 'subagent_tool_call_start',
+            subAgent: 'head-of-growth',
+            tool: 'x_search',
+          },
+        }),
+        baseEvent({
+          id: 'b_f',
+          createdAt: 1250,
+          parentEventId: 'p',
+          sourceAgent: 'head-of-growth',
+          kind: 'subagent_tool_call_finish',
+          payload: {
+            kind: 'subagent_tool_call_finish',
+            subAgent: 'head-of-growth',
+            tool: 'x_search',
+            status: 'ok',
+            durationMs: 50,
+          },
+        }),
+      ];
+      const groups = buildGroups(events);
+      expect(groups).toHaveLength(1);
+      expect(groups[0]?.children).toHaveLength(2);
+      expect(groups[0]?.children[0]?.start.id).toBe('a');
+      expect(groups[0]?.children[0]?.finish?.id).toBe('a_f');
+      expect(groups[0]?.children[1]?.start.id).toBe('b');
+      expect(groups[0]?.children[1]?.finish?.id).toBe('b_f');
+    });
+
+    it('runs in <50ms for 1000 events', () => {
+      // 500 top-level subagent_dispatch start/finish pairs (1000 events).
+      const events: ActivityEvent[] = [];
+      for (let i = 0; i < 500; i++) {
+        const start = 1000 + i * 10;
+        events.push(
+          baseEvent({
+            id: `s${i}`,
+            createdAt: start,
+            kind: 'subagent_dispatch',
+            payload: {
+              kind: 'subagent_dispatch',
+              subAgent: 'head-of-growth',
+            },
+          }),
+        );
+        events.push(
+          baseEvent({
+            id: `f${i}`,
+            createdAt: start + 5,
+            kind: 'subagent_finish',
+            payload: {
+              kind: 'subagent_finish',
+              subAgent: 'head-of-growth',
+              status: 'ok',
+              durationMs: 5,
+            },
+          }),
+        );
+      }
+      // Warm-up to mitigate JIT noise on the first call.
+      buildGroups(events);
+
+      const t0 = performance.now();
+      const groups = buildGroups(events);
+      const elapsed = performance.now() - t0;
+
+      expect(groups).toHaveLength(500);
+      expect(elapsed).toBeLessThan(50);
+    });
   });
 
   it('aggregates subagent_text_delta onto its parent row as sub line', () => {
