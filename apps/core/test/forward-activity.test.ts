@@ -73,4 +73,28 @@ describe("forwardActivityToCmo", () => {
     ).not.toThrow();
     await expect(Promise.all(pending)).resolves.toBeDefined();
   });
+
+  it("routes via transportName-prefixed DO id", async () => {
+    const idSpy = vi.fn((n: string) => n);
+    const fetchSpy = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    const fakeStub = { fetch: fetchSpy };
+    const env = {
+      CMO: { idFromName: idSpy, get: () => fakeStub },
+    } as unknown as Env;
+    const pending: Promise<unknown>[] = [];
+    const ctx = { waitUntil: (p: Promise<unknown>) => pending.push(p) };
+
+    forwardActivityToCmo(ctx, env, "user-1", {
+      conversationId: null,
+      parentTurnId: null,
+      runId: null,
+      sourceAgent: "head-of-growth",
+      parentEventId: null,
+      kind: "turn_start",
+      payload: { kind: "turn_start" },
+    });
+    await Promise.all(pending);
+
+    expect(idSpy).toHaveBeenCalledWith("streamable-http:user-1");
+  });
 });
