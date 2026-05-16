@@ -5,16 +5,19 @@
 //
 // Subscribes to live activity events emitted by the user's CMO Durable
 // Object via a WebSocket opened through the Cloudflare Agents SDK
-// (`useAgent`). On mount and on every reconnect, calls the DO's
-// `getRecentActivity` to seed the feed with events the client missed
-// while disconnected. Dedupes by event id (a Set held in a ref so it
-// survives re-renders) and filters by `conversationId` OR `runId`.
+// (`useAgent`). On mount and on every reconnect, calls
+// `GET /api/cmo-activity` to seed the feed with events the client
+// missed while disconnected -- the API route proxies through to CMO's
+// `getRecentActivity` MCP tool (see follow-up #1 of the activity-feed
+// spec). Dedupes by event id (a Set held in a ref so it survives
+// re-renders) and filters by `conversationId` OR `runId`.
 //
-// Auth: the WS handshake is authenticated by a short-lived
-// (60s) JWT minted at `/api/cmo-ws-token`. The hook fetches a fresh
-// token on userId change and retries with capped exponential backoff
-// on failure (max 8s) so a flaky network doesn't permanently break
-// the feed.
+// Auth: the WS handshake is authenticated by a short-lived (60s) JWT
+// minted at `/api/cmo-ws-token`. The hook fetches a fresh token on
+// userId change and retries with capped exponential backoff on failure
+// (max 8s) so a flaky network doesn't permanently break the feed. The
+// seed-replay proxy uses the standard Better Auth session cookie -- no
+// separate token plumbing.
 //
 // `useAgent` from `agents/react` rebuilds its WS URL when any entry in
 // `queryDeps` changes -- supplying `[token]` therefore reconnects with
@@ -52,21 +55,12 @@ interface SessionLike {
   data?: { user?: { id?: string | null } | null } | null;
 }
 
-// `getRecentActivity` is exposed as an MCP tool on CMO (see
-// apps/core/src/agents/cmo/tools/get-recent-activity.ts) and -- in a
-// later task -- as a callable RPC method via the Agents SDK stub. The
-// shape returned matches `ActivityEvent[]` once Zod-validated. The cast
-// to `unknown` keeps the call site honest while we wait on the typed
-// stub to land.
-interface AgentStubLike {
-  stub?: {
-    getRecentActivity?: (args: {
-      conversationId?: string;
-      runId?: string;
-      sinceMs?: number;
-    }) => Promise<unknown>;
-  };
-}
+// Seed-replay goes through the Next.js API route `/api/cmo-activity`
+// rather than the Agents SDK stub. The stub only exposes methods
+// decorated with `@callable`, and `getRecentActivity` is registered as
+// an MCP tool (apps/core/src/agents/cmo/tools/get-recent-activity.ts).
+// The proxy route wraps that tool call so we keep MCP as the single
+// canonical surface and don't have to duplicate the implementation.
 
 const MAX_BACKOFF_MS = 8_000;
 
@@ -157,12 +151,12 @@ export function useCmoActivity(
   }, [userId]);
 
   // ---------------- 2. Open the WS via useAgent ----------------------------
-  // `useAgent` types are heavily generic and the SDK doesn't expose the
-  // stub method shape for our DO yet. We narrow the return through
-  // `AgentStubLike` rather than scatter `as any` across the hook body.
-  // `query` is a QueryObject; the server reads `?token=<jwt>` on the
-  // handshake URL.
-  const agent = useAgent({
+  // `useAgent` opens the live WebSocket. Seed-replay rides the HTTP
+  // proxy below, not the SDK stub (the SDK stub only exposes @callable
+  // methods, and `getRecentActivity` is an MCP tool). The return value
+  // isn't used here -- we drop it on the floor and let `queryDeps`
+  // handle reconnection.
+  useAgent({
     agent: 'cmo',
     name: userId ?? '__skip__',
     // The SDK signature is `() => Promise<QueryObject>` where
@@ -197,40 +191,49 @@ export function useCmoActivity(
   });
 
   // ---------------- 3. Seed-replay on mount / filter / reconnect -----------
-  // Runs once we have a token. Also re-runs whenever the token changes
-  // (i.e. after every reconnect), which backfills events that arrived
-  // while the socket was down.
+  // Runs once we have a token (so we know the founder is authenticated).
+  // Also re-runs whenever the token changes (i.e. after every reconnect),
+  // which backfills events that arrived while the socket was down.
+  //
+  // The proxy at `/api/cmo-activity` verifies the session and calls CMO's
+  // `getRecentActivity` MCP tool on the founder's behalf. We don't pass
+  // the JWT directly -- the route relies on the same Better Auth session
+  // cookie the rest of the web app uses.
   useEffect(() => {
     if (!userId || !token) return;
     let cancelled = false;
 
     void (async () => {
-      const args: { conversationId?: string; runId?: string } = {};
+      const params = new URLSearchParams();
       if ('conversationId' in filter) {
-        args.conversationId = filter.conversationId;
+        params.set('conversationId', filter.conversationId);
       }
       if ('runId' in filter) {
-        args.runId = filter.runId;
+        params.set('runId', filter.runId);
       }
 
-      const stub = (agent as AgentStubLike).stub;
-      if (!stub?.getRecentActivity) {
-        // Stub not exposed yet -- live broadcasts will still arrive.
+      let res: Response;
+      try {
+        res = await fetch(`/api/cmo-activity?${params.toString()}`);
+      } catch {
+        // Network error -- silent. Live broadcasts will still arrive
+        // over the WS if it connects.
         return;
       }
+      if (cancelled || !res.ok) return;
 
-      let raw: unknown;
+      let body: { events?: unknown } = {};
       try {
-        raw = await stub.getRecentActivity(args);
+        body = (await res.json()) as { events?: unknown };
       } catch {
-        // Network / server error -- silent. Live broadcasts will still
-        // arrive over the WS if it connects.
         return;
       }
       if (cancelled) return;
 
-      // Defensive validation -- the wire shape should match ActivityEvent
-      // but the stub call surface is untyped. Drop any row that fails.
+      // Defensive validation -- the wire shape should match
+      // ActivityEvent. Drop any row that fails Zod, so a partial schema
+      // change on the server doesn't crash the client.
+      const raw = body.events;
       const seed: ActivityEvent[] = Array.isArray(raw)
         ? raw.flatMap((row) => {
             const result = ActivityEventSchema.safeParse(row);
@@ -251,11 +254,11 @@ export function useCmoActivity(
     return () => {
       cancelled = true;
     };
-  }, [userId, token, filterKey, agent]);
-
-  // `agent` is intentionally referenced so eslint's exhaustive-deps
-  // doesn't yell at us; in practice the SDK gives back the same object
-  // identity per name+agent pair so this doesn't cause infinite loops.
+    // `filter` is referenced inside but its contents are encoded in
+    // `filterKey` -- using the stable key avoids re-running on every
+    // parent render that constructs a fresh object literal.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, token, filterKey]);
 
   return useMemo(
     () => ({
