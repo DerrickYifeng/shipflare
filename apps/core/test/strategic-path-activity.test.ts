@@ -14,9 +14,15 @@ import type { CMO } from "../src/agents/cmo/CMO";
  *
  * Test approach:
  *  - Drive the route via `SELF.fetch` (the SSE handler short-circuits
- *    when `_test_fixture: true` so we never call real Anthropic).
- *  - The fixture path emits a deterministic 3-chunk text sequence, so
- *    we can assert kinds + ordering without flakiness.
+ *    when env.STRATEGIC_PATH_FIXTURE === "1" so we never call real Anthropic).
+ *    The fixture binding is set in `vitest.config.mts` — it is NOT
+ *    pulled from the request body, so the trust-boundary leak (any
+ *    authenticated browser forcing fixture mode by spreading the flag
+ *    through the web proxy) is closed.
+ *  - The fixture path emits a deterministic 3-chunk text sequence of
+ *    schema-valid strategic-path JSON, so we can assert kinds +
+ *    ordering without flakiness AND the same `strategicPathSchema.parse()`
+ *    that runs in production also runs here.
  *  - After draining the SSE stream we read `activity_events` directly
  *    out of CMO's storage via `runInDurableObject` (CMO is name-routed
  *    with `transportName(userId)`, matching the production write path).
@@ -68,7 +74,6 @@ describe("onboarding strategic-path — emits activity events", () => {
         body: JSON.stringify({
           userId,
           runId,
-          _test_fixture: true,
           product: {
             name: "Test",
             description: "A test product",
@@ -160,7 +165,6 @@ describe("onboarding strategic-path — emits activity events", () => {
         body: JSON.stringify({
           userId,
           // No runId — back-compat caller (old web build).
-          _test_fixture: true,
           product: {
             name: "Test",
             description: "A test product",
