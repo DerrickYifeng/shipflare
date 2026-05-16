@@ -17,14 +17,15 @@ export async function POST(req: Request): Promise<Response> {
   }
   const { env } = getCloudflareContext();
   const coreRes = await env.CORE.fetch(
-    new Request("https://internal/internal/onboarding/analyze-repo", {
+    "https://internal/internal/onboarding/analyze-repo",
+    {
       method: "POST",
       headers: { "content-type": "application/json", "x-shipflare-internal": "1" },
       body: JSON.stringify({
         userId: session.user.id,
         repoFullName: body.repoFullName ?? "",
       }),
-    }),
+    },
   );
   return new Response(coreRes.body, {
     status: coreRes.status,

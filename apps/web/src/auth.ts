@@ -85,6 +85,19 @@ export function getAuth(): BetterAuthInstance {
       ipAddress: {
         ipAddressHeaders: ["cf-connecting-ip"],
       },
+      // Force non-Secure cookies whenever the baseURL is http:// (local dev).
+      // Better Auth's default heuristic doesn't always catch this in Workers
+      // + OpenNext for Dev, and a Secure-flagged cookie is silently dropped
+      // by browsers on http:// origins — manifesting as
+      //   "State mismatch: State not persisted correctly"
+      // because the OAuth state cookie set on POST /api/auth/sign-in/social
+      // never makes it back on the /api/auth/callback/<provider> hop.
+      useSecureCookies: (env.BETTER_AUTH_URL ?? "").startsWith("https://"),
+      defaultCookieAttributes: {
+        sameSite: "lax",
+        path: "/",
+        httpOnly: true,
+      },
     },
     databaseHooks: {
       user: {

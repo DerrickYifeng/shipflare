@@ -17,11 +17,12 @@ export async function POST(req: Request): Promise<Response> {
   }
   const { env } = getCloudflareContext();
   const coreRes = await env.CORE.fetch(
-    new Request("https://internal/internal/onboarding/analyze-url", {
+    "https://internal/internal/onboarding/analyze-url",
+    {
       method: "POST",
       headers: { "content-type": "application/json", "x-shipflare-internal": "1" },
       body: JSON.stringify({ userId: session.user.id, url: body.url ?? "" }),
-    }),
+    },
   );
   return new Response(coreRes.body, {
     status: coreRes.status,

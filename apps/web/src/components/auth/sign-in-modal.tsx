@@ -3,6 +3,30 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { authClient } from '@/auth-client';
 
+// Hosts we may redirect to. Pre-warming DNS + TCP + TLS while the modal is
+// open removes ~100-300ms of "click → first byte from GitHub" latency on
+// cold connections (especially noticeable on the user's first sign-in
+// attempt or after a long idle).
+const OAUTH_HOSTS = ['https://github.com', 'https://accounts.google.com'];
+
+function useOAuthPreconnect(open: boolean): void {
+  useEffect(() => {
+    if (!open || typeof document === 'undefined') return;
+    const links: HTMLLinkElement[] = [];
+    for (const href of OAUTH_HOSTS) {
+      const link = document.createElement('link');
+      link.rel = 'preconnect';
+      link.href = href;
+      link.crossOrigin = 'anonymous';
+      document.head.appendChild(link);
+      links.push(link);
+    }
+    return () => {
+      for (const l of links) l.remove();
+    };
+  }, [open]);
+}
+
 export interface SignInModalProps {
   open: boolean;
   onClose: () => void;
@@ -58,6 +82,27 @@ const BUTTON_STYLE = {
   color: 'var(--sf-fg-on-dark-1)',
 } as const;
 
+// Better Auth's react client returns `{ data: { url, redirect }, error }` from
+// signIn.social. Whether the client auto-navigates depends on the version /
+// platform — to be safe we always do the navigation ourselves: if `data.url`
+// is present, we hard-redirect; otherwise the throw surfaces the error in the
+// modal's `error` state.
+async function startSocialSignIn(provider: 'github' | 'google'): Promise<void> {
+  const result = await authClient.signIn.social({
+    provider,
+    callbackURL: '/briefing',
+  });
+  if (result.error) {
+    throw new Error(result.error.message ?? 'Sign in failed. Try again.');
+  }
+  const url = (result.data as { url?: string } | null)?.url;
+  if (typeof url === 'string' && url.length > 0) {
+    window.location.assign(url);
+    return;
+  }
+  throw new Error('Sign in failed: no redirect URL returned.');
+}
+
 const PROVIDERS: Provider[] = [
   // Google first: friction-reduction is the goal, so lead with the
   // broader-reach option. See docs/superpowers/specs/2026-05-11-google-auth-design.md.
@@ -65,17 +110,13 @@ const PROVIDERS: Provider[] = [
     id: 'google',
     label: 'Continue with Google',
     icon: <GoogleIcon />,
-    action: async () => {
-      await authClient.signIn.social({ provider: 'google', callbackURL: '/briefing' });
-    },
+    action: () => startSocialSignIn('google'),
   },
   {
     id: 'github',
     label: 'Continue with GitHub',
     icon: <GitHubIcon />,
-    action: async () => {
-      await authClient.signIn.social({ provider: 'github', callbackURL: '/briefing' });
-    },
+    action: () => startSocialSignIn('github'),
   },
 ];
 

@@ -54,13 +54,11 @@ async function destroyAgentState(
 ): Promise<void> {
   try {
     const res = await env.CORE.fetch(
-      new Request(
-        `https://internal/agents/${agent}/${userId}/internal/destroy`,
-        {
-          method: "POST",
-          headers: { "x-shipflare-internal": "1" },
-        },
-      ),
+      `https://internal/agents/${agent}/${userId}/internal/destroy`,
+      {
+        method: "POST",
+        headers: { "x-shipflare-internal": "1" },
+      },
     );
     if (!res.ok) {
       console.warn(

@@ -55,21 +55,19 @@ export async function POST(req: Request): Promise<Response> {
 
   const { env } = getCloudflareContext();
   const res = await env.CORE.fetch(
-    new Request(
-      `https://internal/agents/cmo/${session.user.id}/internal/push-subscribe`,
-      {
-        method: "POST",
-        headers: {
-          "x-shipflare-internal": "1",
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          endpoint: raw.endpoint,
-          p256dh: raw.keys.p256dh,
-          auth: raw.keys.auth,
-        }),
+    `https://internal/agents/cmo/${session.user.id}/internal/push-subscribe`,
+    {
+      method: "POST",
+      headers: {
+        "x-shipflare-internal": "1",
+        "content-type": "application/json",
       },
-    ),
+      body: JSON.stringify({
+        endpoint: raw.endpoint,
+        p256dh: raw.keys.p256dh,
+        auth: raw.keys.auth,
+      }),
+    },
   );
 
   if (!res.ok) {

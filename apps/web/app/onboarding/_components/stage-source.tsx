@@ -9,13 +9,12 @@
 //    it seeds the draft with an empty profile that Stage 3 lets the user
 //    fill in manually.
 
-import { useState, type FormEvent } from 'react';
+import { useState, useEffect, type FormEvent } from 'react';
 import { authClient } from '@/auth-client';
 import { OnbButton } from './_shared/onb-button';
 import { OnbInput } from './_shared/onb-input';
 import { Field } from './_shared/field';
 import { MethodCard } from './_shared/method-card';
-import { GithubConnectCard } from './_shared/github-connect-card';
 import { RepoList } from './_shared/repo-list';
 import type { RepoRowData } from './_shared/repo-row';
 import { BackLink } from './_shared/back-link';
@@ -93,14 +92,14 @@ export function StageSource({
     string | null
   >(initialRepoFullName);
 
-  const loadRepos = async () => {
+  const loadRepos = async (): Promise<'connected' | 'not-linked' | 'error'> => {
     setGhLoading(true);
     setGhError(null);
     try {
       const res = await fetch('/api/onboarding/github-repos');
       if (res.status === 404) {
         setGhConnected('no');
-        return;
+        return 'not-linked';
       }
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as {
@@ -122,29 +121,84 @@ export function StageSource({
         updatedLabel: relativeTime(r.pushedAt),
       }));
       setRepos(rows);
+      return 'connected';
     } catch (err) {
       setGhError(err instanceof Error ? err.message : 'Failed to load repos');
+      return 'error';
     } finally {
       setGhLoading(false);
     }
   };
 
-  const pickMethod = (next: Method) => {
+  const pickMethod = async (next: Method) => {
     setMethod(next);
+    // GitHub: short-circuit the "Authorize ShipFlare" intermediate card. If
+    // the user is already linked (or signed in via GitHub originally with
+    // public_repo scope), loadRepos returns 'connected' and the repo list
+    // renders. If they're not linked, jump straight to the GitHub OAuth
+    // flow — the user's intent was clear when they picked the GitHub card.
     if (next === 'github' && ghConnected === 'unknown') {
-      void loadRepos();
+      const result = await loadRepos();
+      if (result === 'not-linked') {
+        void connectGithub();
+      }
     }
   };
 
-  const connectGithub = () => {
-    // The CF app uses Better Auth, not NextAuth. Better Auth's
-    // /api/auth/sign-in/social endpoint is POST-only — a plain
-    // window.location.href GET 404s. Route through the react client.
-    void authClient.signIn.social({
-      provider: 'github',
-      callbackURL: '/onboarding',
-    });
+  const connectGithub = async () => {
+    // Use `linkSocial` (NOT `signIn.social`): the user is already signed in
+    // (typically via Google) — they have no GitHub account linked to their
+    // session, and `signIn.social` on an authenticated session short-circuits
+    // and returns 200 with no redirect URL. `linkSocial` hits Better Auth's
+    // `/link-social` endpoint which performs the OAuth dance to ATTACH a new
+    // provider to the existing session.
+    //
+    // `?ghAuthorized=1` lets stage-source resume the github sub-state on
+    // return — without it, `method` resets to 'choose' on remount and the
+    // user lands back at the method picker instead of seeing their repos.
+    setGhError(null);
+    try {
+      const result = await authClient.linkSocial({
+        provider: 'github',
+        callbackURL: '/onboarding?ghAuthorized=1',
+      });
+      if (result.error) {
+        setGhError(result.error.message ?? 'GitHub authorization failed.');
+        return;
+      }
+      const url = (result.data as { url?: string } | null)?.url;
+      if (url) {
+        window.location.assign(url);
+        return;
+      }
+      // Some Better Auth response paths (idToken branch, already-linked)
+      // return `{ redirect: false }` without a URL — in our flow that means
+      // the account is already linked, so re-trigger the repo fetch.
+      void loadRepos();
+    } catch (err) {
+      setGhError(
+        err instanceof Error ? err.message : 'GitHub authorization failed.',
+      );
+    }
   };
+
+  // Resume the github sub-state after returning from the OAuth callback.
+  // We strip the marker from the URL once consumed so a refresh doesn't
+  // re-trigger the auto-load.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('ghAuthorized') === '1') {
+      params.delete('ghAuthorized');
+      const cleaned = params.toString();
+      const nextUrl =
+        window.location.pathname + (cleaned ? `?${cleaned}` : '');
+      window.history.replaceState({}, '', nextUrl);
+      setMethod('github');
+      void loadRepos();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const submitUrl = (event: FormEvent) => {
     event.preventDefault();
@@ -237,15 +291,26 @@ export function StageSource({
             onClick={() => setMethod('choose')}
             label={COPY.stage1.pickDifferent}
           />
-          {ghConnected !== 'yes' && (
-            <GithubConnectCard
-              connecting={ghLoading}
-              onConnect={ghConnected === 'no' ? connectGithub : loadRepos}
-              title={COPY.stage1.github.title}
-              sub={COPY.stage1.github.sub}
-              button={COPY.stage1.github.button}
-              connectingButton={COPY.stage1.github.connectingButton}
-            />
+          {/*
+            No intermediate "Authorize ShipFlare" card — pickMethod('github')
+            either renders the repo list (already linked) or kicks off the
+            GitHub OAuth redirect immediately. Two transient states below:
+            a redirect placeholder while OAuth is in flight, and an error +
+            retry banner if OAuth fails / is dismissed.
+          */}
+          {ghConnected !== 'yes' && !ghError && (
+            <div
+              style={{
+                padding: '28px 24px',
+                background: 'var(--sf-bg-dark-surface)',
+                color: 'var(--sf-fg-on-dark-2)',
+                borderRadius: 12,
+                fontSize: 14,
+                letterSpacing: '-0.16px',
+              }}
+            >
+              Redirecting to GitHub…
+            </div>
           )}
           {ghConnected === 'yes' && (
             <RepoList
@@ -260,12 +325,40 @@ export function StageSource({
             <div
               style={{
                 marginTop: 12,
-                fontSize: 13,
+                padding: '14px 16px',
+                background: 'var(--sf-error-light)',
                 color: 'var(--sf-error-ink)',
+                borderRadius: 10,
+                fontSize: 13,
                 letterSpacing: '-0.16px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 16,
               }}
             >
-              {ghError}
+              <span>{ghError}</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setGhError(null);
+                  void connectGithub();
+                }}
+                disabled={ghLoading}
+                style={{
+                  background: 'transparent',
+                  border: '1px solid currentColor',
+                  borderRadius: 8,
+                  padding: '6px 12px',
+                  fontFamily: 'inherit',
+                  fontSize: 13,
+                  color: 'inherit',
+                  cursor: ghLoading ? 'default' : 'pointer',
+                  opacity: ghLoading ? 0.6 : 1,
+                }}
+              >
+                Try again
+              </button>
             </div>
           )}
           <ActionBar

@@ -10,14 +10,15 @@ export async function GET(req: Request): Promise<Response> {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const { env } = getCloudflareContext();
+  // Pass (url, init) instead of `new Request(...)` — OpenNext's dev-mode
+  // service-binding shim doesn't accept a Request object and throws
+  // "Failed to parse URL from [object Request]".
   const coreRes = await env.CORE.fetch(
-    new Request(
-      `https://internal/internal/onboarding/github-repos?userId=${encodeURIComponent(session.user.id)}`,
-      {
-        method: "GET",
-        headers: { "x-shipflare-internal": "1" },
-      },
-    ),
+    `https://internal/internal/onboarding/github-repos?userId=${encodeURIComponent(session.user.id)}`,
+    {
+      method: "GET",
+      headers: { "x-shipflare-internal": "1" },
+    },
   );
   return new Response(coreRes.body, {
     status: coreRes.status,

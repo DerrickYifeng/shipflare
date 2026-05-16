@@ -61,10 +61,9 @@ export const COPY = {
       "We couldn't reach that page. Check the URL, or continue with just the URL.",
     repoError: "Couldn't read this repo. Check access and try again, or switch to URL.",
     github: {
-      title: 'Authorize GitHub',
-      sub: 'Read-only access to repo metadata, READMEs, and release notes. We never clone code or write to your repos.',
-      button: 'Authorize ShipFlare',
-      connectingButton: 'Authorizing…',
+      // title/sub/button/connectingButton removed — the "Authorize ShipFlare"
+      // intermediate card was replaced by a direct OAuth redirect in
+      // stage-source.tsx (pickMethod('github') jumps straight to GitHub).
       searchPlaceholder: 'Search repositories…',
     },
   },
