@@ -192,10 +192,22 @@
 				{
 					"binding": "DB",
 					"database_name": "shipflare-staging",
-					"database_id": "REPLACE_WITH_STAGING_DB_ID",
+					"database_id": "98184513-f82d-4d6e-83d5-cc415e8e950f",
 					"migrations_dir": "../../packages/db/migrations"
 				}
-			]
+			],
+			// durable_objects and workflows are not inherited by environments —
+			// they must be repeated here verbatim.
+			"durable_objects": {
+				"bindings": [
+					{ "name": "CMO", "class_name": "CMO" },
+					{ "name": "HEAD_OF_GROWTH", "class_name": "HeadOfGrowth" },
+					{ "name": "SOCIAL_MEDIA_MGR", "class_name": "SocialMediaMgr" },
+					{ "name": "X_MCP", "class_name": "XMcpAgent" },
+					{ "name": "REDDIT_MCP", "class_name": "RedditMcpAgent" }
+				]
+			},
+			"workflows": []
 		}
 	}
 }
