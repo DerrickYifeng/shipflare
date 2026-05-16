@@ -14,6 +14,7 @@ import { registerChatTool } from "./tools/chat";
 import { registerConversationTools } from "./tools/conversation";
 import { registerRosterTools } from "./tools/roster";
 import { registerDelegationTools } from "./tools/delegate";
+import { registerGetRecentActivityTool } from "./tools/get-recent-activity";
 import { registerSharedStateTools } from "./tools/shared-state";
 import {
   sendWebPush,
@@ -188,6 +189,10 @@ export class CMO extends McpAgent<Env, CMOState, McpProps> {
     //   truth; employees write to it ONLY via these tools).
     registerDelegationTools(this);
     registerSharedStateTools(this);
+    // Task 5 (spec 2026-05-15): activity-feed seed-replay tool. The web
+    // client calls this on mount + after WS reconnect to backfill the
+    // feed before the live stream takes over.
+    registerGetRecentActivityTool(this);
   }
 
   /**
