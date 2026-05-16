@@ -155,5 +155,25 @@ export function applyCmoSchema(sql: SqlStorage): void {
       last_used INTEGER,
       last_error TEXT
     );
+
+    -- Activity events (spec 2026-05-15) — single source of truth for what
+    -- the agent team is doing. Written by emitActivity() in lib/activity.ts.
+    CREATE TABLE IF NOT EXISTS activity_events (
+      id              TEXT PRIMARY KEY,
+      conversation_id TEXT,
+      parent_turn_id  TEXT,
+      run_id          TEXT,
+      source_agent    TEXT NOT NULL,
+      parent_event_id TEXT,
+      kind            TEXT NOT NULL,
+      payload_json    TEXT NOT NULL,
+      created_at      INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_activity_events_conv
+      ON activity_events (conversation_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_activity_events_run
+      ON activity_events (run_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_activity_events_turn
+      ON activity_events (parent_turn_id);
   `);
 }
