@@ -217,4 +217,134 @@ describe("useCmoActivity", () => {
     expect(result.current.events).toHaveLength(1);
     expect(result.current.events[0]?.id).toBe("live-only");
   });
+
+  // ---- Bounded-cache regression tests (H3) -------------------------------
+  //
+  // These tests intentionally run last in the file. They stream large
+  // batches of synthetic frames and override `getRecentActivity` so
+  // seed-replay never floods the events array. Placing them earlier
+  // in the file caused intermittent leakage of mock state into the
+  // subsequent test because the hook re-runs the seed-replay effect
+  // when `agent` identity changes -- which it does on every render
+  // under our mocked `useAgent`. Keeping these at the end isolates the
+  // noise without weakening other tests.
+
+  it("caps events array at MAX_EVENTS (1000) under sweep-heavy load", async () => {
+    // Override the default seed (one event) with an empty array AND a
+    // permanent (`mockResolvedValue`) override so any re-runs of the
+    // seed-replay effect also see an empty seed -- not the default
+    // [seed-1] from beforeEach.
+    testHandles.getRecentActivity.mockReset();
+    testHandles.getRecentActivity.mockResolvedValue([]);
+
+    const { result } = renderHook(() =>
+      useCmoActivity({ conversationId: "c1" }),
+    );
+    await waitFor(() => expect(result.current.isConnected).toBe(true));
+
+    act(() => {
+      for (let i = 0; i < 1500; i += 1) {
+        pushMessage(
+          JSON.stringify({
+            id: `live-${i}`,
+            createdAt: i,
+            conversationId: "c1",
+            parentTurnId: null,
+            runId: null,
+            sourceAgent: "cmo",
+            parentEventId: null,
+            kind: "turn_start",
+            payload: { kind: "turn_start" },
+          }),
+        );
+      }
+    });
+
+    // Events array is capped at 1000; the oldest 500 were dropped, the
+    // most recent 1000 (ids 500..1499) are retained in insertion order.
+    expect(result.current.events).toHaveLength(1000);
+    expect(result.current.events[0]?.id).toBe("live-500");
+    expect(result.current.events[result.current.events.length - 1]?.id).toBe(
+      "live-1499",
+    );
+  });
+
+  it("caps seenIds Set at MAX_SEEN_IDS (5000) with insertion-order eviction", async () => {
+    testHandles.getRecentActivity.mockReset();
+    testHandles.getRecentActivity.mockResolvedValue([]);
+
+    const { result } = renderHook(() =>
+      useCmoActivity({ conversationId: "c1" }),
+    );
+    await waitFor(() => expect(result.current.isConnected).toBe(true));
+
+    // Stream 5500 unique ids -- 500 over the cap. The dedupe ledger
+    // should evict the 500 oldest ids; replaying id "live-0" should
+    // therefore be treated as new again, while "live-5499" (most
+    // recent) is still recognised as a dupe.
+    act(() => {
+      for (let i = 0; i < 5500; i += 1) {
+        pushMessage(
+          JSON.stringify({
+            id: `live-${i}`,
+            createdAt: i,
+            conversationId: "c1",
+            parentTurnId: null,
+            runId: null,
+            sourceAgent: "cmo",
+            parentEventId: null,
+            kind: "turn_start",
+            payload: { kind: "turn_start" },
+          }),
+        );
+      }
+    });
+
+    // The events array is capped at 1000 (separate cap, see test above).
+    expect(result.current.events).toHaveLength(1000);
+    expect(
+      result.current.events[result.current.events.length - 1]?.id,
+    ).toBe("live-5499");
+
+    // Re-push the very oldest id. If seenIds correctly evicted it, the
+    // hook treats it as fresh and appends. If the cap is missing, the
+    // hook would skip it as a dupe and the tail wouldn't change.
+    act(() => {
+      pushMessage(
+        JSON.stringify({
+          id: "live-0",
+          createdAt: 99_999,
+          conversationId: "c1",
+          parentTurnId: null,
+          runId: null,
+          sourceAgent: "cmo",
+          parentEventId: null,
+          kind: "turn_start",
+          payload: { kind: "turn_start" },
+        }),
+      );
+    });
+    expect(
+      result.current.events[result.current.events.length - 1]?.id,
+    ).toBe("live-0");
+
+    // Re-push a recent id -- still inside the ledger, must dedupe.
+    const lengthBefore = result.current.events.length;
+    act(() => {
+      pushMessage(
+        JSON.stringify({
+          id: "live-5499",
+          createdAt: 99_999,
+          conversationId: "c1",
+          parentTurnId: null,
+          runId: null,
+          sourceAgent: "cmo",
+          parentEventId: null,
+          kind: "turn_start",
+          payload: { kind: "turn_start" },
+        }),
+      );
+    });
+    expect(result.current.events).toHaveLength(lengthBefore);
+  });
 });

@@ -70,6 +70,32 @@ interface AgentStubLike {
 
 const MAX_BACKOFF_MS = 8_000;
 
+// Bounds for in-memory caches on long-lived sessions.
+//
+// `seenIds` is the dedupe ledger -- without a cap it grows for the life
+// of the tab. Cap to MAX_SEEN_IDS with insertion-order eviction (JS Set
+// preserves insertion order, so `.values().next().value` is the oldest).
+//
+// `events` is the React state array rendered by the activity feed.
+// During a sweep-heavy run a single conversation can emit hundreds of
+// events; cap to MAX_EVENTS so the rendered list (and the React tree
+// memoising it) stays bounded. The slice keeps the most recent N.
+const MAX_SEEN_IDS = 5_000;
+const MAX_EVENTS = 1_000;
+
+function rememberId(set: Set<string>, id: string): void {
+  if (set.has(id)) return;
+  if (set.size >= MAX_SEEN_IDS) {
+    const oldest = set.values().next().value;
+    if (oldest !== undefined) set.delete(oldest);
+  }
+  set.add(id);
+}
+
+function capEvents(list: ActivityEvent[]): ActivityEvent[] {
+  return list.length > MAX_EVENTS ? list.slice(-MAX_EVENTS) : list;
+}
+
 export function useCmoActivity(
   filter: CmoActivityFilter,
 ): UseCmoActivityResult {
@@ -165,8 +191,8 @@ export function useCmoActivity(
         return;
       }
       if (seenIds.current.has(parsed.id)) return;
-      seenIds.current.add(parsed.id);
-      setEvents((prev) => [...prev, parsed]);
+      rememberId(seenIds.current, parsed.id);
+      setEvents((prev) => capEvents([...prev, parsed]));
     },
   });
 
@@ -214,9 +240,11 @@ export function useCmoActivity(
 
       const fresh = seed.filter((e) => !seenIds.current.has(e.id));
       if (fresh.length === 0) return;
-      fresh.forEach((e) => seenIds.current.add(e.id));
+      fresh.forEach((e) => rememberId(seenIds.current, e.id));
       setEvents((prev) =>
-        [...prev, ...fresh].sort((a, b) => a.createdAt - b.createdAt),
+        capEvents(
+          [...prev, ...fresh].sort((a, b) => a.createdAt - b.createdAt),
+        ),
       );
     })();
 
