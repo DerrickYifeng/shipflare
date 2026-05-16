@@ -67,7 +67,15 @@ export async function GET(req: Request): Promise<Response> {
     env.BETTER_AUTH_SECRET,
   );
 
-  const authUrl = new URL("https://twitter.com/i/oauth2/authorize");
+  // X migrated the canonical domain from twitter.com → x.com. The browser-
+  // facing authorize URL must be on x.com so the user's existing x.com
+  // session cookie (`auth_token`) is sent on the OAuth landing page. Using
+  // twitter.com here makes X show the "you have to be logged in" interstitial
+  // even when the user IS signed into x.com in the same browser, because
+  // twitter.com and x.com are different registrable domains and cookies
+  // don't cross. (api.twitter.com still works for server-to-server token
+  // exchange — those calls use OAuth tokens, not browser cookies.)
+  const authUrl = new URL("https://x.com/i/oauth2/authorize");
   authUrl.searchParams.set("response_type", "code");
   authUrl.searchParams.set("client_id", env.X_CLIENT_ID);
   authUrl.searchParams.set(
