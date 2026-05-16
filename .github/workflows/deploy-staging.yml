@@ -1,0 +1,111 @@
+name: Deploy Staging
+
+on:
+  push:
+    branches: [dev]
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy to staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: staging
+      url: https://shipflare-web-staging.cdhyfpp.workers.dev
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # wrangler types + build both need .dev.vars to exist (even in CI)
+      - name: Seed .dev.vars with placeholders
+        run: |
+          cat > apps/core/.dev.vars <<'EOF'
+          MCP_JWT_SECRET=ci-placeholder
+          EXTERNAL_MCP_SECRET=ci-placeholder
+          ANTHROPIC_API_KEY=ci-placeholder
+          XAI_API_KEY=ci-placeholder
+          CHANNEL_ENC_KEY=ci-test-aes-gcm-key-base64-padding-32b=
+          VAPID_PUBLIC=ci-placeholder
+          VAPID_PRIVATE=ci-placeholder
+          VAPID_SUBJECT=mailto:ci@example.com
+          EOF
+          cat > apps/web/.dev.vars <<'EOF'
+          MCP_JWT_SECRET=ci-placeholder
+          EXTERNAL_MCP_SECRET=ci-placeholder
+          CHANNEL_ENC_KEY=ci-test-aes-gcm-key-base64-padding-32b=
+          VAPID_PUBLIC=ci-placeholder
+          VAPID_PRIVATE=ci-placeholder
+          VAPID_SUBJECT=mailto:ci@example.com
+          BETTER_AUTH_SECRET=ci-placeholder
+          BETTER_AUTH_URL=https://shipflare-web-staging.cdhyfpp.workers.dev
+          CORE_PUBLIC_URL=https://shipflare-core-staging.cdhyfpp.workers.dev
+          GITHUB_CLIENT_ID=ci-placeholder
+          GITHUB_CLIENT_SECRET=ci-placeholder
+          X_CLIENT_ID=ci-placeholder
+          X_CLIENT_SECRET=ci-placeholder
+          REDDIT_CLIENT_ID=ci-placeholder
+          REDDIT_CLIENT_SECRET=ci-placeholder
+          EOF
+
+      - name: Generate worker types
+        run: |
+          pnpm --filter @shipflare/core exec wrangler types || true
+          pnpm --filter @shipflare/web exec wrangler types || true
+
+      - name: Typecheck packages
+        run: |
+          pnpm --filter @shipflare/shared typecheck
+          pnpm --filter @shipflare/crypto typecheck
+          pnpm --filter @shipflare/db typecheck
+
+      - name: Typecheck apps
+        run: |
+          pnpm --filter @shipflare/core typecheck
+          pnpm --filter @shipflare/web typecheck
+
+      - name: Apply D1 migrations (staging)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ce3276e94b7a6cda8fa922282a9edc7e
+        run: |
+          pnpm --filter @shipflare/core exec wrangler d1 migrations apply shipflare-staging \
+            --remote --env staging
+
+      - name: Deploy apps/core (staging)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ce3276e94b7a6cda8fa922282a9edc7e
+        run: |
+          pnpm --filter @shipflare/core exec wrangler deploy --env staging
+
+      - name: Build apps/web (Next.js + OpenNext)
+        run: |
+          pnpm --filter @shipflare/web build
+          pnpm --filter @shipflare/web exec opennextjs-cloudflare build
+
+      - name: Deploy apps/web (staging)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ce3276e94b7a6cda8fa922282a9edc7e
+        run: |
+          pnpm --filter @shipflare/web exec wrangler deploy --env staging
