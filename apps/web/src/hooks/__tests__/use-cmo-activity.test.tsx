@@ -8,15 +8,16 @@
 // We mock three boundaries:
 //
 //   1. agents/react -- useAgent. Avoids a real WebSocket and exposes a
-//      captured onMessage handler so we can synthesize live frames. The
-//      mock also stubs out stub.getRecentActivity for seed-replay.
+//      captured onMessage handler so we can synthesize live frames.
 //
 //   2. @/auth-client -- the Better Auth client. Replaced with a fake
 //      authClient.useSession() that returns a logged-in user.
 //
-//   3. globalThis.fetch -- only the /api/cmo-ws-token call. Returns a
-//      static { token, wsUrl } (the actual route returns both; the hook
-//      only reads token).
+//   3. globalThis.fetch -- two endpoints:
+//        * /api/cmo-ws-token  → returns { token, wsUrl }
+//        * /api/cmo-activity  → returns { events: ActivityEvent[] }
+//      A single dispatcher routes on URL so tests can override the
+//      activity response via `testHandles.activityEvents`.
 
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
@@ -28,7 +29,14 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 // us share mutable state between the factory and the tests.
 const testHandles = vi.hoisted(() => ({
   captured: null as ((msg: MessageEvent<string>) => void) | null,
-  getRecentActivity: vi.fn(),
+  // Per-test override for the /api/cmo-activity response. Default is
+  // installed in beforeEach below. Tests can mutate this to simulate
+  // a failure (set to "throw" or "non-ok") or an empty seed.
+  activityResponse: null as
+    | { kind: "ok"; events: unknown[] }
+    | { kind: "throw" }
+    | { kind: "non-ok"; status: number }
+    | null,
 }));
 
 function pushMessage(data: string): void {
@@ -44,11 +52,10 @@ function pushMessage(data: string): void {
 vi.mock("agents/react", () => ({
   useAgent: (opts: { onMessage?: (msg: MessageEvent<string>) => void }) => {
     testHandles.captured = opts.onMessage ?? null;
-    return {
-      stub: {
-        getRecentActivity: testHandles.getRecentActivity,
-      },
-    };
+    // No `stub` in the new world -- the hook talks to /api/cmo-activity
+    // directly. We still return an object so any future hook code that
+    // captures the return value doesn't trip on `undefined`.
+    return {};
   },
 }));
 
@@ -64,31 +71,51 @@ vi.mock("@/auth-client", () => ({
 
 // `fetch` is global on happy-dom but we want a deterministic stub.
 beforeEach(() => {
-  testHandles.getRecentActivity.mockReset();
-  testHandles.getRecentActivity.mockResolvedValue([
-    {
-      id: "seed-1",
-      createdAt: 1,
-      conversationId: "c1",
-      parentTurnId: null,
-      runId: null,
-      sourceAgent: "cmo",
-      parentEventId: null,
-      kind: "turn_start",
-      payload: { kind: "turn_start" },
-    },
-  ]);
+  // Default: one seed event for the activity endpoint.
+  testHandles.activityResponse = {
+    kind: "ok",
+    events: [
+      {
+        id: "seed-1",
+        createdAt: 1,
+        conversationId: "c1",
+        parentTurnId: null,
+        runId: null,
+        sourceAgent: "cmo",
+        parentEventId: null,
+        kind: "turn_start",
+        payload: { kind: "turn_start" },
+      },
+    ],
+  };
 
   vi.stubGlobal(
     "fetch",
-    vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          token: "fake-token",
-          wsUrl: "ws://localhost:3001/agents/cmo/user-1",
-        }),
-      ),
-    ),
+    vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.startsWith("/api/cmo-ws-token")) {
+        return new Response(
+          JSON.stringify({
+            token: "fake-token",
+            wsUrl: "ws://localhost:3001/agents/cmo/user-1",
+          }),
+        );
+      }
+      if (url.startsWith("/api/cmo-activity")) {
+        const resp = testHandles.activityResponse;
+        if (!resp) {
+          return new Response(JSON.stringify({ events: [] }));
+        }
+        if (resp.kind === "throw") {
+          throw new Error("nope");
+        }
+        if (resp.kind === "non-ok") {
+          return new Response("", { status: resp.status });
+        }
+        return new Response(JSON.stringify({ events: resp.events }));
+      }
+      return new Response("", { status: 404 });
+    }),
   );
 });
 
@@ -189,7 +216,7 @@ describe("useCmoActivity", () => {
   });
 
   it("silently swallows seed-replay failure (live frames still flow)", async () => {
-    testHandles.getRecentActivity.mockRejectedValueOnce(new Error("nope"));
+    testHandles.activityResponse = { kind: "throw" };
     const { result } = renderHook(() =>
       useCmoActivity({ conversationId: "c1" }),
     );
@@ -230,12 +257,10 @@ describe("useCmoActivity", () => {
   // noise without weakening other tests.
 
   it("caps events array at MAX_EVENTS (1000) under sweep-heavy load", async () => {
-    // Override the default seed (one event) with an empty array AND a
-    // permanent (`mockResolvedValue`) override so any re-runs of the
-    // seed-replay effect also see an empty seed -- not the default
-    // [seed-1] from beforeEach.
-    testHandles.getRecentActivity.mockReset();
-    testHandles.getRecentActivity.mockResolvedValue([]);
+    // Override the default seed (one event) with an empty array so any
+    // re-runs of the seed-replay effect also see an empty seed -- not
+    // the default [seed-1] from beforeEach.
+    testHandles.activityResponse = { kind: "ok", events: [] };
 
     const { result } = renderHook(() =>
       useCmoActivity({ conversationId: "c1" }),
@@ -270,8 +295,7 @@ describe("useCmoActivity", () => {
   });
 
   it("caps seenIds Set at MAX_SEEN_IDS (5000) with insertion-order eviction", async () => {
-    testHandles.getRecentActivity.mockReset();
-    testHandles.getRecentActivity.mockResolvedValue([]);
+    testHandles.activityResponse = { kind: "ok", events: [] };
 
     const { result } = renderHook(() =>
       useCmoActivity({ conversationId: "c1" }),

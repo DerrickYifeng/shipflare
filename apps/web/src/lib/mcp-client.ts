@@ -364,6 +364,30 @@ export class CmoClient {
     return this.callJsonTool("queryMemory", { limit });
   }
 
+  /**
+   * Read the tail of CMO's per-team `activity_events` table for a
+   * single conversation or run. Wraps the `getRecentActivity` MCP tool
+   * (apps/core/src/agents/cmo/tools/get-recent-activity.ts) so the web
+   * API proxy at `/api/cmo-activity` can seed the activity feed on
+   * mount + after WS reconnect.
+   *
+   * One of `conversationId` / `runId` is required server-side; the
+   * client doesn't enforce it because the proxy route validates first.
+   *
+   * Returns the rows untyped (`unknown[]`) and leaves Zod validation to
+   * the caller -- the hook already runs `ActivityEventSchema.safeParse`
+   * per row, so re-parsing here would just duplicate work.
+   */
+  async getRecentActivity(args: {
+    conversationId?: string;
+    runId?: string;
+    sinceMs?: number;
+    limit?: number;
+  }): Promise<unknown[]> {
+    const rows = await this.callJsonTool<unknown>("getRecentActivity", args);
+    return Array.isArray(rows) ? rows : [];
+  }
+
   async close(): Promise<void> {
     await this.client?.close();
     this.client = null;
