@@ -87,6 +87,10 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ce3276e94b7a6cda8fa922282a9edc7e
+        # continue-on-error: migrations are idempotent and can be applied
+        # manually via `wrangler d1 migrations apply shipflare-staging --remote --env staging`.
+        # Remove this once the API token 7403 is resolved.
+        continue-on-error: true
         run: |
           pnpm --filter @shipflare/core exec wrangler d1 migrations apply shipflare-staging \
             --remote --env staging
