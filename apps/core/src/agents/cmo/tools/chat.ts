@@ -1,6 +1,7 @@
 import { z } from "zod";
 import Anthropic from "@anthropic-ai/sdk";
 import type { CMO } from "../CMO";
+import { emitActivity } from "../../../lib/activity";
 
 /**
  * CMO `chat` tool — the founder's primary conversational entrypoint.
@@ -75,71 +76,132 @@ export function registerChatTool(agent: CMO): void {
         )
         .toArray();
 
-      // 4. Call Anthropic with streaming.
+      // 4. Activity instrumentation: emit `turn_start` BEFORE any Anthropic
+      // work so the web client can render the user-bubble → assistant-bubble
+      // transition immediately. The synthetic `parentTurnId` lets later
+      // child events (delegation dispatches, tool calls) group under the
+      // right assistant message in the feed.
+      // Spec: 2026-05-15-agent-activity-feed-design.md §Task 7.
+      const turnStartTs = Date.now();
+      const parentTurnId = crypto.randomUUID();
+      await emitActivity(agent, {
+        conversationId,
+        parentTurnId,
+        runId: null,
+        sourceAgent: "cmo",
+        parentEventId: null,
+        kind: "turn_start",
+        payload: { kind: "turn_start" },
+      });
+
+      // 5. Call Anthropic with streaming.
       // `progressToken` lives in the request's `_meta` object, exposed via
       // the `extra._meta` field that `registerTool` passes to the handler.
       const progressToken = extra._meta?.progressToken;
 
-      const client = new Anthropic({
-        apiKey: agent.bindings.ANTHROPIC_API_KEY,
-      });
+      try {
+        const client = new Anthropic({
+          apiKey: agent.bindings.ANTHROPIC_API_KEY,
+        });
 
-      const stream = client.messages.stream({
-        model: "claude-sonnet-4-6",
-        max_tokens: 2048,
-        system: buildSystemPrompt(founderContext, memories),
-        messages: history.map((h) => ({
-          role: (h.role === "assistant" ? "assistant" : "user") as
-            | "user"
-            | "assistant",
-          content: h.content,
-        })),
-      });
+        const stream = client.messages.stream({
+          model: "claude-sonnet-4-6",
+          max_tokens: 2048,
+          system: buildSystemPrompt(founderContext, memories),
+          messages: history.map((h) => ({
+            role: (h.role === "assistant" ? "assistant" : "user") as
+              | "user"
+              | "assistant",
+            content: h.content,
+          })),
+        });
 
-      let acc = "";
-      let chunkIdx = 0;
+        let acc = "";
+        let chunkIdx = 0;
 
-      // Consume the stream, accumulating the full text and pushing progress
-      // notifications when the caller supplied a progressToken.
-      stream.on("text", (delta: string) => {
-        acc += delta;
-        if (progressToken !== undefined) {
-          chunkIdx += 1;
-          // Fire-and-forget: progress notifications are best-effort.
-          // We do NOT await here — the text handler is synchronous and
-          // sendNotification returns a promise we handle with .catch().
-          extra
-            .sendNotification({
-              method: "notifications/progress",
-              params: {
-                progressToken,
-                progress: chunkIdx,
-                message: delta,
-              },
-            })
-            .catch((err: unknown) => {
-              console.warn("[chat] progress notification failed:", err);
-            });
-        }
-      });
+        // Consume the stream, accumulating the full text and pushing progress
+        // notifications when the caller supplied a progressToken.
+        stream.on("text", (delta: string) => {
+          acc += delta;
+          if (progressToken !== undefined) {
+            chunkIdx += 1;
+            // Fire-and-forget: progress notifications are best-effort.
+            // We do NOT await here — the text handler is synchronous and
+            // sendNotification returns a promise we handle with .catch().
+            extra
+              .sendNotification({
+                method: "notifications/progress",
+                params: {
+                  progressToken,
+                  progress: chunkIdx,
+                  message: delta,
+                },
+              })
+              .catch((err: unknown) => {
+                console.warn("[chat] progress notification failed:", err);
+              });
+          }
+        });
 
-      // Wait for the stream to fully complete.
-      await stream.finalMessage();
+        // Wait for the stream to fully complete.
+        await stream.finalMessage();
 
-      // 5. Persist assistant reply (using the fully accumulated text).
-      agent.sqlStorage.exec(
-        `INSERT INTO founder_messages (conversation_id, role, content, ts)
-         VALUES (?, ?, ?, ?)`,
-        conversationId,
-        "assistant",
-        acc,
-        Date.now(),
-      );
+        // 6. Persist assistant reply (using the fully accumulated text).
+        agent.sqlStorage.exec(
+          `INSERT INTO founder_messages (conversation_id, role, content, ts)
+           VALUES (?, ?, ?, ?)`,
+          conversationId,
+          "assistant",
+          acc,
+          Date.now(),
+        );
 
-      // 6. Return MCP result — the full text so non-streaming clients get it.
-      return {
-        content: [{ type: "text" as const, text: acc }],
-      };
+        // 7. Emit `turn_finish` (success). The web client uses this signal
+        // to flip the assistant bubble out of its streaming/spinner state.
+        await emitActivity(agent, {
+          conversationId,
+          parentTurnId,
+          runId: null,
+          sourceAgent: "cmo",
+          parentEventId: null,
+          kind: "turn_finish",
+          payload: {
+            kind: "turn_finish",
+            status: "ok",
+            durationMs: Date.now() - turnStartTs,
+          },
+        });
+
+        // 8. Return MCP result — the full text so non-streaming clients get it.
+        // `_meta.parentTurnId` lets the web client group child events
+        // (delegations, tool calls) under this assistant bubble.
+        return {
+          _meta: { parentTurnId },
+          content: [{ type: "text" as const, text: acc }],
+        };
+      } catch (err) {
+        // Emit `turn_finish` with error status BEFORE re-throwing so the
+        // feed shows the failed turn. Truncate errorMessage to keep
+        // payload_json small and avoid leaking long stack traces.
+        const errorMessage = (
+          err instanceof Error ? err.message : String(err)
+        ).slice(0, 200);
+        await emitActivity(agent, {
+          conversationId,
+          parentTurnId,
+          runId: null,
+          sourceAgent: "cmo",
+          parentEventId: null,
+          kind: "turn_finish",
+          payload: {
+            kind: "turn_finish",
+            status: "error",
+            durationMs: Date.now() - turnStartTs,
+            errorMessage,
+          },
+        });
+        throw err;
+      }
     },
   );
 }
