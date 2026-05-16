@@ -186,7 +186,7 @@ export function useTeamEvents(opts: UseTeamEventsOptions): UseTeamEventsResult {
 
       try {
         let acc = '';
-        const replyText = await client.chat(
+        const { text: replyText, parentTurnId } = await client.chat(
           convId,
           text,
           (chunk) => {
@@ -201,11 +201,18 @@ export function useTeamEvents(opts: UseTeamEventsOptions): UseTeamEventsResult {
         );
 
         // Final reconciliation: use the server's authoritative text and clear
-        // the streaming flag so the UI shows the stable finished state.
+        // the streaming flag so the UI shows the stable finished state. The
+        // server's `parentTurnId` (from MCP `_meta`) is attached to the
+        // assistant message's metadata so the team-desk UI can scope the
+        // ActivityTrail subscription to events emitted under this turn.
         setMessages((prev) =>
           prev.map((m) =>
             m.id === assistantId
-              ? { ...m, content: replyText, metadata: null }
+              ? {
+                  ...m,
+                  content: replyText,
+                  metadata: parentTurnId ? { parentTurnId } : null,
+                }
               : m,
           ),
         );

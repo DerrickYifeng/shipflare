@@ -13,6 +13,7 @@ import { registerListDraftsTool } from "./tools/list-drafts";
 import { registerProcessRepliesBatchTool } from "./tools/process-replies-batch";
 import { registerProcessPostsBatchTool } from "./tools/process-posts-batch";
 import { registerResearchRedditChannelsTool } from "./tools/research-reddit-channels";
+import { registerPingTool } from "./tools/ping";
 
 interface SmmState {
   lastWakeAt: number;
@@ -59,6 +60,14 @@ export class SocialMediaMgr extends McpAgent<Env, SmmState, McpProps> {
   get bindings(): Env {
     return this.env;
   }
+  /**
+   * Expose the DO state's `waitUntil` to tool-registration modules so they
+   * can fire-and-forget telemetry through `forwardActivityToCmo` /
+   * `withSubAgentToolTracing` without blocking tool execution.
+   */
+  get runtimeCtx(): { waitUntil: (p: Promise<unknown>) => void } {
+    return this.ctx;
+  }
 
   async onStart(props?: McpProps): Promise<void> {
     // Schema bootstrap runs BEFORE `super.onStart()` so that
@@ -85,6 +94,7 @@ export class SocialMediaMgr extends McpAgent<Env, SmmState, McpProps> {
     registerProcessRepliesBatchTool(this);
     registerProcessPostsBatchTool(this);
     registerResearchRedditChannelsTool(this); // S4 complete
+    registerPingTool(this);
   }
 
   /**

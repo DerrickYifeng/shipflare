@@ -5,6 +5,7 @@ import type { Env } from "../../index";
 import { applyHogSchema } from "./schema";
 import { registerStrategicPathTool } from "./tools/generate-strategic-path";
 import { registerAuditTool } from "./tools/audit-plan";
+import { registerPingTool } from "./tools/ping";
 
 interface HogState {
   lastWakeAt: number;
@@ -46,6 +47,14 @@ export class HeadOfGrowth extends McpAgent<Env, HogState, McpProps> {
   get bindings(): Env {
     return this.env;
   }
+  /**
+   * Expose the DO state's `waitUntil` to tool-registration modules so they
+   * can fire-and-forget telemetry through `forwardActivityToCmo` /
+   * `withSubAgentToolTracing` without blocking tool execution.
+   */
+  get runtimeCtx(): { waitUntil: (p: Promise<unknown>) => void } {
+    return this.ctx;
+  }
 
   async onStart(props?: McpProps): Promise<void> {
     // Schema bootstrap runs BEFORE `super.onStart()` so that
@@ -69,6 +78,7 @@ export class HeadOfGrowth extends McpAgent<Env, HogState, McpProps> {
     this._toolsRegistered = true;
     registerStrategicPathTool(this);
     registerAuditTool(this);
+    registerPingTool(this);
   }
 
   /**

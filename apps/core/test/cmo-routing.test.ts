@@ -152,4 +152,25 @@ describe("Worker /agents/<role>/<userId>/mcp routing", () => {
     );
     expect(res.status).toBe(404);
   });
+
+  it("returns 403 when an activity-scoped token is replayed at /mcp", async () => {
+    // Regression: /api/cmo-ws-token mints scope:'activity' for the activity
+    // WS path. Without a scope check here, an exfiltrated activity token
+    // could be replayed for a full MCP session, defeating the scope
+    // separation CMO.onConnect promises.
+    const token = await signJwt(
+      { userId: "scope-user-1", scope: "activity" },
+      SECRET,
+      60,
+    );
+    const res = await SELF.fetch(
+      "https://example.com/agents/cmo/scope-user-1/mcp",
+      {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}` },
+      },
+    );
+    expect(res.status).toBe(403);
+    expect(await res.text()).toBe("token scope not valid for mcp");
+  });
 });

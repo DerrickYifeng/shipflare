@@ -37,6 +37,21 @@ interface ToolContentBlock {
 interface CallToolResultLike {
   content?: ToolContentBlock[] | unknown;
   isError?: boolean;
+  _meta?: { parentTurnId?: string } & Record<string, unknown>;
+}
+
+/**
+ * Reply envelope returned by {@link CmoClient.chat}. Carries the full
+ * assistant text plus the synthetic `parentTurnId` minted by the CMO chat
+ * tool (`_meta.parentTurnId`) so the team-desk UI can scope its
+ * `useCmoActivity` feed to events emitted under this turn.
+ *
+ * `parentTurnId` is `null` only when the server omitted `_meta` (older
+ * CMO builds, or future tool variants that don't emit activity).
+ */
+export interface CmoChatReply {
+  text: string;
+  parentTurnId: string | null;
 }
 
 /**
@@ -67,7 +82,10 @@ export class CmoClient {
   }
 
   /**
-   * Send a founder message to the CMO. Returns the full assistant reply.
+   * Send a founder message to the CMO. Returns the full assistant reply
+   * along with the `parentTurnId` minted by the CMO chat tool — callers
+   * use that id to scope an activity feed (see `useCmoActivity`) to the
+   * events emitted under this single turn.
    *
    * When `onChunk` is provided, the client passes a `progressToken` so the
    * server will emit `notifications/progress` notifications for each text
@@ -75,14 +93,17 @@ export class CmoClient {
    * arrives, enabling a streaming UI. The returned promise still resolves
    * with the complete authoritative reply from the tool result.
    *
-   * Callers without `onChunk` receive the full reply in one shot — backward
-   * compatible with all existing call sites.
+   * Callers without `onChunk` receive the full reply in one shot.
+   *
+   * `parentTurnId` is `null` only when the server omitted `_meta` (older
+   * CMO builds). New code should treat that as "activity feed disabled
+   * for this turn".
    */
   async chat(
     conversationId: string,
     message: string,
     onChunk?: (chunk: string) => void,
-  ): Promise<string> {
+  ): Promise<CmoChatReply> {
     if (!this.client) {
       throw new Error("CmoClient.chat called before connect()");
     }
@@ -100,7 +121,12 @@ export class CmoClient {
           }
         : undefined,
     )) as CallToolResultLike;
-    return extractText(result);
+    const text = extractText(result);
+    const parentTurnId =
+      typeof result._meta?.parentTurnId === "string"
+        ? result._meta.parentTurnId
+        : null;
+    return { text, parentTurnId };
   }
 
   /**

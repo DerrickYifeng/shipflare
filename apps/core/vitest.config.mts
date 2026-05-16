@@ -14,6 +14,19 @@ export default defineConfig({
   plugins: [
     cloudflareTest({
       wrangler: { configPath: "./wrangler.jsonc" },
+      // Test-only bindings layered over wrangler.jsonc. `STRATEGIC_PATH_FIXTURE`
+      // is the env-flag that gates fixture mode in `onboarding-routes.ts` —
+      // we set it here so `strategic-path-activity.test.ts` doesn't have to
+      // pass `_test_fixture` through the request body (which was the
+      // trust-boundary leak the body-flag opened: any authenticated browser
+      // could spread the same flag through the web proxy and force core to
+      // skip the LLM call + schema validation). Production never sets this
+      // binding.
+      miniflare: {
+        bindings: {
+          STRATEGIC_PATH_FIXTURE: "1",
+        },
+      },
     }),
   ],
   test: {

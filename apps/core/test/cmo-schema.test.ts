@@ -29,7 +29,7 @@ import type { CMO } from "../src/agents/cmo/CMO";
  */
 
 describe("CMO schema", () => {
-  it("applies all 11 tables on onStart", async () => {
+  it("applies all 12 tables on onStart", async () => {
     const stub = env.CMO.getByName("schema-test-user");
     await runInDurableObject(stub, async (_instance: CMO, state) => {
       applyCmoSchema(state.storage.sql);
@@ -47,6 +47,7 @@ describe("CMO schema", () => {
         .map((r) => r.name);
 
       expect(tables).toEqual([
+        "activity_events",
         "approval_queue",
         "conversations",
         "cross_conversation_memory",

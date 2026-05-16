@@ -10,19 +10,39 @@
 // using userId so the token never crosses the service binding.
 
 import { z } from "zod";
-import { strategicPathSchema, type StrategicPath } from "@shipflare/shared";
+import {
+  strategicPathSchema,
+  type StrategicPath,
+  type ActivityEventInput,
+} from "@shipflare/shared";
 import { createDb, user as userTable, eq } from "@shipflare/db";
 import { scrapeWebsite, analyzeWebsite } from "./lib/onboarding/scraper";
 import { auditSeo } from "./lib/onboarding/seo-audit";
 import { getAnthropic } from "./lib/onboarding/anthropic";
 import { getGitHubToken, listUserRepos } from "./lib/onboarding/github";
 import { scanRepo } from "./lib/onboarding/code-scanner";
+import { forwardActivityToCmo } from "./lib/forward-activity";
+import type { Env } from "./index";
 
 // ─── Env type (only what this file needs) ──────────────────────────────────
 
+// Subset of the full Worker `Env` consumed by this file. We include the
+// CMO binding because Task 9 forwards activity events from the
+// strategic-path SSE handler to the user's CMO DO via the shared
+// `forwardActivityToCmo` helper (spec 2026-05-15-agent-activity-feed §Task 9).
+//
+// `STRATEGIC_PATH_FIXTURE` is the trust-boundary-safe replacement for the
+// previous body-flag (`_test_fixture`). When `"1"`, the strategic-path
+// handler short-circuits Anthropic and emits a deterministic 3-chunk
+// schema-valid path so `strategic-path-activity.test.ts` can exercise the
+// emit path without a real API key. Only test config sets this binding;
+// production never does, so an authenticated browser can no longer force
+// fixture mode by spreading `_test_fixture: true` through the web proxy.
 interface OnboardingEnv {
   ANTHROPIC_API_KEY?: string;
+  STRATEGIC_PATH_FIXTURE?: string;
   DB: D1Database;
+  CMO: Env["CMO"];
 }
 
 // ─── Input schemas ──────────────────────────────────────────────────────────
@@ -64,6 +84,66 @@ const strategicPathInputSchema = z.object({
     .nullable()
     .optional(),
   usersBucket: z.enum(["<100", "100-1k", "1k-10k", "10k+"]).nullable().optional(),
+  // Task 9 (spec 2026-05-15-agent-activity-feed): when the caller passes a
+  // `runId`, the SSE handler forwards `subagent_dispatch` /
+  // `subagent_text_delta` / `subagent_finish` activity events to the user's
+  // CMO DO keyed by this id. Optional so legacy callers (old web builds)
+  // keep working — without a `runId` the forward becomes a no-op.
+  runId: z.string().uuid().optional(),
+});
+
+// ─── Test fixture (env-gated) ──────────────────────────────────────────────
+
+// Minimal schema-valid strategic path emitted when env.STRATEGIC_PATH_FIXTURE
+// is "1". Built once at module load so the JSON.stringify happens once.
+// `narrative` is padded to clear `min(200)`; milestones/thesisArc/
+// contentPillars/channelMix/phaseGoals satisfy strategicPathSchema. We
+// re-`parse()` this with the same schema as production so the downstream
+// `/api/onboarding/commit` invariant — that `path` is schema-valid — still
+// holds for fixture-mode runs.
+const FIXTURE_STRATEGIC_PATH_JSON: string = JSON.stringify({
+  narrative:
+    "Fixture narrative for tests. " +
+    "This deterministic narrative pads past the 200-character minimum so the strategic path schema accepts it. " +
+    "It exists only because the strategic-path SSE handler short-circuits Anthropic when STRATEGIC_PATH_FIXTURE is set in env.",
+  milestones: [
+    {
+      atDayOffset: 7,
+      title: "Fixture milestone 1",
+      successMetric: "fixture metric 1",
+      phase: "foundation",
+    },
+    {
+      atDayOffset: 14,
+      title: "Fixture milestone 2",
+      successMetric: "fixture metric 2",
+      phase: "momentum",
+    },
+    {
+      atDayOffset: 30,
+      title: "Fixture milestone 3",
+      successMetric: "fixture metric 3",
+      phase: "compound",
+    },
+  ],
+  thesisArc: [
+    {
+      weekStart: "2026-01-05",
+      theme: "fixture theme",
+      angleMix: ["story"],
+    },
+  ],
+  contentPillars: ["pillar a", "pillar b", "pillar c"],
+  channelMix: {
+    x: {
+      repliesPerDay: 5,
+      preferredHours: [9, 13, 17],
+      preferredCommunities: null,
+    },
+  },
+  phaseGoals: {
+    foundation: "fixture foundation goal",
+  },
 });
 
 // ─── Strategic path planner prompt ─────────────────────────────────────────
@@ -251,15 +331,23 @@ export async function handleOnboardingInternal(
   request: Request,
   env: OnboardingEnv,
   url: URL,
+  ctx: ExecutionContext,
 ): Promise<Response> {
   if (request.headers.get("x-shipflare-internal") !== "1") {
     return new Response("forbidden", { status: 403 });
   }
-  if (!env.ANTHROPIC_API_KEY) {
+  // The strategic-path SSE handler skips this gate when env.STRATEGIC_PATH_FIXTURE
+  // is "1" (the fixture path never calls Anthropic). All other routes still
+  // require the key — the per-route fixture-mode check below covers
+  // strategic-path-activity.test.ts running against an empty `.dev.vars`.
+  const path = url.pathname;
+  if (
+    !env.ANTHROPIC_API_KEY &&
+    path !== "/internal/onboarding/strategic-path"
+  ) {
     return Response.json({ error: "anthropic_not_configured" }, { status: 503 });
   }
 
-  const path = url.pathname;
   const db = createDb(env.DB);
 
   // ── GET /internal/onboarding/github-repos?userId=... ────────────────────
@@ -375,6 +463,16 @@ export async function handleOnboardingInternal(
         { status: 400 },
       );
     }
+    const fixtureMode = env.STRATEGIC_PATH_FIXTURE === "1";
+    // Non-fixture requests still require a real API key — bail before we
+    // open the SSE stream so the client gets a clean 503 instead of an
+    // SSE `error` event.
+    if (!fixtureMode && !env.ANTHROPIC_API_KEY) {
+      return Response.json(
+        { error: "anthropic_not_configured" },
+        { status: 503 },
+      );
+    }
     return sseStream(async (send) => {
       const launchDate = body.launchDate ? new Date(body.launchDate) : null;
       const launchedAt = body.launchedAt ? new Date(body.launchedAt) : null;
@@ -410,28 +508,178 @@ export async function handleOnboardingInternal(
         PLAN_TIMEOUT_MS,
       );
 
+      // Activity-forwarding helper. No-op when `runId` is missing
+      // (back-compat with old web builds that don't pass one). `userId`
+      // is required by the input schema so we don't need a separate
+      // guard for it. The full `Env` shape isn't visible from this
+      // file's `OnboardingEnv` (it only declares what onboarding needs),
+      // so we cast at the binding boundary — `forwardActivityToCmo`
+      // only touches `env.CMO` which is part of `OnboardingEnv`.
+      const runId = body.runId ?? null;
+      const forward = runId
+        ? (evt: ActivityEventInput): void =>
+            forwardActivityToCmo(ctx, env as unknown as Env, body.userId, evt)
+        : (): void => undefined;
+
+      const dispatchStart = Date.now();
+      forward({
+        conversationId: null,
+        parentTurnId: null,
+        runId,
+        parentEventId: null,
+        sourceAgent: "strategic-planner",
+        kind: "subagent_dispatch",
+        payload: {
+          kind: "subagent_dispatch",
+          subAgent: "strategic-planner",
+          promptPreview: `Plan for ${body.product?.name ?? "product"}`,
+        },
+      });
+
       try {
-        const client = getAnthropic(env.ANTHROPIC_API_KEY!);
-        const response = await client.messages.create(
-          {
-            model: "claude-sonnet-4-6",
-            max_tokens: 4096,
-            system: SYSTEM_PROMPT,
-            messages: [{ role: "user", content: userMessage }],
-          },
-          { signal: abortController.signal },
-        );
-        const text =
-          response.content[0]?.type === "text" ? response.content[0].text : "";
+        let text = "";
+        if (fixtureMode) {
+          // Fixture path — emit a deterministic 3-chunk sequence so tests
+          // can assert ordering without burning Anthropic budget. The
+          // concatenated output is the schema-valid FIXTURE_STRATEGIC_PATH_JSON
+          // so `strategicPathSchema.parse()` below still runs and the
+          // downstream `/api/onboarding/commit` invariant is preserved.
+          const total = FIXTURE_STRATEGIC_PATH_JSON;
+          const third = Math.floor(total.length / 3);
+          const chunks = [
+            total.slice(0, third),
+            total.slice(third, third * 2),
+            total.slice(third * 2),
+          ];
+          for (const chunk of chunks) {
+            text += chunk;
+            forward({
+              conversationId: null,
+              parentTurnId: null,
+              runId,
+              parentEventId: null,
+              sourceAgent: "strategic-planner",
+              kind: "subagent_text_delta",
+              payload: {
+                kind: "subagent_text_delta",
+                subAgent: "strategic-planner",
+                text: chunk,
+              },
+            });
+          }
+        } else {
+          const client = getAnthropic(env.ANTHROPIC_API_KEY!);
+          const stream = client.messages.stream(
+            {
+              model: "claude-sonnet-4-6",
+              max_tokens: 4096,
+              system: SYSTEM_PROMPT,
+              messages: [{ role: "user", content: userMessage }],
+            },
+            { signal: abortController.signal },
+          );
+
+          // Batched text-delta forwarding — flush on the next delta
+          // after the buffer hits 256 chars OR 200 ms have elapsed since
+          // the last flush. There is no setInterval watchdog: late
+          // deltas trigger the time-based path naturally, and the final
+          // `flush()` after `stream.finalMessage()` drains any tail
+          // smaller than 256 chars. Keeps the activity feed snappy
+          // without spraying a forward per token.
+          let buf = "";
+          let lastFlush = Date.now();
+          const flush = (): void => {
+            if (!buf) return;
+            forward({
+              conversationId: null,
+              parentTurnId: null,
+              runId,
+              parentEventId: null,
+              sourceAgent: "strategic-planner",
+              kind: "subagent_text_delta",
+              payload: {
+                kind: "subagent_text_delta",
+                subAgent: "strategic-planner",
+                text: buf,
+              },
+            });
+            buf = "";
+            lastFlush = Date.now();
+          };
+          stream.on("text", (delta: string) => {
+            text += delta;
+            buf += delta;
+            if (buf.length >= 256 || Date.now() - lastFlush >= 200) {
+              flush();
+            }
+          });
+          await stream.finalMessage();
+          flush();
+        }
+
         const m = text.match(/\{[\s\S]*\}/);
         if (!m) {
+          forward({
+            conversationId: null,
+            parentTurnId: null,
+            runId,
+            parentEventId: null,
+            sourceAgent: "strategic-planner",
+            kind: "subagent_finish",
+            payload: {
+              kind: "subagent_finish",
+              subAgent: "strategic-planner",
+              status: "error",
+              durationMs: Date.now() - dispatchStart,
+              summary: "no_json_in_response",
+            },
+          });
           send({ type: "error", error: "no_json_in_response" });
           return;
         }
         const raw = JSON.parse(m[0]) as unknown;
+        // Fixture mode emits FIXTURE_STRATEGIC_PATH_JSON which IS
+        // schema-valid, so the same `strategicPathSchema.parse()` runs
+        // on both branches. This preserves the downstream invariant
+        // that `path` is validated before reaching
+        // `/api/onboarding/commit` — the trust-boundary fix from the
+        // Task 9 code review.
         const strategicPath: StrategicPath = strategicPathSchema.parse(raw);
+        forward({
+          conversationId: null,
+          parentTurnId: null,
+          runId,
+          parentEventId: null,
+          sourceAgent: "strategic-planner",
+          kind: "subagent_finish",
+          payload: {
+            kind: "subagent_finish",
+            subAgent: "strategic-planner",
+            status: "ok",
+            durationMs: Date.now() - dispatchStart,
+            summary: fixtureMode ? "plan ready (fixture)" : "plan ready",
+          },
+        });
         send({ type: "strategic_done", path: strategicPath });
       } catch (err) {
+        forward({
+          conversationId: null,
+          parentTurnId: null,
+          runId,
+          parentEventId: null,
+          sourceAgent: "strategic-planner",
+          kind: "subagent_finish",
+          payload: {
+            kind: "subagent_finish",
+            subAgent: "strategic-planner",
+            status: "error",
+            durationMs: Date.now() - dispatchStart,
+            summary:
+              err instanceof Error
+                ? err.message.slice(0, 200)
+                : String(err).slice(0, 200),
+          },
+        });
         if (abortController.signal.aborted) {
           send({ type: "error", error: "planner_timeout" });
           return;

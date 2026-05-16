@@ -132,6 +132,21 @@ const EMPLOYEE_CLASSES: Record<string, any> = {
 const MCP_ROUTE = /^\/agents\/([a-z-]+)\/([^/]+)\/mcp(?:\/|$)/;
 
 /**
+ * `/agents/cmo/<userId>` (no /mcp suffix) — Browser activity-feed WebSocket.
+ *
+ * Task 6 (spec 2026-05-15): The web client opens this WS after fetching a
+ * short-lived activity-scoped JWT from `/api/cmo-ws-token`. The token is
+ * passed in the `?token=` query string (browsers can't set Authorization
+ * headers on `new WebSocket()`). CMO's `onConnect` lifecycle verifies the
+ * token and closes the socket with 1008 on any auth failure.
+ *
+ * The trailing `$` (no further path) is what discriminates this from the
+ * `/mcp[/...]` route — the regex order in `routeRequest()` checks MCP_ROUTE
+ * first so streamable-HTTP handshakes still flow through `streamableHttpProxy`.
+ */
+const CMO_WS_ROUTE = /^\/agents\/cmo\/([^/]+)$/;
+
+/**
  * `/external/agents/<role>/<userId>/mcp[/...]` — Phase 2 external MCP entry.
  *
  * Long-lived (30d) tokens signed with `EXTERNAL_MCP_SECRET` (distinct from
@@ -404,7 +419,7 @@ async function routeRequest(
   }
 
   if (url.pathname.startsWith("/internal/onboarding/")) {
-    return handleOnboardingInternal(request, env, url);
+    return handleOnboardingInternal(request, env, url, ctx);
   }
 
   const externalMatch = EXTERNAL_MCP_ROUTE.exec(url.pathname);
@@ -425,7 +440,41 @@ async function routeRequest(
     return handleMcpRequest(request, env, role!, userId!);
   }
 
+  const wsMatch = CMO_WS_ROUTE.exec(url.pathname);
+  if (wsMatch) {
+    const [, userId] = wsMatch;
+    return handleCmoWsRequest(request, env, userId!);
+  }
+
   return new Response("not found", { status: 404 });
+}
+
+/**
+ * Bare WebSocket route for the browser activity feed.
+ *
+ * Auth happens INSIDE the DO via CMO.onConnect (Task 6) — the partyserver
+ * `Server.fetch` upgrades to WS first, then calls `onConnect`, which reads
+ * the `?token=` query string and closes the socket with 1008 on failure.
+ * Routing this through the worker just forwards the request to the right
+ * per-user DO instance (keyed by `transportName(userId)` so the bare-WS
+ * lookup lands on the same DO as the /mcp transport).
+ */
+async function handleCmoWsRequest(
+  request: Request,
+  env: Env,
+  userId: string,
+): Promise<Response> {
+  // Reject non-WS traffic early — saves a DO spin-up. The browser always
+  // sends `Upgrade: websocket` when opening a WebSocket; anything else is
+  // a misconfigured probe or a curl call.
+  if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
+    return new Response("expected websocket upgrade", { status: 426 });
+  }
+  const stub = env.CMO.get(env.CMO.idFromName(transportName(userId)));
+  // Forward the request verbatim so `onConnect`'s ctx.request.url retains
+  // the `?token=...` query string AND the original `/agents/cmo/<userId>`
+  // path (CMO uses pathname to discriminate this from /mcp transport WS).
+  return stub.fetch(request);
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -517,6 +566,17 @@ async function handleMcpRequest(
   }
   if (claims["userId"] !== userId) {
     return new Response("token userId mismatch", { status: 403 });
+  }
+  // Scope-claim guard: closes the cross-replay between /api/cmo-ws-token
+  // (mints scope:'activity' for the activity WS) and /api/mcp-token (no
+  // scope today). CMO.onConnect already requires scope === 'activity' on
+  // the WS path, but until this check, an exfiltrated activity token
+  // could be replayed here for a full MCP session. We accept undefined
+  // (back-compat with current /api/mcp-token) or 'mcp' (forward-compat
+  // when we add it) and reject anything else.
+  const scope = (claims as { scope?: unknown }).scope;
+  if (scope !== undefined && scope !== "mcp") {
+    return new Response("token scope not valid for mcp", { status: 403 });
   }
 
   return streamableHttpProxy(request, env.CMO, userId, { userId });

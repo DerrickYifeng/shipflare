@@ -1,17 +1,23 @@
 import { McpAgent } from "agents/mcp";
+import type { Connection, ConnectionContext } from "agents";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
+  ActivityEventInputSchema,
   ROLE_REGISTRY,
   mcpServerName,
   type McpProps,
   type RoleSlug,
 } from "@shipflare/shared";
 import type { Env } from "../../index";
+import { emitActivity } from "../../lib/activity";
+import { verifyJwt } from "../../lib/jwt";
+import { transportName } from "../../lib/do-name";
 import { applyCmoSchema } from "./schema";
 import { registerChatTool } from "./tools/chat";
 import { registerConversationTools } from "./tools/conversation";
 import { registerRosterTools } from "./tools/roster";
 import { registerDelegationTools } from "./tools/delegate";
+import { registerGetRecentActivityTool } from "./tools/get-recent-activity";
 import { registerSharedStateTools } from "./tools/shared-state";
 import {
   sendWebPush,
@@ -93,6 +99,82 @@ export class CMO extends McpAgent<Env, CMOState, McpProps> {
     await super.onStart(props);
     // S2.3 — connect to each hired employee via in-process MCP RPC.
     await this.connectEmployees();
+  }
+
+  /**
+   * Task 6 (spec 2026-05-15) — gate WebSocket connections.
+   *
+   * Two kinds of WS terminate on this DO:
+   *
+   *  1. **MCP streamable-HTTP transport** — `streamableHttpProxy` (Worker
+   *     entry) opens a synthetic WS with `cf-mcp-method`/`cf-mcp-message`
+   *     headers on a URL ending in `/mcp[/...]`. McpAgent's own onConnect
+   *     handles the transport handshake; we MUST delegate to it unchanged
+   *     or every chat message breaks.
+   *
+   *  2. **Browser activity-feed WS** — the web client opens
+   *     `wss://core/agents/cmo/<userId>?token=<jwt>` after fetching a
+   *     short-lived activity-scoped JWT from `/api/cmo-ws-token`. We
+   *     verify the token here and close with WebSocket code 1008
+   *     (Policy Violation) on any failure mode.
+   *
+   * Why query-string token, not Authorization header: browsers don't allow
+   * custom headers on `new WebSocket()`. The token is short-lived (60s)
+   * so leakage via URL is bounded; the activity scope (`scope: 'activity'`)
+   * ensures even a leak can't be replayed against the MCP path.
+   *
+   * Why derive expectedUserId from `this.name` rather than `this.props`:
+   * a bare WS upgrade doesn't go through the MCP transport's prop-loading
+   * path, so `this.props` is undefined here. The DO's name was set by the
+   * Worker route as `transportName(userId)`, so we strip that prefix to
+   * recover the canonical userId and check the JWT claim against it.
+   */
+  async onConnect(conn: Connection, ctx: ConnectionContext): Promise<void> {
+    const url = new URL(ctx.request.url);
+    // MCP transport sessions terminate on `/mcp[/...]` paths. Anything else
+    // is the activity-feed WS that needs our auth check.
+    const isMcpTransport = /\/mcp(?:\/|$)/.test(url.pathname);
+    if (isMcpTransport) {
+      return super.onConnect(conn, ctx);
+    }
+
+    const token = url.searchParams.get("token");
+    if (!token) {
+      conn.close(1008, "missing token");
+      return;
+    }
+
+    let claims: Record<string, unknown>;
+    try {
+      claims = await verifyJwt(token, this.bindings.MCP_JWT_SECRET);
+    } catch {
+      conn.close(1008, "invalid token");
+      return;
+    }
+
+    const scope = claims["scope"];
+    const userId = claims["userId"];
+    if (scope !== "activity" || typeof userId !== "string") {
+      conn.close(1008, "unauthorized");
+      return;
+    }
+
+    // Bare-WS connections don't auto-populate `this.props`. The DO's name
+    // is `transportName(userId)` (set by the Worker route), so recover the
+    // canonical userId from `this.name` and cross-check the JWT claim
+    // against it. This catches a JWT minted for user A being replayed
+    // against user B's DO.
+    const prefix = transportName("");
+    const expectedUserId = this.name.startsWith(prefix)
+      ? this.name.slice(prefix.length)
+      : this.name;
+    if (userId !== expectedUserId) {
+      conn.close(1008, "userId mismatch");
+      return;
+    }
+    // Authenticated. The Connection is already accepted by partyserver's
+    // Server.fetch — nothing else to do here. Outgoing activity events are
+    // delivered via `broadcast()` in `emitActivity()` (Task 4).
   }
 
   /**
@@ -186,6 +268,10 @@ export class CMO extends McpAgent<Env, CMOState, McpProps> {
     //   truth; employees write to it ONLY via these tools).
     registerDelegationTools(this);
     registerSharedStateTools(this);
+    // Task 5 (spec 2026-05-15): activity-feed seed-replay tool. The web
+    // client calls this on mount + after WS reconnect to backfill the
+    // feed before the live stream takes over.
+    registerGetRecentActivityTool(this);
   }
 
   /**
@@ -224,6 +310,9 @@ export class CMO extends McpAgent<Env, CMOState, McpProps> {
     }
     if (url.pathname === "/internal/commit-strategic-path") {
       return this.handleCommitStrategicPath(request);
+    }
+    if (url.pathname === "/internal/log-activity") {
+      return this.handleLogActivity(request);
     }
 
     // Fall through to McpAgent's default fetch (handles /mcp, WebSocket
@@ -489,6 +578,41 @@ export class CMO extends McpAgent<Env, CMOState, McpProps> {
       body.generatedBy,
     );
     return Response.json({ id, version });
+  }
+
+  /**
+   * Cross-DO activity ingest — spec 2026-05-15-agent-activity-feed-design §5.2.
+   *
+   * Sub-agents (HoG, SMM, onboarding, etc.) fire-and-forget POST
+   * `ActivityEventInput` payloads here via Service Binding. We validate
+   * with the shared Zod schema, then route through the single sanctioned
+   * writer (`emitActivity`) so the row lands in `activity_events` AND
+   * the WebSocket broadcast fans out to every connected /activity client.
+   *
+   * Body: `ActivityEventInput` (JSON).
+   *
+   * Returns 204 on success, 400 on validation failure, 405 on non-POST.
+   * The `x-shipflare-internal: 1` gate is enforced by the outer `fetch()`
+   * pre-check (lines 205-208) — no need to repeat it here.
+   */
+  private async handleLogActivity(request: Request): Promise<Response> {
+    if (request.method !== "POST") {
+      return new Response("method not allowed", { status: 405 });
+    }
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return new Response("invalid json", { status: 400 });
+    }
+    const parsed = ActivityEventInputSchema.safeParse(body);
+    if (!parsed.success) {
+      return new Response(`invalid event: ${parsed.error.message}`, {
+        status: 400,
+      });
+    }
+    await emitActivity(this, parsed.data);
+    return new Response(null, { status: 204 });
   }
 
   /**
