@@ -24,6 +24,12 @@
 // the new token whenever the hook refreshes it. The seed-replay effect
 // also depends on `token`, so it re-runs after every reconnect to
 // backfill any events that fired while the socket was down.
+//
+// `isConnected` reflects the *actual* WebSocket state, not just token
+// presence: we keep a `wsOpen` boolean driven by `useAgent`'s
+// `onOpen`/`onClose`/`onError` callbacks. This lets consumers
+// (PlanBuildActivity, indicators, etc.) render a "connecting..." state
+// during the handshake or after a transient disconnect.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAgent } from 'agents/react';
@@ -40,7 +46,24 @@ export type CmoActivityFilter =
 
 export interface UseCmoActivityResult {
   events: ActivityEvent[];
+  /**
+   * `true` only when BOTH:
+   *   - a WS auth token has been successfully fetched, AND
+   *   - the underlying WebSocket has fired `open` and has not since
+   *     fired `close` / `error`.
+   *
+   * Consumers can rely on `isConnected === false` to render a
+   * "connecting..." indicator during the handshake or after a
+   * transient disconnect. The hook auto-reconnects via the Agents
+   * SDK; this flag flips back to `true` once the new socket opens.
+   */
   isConnected: boolean;
+  /**
+   * Token-fetch error message, or `null` while the token is healthy.
+   * WS-level transport errors are not surfaced here -- the SDK
+   * handles them by auto-reconnecting; consumers see them indirectly
+   * via `isConnected` flipping to `false`.
+   */
   connectionError: string | null;
 }
 
@@ -101,6 +124,14 @@ export function useCmoActivity(
   const [token, setToken] = useState<string | null>(null);
   const [tokenError, setTokenError] = useState<string | null>(null);
   const [events, setEvents] = useState<ActivityEvent[]>([]);
+
+  // Tracks the underlying WebSocket's open/closed state. The Agents SDK
+  // (`useAgent`) returns a PartySocket whose `readyState` getter reports
+  // the live state, but reading a getter doesn't trigger React renders.
+  // Instead we drive a piece of React state from the `onOpen`/`onClose`/
+  // `onError` callbacks so `isConnected` flips reactively on handshake
+  // success and transient disconnects.
+  const [wsOpen, setWsOpen] = useState<boolean>(false);
 
   // `useRef` so the seen-id set survives re-renders without being part
   // of state (we don't want re-renders just because we logged an id).
@@ -165,6 +196,17 @@ export function useCmoActivity(
     // no `?token=` slips through unauthenticated.
     query: async () => ({ token: token ?? null }),
     queryDeps: [token],
+    onOpen: () => {
+      setWsOpen(true);
+    },
+    onClose: () => {
+      setWsOpen(false);
+    },
+    onError: () => {
+      // The SDK will auto-reconnect; flip `isConnected` to false so
+      // consumers can show a "reconnecting" indicator in the meantime.
+      setWsOpen(false);
+    },
     onMessage: (msg: MessageEvent<string>) => {
       let parsed: ActivityEvent;
       try {
@@ -263,9 +305,12 @@ export function useCmoActivity(
   return useMemo(
     () => ({
       events,
-      isConnected: token !== null && tokenError === null,
+      // Require BOTH a healthy token AND an open WebSocket. The token
+      // alone only proves we successfully minted a JWT; the WS may
+      // still be mid-handshake or recovering from a transient drop.
+      isConnected: token !== null && tokenError === null && wsOpen,
       connectionError: tokenError,
     }),
-    [events, token, tokenError],
+    [events, token, tokenError, wsOpen],
   );
 }

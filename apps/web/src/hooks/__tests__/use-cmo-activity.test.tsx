@@ -37,6 +37,14 @@ const testHandles = vi.hoisted(() => ({
     | { kind: "throw" }
     | { kind: "non-ok"; status: number }
     | null,
+  onOpen: null as (() => void) | null,
+  onClose: null as (() => void) | null,
+  onError: null as (() => void) | null,
+  // When true (default), the mock auto-fires `onOpen` on the next
+  // microtask so tests that predate the WS-state contract continue to
+  // observe `isConnected === true` once the token resolves. Tests
+  // inspecting the pre-open state set this to false before rendering.
+  autoFireOpen: true,
 }));
 
 function pushMessage(data: string): void {
@@ -50,8 +58,33 @@ function pushMessage(data: string): void {
 }
 
 vi.mock("agents/react", () => ({
-  useAgent: (opts: { onMessage?: (msg: MessageEvent<string>) => void }) => {
+  useAgent: (opts: {
+    onMessage?: (msg: MessageEvent<string>) => void;
+    onOpen?: (event: Event) => void;
+    onClose?: (event: CloseEvent) => void;
+    onError?: (event: Event) => void;
+  }) => {
     testHandles.captured = opts.onMessage ?? null;
+    testHandles.onOpen = opts.onOpen
+      ? () => opts.onOpen?.(new Event("open"))
+      : null;
+    testHandles.onClose = opts.onClose
+      ? () =>
+          opts.onClose?.(
+            new CloseEvent("close", { code: 1006, reason: "test" }),
+          )
+      : null;
+    testHandles.onError = opts.onError
+      ? () => opts.onError?.(new Event("error"))
+      : null;
+    if (testHandles.autoFireOpen) {
+      // Fire `open` on the next microtask so we don't call setState
+      // synchronously during the render that just called useAgent --
+      // that would trigger an infinite re-render loop. Mirrors the real
+      // SDK handshake which completes after the render cycle that
+      // mounted the socket.
+      queueMicrotask(() => opts.onOpen?.(new Event("open")));
+    }
     // No `stub` in the new world -- the hook talks to /api/cmo-activity
     // directly. We still return an object so any future hook code that
     // captures the return value doesn't trip on `undefined`.
@@ -71,6 +104,11 @@ vi.mock("@/auth-client", () => ({
 
 // `fetch` is global on happy-dom but we want a deterministic stub.
 beforeEach(() => {
+  // Reset WS callback handles + auto-fire flag between tests.
+  testHandles.autoFireOpen = true;
+  testHandles.onOpen = null;
+  testHandles.onClose = null;
+  testHandles.onError = null;
   // Default: one seed event for the activity endpoint.
   testHandles.activityResponse = {
     kind: "ok",
@@ -213,6 +251,40 @@ describe("useCmoActivity", () => {
     });
 
     expect(result.current.events).toHaveLength(1);
+  });
+
+  // ---- isConnected reflects WS state, not just token presence -----------
+  //
+  // The hook used to flip `isConnected` to `true` as soon as the JWT
+  // arrived, regardless of whether the WebSocket actually opened. Now
+  // it requires both: a healthy token AND useAgent firing `onOpen`.
+
+  it("keeps isConnected=false while WS is still handshaking (token alone is not enough)", async () => {
+    testHandles.autoFireOpen = false;
+    const { result } = renderHook(() =>
+      useCmoActivity({ conversationId: "c1" }),
+    );
+
+    // Wait until the token has been minted -- but the WS open event
+    // has NOT fired yet, so isConnected must stay false.
+    await waitFor(() => expect(testHandles.captured).not.toBeNull());
+
+    // Give any pending microtasks (token fetch resolve) a chance to flush.
+    await waitFor(() => expect(result.current.connectionError).toBeNull());
+    expect(result.current.isConnected).toBe(false);
+
+    // Now fire the WS `open` event -- isConnected flips to true.
+    act(() => {
+      testHandles.onOpen?.();
+    });
+    expect(result.current.isConnected).toBe(true);
+
+    // A subsequent close drops it back to false (transient disconnect /
+    // SDK auto-reconnect path).
+    act(() => {
+      testHandles.onClose?.();
+    });
+    expect(result.current.isConnected).toBe(false);
   });
 
   it("silently swallows seed-replay failure (live frames still flow)", async () => {
