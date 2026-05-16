@@ -10,6 +10,7 @@
 //    fill in manually.
 
 import { useState, type FormEvent } from 'react';
+import { authClient } from '@/auth-client';
 import { OnbButton } from './_shared/onb-button';
 import { OnbInput } from './_shared/onb-input';
 import { Field } from './_shared/field';
@@ -136,10 +137,13 @@ export function StageSource({
   };
 
   const connectGithub = () => {
-    // Existing /onboarding page's user already signed in via GitHub;
-    // if they hit `No GitHub account linked` they must re-auth via NextAuth.
-    const callbackUrl = encodeURIComponent('/onboarding');
-    window.location.href = `/api/auth/signin/github?callbackUrl=${callbackUrl}`;
+    // The CF app uses Better Auth, not NextAuth. Better Auth's
+    // /api/auth/sign-in/social endpoint is POST-only — a plain
+    // window.location.href GET 404s. Route through the react client.
+    void authClient.signIn.social({
+      provider: 'github',
+      callbackURL: '/onboarding',
+    });
   };
 
   const submitUrl = (event: FormEvent) => {
