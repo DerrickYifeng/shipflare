@@ -122,6 +122,10 @@ export function useCmoActivity(
   const userId = session?.data?.user?.id ?? null;
 
   const [token, setToken] = useState<string | null>(null);
+  // Host extracted from the wsUrl returned by /api/cmo-ws-token. The CMO DO
+  // lives on the core worker, not the web worker — useAgent must connect to
+  // the core origin, not window.location.host.
+  const [wsHost, setWsHost] = useState<string | null>(null);
   const [tokenError, setTokenError] = useState<string | null>(null);
   const [events, setEvents] = useState<ActivityEvent[]>([]);
 
@@ -160,6 +164,13 @@ export function useCmoActivity(
         const body = (await res.json()) as TokenResponse;
         if (cancelled) return;
         setToken(body.token);
+        if (body.wsUrl) {
+          try {
+            setWsHost(new URL(body.wsUrl).host);
+          } catch {
+            // Malformed wsUrl — fall back to same-origin
+          }
+        }
         setTokenError(null);
       } catch (err: unknown) {
         if (cancelled) return;
@@ -190,12 +201,18 @@ export function useCmoActivity(
   useAgent({
     agent: 'cmo',
     name: userId ?? '__skip__',
+    // Route the WebSocket to the core worker, not the web worker. The CMO DO
+    // lives in apps/core; apps/web has no /agents/* handler. wsHost is null
+    // until the token fetch resolves — useAgent skips opening the socket
+    // while name is '__skip__' (no userId yet), so the first real connection
+    // always uses the correct host.
+    host: wsHost ?? undefined,
     // The SDK signature is `() => Promise<QueryObject>` where
     // QueryObject = Record<string, string | null>. We surface `null`
     // when the token isn't ready yet -- the SDK drops null entries so
     // no `?token=` slips through unauthenticated.
     query: async () => ({ token: token ?? null }),
-    queryDeps: [token],
+    queryDeps: [token, wsHost],
     onOpen: () => {
       setWsOpen(true);
     },
@@ -305,12 +322,12 @@ export function useCmoActivity(
   return useMemo(
     () => ({
       events,
-      // Require BOTH a healthy token AND an open WebSocket. The token
-      // alone only proves we successfully minted a JWT; the WS may
-      // still be mid-handshake or recovering from a transient drop.
-      isConnected: token !== null && tokenError === null && wsOpen,
+      // Require a healthy token, a resolved wsHost (core worker URL), AND
+      // an open WebSocket. Without wsHost the socket is connecting to the
+      // wrong origin and will never receive events.
+      isConnected: token !== null && wsHost !== null && tokenError === null && wsOpen,
       connectionError: tokenError,
     }),
-    [events, token, tokenError, wsOpen],
+    [events, token, wsHost, tokenError, wsOpen],
   );
 }
