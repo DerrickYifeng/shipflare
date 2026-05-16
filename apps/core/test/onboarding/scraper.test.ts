@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { scrapeWebsite } from "../../src/lib/scraper";
+import { scrapeWebsite } from "../../src/lib/onboarding/scraper";
 
 describe("scrapeWebsite", () => {
   it("rejects single-label hostnames", async () => {

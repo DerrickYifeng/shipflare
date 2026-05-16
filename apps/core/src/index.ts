@@ -37,6 +37,7 @@
  */
 
 import { getAgentByName } from "agents";
+import { handleOnboardingInternal } from "./onboarding-routes";
 import { verifyJwt } from "./lib/jwt";
 import { validateExternalAccess } from "./lib/external-auth";
 import { transportName } from "./lib/do-name";
@@ -400,6 +401,10 @@ async function routeRequest(
 ): Promise<Response> {
   if (url.pathname === "/healthz") {
     return Response.json({ ok: true, ts: Date.now() });
+  }
+
+  if (url.pathname.startsWith("/internal/onboarding/")) {
+    return handleOnboardingInternal(request, env, url);
   }
 
   const externalMatch = EXTERNAL_MCP_ROUTE.exec(url.pathname);

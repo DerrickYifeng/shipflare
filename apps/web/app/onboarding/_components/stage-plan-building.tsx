@@ -16,7 +16,7 @@ import {
   type ToolProgressEvent,
 } from './_shared/synthesize-strategy-conversation';
 import { COPY } from './_copy';
-import type { StrategicPath } from '@/lib/strategic-path-schema';
+import type { StrategicPath } from '@shipflare/shared';
 import type { DraftState, ProductState } from './OnboardingFlow';
 
 const PLAN_TIMEOUT_MS = 180_000;

@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ExtractedProfile } from '@/lib/types/onboarding';
-import type { StrategicPath } from '@/lib/strategic-path-schema';
+import type { StrategicPath } from '@shipflare/shared';
 import { ProgressRail } from './progress-rail';
 import { MobileHeader } from './mobile-header';
 import { TopChevron } from './top-chevron';

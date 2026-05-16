@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { getAuth } from "@/auth";
-import { getDb } from "@/db";
-import { getGitHubToken, listUserRepos } from "@/lib/github";
 
 export const dynamic = "force-dynamic";
 
@@ -12,20 +10,17 @@ export async function GET(req: Request): Promise<Response> {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const { env } = getCloudflareContext();
-  const db = getDb(env);
-  const token = await getGitHubToken(db, session.user.id);
-  if (!token) {
-    return NextResponse.json(
-      { error: "No GitHub account linked" },
-      { status: 404 },
-    );
-  }
-  try {
-    const repos = await listUserRepos(token);
-    return NextResponse.json({ repos, username: session.user.name ?? null });
-  } catch (err) {
-    const message =
-      err instanceof Error ? err.message : "Failed to fetch repos";
-    return NextResponse.json({ error: message }, { status: 502 });
-  }
+  const coreRes = await env.CORE.fetch(
+    new Request(
+      `https://internal/internal/onboarding/github-repos?userId=${encodeURIComponent(session.user.id)}`,
+      {
+        method: "GET",
+        headers: { "x-shipflare-internal": "1" },
+      },
+    ),
+  );
+  return new Response(coreRes.body, {
+    status: coreRes.status,
+    headers: coreRes.headers,
+  });
 }

@@ -62,10 +62,6 @@ declare global {
     //   openssl rand -base64 32
     CHANNEL_ENC_KEY: string;
 
-    // Onboarding URL/repo extraction + plan-generation. apps/web ONLY (apps/core
-    // already has its own ANTHROPIC_API_KEY for HoG). Set via `wrangler secret put`.
-    ANTHROPIC_API_KEY?: string;
-
     // Sign-up allowlist. Comma-separated emails (case-insensitive). When set
     // to a non-empty value, only those addresses (plus SUPER_ADMIN_EMAIL)
     // can complete first-time sign-up via Better Auth's

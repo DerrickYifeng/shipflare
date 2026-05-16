@@ -18,11 +18,16 @@
     "@anthropic-ai/sdk": "^0.96.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "agents": "^0.12.4",
+    "cheerio": "^1.2.0",
+    "micromatch": "^4.0.5",
+    "turndown": "^7.2.4",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.16.4",
     "@cloudflare/workers-types": "^4.20260511.1",
+    "@types/micromatch": "^4.0.9",
+    "@types/turndown": "^5.0.6",
     "typescript": "^5.9.3",
     "vitest": "^4.1.6",
     "wrangler": "^4.90.1"

@@ -8,7 +8,7 @@
  * existed.
  */
 
-import type { StrategicPath, StrategicThesisWeekPosts } from '@/lib/strategic-path-schema';
+import type { StrategicPath, StrategicThesisWeekPosts } from '@shipflare/shared';
 
 /**
  * Resolve the post allocation for a given week, defaulting any missing

@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { getAuth } from "@/auth";
-import { scrapeWebsite, analyzeWebsite } from "@/lib/scraper";
-import { auditSeo } from "@/lib/seo-audit";
 
 export const dynamic = "force-dynamic";
 
@@ -17,27 +15,16 @@ export async function POST(req: Request): Promise<Response> {
   } catch {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
-  if (!body.url || typeof body.url !== "string") {
-    return NextResponse.json({ error: "URL is required" }, { status: 400 });
-  }
   const { env } = getCloudflareContext();
-  const anthropicKey = env.ANTHROPIC_API_KEY;
-  if (!anthropicKey) {
-    return NextResponse.json({ error: "anthropic_not_configured" }, { status: 503 });
-  }
-  const scraped = await scrapeWebsite(body.url);
-  const [analysis, seoAudit] = await Promise.all([
-    analyzeWebsite(scraped, anthropicKey),
-    auditSeo(body.url),
-  ]);
-  return NextResponse.json({
-    url: body.url,
-    name: analysis.productName,
-    description: analysis.oneLiner,
-    keywords: analysis.keywords,
-    valueProp: analysis.valueProp,
-    targetAudience: analysis.targetAudience,
-    ogImage: scraped.ogImage,
-    seoAudit,
+  const coreRes = await env.CORE.fetch(
+    new Request("https://internal/internal/onboarding/analyze-url", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-shipflare-internal": "1" },
+      body: JSON.stringify({ userId: session.user.id, url: body.url ?? "" }),
+    }),
+  );
+  return new Response(coreRes.body, {
+    status: coreRes.status,
+    headers: coreRes.headers,
   });
 }

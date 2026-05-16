@@ -60,20 +60,3 @@ export async function listUserRepos(token: string): Promise<GithubRepo[]> {
     pushedAt: r.pushed_at,
   }));
 }
-
-export async function getRepoReadme(
-  token: string,
-  fullName: string,
-): Promise<string> {
-  const res = await fetch(`https://api.github.com/repos/${fullName}/readme`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: "application/vnd.github.raw",
-      "User-Agent": "ShipFlare/1.0",
-    },
-  });
-  if (!res.ok) {
-    throw new Error(`GitHub README ${res.status}`);
-  }
-  return await res.text();
-}

@@ -4,7 +4,7 @@ import { z } from "zod";
 import { products, eq } from "@shipflare/db";
 import { getDb } from "@/db";
 import { getAuth } from "@/auth";
-import { strategicPathSchema } from "@/lib/strategic-path-schema";
+import type { StrategicPath } from "@shipflare/shared";
 import { derivePhase } from "@/lib/launch-phase";
 import { validateLaunchDates } from "@/lib/launch-date-rules";
 import { deleteDraft } from "@/lib/onboarding-draft";
@@ -40,10 +40,16 @@ const requestBodySchema = z.object({
     .enum(["<100", "100-1k", "1k-10k", "10k+"])
     .nullable()
     .optional(),
-  path: strategicPathSchema,
+  // path is a StrategicPath object validated by apps/core before it reaches
+  // the browser. We accept it as unknown here and cast — cross-workspace Zod
+  // v3/v4 mismatch prevents using the v4 schema from @shipflare/shared directly
+  // inside a v3 z.object() call.
+  path: z.unknown(),
 });
 
-type RequestBody = z.infer<typeof requestBodySchema>;
+type RequestBody = Omit<z.infer<typeof requestBodySchema>, "path"> & {
+  path: StrategicPath;
+};
 
 export async function POST(req: Request): Promise<Response> {
   const session = await getAuth().api.getSession({ headers: req.headers });
@@ -54,7 +60,7 @@ export async function POST(req: Request): Promise<Response> {
 
   let body: RequestBody;
   try {
-    body = requestBodySchema.parse(await req.json());
+    body = requestBodySchema.parse(await req.json()) as RequestBody;
   } catch (err) {
     const detail = err instanceof Error ? err.message : "invalid body";
     return NextResponse.json(

@@ -62,7 +62,6 @@ pnpm exec wrangler secret list
 - `GITHUB_CLIENT_ID` + `GITHUB_CLIENT_SECRET`
 - `X_CLIENT_ID` + `X_CLIENT_SECRET` (only if testing X channel)
 - `REDDIT_CLIENT_ID` + `REDDIT_CLIENT_SECRET` (only if testing Reddit)
-- `ANTHROPIC_API_KEY` (required for `/api/onboarding/extract`, `/api/onboarding/extract-repo`, `/api/onboarding/plan` — onboarding URL/repo analysis and strategic-path generation). Set on `apps/web` only. Routes return 503 `anthropic_not_configured` when unset.
 
 > Note: existing GitHub-linked users must sign in once after the `public_repo` scope rollout to upgrade their stored token. Better Auth does not auto-refresh OAuth scopes; without the upgraded token the `/api/onboarding/github-repos` route can't list repos.
 
