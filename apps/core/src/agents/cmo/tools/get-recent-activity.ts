@@ -18,9 +18,11 @@ import type { CMO } from "../CMO";
  * a second round-trip when both ids are known.
  *
  * Ordering: ASCENDING by `(created_at, id)` so the client can append
- * directly to the feed. `id` is the tie-breaker for events with the
- * same `created_at` — `crypto.randomUUID()` is monotonic enough for
- * our purposes (and `emitActivity` generates ids in order anyway).
+ * directly to the feed. `emitActivity` guarantees `created_at` is
+ * strictly monotonic per CMO DO (bumps to `prev + 1` when `Date.now()`
+ * ties), so the `id ASC` tiebreaker is effectively dead code — present
+ * only as a defensive secondary sort in case future writers bypass the
+ * monotonic counter.
  */
 export function registerGetRecentActivityTool(agent: CMO): void {
   const InputSchema = z

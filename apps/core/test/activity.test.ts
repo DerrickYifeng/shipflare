@@ -68,6 +68,37 @@ describe("emitActivity", () => {
   });
 });
 
+describe("emitActivity monotonic createdAt", () => {
+  it("produces strictly increasing createdAt even within the same millisecond", async () => {
+    const agent = makeFakeAgent();
+    // Freeze Date.now() so all emits would normally tie.
+    const realNow = Date.now;
+    Date.now = () => 1_000_000;
+    try {
+      for (let i = 0; i < 5; i++) {
+        await emitActivity(agent as never, {
+          conversationId: null,
+          parentTurnId: null,
+          runId: "r",
+          sourceAgent: "cmo",
+          parentEventId: null,
+          kind: "turn_start",
+          payload: { kind: "turn_start" },
+        });
+      }
+    } finally {
+      Date.now = realNow;
+    }
+    // Pull createdAt off each broadcast — must be strictly increasing.
+    const createdAts = agent.broadcasts.map(
+      (b) => JSON.parse(b).createdAt as number,
+    );
+    for (let i = 1; i < createdAts.length; i++) {
+      expect(createdAts[i]).toBeGreaterThan(createdAts[i - 1]!);
+    }
+  });
+});
+
 describe("trace context", () => {
   it("returns null outside a withTraceContext scope", () => {
     expect(currentTraceContext()).toBeNull();

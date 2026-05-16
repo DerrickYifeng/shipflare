@@ -63,6 +63,15 @@ interface ActivityHost {
 }
 
 /**
+ * Per-DO last emit timestamp — guarantees `createdAt` is strictly monotonic
+ * per CMO instance. Without this, two events emitted in the same millisecond
+ * would tie on created_at; the SQL tiebreaker (id ASC, where id is UUIDv4)
+ * would then sort them randomly. WeakMap is keyed by agent so each CMO DO
+ * has its own counter, with no cross-DO interference.
+ */
+const LAST_EMIT_MS = new WeakMap<object, number>();
+
+/**
  * Single sanctioned writer for activity events.
  *
  * Spec: 2026-05-15-agent-activity-feed-design.md §5.1.
@@ -76,13 +85,22 @@ interface ActivityHost {
  * `agent.sqlStorage` is the CMO's local `SqlStorage`. Code on other
  * DOs (or workers) MUST forward the event over RPC / fetch — direct
  * cross-DO SQL access is forbidden by CLAUDE.md's architecture rules.
+ *
+ * Ordering guarantee: `createdAt` is strictly monotonic per host. If
+ * `Date.now()` has not advanced since the last emit (same-millisecond
+ * bursts on fast hardware), the new event's `createdAt` is bumped to
+ * `prev + 1`. This makes `(created_at ASC, id ASC)` ordering on reads
+ * deterministic without relying on UUIDv4 as a tiebreaker.
  */
 export async function emitActivity(
   agent: ActivityHost,
   input: ActivityEventInput,
 ): Promise<void> {
   const id = crypto.randomUUID();
-  const createdAt = Date.now();
+  const now = Date.now();
+  const prev = LAST_EMIT_MS.get(agent as object) ?? 0;
+  const createdAt = now > prev ? now : prev + 1;
+  LAST_EMIT_MS.set(agent as object, createdAt);
 
   agent.sqlStorage.exec(
     `INSERT INTO activity_events
