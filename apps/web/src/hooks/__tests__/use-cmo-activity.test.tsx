@@ -28,7 +28,15 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 // us share mutable state between the factory and the tests.
 const testHandles = vi.hoisted(() => ({
   captured: null as ((msg: MessageEvent<string>) => void) | null,
+  onOpen: null as (() => void) | null,
+  onClose: null as (() => void) | null,
+  onError: null as (() => void) | null,
   getRecentActivity: vi.fn(),
+  // When true (default), the mock auto-fires `onOpen` synchronously so
+  // the rest of the suite -- which predates the WS-state contract --
+  // continues to observe `isConnected === true` once the token resolves.
+  // Set to false in tests that want to inspect the pre-open state.
+  autoFireOpen: true,
 }));
 
 function pushMessage(data: string): void {
@@ -42,8 +50,34 @@ function pushMessage(data: string): void {
 }
 
 vi.mock("agents/react", () => ({
-  useAgent: (opts: { onMessage?: (msg: MessageEvent<string>) => void }) => {
+  useAgent: (opts: {
+    onMessage?: (msg: MessageEvent<string>) => void;
+    onOpen?: (event: Event) => void;
+    onClose?: (event: CloseEvent) => void;
+    onError?: (event: Event) => void;
+  }) => {
     testHandles.captured = opts.onMessage ?? null;
+    testHandles.onOpen = opts.onOpen
+      ? () => opts.onOpen?.(new Event("open"))
+      : null;
+    testHandles.onClose = opts.onClose
+      ? () =>
+          opts.onClose?.(
+            new CloseEvent("close", { code: 1006, reason: "test" }),
+          )
+      : null;
+    testHandles.onError = opts.onError
+      ? () => opts.onError?.(new Event("error"))
+      : null;
+    if (testHandles.autoFireOpen) {
+      // Fire `open` on the next microtask so we don't call setState
+      // synchronously during the render that just called useAgent --
+      // that would trigger an infinite re-render loop. This mirrors
+      // the real SDK: the handshake completes after the render cycle
+      // that mounted the socket. Tests that need to observe the
+      // pre-open state set `autoFireOpen = false` before rendering.
+      queueMicrotask(() => opts.onOpen?.(new Event("open")));
+    }
     return {
       stub: {
         getRecentActivity: testHandles.getRecentActivity,
@@ -65,6 +99,10 @@ vi.mock("@/auth-client", () => ({
 // `fetch` is global on happy-dom but we want a deterministic stub.
 beforeEach(() => {
   testHandles.getRecentActivity.mockReset();
+  testHandles.autoFireOpen = true;
+  testHandles.onOpen = null;
+  testHandles.onClose = null;
+  testHandles.onError = null;
   testHandles.getRecentActivity.mockResolvedValue([
     {
       id: "seed-1",
@@ -186,6 +224,40 @@ describe("useCmoActivity", () => {
     });
 
     expect(result.current.events).toHaveLength(1);
+  });
+
+  // ---- isConnected reflects WS state, not just token presence -----------
+  //
+  // The hook used to flip `isConnected` to `true` as soon as the JWT
+  // arrived, regardless of whether the WebSocket actually opened. Now
+  // it requires both: a healthy token AND useAgent firing `onOpen`.
+
+  it("keeps isConnected=false while WS is still handshaking (token alone is not enough)", async () => {
+    testHandles.autoFireOpen = false;
+    const { result } = renderHook(() =>
+      useCmoActivity({ conversationId: "c1" }),
+    );
+
+    // Wait until the token has been minted -- but the WS open event
+    // has NOT fired yet, so isConnected must stay false.
+    await waitFor(() => expect(testHandles.captured).not.toBeNull());
+
+    // Give any pending microtasks (token fetch resolve) a chance to flush.
+    await waitFor(() => expect(result.current.connectionError).toBeNull());
+    expect(result.current.isConnected).toBe(false);
+
+    // Now fire the WS `open` event -- isConnected flips to true.
+    act(() => {
+      testHandles.onOpen?.();
+    });
+    expect(result.current.isConnected).toBe(true);
+
+    // A subsequent close drops it back to false (transient disconnect /
+    // SDK auto-reconnect path).
+    act(() => {
+      testHandles.onClose?.();
+    });
+    expect(result.current.isConnected).toBe(false);
   });
 
   it("silently swallows seed-replay failure (live frames still flow)", async () => {
