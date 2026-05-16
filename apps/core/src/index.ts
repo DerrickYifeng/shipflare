@@ -419,7 +419,7 @@ async function routeRequest(
   }
 
   if (url.pathname.startsWith("/internal/onboarding/")) {
-    return handleOnboardingInternal(request, env, url);
+    return handleOnboardingInternal(request, env, url, ctx);
   }
 
   const externalMatch = EXTERNAL_MCP_ROUTE.exec(url.pathname);
