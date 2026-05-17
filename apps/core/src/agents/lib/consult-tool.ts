@@ -10,21 +10,37 @@ import { peerInputSchema } from "./peer-schema";
 import { safeAgentChain } from "../../lib/agent-depth";
 
 /**
- * Pre-instantiate one `agentTool` per employee at module load. `agents@0.12.4`
+ * Lazy-initialise one `agentTool` per employee on first access. `agents@0.12.4`
  * exposes only `agentTool(Cls, options)` (verified Phase 0); there is no
  * free-function `runAgentTool`. CMO is excluded — it's still McpAgent through
  * Phase 5, and peers don't consult CMO upward anyway (see filter below).
+ *
+ * Lazy (not top-level) construction is REQUIRED to break the
+ *   registry ⇄ HoG/SMM ⇄ consult-tool
+ * import cycle. At top level, when `registry.ts` is the cycle entry, the
+ * partially-evaluated registry module returns `EMPLOYEE_IDS = undefined` and
+ * the iteration crashes with `EMPLOYEE_IDS is not iterable`. By the time
+ * any caller invokes `makeConsultTool(...).execute(...)`, all modules have
+ * finished evaluating and the lookup is safe.
  */
-const PEER_TOOLS: Partial<Record<EmployeeId, ReturnType<typeof agentTool>>> =
-	{};
-for (const id of EMPLOYEE_IDS) {
-	if (id === "cmo") continue; // CMO is not ChatCapable until Phase 5
-	const meta = EMPLOYEE_REGISTRY[id];
-	if (!meta) continue;
-	PEER_TOOLS[id] = agentTool(meta.class, {
-		description: meta.description,
-		inputSchema: peerInputSchema,
-	});
+let PEER_TOOLS: Partial<Record<EmployeeId, ReturnType<typeof agentTool>>> | null =
+	null;
+function getPeerTools(): Partial<
+	Record<EmployeeId, ReturnType<typeof agentTool>>
+> {
+	if (PEER_TOOLS) return PEER_TOOLS;
+	const built: Partial<Record<EmployeeId, ReturnType<typeof agentTool>>> = {};
+	for (const id of EMPLOYEE_IDS) {
+		if (id === "cmo") continue; // CMO is not ChatCapable until Phase 5
+		const meta = EMPLOYEE_REGISTRY[id];
+		if (!meta) continue;
+		built[id] = agentTool(meta.class, {
+			description: meta.description,
+			inputSchema: peerInputSchema,
+		});
+	}
+	PEER_TOOLS = built;
+	return PEER_TOOLS;
 }
 
 /**
@@ -82,7 +98,7 @@ export function makeConsultTool(selfId: EmployeeId) {
 			if (!meta) {
 				return { ok: false as const, error: `Unknown employee: ${employee}` };
 			}
-			const peerTool = PEER_TOOLS[employee as EmployeeId];
+			const peerTool = getPeerTools()[employee as EmployeeId];
 			if (!peerTool || !peerTool.execute) {
 				return {
 					ok: false as const,
