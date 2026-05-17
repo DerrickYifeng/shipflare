@@ -11,6 +11,7 @@ import { anthropic } from "@ai-sdk/anthropic";
 import { makeConsultTool } from "../lib/consult-tool";
 import { loadSystemPrompt } from "../lib/system-prompt";
 import { applyHogSchema } from "./schema";
+import { makeGenerateStrategicPathTool } from "./tools/generate-strategic-path";
 import type { Env } from "../../index";
 
 export interface HoGState {
@@ -38,6 +39,22 @@ export class HoG extends AIChatAgent<Env, HoGState> {
 		if (this._schemaApplied) return;
 		applyHogSchema(this.ctx.storage.sql);
 		this._schemaApplied = true;
+	}
+
+	/**
+	 * Read-only accessors for use by peer-tool files in this folder. The
+	 * `env` and `ctx` on `AIChatAgent` (via the underlying `DurableObject`)
+	 * are `protected`, so tool authors in separate files need a public hatch.
+	 *
+	 * Same pattern as SMM (5.1c.3) — exposes the namespace + SQLite storage
+	 * for peer tools to read/write the DO's own state.
+	 */
+	get bindings(): Env {
+		return this.env;
+	}
+
+	get sqlStorage(): SqlStorage {
+		return this.ctx.storage.sql;
 	}
 
 	async onChatMessage(onFinish: StreamTextOnFinishCallback<ToolSet>) {
@@ -68,8 +85,10 @@ export class HoG extends AIChatAgent<Env, HoGState> {
 	}
 
 	getTools(): ToolSet {
+		this.ensureSchema();
 		return {
 			consult: makeConsultTool("hog"),
+			generate_strategic_path: makeGenerateStrategicPathTool(this),
 		};
 	}
 }

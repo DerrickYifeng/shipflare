@@ -26,11 +26,11 @@ describe("HoG as AIChatAgent", () => {
 		});
 	});
 
-	it("getTools() returns consult only", async () => {
+	it("getTools() returns consult + generate_strategic_path", async () => {
 		const id = env.HOG.idFromName("hog-test-tools");
 		await runInDurableObject<HoG, void>(env.HOG.get(id), async (instance) => {
 			const tools = instance.getTools();
-			expect(Object.keys(tools)).toEqual(["consult"]);
+			expect(Object.keys(tools).sort()).toEqual(["consult", "generate_strategic_path"].sort());
 		});
 	});
 });
