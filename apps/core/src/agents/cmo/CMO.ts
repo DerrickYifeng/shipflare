@@ -194,6 +194,12 @@ export class CMO extends McpAgent<Env, CMOState, McpProps> {
    * Per-role isolation: each addMcpServer call is wrapped in try/catch so one
    * failing employee doesn't blow up the rest. The CMO remains usable for
    * direct founder chat even if every employee dial-up fails.
+   *
+   * TODO(Task 4.4e / Phase 5): SMM is now an AIChatAgent (Task 4.4c+d), so
+   * the addMcpServer call below fails fast at runtime — AIChatAgent is not
+   * an McpAgent peer. The try/catch logs and continues, so CMO stays usable,
+   * but the SMM peer is unreachable until Phase 5 replaces this loop with
+   * the `consult` tool-mediated dispatch (per spec §3.2).
    */
   private async connectEmployees(): Promise<void> {
     // `props` is populated by the parent McpAgent.onStart() from the transport

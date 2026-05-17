@@ -76,7 +76,7 @@ export class SMM extends AIChatAgent<Env, SMMState> {
 						  }
 						| undefined;
 					return await runSkill({
-						name: "drafting-single-post",
+						name: "drafting-post",
 						args,
 						writer: exp?.writer,
 						userId: exp?.userId,
