@@ -2319,7 +2319,7 @@ git commit -m "feat(external): OAuth-protected /cmo/sse mount"
 - Create: `apps/web/app/api/agent-token/route.ts`
 - Test: `apps/web/__tests__/agent-token.test.ts`
 
-- [ ] **Step 1: Write the test**
+- [x] **Step 1: Write the test**
 
 ```typescript
 // apps/web/__tests__/agent-token.test.ts
@@ -2351,9 +2351,9 @@ describe('GET /api/agent-token', () => {
 });
 ```
 
-- [ ] **Step 2: Run, expect FAIL**
+- [x] **Step 2: Run, expect FAIL**
 
-- [ ] **Step 3: Implement (model after existing `/api/cmo-ws-token/route.ts`)**
+- [x] **Step 3: Implement (model after existing `/api/cmo-ws-token/route.ts`)**
 
 ```typescript
 // apps/web/app/api/agent-token/route.ts
@@ -2387,9 +2387,9 @@ export async function GET(req: NextRequest) {
 }
 ```
 
-- [ ] **Step 4: Run, expect PASS**
+- [x] **Step 4: Run, expect PASS**
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/app/api/agent-token/route.ts apps/web/__tests__/agent-token.test.ts
@@ -2403,7 +2403,7 @@ git commit -m "feat(web): generic /api/agent-token for any agent WebSocket"
 **Files:**
 - Create: `apps/web/src/hooks/use-cmo-chat.ts`
 
-- [ ] **Step 1: Implement**
+- [x] **Step 1: Implement**
 
 ```typescript
 // apps/web/src/hooks/use-cmo-chat.ts
@@ -2442,13 +2442,13 @@ export function useCmoChat({ userId, conversationId }: { userId: string; convers
 }
 ```
 
-- [ ] **Step 2: Verify build**
+- [x] **Step 2: Verify build**
 
 ```bash
 pnpm --filter web exec tsc --noEmit
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add apps/web/src/hooks/use-cmo-chat.ts
@@ -2470,7 +2470,7 @@ git commit -m "feat(web): useCmoChat hook over useAgentChat + useAgentToolEvents
 
 For each component, follow this shape — keep it minimal in this task; styling polish lives in Task 8.5.
 
-- [ ] **Step 1: TextPart**
+- [x] **Step 1: TextPart**
 
 ```tsx
 // apps/web/app/(app)/chat/_components/text-part.tsx
@@ -2479,7 +2479,7 @@ export function TextPart({ text }: { text: string }) {
 }
 ```
 
-- [ ] **Step 2: ReasoningPart**
+- [x] **Step 2: ReasoningPart**
 
 ```tsx
 // apps/web/app/(app)/chat/_components/reasoning-part.tsx
@@ -2493,7 +2493,7 @@ export function ReasoningPart({ text }: { text: string }) {
 }
 ```
 
-- [ ] **Step 3: SkillPart**
+- [x] **Step 3: SkillPart**
 
 ```tsx
 // apps/web/app/(app)/chat/_components/skill-part.tsx
@@ -2512,7 +2512,7 @@ export function SkillPart({ part }: { part: { type: 'data-skill-start' | 'data-s
 }
 ```
 
-- [ ] **Step 4: ToolInvocation**
+- [x] **Step 4: ToolInvocation**
 
 ```tsx
 // apps/web/app/(app)/chat/_components/tool-invocation.tsx
@@ -2535,7 +2535,7 @@ export function ToolInvocation({ invocation }: { invocation: ToolInvocation }) {
 }
 ```
 
-- [ ] **Step 5: StepAnchor**
+- [x] **Step 5: StepAnchor**
 
 ```tsx
 // apps/web/app/(app)/chat/_components/step-anchor.tsx
@@ -2544,7 +2544,7 @@ export function StepAnchor({ part }: { part: { data: { label: string; stepId: st
 }
 ```
 
-- [ ] **Step 6: NestedAgentRun**
+- [x] **Step 6: NestedAgentRun**
 
 ```tsx
 // apps/web/app/(app)/chat/_components/nested-agent-run.tsx
@@ -2582,7 +2582,7 @@ export function NestedAgentRun({ label, childRun }: { label: string; childRun?: 
 }
 ```
 
-- [ ] **Step 7: MessageBubble**
+- [x] **Step 7: MessageBubble**
 
 ```tsx
 // apps/web/app/(app)/chat/_components/message-bubble.tsx
@@ -2597,7 +2597,7 @@ export function MessageBubble({ role, children }: PropsWithChildren<{ role: 'use
 }
 ```
 
-- [ ] **Step 8: Verify build + commit**
+- [x] **Step 8: Verify build + commit**
 
 ```bash
 pnpm --filter web exec tsc --noEmit
@@ -2613,7 +2613,7 @@ git commit -m "feat(web): part renderer components"
 - Create: `apps/web/app/(app)/chat/_components/cmo-chat.tsx`
 - Modify: `apps/web/app/(app)/chat/page.tsx` (or create if absent — confirm path before edit)
 
-- [ ] **Step 1: Implement CmoChat**
+- [x] **Step 1: Implement CmoChat**
 
 ```tsx
 // apps/web/app/(app)/chat/_components/cmo-chat.tsx
@@ -2683,7 +2683,7 @@ export function CmoChat({ userId }: { userId: string }) {
 }
 ```
 
-- [ ] **Step 2: Add client-side employee registry mirror**
+- [x] **Step 2: Add client-side employee registry mirror**
 
 `EMPLOYEE_REGISTRY` lives in `apps/core` and bundling Cloudflare Worker imports into Next.js may not work. Create a slim client mirror:
 
@@ -2698,7 +2698,7 @@ export const EMPLOYEE_REGISTRY: Record<string, { displayName: string; descriptio
 
 Note: this is intentional duplication — adding a new employee requires updating both the core registry AND this client mirror. Add this to the New Employee Checklist.
 
-- [ ] **Step 3: Wire CmoChat into the chat page**
+- [x] **Step 3: Wire CmoChat into the chat page**
 
 ```bash
 ls apps/web/app/\(app\)/chat/ 2>/dev/null
@@ -2719,21 +2719,21 @@ export default async function ChatPage() {
 }
 ```
 
-- [ ] **Step 4: Verify build**
+- [x] **Step 4: Verify build**
 
 ```bash
 pnpm --filter web exec tsc --noEmit
 pnpm --filter web build
 ```
 
-- [ ] **Step 5: Manual smoke**
+- [x] **Step 5: Manual smoke**
 
 ```bash
 pnpm dev
 # open http://localhost:3000/chat, send "hi", verify text-delta renders
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/web/app/\(app\)/chat/ apps/web/src/lib/employee-registry-client.ts
@@ -2747,14 +2747,14 @@ git commit -m "feat(web): CmoChat page wired to useCmoChat + part renderers"
 **Files:**
 - Modify: `CLAUDE.md`
 
-- [ ] **Step 1: Append to "New Employee Checklist" section**
+- [x] **Step 1: Append to "New Employee Checklist" section**
 
 ```markdown
 - [ ] Mirror the new employee in `apps/web/src/lib/employee-registry-client.ts`
       (displayName + description; consumed by the chat UI's `NestedAgentRun` label).
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add CLAUDE.md
@@ -2768,7 +2768,7 @@ git commit -m "docs: New Employee Checklist includes web registry mirror"
 **Files:**
 - Create: `apps/web/e2e/cmo-chat.spec.ts`
 
-- [ ] **Step 1: Write the test**
+- [x] **Step 1: Write the test**
 
 ```typescript
 // apps/web/e2e/cmo-chat.spec.ts
@@ -2794,14 +2794,14 @@ test('founder sees reasoning + nested agent run + resumable stream', async ({ br
 });
 ```
 
-- [ ] **Step 2: Run (requires dev server)**
+- [x] **Step 2: Run (requires dev server)**
 
 ```bash
 pnpm dev &  # in another terminal
 pnpm --filter web exec playwright test e2e/cmo-chat.spec.ts
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add apps/web/e2e/cmo-chat.spec.ts
