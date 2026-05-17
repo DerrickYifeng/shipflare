@@ -1,5 +1,6 @@
 import { env, runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { applySmmSchema } from "../../src/agents/social-media-manager/schema";
 import type { SMM } from "../../src/agents/social-media-manager/SocialMediaMgr";
 
@@ -22,9 +23,15 @@ describe("SMM tool find_threads", () => {
     });
 
     await runInDurableObject<SMM, void>(stub, async (instance) => {
-      const tools = instance.getTools();
-      const res = await tools.find_threads!.execute!(
-        { platforms: ["x"], status: "pending", limit: 10 },
+      const tool = instance.getTools().find_threads!;
+      // Route through inputSchema so Zod defaults are applied — this is the
+      // boundary the `ai` SDK uses (safeValidateTypes → safeParseAsync) before
+      // invoking execute(). Calling execute() directly bypasses validation.
+      const parsed = (tool.inputSchema as z.ZodTypeAny).parse({
+        platforms: ["x"], status: "pending", limit: 10,
+      });
+      const res = await tool.execute!(
+        parsed,
         { experimental_context: { env: instance.bindings, userId } } as never,
       );
       const r = res as { threads: Array<{ id: string }> };
@@ -34,16 +41,33 @@ describe("SMM tool find_threads", () => {
     });
   });
 
-  it("defaults to all platforms + status='pending' + limit 20", async () => {
+  it("defaults: all platforms + status='pending' + limit 20", async () => {
     const userId = "smm-ft-2";
     const stub = env.SMM.get(env.SMM.idFromName(userId));
-    await runInDurableObject<SMM, void>(stub, async (_inst, state) => applySmmSchema(state.storage.sql));
+    await runInDurableObject<SMM, void>(stub, async (_inst, state) => {
+      applySmmSchema(state.storage.sql);
+      const insert = (id: string, plat: string, status: string) =>
+        state.storage.sql.exec(
+          `INSERT INTO threads_inbox (id, external_id, platform, content, judge_score, judged_at, discovered_at, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          id, `ext-${id}`, plat, "c", 0.5, 1000, Date.now(), status,
+        );
+      insert("a", "x", "pending");
+      insert("b", "reddit", "pending");
+      insert("c", "x", "drafted");
+    });
     await runInDurableObject<SMM, void>(stub, async (instance) => {
-      const r = await instance.getTools().find_threads!.execute!(
-        {},
+      const tool = instance.getTools().find_threads!;
+      // {} → Zod applies status='pending', limit=20, platforms stays undefined
+      // (optional, falls back to ["x","reddit"] inside execute()).
+      const parsed = (tool.inputSchema as z.ZodTypeAny).parse({});
+      const r = await tool.execute!(
+        parsed,
         { experimental_context: { env: instance.bindings, userId } } as never,
       );
-      expect((r as { threads: unknown[] }).threads).toEqual([]);
+      const ids = (r as { threads: Array<{ id: string }> }).threads.map((t) => t.id).sort();
+      // 'a' (pending/x) + 'b' (pending/reddit) match defaults. 'c' (drafted) excluded.
+      expect(ids).toEqual(["a", "b"]);
     });
   });
 
@@ -59,8 +83,10 @@ describe("SMM tool find_threads", () => {
       );
     });
     await runInDurableObject<SMM, void>(stub, async (instance) => {
-      const r = await instance.getTools().find_threads!.execute!(
-        { limit: 5 },
+      const tool = instance.getTools().find_threads!;
+      const parsed = (tool.inputSchema as z.ZodTypeAny).parse({ limit: 5 });
+      const r = await tool.execute!(
+        parsed,
         { experimental_context: { env: instance.bindings, userId } } as never,
       );
       const threads = (r as { threads: Array<{

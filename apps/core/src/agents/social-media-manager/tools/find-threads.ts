@@ -1,7 +1,6 @@
 import { z } from "zod";
 import { tool } from "ai";
 import type { SMM } from "../SocialMediaMgr";
-import type { ThreadInboxRow } from "../schema";
 
 /**
  * find_threads — read SMM's threads_inbox cache.
@@ -18,26 +17,32 @@ export function makeFindThreadsTool(agent: SMM) {
 			"List threads from your threads_inbox. Read-only companion to find_threads_via_xai. " +
 			"Returns threads ordered by judged_at DESC, filtered by platform(s) and status.",
 		inputSchema: z.object({
-			platforms: z.array(z.enum(["x", "reddit"])).optional(),
-			status: z.enum(["pending", "drafted", "skipped"]).optional(),
-			limit: z.number().int().min(1).max(100).optional(),
+			platforms: z.array(z.enum(["x", "reddit"])).min(1).optional(),
+			status: z.enum(["pending", "drafted", "skipped"]).default("pending"),
+			limit: z.number().int().min(1).max(100).default(20),
 		}),
 		execute: async (args) => {
 			const platforms = args.platforms ?? ["x", "reddit"];
-			const status = args.status ?? "pending";
-			const limit = args.limit ?? 20;
 			const placeholders = platforms.map(() => "?").join(",");
 			const rows = agent.sqlStorage
-				.exec<ThreadInboxRow>(
-					`SELECT id, external_id, platform, author, content, intent,
-					        judge_score, judge_reason, judged_at, discovered_at, status
+				.exec<{
+					id: string;
+					external_id: string;
+					platform: string;
+					author: string | null;
+					content: string;
+					judge_score: number | null;
+					judged_at: number | null;
+					[k: string]: SqlStorageValue;
+				}>(
+					`SELECT id, external_id, platform, author, content, judge_score, judged_at
 					 FROM threads_inbox
 					 WHERE status = ? AND platform IN (${placeholders})
 					 ORDER BY judged_at DESC
 					 LIMIT ?`,
-					status,
+					args.status,
 					...platforms,
-					limit,
+					args.limit,
 				)
 				.toArray();
 			return {

@@ -54,6 +54,9 @@ export function applyHogSchema(sql: SqlStorage): void {
 
 /**
  * Row shapes for `planning_chat`. Use as the `<T>` argument of `sql.exec<T>(...)`.
+ *
+ * The string index signature is required to satisfy `Record<string, SqlStorageValue>`
+ * — the constraint on `exec<T>` in `@cloudflare/workers-types`.
  */
 export interface PlanningChatRow {
 	id: number;
@@ -61,6 +64,7 @@ export interface PlanningChatRow {
 	role: string;
 	content: string;
 	ts: number;
+	[k: string]: SqlStorageValue;
 }
 
 /**
@@ -74,6 +78,7 @@ export interface ProposalDraftRow {
 	generated_at: number;
 	mirrored_to_cmo: number;     // 0 | 1 (SQLite bool)
 	mirror_error: number | null; // HTTP status code from last failed mirror POST
+	[k: string]: SqlStorageValue;
 }
 
 /**
@@ -87,4 +92,5 @@ export interface AuditFindingRow {
 	finding: string;
 	affected_plan_items: string | null;
 	created_at: number;
+	[k: string]: SqlStorageValue;
 }

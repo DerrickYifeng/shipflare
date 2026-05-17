@@ -74,7 +74,10 @@ export interface ThreadInboxRow {
 }
 
 /**
- * Row shapes for `drafts`.
+ * Row shapes for `drafts`. Use as the `<T>` argument of `sql.exec<T>(...)`.
+ *
+ * The string index signature is required to satisfy `Record<string, SqlStorageValue>`
+ * — the constraint on `exec<T>` in `@cloudflare/workers-types`.
  */
 export interface DraftRow {
 	id: string;
@@ -91,4 +94,5 @@ export interface DraftRow {
 	mirrored_at: number | null;
 	mirror_error: number | null;
 	posted_at: number | null;
+	[k: string]: SqlStorageValue;
 }
