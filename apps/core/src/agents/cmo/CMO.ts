@@ -20,6 +20,8 @@ import {
 	type PushPayload,
 	type PushSubscriptionRow,
 } from "../../lib/web-push";
+import { handleInternalJson } from "../../lib/internal-route";
+import { mirrorDraftBodySchema } from "../../lib/mirror-draft";
 
 export interface CMOState {
 	currentRunId: string | null;
@@ -53,6 +55,7 @@ export interface CMOState {
  *   - /internal/push-subscribe          — web-push subscription persistence
  *   - /internal/destroy                 — account-deletion cleanup
  *   - /internal/commit-strategic-path   — onboarding-wizard direct write
+ *   - /internal/mirror-draft            — SMM/HoG shadow-POST when a draft hits status='ready'
  *
  * The legacy /internal/log-activity route + the activity_events table are
  * deleted in this commit (telemetry routes through Analytics Engine via
@@ -552,6 +555,45 @@ export class CMO extends AIChatAgent<Env, CMOState> {
 		if (url.pathname === "/internal/commit-strategic-path") {
 			this.ensureSchema();
 			return this.handleCommitStrategicPath(request);
+		}
+		if (url.pathname === "/internal/mirror-draft") {
+			this.ensureSchema();
+			return handleInternalJson(
+				request,
+				"CMO /internal/mirror-draft",
+				mirrorDraftBodySchema,
+				async (body) => {
+					// Idempotent: skip insert if draft_id already present.
+					const existing = this.ctx.storage.sql
+						.exec<{ id: string }>(
+							"SELECT id FROM approval_queue WHERE draft_id = ? LIMIT 1",
+							body.draftId,
+						)
+						.toArray();
+					if (existing.length === 0) {
+						this.ctx.storage.sql.exec(
+							`INSERT INTO approval_queue (id, draft_id, employee, kind, channel, preview, created_at)
+							 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+							crypto.randomUUID(),
+							body.draftId,
+							body.employee,
+							body.kind,
+							body.channel,
+							body.preview,
+							body.createdAt,
+						);
+					}
+
+					writeAgentEvent(this.env, {
+						kind: "agent_run",
+						userId: this.name,
+						blobs: ["CMO", "draft-mirrored", body.employee, body.channel, body.kind],
+						doubles: [0],
+					});
+
+					return { ok: true };
+				},
+			);
 		}
 
 		return super.fetch(request);
