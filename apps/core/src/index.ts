@@ -457,14 +457,18 @@ async function routeRequest(
 }
 
 /**
- * Bare WebSocket route for the browser activity feed.
+ * Bare WebSocket route for the browser chat surface.
  *
- * Auth happens INSIDE the DO via CMO.onConnect (Task 6) — the partyserver
- * `Server.fetch` upgrades to WS first, then calls `onConnect`, which reads
- * the `?token=` query string and closes the socket with 1008 on failure.
- * Routing this through the worker just forwards the request to the right
- * per-user DO instance (keyed by `transportName(userId)` so the bare-WS
- * lookup lands on the same DO as the /mcp transport).
+ * Verifies the JWT minted by apps/web's /api/agent-token BEFORE spinning up
+ * a DO instance. Defense-in-depth: the DO's onConnect also re-checks the
+ * token, but doing it here prevents unnecessary DO spin-ups and protects
+ * against cross-user replay (token.name must match the URL's userId) and
+ * cross-agent token reuse (token.agent must be "cmo").
+ *
+ * Browser opens:
+ *   wss://core/agents/cmo/<userId>?token=<jwt>
+ * Token claims expected:
+ *   { userId: <session user id>, agent: "cmo", name: <userId from URL> }
  */
 async function handleCmoWsRequest(
   request: Request,
@@ -477,6 +481,33 @@ async function handleCmoWsRequest(
   if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
     return new Response("expected websocket upgrade", { status: 426 });
   }
+
+  // Verify the JWT minted by apps/web's /api/agent-token before
+  // spinning up a DO instance. Browser opens
+  //   wss://core/agents/cmo/<userId>?token=<jwt>
+  // and we check the claims match the URL's `userId` (defense against
+  // cross-user replay) and that the agent claim is `cmo` (defense
+  // against tokens minted for hog/smm being used here).
+  const url = new URL(request.url);
+  const token = url.searchParams.get("token");
+  if (!token) {
+    return new Response("missing token", { status: 401 });
+  }
+
+  let claims: Record<string, unknown>;
+  try {
+    claims = await verifyJwt(token, env.MCP_JWT_SECRET);
+  } catch {
+    return new Response("invalid token", { status: 401 });
+  }
+
+  if (claims["agent"] !== "cmo") {
+    return new Response("token agent mismatch", { status: 401 });
+  }
+  if (claims["name"] !== userId) {
+    return new Response("token name mismatch", { status: 401 });
+  }
+
   const stub = env.CMO.get(env.CMO.idFromName(transportName(userId)));
   // Forward the request verbatim so `onConnect`'s ctx.request.url retains
   // the `?token=...` query string AND the original `/agents/cmo/<userId>`
