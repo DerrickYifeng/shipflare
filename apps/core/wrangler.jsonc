@@ -156,6 +156,15 @@
 			"dataset": "shipflare_agent_events"
 		}
 	],
+	// Plain (non-secret) vars. Per-request: every employee gets these
+	// as `env.MCP_OAUTH_AUDIENCE` etc. Secrets live in `wrangler secret
+	// put` (see scripts/cf-deploy-checklist.md). Phase 7 of the CF-native
+	// migration wires `withOAuthProvider` onto the external MCP route
+	// for CMO at mcp.shipflare.com/cmo — the env is scaffolded here so
+	// the `Env` type stays valid while the Phase 7 wiring is staged.
+	"vars": {
+		"MCP_OAUTH_AUDIENCE": "mcp.shipflare.com"
+	},
 	// Dynamic Workflow binding — class lands in a later task. AgentPlanWorkflow
 	// drives long-running multi-step orchestration spawned by CMO when plans
 	// exceed a single MCP call's lifetime (e.g. multi-platform inbound sweep).

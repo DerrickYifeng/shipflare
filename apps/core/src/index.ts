@@ -107,6 +107,18 @@ export interface Env {
    * table (deleted in Phase 5 of the CF-native chat migration).
    */
   TELEMETRY: AnalyticsEngineDataset;
+  /**
+   * Phase 7 wiring (CF-native migration): `withOAuthProvider` wraps the
+   * external MCP route for CMO so 3rd-party clients (Claude Desktop,
+   * Cursor, the founder's own LLM stack) authenticate via the standard
+   * MCP OAuth flow. The audience claim is published; the signing key is
+   * provisioned via `wrangler secret put MCP_OAUTH_JWT_SIGNING_KEY`.
+   *
+   * Scaffolded in Phase 0 so the `Env` type stays consistent across the
+   * migration; the route handler that consumes these lands in Phase 7.
+   */
+  MCP_OAUTH_AUDIENCE: string;
+  MCP_OAUTH_JWT_SIGNING_KEY: string;
 }
 
 /**

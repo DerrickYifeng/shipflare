@@ -74,6 +74,7 @@ pnpm exec wrangler secret put ANTHROPIC_API_KEY        # from console.anthropic.
 pnpm exec wrangler secret put XAI_API_KEY              # from console.x.ai
 pnpm exec wrangler secret put MCP_JWT_SECRET           # 32-byte random
 pnpm exec wrangler secret put CHANNEL_ENC_KEY          # 32-byte random (same as web)
+pnpm exec wrangler secret put MCP_OAUTH_JWT_SIGNING_KEY  # 32-byte random; signs external MCP OAuth tokens for mcp.shipflare.com/cmo (Phase 7 of CF-native chat migration)
 ```
 
 For **apps/web**:
