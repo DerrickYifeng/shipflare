@@ -9,10 +9,8 @@ import type { CMO } from "../src/agents/cmo/CMO";
  * Endpoints:
  *  - POST /internal/init             — idempotent default-roster seed
  *  - POST /internal/peer-dm-shadow   — quiet employee_log append (no LLM)
- *  - POST /internal/cron-tick        — per-hour SMM fan-out (no-op if SMM
- *                                       not connected)
  *
- * All three are gated on `x-shipflare-internal: 1` — the Worker entry
+ * Both are gated on `x-shipflare-internal: 1` — the Worker entry
  * sets this for Service-Binding-initiated traffic (S2.6). The 403 path
  * is exercised below.
  *
@@ -197,28 +195,3 @@ describe("CMO /internal/peer-dm-shadow", () => {
   });
 });
 
-describe("CMO /internal/cron-tick", () => {
-  it("returns the post-Phase-5 stub response (peer fan-out retired)", async () => {
-    const stub = env.CMO.getByName("cron-test-1");
-    // No bootstrap needed — the stub returns a static 200 without touching SQL.
-    const res = await stub.fetch(
-      new Request("https://x/internal/cron-tick", {
-        method: "POST",
-        headers: INTERNAL_HEADERS,
-      }),
-    );
-    expect(res.status).toBe(200);
-    // Stub response now includes the DO name for log triage.
-    expect(await res.text()).toMatch(/^noop:cron-tick-stub:/);
-  });
-
-  it("rejects without internal header (403)", async () => {
-    const stub = env.CMO.getByName("cron-test-2");
-    const res = await stub.fetch(
-      new Request("https://x/internal/cron-tick", {
-        method: "POST",
-      }),
-    );
-    expect(res.status).toBe(403);
-  });
-});

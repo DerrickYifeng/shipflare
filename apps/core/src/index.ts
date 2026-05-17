@@ -19,9 +19,9 @@
  *   for sibling-agent RPC. Gated by `x-shipflare-internal: 1` (Cloudflare
  *   strips this header from public-edge traffic, so only intra-network
  *   callers can set it; the DO re-checks defensively).
- * - `scheduled()` → hourly fan-out. Iterates `user` rows in D1, POSTs
- *   `/internal/cron-tick` to each user's CMO DO. Per-DO failures are
- *   isolated via `Promise.allSettled`.
+ * - `scheduled()` → fleet-wide rollups only (currently the 6h growth
+ *   snapshot). Per-user daily relays moved to `CMO.alarm()` in 5.1c.13;
+ *   the legacy `/internal/cron-tick` fan-out was retired in 5.1c.16.
  *
  * Phase 0 spike #2: parameterized `DurableObjectNamespace<CMO>` is required
  * (not bare) for `addMcpServer`'s generic constraint to resolve, and the
@@ -44,7 +44,6 @@ import { inferTimezone } from "./lib/tz-inference";
 import { ROLE_REGISTRY, isValidRole, type RoleSlug } from "@shipflare/shared";
 import {
   createDb,
-  user as userTable,
   channels as channelsTable,
   growthSnapshots as growthSnapshotsTable,
 } from "@shipflare/db";
@@ -178,14 +177,6 @@ const EXTERNAL_MCP_ROUTE =
  */
 const INTERNAL_ROUTE = /^\/agents\/([a-z-]+)\/([^/]+)(\/internal\/.+)$/;
 
-/**
- * Per-tick cap on D1 user fan-out. We're early in Phase 1 — every active CMO
- * gets ticked every hour regardless of activity. The cap prevents a runaway
- * cron call when the user table grows faster than the per-user activity
- * gating ships. Remove this once `user.lastActiveAt`-based filtering exists.
- */
-const CRON_FANOUT_CAP = 1000;
-
 export default {
   async fetch(
     request: Request,
@@ -214,36 +205,16 @@ export default {
     env: Env,
     _ctx: ExecutionContext,
   ): Promise<void> {
-    // Hourly fan-out. Read every user.id from D1, fire `/internal/cron-tick`
-    // at their CMO DO. Each tick is a separate DO instance so failures
-    // isolate — one bad CMO doesn't block the rest.
+    // Per-user daily relay moved to `CMO.alarm()` in 5.1c.13, so this
+    // handler is now fleet-wide rollups only.
     //
-    // Phase 0 spike #9: don't use `SELF.scheduled()` to test this; call
-    // the handler directly from tests instead.
-    try {
-      const db = createDb(env.DB);
-      const users = await db.select({ id: userTable.id }).from(userTable);
-      const subset = users.slice(0, CRON_FANOUT_CAP);
-      await Promise.allSettled(
-        subset.map(({ id: userId }) => {
-          const stub = env.CMO.get(env.CMO.idFromName(transportName(userId)));
-          return stub.fetch(
-            new Request("https://internal/internal/cron-tick", {
-              method: "POST",
-              headers: { "x-shipflare-internal": "1" },
-            }),
-          );
-        }),
-      );
-    } catch (err) {
-      // Cron should be self-healing — log + swallow. The next tick retries.
-      console.error("[scheduled] cron fan-out failed:", err);
-    }
-
     // Growth snapshots: capture per-(user, platform) metrics into D1 every
     // 6h tick. Phase 1 stores empty metrics {}; a later task wires real
     // collection. Per-(user, platform) failures are isolated via the
     // try/catch inside snapshotGrowth.
+    //
+    // Phase 0 spike #9: don't use `SELF.scheduled()` to test this; call
+    // the handler directly from tests instead.
     try {
       await snapshotGrowth(env);
     } catch (err) {

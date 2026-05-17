@@ -53,9 +53,6 @@ export interface CMOState {
  *   - /internal/init                    — first-login seed of founder_context
  *   - /internal/peer-dm-shadow          — quiet employee_log append; per
  *                                          CLAUDE.md MUST NOT trigger chat
- *   - /internal/cron-tick               — periodic wake; currently a no-op
- *                                          stub (peer fan-out was deleted
- *                                          alongside the McpAgent surface)
  *   - /internal/push-subscribe          — web-push subscription persistence
  *   - /internal/destroy                 — account-deletion cleanup
  *   - /internal/commit-strategic-path   — onboarding-wizard direct write
@@ -64,7 +61,10 @@ export interface CMOState {
  *
  * The legacy /internal/log-activity route + the activity_events table are
  * deleted in this commit (telemetry routes through Analytics Engine via
- * `writeAgentEvent` instead).
+ * `writeAgentEvent` instead). The legacy /internal/cron-tick fan-out route
+ * was retired in 5.1c.16 — per-user daily relays now run via DO `alarm()`
+ * (see `scheduleNextRelay` / `alarm`), so the outer `scheduled()` no
+ * longer pokes individual CMOs.
  */
 export class CMO extends AIChatAgent<Env, CMOState> {
 	initialState: CMOState = { currentRunId: null };
@@ -559,10 +559,6 @@ export class CMO extends AIChatAgent<Env, CMOState> {
 			this.ensureSchema();
 			return this.handlePeerShadow(request);
 		}
-		if (url.pathname === "/internal/cron-tick") {
-			this.ensureSchema();
-			return this.handleCronTick();
-		}
 		if (url.pathname === "/internal/push-subscribe") {
 			this.ensureSchema();
 			return this.handlePushSubscribe(request);
@@ -920,34 +916,6 @@ export class CMO extends AIChatAgent<Env, CMOState> {
 			(current) => [...current, synthetic],
 		);
 		return result.status;
-	}
-
-	/**
-	 * Cron tick — called from `apps/core`'s `scheduled()` handler on every
-	 * cron trigger.
-	 *
-	 * Post-Phase-5 status: this is a stub. The legacy McpAgent CMO fanned
-	 * out to SMM's `findThreadsViaXai` via in-process MCP RPC; with peers
-	 * now AIChatAgents reached only via `consult`, the cron-tick driven
-	 * fan-out is no longer wired. Task 5.1c brings the sweep back in by
-	 * re-implementing the deleted SMM tools as CMO-side LLM tools that
-	 * the cron tick can drive via a synthetic chat turn.
-	 *
-	 * Until then this returns 200 noop so the Worker's `scheduled()` loop
-	 * stays self-healing and tests that don't depend on the fan-out can
-	 * still assert "tick happened" semantics.
-	 */
-	private handleCronTick(): Response {
-		// Observability: emit a telemetry event for every tick so we can
-		// confirm crons are firing (and measure the cost of the no-op
-		// invocations) before 5.1c restores real fan-out behavior.
-		writeAgentEvent(this.env, {
-			kind: "agent_run",
-			userId: this.name,
-			blobs: ["CMO", "cron-tick-noop"],
-			doubles: [0],
-		});
-		return new Response(`noop:cron-tick-stub:${this.name}`, { status: 200 });
 	}
 
 	/**
