@@ -3,6 +3,6 @@ export {
   listSkills,
   parseFrontmatter,
   substituteArguments,
-  type SkillContext,
+  type RunSkillOptions,
 } from "./runner";
 export { SKILL_REGISTRY } from "./registry";

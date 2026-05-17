@@ -11,11 +11,6 @@ export interface RunSkillOptions {
   userId?: string;
 }
 
-/** @deprecated Use RunSkillOptions instead */
-export interface SkillContext {
-  env: { ANTHROPIC_API_KEY: string };
-}
-
 interface ParsedFrontmatter {
   model: string;
   maxTokens: number;
