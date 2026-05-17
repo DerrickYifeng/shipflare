@@ -118,6 +118,10 @@ export interface Env {
    * migration; the route handler that consumes these lands in Phase 7.
    */
   MCP_OAUTH_AUDIENCE: string;
+  // TODO(Phase 7): the route handler that installs `withOAuthProvider` must
+  // assert this is non-empty at startup — bindings injected by Wrangler can
+  // silently arrive as `""` if `wrangler secret put MCP_OAUTH_JWT_SIGNING_KEY`
+  // was never run for the environment.
   MCP_OAUTH_JWT_SIGNING_KEY: string;
 }
 

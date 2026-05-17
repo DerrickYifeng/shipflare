@@ -58,6 +58,36 @@ The three prompt templates live at
 - `apps/core/.dev.vars` is gitignored — `MCP_OAUTH_JWT_SIGNING_KEY` is set locally (random base64) but the `.dev.vars.example` documents it for other devs.
 - Vitest invocation: `pnpm --filter @shipflare/core exec vitest run <path>` (the `exec` is required; there's no `vitest` script).
 
+## Open review findings (from spec + code review of Phase 0 + Task 1.1)
+
+Both reviews PASSED (spec: ✅, code: approved-with-follow-ups). The
+implementations faithfully execute the plan. These items are
+**plan-level** concerns to resolve before Phase 3 / Phase 8 build on the
+current scaffolding:
+
+1. **Analytics Engine `indexes` cardinality** — Cloudflare AE accepts
+   *at most one* index per data point; the second and third array slots
+   are silently dropped at write time. Current `writeAgentEvent` writes
+   `[kind, userId, runId]`. As-is, only `kind` will be queryable via
+   `WHERE index = …` SQL; `userId` and `runId` won't be. **Decide before
+   Phase 3 wires the first consumer** whether to (a) pick one most-
+   useful index (likely `userId` for per-user query) and move the
+   others into `blobs`, or (b) accept that `userId`/`runId` are
+   blobs-only and document the SQL query patterns accordingly. Touch
+   `apps/core/src/lib/telemetry.ts:14`.
+
+2. **`@ai-sdk/anthropic` in `apps/web`** — Task 0.1 Step 3 directed
+   installation in both packages, but the web app only needs
+   `useAgentChat` / `UIMessage` from `ai`, not the Anthropic provider
+   (which is server-side only). When Phase 8 wires the chat UI, drop
+   `@ai-sdk/anthropic` from `apps/web/package.json` unless a web-side
+   consumer materialises.
+
+3. **Phase-7 OAuth signing key startup-guard** — *Resolved
+   2026-05-16*: added a `TODO(Phase 7)` comment at
+   `apps/core/src/index.ts:121` so the route handler that lands in
+   Phase 7 doesn't ship without an "is non-empty" assertion.
+
 ## Branch state
 
 `git status` should show a clean tree. If the working tree has stray edits, investigate before resuming.
