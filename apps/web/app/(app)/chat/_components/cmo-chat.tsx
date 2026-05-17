@@ -75,11 +75,11 @@ export function CmoChat({ userId }: { userId: string }) {
 								const toolCallId = String(p["toolCallId"] ?? "");
 
 								if (toolName === "consult") {
-									const employeeId = String(
-										(p["input"] as Record<string, unknown> | undefined)?.[
-											"employee"
-										] ?? "",
-									);
+									const input = p["input"];
+									const employeeId =
+										input && typeof input === "object" && "employee" in input
+											? String((input as Record<string, unknown>)["employee"] ?? "")
+											: "";
 									const meta = EMPLOYEE_REGISTRY[employeeId];
 									return (
 										<NestedAgentRun

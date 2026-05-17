@@ -10,21 +10,21 @@
  */
 
 export interface EmployeeMetaClient {
-	displayName: string;
-	description: string;
+  displayName: string;
+  description: string;
 }
 
 export const EMPLOYEE_REGISTRY: Record<string, EmployeeMetaClient> = {
-	cmo: {
-		displayName: "Chief Marketing Officer",
-		description: "Strategic marketing leadership; the orchestrator.",
-	},
-	hog: {
-		displayName: "Head of Growth",
-		description: "Growth strategy, acquisition funnels, retention experiments.",
-	},
-	smm: {
-		displayName: "Social Media Manager",
-		description: "Channel-specific drafting, voice, posting cadence.",
-	},
+  cmo: {
+    displayName: "Chief Marketing Officer",
+    description: "Strategic marketing leadership; the orchestrator.",
+  },
+  hog: {
+    displayName: "Head of Growth",
+    description: "Growth strategy, acquisition funnels, retention experiments.",
+  },
+  smm: {
+    displayName: "Social Media Manager",
+    description: "Channel-specific drafting, voice, posting cadence.",
+  },
 };
