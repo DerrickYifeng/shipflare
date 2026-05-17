@@ -62,7 +62,7 @@ describe("substituteArguments", () => {
 describe("runSkill", () => {
   it("throws a helpful error on unknown skill name", async () => {
     await expect(
-      runSkill("nonexistent-skill", {}, { env: { ANTHROPIC_API_KEY: "" } }),
+      runSkill({ name: "nonexistent-skill", args: {}, env: { ANTHROPIC_API_KEY: "" } }),
     ).rejects.toThrow(/Unknown skill/);
   });
 });

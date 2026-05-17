@@ -1,6 +1,17 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { SKILL_REGISTRY } from "./registry";
 
+export interface RunSkillOptions {
+  name: string;
+  args: Record<string, unknown>;
+  env: { ANTHROPIC_API_KEY: string };
+  // Declared for Task 3.1c — unused in 3.1b
+  writer?: { write: (chunk: unknown) => void };
+  parentRunId?: string | null;
+  userId?: string;
+}
+
+/** @deprecated Use RunSkillOptions instead */
 export interface SkillContext {
   env: { ANTHROPIC_API_KEY: string };
 }
@@ -69,27 +80,23 @@ export function substituteArguments(
  * Run a skill end-to-end:
  *   1. Look up the markdown body from SKILL_REGISTRY (throws if missing).
  *   2. Parse YAML frontmatter (model / maxTokens / optional system).
- *   3. Substitute `{key}` placeholders in the body with `inputs`.
+ *   3. Substitute `{key}` placeholders in the body with `args`.
  *   4. Call Anthropic Messages API.
  *   5. Parse the response — try fenced JSON, raw JSON, then return raw text.
  */
-export async function runSkill<T = unknown>(
-  name: string,
-  inputs: Record<string, unknown>,
-  context: SkillContext,
-): Promise<T> {
-  const markdown = SKILL_REGISTRY[name];
+export async function runSkill<T = unknown>(opts: RunSkillOptions): Promise<T> {
+  const markdown = SKILL_REGISTRY[opts.name];
   if (!markdown) {
     const registered = Object.keys(SKILL_REGISTRY).join(", ");
     throw new Error(
-      `Unknown skill: ${name}. Registered skills: ${registered}`,
+      `Unknown skill: ${opts.name}. Registered skills: ${registered}`,
     );
   }
 
   const { frontmatter, body } = parseFrontmatter(markdown);
-  const prompt = substituteArguments(body, inputs);
+  const prompt = substituteArguments(body, opts.args);
 
-  const client = new Anthropic({ apiKey: context.env.ANTHROPIC_API_KEY });
+  const client = new Anthropic({ apiKey: opts.env.ANTHROPIC_API_KEY });
   const response = await client.messages.create({
     model: frontmatter.model,
     max_tokens: frontmatter.maxTokens,

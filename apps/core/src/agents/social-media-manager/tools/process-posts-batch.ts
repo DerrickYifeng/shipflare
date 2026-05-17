@@ -182,9 +182,9 @@ export function registerProcessPostsBatchTool(agent: SocialMediaMgr): void {
             let whyItWorks = "";
             let confidence = 0;
             try {
-              const raw = await runSkill<unknown>(
-                "drafting-post",
-                {
+              const raw = await runSkill<unknown>({
+                name: "drafting-post",
+                args: {
                   platform,
                   product,
                   productDescription: productDescription || "no description",
@@ -193,10 +193,8 @@ export function registerProcessPostsBatchTool(agent: SocialMediaMgr): void {
                   skill: item.skill,
                   params: JSON.stringify(params, null, 2),
                 },
-                {
-                  env: { ANTHROPIC_API_KEY: agent.bindings.ANTHROPIC_API_KEY },
-                },
-              );
+                env: { ANTHROPIC_API_KEY: agent.bindings.ANTHROPIC_API_KEY },
+              });
               if (raw && typeof raw === "object") {
                 const parsed = raw as {
                   body?: unknown;

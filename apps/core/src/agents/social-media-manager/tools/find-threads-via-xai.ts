@@ -184,17 +184,15 @@ export function registerFindThreadsViaXaiTool(agent: SocialMediaMgr): void {
           }> = [];
           if (rawThreads.length > 0) {
             try {
-              const raw = await runSkill<unknown>(
-                "judging-thread",
-                {
+              const raw = await runSkill<unknown>({
+                name: "judging-thread",
+                args: {
                   product,
                   productDescription: productDescription || "(not provided)",
                   threads: JSON.stringify(rawThreads, null, 2),
                 },
-                {
-                  env: { ANTHROPIC_API_KEY: agent.bindings.ANTHROPIC_API_KEY },
-                },
-              );
+                env: { ANTHROPIC_API_KEY: agent.bindings.ANTHROPIC_API_KEY },
+              });
               if (Array.isArray(raw)) {
                 judgements = raw
                   .filter(
