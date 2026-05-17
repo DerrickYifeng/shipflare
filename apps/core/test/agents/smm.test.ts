@@ -31,7 +31,7 @@ describe("SMM as AIChatAgent", () => {
 		await runInDurableObject<SMM, void>(env.SMM.get(id), async (instance) => {
 			const tools = instance.getTools();
 			expect(Object.keys(tools).sort()).toEqual(
-				["consult", "draft_for_channel", "find_threads_via_xai", "find_threads"].sort(),
+				["consult", "draft_for_channel", "find_threads_via_xai", "find_threads", "research_reddit_channels"].sort(),
 			);
 		});
 	});
