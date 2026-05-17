@@ -36,12 +36,19 @@ dd5bf4e feat(skills): thread env+userId into SMM runSkill calls for telemetry
 
 ## Start here next session
 
-**Task 4.1: Peer input/output schemas** (plan line 793).
+**Task 4.4b** — extract `apps/core/src/agents/social-media-manager/SYSTEM.md` from the existing class JSDoc.
 
-First task of Phase 4 — Agent orchestration (Layer 2). Build registry,
-consult tool, and rewrite employees bottom-up: SMM → HoG.
+Phase 4 progress so far:
+- 4.1 (peer schemas), 4.2 (EMPLOYEE_REGISTRY scaffold), 4.3 (getEmployee), 4.4a (stubs) — ALL DONE.
+- 4.4b/c/d pending; see `docs/superpowers/plans/2026-05-16-task-4.4-amendment.md`
+  for the authoritative sub-task split — Task 4.4 in the original plan
+  collapses an architectural rewrite that needs ~4 commits, not 1.
+- 4.4e (CMO-side port of 6 deleted SMM tools) is **deferred to Phase 5**.
+  Branch is non-deployable between 4.4d and 4.4e — that gap is acknowledged.
 
-Phase 4 is the biggest phase — 8 tasks. Plan §line 787 onwards.
+After 4.4 lands: continue with Task 4.5 (HoG as AIChatAgent — same shape,
+should reuse 4.4 patterns), then 4.6 (real consult-tool), 4.7 (real
+loadSystemPrompt), 4.8 (peer-mesh integration test).
 
 ## Execution mode
 

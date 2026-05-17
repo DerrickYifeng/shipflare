@@ -796,7 +796,7 @@ Build registry, consult tool, and rewrite employees bottom-up: SMM → HoG.
 - Create: `apps/core/src/agents/lib/peer-schema.ts`
 - Test: `apps/core/test/peer-schema.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```typescript
 // apps/core/test/peer-schema.test.ts
@@ -818,13 +818,13 @@ describe('peer schemas', () => {
 });
 ```
 
-- [ ] **Step 2: Run, expect FAIL**
+- [x] **Step 2: Run, expect FAIL**
 
 ```bash
 pnpm --filter @shipflare/core vitest run test/peer-schema.test.ts
 ```
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 ```typescript
 // apps/core/src/agents/lib/peer-schema.ts
@@ -843,8 +843,8 @@ export const peerOutputSchema = z.object({
 export type PeerOutput = z.infer<typeof peerOutputSchema>;
 ```
 
-- [ ] **Step 4: Run, expect PASS**
-- [ ] **Step 5: Commit**
+- [x] **Step 4: Run, expect PASS**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/core/src/agents/lib/peer-schema.ts apps/core/test/peer-schema.test.ts
@@ -859,7 +859,7 @@ git commit -m "feat(agents): peerInput/Output schemas"
 - Create: `apps/core/src/agents/registry.ts`
 - Test: `apps/core/test/registry.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```typescript
 // apps/core/test/registry.test.ts
@@ -880,9 +880,9 @@ describe('EMPLOYEE_REGISTRY', () => {
 });
 ```
 
-- [ ] **Step 2: Run, expect FAIL**
+- [x] **Step 2: Run, expect FAIL**
 
-- [ ] **Step 3: Implement (CMO entry only for now — HoG/SMM added when class files are rewritten)**
+- [x] **Step 3: Implement (CMO entry only for now — HoG/SMM added when class files are rewritten)**
 
 ```typescript
 // apps/core/src/agents/registry.ts
@@ -916,8 +916,8 @@ export const EMPLOYEE_IDS = Object.keys(EMPLOYEE_REGISTRY) as EmployeeId[];
 
 Note: this file imports `CMO`, which still exists in its old `McpAgent` form. The import resolves; the type compatibility is loose because the registry uses `typeof AIChatAgent`. **Phase 5 fixes this** by rewriting CMO. Until then, the test passes because we're checking metadata only.
 
-- [ ] **Step 4: Run, expect PASS**
-- [ ] **Step 5: Verify build**
+- [x] **Step 4: Run, expect PASS**
+- [x] **Step 5: Verify build**
 
 ```bash
 pnpm -r exec tsc --noEmit
@@ -925,7 +925,7 @@ pnpm -r exec tsc --noEmit
 
 If the `typeof AIChatAgent` constraint blocks compilation against the old `McpAgent` CMO, change `class:` to `class: any` temporarily and add a TODO comment that Phase 5 tightens the type. Document in commit message.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/core/src/agents/registry.ts apps/core/test/registry.test.ts
@@ -940,7 +940,7 @@ git commit -m "feat(agents): EMPLOYEE_REGISTRY scaffold (CMO entry)"
 - Create: `apps/core/src/agents/lib/get-employee.ts`
 - Test: `apps/core/test/get-employee.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```typescript
 // apps/core/test/get-employee.test.ts
@@ -970,9 +970,9 @@ describe('getEmployee', () => {
 });
 ```
 
-- [ ] **Step 2: Run, expect FAIL**
+- [x] **Step 2: Run, expect FAIL**
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 ```typescript
 // apps/core/src/agents/lib/get-employee.ts
@@ -991,8 +991,8 @@ export function getEmployee<TEnv extends Record<string, unknown>>(
 }
 ```
 
-- [ ] **Step 4: Run, expect PASS**
-- [ ] **Step 5: Commit**
+- [x] **Step 4: Run, expect PASS**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/core/src/agents/lib/get-employee.ts apps/core/test/get-employee.test.ts
@@ -1002,6 +1002,31 @@ git commit -m "feat(agents): getEmployee(id, userId, env) helper"
 ---
 
 ### Task 4.4: SMM as AIChatAgent (with placeholder consult)
+
+**PLAN AMENDMENT — 2026-05-16:** Mid-execution audit surfaced that this
+task's scope is bigger than the plan body suggests. The current
+`SocialMediaMgr.ts` is heavily MCP-coupled (7 tools that use
+`agent.mcp.callTool`, `addMcpServer` peer connections, custom SQLite
+schema, MCP `props.userId`). Naive port leaves dead plumbing. Spec §3.4
++ §13 already capture the intent: SMM becomes a lean AIChatAgent with
+`consult` + `draft_for_channel` ONLY; the 6 work-doing tools relocate to
+CMO-side ports in Phase 5.
+
+**Read `docs/superpowers/plans/2026-05-16-task-4.4-amendment.md` for the
+authoritative sub-task split before executing.** Summary:
+
+- **4.4a** — stubs (DONE, commit `faf576c`)
+- **4.4b** — extract `SYSTEM.md`
+- **4.4c** — rewrite class + binding rename `SOCIAL_MEDIA_MGR → SMM` +
+  wrangler migration tag **v10** with `renamed_classes`
+- **4.4d** — delete obsolete MCP-tool surface (6 tool files + 4 test
+  files) + stub out the CMO/HoG `addMcpServer('smm', …)` callsites with
+  Phase-5 TODOs
+- **4.4e** — DEFERRED to Phase 5: port the 6 removed SMM tools to
+  CMO-side equivalents. Branch is non-deployable between 4.4d and 4.4e.
+
+The body below is the original plan content for context; the amendment
+doc's sub-task split is the authoritative execution order.
 
 **Files:**
 - Modify: `apps/core/src/agents/social-media-manager/SocialMediaMgr.ts` (rewrite)
