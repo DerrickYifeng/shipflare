@@ -184,6 +184,7 @@ export function registerFindThreadsViaXaiTool(agent: SocialMediaMgr): void {
           }> = [];
           if (rawThreads.length > 0) {
             try {
+              // writer / parentRunId wire up in Phase 4 when SMM becomes an AIChatAgent
               const raw = await runSkill<unknown>({
                 name: "judging-thread",
                 args: {
@@ -191,7 +192,8 @@ export function registerFindThreadsViaXaiTool(agent: SocialMediaMgr): void {
                   productDescription: productDescription || "(not provided)",
                   threads: JSON.stringify(rawThreads, null, 2),
                 },
-                env: { ANTHROPIC_API_KEY: agent.bindings.ANTHROPIC_API_KEY },
+                env: agent.bindings,
+                userId,
               });
               if (Array.isArray(raw)) {
                 judgements = raw

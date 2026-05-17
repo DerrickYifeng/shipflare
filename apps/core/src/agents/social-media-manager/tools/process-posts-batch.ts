@@ -182,6 +182,7 @@ export function registerProcessPostsBatchTool(agent: SocialMediaMgr): void {
             let whyItWorks = "";
             let confidence = 0;
             try {
+              // writer / parentRunId wire up in Phase 4 when SMM becomes an AIChatAgent
               const raw = await runSkill<unknown>({
                 name: "drafting-post",
                 args: {
@@ -193,7 +194,8 @@ export function registerProcessPostsBatchTool(agent: SocialMediaMgr): void {
                   skill: item.skill,
                   params: JSON.stringify(params, null, 2),
                 },
-                env: { ANTHROPIC_API_KEY: agent.bindings.ANTHROPIC_API_KEY },
+                env: agent.bindings,
+                userId,
               });
               if (raw && typeof raw === "object") {
                 const parsed = raw as {
