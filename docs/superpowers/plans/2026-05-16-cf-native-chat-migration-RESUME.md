@@ -12,6 +12,8 @@
 **Phase 1 — Telemetry layer: COMPLETE** (Task 1.1)
 **Phase 2 — Agent depth & cycle safety: COMPLETE** (Task 2.1)
 **Phase 3 — Skill primitive emits data parts: COMPLETE** (Task 3.1a / 3.1b / 3.1c / 3.2)
+**Phase 4 — Agent orchestration: COMPLETE** (Tasks 4.1, 4.2, 4.3, 4.4a/b/c+d, 4.5a/b, 4.6, 4.7, 4.8)
+  - Deferred: 4.4e (CMO-side ports of 6 deleted SMM tools), 4.5e (CMO-side ports of 2 deleted HoG tools) — both fold into Phase 5.
 
 ```
 115fcd8 chore: install @cloudflare/ai-chat
@@ -36,19 +38,38 @@ dd5bf4e feat(skills): thread env+userId into SMM runSkill calls for telemetry
 
 ## Start here next session
 
-**Task 4.4b** — extract `apps/core/src/agents/social-media-manager/SYSTEM.md` from the existing class JSDoc.
+**Task 5.1: CMO class rewrite** (plan line 1643).
 
-Phase 4 progress so far:
-- 4.1 (peer schemas), 4.2 (EMPLOYEE_REGISTRY scaffold), 4.3 (getEmployee), 4.4a (stubs) — ALL DONE.
-- 4.4b/c/d pending; see `docs/superpowers/plans/2026-05-16-task-4.4-amendment.md`
-  for the authoritative sub-task split — Task 4.4 in the original plan
-  collapses an architectural rewrite that needs ~4 commits, not 1.
-- 4.4e (CMO-side port of 6 deleted SMM tools) is **deferred to Phase 5**.
-  Branch is non-deployable between 4.4d and 4.4e — that gap is acknowledged.
+Phase 5 = CMO rewrite from McpAgent to AIChatAgent. Pattern established by
+Tasks 4.4c+d (SMM) and 4.5b (HoG): class rename, AIChatAgent class body,
+binding stays `CMO`, migration tag `v12` with deleted+new (clean DO
+namespace — dev stage). SYSTEM.md extraction. EMPLOYEE_REGISTRY tightening
+(class type from `any` → `typeof AIChatAgent` per Task 4.2 TODO).
 
-After 4.4 lands: continue with Task 4.5 (HoG as AIChatAgent — same shape,
-should reuse 4.4 patterns), then 4.6 (real consult-tool), 4.7 (real
-loadSystemPrompt), 4.8 (peer-mesh integration test).
+**Critical Phase 5 work:**
+
+1. CMO becomes AIChatAgent — `onChatMessage`, `getTools()` exposing user-
+   facing surface (chat, conversation, roster, shared-state). Inter-agent
+   `delegateToEmployee` deletes (replaced by `consult` for outbound peer
+   calls) — but note CMO is the orchestrator: it doesn't use `consult`
+   to call SMM/HoG, those calls go through `agentTool(Cls)` dispatch
+   the same way the `consult` tool's PEER_TOOLS table works.
+
+2. **Fold in 4.4e + 4.5e**: the 8 deleted tools' work relocates to
+   CMO-side tools. Specifically: SMM's `find_threads_via_xai`,
+   `find_threads`, `process_replies_batch`, `process_posts_batch`,
+   `research_reddit_channels`, `list_drafts`; HoG's
+   `generate_strategic_path`, `audit_plan`. These either become CMO
+   `getTools()` entries or get ported as discrete agentTool wrappers.
+
+3. Delete `apps/core/src/lib/activity.ts`, `forward-activity.ts`,
+   `subagent-activity.ts` per spec §13. Delete CMO's
+   `getRecentActivity` tool. Drop the legacy `activity_events` D1
+   table writer.
+
+4. The branch becomes deployable again once 5.1+5.2+5.3 land. Until
+   then, CMO peer-dial to SMM/HoG still fail-soft (TODO breadcrumb
+   already in CMO.ts).
 
 ## Execution mode
 

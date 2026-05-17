@@ -1034,7 +1034,7 @@ doc's sub-task split is the authoritative execution order.
 - Modify: `apps/core/src/agents/registry.ts` (add SMM entry)
 - Test: `apps/core/test/agents/smm.test.ts`
 
-- [ ] **Step 1: Audit current SMM tools**
+- [x] **Step 1: Audit current SMM tools**
 
 ```bash
 grep -E "this\.(server\.tool|sql)" apps/core/src/agents/social-media-manager/SocialMediaMgr.ts | head -20
@@ -1043,7 +1043,7 @@ ls apps/core/src/agents/social-media-manager/tools/
 
 List tool names; they become entries in the new `getTools()` return.
 
-- [ ] **Step 2: Move existing SYSTEM/system-prompt content into a new `SYSTEM.md`**
+- [x] **Step 2: Move existing SYSTEM/system-prompt content into a new `SYSTEM.md`**
 
 ```bash
 # extract the system prompt string from the old file (likely in connectEmployees or a buildSystemPrompt fn)
@@ -1052,7 +1052,7 @@ grep -A 200 "buildSystemPrompt\|SYSTEM_PROMPT" apps/core/src/agents/social-media
 
 Save the role-specific content (NOT shared preamble — that goes to `_SYSTEM_PREAMBLE.md` in Task 5.x) to `apps/core/src/agents/social-media-manager/SYSTEM.md`.
 
-- [ ] **Step 3: Write the integration test**
+- [x] **Step 3: Write the integration test**
 
 ```typescript
 // apps/core/test/agents/smm.test.ts
@@ -1086,9 +1086,9 @@ describe('SMM as AIChatAgent', () => {
 });
 ```
 
-- [ ] **Step 4: Run, expect FAIL** (`Cannot find binding SMM` until next step)
+- [x] **Step 4: Run, expect FAIL** (`Cannot find binding SMM` until next step)
 
-- [ ] **Step 5: Rewrite the SMM class**
+- [x] **Step 5: Rewrite the SMM class**
 
 ```typescript
 // apps/core/src/agents/social-media-manager/SocialMediaMgr.ts
@@ -1171,7 +1171,7 @@ export async function loadSystemPrompt(_id: string): Promise<string> {
 }
 ```
 
-- [ ] **Step 6: Update wrangler — rename binding `SOCIAL_MEDIA_MGR` → `SMM`**
+- [x] **Step 6: Update wrangler — rename binding `SOCIAL_MEDIA_MGR` → `SMM`**
 
 ```jsonc
 // apps/core/wrangler.jsonc — change
@@ -1191,7 +1191,7 @@ Append migration tag for the renamed class (CF DO migrations are append-only):
 
 (Replace `vN` with the next available tag number; check existing migrations first.)
 
-- [ ] **Step 7: Add SMM to `EMPLOYEE_REGISTRY`**
+- [x] **Step 7: Add SMM to `EMPLOYEE_REGISTRY`**
 
 ```typescript
 // apps/core/src/agents/registry.ts — uncomment and add:
@@ -1206,20 +1206,20 @@ smm: {
 },
 ```
 
-- [ ] **Step 8: Add SMM to Env type**
+- [x] **Step 8: Add SMM to Env type**
 
 ```typescript
 // apps/core/src/env.ts
 SMM: DurableObjectNamespace<import('./agents/social-media-manager/SocialMediaMgr').SMM>;
 ```
 
-- [ ] **Step 9: Run integration test, expect PASS**
+- [x] **Step 9: Run integration test, expect PASS**
 
 ```bash
 pnpm --filter @shipflare/core vitest run test/agents/smm.test.ts
 ```
 
-- [ ] **Step 10: Verify all callers compile**
+- [x] **Step 10: Verify all callers compile**
 
 ```bash
 pnpm -r exec tsc --noEmit
@@ -1232,7 +1232,7 @@ grep -rln "SOCIAL_MEDIA_MGR" apps/ packages/
 # fix each by switching to env.SMM
 ```
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add apps/core/src/agents/social-media-manager/ apps/core/src/agents/registry.ts apps/core/src/env.ts apps/core/src/agents/lib/consult-tool.ts apps/core/src/agents/lib/system-prompt.ts apps/core/wrangler.jsonc apps/core/test/agents/smm.test.ts
@@ -1253,15 +1253,15 @@ Same shape as Task 4.4 but for `HeadOfGrowth`.
 - Modify: `apps/core/src/env.ts`
 - Test: `apps/core/test/agents/hog.test.ts`
 
-- [ ] **Step 1: Audit HoG tools**
+- [x] **Step 1: Audit HoG tools**
 
 ```bash
 grep -E "this\.(server\.tool|sql)" apps/core/src/agents/head-of-growth/HeadOfGrowth.ts | head -20
 ```
 
-- [ ] **Step 2: Move system prompt to SYSTEM.md**
+- [x] **Step 2: Move system prompt to SYSTEM.md**
 
-- [ ] **Step 3: Write integration test**
+- [x] **Step 3: Write integration test**
 
 ```typescript
 // apps/core/test/agents/hog.test.ts
@@ -1282,7 +1282,7 @@ describe('HoG as AIChatAgent', () => {
 });
 ```
 
-- [ ] **Step 4: Rewrite class**
+- [x] **Step 4: Rewrite class**
 
 Mirror SMM (Task 4.4 Step 5), substituting:
 - Class name `HoG`
@@ -1291,7 +1291,7 @@ Mirror SMM (Task 4.4 Step 5), substituting:
 - `makeConsultTool('hog')` — will be able to consult SMM after Task 4.6 (now mesh)
 - HoG-direct tools (e.g., `research_competitor`, `analyze_funnel`) ported from the old class
 
-- [ ] **Step 5: Update wrangler — rename `HEAD_OF_GROWTH` → `HOG`**
+- [x] **Step 5: Update wrangler — rename `HEAD_OF_GROWTH` → `HOG`**
 
 ```jsonc
 { "name": "HOG", "class_name": "HoG" }
@@ -1299,7 +1299,7 @@ Mirror SMM (Task 4.4 Step 5), substituting:
 { "tag": "vN+1", "renamed_classes": [{ "from": "HeadOfGrowth", "to": "HoG" }] }
 ```
 
-- [ ] **Step 6: Add HoG to registry + Env**
+- [x] **Step 6: Add HoG to registry + Env**
 
 ```typescript
 hog: {
@@ -1311,20 +1311,20 @@ hog: {
 },
 ```
 
-- [ ] **Step 7: Grep and fix callers of `HEAD_OF_GROWTH`**
+- [x] **Step 7: Grep and fix callers of `HEAD_OF_GROWTH`**
 
 ```bash
 grep -rln "HEAD_OF_GROWTH" apps/ packages/
 ```
 
-- [ ] **Step 8: Run tests + tsc**
+- [x] **Step 8: Run tests + tsc**
 
 ```bash
 pnpm --filter @shipflare/core vitest run test/agents/hog.test.ts
 pnpm -r exec tsc --noEmit
 ```
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add apps/core/src/agents/head-of-growth/ apps/core/src/agents/registry.ts apps/core/src/env.ts apps/core/wrangler.jsonc apps/core/test/agents/hog.test.ts
@@ -1339,7 +1339,7 @@ git commit -m "feat(agents): HoG extends AIChatAgent (binding renamed HOG)"
 - Modify: `apps/core/src/agents/lib/consult-tool.ts` (replace stub)
 - Test: `apps/core/test/consult-tool.test.ts`
 
-- [ ] **Step 1: Write unit test for caller scoping**
+- [x] **Step 1: Write unit test for caller scoping**
 
 ```typescript
 // apps/core/test/consult-tool.test.ts
@@ -1373,9 +1373,9 @@ describe('makeConsultTool', () => {
 });
 ```
 
-- [ ] **Step 2: Run, expect FAIL** (current stub has empty schema)
+- [x] **Step 2: Run, expect FAIL** (current stub has empty schema)
 
-- [ ] **Step 3: Replace stub with real implementation**
+- [x] **Step 3: Replace stub with real implementation**
 
 ```typescript
 // apps/core/src/agents/lib/consult-tool.ts
@@ -1455,19 +1455,19 @@ execute: async ({ employee, question, context }, ctx: any) => {
 },
 ```
 
-- [ ] **Step 4: Run, expect PASS**
+- [x] **Step 4: Run, expect PASS**
 
 ```bash
 pnpm --filter @shipflare/core vitest run test/consult-tool.test.ts
 ```
 
-- [ ] **Step 5: Verify build**
+- [x] **Step 5: Verify build**
 
 ```bash
 pnpm -r exec tsc --noEmit
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/core/src/agents/lib/consult-tool.ts apps/core/test/consult-tool.test.ts
@@ -1483,7 +1483,7 @@ git commit -m "feat(agents): generalized consult tool with caller-scoped enum"
 - Modify: `apps/core/src/agents/lib/system-prompt.ts` (replace stub)
 - Test: `apps/core/test/system-prompt.test.ts`
 
-- [ ] **Step 1: Write `_SYSTEM_PREAMBLE.md`**
+- [x] **Step 1: Write `_SYSTEM_PREAMBLE.md`**
 
 ```markdown
 # ShipFlare Agent Preamble
@@ -1508,7 +1508,7 @@ Your tool calls and skill invocations are recorded. Be concise; prefer one focus
 ## Role
 ```
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 ```typescript
 // apps/core/test/system-prompt.test.ts
@@ -1536,9 +1536,9 @@ describe('loadSystemPrompt', () => {
 });
 ```
 
-- [ ] **Step 3: Run, expect FAIL**
+- [x] **Step 3: Run, expect FAIL**
 
-- [ ] **Step 4: Implement**
+- [x] **Step 4: Implement**
 
 ```typescript
 // apps/core/src/agents/lib/system-prompt.ts
@@ -1579,13 +1579,13 @@ export async function loadSystemPrompt(id: EmployeeId): Promise<string> {
 
 **Note:** the `?raw` import is a Vite-style text import. If the build doesn't support it, switch to a manifest object literal in this file containing the prompt strings directly. Phase 0 should have verified the loader.
 
-- [ ] **Step 5: Run, expect PASS**
+- [x] **Step 5: Run, expect PASS**
 
 ```bash
 pnpm --filter @shipflare/core vitest run test/system-prompt.test.ts
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/core/src/agents/_SYSTEM_PREAMBLE.md apps/core/src/agents/lib/system-prompt.ts apps/core/src/agents/{cmo,head-of-growth,social-media-manager}/SYSTEM.md apps/core/test/system-prompt.test.ts
@@ -1599,7 +1599,7 @@ git commit -m "feat(agents): _SYSTEM_PREAMBLE.md + loadSystemPrompt with auto co
 **Files:**
 - Test: `apps/core/test/integration/peer-mesh.test.ts`
 
-- [ ] **Step 1: Write the test**
+- [x] **Step 1: Write the test**
 
 ```typescript
 // apps/core/test/integration/peer-mesh.test.ts
@@ -1644,13 +1644,13 @@ describe('peer mesh', () => {
 });
 ```
 
-- [ ] **Step 2: Run, expect PASS**
+- [x] **Step 2: Run, expect PASS**
 
 ```bash
 pnpm --filter @shipflare/core vitest run test/integration/peer-mesh.test.ts
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add apps/core/test/integration/peer-mesh.test.ts
