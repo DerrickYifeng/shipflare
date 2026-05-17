@@ -5,21 +5,33 @@ import { TextPart } from "./text-part";
 import { ReasoningPart } from "./reasoning-part";
 import { ToolInvocation } from "./tool-invocation";
 import type { ToolInvocationData } from "./tool-invocation";
+import { SkillPart } from "./skill-part";
 
 function renderPart(p: unknown, i: number): React.ReactNode {
   const part = p as Record<string, unknown>;
+  const typeStr = String(part["type"] ?? "");
 
-  if (part["type"] === "text") {
+  if (typeStr === "text") {
     return <TextPart key={i} text={String(part["text"] ?? "")} />;
   }
 
-  if (part["type"] === "reasoning") {
+  if (typeStr === "reasoning") {
     // ReasoningUIPart from ai v6 has a direct `text` field.
     return <ReasoningPart key={i} text={String(part["text"] ?? "")} />;
   }
 
+  if (typeStr === "data-skill-start" || typeStr === "data-skill-finish") {
+    // Pass through to SkillPart; the SkillPart's discriminated union narrows
+    // on `type` so this cast is structurally safe.
+    return (
+      <SkillPart
+        key={i}
+        part={part as unknown as Parameters<typeof SkillPart>[0]["part"]}
+      />
+    );
+  }
+
   // Tool parts have type `tool-<name>` or `dynamic-tool`.
-  const typeStr = String(part["type"] ?? "");
   if (typeStr.startsWith("tool-") || typeStr === "dynamic-tool") {
     const invocation: ToolInvocationData = {
       toolCallId: String(part["toolCallId"] ?? ""),
