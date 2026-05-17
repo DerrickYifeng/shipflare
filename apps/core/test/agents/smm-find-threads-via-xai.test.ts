@@ -78,7 +78,7 @@ describe("SMM tool find_threads_via_xai", () => {
     await runInDurableObject<SMM, void>(stub, async (instance) => {
       const tools = instance.getTools();
       expect(Object.keys(tools).sort()).toEqual(
-        ["consult", "draft_for_channel", "find_threads_via_xai", "find_threads", "research_reddit_channels"].sort(),
+        ["consult", "draft_for_channel", "find_threads_via_xai", "find_threads", "research_reddit_channels", "process_replies_batch"].sort(),
       );
     });
   });

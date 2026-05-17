@@ -17,6 +17,7 @@ import { applySmmSchema } from "./schema";
 import { makeFindThreadsViaXaiTool } from "./tools/find-threads-via-xai";
 import { makeFindThreadsTool } from "./tools/find-threads";
 import { makeResearchRedditChannelsTool } from "./tools/research-reddit-channels";
+import { makeProcessRepliesBatchTool } from "./tools/process-replies-batch";
 import type { Env } from "../../index";
 
 export interface SMMState {
@@ -117,6 +118,7 @@ export class SMM extends AIChatAgent<Env, SMMState> {
 			find_threads_via_xai: makeFindThreadsViaXaiTool(this),
 			find_threads: makeFindThreadsTool(this),
 			research_reddit_channels: makeResearchRedditChannelsTool(this),
+			process_replies_batch: makeProcessRepliesBatchTool(this),
 		};
 	}
 }
