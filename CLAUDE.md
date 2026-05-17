@@ -287,6 +287,17 @@ must reject violations of these two:
    calls. The shadow handler appends to `employee_log` and returns; CMO sees
    it on next natural wake.
 
+3. **Per-user daily relay runs via DO `alarm()` on CMO, not outer cron.**
+   Each user's CMO calls `this.ctx.storage.setAlarm(nextRelayMs)` based on
+   `founder_context.tz` + `relayHourLocal` (defaults: UTC + 9am). The outer
+   `scheduled()` handler is fleet-wide only (`snapshotGrowth` every 6h).
+   The synthetic system-role message (`metadata.source='daily-relay'`)
+   triggers the LLM turn via `saveMessages` (function form); the web UI
+   hides the synthetic prompt but renders the assistant's reply.
+
+   See `docs/superpowers/specs/2026-05-17-cf-chat-5-1c-design.md`,
+   `docs/superpowers/specs/2026-05-17-phase-0c-verifications.md`.
+
 Framework guarantees (no longer hand-enforced):
 - Single-threaded message processing per DO (replaces mailbox row lock)
 - Hibernation on idle (replaces sleep / slot-yield protocol)

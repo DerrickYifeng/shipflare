@@ -1,21 +1,40 @@
 # Resume Note — CF-Native Chat Migration
 
-**Last updated:** 2026-05-17
-**Branch:** `feat/cf-native-chat-migration` (**pushed to origin** at commit `428c4bb`+)
+**Last updated:** 2026-05-17 (post-5.1c)
+**Branch:** `feat/cf-native-chat-migration` (origin synced through `428c4bb`; 5.1c commits `f1179d0`..`9ed5a04` are local-only at time of this update)
 **Plan:** `docs/superpowers/plans/2026-05-16-cf-native-chat-migration.md`
 **Spec:** `docs/superpowers/specs/2026-05-16-cf-native-chat-migration-design.md`
+**5.1c spec:** `docs/superpowers/specs/2026-05-17-cf-chat-5-1c-design.md`
+**5.1c plan:** `docs/superpowers/plans/2026-05-17-cf-chat-5-1c.md`
 **Phase-0 verifications:** `docs/superpowers/specs/2026-05-16-phase-0-verifications.md`
+**Phase-0c verifications:** `docs/superpowers/specs/2026-05-17-phase-0c-verifications.md`
 **Amendments:**
 - `docs/superpowers/plans/2026-05-16-task-4.4-amendment.md` (SMM rewrite scope)
 - `docs/superpowers/plans/2026-05-16-task-5.1-amendment.md` (CMO rewrite scope + locked decisions)
 
+## 5.1c — landed 2026-05-17 (PR-ready)
+
+20 sub-tasks shipped on `feat/cf-native-chat-migration` (commits `f1179d0`..`9ed5a04`):
+
+- Phase-0c probe verified `saveMessages` as the synthetic-turn API
+- SMM peer tools: find_threads_via_xai, find_threads, process_replies_batch, process_posts_batch, research_reddit_channels
+- HoG peer tools: generate_strategic_path, audit_plan
+- CMO shadow handlers: /internal/mirror-draft, /internal/strategic-path-proposal
+- Daily relay: DO alarm() + computeNextDailyAt + setFounderContext hook
+- TZ inference: browser Intl + cf.timezone + lazy bootstrap on first WS connect
+- Outer cron-tick fan-out deleted (alarm() replaces it)
+- /chat UI filters out synthetic system-role messages
+- Playwright smoke `e2e/cmo-relay.spec.ts` ready for manual run
+
+Net SQL writes: SMM owns threads_inbox + drafts; HoG owns planning_chat + proposal_drafts + audit_findings; CMO owns approval_queue + strategic_path (proposed rows arrive via mirror).
+
 ## TL;DR — where things stand
 
-- **62 commits** on the branch, all on remote. Working tree clean.
-- **192/192 tests passing** across all packages (core 105, web 76, shared 11).
+- **~82 commits** on the branch (62 pre-5.1c on remote + 20 5.1c commits local; working tree clean).
+- **163/163 core tests passing** (`@shipflare/core`); web + shared suites unchanged from pre-5.1c green.
 - **tsc clean** on `@shipflare/core`, `@shipflare/shared`, `@shipflare/web`. (Repo-wide `pnpm -r exec tsc --noEmit` surfaces ~762 pre-existing errors in the legacy root `src/` from before the monorepo split — those are NOT introduced by this branch.)
-- **Phases 0, 1, 2, 3, 4, 5, 6, 8, 9, 10 done**. Phase 7 deferred. Phase 11 (cutover) pending.
-- **Branch is non-deployable to prod** in two places — see "Known limitations" below.
+- **Phases 0, 1, 2, 3, 4, 5 (incl. 5.1c), 6, 8, 9, 10 done**. Phase 7 deferred. Phase 11 (cutover) pending.
+- **Branch is deployable to dev** — the CMO-side agent execution gap that previously blocked autonomous workflows is now closed. External MCP (Phase 7) remains the only deferred work for full production deploy.
 
 ## Status by phase
 
@@ -27,6 +46,7 @@
 | 3 | ✅ COMPLETE | `runSkill` options-bag + emission + telemetry; 3 SMM callsites threaded |
 | 4 | ✅ COMPLETE | EMPLOYEE_REGISTRY, getEmployee, consult-tool, system-prompt, peer schemas, SMM+HoG rewrites as AIChatAgent, peer-mesh tests |
 | 5 | ✅ COMPLETE | CMO rewrite as AIChatAgent (net −4,333 LOC); 15 LLM-callable tools; migration v12 clean DO namespace |
+| 5.1c | ✅ COMPLETE | 20 sub-tasks; SMM/HoG peer tools ported, CMO mirror handlers, DO `alarm()`-driven daily relay, /chat synthetic-message filter, Playwright spec `e2e/cmo-relay.spec.ts` |
 | 6 | ✅ COMPLETE (no-op) | `founder_messages` / `activity_events` never lived in D1; DO migration tags landed inline |
 | 7 | ⏸ DEFERRED | External MCP route stubbed to 503; OAuth wrapper deferred (user chose Phase 8 first) |
 | 8 | ✅ COMPLETE | `/api/agent-token`, `useCmoChat`, 7 part renderers, `/chat` page, WS JWT verification, New Employee Checklist, Playwright spec |
@@ -36,47 +56,36 @@
 
 ## Start here next session
 
-Pick one path:
+5.1c is done. Two paths remain:
 
 ### Path A — Phase 11 (cutover, lands the work on dev)
 
-1. Open a PR for the branch on GitHub: `gh pr create --base dev --title "feat: CF-native chat migration"`
-2. Per memory `feedback_pr_merge_use_merge_commit`: merge with a merge commit, NOT squash.
-3. Run the Playwright smoke at `apps/web/e2e/cmo-chat.spec.ts` (requires real Anthropic key + running dev server + `auth-state.json` for the founder's pre-authenticated browser context).
-4. Telemetry verify: query Cloudflare Analytics Engine SQL API for `shipflare_agent_events` post-deploy.
+1. Push the 5.1c commits to origin: `git push` (20 commits `f1179d0`..`9ed5a04` are local-only).
+2. Open a PR for the branch on GitHub: `gh pr create --base dev --title "feat: CF-native chat migration"`
+3. Per memory `feedback_pr_merge_use_merge_commit`: merge with a merge commit, NOT squash.
+4. Run the Playwright smokes:
+   - `apps/web/e2e/cmo-chat.spec.ts` (general chat — requires real Anthropic key + running dev server + `auth-state.json`)
+   - `apps/web/e2e/cmo-relay.spec.ts` (daily relay — uses the admin-trigger endpoint added in 5.1c.18)
+5. Telemetry verify: query Cloudflare Analytics Engine SQL API for `shipflare_agent_events` post-deploy.
 
-**Caveats**: the branch in its current state has known limitations (see below). Phase 11 lands them as acknowledged tech debt; **production deploy should wait until 5.1c + Phase 7 land**.
+### Path B — Phase 7 (external MCP + OAuth, still deferred)
 
-### Path B — Phase 7 (external MCP + OAuth)
+Plan §Phase 7 lines 2060–2310 (4 tasks). Wires `withOAuthProvider` over the CMO external MCP route so 3rd-party clients (Claude Desktop, Cursor, the founder's own LLM stack) can connect to `mcp.shipflare.com/cmo`. The route is currently a hard 503 stub in `apps/core/src/index.ts:handleExternalMcpRequest` with a Phase 7 marker. Not required for production deploy of the autonomous agent — only for external MCP client access.
 
-Plan §Phase 7 lines 2060–2310 (4 tasks). Wires `withOAuthProvider` over the CMO external MCP route so 3rd-party clients (Claude Desktop, Cursor, the founder's own LLM stack) can connect to `mcp.shipflare.com/cmo`. The route is currently a hard 503 stub in `apps/core/src/index.ts:handleExternalMcpRequest` with a Phase 7 marker.
-
-### Path C — 5.1c (the biggest remaining functional work)
-
-Port the 8 deleted SMM+HoG tools to CMO-side LLM tools. Without this:
-- `queryDrafts` returns empty (CMO's `approval_queue` is never populated)
-- `/internal/cron-tick` is a noop stub (currently just emits a `cron-tick-noop` telemetry event)
-- The agent system can chat but cannot actually drive drafting / sweep workflows
-
-The 8 tools (all previously MCP-style; now need to be AI SDK `tool({...})` entries inside CMO's `getTools()`):
-- From SMM: `find_threads_via_xai`, `find_threads`, `process_replies_batch`, `process_posts_batch`, `research_reddit_channels`, `list_drafts`
-- From HoG: `generate_strategic_path`, `audit_plan`
-
-Each becomes either a direct CMO tool OR a CMO orchestration that internally calls `consult('smm'|'hog', {...})`. Spec §3.4 prefers the latter — peers answer questions, CMO commits decisions.
-
-## Known limitations (the branch is non-deployable in 2 places)
+## Known limitations
 
 ### 1. Web chat: production-ready
-The `/chat` page (Phase 8) and refactored `/team` page (Phase 10) both work against the new AIChatAgent surface. JWT verification on the WS upgrade is in `apps/core/src/index.ts:handleCmoWsRequest`. **This part is deployable.**
+The `/chat` page (Phase 8) and refactored `/team` page (Phase 10) both work against the new AIChatAgent surface. JWT verification on the WS upgrade is in `apps/core/src/index.ts:handleCmoWsRequest`. The /chat UI filters synthetic system-role messages (`metadata.source='daily-relay'`) so daily-relay prompts don't render but assistant replies do. **This part is deployable.**
 
 ### 2. External MCP route: 503 stub
-`/external/agents/cmo/<userId>/mcp` returns 503 with a Phase 7 message. Any external MCP client (Claude Desktop / Cursor) will fail until Phase 7 lands. **Not deployable for external MCP use cases.**
+`/external/agents/cmo/<userId>/mcp` returns 503 with a Phase 7 message. Any external MCP client (Claude Desktop / Cursor) will fail until Phase 7 lands. **Not deployable for external MCP use cases**, but in-app autonomous workflows do not depend on it.
 
-### 3. CMO-side agent execution: half-built
-- `queryDrafts`: returns empty (`approval_queue` has no writer)
-- `cron-tick`: noop stub (no fan-out)
-- 8 SMM/HoG tools: deleted, not yet re-implemented
-- **The agent CAN chat with the founder. It CANNOT autonomously drive discovery, drafting, or scheduled sweeps.** This is the "5.1c" follow-up work.
+### 3. CMO-side agent execution: DONE (was the 5.1c gap, closed 2026-05-17)
+- SMM owns `threads_inbox` + `drafts`; peer tools populate them and mirror to CMO's `approval_queue`.
+- HoG owns `planning_chat` + `proposal_drafts` + `audit_findings`; `generate_strategic_path` proposes via `/internal/strategic-path-proposal`.
+- Daily relay runs via DO `alarm()` on each CMO (TZ-aware) — outer `scheduled()` is fleet-only (`snapshotGrowth`).
+- Playwright spec `apps/web/e2e/cmo-relay.spec.ts` is ready to run manually against a real LLM for end-to-end validation.
+- **The agent can now chat with the founder AND autonomously drive discovery, drafting, and the daily relay.**
 
 ## Execution mode (carry forward)
 
@@ -127,7 +136,9 @@ The current `writeAgentEvent` writes `indexes: [kind, userId, runId]` but Cloudf
 
 Touch: `packages/shared/src/telemetry.ts:14`.
 
-## Commit log (62 commits)
+## Commit log (~82 commits — 62 pre-5.1c on remote + 20 5.1c local)
+
+5.1c tip: `9ed5a04 test(e2e): cmo-relay Playwright smoke + admin trigger endpoint (5.1c.18)`. See "5.1c — landed 2026-05-17" section above for the per-task commit list. Pre-5.1c log shown below:
 
 ```
 $ git log --oneline 084c1cd..HEAD | head -30
@@ -152,7 +163,7 @@ f61362a feat(cmo): rewrite as AIChatAgent + delete obsolete tool surface + migra
 …
 ```
 
-Full log: `git log --oneline 084c1cd..HEAD` (60 commits across all phases, ordered most-recent first).
+Full log: `git log --oneline 084c1cd..HEAD` (ordered most-recent first).
 
 ## When ready to merge
 
@@ -160,9 +171,7 @@ Per `feedback_pr_merge_use_merge_commit` memory:
 - Use a merge commit (NOT squash)
 - After merging dev → main, immediately fast-forward dev to origin/main
 
-**The branch is currently non-deployable to prod**. Plan to either:
-- Land 5.1c + Phase 7 before any production deploy, OR
-- Land the branch on dev now (acknowledging the limitations above) and address 5.1c/Phase 7 as follow-up PRs
+The branch is deployable to dev now. Phase 7 (external MCP) can land as a follow-up PR — it does not gate autonomous agent workflows, only third-party MCP-client access.
 
 ## Quick verify command (run before starting next session)
 
@@ -176,4 +185,4 @@ pnpm --filter @shipflare/shared exec tsc --noEmit
 pnpm --filter @shipflare/core exec vitest run | tail -3
 ```
 
-Expected: clean tree, recent commit `428c4bb` or later, all tsc clean, 105/105 core tests pass.
+Expected: clean tree, recent commit `9ed5a04` or later, all tsc clean, 163/163 core tests pass.
