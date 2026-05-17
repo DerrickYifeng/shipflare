@@ -21,6 +21,9 @@ export const EMPLOYEE_REGISTRY: Partial<Record<EmployeeId, EmployeeMeta>> = {
 		envBinding: 'CMO',
 		displayName: 'Chief Marketing Officer',
 		description: 'Strategic marketing leadership; the orchestrator.',
+		// TODO(Task 4.7): replace this workspace-relative string with a
+		// runtime-safe form (bundler inline import or DO asset URL);
+		// CF Workers have no fs / __dirname so readFileSync won't work.
 		systemPromptPath: 'apps/core/src/agents/cmo/SYSTEM.md',
 	},
 };
