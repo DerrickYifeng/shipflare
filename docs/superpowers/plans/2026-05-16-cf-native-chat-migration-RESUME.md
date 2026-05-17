@@ -10,6 +10,7 @@
 
 **Phase 0 — Foundation: COMPLETE** (Tasks 0.1, 0.2, 0.3, 0.4)
 **Phase 1 — Telemetry layer: COMPLETE** (Task 1.1)
+**Phase 2 — Agent depth & cycle safety: COMPLETE** (Task 2.1)
 
 ```
 115fcd8 chore: install @cloudflare/ai-chat for Phase 0 of CF-native migration
@@ -19,19 +20,20 @@ c74b371 docs: Phase 0 SDK verifications for CF-native migration
 4494d8f docs(plan): mark Phase 0 tasks complete (0.1-0.4)
 6bf9749 feat(telemetry): writeAgentEvent → Analytics Engine
 f9d9200 docs(plan): mark Task 1.1 (writeAgentEvent) complete
+df5cb6e chore(review): Phase-0 follow-ups — TODO for Phase-7 signing key
+8610ca8 feat(lib): safeAgentChain with depth+cycle errors
+5344f74 refactor(lib): clarify safeAgentChain — export ChainContext, fix test name
 ```
 
 ## Start here next session
 
-**Task 2.1: `safeAgentChain` with depth + cycle errors** (plan line 408).
+**Task 3.1: Add writer + telemetry to `runSkill`** (plan line 509).
 
-Pure leaf utility (no DO, no integration). TDD: failing test → implement → green → commit.
+First integration task — modifies the existing `runSkill` to emit
+`data-skill-start` / `data-skill-finish` parts and call
+`writeAgentEvent(env, …)` with `kind: 'skill_invocation'`.
 
-- Create: `apps/core/src/lib/agent-depth.ts`
-- Test: `apps/core/test/agent-depth.test.ts`
-- Plan steps + code blocks: see plan §Task 2.1 (lines 408-499)
-
-Commit message: `feat(lib): safeAgentChain with depth+cycle errors`
+Plan steps + code blocks: see plan §Task 3.1.
 
 ## Execution mode
 

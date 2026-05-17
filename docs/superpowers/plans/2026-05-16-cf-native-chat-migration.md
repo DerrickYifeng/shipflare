@@ -411,7 +411,7 @@ Prerequisite for Layer 2. Pure utility, no DO.
 - Create: `apps/core/src/lib/agent-depth.ts`
 - Test: `apps/core/test/agent-depth.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```typescript
 // apps/core/test/agent-depth.test.ts
@@ -447,13 +447,13 @@ describe('safeAgentChain', () => {
 });
 ```
 
-- [ ] **Step 2: Run test, expect FAIL**
+- [x] **Step 2: Run test, expect FAIL**
 
 ```bash
 pnpm --filter @shipflare/core vitest run test/agent-depth.test.ts
 ```
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 ```typescript
 // apps/core/src/lib/agent-depth.ts
@@ -485,13 +485,13 @@ export const safeAgentChain = {
 };
 ```
 
-- [ ] **Step 4: Run test, expect PASS**
+- [x] **Step 4: Run test, expect PASS**
 
 ```bash
 pnpm --filter @shipflare/core vitest run test/agent-depth.test.ts
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/core/src/lib/agent-depth.ts apps/core/test/agent-depth.test.ts
