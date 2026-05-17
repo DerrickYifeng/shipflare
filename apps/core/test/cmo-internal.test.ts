@@ -208,7 +208,8 @@ describe("CMO /internal/cron-tick", () => {
       }),
     );
     expect(res.status).toBe(200);
-    expect(await res.text()).toBe("noop:cron-tick-stub");
+    // Stub response now includes the DO name for log triage.
+    expect(await res.text()).toMatch(/^noop:cron-tick-stub:/);
   });
 
   it("rejects without internal header (403)", async () => {

@@ -387,9 +387,6 @@ export class CMO extends AIChatAgent<Env, CMOState> {
 				description:
 					"List drafts (typically pending approval) from the approval_queue table.",
 				inputSchema: z.object({
-					status: z
-						.enum(["drafting", "ready", "posted", "failed", "rejected"])
-						.default("ready"),
 					limit: z.number().int().min(1).max(200).default(50),
 				}),
 				execute: async ({ limit }) => {
@@ -397,10 +394,10 @@ export class CMO extends AIChatAgent<Env, CMOState> {
 					// The post-rewrite path reads drafts directly from approval_queue
 					// (CMO is the sole writer post-Phase-5). The legacy MCP tool RPC'd
 					// to SMM.list_drafts; that path is gone alongside the McpAgent
-					// surface. The `status` filter is accepted for forward-compat but
-					// not yet wired — approval_queue.decision (not status) is the
-					// authoritative state, and SMM-side draft mirroring is a Task 5.1c
-					// concern.
+					// surface. The legacy `status` filter param was dropped —
+					// approval_queue.decision is the authoritative state, and the
+					// queue is empty until SMM-side draft mirroring lands in Task
+					// 5.1c. Status filtering will be re-added then.
 					return self.ctx.storage.sql
 						.exec(
 							`SELECT id, draft_id, employee, kind, channel, preview, created_at, decided_at, decision
@@ -655,7 +652,16 @@ export class CMO extends AIChatAgent<Env, CMOState> {
 	 * still assert "tick happened" semantics.
 	 */
 	private handleCronTick(): Response {
-		return new Response("noop:cron-tick-stub", { status: 200 });
+		// Observability: emit a telemetry event for every tick so we can
+		// confirm crons are firing (and measure the cost of the no-op
+		// invocations) before 5.1c restores real fan-out behavior.
+		writeAgentEvent(this.env, {
+			kind: "agent_run",
+			userId: this.name,
+			blobs: ["CMO", "cron-tick-noop"],
+			doubles: [0],
+		});
+		return new Response(`noop:cron-tick-stub:${this.name}`, { status: 200 });
 	}
 
 	/**
