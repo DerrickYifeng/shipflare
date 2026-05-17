@@ -41,4 +41,19 @@ describe("RedditMcpAgent /internal/{reddit_search,research_subreddits}", () => {
     );
     expect([200, 500]).toContain(res.status);
   });
+
+  it("reddit_search returns 400 on invalid body (missing required `product`)", async () => {
+    const id = env.REDDIT_MCP.idFromName("reddit-mcp-search-test-3");
+    const stub = env.REDDIT_MCP.get(id);
+    const res = await stub.fetch(
+      new Request("https://internal/internal/reddit_search", {
+        method: "POST",
+        headers: { "x-shipflare-internal": "1", "content-type": "application/json" },
+        body: JSON.stringify({ maxResults: 5 }),
+      }),
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error?: string };
+    expect(body.error).toBeDefined();
+  });
 });

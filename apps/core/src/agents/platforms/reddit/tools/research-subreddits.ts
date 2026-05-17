@@ -38,11 +38,11 @@ import type { RedditMcpAgent } from "../RedditMcpAgent";
  * (Reddit's public JSON API is anonymous).
  */
 
-export interface ResearchSubredditsArgs {
-	product: string;
-	audience?: string;
-	productDescription?: string;
-}
+export const researchSubredditsArgsSchema = z.object({
+	product: z.string().min(1),
+	audience: z.string().optional(),
+});
+export type ResearchSubredditsArgs = z.infer<typeof researchSubredditsArgsSchema>;
 
 export interface SubredditCandidate {
 	subreddit: string;
@@ -123,20 +123,12 @@ export function registerResearchSubredditsTool(agent: RedditMcpAgent): void {
       inputSchema: {
         product: z.string().min(1),
         audience: z.string().optional(),
-        productDescription: z
-          .string()
-          .optional()
-          .describe(
-            "Reserved for Phase 2 LLM-fit scoring. Currently unused " +
-              "by the subscriber-density heuristic.",
-          ),
       },
     },
-    async ({ product, audience, productDescription }) => {
+    async ({ product, audience }) => {
       const candidates = await researchSubredditsImpl({
         product,
         audience,
-        productDescription,
       });
       return jsonContent(candidates);
     },

@@ -3,10 +3,11 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { McpProps } from "@shipflare/shared";
 import type { Env } from "../../../index";
 import { applyXSchema } from "./schema";
-import { registerXSearchTool, xSearchImpl } from "./tools/x-search";
+import { registerXSearchTool, xSearchImpl, xSearchArgsSchema } from "./tools/x-search";
 import { registerXPostTool } from "./tools/x-post";
 import { registerXMetricsTool } from "./tools/x-metrics";
 import { registerXAggregateMetricsTool, computeXAggregateMetrics } from "./tools/x-aggregate-metrics";
+import { handleInternalJson } from "../../../lib/internal-route";
 
 interface XState {
   lastWakeAt: number;
@@ -113,30 +114,19 @@ export class XMcpAgent extends McpAgent<
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.warn("[XMcpAgent] /internal/x_aggregate_metrics failed:", msg);
-        return new Response(JSON.stringify({ error: msg }), { status: 500 });
-      }
-    }
-    if (url.pathname === "/internal/x_search") {
-      try {
-        const body = (await request.json()) as {
-          product: string;
-          productDescription?: string;
-          intent?: string;
-          maxResults?: number;
-        };
-        const results = await xSearchImpl(this.env, body);
-        return new Response(JSON.stringify(results), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.warn("[XMcpAgent] /internal/x_search failed:", msg);
         return new Response(JSON.stringify({ error: msg }), {
           status: 500,
           headers: { "content-type": "application/json" },
         });
       }
+    }
+    if (url.pathname === "/internal/x_search") {
+      return handleInternalJson(
+        request,
+        "XMcpAgent /internal/x_search",
+        xSearchArgsSchema,
+        (body) => xSearchImpl(this.env, body),
+      );
     }
     return super.fetch(request);
   }

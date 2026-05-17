@@ -34,12 +34,13 @@ import type { Env } from "../../../../index";
  * going through the MCP envelope.
  */
 
-export interface XSearchArgs {
-	product: string;
-	productDescription?: string;
-	intent?: string;
-	maxResults?: number;
-}
+export const xSearchArgsSchema = z.object({
+	product: z.string().min(1),
+	productDescription: z.string().optional(),
+	intent: z.string().optional(),
+	maxResults: z.number().int().min(1).max(50).default(20),
+});
+export type XSearchArgs = z.infer<typeof xSearchArgsSchema>;
 
 export interface XSearchThread {
 	externalId: string;
@@ -51,8 +52,7 @@ export async function xSearchImpl(
 	env: Env,
 	args: XSearchArgs,
 ): Promise<XSearchThread[]> {
-	const { product, productDescription, intent } = args;
-	const maxResults = args.maxResults ?? 20;
+	const { product, productDescription, intent, maxResults } = args;
 	const apiKey = env.XAI_API_KEY;
 	if (!apiKey) {
 		// No key in this environment — return empty rather than crash.

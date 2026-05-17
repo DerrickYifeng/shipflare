@@ -32,4 +32,19 @@ describe("XMcpAgent /internal/x_search", () => {
     // 200 → array of threads; 500 → { error: "..." }
     expect(typeof body).toBe("object");
   });
+
+  it("returns 400 on invalid body (missing required `product`)", async () => {
+    const id = env.X_MCP.idFromName("x-mcp-search-test-3");
+    const stub = env.X_MCP.get(id);
+    const res = await stub.fetch(
+      new Request("https://internal/internal/x_search", {
+        method: "POST",
+        headers: { "x-shipflare-internal": "1", "content-type": "application/json" },
+        body: JSON.stringify({ maxResults: 5 }),
+      }),
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error?: string };
+    expect(body.error).toBeDefined();
+  });
 });

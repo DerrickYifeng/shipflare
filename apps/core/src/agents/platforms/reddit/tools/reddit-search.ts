@@ -34,13 +34,14 @@ import type { RedditMcpAgent } from "../RedditMcpAgent";
  * JSON API is anonymous).
  */
 
-export interface RedditSearchArgs {
-	product: string;
-	productDescription?: string;
-	intent?: string;
-	maxResults?: number;
-	subreddit?: string;
-}
+export const redditSearchArgsSchema = z.object({
+	product: z.string().min(1),
+	productDescription: z.string().optional(),
+	intent: z.string().optional(),
+	maxResults: z.number().int().min(1).max(100).default(20),
+	subreddit: z.string().optional(),
+});
+export type RedditSearchArgs = z.infer<typeof redditSearchArgsSchema>;
 
 export interface RedditSearchThread {
 	externalId: string;
@@ -51,8 +52,7 @@ export interface RedditSearchThread {
 export async function redditSearchImpl(
 	args: RedditSearchArgs,
 ): Promise<RedditSearchThread[]> {
-	const { product, productDescription, intent, subreddit } = args;
-	const maxResults = args.maxResults ?? 20;
+	const { product, productDescription, intent, subreddit, maxResults } = args;
 	const url = new URL(
 		subreddit
 			? `https://www.reddit.com/r/${encodeURIComponent(subreddit)}/search.json`
