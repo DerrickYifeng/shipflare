@@ -3,9 +3,9 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { McpProps } from "@shipflare/shared";
 import type { Env } from "../../../index";
 import { applyRedditSchema } from "./schema";
-import { registerRedditSearchTool } from "./tools/reddit-search";
+import { registerRedditSearchTool, redditSearchImpl } from "./tools/reddit-search";
 import { registerRedditPostTool } from "./tools/reddit-post";
-import { registerResearchSubredditsTool } from "./tools/research-subreddits";
+import { registerResearchSubredditsTool, researchSubredditsImpl } from "./tools/research-subreddits";
 import { registerRedditLocalMetricsTool, computeRedditLocalMetrics } from "./tools/reddit-local-metrics";
 
 interface RedditState {
@@ -126,6 +126,56 @@ export class RedditMcpAgent extends McpAgent<
           msg,
         );
         return new Response(JSON.stringify({ error: msg }), { status: 500 });
+      }
+    }
+    if (url.pathname === "/internal/reddit_search") {
+      try {
+        const body = (await request.json()) as {
+          product: string;
+          productDescription?: string;
+          intent?: string;
+          maxResults?: number;
+          subreddit?: string;
+        };
+        const results = await redditSearchImpl(body);
+        return new Response(JSON.stringify(results), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(
+          "[RedditMcpAgent] /internal/reddit_search failed:",
+          msg,
+        );
+        return new Response(JSON.stringify({ error: msg }), {
+          status: 500,
+          headers: { "content-type": "application/json" },
+        });
+      }
+    }
+    if (url.pathname === "/internal/research_subreddits") {
+      try {
+        const body = (await request.json()) as {
+          product: string;
+          audience?: string;
+          productDescription?: string;
+        };
+        const results = await researchSubredditsImpl(body);
+        return new Response(JSON.stringify(results), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(
+          "[RedditMcpAgent] /internal/research_subreddits failed:",
+          msg,
+        );
+        return new Response(JSON.stringify({ error: msg }), {
+          status: 500,
+          headers: { "content-type": "application/json" },
+        });
       }
     }
     return super.fetch(request);

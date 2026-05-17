@@ -26,7 +26,100 @@ import type { RedditMcpAgent } from "../RedditMcpAgent";
  * empty array rather than crashing the caller's sweep — same pattern
  * as `x_search`. Reddit rate-limits anonymous traffic per IP; on 429
  * we silently degrade and the caller's next tick retries.
+ *
+ * --- 5.1c.M1: pure-async helper extracted ---
+ * `redditSearchImpl` is the canonical search function. Both the MCP
+ * tool registration AND the `/internal/reddit_search` HTTP route on
+ * `RedditMcpAgent` call it directly. No env needed (Reddit's public
+ * JSON API is anonymous).
  */
+
+export interface RedditSearchArgs {
+	product: string;
+	productDescription?: string;
+	intent?: string;
+	maxResults?: number;
+	subreddit?: string;
+}
+
+export interface RedditSearchThread {
+	externalId: string;
+	author: string;
+	content: string;
+}
+
+export async function redditSearchImpl(
+	args: RedditSearchArgs,
+): Promise<RedditSearchThread[]> {
+	const { product, productDescription, intent, subreddit } = args;
+	const maxResults = args.maxResults ?? 20;
+	const url = new URL(
+		subreddit
+			? `https://www.reddit.com/r/${encodeURIComponent(subreddit)}/search.json`
+			: `https://www.reddit.com/search.json`,
+	);
+	url.searchParams.set(
+		"q",
+		buildSearchQuery(product, productDescription, intent),
+	);
+	url.searchParams.set("limit", String(maxResults));
+	// 'new' bias matches xAI date-pinning (project memory 2026-05-06):
+	// wide windows re-surface the same threads across sweeps. Sorting
+	// by recency keeps each sweep fresh.
+	url.searchParams.set("sort", "new");
+	url.searchParams.set("restrict_sr", subreddit ? "true" : "false");
+
+	let res: Response;
+	try {
+		res = await fetch(url.toString(), {
+			headers: {
+				// Reddit returns 429 (or 403) for anonymous requests with
+				// an empty or generic UA. Identifying the client as
+				// ShipFlare keeps us inside Reddit's expected envelope.
+				"User-Agent": "shipflare-cf/1.0 (https://shipflare.com)",
+			},
+		});
+	} catch (err) {
+		console.error("[reddit_search] fetch failed:", err);
+		return [];
+	}
+
+	if (!res.ok) {
+		console.error(
+			`[reddit_search] reddit returned ${res.status}: ${await res
+				.text()
+				.catch(() => "(no body)")}`,
+		);
+		return [];
+	}
+
+	let data: RedditListing<RedditPostData>;
+	try {
+		data = (await res.json()) as RedditListing<RedditPostData>;
+	} catch (err) {
+		console.error("[reddit_search] response JSON parse failed:", err);
+		return [];
+	}
+
+	return (data.data?.children ?? [])
+		.map((c) => {
+			const d = c?.data;
+			if (!d || typeof d.id !== "string") return null;
+			const title = typeof d.title === "string" ? d.title : "";
+			const body = typeof d.selftext === "string" ? d.selftext : "";
+			const content = body ? `${title}\n\n${body}` : title;
+			return {
+				externalId: d.id,
+				author: typeof d.author === "string" ? d.author : "",
+				content,
+			};
+		})
+		.filter(
+			(t): t is RedditSearchThread =>
+				t !== null && t.content.length > 0,
+		);
+}
+
 export function registerRedditSearchTool(agent: RedditMcpAgent): void {
   agent.server.registerTool(
     "reddit_search",
@@ -49,72 +142,13 @@ export function registerRedditSearchTool(agent: RedditMcpAgent): void {
       },
     },
     async ({ product, productDescription, intent, maxResults, subreddit }) => {
-      const url = new URL(
-        subreddit
-          ? `https://www.reddit.com/r/${encodeURIComponent(subreddit)}/search.json`
-          : `https://www.reddit.com/search.json`,
-      );
-      url.searchParams.set(
-        "q",
-        buildSearchQuery(product, productDescription, intent),
-      );
-      url.searchParams.set("limit", String(maxResults));
-      // 'new' bias matches xAI date-pinning (project memory 2026-05-06):
-      // wide windows re-surface the same threads across sweeps. Sorting
-      // by recency keeps each sweep fresh.
-      url.searchParams.set("sort", "new");
-      url.searchParams.set("restrict_sr", subreddit ? "true" : "false");
-
-      let res: Response;
-      try {
-        res = await fetch(url.toString(), {
-          headers: {
-            // Reddit returns 429 (or 403) for anonymous requests with
-            // an empty or generic UA. Identifying the client as
-            // ShipFlare keeps us inside Reddit's expected envelope.
-            "User-Agent": "shipflare-cf/1.0 (https://shipflare.com)",
-          },
-        });
-      } catch (err) {
-        console.error("[reddit_search] fetch failed:", err);
-        return jsonContent([]);
-      }
-
-      if (!res.ok) {
-        console.error(
-          `[reddit_search] reddit returned ${res.status}: ${await res
-            .text()
-            .catch(() => "(no body)")}`,
-        );
-        return jsonContent([]);
-      }
-
-      let data: RedditListing<RedditPostData>;
-      try {
-        data = (await res.json()) as RedditListing<RedditPostData>;
-      } catch (err) {
-        console.error("[reddit_search] response JSON parse failed:", err);
-        return jsonContent([]);
-      }
-
-      const threads = (data.data?.children ?? [])
-        .map((c) => {
-          const d = c?.data;
-          if (!d || typeof d.id !== "string") return null;
-          const title = typeof d.title === "string" ? d.title : "";
-          const body = typeof d.selftext === "string" ? d.selftext : "";
-          const content = body ? `${title}\n\n${body}` : title;
-          return {
-            externalId: d.id,
-            author: typeof d.author === "string" ? d.author : "",
-            content,
-          };
-        })
-        .filter(
-          (t): t is { externalId: string; author: string; content: string } =>
-            t !== null && t.content.length > 0,
-        );
-
+      const threads = await redditSearchImpl({
+        product,
+        productDescription,
+        intent,
+        maxResults,
+        subreddit,
+      });
       return jsonContent(threads);
     },
   );
