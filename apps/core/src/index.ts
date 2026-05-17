@@ -139,13 +139,14 @@ export interface Env {
 const MCP_ROUTE = /^\/agents\/([a-z-]+)\/([^/]+)\/mcp(?:\/|$)/;
 
 /**
- * `/agents/cmo/<userId>` (no /mcp suffix) — Browser activity-feed WebSocket.
+ * `/agents/cmo/<userId>` (no /mcp suffix) — Browser chat WebSocket.
  *
- * Task 6 (spec 2026-05-15): The web client opens this WS after fetching a
- * short-lived activity-scoped JWT from `/api/cmo-ws-token`. The token is
+ * Post-Phase-8 (CF-native chat migration): the web client opens this WS
+ * after fetching a short-lived JWT from `/api/agent-token`. The token is
  * passed in the `?token=` query string (browsers can't set Authorization
- * headers on `new WebSocket()`). CMO's `onConnect` lifecycle verifies the
- * token and closes the socket with 1008 on any auth failure.
+ * headers on `new WebSocket()`). `handleCmoWsRequest` verifies the JWT
+ * before forwarding to the DO; the DO is AIChatAgent so the WS upgrade
+ * is handled by the framework's native chat transport.
  *
  * The trailing `$` (no further path) is what discriminates this from the
  * `/mcp[/...]` route — the regex order in `routeRequest()` checks MCP_ROUTE
@@ -598,9 +599,11 @@ async function handleMcpRequest(
   if (claims["userId"] !== userId) {
     return new Response("token userId mismatch", { status: 403 });
   }
-  // Scope-claim guard: closes the cross-replay between /api/cmo-ws-token
-  // (mints scope:'activity' for the activity WS) and /api/mcp-token (no
-  // scope today). We accept undefined (back-compat) or 'mcp'.
+  // Scope-claim guard: historical cross-replay protection. The legacy
+  // /api/cmo-ws-token route minted scope:'activity' tokens; it was
+  // retired in Phase 10 of the CF-native chat migration. /api/mcp-token
+  // continues to mint MCP-scoped (no `scope` claim today) tokens. We
+  // accept undefined (back-compat) or 'mcp'.
   const scope = (claims as { scope?: unknown }).scope;
   if (scope !== undefined && scope !== "mcp") {
     return new Response("token scope not valid for mcp", { status: 403 });
