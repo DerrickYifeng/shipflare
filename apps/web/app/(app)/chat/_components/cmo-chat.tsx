@@ -11,6 +11,7 @@ import { NestedAgentRun } from "./nested-agent-run";
 import { SkillPart } from "./skill-part";
 import { StepAnchor } from "./step-anchor";
 import { EMPLOYEE_REGISTRY } from "@/lib/employee-registry-client";
+import { shouldRenderMessage } from "@/lib/chat/message-filter";
 
 export function CmoChat({ userId }: { userId: string }) {
 	const { messages, sendMessage, isStreaming, agentRunsByToolCall } = useCmoChat({ userId });
@@ -27,7 +28,7 @@ export function CmoChat({ userId }: { userId: string }) {
 	return (
 		<div className="flex flex-col h-full max-w-3xl mx-auto">
 			<div className="flex-1 overflow-y-auto p-4">
-				{messages.map((msg: UIMessage) => (
+				{messages.filter(shouldRenderMessage).map((msg: UIMessage) => (
 					<MessageBubble key={msg.id} role={msg.role}>
 						{msg.parts.map((part: unknown, i: number) => {
 							const p = part as Record<string, unknown>;
