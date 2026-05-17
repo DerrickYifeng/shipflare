@@ -59,13 +59,25 @@ export function useCmoChat({
   userId: string;
   conversationId?: string;
 }): UseCmoChatResult {
+  // The browser knows its own timezone via Intl; we ship it on the WS
+  // handshake so the CMO DO can bootstrap `founder_context.tz` on first
+  // connect (server-side fallback is `request.cf.timezone`, then `UTC`).
+  // Resolved at hook-call time — Intl is stable per session so this is
+  // safe to read synchronously and capture into the async `query`.
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
   const agent = useAgent({
     agent: 'cmo',
     name: userId,
     // The SDK's QueryObject is Record<string, string | null>. We return the
-    // token as a plain key so `useAgent` appends `?token=<jwt>` to the WS URL.
-    query: async () => ({ token: await fetchAgentJwt('cmo', userId) }),
-    queryDeps: [userId],
+    // token alongside the inferred timezone so `useAgent` appends
+    // `?token=<jwt>&tz=<IANA>` to the WS URL. The server reads `tz` in
+    // `handleCmoWsRequest` and forwards it via `x-inferred-tz` header.
+    query: async () => ({
+      token: await fetchAgentJwt('cmo', userId),
+      tz,
+    }),
+    queryDeps: [userId, tz],
   });
 
   const chat = useAgentChat({ agent, id: conversationId });

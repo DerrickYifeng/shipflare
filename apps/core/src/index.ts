@@ -40,6 +40,7 @@ import { handleOnboardingInternal } from "./onboarding-routes";
 import { verifyJwt } from "./lib/jwt";
 import { validateExternalAccess } from "./lib/external-auth";
 import { transportName } from "./lib/do-name";
+import { inferTimezone } from "./lib/tz-inference";
 import { ROLE_REGISTRY, isValidRole, type RoleSlug } from "@shipflare/shared";
 import {
   createDb,
@@ -509,11 +510,33 @@ async function handleCmoWsRequest(
     return new Response("token name mismatch", { status: 401 });
   }
 
+  // Infer the founder's timezone from the WS handshake so the CMO DO can
+  // bootstrap `founder_context.tz` on first connect (5.1c.14 / .15).
+  //   Priority: ?tz=<IANA>  →  request.cf.timezone  →  "UTC"
+  // The browser provides the query param via
+  //   `Intl.DateTimeFormat().resolvedOptions().timeZone` (apps/web's
+  //   useCmoChat). Cloudflare's IP-geo guess is the fallback for clients
+  //   that don't send the query (older builds, MCP clients, etc).
+  const tzFromQuery = url.searchParams.get("tz") ?? undefined;
+  const tzFromCf = (request.cf as { timezone?: string } | undefined)?.timezone;
+  const inferredTz = inferTimezone(tzFromQuery, tzFromCf);
+
+  // Forward via header so the DO's fetch() can read `x-inferred-tz`
+  // without re-parsing the URL. Use `new Request(url, request)` so the
+  // WS upgrade machinery (Upgrade / Connection / Sec-WebSocket-*, plus
+  // the internal `webSocket` field workerd attaches to upgrade Requests)
+  // is carried over from the original. Mutating `.headers` after
+  // construction keeps every existing handshake header intact and just
+  // overlays our `x-inferred-tz` on top.
+  const forwarded = new Request(request.url, request);
+  forwarded.headers.set("x-inferred-tz", inferredTz);
+
   const stub = env.CMO.get(env.CMO.idFromName(transportName(userId)));
-  // Forward the request verbatim so `onConnect`'s ctx.request.url retains
-  // the `?token=...` query string AND the original `/agents/cmo/<userId>`
-  // path (CMO uses pathname to discriminate this from /mcp transport WS).
-  return stub.fetch(request);
+  // Forward the request (with `x-inferred-tz` overlay) so `onConnect`'s
+  // ctx.request.url retains the `?token=...` query string AND the
+  // original `/agents/cmo/<userId>` path (CMO uses pathname to
+  // discriminate this from /mcp transport WS).
+  return stub.fetch(forwarded);
 }
 
 // ──────────────────────────────────────────────────────────────────────────
