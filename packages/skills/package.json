@@ -10,9 +10,11 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.96.0"
+    "@anthropic-ai/sdk": "^0.96.0",
+    "@shipflare/shared": "workspace:*"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260511.1",
     "typescript": "^5.9.3",
     "vitest": "^4.1.4"
   }
