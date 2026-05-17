@@ -10,6 +10,7 @@ import {
 import { anthropic } from "@ai-sdk/anthropic";
 import { makeConsultTool } from "../lib/consult-tool";
 import { loadSystemPrompt } from "../lib/system-prompt";
+import { applyHogSchema } from "./schema";
 import type { Env } from "../../index";
 
 export interface HoGState {
@@ -31,7 +32,16 @@ export interface HoGState {
 export class HoG extends AIChatAgent<Env, HoGState> {
 	initialState: HoGState = { currentRunId: null };
 
+	private _schemaApplied = false;
+
+	private ensureSchema(): void {
+		if (this._schemaApplied) return;
+		applyHogSchema(this.ctx.storage.sql);
+		this._schemaApplied = true;
+	}
+
 	async onChatMessage(onFinish: StreamTextOnFinishCallback<ToolSet>) {
+		this.ensureSchema();
 		const messages = await convertToModelMessages(this.messages);
 		const system = await loadSystemPrompt("hog");
 		const tools: ToolSet = this.getTools();
