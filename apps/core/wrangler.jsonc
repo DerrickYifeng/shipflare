@@ -145,6 +145,17 @@
 			]
 		}
 	],
+	// Ops telemetry — single Analytics Engine dataset for agent / skill /
+	// tool events. Replaces the bespoke `activity_events` D1 table written
+	// from `apps/core/src/lib/activity.ts`. Phase 5 of the CF-native chat
+	// migration plan deletes the legacy writer once consumers read this
+	// dataset via the Cloudflare SQL API.
+	"analytics_engine_datasets": [
+		{
+			"binding": "TELEMETRY",
+			"dataset": "shipflare_agent_events"
+		}
+	],
 	// Dynamic Workflow binding — class lands in a later task. AgentPlanWorkflow
 	// drives long-running multi-step orchestration spawned by CMO when plans
 	// exceed a single MCP call's lifetime (e.g. multi-platform inbound sweep).
@@ -207,7 +218,13 @@
 					{ "name": "REDDIT_MCP", "class_name": "RedditMcpAgent" }
 				]
 			},
-			"workflows": []
+			"workflows": [],
+			"analytics_engine_datasets": [
+				{
+					"binding": "TELEMETRY",
+					"dataset": "shipflare_agent_events_staging"
+				}
+			]
 		}
 	}
 }
