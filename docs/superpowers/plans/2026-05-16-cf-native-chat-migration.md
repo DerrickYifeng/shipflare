@@ -508,6 +508,33 @@ Modify `runSkill` to optionally emit `data-skill-start/finish` parts and write t
 
 ### Task 3.1: Add writer + telemetry to `runSkill`
 
+**PLAN AMENDMENT — 2026-05-16:** Pre-flight inspection revealed three
+mismatches with reality that this task as-written would silently
+paper over. The user authorised splitting Task 3.1 into three
+sequential sub-tasks before any emission logic lands:
+
+- **3.1a**: Move `apps/core/src/lib/telemetry.ts` →
+  `packages/shared/src/telemetry.ts` so `packages/skills` can import it
+  without an inverted app→package dependency. Test file follows.
+- **3.1b**: Migrate `runSkill(name, inputs, context)` (positional,
+  generic) → `runSkill(opts: RunSkillOptions)` (object-bag). Update
+  three callsites: `process-replies-batch.ts`, `process-posts-batch.ts`,
+  `find-threads-via-xai.ts`. Add `noop-test-skill` + `throwing-test-skill`
+  fixtures to `SKILL_REGISTRY`. **No emission, no telemetry** in this
+  step — purely a signature/callsite migration that keeps current
+  behaviour. Tests stay green.
+- **3.1c**: The original Task 3.1 body below — add
+  `data-skill-start`/`data-skill-finish` emissions and the
+  `writeAgentEvent` call. Mock `@anthropic-ai/sdk` per-test so the new
+  fixtures can actually run without a network call.
+
+The plan body below is **3.1c**. The signature it shows
+(`runSkill(opts: RunSkillOptions)` with `loadSkillMeta` /
+`executeSkill`) does NOT match the real runner — adapt at
+implementation time: use `parseFrontmatter(SKILL_REGISTRY[name])`
+instead of `loadSkillMeta`, and inline the existing Anthropic
+call instead of `executeSkill(meta, opts.args)`.
+
 **Files:**
 - Modify: `packages/skills/src/runner.ts`
 - Test: `packages/skills/test/runner.test.ts` (extend)
