@@ -74,12 +74,14 @@ export function Conversation({
     >
       {messages.map((msg) => {
         if (msg.role === "user") {
+          // UIMessage doesn't carry a structured submission timestamp — the
+          // previous render-time `new Date()` stamp was a visual bug (jittered
+          // on re-render). The UserMessage component doesn't display a
+          // timestamp anyway, so drop the prop. If per-user-message timestamps
+          // become required again, capture them at submit time in the
+          // message metadata and surface via msg.metadata.createdAt.
           return (
-            <UserMessage
-              key={msg.id}
-              content={extractText(msg)}
-              createdAt={new Date().toISOString()}
-            />
+            <UserMessage key={msg.id} content={extractText(msg)} />
           );
         }
 
