@@ -14,6 +14,7 @@ import { runSkill } from "@shipflare/skills";
 import { makeConsultTool } from "../lib/consult-tool";
 import { loadSystemPrompt } from "../lib/system-prompt";
 import { applySmmSchema } from "./schema";
+import { makeFindThreadsViaXaiTool } from "./tools/find-threads-via-xai";
 import type { Env } from "../../index";
 
 export interface SMMState {
@@ -42,6 +43,25 @@ export class SMM extends AIChatAgent<Env, SMMState> {
 		this._schemaApplied = true;
 	}
 
+	/**
+	 * Public accessor for peer tools defined in separate files. The
+	 * base-class `env` is `protected`; tools that close over the SMM
+	 * instance need a sanctioned, type-checked entry point.
+	 */
+	public getEnv(): Env {
+		return this.env;
+	}
+
+	/**
+	 * Public accessor for the DO's SqlStorage. Tools defined in
+	 * separate files (e.g. `tools/find-threads-via-xai.ts`) need this
+	 * to write to `threads_inbox` / `drafts`. Schema is applied via
+	 * `ensureSchema()` in `getTools()` before any tool runs.
+	 */
+	public getSql(): SqlStorage {
+		return this.ctx.storage.sql;
+	}
+
 	async onChatMessage(onFinish: StreamTextOnFinishCallback<ToolSet>) {
 		this.ensureSchema();
 		const messages = await convertToModelMessages(this.messages);
@@ -68,6 +88,7 @@ export class SMM extends AIChatAgent<Env, SMMState> {
 	}
 
 	getTools(): ToolSet {
+		this.ensureSchema();
 		return {
 			consult: makeConsultTool("smm"),
 			draft_for_channel: tool({
@@ -94,6 +115,7 @@ export class SMM extends AIChatAgent<Env, SMMState> {
 					});
 				},
 			}),
+			find_threads_via_xai: makeFindThreadsViaXaiTool(this),
 		};
 	}
 }
