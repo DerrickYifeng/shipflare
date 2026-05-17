@@ -541,6 +541,16 @@ export class CMO extends AIChatAgent<Env, CMOState> {
 			return new Response("forbidden", { status: 403 });
 		}
 
+		// 5.1c.15: lazy TZ bootstrap on first client-facing request.
+		// Hits ANY non-/internal/ path (WS upgrade, /health, etc.) — the
+		// bootstrap is idempotent (won't overwrite existing tz).
+		if (!url.pathname.startsWith("/internal/")) {
+			const inferredTz = request.headers.get("x-inferred-tz");
+			if (inferredTz) {
+				await this.bootstrapTzIfMissing(inferredTz);
+			}
+		}
+
 		if (url.pathname === "/internal/init") {
 			this.ensureSchema();
 			return this.handleInit(request);
@@ -721,6 +731,27 @@ export class CMO extends AIChatAgent<Env, CMOState> {
 			Date.now(),
 		);
 		return new Response("logged", { status: 200 });
+	}
+
+	/**
+	 * Lazy-bootstrap founder_context.tz from the inferred TZ on the WS
+	 * upgrade. Only writes if tz is unset — never overwrites a manually-set
+	 * value. Also schedules the first relay alarm.
+	 *
+	 * Called from `fetch()` when an inbound request carries `x-inferred-tz`
+	 * (added by 5.1c.14's handleCmoWsRequest in apps/core/src/index.ts).
+	 */
+	private async bootstrapTzIfMissing(tz: string): Promise<void> {
+		this.ensureSchema();
+		const existing = this.ctx.storage.sql
+			.exec("SELECT value FROM founder_context WHERE key = 'tz'")
+			.toArray();
+		if (existing.length > 0) return;
+		this.ctx.storage.sql.exec(
+			"INSERT INTO founder_context (key, value) VALUES (?, ?)",
+			"tz", tz,
+		);
+		this.scheduleNextRelayAlarm();
 	}
 
 	/**
