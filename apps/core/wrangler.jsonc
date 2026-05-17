@@ -146,30 +146,25 @@
 		},
 		// v10 — CF-native chat migration Task 4.4c. The SMM class was rewritten
 		// from McpAgent to AIChatAgent in the same file; the class export name
-		// changed from `SocialMediaMgr` to `SMM`. `renamed_classes` preserves
-		// the existing per-DO SQLite namespace across the rename so threads_inbox
-		// / drafts / voice_audit rows survive the rewrite. (Nothing reads those
-		// tables post-rewrite until Phase 5 / Task 4.4e ports the SMM tools to
-		// CMO-side; the rename keeps the data available for that follow-up.)
+		// changed from `SocialMediaMgr` to `SMM`. We are still in dev stage,
+		// so the old per-DO SQLite (threads_inbox / drafts / voice_audit) is
+		// not worth preserving — delete the old class namespace cleanly and
+		// stand up `SMM` as a fresh SQLite-backed DO. AIChatAgent bootstraps
+		// its own chat-history schema on first message.
 		{
 			"tag": "v10",
-			"renamed_classes": [
-				{ "from": "SocialMediaMgr", "to": "SMM" }
-			]
+			"deleted_classes": ["SocialMediaMgr"],
+			"new_sqlite_classes": ["SMM"]
 		},
-		// v11 — CF-native chat migration Task 4.5b. The HeadOfGrowth class was
-		// rewritten from McpAgent to AIChatAgent in the same file; the class
-		// export name changed from `HeadOfGrowth` to `HoG`. `renamed_classes`
-		// preserves the existing per-DO SQLite namespace across the rename so
-		// planning_chat / proposal_drafts / audit_findings rows survive the
-		// rewrite. (Nothing reads those tables post-rewrite until Phase 5 /
-		// Task 4.5e ports the HoG tools to CMO-side; the rename keeps the
-		// data available for that follow-up.)
+		// v11 — CF-native chat migration Task 4.5b. Same shape as v10 for HoG:
+		// HeadOfGrowth → HoG with a clean DO namespace (planning_chat /
+		// proposal_drafts / audit_findings dropped — dev-stage, not worth
+		// preserving). AIChatAgent bootstraps chat-history tables on first
+		// message.
 		{
 			"tag": "v11",
-			"renamed_classes": [
-				{ "from": "HeadOfGrowth", "to": "HoG" }
-			]
+			"deleted_classes": ["HeadOfGrowth"],
+			"new_sqlite_classes": ["HoG"]
 		}
 	],
 	// Ops telemetry — single Analytics Engine dataset for agent / skill /
