@@ -85,7 +85,7 @@ describe("parseFrontmatter", () => {
   it("parses optional context field", () => {
     const md = "---\nname: x\ncontext: fork\n---\nbody";
     const { frontmatter } = parseFrontmatter(md);
-    expect((frontmatter as { context: string }).context).toBe("fork");
+    expect(frontmatter.context).toBe("fork");
   });
 });
 

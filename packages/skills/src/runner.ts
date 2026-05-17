@@ -86,6 +86,30 @@ export function substituteArguments(
  *   7. Emit `data-skill-finish` part and write telemetry on success or error.
  *      On error, re-raises the original exception after emitting.
  */
+/**
+ * Pure helper: parse a model-response text into T. Tries fenced ```json``` first,
+ * then raw JSON-shaped substring, then returns the original text cast to T.
+ */
+function parseResponseText<T>(text: string): T {
+  const fencedMatch = text.match(/```json\s*([\s\S]*?)\s*```/);
+  if (fencedMatch && fencedMatch[1]) {
+    try {
+      return JSON.parse(fencedMatch[1]) as T;
+    } catch {
+      // fall through
+    }
+  }
+  const rawMatch = text.match(/[{[][\s\S]*[}\]]/);
+  if (rawMatch) {
+    try {
+      return JSON.parse(rawMatch[0]) as T;
+    } catch {
+      // fall through
+    }
+  }
+  return text as unknown as T;
+}
+
 export async function runSkill<T = unknown>(opts: RunSkillOptions): Promise<T> {
   const markdown = SKILL_REGISTRY[opts.name];
   if (!markdown) {
@@ -100,8 +124,30 @@ export async function runSkill<T = unknown>(opts: RunSkillOptions): Promise<T> {
   const skillName = opts.name;
   const runId = crypto.randomUUID();
   const userId = opts.userId ?? "unknown";
+  const t0 = Date.now();
 
-  // Emit data-skill-start before the Anthropic call
+  // Single source of truth for finish-side emission + telemetry. Called from
+  // both the success path and the error path so they can never drift.
+  const emitFinish = (status: "ok" | "error", error?: string): void => {
+    if (opts.writer) {
+      opts.writer.write({
+        id: runId,
+        type: "data-skill-finish",
+        data:
+          status === "error"
+            ? { skillName, status, error }
+            : { skillName, status },
+      });
+    }
+    writeAgentEvent(opts.env, {
+      kind: "skill_invocation",
+      userId,
+      runId,
+      blobs: [skillName, status, frontmatter.model, frontmatter.context],
+      doubles: [Date.now() - t0],
+    });
+  };
+
   if (opts.writer) {
     opts.writer.write({
       id: runId,
@@ -115,8 +161,6 @@ export async function runSkill<T = unknown>(opts: RunSkillOptions): Promise<T> {
     });
   }
 
-  const t0 = Date.now();
-  let result: T;
   try {
     const client = new Anthropic({ apiKey: opts.env.ANTHROPIC_API_KEY });
     const response = await client.messages.create({
@@ -131,91 +175,11 @@ export async function runSkill<T = unknown>(opts: RunSkillOptions): Promise<T> {
       .map((c) => c.text)
       .join("\n");
 
-    // 1. Try fenced JSON block first
-    const fencedMatch = text.match(/```json\s*([\s\S]*?)\s*```/);
-    if (fencedMatch && fencedMatch[1]) {
-      try {
-        result = JSON.parse(fencedMatch[1]) as T;
-        // Emit success data part and telemetry
-        if (opts.writer) {
-          opts.writer.write({
-            id: runId,
-            type: "data-skill-finish",
-            data: { skillName, status: "ok" },
-          });
-        }
-        writeAgentEvent(opts.env, {
-          kind: "skill_invocation",
-          userId,
-          runId,
-          blobs: [skillName, "ok", frontmatter.model, frontmatter.context],
-          doubles: [Date.now() - t0],
-        });
-        return result;
-      } catch {
-        // fall through
-      }
-    }
-
-    // 2. Try raw JSON (object or array)
-    const rawMatch = text.match(/[{[][\s\S]*[}\]]/);
-    if (rawMatch) {
-      try {
-        result = JSON.parse(rawMatch[0]) as T;
-        // Emit success data part and telemetry
-        if (opts.writer) {
-          opts.writer.write({
-            id: runId,
-            type: "data-skill-finish",
-            data: { skillName, status: "ok" },
-          });
-        }
-        writeAgentEvent(opts.env, {
-          kind: "skill_invocation",
-          userId,
-          runId,
-          blobs: [skillName, "ok", frontmatter.model, frontmatter.context],
-          doubles: [Date.now() - t0],
-        });
-        return result;
-      } catch {
-        // fall through
-      }
-    }
-
-    // 3. Fallback: return raw text
-    result = text as unknown as T;
-    if (opts.writer) {
-      opts.writer.write({
-        id: runId,
-        type: "data-skill-finish",
-        data: { skillName, status: "ok" },
-      });
-    }
-    writeAgentEvent(opts.env, {
-      kind: "skill_invocation",
-      userId,
-      runId,
-      blobs: [skillName, "ok", frontmatter.model, frontmatter.context],
-      doubles: [Date.now() - t0],
-    });
+    const result = parseResponseText<T>(text);
+    emitFinish("ok");
     return result;
   } catch (err) {
-    // Emit error data part and telemetry, then re-raise
-    if (opts.writer) {
-      opts.writer.write({
-        id: runId,
-        type: "data-skill-finish",
-        data: { skillName, status: "error", error: String(err) },
-      });
-    }
-    writeAgentEvent(opts.env, {
-      kind: "skill_invocation",
-      userId,
-      runId,
-      blobs: [skillName, "error", frontmatter.model, frontmatter.context],
-      doubles: [Date.now() - t0],
-    });
+    emitFinish("error", String(err));
     throw err;
   }
 }
