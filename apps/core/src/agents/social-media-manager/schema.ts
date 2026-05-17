@@ -54,6 +54,9 @@ export function applySmmSchema(sql: SqlStorage): void {
 /**
  * Row shapes for `threads_inbox`. Use as the `<T>` argument of `sql.exec<T>(...)`
  * so peer tools don't redeclare these inline.
+ *
+ * The string index signature is required to satisfy `Record<string, SqlStorageValue>`
+ * — the constraint on `exec<T>` in `@cloudflare/workers-types`.
  */
 export interface ThreadInboxRow {
 	id: string;
@@ -67,6 +70,7 @@ export interface ThreadInboxRow {
 	judged_at: number | null;
 	discovered_at: number;
 	status: string;
+	[k: string]: SqlStorageValue;
 }
 
 /**

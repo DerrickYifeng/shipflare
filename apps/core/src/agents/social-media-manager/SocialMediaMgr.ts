@@ -15,6 +15,7 @@ import { makeConsultTool } from "../lib/consult-tool";
 import { loadSystemPrompt } from "../lib/system-prompt";
 import { applySmmSchema } from "./schema";
 import { makeFindThreadsViaXaiTool } from "./tools/find-threads-via-xai";
+import { makeFindThreadsTool } from "./tools/find-threads";
 import type { Env } from "../../index";
 
 export interface SMMState {
@@ -113,6 +114,7 @@ export class SMM extends AIChatAgent<Env, SMMState> {
 				},
 			}),
 			find_threads_via_xai: makeFindThreadsViaXaiTool(this),
+			find_threads: makeFindThreadsTool(this),
 		};
 	}
 }
