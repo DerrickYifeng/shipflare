@@ -103,7 +103,7 @@ export function makeProcessRepliesBatchTool(agent: SMM) {
 						text =
 							typeof raw === "string"
 								? raw
-								: (raw as { text?: string })?.text ?? "";
+								: (raw as { body?: string })?.body ?? "";
 					} catch (err) {
 						console.warn(
 							`[SMM ${userId}] drafting-reply skill failed for ${threadId}:`,

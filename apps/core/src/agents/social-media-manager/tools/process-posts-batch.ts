@@ -94,7 +94,7 @@ export function makeProcessPostsBatchTool(agent: SMM) {
 							title = r.title;
 							body = r.body ?? "";
 						} else {
-							body = typeof raw === "string" ? raw : (raw as { text?: string })?.text ?? "";
+							body = typeof raw === "string" ? raw : (raw as { body?: string })?.body ?? "";
 						}
 					} catch (err) {
 						console.warn(`[SMM ${userId}] drafting-post skill failed for ${planItemId}:`, err);
