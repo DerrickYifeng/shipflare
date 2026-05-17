@@ -43,10 +43,10 @@ focused tool call over many.
 ## Role
 `;
 
-// Role-specific prompts. Mirrors the on-disk SYSTEM.md files:
+// Role-specific prompts mirror the on-disk SYSTEM.md files:
 //   apps/core/src/agents/<agent>/SYSTEM.md
-// CMO SYSTEM.md doesn't exist yet (created in Phase 5 / Task 5.1); use a
-// minimal placeholder until then.
+// To update a role prompt: edit BOTH the on-disk file AND the matching
+// entry below (project convention from packages/skills/src/registry.ts).
 const ROLE_PROMPTS: Record<EmployeeId, string> = {
 	cmo: `# Chief Marketing Officer
 
