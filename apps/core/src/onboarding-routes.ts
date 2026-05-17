@@ -516,13 +516,23 @@ export async function handleOnboardingInternal(
       // so we cast at the binding boundary — `forwardActivityToCmo`
       // only touches `env.CMO` which is part of `OnboardingEnv`.
       const runId = body.runId ?? null;
-      const forward = runId
-        ? (evt: ActivityEventInput): void =>
-            forwardActivityToCmo(ctx, env as unknown as Env, body.userId, evt)
+      // Awaitable forward for lifecycle events (dispatch, finish).
+      // Text deltas use ctx.waitUntil (fire-and-forget is acceptable there).
+      const forwardAwait = runId
+        ? (evt: ActivityEventInput): Promise<void> =>
+            forwardActivityToCmo(env as unknown as Env, body.userId, evt)
+        : (): Promise<void> => Promise.resolve();
+      // Legacy fire-and-forget wrapper for text deltas.
+      const forwardBg = runId
+        ? (evt: ActivityEventInput): void => {
+            ctx.waitUntil(
+              forwardActivityToCmo(env as unknown as Env, body.userId, evt),
+            );
+          }
         : (): void => undefined;
 
       const dispatchStart = Date.now();
-      forward({
+      await forwardAwait({
         conversationId: null,
         parentTurnId: null,
         runId,
@@ -553,7 +563,7 @@ export async function handleOnboardingInternal(
           ];
           for (const chunk of chunks) {
             text += chunk;
-            forward({
+            forwardBg({
               conversationId: null,
               parentTurnId: null,
               runId,
@@ -590,7 +600,7 @@ export async function handleOnboardingInternal(
           let lastFlush = Date.now();
           const flush = (): void => {
             if (!buf) return;
-            forward({
+            forwardBg({
               conversationId: null,
               parentTurnId: null,
               runId,
@@ -619,7 +629,7 @@ export async function handleOnboardingInternal(
 
         const m = text.match(/\{[\s\S]*\}/);
         if (!m) {
-          forward({
+          await forwardAwait({
             conversationId: null,
             parentTurnId: null,
             runId,
@@ -645,7 +655,7 @@ export async function handleOnboardingInternal(
         // `/api/onboarding/commit` — the trust-boundary fix from the
         // Task 9 code review.
         const strategicPath: StrategicPath = strategicPathSchema.parse(raw);
-        forward({
+        await forwardAwait({
           conversationId: null,
           parentTurnId: null,
           runId,
@@ -662,7 +672,7 @@ export async function handleOnboardingInternal(
         });
         send({ type: "strategic_done", path: strategicPath });
       } catch (err) {
-        forward({
+        await forwardAwait({
           conversationId: null,
           parentTurnId: null,
           runId,

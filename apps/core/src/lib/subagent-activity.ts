@@ -84,54 +84,60 @@ export async function withSubAgentToolTracing<T>(
       return "";
     }
   })();
-  forwardActivityToCmo(ctx, env, trace.userId, {
-    conversationId: trace.conversationId,
-    parentTurnId: trace.parentTurnId,
-    runId: trace.runId,
-    sourceAgent: subAgent,
-    parentEventId: trace.parentEventId,
-    kind: "subagent_tool_call_start",
-    payload: {
+  ctx.waitUntil(
+    forwardActivityToCmo(env, trace.userId, {
+      conversationId: trace.conversationId,
+      parentTurnId: trace.parentTurnId,
+      runId: trace.runId,
+      sourceAgent: subAgent,
+      parentEventId: trace.parentEventId,
       kind: "subagent_tool_call_start",
-      subAgent,
-      tool: toolName,
-      argsPreview,
-    },
-  });
+      payload: {
+        kind: "subagent_tool_call_start",
+        subAgent,
+        tool: toolName,
+        argsPreview,
+      },
+    }),
+  );
   try {
     const out = await body();
-    forwardActivityToCmo(ctx, env, trace.userId, {
-      conversationId: trace.conversationId,
-      parentTurnId: trace.parentTurnId,
-      runId: trace.runId,
-      sourceAgent: subAgent,
-      parentEventId: trace.parentEventId,
-      kind: "subagent_tool_call_finish",
-      payload: {
+    ctx.waitUntil(
+      forwardActivityToCmo(env, trace.userId, {
+        conversationId: trace.conversationId,
+        parentTurnId: trace.parentTurnId,
+        runId: trace.runId,
+        sourceAgent: subAgent,
+        parentEventId: trace.parentEventId,
         kind: "subagent_tool_call_finish",
-        subAgent,
-        tool: toolName,
-        status: "ok",
-        durationMs: Date.now() - start,
-      },
-    });
+        payload: {
+          kind: "subagent_tool_call_finish",
+          subAgent,
+          tool: toolName,
+          status: "ok",
+          durationMs: Date.now() - start,
+        },
+      }),
+    );
     return out;
   } catch (err) {
-    forwardActivityToCmo(ctx, env, trace.userId, {
-      conversationId: trace.conversationId,
-      parentTurnId: trace.parentTurnId,
-      runId: trace.runId,
-      sourceAgent: subAgent,
-      parentEventId: trace.parentEventId,
-      kind: "subagent_tool_call_finish",
-      payload: {
+    ctx.waitUntil(
+      forwardActivityToCmo(env, trace.userId, {
+        conversationId: trace.conversationId,
+        parentTurnId: trace.parentTurnId,
+        runId: trace.runId,
+        sourceAgent: subAgent,
+        parentEventId: trace.parentEventId,
         kind: "subagent_tool_call_finish",
-        subAgent,
-        tool: toolName,
-        status: "error",
-        durationMs: Date.now() - start,
-      },
-    });
+        payload: {
+          kind: "subagent_tool_call_finish",
+          subAgent,
+          tool: toolName,
+          status: "error",
+          durationMs: Date.now() - start,
+        },
+      }),
+    );
     throw err;
   }
 }

@@ -3,13 +3,13 @@ import { forwardActivityToCmo } from "../src/lib/forward-activity";
 import type { Env } from "../src/index";
 
 /**
- * Unit tests for the cross-DO activity forwarder (spec
- * 2026-05-15-agent-activity-feed-design §5.2).
+ * Unit tests for the cross-DO activity forwarder.
  *
- * The helper is fire-and-forget: it must POST to the CMO DO's
- * `/internal/log-activity` endpoint with the internal-call header, and
- * it must NOT throw if the fetch rejects (downed CMO must not crash
- * sub-agent work).
+ * The helper returns Promise<void> — callers choose to await it for
+ * critical lifecycle events or pass it to ctx.waitUntil for text deltas.
+ * It must POST to the CMO DO's `/internal/log-activity` endpoint with
+ * the internal-call header, and must NOT throw if the fetch rejects
+ * (downed CMO must not crash sub-agent work).
  *
  * The CMO binding is faked structurally — we cast the fake to `Env` for
  * the call site since vitest tests don't run inside a real Worker.
@@ -23,12 +23,7 @@ describe("forwardActivityToCmo", () => {
       CMO: { idFromName: (n: string) => n, get: () => fakeStub },
     } as unknown as Env;
 
-    const pending: Promise<unknown>[] = [];
-    const ctx = {
-      waitUntil: (p: Promise<unknown>) => pending.push(p),
-    };
-
-    forwardActivityToCmo(ctx, env, "user-1", {
+    await forwardActivityToCmo(env, "user-1", {
       conversationId: null,
       parentTurnId: null,
       runId: "run-1",
@@ -37,7 +32,6 @@ describe("forwardActivityToCmo", () => {
       kind: "subagent_text_delta",
       payload: { kind: "subagent_text_delta", subAgent: "head-of-growth", text: "hi" },
     });
-    await Promise.all(pending);
 
     expect(fetchSpy).toHaveBeenCalledOnce();
     const call = fetchSpy.mock.calls[0]!;
@@ -55,13 +49,9 @@ describe("forwardActivityToCmo", () => {
     const env = {
       CMO: { idFromName: (n: string) => n, get: () => fakeStub },
     } as unknown as Env;
-    const pending: Promise<unknown>[] = [];
-    const ctx = {
-      waitUntil: (p: Promise<unknown>) => pending.push(p),
-    };
 
-    expect(() =>
-      forwardActivityToCmo(ctx, env, "user-1", {
+    await expect(
+      forwardActivityToCmo(env, "user-1", {
         conversationId: null,
         parentTurnId: null,
         runId: null,
@@ -70,8 +60,7 @@ describe("forwardActivityToCmo", () => {
         kind: "turn_start",
         payload: { kind: "turn_start" },
       }),
-    ).not.toThrow();
-    await expect(Promise.all(pending)).resolves.toBeDefined();
+    ).resolves.toBeUndefined();
   });
 
   it("routes via transportName-prefixed DO id", async () => {
@@ -81,10 +70,8 @@ describe("forwardActivityToCmo", () => {
     const env = {
       CMO: { idFromName: idSpy, get: () => fakeStub },
     } as unknown as Env;
-    const pending: Promise<unknown>[] = [];
-    const ctx = { waitUntil: (p: Promise<unknown>) => pending.push(p) };
 
-    forwardActivityToCmo(ctx, env, "user-1", {
+    await forwardActivityToCmo(env, "user-1", {
       conversationId: null,
       parentTurnId: null,
       runId: null,
@@ -93,7 +80,6 @@ describe("forwardActivityToCmo", () => {
       kind: "turn_start",
       payload: { kind: "turn_start" },
     });
-    await Promise.all(pending);
 
     expect(idSpy).toHaveBeenCalledWith("streamable-http:user-1");
   });

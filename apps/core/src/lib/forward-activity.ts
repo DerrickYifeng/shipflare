@@ -6,41 +6,44 @@ import { transportName } from "./do-name";
  * Forward an activity event from a sub-agent (HoG / SMM / platform DO /
  * onboarding handler) to the user's CMO DO via service binding.
  *
- * Fire-and-forget: sub-agent work must never block on telemetry.
- * Failures are logged (not thrown) — lost forwards are degraded UX, not
- * correctness, but silent .catch(()=>undefined) hides programmer bugs.
+ * Returns the pending Promise so callers can choose to:
+ *   - `await` it for critical lifecycle events (dispatch, finish) to
+ *     guarantee the event lands in CMO SQLite + is broadcast to connected
+ *     WebSocket clients BEFORE the caller's own response closes.
+ *   - Pass it to `ctx.waitUntil()` for non-critical events (text deltas)
+ *     where fire-and-forget is acceptable.
+ *
+ * Background: ctx.waitUntil tasks are not guaranteed to execute before a
+ * streaming SSE response body closes. For subagent_dispatch/finish events
+ * the caller MUST await so the browser's useCmoActivity hook sees them
+ * before the stage advances. Text deltas are lower priority and can still
+ * use ctx.waitUntil.
  *
  * The DO name MUST be wrapped with `transportName()` so writes land on
- * the same CMO instance the browser reads from (the /mcp transport
- * prepends `streamable-http:` to the DO name — see ./do-name.ts).
- *
- * The URL host is arbitrary; CF routes by binding, not by hostname.
+ * the same CMO instance the browser reads from.
  */
 export function forwardActivityToCmo(
-  ctx: { waitUntil: (p: Promise<unknown>) => void },
   env: Env,
   userId: string,
   event: ActivityEventInput,
-): void {
+): Promise<void> {
   const id = env.CMO.idFromName(transportName(userId));
   const stub = env.CMO.get(id);
-  ctx.waitUntil(
-    stub
-      .fetch("https://internal/internal/log-activity", {
-        method: "POST",
-        headers: {
-          "x-shipflare-internal": "1",
-          "content-type": "application/json",
-        },
-        body: JSON.stringify(event),
-      })
-      .then((res) => {
-        if (!res.ok) {
-          console.warn(`[forwardActivityToCmo] non-OK ${res.status}`);
-        }
-      })
-      .catch((err) => {
-        console.warn("[forwardActivityToCmo] forward failed:", err);
-      }),
-  );
+  return stub
+    .fetch("https://internal/internal/log-activity", {
+      method: "POST",
+      headers: {
+        "x-shipflare-internal": "1",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(event),
+    })
+    .then((res) => {
+      if (!res.ok) {
+        console.warn(`[forwardActivityToCmo] non-OK ${res.status}`);
+      }
+    })
+    .catch((err) => {
+      console.warn("[forwardActivityToCmo] forward failed:", err);
+    });
 }
