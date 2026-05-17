@@ -7,6 +7,7 @@ import {
 	tool,
 	type StreamTextOnFinishCallback,
 	type ToolSet,
+	type UIMessage,
 } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
 import { z } from "zod";
@@ -14,6 +15,7 @@ import { writeAgentEvent } from "@shipflare/shared";
 import type { Env } from "../../index";
 import { applyCmoSchema } from "./schema";
 import { computeNextDailyAt } from "./scheduling";
+import { SYNTHETIC_CRON_PROMPT } from "./cron-prompts";
 import { makeConsultTool } from "../lib/consult-tool";
 import { loadSystemPrompt } from "../lib/system-prompt";
 import {
@@ -744,6 +746,149 @@ export class CMO extends AIChatAgent<Env, CMOState> {
 		const hour = Number(ctx.relayHourLocal ?? "9");
 		const nextMs = computeNextDailyAt(tz, hour, Date.now());
 		this.ctx.storage.setAlarm(nextMs);
+	}
+
+	/**
+	 * Daily-relay alarm handler. Fires when the DO's `setAlarm` deadline lands.
+	 *
+	 * Behavior (per spec §3.2 + Phase-0c verifications):
+	 *  - If `founder_context.productName` is unset, skip the synthetic turn
+	 *    (the founder may set it later; still reschedule for tomorrow).
+	 *  - Otherwise inject a system-role synthetic message and trigger an LLM
+	 *    turn via `saveMessages` (function form to avoid stale-baseline races —
+	 *    see Phase-0c §1). The LLM's response auto-persists into
+	 *    `cf_ai_chat_agent_messages` and is broadcast to any connected WS
+	 *    clients (silent no-op if zero clients are connected).
+	 *  - `saveMessages` returns `{ requestId, status }`. `status='skipped'`
+	 *    and `status='aborted'` are NON-ERROR terminals — log telemetry and
+	 *    reschedule, don't retry.
+	 *  - On thrown error, log + reschedule (self-healing).
+	 *  - ALWAYS call `scheduleNextRelayAlarm()` at the end.
+	 *
+	 * Telemetry events on Analytics Engine:
+	 *  - `relay-skip-no-product` — productName unset, turn skipped
+	 *  - `relay-fired`           — turn completed normally
+	 *  - `relay-skipped`         — turn returned status='skipped'
+	 *  - `relay-aborted`         — turn returned status='aborted'
+	 *  - `relay-failed`          — turn threw; first 200 chars of error msg
+	 *  - `relay-dryrun`          — test-mode dry-run (skips turn body)
+	 *
+	 * Test seams (only honored in unit tests; never set in prod):
+	 *  - `_alarmDryRun: true`           — emit `relay-dryrun` + reschedule;
+	 *                                     skip `runRelayTurn` (no LLM call).
+	 *  - `_alarmInjectError: string`    — emit `relay-failed` with the given
+	 *                                     message + reschedule; skip
+	 *                                     `runRelayTurn`. Exercises the
+	 *                                     self-healing reschedule path
+	 *                                     without needing a real LLM throw.
+	 */
+	async alarm(): Promise<void> {
+		this.ensureSchema();
+		const productNameRow = this.ctx.storage.sql
+			.exec<{ value: string }>(
+				"SELECT value FROM founder_context WHERE key = 'productName'",
+			)
+			.toArray()[0];
+		const hasProduct = productNameRow != null && productNameRow.value !== "";
+
+		if (!hasProduct) {
+			writeAgentEvent(this.env, {
+				kind: "agent_run",
+				userId: this.name,
+				blobs: ["CMO", "relay-skip-no-product"],
+				doubles: [0],
+			});
+		} else {
+			const seams = this as unknown as {
+				_alarmDryRun?: boolean;
+				_alarmInjectError?: string;
+			};
+			if (seams._alarmDryRun) {
+				writeAgentEvent(this.env, {
+					kind: "agent_run",
+					userId: this.name,
+					blobs: ["CMO", "relay-dryrun"],
+					doubles: [0],
+				});
+			} else if (seams._alarmInjectError) {
+				// Test seam: simulate a thrown error from runRelayTurn.
+				writeAgentEvent(this.env, {
+					kind: "agent_run",
+					userId: this.name,
+					blobs: [
+						"CMO",
+						"relay-failed",
+						seams._alarmInjectError.slice(0, 200),
+					],
+					doubles: [0],
+				});
+			} else {
+				try {
+					const status = await this.runRelayTurn();
+					const eventKind =
+						status === "skipped"
+							? "relay-skipped"
+							: status === "aborted"
+								? "relay-aborted"
+								: "relay-fired";
+					writeAgentEvent(this.env, {
+						kind: "agent_run",
+						userId: this.name,
+						blobs: ["CMO", eventKind],
+						doubles: [0],
+					});
+				} catch (err) {
+					const msg = err instanceof Error ? err.message : String(err);
+					writeAgentEvent(this.env, {
+						kind: "agent_run",
+						userId: this.name,
+						blobs: ["CMO", "relay-failed", msg.slice(0, 200)],
+						doubles: [0],
+					});
+				}
+			}
+		}
+
+		// Always reschedule (self-healing — even on skip / fail / abort).
+		this.scheduleNextRelayAlarm();
+	}
+
+	/**
+	 * Inject a synthetic system-role message and drive an LLM turn via
+	 * `saveMessages` (function form). The LLM's response is auto-persisted
+	 * by AIChatAgent's built-in machinery; the founder reads it on next
+	 * WS connect.
+	 *
+	 * Per Phase-0c verifications (docs/superpowers/specs/2026-05-17-phase-0c-verifications.md):
+	 *  - Use the function-form callback so the messages baseline reflects
+	 *    any persisted state at save time (not a stale snapshot from when
+	 *    `alarm()` started).
+	 *  - The message shape is AI SDK v6 `UIMessage` —
+	 *    `{ id, role, parts, metadata }`. There is no top-level `content` or
+	 *    `createdAt` field; we put `firedAt` inside `metadata`.
+	 *  - ID is `relay-${crypto.randomUUID()}` (not `Date.now()`) to avoid PK
+	 *    collisions on same-ms double-fire.
+	 *
+	 * Returns the SDK's `status` so the caller can emit per-state telemetry.
+	 * `'completed'` is the normal path; `'skipped'` / `'aborted'` are
+	 * non-error terminals (e.g. founder cleared the chat mid-flight).
+	 */
+	private async runRelayTurn(): Promise<
+		"completed" | "skipped" | "aborted"
+	> {
+		const synthetic: UIMessage = {
+			id: `relay-${crypto.randomUUID()}`,
+			role: "system",
+			parts: [{ type: "text", text: SYNTHETIC_CRON_PROMPT }],
+			metadata: {
+				source: "daily-relay",
+				firedAt: new Date().toISOString(),
+			},
+		};
+		const result = await this.saveMessages(
+			(current) => [...current, synthetic],
+		);
+		return result.status;
 	}
 
 	/**
