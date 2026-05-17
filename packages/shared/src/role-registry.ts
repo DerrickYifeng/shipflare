@@ -12,7 +12,7 @@ export interface RoleEntry {
   /** Wrangler binding name; MUST match the wrangler.jsonc durable_objects.bindings[].name */
   binding:
     | "CMO"
-    | "HEAD_OF_GROWTH"
+    | "HOG"
     | "SMM"
     | "COPYWRITER"
     | "BRAND_ANALYST"
@@ -33,7 +33,7 @@ export const ROLE_REGISTRY = {
     defaultActive: true,
   },
   "head-of-growth": {
-    binding: "HEAD_OF_GROWTH",
+    binding: "HOG",
     displayName: "Head of Growth",
     tier: "core",
     defaultActive: true,

@@ -45,10 +45,10 @@
 				"name": "CMO",
 				"class_name": "CMO"
 			},
-			// S3 — Head of Growth
+			// S3 — Head of Growth (renamed v11 from HeadOfGrowth → HoG)
 			{
-				"name": "HEAD_OF_GROWTH",
-				"class_name": "HeadOfGrowth"
+				"name": "HOG",
+				"class_name": "HoG"
 			},
 			// S4 — Social Media Manager (renamed v10 from SocialMediaMgr → SMM)
 			{
@@ -156,6 +156,20 @@
 			"renamed_classes": [
 				{ "from": "SocialMediaMgr", "to": "SMM" }
 			]
+		},
+		// v11 — CF-native chat migration Task 4.5b. The HeadOfGrowth class was
+		// rewritten from McpAgent to AIChatAgent in the same file; the class
+		// export name changed from `HeadOfGrowth` to `HoG`. `renamed_classes`
+		// preserves the existing per-DO SQLite namespace across the rename so
+		// planning_chat / proposal_drafts / audit_findings rows survive the
+		// rewrite. (Nothing reads those tables post-rewrite until Phase 5 /
+		// Task 4.5e ports the HoG tools to CMO-side; the rename keeps the
+		// data available for that follow-up.)
+		{
+			"tag": "v11",
+			"renamed_classes": [
+				{ "from": "HeadOfGrowth", "to": "HoG" }
+			]
 		}
 	],
 	// Ops telemetry — single Analytics Engine dataset for agent / skill /
@@ -234,7 +248,7 @@
 			"durable_objects": {
 				"bindings": [
 					{ "name": "CMO", "class_name": "CMO" },
-					{ "name": "HEAD_OF_GROWTH", "class_name": "HeadOfGrowth" },
+					{ "name": "HOG", "class_name": "HoG" },
 					{ "name": "SMM", "class_name": "SMM" },
 					{ "name": "X_MCP", "class_name": "XMcpAgent" },
 					{ "name": "REDDIT_MCP", "class_name": "RedditMcpAgent" }

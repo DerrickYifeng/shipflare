@@ -50,7 +50,7 @@ import {
 } from "@shipflare/db";
 
 import { CMO } from "./agents/cmo/CMO";
-import { HeadOfGrowth } from "./agents/head-of-growth/HeadOfGrowth";
+import { HoG } from "./agents/head-of-growth/HeadOfGrowth";
 import { SMM } from "./agents/social-media-manager/SocialMediaMgr";
 // `XMcpAgent` / `RedditMcpAgent` are type-imported here (Env declaration).
 // The value re-exports below put the classes on the module graph so wrangler
@@ -63,7 +63,7 @@ import type { RedditMcpAgent } from "./agents/platforms/reddit/RedditMcpAgent";
 // can also be used in the EMPLOYEE_CLASSES dispatch table for the external
 // MCP route — `export { X }` is enough on its own when there's already an
 // `import { X }` above, but we keep the explicit re-export for grep-ability.)
-export { CMO, HeadOfGrowth, SMM };
+export { CMO, HoG, SMM };
 // Re-export the platform DO classes so wrangler can discover them via the
 // module graph rooted at `main`.
 export { XMcpAgent } from "./agents/platforms/x/XMcpAgent";
@@ -73,7 +73,7 @@ export interface Env {
   DB: D1Database;
   // DO bindings — 3 employee agents + 2 platform tool MCPs.
   CMO: DurableObjectNamespace<CMO>;
-  HEAD_OF_GROWTH: DurableObjectNamespace<HeadOfGrowth>;
+  HOG: DurableObjectNamespace<HoG>;
   SMM: DurableObjectNamespace<SMM>;
   X_MCP: DurableObjectNamespace<XMcpAgent>;
   REDDIT_MCP: DurableObjectNamespace<RedditMcpAgent>;
@@ -144,7 +144,7 @@ export interface Env {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const EMPLOYEE_CLASSES: Record<string, any> = {
   cmo: CMO,
-  "head-of-growth": HeadOfGrowth,
+  "head-of-growth": HoG,
   "social-media-manager": SMM,
 };
 

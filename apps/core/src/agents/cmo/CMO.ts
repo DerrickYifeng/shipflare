@@ -195,10 +195,11 @@ export class CMO extends McpAgent<Env, CMOState, McpProps> {
    * failing employee doesn't blow up the rest. The CMO remains usable for
    * direct founder chat even if every employee dial-up fails.
    *
-   * TODO(Task 4.4e / Phase 5): SMM is now an AIChatAgent (Task 4.4c+d), so
-   * the addMcpServer call below fails fast at runtime — AIChatAgent is not
+   * TODO(Task 4.4e+4.5e / Phase 5): SMM + HoG are now AIChatAgents
+   * (Task 4.4c+d landed SMM, Task 4.5b landed HoG), so the addMcpServer
+   * calls below fail fast at runtime for both peers — AIChatAgent is not
    * an McpAgent peer. The try/catch logs and continues, so CMO stays usable,
-   * but the SMM peer is unreachable until Phase 5 replaces this loop with
+   * but both peers are unreachable until Phase 5 replaces this loop with
    * the `consult` tool-mediated dispatch (per spec §3.2).
    */
   private async connectEmployees(): Promise<void> {
