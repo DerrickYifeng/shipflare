@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { CMO } from "../agents/cmo/CMO";
+import { transportName } from "./do-name";
 
 /**
  * Zod schema for the body POSTed to CMO `/internal/mirror-draft`.
@@ -22,8 +23,8 @@ export type MirrorDraftPayload = z.infer<typeof mirrorDraftBodySchema>;
 /**
  * POST to CMO's /internal/mirror-draft via Service Binding.
  *
- * Same name shape (`streamable-http:${userId}`) as the existing peer-DM
- * shadow helper at apps/core/src/lib/peer-dm-shadow.ts.
+ * Uses the same `transportName(userId)` helper as `logPeerDmShadow` so the
+ * transport prefix has a single source of truth.
  *
  * Throws on non-2xx so callers can record `drafts.mirror_error` (the SMM
  * `drafts` table has a `mirror_error INTEGER` column for the last HTTP
@@ -34,7 +35,8 @@ export async function mirrorDraft(
 	userId: string,
 	payload: MirrorDraftPayload,
 ): Promise<void> {
-	const stub = cmoBinding.getByName(`streamable-http:${userId}`);
+	const cmoId = cmoBinding.idFromName(transportName(userId));
+	const stub = cmoBinding.get(cmoId);
 	const res = await stub.fetch(
 		new Request("https://internal/internal/mirror-draft", {
 			method: "POST",

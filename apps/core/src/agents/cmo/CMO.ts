@@ -582,14 +582,13 @@ export class CMO extends AIChatAgent<Env, CMOState> {
 							body.preview,
 							body.createdAt,
 						);
+						writeAgentEvent(this.env, {
+							kind: "agent_run",
+							userId: this.name,
+							blobs: ["CMO", "draft-mirrored", body.employee, body.channel, body.kind],
+							doubles: [0],
+						});
 					}
-
-					writeAgentEvent(this.env, {
-						kind: "agent_run",
-						userId: this.name,
-						blobs: ["CMO", "draft-mirrored", body.employee, body.channel, body.kind],
-						doubles: [0],
-					});
 
 					return { ok: true };
 				},
