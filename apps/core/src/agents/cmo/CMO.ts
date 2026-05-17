@@ -13,6 +13,7 @@ import { z } from "zod";
 import { writeAgentEvent } from "@shipflare/shared";
 import type { Env } from "../../index";
 import { applyCmoSchema } from "./schema";
+import { computeNextDailyAt } from "./scheduling";
 import { makeConsultTool } from "../lib/consult-tool";
 import { loadSystemPrompt } from "../lib/system-prompt";
 import {
@@ -170,6 +171,9 @@ export class CMO extends AIChatAgent<Env, CMOState> {
 						key,
 						value,
 					);
+					if (key === "tz" || key === "relayHourLocal") {
+						self.scheduleNextRelayAlarm();
+					}
 					return { ok: true as const };
 				},
 			}),
@@ -715,6 +719,31 @@ export class CMO extends AIChatAgent<Env, CMOState> {
 			Date.now(),
 		);
 		return new Response("logged", { status: 200 });
+	}
+
+	/**
+	 * Schedule the next daily-relay alarm based on founder_context.tz +
+	 * founder_context.relayHourLocal (defaults: UTC + 9am).
+	 *
+	 * Called from `setFounderContext` when the user changes tz or
+	 * relayHourLocal, and from `alarm()` itself for self-rescheduling
+	 * after each fire (5.1c.13).
+	 *
+	 * `ctx.storage.setAlarm` REPLACES any existing alarm — guaranteed
+	 * single-alarm semantics regardless of how often we call this.
+	 */
+	private scheduleNextRelayAlarm(): void {
+		this.ensureSchema();
+		const ctxRows = this.ctx.storage.sql
+			.exec<{ key: string; value: string }>(
+				"SELECT key, value FROM founder_context WHERE key IN ('tz', 'relayHourLocal')",
+			)
+			.toArray();
+		const ctx = Object.fromEntries(ctxRows.map((r) => [r.key, r.value]));
+		const tz = ctx.tz ?? "UTC";
+		const hour = Number(ctx.relayHourLocal ?? "9");
+		const nextMs = computeNextDailyAt(tz, hour, Date.now());
+		this.ctx.storage.setAlarm(nextMs);
 	}
 
 	/**
