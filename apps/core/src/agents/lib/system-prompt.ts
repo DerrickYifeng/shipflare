@@ -176,7 +176,10 @@ const EMPLOYEE_META: Record<
 	},
 };
 
-const ALL_EMPLOYEE_IDS: EmployeeId[] = ["cmo", "hog", "smm"];
+// Derived from EMPLOYEE_META so a single source-of-truth governs both
+// metadata + the id list. Adding a new employee only requires one edit
+// (the EMPLOYEE_META entry above) — this array follows automatically.
+const ALL_EMPLOYEE_IDS = Object.keys(EMPLOYEE_META) as EmployeeId[];
 
 /**
  * Render the colleague list for a given caller. Excludes self; excludes
