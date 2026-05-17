@@ -58,6 +58,17 @@ export interface CMOState {
  *   - /internal/commit-strategic-path   — onboarding-wizard direct write
  *   - /internal/mirror-draft            — SMM/HoG shadow-POST when a draft hits status='ready'
  *   - /internal/strategic-path-proposal — HoG shadow-POST when a new strategic-path version is generated
+ *   - /internal/trigger-alarm           — test-only seam (5.1c.18): invokes
+ *                                          `alarm()` directly so the Playwright
+ *                                          smoke can drive a daily-relay turn
+ *                                          deterministically without waiting
+ *                                          for the scheduled timestamp. Gated
+ *                                          on the same `x-shipflare-internal`
+ *                                          header as every other /internal/
+ *                                          route — Cloudflare strips the
+ *                                          header from public-edge traffic,
+ *                                          so only sibling Workers / Service
+ *                                          Bindings can hit it.
  *
  * The legacy /internal/log-activity route + the activity_events table are
  * deleted in this commit (telemetry routes through Analytics Engine via
@@ -607,6 +618,16 @@ export class CMO extends AIChatAgent<Env, CMOState> {
 					return { ok: true };
 				},
 			);
+		}
+		if (url.pathname === "/internal/trigger-alarm") {
+			// 5.1c.18 — test-only seam for the Playwright real-LLM smoke.
+			// Drives a daily-relay turn deterministically by invoking
+			// `alarm()` directly, instead of waiting on the scheduled
+			// `ctx.storage.setAlarm` deadline. The route inherits the
+			// `x-shipflare-internal: 1` gate at the top of fetch(), so
+			// only sibling Workers / Service Bindings can reach it.
+			await this.alarm();
+			return new Response("alarm-triggered", { status: 200 });
 		}
 		if (url.pathname === "/internal/strategic-path-proposal") {
 			this.ensureSchema();
