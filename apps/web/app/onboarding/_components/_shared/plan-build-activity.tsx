@@ -1,55 +1,37 @@
 'use client';
 
-// Onboarding Stage 6 — real-time strategy visualization.
+// Onboarding Stage 6 — strategy plan-build status indicator.
 //
-// Uses ActivityTrail (the same component as the /team page) so the visual
-// language is identical. Text delta events are filtered out before passing
-// to ActivityTrail — the strategic planner streams raw JSON chunks that
-// aren't human-readable, so we only surface the dispatch + finish rows.
-// This gives a clean "Activity (2) ▾" tree: one running/done dispatch row.
-
-import { useMemo } from 'react';
-import { useCmoActivity } from '@/hooks/use-cmo-activity';
-import { ActivityTrail } from '@/components/activity/activity-trail';
-import type { ActivityEvent } from '@shipflare/shared';
+// Phase 9 adaptation (CF-native chat migration): the legacy activity-trail
+// visualisation depended on `useCmoActivity`, which consumed the
+// `ActivityEvent` stream forwarded from `forwardActivityToCmo` calls inside
+// `onboarding-routes.ts`. That forwarding was retired in Phase 5 alongside
+// the CMO McpAgent → AIChatAgent rewrite (commit `f61362a`).
+//
+// The onboarding wizard still functions via the SSE state machine in
+// `onboarding-routes.ts` — when the strategic-path stream emits
+// `strategic_done`, the parent stage advances to Stage 7. This component
+// only renders a status indicator while the SSE is in flight.
+//
+// Richer in-flight activity visualisation (reasoning parts, nested agent
+// runs, skill events) is a Phase 9 follow-up: it requires routing the
+// onboarding flow through CMO's `onChatMessage` (which emits `data-step`
+// + `data-skill-*` parts) instead of the bespoke SSE handler. That
+// refactor is deferred until the onboarding UX needs it.
+//
+// `runId` remains on the props for back-compat with the parent component
+// (`stage-plan-building.tsx`) — the value is no longer consumed but
+// removing it requires a coordinated edit of the call site.
 
 interface PlanBuildActivityProps {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   runId: string;
 }
 
-export function PlanBuildActivity({ runId }: PlanBuildActivityProps) {
-  const { events, connectionError } = useCmoActivity({ runId });
-
-  // Strip raw text delta events — the strategic planner streams JSON chunks
-  // that aren't human-readable. Only show dispatch + finish rows.
-  const displayEvents = useMemo(
-    () => events.filter((e: ActivityEvent) => e.kind !== 'subagent_text_delta'),
-    [events],
-  );
-
-  if (connectionError) {
-    return (
-      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-        Couldn&apos;t connect to the activity feed. The strategist is still
-        working — you&apos;ll advance automatically when the plan is ready.
-      </div>
-    );
-  }
-
-  if (displayEvents.length === 0) {
-    return (
-      <div className="rounded-2xl border border-gray-200 p-4 text-sm text-gray-500">
-        Preparing strategist…
-      </div>
-    );
-  }
-
+export function PlanBuildActivity({ runId: _runId }: PlanBuildActivityProps) {
   return (
-    <ActivityTrail
-      events={displayEvents}
-      defaultOpen
-      hideTicker
-      shell="dispatch-card"
-    />
+    <div className="rounded-2xl border border-gray-200 p-4 text-sm text-gray-500">
+      Preparing strategist…
+    </div>
   );
 }
