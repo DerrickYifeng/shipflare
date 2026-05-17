@@ -99,7 +99,7 @@ Verify SDK shape, install dependencies, scaffold telemetry + OAuth bindings.
 - Modify: `apps/web/package.json`
 - Modify: `pnpm-lock.yaml`
 
-- [ ] **Step 1: Check current versions**
+- [x] **Step 1: Check current versions**
 
 ```bash
 pnpm list ai @ai-sdk/anthropic agents @cloudflare/ai-chat --depth 0 -r 2>&1 | head -30
@@ -107,28 +107,28 @@ pnpm list ai @ai-sdk/anthropic agents @cloudflare/ai-chat --depth 0 -r 2>&1 | he
 
 Expected: `agents@0.12.x` present; `@cloudflare/ai-chat` absent; AI SDK v5 (`ai@5.x`, `@ai-sdk/anthropic@1.x`).
 
-- [ ] **Step 2: Install `@cloudflare/ai-chat` in core and web**
+- [x] **Step 2: Install `@cloudflare/ai-chat` in core and web**
 
 ```bash
 pnpm --filter @shipflare/core add @cloudflare/ai-chat
 pnpm --filter web add @cloudflare/ai-chat
 ```
 
-- [ ] **Step 3: If AI SDK is < v5, upgrade**
+- [x] **Step 3: If AI SDK is < v5, upgrade**
 
 ```bash
 pnpm --filter @shipflare/core add ai@latest @ai-sdk/anthropic@latest
 pnpm --filter web add ai@latest @ai-sdk/anthropic@latest
 ```
 
-- [ ] **Step 4: Verify build still green**
+- [x] **Step 4: Verify build still green**
 
 ```bash
 pnpm -r exec tsc --noEmit
 ```
 Expected: 0 errors (we haven't changed any code yet; any errors are pre-existing and must be fixed before continuing).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/core/package.json apps/web/package.json pnpm-lock.yaml
@@ -142,7 +142,7 @@ git commit -m "chore: install @cloudflare/ai-chat for Phase 0 of CF-native migra
 **Files:**
 - Create: `docs/superpowers/specs/2026-05-16-phase-0-verifications.md`
 
-- [ ] **Step 1: Verify `runAgentTool` public API**
+- [x] **Step 1: Verify `runAgentTool` public API**
 
 ```bash
 grep -rln "runAgentTool\|agentTool" node_modules/agents/dist/agent-tools/ 2>/dev/null | head -5
@@ -151,7 +151,7 @@ cat node_modules/agents/dist/agent-tools/index.d.ts 2>/dev/null | grep -E "expor
 
 Record finding: is `runAgentTool` exported? If only `agentTool(Cls)` is exposed, the plan's `consult-tool.ts` must pre-instantiate one `agentTool` per employee instead.
 
-- [ ] **Step 2: Verify `@ai-sdk/anthropic` reasoning support**
+- [x] **Step 2: Verify `@ai-sdk/anthropic` reasoning support**
 
 ```bash
 grep -l "reasoning" node_modules/@ai-sdk/anthropic/dist/*.d.ts | head -3
@@ -160,7 +160,7 @@ grep -E "reasoning-(start|delta|end)" node_modules/@ai-sdk/anthropic/dist/*.js 2
 
 Record: do Anthropic provider chunks include `reasoning-*`? If not, plan a shim that maps Claude `thinking` content blocks → AI SDK `reasoning-delta`.
 
-- [ ] **Step 3: Verify `useAgentChat` export**
+- [x] **Step 3: Verify `useAgentChat` export**
 
 ```bash
 test -f node_modules/@cloudflare/ai-chat/react/dist/index.d.ts && \
@@ -169,7 +169,7 @@ test -f node_modules/@cloudflare/ai-chat/react/dist/index.d.ts && \
 
 Record exact import path.
 
-- [ ] **Step 4: Verify `experimental_context` threading**
+- [x] **Step 4: Verify `experimental_context` threading**
 
 ```bash
 grep -E "experimental_context" node_modules/ai/dist/index.d.ts | head -5
@@ -177,7 +177,7 @@ grep -E "experimental_context" node_modules/ai/dist/index.d.ts | head -5
 
 Record: does the `tool` execute signature accept context?
 
-- [ ] **Step 5: Verify tool definition API (`defineTool` vs `tool`)**
+- [x] **Step 5: Verify tool definition API (`defineTool` vs `tool`)**
 
 ```bash
 grep -E "export (function|const) (defineTool|tool)" node_modules/agents/dist/tools/*.d.ts node_modules/ai/dist/index.d.ts 2>/dev/null | head -10
@@ -185,11 +185,11 @@ grep -E "export (function|const) (defineTool|tool)" node_modules/agents/dist/too
 
 Decide: this plan uses `tool({...})` from `'ai'` if `defineTool` is absent. Apply consistently across all tool definitions.
 
-- [ ] **Step 6: Write findings**
+- [x] **Step 6: Write findings**
 
 Write findings to `docs/superpowers/specs/2026-05-16-phase-0-verifications.md` (a short table: question / answer / impact). If any answer triggers a design change, amend the spec doc in a separate commit BEFORE proceeding to Phase 1.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add docs/superpowers/specs/2026-05-16-phase-0-verifications.md
@@ -203,7 +203,7 @@ git commit -m "docs: Phase 0 SDK verifications for CF-native migration"
 **Files:**
 - Modify: `apps/core/wrangler.jsonc`
 
-- [ ] **Step 1: Add `analytics_engine_datasets` block to wrangler**
+- [x] **Step 1: Add `analytics_engine_datasets` block to wrangler**
 
 After the existing `durable_objects` block, add:
 
@@ -216,7 +216,7 @@ After the existing `durable_objects` block, add:
 ]
 ```
 
-- [ ] **Step 2: Add binding to `apps/core/src/env.ts`**
+- [x] **Step 2: Add binding to `apps/core/src/env.ts`**
 
 ```typescript
 // in Env interface:
@@ -225,7 +225,7 @@ TELEMETRY: AnalyticsEngineDataset;
 
 (`AnalyticsEngineDataset` is in `@cloudflare/workers-types`; verify it's already in deps.)
 
-- [ ] **Step 3: Verify wrangler config parses**
+- [x] **Step 3: Verify wrangler config parses**
 
 ```bash
 cd apps/core && pnpm wrangler types && cd ../..
@@ -234,7 +234,7 @@ pnpm -r exec tsc --noEmit
 
 Expected: 0 errors.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/core/wrangler.jsonc apps/core/src/env.ts
@@ -249,7 +249,7 @@ git commit -m "chore: add Analytics Engine binding for ops telemetry"
 - Modify: `apps/core/wrangler.jsonc`
 - Modify: `apps/core/src/env.ts`
 
-- [ ] **Step 1: Add OAuth env vars to wrangler vars section**
+- [x] **Step 1: Add OAuth env vars to wrangler vars section**
 
 ```jsonc
 "vars": {
@@ -257,7 +257,7 @@ git commit -m "chore: add Analytics Engine binding for ops telemetry"
 }
 ```
 
-- [ ] **Step 2: Document required secrets in `scripts/cf-deploy-checklist.md`**
+- [x] **Step 2: Document required secrets in `scripts/cf-deploy-checklist.md`**
 
 Add a line:
 
@@ -266,20 +266,20 @@ Add a line:
   Used by withOAuthProvider to sign tokens for external MCP at mcp.shipflare.com/cmo
 ```
 
-- [ ] **Step 3: Add to Env type**
+- [x] **Step 3: Add to Env type**
 
 ```typescript
 MCP_OAUTH_AUDIENCE: string;
 MCP_OAUTH_JWT_SIGNING_KEY: string;
 ```
 
-- [ ] **Step 4: Verify build**
+- [x] **Step 4: Verify build**
 
 ```bash
 pnpm -r exec tsc --noEmit
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/core/wrangler.jsonc apps/core/src/env.ts scripts/cf-deploy-checklist.md
