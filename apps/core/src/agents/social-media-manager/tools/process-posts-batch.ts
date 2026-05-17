@@ -1,307 +1,182 @@
 import { z } from "zod";
+import { tool } from "ai";
 import { runSkill } from "@shipflare/skills";
-import { mcpServerName } from "@shipflare/shared";
 import { validateDraft } from "../lib/validators";
-import { extractText } from "../lib/mcp-result";
-import type { SocialMediaMgr } from "../SocialMediaMgr";
-import {
-  extractTrace,
-  withSubAgentToolTracing,
-} from "../../../lib/subagent-activity";
-
-interface PlanItemRow {
-  id: string;
-  skill: string;
-  channel: string;
-  params_json: string;
-  status: string;
-  owner_role: string;
-  scheduled_for: number | null;
-  started_at: number | null;
-  completed_at: number | null;
-}
+import { mirrorDraft } from "../../../lib/mirror-draft";
+import type { SMM } from "../SocialMediaMgr";
+import type { Env } from "../../../index";
 
 /**
  * process_posts_batch — draft original posts for a batch of plan_item ids.
  *
- * Called by CMO via delegateToEmployee. The CMO sources plan_items (HoG
- * generates them via plan tools); SMM executes by drafting + persisting.
+ * Per spec §2.1: for each plan_item:
+ *   1. Look up the plan item details in `context.planItems` (inlined by CMO —
+ *      peers don't read CMO SQLite). If missing → status='failed'.
+ *   2. runSkill('drafting-post') to draft. Reddit posts return {title, body};
+ *      X posts return just body.
+ *   3. Validate via validateDraft(body, platform). For Reddit, combine title+body.
+ *   4. Persist to drafts (kind='post', plan_item_id link).
+ *   5. If ready: mirror to CMO; promote drafts.status='mirrored' on success.
  *
- * Per plan item:
- *   1. Read item via CMO.queryPlanItems (filtered by id list)
- *   2. Pull founder_context for voice + product knowledge
- *   3. runSkill("drafting-post") to draft an original post
- *   4. Validate via validateDraft (platform-leak + length)
- *   5. Persist to drafts (kind='post', plan_item_id link, status='ready'/'failed')
- *   6. RPC CMO.updatePlanItem(id, status='in_progress', output={ draftId }) if valid
+ * Dry-run seam: `_dryRunDrafts: [{ planItemId, title?, body }]`.
  *
- * Per spec §6.1: SMM never writes CMO's plan_items directly. updates go via
- * the exposed RPC tool.
- *
- * S6.1: the drafting prompt has been lifted to packages/skills/drafting-post
- * and is invoked via `runSkill`. The inline `draftPost` helper is gone.
- *
- * Bulk-fetch design: we pull the full pending pool (capped at 200) in one
- * round-trip and filter in-memory by the requested ids. Cheaper than N
- * queryPlanItems calls and aligns with the batched-LLM cost shape of
- * `find_threads_via_xai`.
+ * CMO LLM (NOT this tool) handles updatePlanItem after consult return —
+ * spec §1.2 invariant: peers don't write CMO state.
  */
-export function registerProcessPostsBatchTool(agent: SocialMediaMgr): void {
-  agent.server.registerTool(
-    "process_posts_batch",
-    {
-      description:
-        "Draft original posts for a batch of plan_item ids. Reads each item, " +
-        "drafts via LLM in the founder's voice, validates, persists to drafts " +
-        "table. Updates each plan_item to in_progress via CMO RPC.",
-      inputSchema: {
-        conversationId: z.string().min(1),
-        planItemIds: z.array(z.string().min(1)).min(1).max(20),
-        voiceOverride: z
-          .string()
-          .optional()
-          .describe(
-            "Override founder_context.voice with a one-off instruction. " +
-              "Use sparingly; default voice should win in production.",
-          ),
-        _trace: z.unknown().optional(),
-      },
-    },
-    async (args) => {
-      const trace = extractTrace(args);
-      const { conversationId, planItemIds, voiceOverride } = args as {
-        conversationId: string;
-        planItemIds: string[];
-        voiceOverride?: string;
-      };
-      return withSubAgentToolTracing(
-        agent.runtimeCtx,
-        agent.bindings,
-        trace,
-        "social-media-manager",
-        "process_posts_batch",
-        args,
-        async () => {
-          const userId = agent.props?.userId;
-          if (!userId) throw new Error("SMM has no userId; cannot draft posts");
+export function makeProcessPostsBatchTool(agent: SMM) {
+	return tool({
+		description:
+			"Draft original posts for an array of plan_item ids. " +
+			"Plan item details must be provided in context.planItems. " +
+			"Each draft is validated then mirrored to CMO's approval queue.",
+		inputSchema: z.object({
+			planItemIds: z.array(z.string().min(1)).min(1).max(10),
+			context: z.string().describe(
+				"Founder context JSON + plan items: { productName, voice?, audience?, " +
+					"productDescription?, planItems: [{ id, channel, topic, paramsJson }] }.",
+			),
+			_dryRunDrafts: z.array(z.object({
+				planItemId: z.string(),
+				title: z.string().optional(),
+				body: z.string(),
+			})).optional(),
+		}),
+		execute: async (args) => {
+			const userId = agent.name;
+			const env = agent.bindings as Env;
+			const ctxParsed = parseContext(args.context);
 
-          const cmoServerName = mcpServerName("cmo", userId);
-          const cmo = agent.mcp
-            .listServers()
-            .find((s) => s.name === cmoServerName);
-          if (!cmo) {
-            return {
-              content: [
-                {
-                  type: "text" as const,
-                  text: JSON.stringify({
-                    itemsScanned: 0,
-                    draftsCreated: 0,
-                    draftsSkipped: planItemIds.length,
-                    notes: [
-                      "CMO not connected — cannot fetch plan_items or update status",
-                    ],
-                  }),
-                },
-              ],
-            };
-          }
+			const drafts: Array<{
+				draftId: string;
+				planItemId: string;
+				status: "ready" | "failed";
+				validationErrors?: string[];
+			}> = [];
+			let drafted = 0;
+			let failed = 0;
 
-          // Step 1: pull plan_items via CMO RPC. Single round-trip; filter to
-          // requested ids in-memory.
-          let allItems: PlanItemRow[] = [];
-          try {
-            const result = await agent.mcp.callTool({
-              serverId: cmo.id,
-              name: "queryPlanItems",
-              arguments: { status: "pending", limit: 200 },
-            });
-            allItems = JSON.parse(extractText(result)) as PlanItemRow[];
-          } catch (err) {
-            return {
-              content: [
-                {
-                  type: "text" as const,
-                  text: JSON.stringify({
-                    itemsScanned: 0,
-                    draftsCreated: 0,
-                    draftsSkipped: planItemIds.length,
-                    notes: [`queryPlanItems failed: ${String(err)}`],
-                  }),
-                },
-              ],
-            };
-          }
-          const itemMap = new Map(allItems.map((i) => [i.id, i]));
+			for (const planItemId of args.planItemIds) {
+				const planItem = ctxParsed.planItems?.find((p) => p.id === planItemId);
+				if (!planItem) {
+					drafts.push({
+						draftId: "",
+						planItemId,
+						status: "failed",
+						validationErrors: ["plan item not found in context"],
+					});
+					failed++;
+					continue;
+				}
 
-          // Step 2: pull founder_context
-          let founderContext: Record<string, string> = {};
-          try {
-            const result = await agent.mcp.callTool({
-              serverId: cmo.id,
-              name: "queryFounderContext",
-              arguments: {},
-            });
-            founderContext = JSON.parse(extractText(result)) as Record<
-              string,
-              string
-            >;
-          } catch (err) {
-            console.warn(`[SMM ${userId}] queryFounderContext failed:`, err);
-          }
-          const product = founderContext.productName ?? "(product not set)";
-          const productDescription = founderContext.productDescription ?? "";
-          const voice =
-            voiceOverride ??
-            founderContext.voice ??
-            "casual, direct, no marketing fluff";
+				const channel = planItem.channel;
+				let title: string | undefined;
+				let body: string;
+				const dry = args._dryRunDrafts?.find((d) => d.planItemId === planItemId);
+				if (dry) {
+					title = dry.title;
+					body = dry.body;
+				} else {
+					try {
+						const raw = await runSkill<unknown>({
+							name: "drafting-post",
+							args: {
+								product: ctxParsed.productName ?? "(product not set)",
+								voice: ctxParsed.voice ?? "(no voice set)",
+								topic: planItem.topic,
+								channel,
+								paramsJson: planItem.paramsJson ?? "{}",
+							},
+							env: env as Env & { ANTHROPIC_API_KEY: string },
+							userId,
+						});
+						if (channel === "reddit" && typeof raw === "object" && raw !== null) {
+							const r = raw as { title?: string; body?: string };
+							title = r.title;
+							body = r.body ?? "";
+						} else {
+							body = typeof raw === "string" ? raw : (raw as { body?: string })?.body ?? "";
+						}
+					} catch (err) {
+						console.warn(`[SMM ${userId}] drafting-post skill failed for ${planItemId}:`, err);
+						body = "";
+					}
+				}
 
-          // Step 3: process each requested id
-          let draftsCreated = 0;
-          let draftsSkipped = 0;
-          const notes: string[] = [];
+				// Validate. For Reddit, validate title+body combined (length includes title).
+				const validateBody = channel === "reddit" && title ? `${title}\n\n${body}` : body;
+				const validation = validateDraft(validateBody, channel);
 
-          for (const planItemId of planItemIds) {
-            const item = itemMap.get(planItemId);
-            if (!item) {
-              draftsSkipped++;
-              notes.push(`${planItemId}: not in pending plan_items pool`);
-              continue;
-            }
+				const draftId = crypto.randomUUID();
+				const now = Date.now();
+				agent.sqlStorage.exec(
+					`INSERT INTO drafts (id, kind, channel, plan_item_id, body, body_title, status, validation_errors, created_at, updated_at)
+					 VALUES (?, 'post', ?, ?, ?, ?, ?, ?, ?, ?)`,
+					draftId,
+					channel,
+					planItemId,
+					body,
+					title ?? null,
+					validation.ok ? "ready" : "failed",
+					validation.ok ? null : JSON.stringify(validation.reasons),
+					now,
+					now,
+				);
 
-            const platform = item.channel as "x" | "reddit";
-            const lengthHint =
-              platform === "x" ? "≤ 280 chars" : "≤ 1500 chars";
-            const params = JSON.parse(item.params_json) as Record<
-              string,
-              unknown
-            >;
+				if (validation.ok) {
+					try {
+						const previewParts: string[] = [];
+						if (title) previewParts.push(title);
+						previewParts.push(body);
+						await mirrorDraft(env.CMO, userId, {
+							draftId,
+							employee: "smm",
+							kind: "post",
+							channel,
+							preview: previewParts.join(" — ").slice(0, 140),
+							createdAt: now,
+						});
+						agent.sqlStorage.exec(
+							"UPDATE drafts SET mirrored_at = ?, status = 'mirrored', updated_at = ? WHERE id = ?",
+							now, now, draftId,
+						);
+					} catch (err) {
+						const status = (err as { status?: number }).status ?? 500;
+						agent.sqlStorage.exec(
+							"UPDATE drafts SET mirror_error = ?, updated_at = ? WHERE id = ?",
+							status, Date.now(), draftId,
+						);
+					}
+					drafted++;
+					drafts.push({ draftId, planItemId, status: "ready" });
+				} else {
+					failed++;
+					drafts.push({ draftId, planItemId, status: "failed", validationErrors: validation.reasons });
+				}
+			}
 
-            // Step 3a: draft via `drafting-post` skill
-            let draftBody = "";
-            let whyItWorks = "";
-            let confidence = 0;
-            try {
-              const raw = await runSkill<unknown>(
-                "drafting-post",
-                {
-                  platform,
-                  product,
-                  productDescription: productDescription || "no description",
-                  voice,
-                  lengthHint,
-                  skill: item.skill,
-                  params: JSON.stringify(params, null, 2),
-                },
-                {
-                  env: { ANTHROPIC_API_KEY: agent.bindings.ANTHROPIC_API_KEY },
-                },
-              );
-              if (raw && typeof raw === "object") {
-                const parsed = raw as {
-                  body?: unknown;
-                  whyItWorks?: unknown;
-                  confidence?: unknown;
-                };
-                draftBody = typeof parsed.body === "string" ? parsed.body : "";
-                whyItWorks =
-                  typeof parsed.whyItWorks === "string"
-                    ? parsed.whyItWorks
-                    : "";
-                confidence =
-                  typeof parsed.confidence === "number" ? parsed.confidence : 0;
-              } else if (typeof raw === "string") {
-                draftBody = raw.slice(0, 280);
-                whyItWorks = "fallback parse";
-                confidence = 0;
-              }
-            } catch (err) {
-              draftsSkipped++;
-              notes.push(`${planItemId}: LLM failed: ${String(err)}`);
-              continue;
-            }
+			return { drafted, failed, drafts };
+		},
+	});
+}
 
-            // Step 3b: validate
-            const validation = validateDraft(draftBody, platform);
-            const draftId = crypto.randomUUID();
-            const now = Date.now();
-            const status = validation.ok ? "ready" : "failed";
+interface PlanItem {
+	id: string;
+	channel: "x" | "reddit";
+	topic: string;
+	paramsJson?: string;
+}
 
-            // Step 3c: persist draft
-            agent.sqlStorage.exec(
-              `INSERT INTO drafts
-             (conversation_id, id, kind, plan_item_id, platform, thread_id, body,
-              why_it_works, confidence, status, audit_notes_json, created_at, updated_at)
-           VALUES (?, ?, 'post', ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)`,
-              conversationId,
-              draftId,
-              planItemId,
-              platform,
-              draftBody,
-              whyItWorks || null,
-              confidence,
-              status,
-              JSON.stringify({ validation, planItemId }),
-              now,
-              now,
-            );
-
-            if (!validation.ok) {
-              draftsSkipped++;
-              notes.push(
-                `${planItemId}: validation failed: ${validation.reasons.join("; ")}`,
-              );
-              continue;
-            }
-
-            // Step 3d: update plan_item to in_progress via CMO RPC.
-            // Draft is canonical; CMO out-of-sync is recoverable (CMO can
-            // re-query SMM.list_drafts to reconcile). Non-fatal on failure.
-            try {
-              await agent.mcp.callTool({
-                serverId: cmo.id,
-                name: "updatePlanItem",
-                arguments: {
-                  id: planItemId,
-                  status: "in_progress",
-                  output: { draftId },
-                },
-              });
-            } catch (err) {
-              console.warn(
-                `[SMM ${userId}] updatePlanItem failed for ${planItemId}:`,
-                err,
-              );
-              notes.push(
-                `${planItemId}: draft created but plan_item update failed`,
-              );
-            }
-
-            draftsCreated++;
-            // TODO(P2-F.2): notify founder via web push when a post draft hits
-            // 'ready' status. Wire this through the CMO DO's sendPushToFounder()
-            // helper — needs a peer RPC channel from SMM → CMO (the
-            // peer-dm-shadow + employee_log path is the natural seam; a tiny
-            // "draft_ready" message type on /internal/peer-dm-shadow can carry
-            // the platform + planItemId + draftId so the CMO can fire the push +
-            // record it in employee_log atomically).
-          }
-
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: JSON.stringify({
-                  itemsScanned: planItemIds.length,
-                  draftsCreated,
-                  draftsSkipped,
-                  notes,
-                }),
-              },
-            ],
-          };
-        },
-      );
-    },
-  );
+function parseContext(s: string): {
+	productName?: string;
+	voice?: string;
+	audience?: string;
+	productDescription?: string;
+	planItems?: PlanItem[];
+} {
+	try {
+		const parsed = JSON.parse(s);
+		return typeof parsed === "object" && parsed !== null ? parsed : {};
+	} catch {
+		return {};
+	}
 }

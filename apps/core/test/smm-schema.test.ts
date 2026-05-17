@@ -1,113 +1,64 @@
 import { env, runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { applySmmSchema } from "../src/agents/social-media-manager/schema";
-import type { SocialMediaMgr } from "../src/agents/social-media-manager/SocialMediaMgr";
+import type { SMM } from "../src/agents/social-media-manager/SocialMediaMgr";
 
-/**
- * Smoke tests for the SocialMediaMgr DO's SQLite schema bootstrap.
- *
- * Same pattern as `hog-schema.test.ts` (S3.0) and `cmo-schema.test.ts`
- * (S2.0): we drive `applySmmSchema` directly rather than
- * `instance.onStart()` because McpAgent's `super.onStart()` calls
- * `getTransportType()` which reads a transport prefix
- * (`sse:` / `streamable-http:` / `rpc:`) from the DO name and throws on
- * non-transport names. SMM.onStart runs `applySmmSchema` BEFORE the super
- * call precisely so the schema can be verified in isolation here.
- *
- * Schema queries exclude:
- *   - `sqlite_%` — SQLite's own metadata
- *   - `_cf_%` — workerd's internal bookkeeping
- *   - `cf_agents_%` / `cf_agent_%` — Agents framework state tables (runs,
- *     queues, schedules, MCP server registry; the framework writes these
- *     lazily on first use, not at construction, so they may or may not
- *     exist when we read sqlite_master).
- */
-
-describe("SocialMediaMgr schema", () => {
-  it("applies all 4 tables", async () => {
-    const stub = env.SOCIAL_MEDIA_MGR.getByName("smm-schema-test-user-1");
-    await runInDurableObject(stub, async (_instance: SocialMediaMgr, state) => {
+describe("applySmmSchema", () => {
+  it("creates threads_inbox + drafts tables idempotently", async () => {
+    const id = env.SMM.idFromName("smm-schema-test");
+    await runInDurableObject<SMM, void>(env.SMM.get(id), async (_inst, state) => {
       applySmmSchema(state.storage.sql);
+      applySmmSchema(state.storage.sql);   // idempotent
+
       const tables = state.storage.sql
         .exec<{ name: string }>(
-          `SELECT name FROM sqlite_master
-           WHERE type='table'
-             AND name NOT LIKE 'sqlite_%'
-             AND name NOT LIKE '_cf_%'
-             AND name NOT LIKE 'cf_agents_%'
-             AND name NOT LIKE 'cf_agent_%'
-           ORDER BY name`,
+          "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name",
         )
         .toArray()
         .map((r) => r.name);
 
-      expect(tables).toEqual([
-        "drafts",
-        "posted",
-        "threads_inbox",
-        "voice_audit",
-      ]);
+      expect(tables).toContain("threads_inbox");
+      expect(tables).toContain("drafts");
     });
   });
 
-  it("drafts table accepts null conversation_id (cron-initiated)", async () => {
-    const stub = env.SOCIAL_MEDIA_MGR.getByName("smm-schema-test-user-2");
-    await runInDurableObject(stub, async (_instance: SocialMediaMgr, state) => {
-      const sql = state.storage.sql;
-      applySmmSchema(sql);
-
-      sql.exec(
-        `INSERT INTO drafts
-           (conversation_id, id, kind, plan_item_id, platform, body, status, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        null,
-        "d1",
-        "post",
-        "pi-1",
-        "x",
-        "test body",
-        "drafting",
-        1,
-        1,
-      );
-
-      const row = sql
-        .exec<{ conversation_id: string | null; kind: string }>(
-          "SELECT conversation_id, kind FROM drafts WHERE id = 'd1'",
-        )
-        .one();
-      expect(row.conversation_id).toBeNull();
-      expect(row.kind).toBe("post");
-    });
-  });
-
-  it("threads_inbox has idx_inbox_platform_judged", async () => {
-    const stub = env.SOCIAL_MEDIA_MGR.getByName("smm-schema-test-user-3");
-    await runInDurableObject(stub, async (_instance: SocialMediaMgr, state) => {
+  it("threads_inbox accepts row with judge_score null", async () => {
+    const id = env.SMM.idFromName("smm-schema-test-inbox");
+    await runInDurableObject<SMM, void>(env.SMM.get(id), async (_inst, state) => {
       applySmmSchema(state.storage.sql);
-      const indexes = state.storage.sql
-        .exec<{ name: string }>(
-          "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='threads_inbox'",
-        )
-        .toArray()
-        .map((r) => r.name);
-      expect(indexes).toContain("idx_inbox_platform_judged");
+      state.storage.sql.exec(
+        `INSERT INTO threads_inbox
+           (id, external_id, platform, content, discovered_at, status)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        "t1", "ext-1", "x", "hello world", Date.now(), "pending",
+      );
+      const rows = state.storage.sql
+        .exec("SELECT id, judge_score, status FROM threads_inbox")
+        .toArray();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ id: "t1", judge_score: null, status: "pending" });
     });
   });
 
-  it("drafts has idx_drafts_status + idx_drafts_plan_item", async () => {
-    const stub = env.SOCIAL_MEDIA_MGR.getByName("smm-schema-test-user-4");
-    await runInDurableObject(stub, async (_instance: SocialMediaMgr, state) => {
+  it("drafts accepts row with thread_id or plan_item_id (either nullable)", async () => {
+    const id = env.SMM.idFromName("smm-schema-test-drafts");
+    await runInDurableObject<SMM, void>(env.SMM.get(id), async (_inst, state) => {
       applySmmSchema(state.storage.sql);
-      const indexes = state.storage.sql
-        .exec<{ name: string }>(
-          "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='drafts'",
-        )
-        .toArray()
-        .map((r) => r.name);
-      expect(indexes).toEqual(
-        expect.arrayContaining(["idx_drafts_status", "idx_drafts_plan_item"]),
+      const now = Date.now();
+      state.storage.sql.exec(
+        `INSERT INTO drafts (id, kind, channel, thread_id, body, status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        "d1", "reply", "x", "t1", "drafted reply text", "ready", now, now,
       );
+      state.storage.sql.exec(
+        `INSERT INTO drafts (id, kind, channel, plan_item_id, body, status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        "d2", "post", "reddit", "pi1", "drafted post text", "failed", now, now,
+      );
+      const rows = state.storage.sql
+        .exec("SELECT id, kind, channel, thread_id, plan_item_id FROM drafts ORDER BY id")
+        .toArray();
+      expect(rows).toHaveLength(2);
     });
   });
 });

@@ -2,66 +2,95 @@
 // re-exported by `cloudflare:workers`). No import needed.
 
 /**
- * Apply the HeadOfGrowth Durable Object's SQLite schema.
+ * HoG Durable Object SQLite schema.
  *
- * Per spec §4.2.4: this is HoG's PRIVATE state — its own thinking history
- * (not visible to founder), its in-flight strategy drafts, and audit
- * findings it has produced. Per-conversation scope (D11) where applicable.
+ * 5.1c addition: HoG owns its working state (planning_chat,
+ * proposal_drafts, audit_findings). CMO never reads these directly —
+ * strategic_path proposals shadow-POST to CMO via
+ * /internal/strategic-path-proposal (handler in 5.1c.11); audit
+ * findings travel back via the consult tool's return value.
  *
- * Per spec §6.1 invariant #1: HoG does NOT own the source-of-truth for the
- * team's strategic_path or plan_items — those live in the CMO DO and are
- * mutated by HoG only via the CMO's RPC tools. Anything in this schema is
- * working space the founder never reads directly.
- *
- * Per Phase 0 spike + S2.0 finding: `super.onStart()` reads the DO name for
- * the McpAgent transport prefix and throws on non-transport names. The
- * schema bootstrap MUST run BEFORE `super.onStart()`. Tests must call
- * `applyHogSchema(sql)` explicitly because `stub.fetch` + getByName-without-
- * a-transport-prefix skips the parent transport-init path.
- *
- * SQLite types only — no Postgres-isms (no SERIAL / TIMESTAMP WITH TIME
- * ZONE / JSONB). `INTEGER` epoch millis stand in for timestamps; `_json`
- * suffix marks columns holding JSON-encoded TEXT.
+ * Per spec §1.2 invariant #1 — no cross-DO SQL.
  */
 export function applyHogSchema(sql: SqlStorage): void {
-  sql.exec(`
-    -- HoG's internal thinking — not surfaced in the founder chat.
-    -- Conversation-scoped per D11; resets when the founder starts a new
-    -- conversation. Composite PK on (conversation_id, ts, role) tolerates
-    -- a 'user' and 'assistant' turn landing at the same epoch ms.
-    CREATE TABLE IF NOT EXISTS planning_chat (
-      conversation_id TEXT NOT NULL,
-      role TEXT NOT NULL,
-      content TEXT NOT NULL,
-      ts INTEGER NOT NULL,
-      PRIMARY KEY (conversation_id, ts, role)
-    );
+	sql.exec(`
+		CREATE TABLE IF NOT EXISTS planning_chat (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			conversation_id TEXT,
+			role TEXT NOT NULL,
+			content TEXT NOT NULL,
+			ts INTEGER NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS idx_planning_chat_ts
+			ON planning_chat(ts DESC);
 
-    -- Strategy options in flight. Committed-to-CMO versions live in CMO's
-    -- strategic_path table; this is HoG's working space (multiple drafts,
-    -- alternatives, the one we'll eventually commit via the CMO RPC tool).
-    CREATE TABLE IF NOT EXISTS proposal_drafts (
-      id TEXT PRIMARY KEY,
-      theme TEXT NOT NULL,
-      narrative_md TEXT NOT NULL,
-      status TEXT NOT NULL,
-      alternatives_json TEXT,
-      confidence REAL NOT NULL DEFAULT 0,
-      created_at INTEGER NOT NULL
-    );
+		CREATE TABLE IF NOT EXISTS proposal_drafts (
+			id TEXT PRIMARY KEY,
+			version INTEGER NOT NULL,
+			theme TEXT NOT NULL,
+			narrative_json TEXT NOT NULL,
+			generated_at INTEGER NOT NULL,
+			mirrored_to_cmo INTEGER NOT NULL DEFAULT 0,
+			mirror_error INTEGER             -- HTTP status code from last failed mirror POST (null = no failure)
+		);
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_proposal_version
+			ON proposal_drafts(version);
 
-    -- Plan-audit findings — gaps, risks, redundancies HoG spots in the
-    -- current plan_items. HoG surfaces these to the CMO via the audit_plan
-    -- tool (S3.2); the founder sees a summarized version through the CMO.
-    CREATE TABLE IF NOT EXISTS audit_findings (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      conversation_id TEXT,
-      target_id TEXT,
-      severity TEXT NOT NULL,
-      finding TEXT NOT NULL,
-      suggested_fix TEXT,
-      status TEXT NOT NULL DEFAULT 'open'
-    );
-    CREATE INDEX IF NOT EXISTS idx_audit_open ON audit_findings(status, severity);
-  `);
+		CREATE TABLE IF NOT EXISTS audit_findings (
+			id TEXT PRIMARY KEY,
+			audit_run_id TEXT NOT NULL,
+			severity TEXT NOT NULL
+				CHECK (severity IN ('high', 'med', 'low')),
+			category TEXT NOT NULL
+				CHECK (category IN ('gap', 'redundancy', 'risk')),
+			finding TEXT NOT NULL,
+			affected_plan_items TEXT,
+			created_at INTEGER NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS idx_findings_run
+			ON audit_findings(audit_run_id, severity);
+	`);
+}
+
+/**
+ * Row shapes for `planning_chat`. Use as the `<T>` argument of `sql.exec<T>(...)`.
+ *
+ * The string index signature is required to satisfy `Record<string, SqlStorageValue>`
+ * — the constraint on `exec<T>` in `@cloudflare/workers-types`.
+ */
+export interface PlanningChatRow {
+	id: number;
+	conversation_id: string | null;
+	role: string;
+	content: string;
+	ts: number;
+	[k: string]: SqlStorageValue;
+}
+
+/**
+ * Row shapes for `proposal_drafts`.
+ */
+export interface ProposalDraftRow {
+	id: string;
+	version: number;
+	theme: string;
+	narrative_json: string;
+	generated_at: number;
+	mirrored_to_cmo: number;     // 0 | 1 (SQLite bool)
+	mirror_error: number | null; // HTTP status code from last failed mirror POST
+	[k: string]: SqlStorageValue;
+}
+
+/**
+ * Row shapes for `audit_findings`.
+ */
+export interface AuditFindingRow {
+	id: string;
+	audit_run_id: string;
+	severity: string;   // 'high' | 'med' | 'low' — CHECK-enforced
+	category: string;   // 'gap' | 'redundancy' | 'risk' — CHECK-enforced
+	finding: string;
+	affected_plan_items: string | null;
+	created_at: number;
+	[k: string]: SqlStorageValue;
 }

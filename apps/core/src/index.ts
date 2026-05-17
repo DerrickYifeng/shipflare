@@ -19,9 +19,9 @@
  *   for sibling-agent RPC. Gated by `x-shipflare-internal: 1` (Cloudflare
  *   strips this header from public-edge traffic, so only intra-network
  *   callers can set it; the DO re-checks defensively).
- * - `scheduled()` → hourly fan-out. Iterates `user` rows in D1, POSTs
- *   `/internal/cron-tick` to each user's CMO DO. Per-DO failures are
- *   isolated via `Promise.allSettled`.
+ * - `scheduled()` → fleet-wide rollups only (currently the 6h growth
+ *   snapshot). Per-user daily relays moved to `CMO.alarm()` in 5.1c.13;
+ *   the legacy `/internal/cron-tick` fan-out was retired in 5.1c.16.
  *
  * Phase 0 spike #2: parameterized `DurableObjectNamespace<CMO>` is required
  * (not bare) for `addMcpServer`'s generic constraint to resolve, and the
@@ -36,22 +36,21 @@
  * tests invoke `worker.scheduled!(ctl, env, ctx)` directly instead.
  */
 
-import { getAgentByName } from "agents";
 import { handleOnboardingInternal } from "./onboarding-routes";
 import { verifyJwt } from "./lib/jwt";
 import { validateExternalAccess } from "./lib/external-auth";
 import { transportName } from "./lib/do-name";
+import { inferTimezone } from "./lib/tz-inference";
 import { ROLE_REGISTRY, isValidRole, type RoleSlug } from "@shipflare/shared";
 import {
   createDb,
-  user as userTable,
   channels as channelsTable,
   growthSnapshots as growthSnapshotsTable,
 } from "@shipflare/db";
 
 import { CMO } from "./agents/cmo/CMO";
-import { HeadOfGrowth } from "./agents/head-of-growth/HeadOfGrowth";
-import { SocialMediaMgr } from "./agents/social-media-manager/SocialMediaMgr";
+import { HoG } from "./agents/head-of-growth/HeadOfGrowth";
+import { SMM } from "./agents/social-media-manager/SocialMediaMgr";
 // `XMcpAgent` / `RedditMcpAgent` are type-imported here (Env declaration).
 // The value re-exports below put the classes on the module graph so wrangler
 // can discover them once S5.3 uncomments the X_MCP / REDDIT_MCP bindings.
@@ -63,7 +62,7 @@ import type { RedditMcpAgent } from "./agents/platforms/reddit/RedditMcpAgent";
 // can also be used in the EMPLOYEE_CLASSES dispatch table for the external
 // MCP route — `export { X }` is enough on its own when there's already an
 // `import { X }` above, but we keep the explicit re-export for grep-ability.)
-export { CMO, HeadOfGrowth, SocialMediaMgr };
+export { CMO, HoG, SMM };
 // Re-export the platform DO classes so wrangler can discover them via the
 // module graph rooted at `main`.
 export { XMcpAgent } from "./agents/platforms/x/XMcpAgent";
@@ -73,8 +72,8 @@ export interface Env {
   DB: D1Database;
   // DO bindings — 3 employee agents + 2 platform tool MCPs.
   CMO: DurableObjectNamespace<CMO>;
-  HEAD_OF_GROWTH: DurableObjectNamespace<HeadOfGrowth>;
-  SOCIAL_MEDIA_MGR: DurableObjectNamespace<SocialMediaMgr>;
+  HOG: DurableObjectNamespace<HoG>;
+  SMM: DurableObjectNamespace<SMM>;
   X_MCP: DurableObjectNamespace<XMcpAgent>;
   REDDIT_MCP: DurableObjectNamespace<RedditMcpAgent>;
   // Workflow binding — added when AgentPlanWorkflow lands (S6).
@@ -99,30 +98,38 @@ export interface Env {
   VAPID_PUBLIC: string;
   VAPID_PRIVATE: string;
   VAPID_SUBJECT: string;
+  /**
+   * Workers Analytics Engine dataset binding for ops telemetry —
+   * agent_run / skill_invocation / tool_invocation events. Written via
+   * `@shipflare/shared#writeAgentEvent` and queried back via
+   * the Cloudflare SQL API. Replaces the legacy `activity_events` D1
+   * table (deleted in Phase 5 of the CF-native chat migration).
+   */
+  TELEMETRY: AnalyticsEngineDataset;
+  /**
+   * Phase 7 wiring (CF-native migration): `withOAuthProvider` wraps the
+   * external MCP route for CMO so 3rd-party clients (Claude Desktop,
+   * Cursor, the founder's own LLM stack) authenticate via the standard
+   * MCP OAuth flow. The audience claim is published; the signing key is
+   * provisioned via `wrangler secret put MCP_OAUTH_JWT_SIGNING_KEY`.
+   *
+   * Scaffolded in Phase 0 so the `Env` type stays consistent across the
+   * migration; the route handler that consumes these lands in Phase 7.
+   */
+  MCP_OAUTH_AUDIENCE: string;
+  // TODO(Phase 7): the route handler that installs `withOAuthProvider` must
+  // assert this is non-empty at startup — bindings injected by Wrangler can
+  // silently arrive as `""` if `wrangler secret put MCP_OAUTH_JWT_SIGNING_KEY`
+  // was never run for the environment.
+  MCP_OAUTH_JWT_SIGNING_KEY: string;
 }
 
-/**
- * Class dispatch table for the Phase 2 external MCP route. Maps the URL
- * `<role>` segment to the McpAgent subclass we use for `Klass.serve(...)`.
- *
- * Keep in sync with `ROLE_REGISTRY` (`@shipflare/shared`): every role with
- * an `externalExposed` capability needs an entry here. P2-B additions get
- * added here when they land — adding a row in `ROLE_REGISTRY` alone is not
- * enough to expose a new role externally.
- *
- * Typed as `Record<string, typeof McpAgent>` would require fighting the
- * generic params on McpAgent<Env, State, Props>. The use-site only calls
- * `.serve(path, { binding }).fetch(...)`, which all three classes inherit
- * unchanged from `McpAgent`. `any` here is bounded: the dispatch is gated
- * by `validateExternalAccess` (auth) + the URL-pattern check above, and
- * the runtime types come from the McpAgent base class.
- */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const EMPLOYEE_CLASSES: Record<string, any> = {
-  cmo: CMO,
-  "head-of-growth": HeadOfGrowth,
-  "social-media-manager": SocialMediaMgr,
-};
+// EMPLOYEE_CLASSES dispatch table for the legacy external MCP route was
+// retired in Task 5.1b (CF-native chat migration). All three employee
+// classes are now AIChatAgent subclasses; AIChatAgent has no `.serve()`
+// HTTP-handler shim, so the external MCP path is offline until Phase 7
+// reinstalls a withOAuthProvider-wrapped surface. See `handleExternalMcpRequest`
+// below — it returns 503 with a Phase 7 marker for any role.
 
 /**
  * `/agents/<role>/<userId>/mcp[/...]` — Phase 1 internal MCP entry. The
@@ -132,13 +139,14 @@ const EMPLOYEE_CLASSES: Record<string, any> = {
 const MCP_ROUTE = /^\/agents\/([a-z-]+)\/([^/]+)\/mcp(?:\/|$)/;
 
 /**
- * `/agents/cmo/<userId>` (no /mcp suffix) — Browser activity-feed WebSocket.
+ * `/agents/cmo/<userId>` (no /mcp suffix) — Browser chat WebSocket.
  *
- * Task 6 (spec 2026-05-15): The web client opens this WS after fetching a
- * short-lived activity-scoped JWT from `/api/cmo-ws-token`. The token is
+ * Post-Phase-8 (CF-native chat migration): the web client opens this WS
+ * after fetching a short-lived JWT from `/api/agent-token`. The token is
  * passed in the `?token=` query string (browsers can't set Authorization
- * headers on `new WebSocket()`). CMO's `onConnect` lifecycle verifies the
- * token and closes the socket with 1008 on any auth failure.
+ * headers on `new WebSocket()`). `handleCmoWsRequest` verifies the JWT
+ * before forwarding to the DO; the DO is AIChatAgent so the WS upgrade
+ * is handled by the framework's native chat transport.
  *
  * The trailing `$` (no further path) is what discriminates this from the
  * `/mcp[/...]` route — the regex order in `routeRequest()` checks MCP_ROUTE
@@ -169,14 +177,6 @@ const EXTERNAL_MCP_ROUTE =
  */
 const INTERNAL_ROUTE = /^\/agents\/([a-z-]+)\/([^/]+)(\/internal\/.+)$/;
 
-/**
- * Per-tick cap on D1 user fan-out. We're early in Phase 1 — every active CMO
- * gets ticked every hour regardless of activity. The cap prevents a runaway
- * cron call when the user table grows faster than the per-user activity
- * gating ships. Remove this once `user.lastActiveAt`-based filtering exists.
- */
-const CRON_FANOUT_CAP = 1000;
-
 export default {
   async fetch(
     request: Request,
@@ -205,36 +205,16 @@ export default {
     env: Env,
     _ctx: ExecutionContext,
   ): Promise<void> {
-    // Hourly fan-out. Read every user.id from D1, fire `/internal/cron-tick`
-    // at their CMO DO. Each tick is a separate DO instance so failures
-    // isolate — one bad CMO doesn't block the rest.
+    // Per-user daily relay moved to `CMO.alarm()` in 5.1c.13, so this
+    // handler is now fleet-wide rollups only.
     //
-    // Phase 0 spike #9: don't use `SELF.scheduled()` to test this; call
-    // the handler directly from tests instead.
-    try {
-      const db = createDb(env.DB);
-      const users = await db.select({ id: userTable.id }).from(userTable);
-      const subset = users.slice(0, CRON_FANOUT_CAP);
-      await Promise.allSettled(
-        subset.map(({ id: userId }) => {
-          const stub = env.CMO.get(env.CMO.idFromName(transportName(userId)));
-          return stub.fetch(
-            new Request("https://internal/internal/cron-tick", {
-              method: "POST",
-              headers: { "x-shipflare-internal": "1" },
-            }),
-          );
-        }),
-      );
-    } catch (err) {
-      // Cron should be self-healing — log + swallow. The next tick retries.
-      console.error("[scheduled] cron fan-out failed:", err);
-    }
-
     // Growth snapshots: capture per-(user, platform) metrics into D1 every
     // 6h tick. Phase 1 stores empty metrics {}; a later task wires real
     // collection. Per-(user, platform) failures are isolated via the
     // try/catch inside snapshotGrowth.
+    //
+    // Phase 0 spike #9: don't use `SELF.scheduled()` to test this; call
+    // the handler directly from tests instead.
     try {
       await snapshotGrowth(env);
     } catch (err) {
@@ -450,14 +430,18 @@ async function routeRequest(
 }
 
 /**
- * Bare WebSocket route for the browser activity feed.
+ * Bare WebSocket route for the browser chat surface.
  *
- * Auth happens INSIDE the DO via CMO.onConnect (Task 6) — the partyserver
- * `Server.fetch` upgrades to WS first, then calls `onConnect`, which reads
- * the `?token=` query string and closes the socket with 1008 on failure.
- * Routing this through the worker just forwards the request to the right
- * per-user DO instance (keyed by `transportName(userId)` so the bare-WS
- * lookup lands on the same DO as the /mcp transport).
+ * Verifies the JWT minted by apps/web's /api/agent-token BEFORE spinning up
+ * a DO instance. Defense-in-depth: the DO's onConnect also re-checks the
+ * token, but doing it here prevents unnecessary DO spin-ups and protects
+ * against cross-user replay (token.name must match the URL's userId) and
+ * cross-agent token reuse (token.agent must be "cmo").
+ *
+ * Browser opens:
+ *   wss://core/agents/cmo/<userId>?token=<jwt>
+ * Token claims expected:
+ *   { userId: <session user id>, agent: "cmo", name: <userId from URL> }
  */
 async function handleCmoWsRequest(
   request: Request,
@@ -470,11 +454,60 @@ async function handleCmoWsRequest(
   if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
     return new Response("expected websocket upgrade", { status: 426 });
   }
+
+  // Verify the JWT minted by apps/web's /api/agent-token before
+  // spinning up a DO instance. Browser opens
+  //   wss://core/agents/cmo/<userId>?token=<jwt>
+  // and we check the claims match the URL's `userId` (defense against
+  // cross-user replay) and that the agent claim is `cmo` (defense
+  // against tokens minted for hog/smm being used here).
+  const url = new URL(request.url);
+  const token = url.searchParams.get("token");
+  if (!token) {
+    return new Response("missing token", { status: 401 });
+  }
+
+  let claims: Record<string, unknown>;
+  try {
+    claims = await verifyJwt(token, env.MCP_JWT_SECRET);
+  } catch {
+    return new Response("invalid token", { status: 401 });
+  }
+
+  if (claims["agent"] !== "cmo") {
+    return new Response("token agent mismatch", { status: 401 });
+  }
+  if (claims["name"] !== userId) {
+    return new Response("token name mismatch", { status: 401 });
+  }
+
+  // Infer the founder's timezone from the WS handshake so the CMO DO can
+  // bootstrap `founder_context.tz` on first connect (5.1c.14 / .15).
+  //   Priority: ?tz=<IANA>  →  request.cf.timezone  →  "UTC"
+  // The browser provides the query param via
+  //   `Intl.DateTimeFormat().resolvedOptions().timeZone` (apps/web's
+  //   useCmoChat). Cloudflare's IP-geo guess is the fallback for clients
+  //   that don't send the query (older builds, MCP clients, etc).
+  const tzFromQuery = url.searchParams.get("tz") ?? undefined;
+  const tzFromCf = (request.cf as { timezone?: string } | undefined)?.timezone;
+  const inferredTz = inferTimezone(tzFromQuery, tzFromCf);
+
+  // Forward via header so the DO's fetch() can read `x-inferred-tz`
+  // without re-parsing the URL. Use `new Request(url, request)` so the
+  // WS upgrade machinery (Upgrade / Connection / Sec-WebSocket-*, plus
+  // the internal `webSocket` field workerd attaches to upgrade Requests)
+  // is carried over from the original. Mutating `.headers` after
+  // construction keeps every existing handshake header intact and just
+  // overlays our `x-inferred-tz` on top.
+  const forwarded = new Request(request.url, request);
+  forwarded.headers.set("x-inferred-tz", inferredTz);
+
   const stub = env.CMO.get(env.CMO.idFromName(transportName(userId)));
-  // Forward the request verbatim so `onConnect`'s ctx.request.url retains
-  // the `?token=...` query string AND the original `/agents/cmo/<userId>`
-  // path (CMO uses pathname to discriminate this from /mcp transport WS).
-  return stub.fetch(request);
+  // Forward the request (with `x-inferred-tz` overlay) so `onConnect`'s
+  // ctx.request.url retains the `?token=...` query string AND the
+  // original `/agents/cmo/<userId>` path (CMO uses pathname to
+  // discriminate this from /mcp transport WS).
+  return stub.fetch(forwarded);
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -522,24 +555,17 @@ async function handleInternalRequest(
 
 // ──────────────────────────────────────────────────────────────────────────
 // /agents/<role>/<userId>/mcp
-// JWT-protected internal MCP entry for the browser → CMO DO path.
 //
-// The Agents SDK (agents@0.12.4) does NOT support plain HTTP forwarding to
-// a DO. `McpAgent.serve()` internally wraps `createStreamingHttpHandler`
-// which converts HTTP POST/GET requests into WebSocket upgrades with custom
-// Cloudflare headers (`cf-mcp-method`, `cf-mcp-message`) before calling
-// agent.fetch(). Bypassing that with a bare stub.fetch(request) results in
-// "Not implemented".
+// Task 5.1b (CF-native chat migration): CMO is now an AIChatAgent and no
+// longer speaks the MCP transport. The legacy `streamableHttpProxy` +
+// `setInitializeRequest`/`getInitializeRequest` helpers were deleted with
+// the McpAgent surface. Phase 8 reinstalls a chat-native browser entry
+// (apps/web → `useAgentChat` over `/agents/cmo/<userId>` WebSocket).
 //
-// We implement `streamableHttpProxy` — the same Worker→DO protocol as
-// `createStreamingHttpHandler`, but keying the DO by `userId` instead of a
-// random sessionId. This gives a stable per-user CMO DO (persistent SQLite
-// state across browser sessions), which the random-session approach can't.
+// Existing auth assertions in `cmo-routing.test.ts` (401 without bearer,
+// 401 expired, 403 mismatched userId / scope) survive — the JWT validation
+// happens here before the 503 dispatch.
 // ──────────────────────────────────────────────────────────────────────────
-
-// Custom MCP header names used by the Agents SDK (agents@0.12.4 source).
-const CF_MCP_METHOD = "cf-mcp-method";
-const CF_MCP_MESSAGE = "cf-mcp-message";
 
 async function handleMcpRequest(
   request: Request,
@@ -567,153 +593,22 @@ async function handleMcpRequest(
   if (claims["userId"] !== userId) {
     return new Response("token userId mismatch", { status: 403 });
   }
-  // Scope-claim guard: closes the cross-replay between /api/cmo-ws-token
-  // (mints scope:'activity' for the activity WS) and /api/mcp-token (no
-  // scope today). CMO.onConnect already requires scope === 'activity' on
-  // the WS path, but until this check, an exfiltrated activity token
-  // could be replayed here for a full MCP session. We accept undefined
-  // (back-compat with current /api/mcp-token) or 'mcp' (forward-compat
-  // when we add it) and reject anything else.
+  // Scope-claim guard: historical cross-replay protection. The legacy
+  // /api/cmo-ws-token route minted scope:'activity' tokens; it was
+  // retired in Phase 10 of the CF-native chat migration. /api/mcp-token
+  // continues to mint MCP-scoped (no `scope` claim today) tokens. We
+  // accept undefined (back-compat) or 'mcp'.
   const scope = (claims as { scope?: unknown }).scope;
   if (scope !== undefined && scope !== "mcp") {
     return new Response("token scope not valid for mcp", { status: 403 });
   }
 
-  return streamableHttpProxy(request, env.CMO, userId, { userId });
-}
-
-/**
- * Implements the Agents SDK's Worker→DO streamable HTTP protocol, keyed by
- * userId for stable per-user DO instances.
- *
- * The SDK's createStreamingHttpHandler (not exported) converts browser HTTP
- * POST/GET into a WebSocket upgrade with `cf-mcp-method` + `cf-mcp-message`
- * headers, calls agent.fetch(), then streams WebSocket messages back as SSE.
- * We replicate that here, substituting userId for the random sessionId so
- * all of the founder's browser sessions share one CMO DO (and its SQLite).
- */
-async function streamableHttpProxy(
-  request: Request,
-  namespace: DurableObjectNamespace<CMO>,
-  userId: string,
-  props: Record<string, unknown>,
-): Promise<Response> {
-  const method = request.method.toUpperCase();
-
-  if (method === "POST") {
-    const accept = request.headers.get("accept") ?? "";
-    const ct = request.headers.get("content-type") ?? "";
-    if (!accept.includes("application/json") || !accept.includes("text/event-stream")) {
-      return mcpJsonError(-32000, "Not Acceptable: must accept application/json and text/event-stream", 406);
-    }
-    if (!ct.includes("application/json")) {
-      return mcpJsonError(-32000, "Unsupported Media Type: Content-Type must be application/json", 415);
-    }
-
-    let raw: unknown;
-    try {
-      raw = await request.json();
-    } catch {
-      return mcpJsonError(-32700, "Parse error: Invalid JSON", 400);
-    }
-    const messages = Array.isArray(raw) ? raw : [raw];
-
-    const agent = await getAgentByName(namespace, transportName(userId), { props });
-
-    const isInit = messages.some(
-      (m): boolean =>
-        typeof m === "object" && m !== null && (m as Record<string, unknown>)["method"] === "initialize",
-    );
-    if (isInit) {
-      await agent.setInitializeRequest(messages[0]);
-    } else if (!(await agent.getInitializeRequest())) {
-      return mcpJsonError(-32001, "Session not found", 404);
-    }
-
-    const fwd: Record<string, string> = {};
-    request.headers.forEach((v, k) => { fwd[k] = v; });
-
-    const wsRes = await agent.fetch(
-      new Request(request.url, {
-        headers: {
-          ...fwd,
-          [CF_MCP_METHOD]: "POST",
-          [CF_MCP_MESSAGE]: Buffer.from(JSON.stringify(messages)).toString("base64"),
-          Upgrade: "websocket",
-        },
-      }),
-    );
-    return sseFromWebSocket(wsRes.webSocket, userId);
-  }
-
-  if (method === "GET") {
-    const agent = await getAgentByName(namespace, transportName(userId), { props });
-    const fwd: Record<string, string> = {};
-    request.headers.forEach((v, k) => { fwd[k] = v; });
-    const wsRes = await agent.fetch(
-      new Request(request.url, {
-        headers: { ...fwd, [CF_MCP_METHOD]: "GET", Upgrade: "websocket" },
-      }),
-    );
-    return sseFromWebSocket(wsRes.webSocket, userId);
-  }
-
-  if (method === "DELETE") {
-    const agent = await getAgentByName(namespace, transportName(userId), { props });
-    const fwd: Record<string, string> = {};
-    request.headers.forEach((v, k) => { fwd[k] = v; });
-    await agent.fetch(
-      new Request(request.url, {
-        headers: { ...fwd, [CF_MCP_METHOD]: "DELETE", Upgrade: "websocket" },
-      }),
-    );
-    return new Response(null, { status: 200 });
-  }
-
-  return new Response("Method Not Allowed", { status: 405 });
-}
-
-function sseFromWebSocket(ws: WebSocket | null, sessionId: string): Response {
-  if (!ws) return mcpJsonError(-32001, "Failed to establish WebSocket connection to DO", 500);
-  ws.accept();
-  const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
-  const writer = writable.getWriter();
-  const enc = new TextEncoder();
-  ws.addEventListener("message", (event) => {
-    // The DO sends messages as: { type: "cf_mcp_agent_event", event: "<sse-string>", close?: true }
-    // `event` is already SSE-formatted ("data: ...\n\n") — write it directly.
-    // Ignore non-MCP messages (e.g. internal DO keepalives).
-    async function onMessage(ev: MessageEvent) {
-      try {
-        const raw = typeof ev.data === "string" ? ev.data : new TextDecoder().decode(ev.data as ArrayBuffer);
-        const msg = JSON.parse(raw) as { type?: string; event?: string; close?: boolean };
-        if (msg.type !== "cf_mcp_agent_event") return;
-        if (msg.event) await writer.write(enc.encode(msg.event));
-        if (msg.close) {
-          ws?.close();
-          await writer.close().catch(() => {});
-        }
-      } catch (err) {
-        console.error("[sseFromWebSocket] message parse error:", err);
-      }
-    }
-    void onMessage(event);
-  });
-  ws.addEventListener("close", () => void writer.close().catch(() => {}));
-  ws.addEventListener("error", () => void writer.close().catch(() => {}));
-  return new Response(readable, {
-    headers: {
-      "content-type": "text/event-stream",
-      "mcp-session-id": sessionId,
-      "cache-control": "no-cache",
-    },
-  });
-}
-
-function mcpJsonError(code: number, message: string, status: number): Response {
+  // Past auth: the MCP transport is offline. Phase 8 will rewire to a
+  // chat-native browser entry. Returning 503 (not 200) so old web builds
+  // surface the migration state clearly instead of silently hanging.
   return new Response(
-    JSON.stringify({ jsonrpc: "2.0", id: null, error: { code, message } }),
-    { status, headers: { "content-type": "application/json" } },
+    "MCP transport retired in Phase 5; chat-native browser entry lands in Phase 8",
+    { status: 503 },
   );
 }
 
@@ -735,7 +630,7 @@ function mcpJsonError(code: number, message: string, status: number): Response {
 async function handleExternalMcpRequest(
   request: Request,
   env: Env,
-  ctx: ExecutionContext,
+  _ctx: ExecutionContext,
   role: string,
   userId: string,
 ): Promise<Response> {
@@ -747,23 +642,17 @@ async function handleExternalMcpRequest(
   if (!isValidRole(role)) {
     return new Response("unknown role", { status: 404 });
   }
-  const Klass = EMPLOYEE_CLASSES[role];
   const entry = ROLE_REGISTRY[role as RoleSlug];
-  if (!Klass || !entry) {
+  if (!entry) {
     return new Response("role not exposed externally", { status: 404 });
   }
-  const binding = entry.binding;
-  // Defensive: ensure the named binding actually exists on `env`. If the
-  // DO class is declared in ROLE_REGISTRY + EMPLOYEE_CLASSES but the
-  // wrangler binding isn't deployed yet, fail loud with 503.
-  const ns = (env as unknown as Record<string, unknown>)[binding];
-  if (!ns) {
-    return new Response(`binding "${binding}" not deployed`, { status: 503 });
-  }
 
-  // Per Phase 0 spike #3: pass `binding` explicitly. The path pattern uses
-  // `:userId` so the MCP SDK can extract the per-tenant DO id from the URL.
-  return Klass.serve(`/external/agents/${role}/:userId/mcp`, {
-    binding,
-  }).fetch(request, env, ctx);
+  // Task 5.1b: every employee class (CMO/HoG/SMM) is now AIChatAgent and
+  // has no `.serve()` MCP shim. The external MCP surface is offline until
+  // Phase 7 wires `withOAuthProvider` on the chat-native entry. Auth
+  // still runs above so token-validation tests stay green.
+  return new Response(
+    "external MCP surface offline; Phase 7 reinstalls via withOAuthProvider",
+    { status: 503 },
+  );
 }

@@ -30,7 +30,88 @@ import type { RedditMcpAgent } from "../RedditMcpAgent";
  * rather than crashing the caller — same pattern as `reddit_search`.
  * The empty result surfaces as "REDDIT_MCP returned no candidates"
  * upstream and the caller's next tick retries.
+ *
+ * --- 5.1c.M1: pure-async helper extracted ---
+ * `researchSubredditsImpl` is the canonical research function. Both
+ * the MCP tool registration AND the `/internal/research_subreddits`
+ * HTTP route on `RedditMcpAgent` call it directly. No env needed
+ * (Reddit's public JSON API is anonymous).
  */
+
+export const researchSubredditsArgsSchema = z.object({
+	product: z.string().min(1),
+	audience: z.string().optional(),
+});
+export type ResearchSubredditsArgs = z.infer<typeof researchSubredditsArgsSchema>;
+
+export interface SubredditCandidate {
+	subreddit: string;
+	rank: number;
+	fitScore: number;
+}
+
+export async function researchSubredditsImpl(
+	args: ResearchSubredditsArgs,
+): Promise<SubredditCandidate[]> {
+	const { product, audience } = args;
+	const url = new URL("https://www.reddit.com/subreddits/search.json");
+	url.searchParams.set("q", `${product} ${audience ?? ""}`.trim());
+	url.searchParams.set("limit", "10");
+
+	let res: Response;
+	try {
+		res = await fetch(url.toString(), {
+			headers: {
+				"User-Agent": "shipflare-cf/1.0 (https://shipflare.com)",
+			},
+		});
+	} catch (err) {
+		console.error("[research_subreddits] fetch failed:", err);
+		return [];
+	}
+
+	if (!res.ok) {
+		console.error(
+			`[research_subreddits] reddit returned ${res.status}: ${await res
+				.text()
+				.catch(() => "(no body)")}`,
+		);
+		return [];
+	}
+
+	let data: RedditListing<SubredditData>;
+	try {
+		data = (await res.json()) as RedditListing<SubredditData>;
+	} catch (err) {
+		console.error(
+			"[research_subreddits] response JSON parse failed:",
+			err,
+		);
+		return [];
+	}
+
+	return (data.data?.children ?? [])
+		.map((c, idx) => {
+			const d = c?.data;
+			if (!d || typeof d.display_name !== "string") return null;
+			const subscribers =
+				typeof d.subscribers === "number" && d.subscribers >= 0
+					? d.subscribers
+					: 0;
+			// log10(N+1)/7: 1 subscriber ≈ 0.04, 1k ≈ 0.43, 1M ≈ 0.86,
+			// 10M ≈ 1.0. Clamped at 1 to keep the range stable for
+			// downstream UI / ordering.
+			const fitScore = Math.min(1, Math.log10(subscribers + 1) / 7);
+			return {
+				subreddit: `r/${d.display_name}`,
+				rank: idx + 1,
+				fitScore,
+			};
+		})
+		.filter((c): c is SubredditCandidate => c !== null)
+		.sort((a, b) => b.fitScore - a.fitScore);
+}
+
 export function registerResearchSubredditsTool(agent: RedditMcpAgent): void {
   agent.server.registerTool(
     "research_subreddits",
@@ -42,79 +123,13 @@ export function registerResearchSubredditsTool(agent: RedditMcpAgent): void {
       inputSchema: {
         product: z.string().min(1),
         audience: z.string().optional(),
-        productDescription: z
-          .string()
-          .optional()
-          .describe(
-            "Reserved for Phase 2 LLM-fit scoring. Currently unused " +
-              "by the subscriber-density heuristic.",
-          ),
       },
     },
     async ({ product, audience }) => {
-      const url = new URL("https://www.reddit.com/subreddits/search.json");
-      url.searchParams.set("q", `${product} ${audience ?? ""}`.trim());
-      url.searchParams.set("limit", "10");
-
-      let res: Response;
-      try {
-        res = await fetch(url.toString(), {
-          headers: {
-            "User-Agent": "shipflare-cf/1.0 (https://shipflare.com)",
-          },
-        });
-      } catch (err) {
-        console.error("[research_subreddits] fetch failed:", err);
-        return jsonContent([]);
-      }
-
-      if (!res.ok) {
-        console.error(
-          `[research_subreddits] reddit returned ${res.status}: ${await res
-            .text()
-            .catch(() => "(no body)")}`,
-        );
-        return jsonContent([]);
-      }
-
-      let data: RedditListing<SubredditData>;
-      try {
-        data = (await res.json()) as RedditListing<SubredditData>;
-      } catch (err) {
-        console.error(
-          "[research_subreddits] response JSON parse failed:",
-          err,
-        );
-        return jsonContent([]);
-      }
-
-      const candidates = (data.data?.children ?? [])
-        .map((c, idx) => {
-          const d = c?.data;
-          if (!d || typeof d.display_name !== "string") return null;
-          const subscribers =
-            typeof d.subscribers === "number" && d.subscribers >= 0
-              ? d.subscribers
-              : 0;
-          // log10(N+1)/7: 1 subscriber ≈ 0.04, 1k ≈ 0.43, 1M ≈ 0.86,
-          // 10M ≈ 1.0. Clamped at 1 to keep the range stable for
-          // downstream UI / ordering.
-          const fitScore = Math.min(
-            1,
-            Math.log10(subscribers + 1) / 7,
-          );
-          return {
-            subreddit: `r/${d.display_name}`,
-            rank: idx + 1,
-            fitScore,
-          };
-        })
-        .filter(
-          (c): c is { subreddit: string; rank: number; fitScore: number } =>
-            c !== null,
-        )
-        .sort((a, b) => b.fitScore - a.fitScore);
-
+      const candidates = await researchSubredditsImpl({
+        product,
+        audience,
+      });
       return jsonContent(candidates);
     },
   );

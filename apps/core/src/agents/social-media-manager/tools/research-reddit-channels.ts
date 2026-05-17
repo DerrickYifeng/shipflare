@@ -1,235 +1,116 @@
 import { z } from "zod";
-import { mcpServerName, platformServerName } from "@shipflare/shared";
-import { extractText } from "../lib/mcp-result";
-import type { SocialMediaMgr } from "../SocialMediaMgr";
-import {
-  extractTrace,
-  withSubAgentToolTracing,
-} from "../../../lib/subagent-activity";
-
-interface Subreddit {
-  subreddit: string;
-  rank: number;
-  fitScore: number;
-}
+import { tool } from "ai";
+import type { SMM } from "../SocialMediaMgr";
+import type { Env } from "../../../index";
 
 /**
- * research_reddit_channels — discover top-3 subreddits for the founder's ICP.
+ * research_reddit_channels — discover top subreddits for the founder's ICP.
  *
- * Called by CMO via delegateToEmployee. Typical triggers:
- *   - Reddit channel freshly connected, no subreddits researched yet
- *   - Founder says "find new subreddits for us"
- *   - Periodic refresh
+ * Calls REDDIT_MCP `/internal/research_subreddits` (added in 5.1c.M1).
+ * Returns ranked candidates + a `topThree` convenience array — the CMO LLM
+ * decides whether to commit the result to founder_context.subreddits via
+ * its own setFounderContext tool (spec §1.2 invariant: peers don't write
+ * CMO state).
  *
- * Flow:
- *   1. Pull founder_context for productName, audience, productDescription
- *   2. RPC REDDIT_MCP.research_subreddits for ranked candidates
- *   3. Top-3 written to CMO.setFounderContext('subreddits', JSON)
- *   4. Return { subreddits, written }
- *
- * Per spec §6.1: SMM never writes CMO's founder_context directly. Writes
- * go through CMO.setFounderContext RPC.
- *
- * Forward-compat: REDDIT_MCP lands in S5. Until then, gracefully returns
- * a "not yet deployed" error.
+ * Dry-run seam (`_dryRunCandidates`, `_dryRunMcpError`) bypasses Service
+ * Binding for vitest tests.
  */
-export function registerResearchRedditChannelsTool(
-  agent: SocialMediaMgr,
-): void {
-  agent.server.registerTool(
-    "research_reddit_channels",
-    {
-      description:
-        "Discover top-3 subreddits where the founder's ICP gathers. Calls " +
-        "REDDIT_MCP for ranked candidates, writes the top-3 to CMO's " +
-        "founder_context (key='subreddits'). Returns { subreddits, written }.",
-      inputSchema: {
-        force: z
-          .boolean()
-          .default(false)
-          .describe(
-            "If true, re-run discovery even if subreddits are already in " +
-              "founder_context. Default false: skip if already researched.",
-          ),
-        _trace: z.unknown().optional(),
-      },
-    },
-    async (args) => {
-      const trace = extractTrace(args);
-      const { force } = args as { force: boolean };
-      return withSubAgentToolTracing(
-        agent.runtimeCtx,
-        agent.bindings,
-        trace,
-        "social-media-manager",
-        "research_reddit_channels",
-        args,
-        async () => {
-          const userId = agent.props?.userId;
-          if (!userId) throw new Error("SMM has no userId");
+export function makeResearchRedditChannelsTool(agent: SMM) {
+	return tool({
+		description:
+			"Discover the top subreddits for the founder's audience. " +
+			"Returns ranked candidates with a topThree convenience array — " +
+			"the caller decides whether to commit them as founder_context.subreddits.",
+		inputSchema: z.object({
+			context: z.string().describe(
+				"Founder context JSON: { productName, audience, productDescription }. " +
+					"Inlined by CMO via consult; peers do not call CMO upward.",
+			),
+			_dryRunCandidates: z
+				.array(
+					z.object({
+						subreddit: z.string(),
+						rank: z.number(),
+						fitScore: z.number(),
+					}),
+				)
+				.optional(),
+			_dryRunMcpError: z.string().optional(),
+		}),
+		execute: async (args) => {
+			const userId = agent.name;
+			const env = agent.bindings as Env;
+			const ctxParsed = parseContext(args.context);
+			const product = ctxParsed.productName ?? "";
+			const audience = ctxParsed.audience;
 
-          const cmoServerName = mcpServerName("cmo", userId);
-          const cmo = agent.mcp
-            .listServers()
-            .find((s) => s.name === cmoServerName);
-          if (!cmo) {
-            return errorResult(
-              "CMO not connected — cannot read founder_context or write subreddits",
-            );
-          }
+			// Dry-run short-circuit
+			if (args._dryRunMcpError) {
+				return {
+					subreddits: [],
+					topThree: [],
+					error: `REDDIT_MCP unavailable: ${args._dryRunMcpError}`,
+				};
+			}
 
-          // Step 1: read founder_context
-          let founderContext: Record<string, string> = {};
-          try {
-            const result = await agent.mcp.callTool({
-              serverId: cmo.id,
-              name: "queryFounderContext",
-              arguments: {},
-            });
-            founderContext = JSON.parse(extractText(result)) as Record<
-              string,
-              string
-            >;
-          } catch (err) {
-            return errorResult(`queryFounderContext failed: ${String(err)}`);
-          }
+			let candidates = args._dryRunCandidates;
+			if (!candidates) {
+				if (!product) {
+					return {
+						subreddits: [],
+						topThree: [],
+						error: "context.productName missing — cannot research subreddits",
+					};
+				}
+				try {
+					const stub = env.REDDIT_MCP.get(env.REDDIT_MCP.idFromName(userId));
+					const res = await stub.fetch(
+						new Request("https://internal/internal/research_subreddits", {
+							method: "POST",
+							headers: {
+								"x-shipflare-internal": "1",
+								"content-type": "application/json",
+							},
+							body: JSON.stringify({ product, audience }),
+						}),
+					);
+					if (!res.ok) {
+						return {
+							subreddits: [],
+							topThree: [],
+							error: `REDDIT_MCP returned ${res.status}`,
+						};
+					}
+					candidates = (await res.json()) as typeof candidates;
+				} catch (err) {
+					return {
+						subreddits: [],
+						topThree: [],
+						error: `REDDIT_MCP fetch failed: ${String(err)}`,
+					};
+				}
+			}
+			candidates = candidates ?? [];
 
-          // Step 1b: skip if already researched and !force
-          if (!force && founderContext.subreddits) {
-            try {
-              const existing = JSON.parse(
-                founderContext.subreddits,
-              ) as Subreddit[];
-              if (Array.isArray(existing) && existing.length > 0) {
-                return {
-                  content: [
-                    {
-                      type: "text" as const,
-                      text: JSON.stringify({
-                        subreddits: existing,
-                        written: 0,
-                        skipped: true,
-                        reason:
-                          "already researched (pass force=true to re-run)",
-                      }),
-                    },
-                  ],
-                };
-              }
-            } catch {
-              // Corrupted founder_context.subreddits — proceed with fresh research
-            }
-          }
-
-          const product = founderContext.productName ?? "";
-          const audience = founderContext.audience ?? "";
-          const productDescription = founderContext.productDescription ?? "";
-
-          if (!product) {
-            return errorResult(
-              "founder_context.productName not set; cannot research without product name",
-            );
-          }
-
-          // Step 2: find REDDIT_MCP and call research_subreddits
-          const redditServerName = platformServerName("reddit", userId);
-          const reddit = agent.mcp
-            .listServers()
-            .find((s) => s.name === redditServerName);
-          if (!reddit) {
-            return errorResult(
-              "REDDIT_MCP not yet deployed (S5). Try again after S5 lands.",
-            );
-          }
-
-          let candidates: Subreddit[] = [];
-          try {
-            const result = await agent.mcp.callTool({
-              serverId: reddit.id,
-              name: "research_subreddits",
-              arguments: {
-                product,
-                audience,
-                productDescription,
-              },
-            });
-            candidates = JSON.parse(extractText(result)) as Subreddit[];
-          } catch (err) {
-            return errorResult(
-              `reddit research_subreddits failed: ${String(err)}`,
-            );
-          }
-
-          if (!Array.isArray(candidates) || candidates.length === 0) {
-            return {
-              content: [
-                {
-                  type: "text" as const,
-                  text: JSON.stringify({
-                    subreddits: [],
-                    written: 0,
-                    reason: "REDDIT_MCP returned no candidates",
-                  }),
-                },
-              ],
-            };
-          }
-
-          const top3 = candidates
-            .slice()
-            .sort((a, b) => (b.fitScore ?? 0) - (a.fitScore ?? 0))
-            .slice(0, 3);
-
-          // Step 3: write top-3 to CMO.setFounderContext
-          try {
-            await agent.mcp.callTool({
-              serverId: cmo.id,
-              name: "setFounderContext",
-              arguments: {
-                key: "subreddits",
-                value: JSON.stringify(top3),
-              },
-            });
-          } catch (err) {
-            // Non-fatal: return candidates anyway, founder can retry or set manually
-            return {
-              content: [
-                {
-                  type: "text" as const,
-                  text: JSON.stringify({
-                    subreddits: top3,
-                    written: 0,
-                    warning: `setFounderContext failed: ${String(err)}`,
-                  }),
-                },
-              ],
-            };
-          }
-
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: JSON.stringify({
-                  subreddits: top3,
-                  written: top3.length,
-                }),
-              },
-            ],
-          };
-        },
-      );
-    },
-  );
+			// Top-3 convenience array (already sorted by fitScore desc by the MCP impl)
+			const topThree = candidates.slice(0, 3).map((c) => c.subreddit);
+			return {
+				subreddits: candidates,
+				topThree,
+			};
+		},
+	});
 }
 
-function errorResult(error: string) {
-  return {
-    content: [
-      {
-        type: "text" as const,
-        text: JSON.stringify({ subreddits: [], written: 0, error }),
-      },
-    ],
-  };
+function parseContext(s: string): {
+	productName?: string;
+	audience?: string;
+	productDescription?: string;
+} {
+	try {
+		const parsed = JSON.parse(s);
+		return typeof parsed === "object" && parsed !== null ? parsed : {};
+	} catch {
+		return {};
+	}
 }

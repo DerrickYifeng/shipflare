@@ -4,7 +4,6 @@ import type { CSSProperties } from "react";
 
 interface UserMessageProps {
   content: string;
-  createdAt: string;
 }
 
 const row: CSSProperties = {

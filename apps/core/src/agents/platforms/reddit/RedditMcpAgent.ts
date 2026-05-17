@@ -3,10 +3,15 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { McpProps } from "@shipflare/shared";
 import type { Env } from "../../../index";
 import { applyRedditSchema } from "./schema";
-import { registerRedditSearchTool } from "./tools/reddit-search";
+import { registerRedditSearchTool, redditSearchImpl, redditSearchArgsSchema } from "./tools/reddit-search";
 import { registerRedditPostTool } from "./tools/reddit-post";
-import { registerResearchSubredditsTool } from "./tools/research-subreddits";
+import {
+  registerResearchSubredditsTool,
+  researchSubredditsImpl,
+  researchSubredditsArgsSchema,
+} from "./tools/research-subreddits";
 import { registerRedditLocalMetricsTool, computeRedditLocalMetrics } from "./tools/reddit-local-metrics";
+import { handleInternalJson } from "../../../lib/internal-route";
 
 interface RedditState {
   lastWakeAt: number;
@@ -125,8 +130,27 @@ export class RedditMcpAgent extends McpAgent<
           "[RedditMcpAgent] /internal/reddit_local_metrics failed:",
           msg,
         );
-        return new Response(JSON.stringify({ error: msg }), { status: 500 });
+        return new Response(JSON.stringify({ error: msg }), {
+          status: 500,
+          headers: { "content-type": "application/json" },
+        });
       }
+    }
+    if (url.pathname === "/internal/reddit_search") {
+      return handleInternalJson(
+        request,
+        "RedditMcpAgent /internal/reddit_search",
+        redditSearchArgsSchema,
+        (body) => redditSearchImpl(body),
+      );
+    }
+    if (url.pathname === "/internal/research_subreddits") {
+      return handleInternalJson(
+        request,
+        "RedditMcpAgent /internal/research_subreddits",
+        researchSubredditsArgsSchema,
+        (body) => researchSubredditsImpl(body),
+      );
     }
     return super.fetch(request);
   }

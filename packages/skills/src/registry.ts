@@ -312,4 +312,36 @@ Output ONLY a JSON object inside a \`\`\`json code block:
 }
 \`\`\`
 `,
+
+  // Test fixtures — Phase 3 (CF-native chat migration). Not consumed by
+  // production code; referenced by packages/skills/test/runner.test.ts only.
+  "noop-test-skill": `---
+name: noop-test-skill
+description: No-op test fixture for unit tests.
+model: claude-sonnet-4-6
+context: inline
+maxTokens: 10
+---
+
+This is a no-op test fixture skill used by the runner test suite.
+It exercises the data-part emission and telemetry paths without
+making real network calls. The Anthropic client is always mocked
+when this skill runs in tests.
+`,
+
+  // Test fixtures — Phase 3 (CF-native chat migration). Not consumed by
+  // production code; referenced by packages/skills/test/runner.test.ts only.
+  "throwing-test-skill": `---
+name: throwing-test-skill
+description: Test fixture that causes the mocked Anthropic client to throw.
+model: claude-sonnet-4-6
+context: inline
+maxTokens: 10
+---
+
+This is a test fixture skill used by the runner test suite to exercise
+the error path in runSkill. The Anthropic client mock is configured to
+throw when this skill is invoked, verifying that data-skill-finish with
+status=error is emitted and the error is re-raised to the caller.
+`,
 };

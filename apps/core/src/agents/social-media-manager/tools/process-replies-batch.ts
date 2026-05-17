@@ -1,231 +1,200 @@
 import { z } from "zod";
+import { tool } from "ai";
 import { runSkill } from "@shipflare/skills";
-import { mcpServerName } from "@shipflare/shared";
 import { validateDraft } from "../lib/validators";
-import { extractText } from "../lib/mcp-result";
-import type { SocialMediaMgr } from "../SocialMediaMgr";
-import {
-  extractTrace,
-  withSubAgentToolTracing,
-} from "../../../lib/subagent-activity";
+import { mirrorDraft } from "../../../lib/mirror-draft";
+import type { SMM } from "../SocialMediaMgr";
+import type { Env } from "../../../index";
+
+interface DraftSummary {
+	draftId: string;
+	threadId: string;
+	status: "ready" | "failed";
+	validationErrors?: string[];
+}
 
 /**
- * process_replies_batch — draft replies for a batch of thread ids.
+ * process_replies_batch — draft replies for a batch of `threads_inbox` rows.
  *
- * Called by CMO via delegateToEmployee after find_threads_via_xai surfaces
- * candidates worth replying to.
+ * Per spec §2.1, per thread:
+ *   1. Read row from `threads_inbox`.
+ *   2. `runSkill('drafting-reply')` to draft a reply in the founder's voice.
+ *   3. `validateDraft(body, platform)` — platform-leak + length sanity.
+ *   4. INSERT into `drafts` (status='ready' if valid, 'failed' otherwise).
+ *   5. If ready: POST `/internal/mirror-draft` to CMO. On non-2xx, record
+ *      `drafts.mirror_error = httpStatus` and leave `status='ready'`. On
+ *      success, promote `status='mirrored'` (matches the schema CHECK
+ *      added in 5.1c.1).
+ *   6. UPDATE `threads_inbox.status='drafted'` regardless of validation —
+ *      the thread has been processed; the 'failed' draft row carries the
+ *      validation errors for retry / founder review.
  *
- * Per thread:
- *   1. Read from threads_inbox
- *   2. Pull founder_context (voice + product) from CMO RPC
- *   3. runSkill("drafting-reply") to draft a reply in the founder's voice
- *   4. Validate: platform-leak + length limits (S6 ports throttle too)
- *   5. Persist to drafts table (status='ready' if valid; 'failed' if not)
- *
- * S6.1: the drafting prompt has been lifted to packages/skills/drafting-reply
- * and is invoked via `runSkill`. The inline `draftReply` helper is gone.
- *
- * Returns: { itemsScanned, draftsCreated, draftsSkipped, notes: [...] }
+ * Dry-run seam: `_dryRunDrafts: [{ threadId, text }]` bypasses the
+ * `drafting-reply` skill call so unit tests don't need an Anthropic key
+ * (vi.mock doesn't propagate into the worker bundle — see find-threads-via-xai
+ * for the same pattern).
  */
-export function registerProcessRepliesBatchTool(agent: SocialMediaMgr): void {
-  agent.server.registerTool(
-    "process_replies_batch",
-    {
-      description:
-        "Draft replies for a batch of thread ids. Reads each thread, drafts " +
-        "via LLM in the founder's voice, validates platform-leak + length, " +
-        "persists to drafts table. Returns batch summary.",
-      inputSchema: {
-        conversationId: z.string().min(1),
-        threadIds: z.array(z.string().min(1)).min(1).max(50),
-        voiceOverride: z
-          .string()
-          .optional()
-          .describe(
-            "Override the founder_context.voice with a one-off instruction. " +
-              "Use sparingly; the default voice should win in production.",
-          ),
-        _trace: z.unknown().optional(),
-      },
-    },
-    async (args) => {
-      const trace = extractTrace(args);
-      const { conversationId, threadIds, voiceOverride } = args as {
-        conversationId: string;
-        threadIds: string[];
-        voiceOverride?: string;
-      };
-      return withSubAgentToolTracing(
-        agent.runtimeCtx,
-        agent.bindings,
-        trace,
-        "social-media-manager",
-        "process_replies_batch",
-        args,
-        async () => {
-          const userId = agent.props?.userId;
-          if (!userId)
-            throw new Error("SMM has no userId; cannot draft replies");
+export function makeProcessRepliesBatchTool(agent: SMM) {
+	return tool({
+		description:
+			"Draft replies for an array of thread ids from your threads_inbox. " +
+			"Each draft is validated then mirrored to CMO's approval queue.",
+		inputSchema: z.object({
+			threadIds: z.array(z.string().min(1)).min(1).max(10),
+			context: z.string().describe(
+				"Founder context JSON: { productName, voice, audience, productDescription }. " +
+					"Inlined by CMO via consult; peers do not call CMO upward.",
+			),
+			_dryRunDrafts: z
+				.array(z.object({ threadId: z.string(), text: z.string() }))
+				.optional(),
+		}),
+		execute: async (args) => {
+			const userId = agent.name;
+			const env = agent.bindings;
+			const sql = agent.sqlStorage;
+			const ctxParsed = parseContext(args.context);
 
-          // Step 1: pull founder_context via CMO RPC
-          const cmoServerName = mcpServerName("cmo", userId);
-          const cmo = agent.mcp
-            .listServers()
-            .find((s) => s.name === cmoServerName);
+			const drafts: DraftSummary[] = [];
+			let drafted = 0;
+			let failed = 0;
 
-          let founderContext: Record<string, string> = {};
-          if (cmo) {
-            try {
-              const result = await agent.mcp.callTool({
-                serverId: cmo.id,
-                name: "queryFounderContext",
-                arguments: {},
-              });
-              founderContext = JSON.parse(extractText(result)) as Record<
-                string,
-                string
-              >;
-            } catch (err) {
-              console.warn(`[SMM ${userId}] queryFounderContext failed:`, err);
-            }
-          }
+			for (const threadId of args.threadIds) {
+				const row = sql
+					.exec<{
+						external_id: string;
+						platform: string;
+						content: string;
+						[k: string]: SqlStorageValue;
+					}>(
+						"SELECT external_id, platform, content FROM threads_inbox WHERE id = ?",
+						threadId,
+					)
+					.toArray()[0];
+				if (!row) {
+					drafts.push({
+						draftId: "",
+						threadId,
+						status: "failed",
+						validationErrors: ["thread not found"],
+					});
+					failed++;
+					continue;
+				}
 
-          const product = founderContext.productName ?? "(product not set)";
-          const productDescription = founderContext.productDescription ?? "";
-          const voice =
-            voiceOverride ??
-            founderContext.voice ??
-            "casual, direct, no marketing fluff";
+				// Step 2: draft text (skill or dry-run).
+				let text: string;
+				const dry = args._dryRunDrafts?.find((d) => d.threadId === threadId);
+				if (dry) {
+					text = dry.text;
+				} else {
+					try {
+						const raw = await runSkill<unknown>({
+							name: "drafting-reply",
+							args: {
+								product: ctxParsed.productName ?? "(product not set)",
+								voice: ctxParsed.voice ?? "(no voice set)",
+								thread: row.content,
+								platform: row.platform,
+							},
+							env: env as Env & { ANTHROPIC_API_KEY: string },
+							userId,
+						});
+						text =
+							typeof raw === "string"
+								? raw
+								: (raw as { body?: string })?.body ?? "";
+					} catch (err) {
+						console.warn(
+							`[SMM ${userId}] drafting-reply skill failed for ${threadId}:`,
+							err,
+						);
+						text = "";
+					}
+				}
 
-          // Step 2: process each thread
-          let draftsCreated = 0;
-          let draftsSkipped = 0;
-          const notes: string[] = [];
+				// Step 3: validate. `validateDraft(body, platform)` returns
+				// `{ ok, reasons }` — platform-leak + length sanity.
+				const platform = row.platform === "reddit" ? "reddit" : "x";
+				const validation = validateDraft(text, platform);
 
-          for (const threadId of threadIds) {
-            const threadRow = agent.sqlStorage
-              .exec<{
-                platform: string;
-                external_id: string;
-                author: string | null;
-                content: string;
-              }>(
-                "SELECT platform, external_id, author, content FROM threads_inbox WHERE id = ?",
-                threadId,
-              )
-              .toArray()[0];
+				// Step 4: insert drafts row.
+				const draftId = crypto.randomUUID();
+				const now = Date.now();
+				sql.exec(
+					`INSERT INTO drafts
+						(id, kind, channel, thread_id, body, status, validation_errors, created_at, updated_at)
+					 VALUES (?, 'reply', ?, ?, ?, ?, ?, ?, ?)`,
+					draftId,
+					platform,
+					threadId,
+					text,
+					validation.ok ? "ready" : "failed",
+					validation.ok ? null : JSON.stringify(validation.reasons),
+					now,
+					now,
+				);
 
-            if (!threadRow) {
-              draftsSkipped++;
-              notes.push(`${threadId}: not in inbox`);
-              continue;
-            }
+				// Step 5: mirror to CMO if valid.
+				if (validation.ok) {
+					try {
+						await mirrorDraft(env.CMO, userId, {
+							draftId,
+							employee: "smm",
+							kind: "reply",
+							channel: platform,
+							preview: text.slice(0, 140),
+							createdAt: now,
+						});
+						sql.exec(
+							"UPDATE drafts SET mirrored_at = ?, status = 'mirrored', updated_at = ? WHERE id = ?",
+							now,
+							now,
+							draftId,
+						);
+					} catch (err) {
+						const status = (err as { status?: number }).status ?? 500;
+						sql.exec(
+							"UPDATE drafts SET mirror_error = ?, updated_at = ? WHERE id = ?",
+							status,
+							Date.now(),
+							draftId,
+						);
+					}
+					drafted++;
+					drafts.push({ draftId, threadId, status: "ready" });
+				} else {
+					failed++;
+					drafts.push({
+						draftId,
+						threadId,
+						status: "failed",
+						validationErrors: validation.reasons,
+					});
+				}
 
-            const platform = threadRow.platform as "x" | "reddit";
-            const lengthHint =
-              platform === "x" ? "≤ 280 chars" : "≤ 1000 chars";
+				// Step 6: mark thread processed regardless of validation outcome.
+				sql.exec(
+					"UPDATE threads_inbox SET status = 'drafted' WHERE id = ?",
+					threadId,
+				);
+			}
 
-            // Step 3: draft the reply via the `drafting-reply` skill
-            let draftBody = "";
-            let whyItWorks = "";
-            let confidence = 0;
-            try {
-              const raw = await runSkill<unknown>(
-                "drafting-reply",
-                {
-                  product,
-                  productDescription: productDescription || "no description",
-                  voice,
-                  platform,
-                  lengthHint,
-                  threadAuthor: threadRow.author ?? "someone",
-                  threadContent: threadRow.content,
-                },
-                {
-                  env: { ANTHROPIC_API_KEY: agent.bindings.ANTHROPIC_API_KEY },
-                },
-              );
-              if (raw && typeof raw === "object") {
-                const parsed = raw as {
-                  body?: unknown;
-                  whyItWorks?: unknown;
-                  confidence?: unknown;
-                };
-                draftBody = typeof parsed.body === "string" ? parsed.body : "";
-                whyItWorks =
-                  typeof parsed.whyItWorks === "string"
-                    ? parsed.whyItWorks
-                    : "";
-                confidence =
-                  typeof parsed.confidence === "number" ? parsed.confidence : 0;
-              } else if (typeof raw === "string") {
-                // Fallback: runner couldn't parse JSON, returned raw text.
-                draftBody = raw.slice(0, 280);
-                whyItWorks = "fallback parse";
-                confidence = 0;
-              }
-            } catch (err) {
-              draftsSkipped++;
-              notes.push(`${threadId}: LLM failed: ${String(err)}`);
-              continue;
-            }
+			return { drafted, failed, drafts };
+		},
+	});
+}
 
-            // Step 4: validate
-            const validation = validateDraft(draftBody, platform);
-            const draftId = crypto.randomUUID();
-            const now = Date.now();
-            const status = validation.ok ? "ready" : "failed";
-
-            agent.sqlStorage.exec(
-              `INSERT INTO drafts
-             (conversation_id, id, kind, plan_item_id, platform, thread_id, body,
-              why_it_works, confidence, status, audit_notes_json, created_at, updated_at)
-           VALUES (?, ?, 'reply', NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-              conversationId,
-              draftId,
-              platform,
-              threadId,
-              draftBody,
-              whyItWorks || null,
-              confidence,
-              status,
-              JSON.stringify({ validation }),
-              now,
-              now,
-            );
-
-            if (validation.ok) {
-              draftsCreated++;
-              // TODO(P2-F.2): notify founder via web push when a reply draft hits
-              // 'ready' status. Wire this through the CMO DO's sendPushToFounder()
-              // helper — needs a peer RPC channel from SMM → CMO (the
-              // peer-dm-shadow + employee_log path is the natural seam; a tiny
-              // "draft_ready" message type on /internal/peer-dm-shadow can carry
-              // the platform + threadId + draftId so the CMO can fire the push +
-              // record it in employee_log atomically).
-            } else {
-              draftsSkipped++;
-              notes.push(
-                `${threadId}: validation failed: ${validation.reasons.join("; ")}`,
-              );
-            }
-          }
-
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: JSON.stringify({
-                  itemsScanned: threadIds.length,
-                  draftsCreated,
-                  draftsSkipped,
-                  notes,
-                }),
-              },
-            ],
-          };
-        },
-      );
-    },
-  );
+function parseContext(s: string): {
+	productName?: string;
+	voice?: string;
+	audience?: string;
+	productDescription?: string;
+} {
+	try {
+		const parsed = JSON.parse(s);
+		return typeof parsed === "object" && parsed !== null ? parsed : {};
+	} catch {
+		return {};
+	}
 }

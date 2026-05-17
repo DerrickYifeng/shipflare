@@ -9,10 +9,8 @@ import type { CMO } from "../src/agents/cmo/CMO";
  * Endpoints:
  *  - POST /internal/init             — idempotent default-roster seed
  *  - POST /internal/peer-dm-shadow   — quiet employee_log append (no LLM)
- *  - POST /internal/cron-tick        — per-hour SMM fan-out (no-op if SMM
- *                                       not connected)
  *
- * All three are gated on `x-shipflare-internal: 1` — the Worker entry
+ * Both are gated on `x-shipflare-internal: 1` — the Worker entry
  * sets this for Service-Binding-initiated traffic (S2.6). The 403 path
  * is exercised below.
  *
@@ -40,7 +38,7 @@ async function bootstrap(stub: DurableObjectStub<CMO>): Promise<void> {
 }
 
 describe("CMO /internal/init", () => {
-  it("first call seeds founder_context + default roster", async () => {
+  it("first call seeds founder_context (roster retired in Task 5.1b)", async () => {
     const stub = env.CMO.getByName("init-test-user-1");
     await bootstrap(stub);
 
@@ -66,14 +64,6 @@ describe("CMO /internal/init", () => {
         .toArray();
       expect(ctx).toContainEqual({ key: "email", value: "founder@example.com" });
       expect(ctx).toContainEqual({ key: "githubLogin", value: "founder42" });
-
-      // ROLE_REGISTRY.defaultActive=true excluding 'cmo':
-      //   head-of-growth, social-media-manager.
-      const roles = sql
-        .exec<{ role: string }>("SELECT role FROM roster ORDER BY role")
-        .toArray()
-        .map((r) => r.role);
-      expect(roles).toEqual(["head-of-growth", "social-media-manager"]);
     });
   });
 
@@ -205,34 +195,3 @@ describe("CMO /internal/peer-dm-shadow", () => {
   });
 });
 
-describe("CMO /internal/cron-tick", () => {
-  it("returns noop:smm_not_connected (or no-userId) when SMM not hired", async () => {
-    const stub = env.CMO.getByName("cron-test-1");
-    // No bootstrap needed — cron-tick reads from mcp.listServers() / props,
-    // not from SQL.
-    const res = await stub.fetch(
-      new Request("https://x/internal/cron-tick", {
-        method: "POST",
-        headers: INTERNAL_HEADERS,
-      }),
-    );
-    expect(res.status).toBe(200);
-    const text = await res.text();
-    // In test context the DO's props aren't populated (non-transport name
-    // skips parent McpAgent transport init), so userId is undefined and
-    // we get "no userId in props". In production, an init'd CMO has
-    // userId set but no SMM connected yet (S4 hasn't landed), so we'd
-    // get "noop:smm_not_connected". Both are acceptable for this stub.
-    expect(["noop:smm_not_connected", "no userId in props"]).toContain(text);
-  });
-
-  it("rejects without internal header (403)", async () => {
-    const stub = env.CMO.getByName("cron-test-2");
-    const res = await stub.fetch(
-      new Request("https://x/internal/cron-tick", {
-        method: "POST",
-      }),
-    );
-    expect(res.status).toBe(403);
-  });
-});

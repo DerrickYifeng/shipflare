@@ -45,15 +45,15 @@
 				"name": "CMO",
 				"class_name": "CMO"
 			},
-			// S3 — Head of Growth
+			// S3 — Head of Growth (renamed v11 from HeadOfGrowth → HoG)
 			{
-				"name": "HEAD_OF_GROWTH",
-				"class_name": "HeadOfGrowth"
+				"name": "HOG",
+				"class_name": "HoG"
 			},
-			// S4 — Social Media Manager
+			// S4 — Social Media Manager (renamed v10 from SocialMediaMgr → SMM)
 			{
-				"name": "SOCIAL_MEDIA_MGR",
-				"class_name": "SocialMediaMgr"
+				"name": "SMM",
+				"class_name": "SMM"
 			},
 			// S5 — Platform tool MCPs (landed S5.3 under migration tag v4)
 			{
@@ -143,8 +143,66 @@
 				"HackerNewsMcpAgent",
 				"DiscordMcpAgent"
 			]
+		},
+		// v10 — CF-native chat migration Task 4.4c. The SMM class was rewritten
+		// from McpAgent to AIChatAgent in the same file; the class export name
+		// changed from `SocialMediaMgr` to `SMM`. We are still in dev stage,
+		// so the old per-DO SQLite (threads_inbox / drafts / voice_audit) is
+		// not worth preserving — delete the old class namespace cleanly and
+		// stand up `SMM` as a fresh SQLite-backed DO. AIChatAgent bootstraps
+		// its own chat-history schema on first message.
+		{
+			"tag": "v10",
+			"deleted_classes": ["SocialMediaMgr"],
+			"new_sqlite_classes": ["SMM"]
+		},
+		// v11 — CF-native chat migration Task 4.5b. Same shape as v10 for HoG:
+		// HeadOfGrowth → HoG with a clean DO namespace (planning_chat /
+		// proposal_drafts / audit_findings dropped — dev-stage, not worth
+		// preserving). AIChatAgent bootstraps chat-history tables on first
+		// message.
+		{
+			"tag": "v11",
+			"deleted_classes": ["HeadOfGrowth"],
+			"new_sqlite_classes": ["HoG"]
+		},
+		// v12 — CF-native chat migration Task 5.1b. The CMO class was
+		// rewritten from McpAgent to AIChatAgent in the same file; the
+		// class export name stays `CMO` (so the binding name doesn't
+		// move). Dev-stage decision (matches v10/v11): drop the old
+		// per-DO SQLite namespace cleanly rather than migrate the
+		// retired tables (conversations / founder_messages / roster /
+		// activity_events). AIChatAgent bootstraps its own chat-history
+		// schema; applyCmoSchema reconstructs the retained per-team
+		// tables (founder_context / plan_items / drafts / memory /
+		// employee_log / strategic_path / push_subscriptions) on first
+		// chat or first /internal/* hit.
+		{
+			"tag": "v12",
+			"deleted_classes": ["CMO"],
+			"new_sqlite_classes": ["CMO"]
 		}
 	],
+	// Ops telemetry — single Analytics Engine dataset for agent / skill /
+	// tool events. Replaces the bespoke `activity_events` D1 table written
+	// from `apps/core/src/lib/activity.ts`. Phase 5 of the CF-native chat
+	// migration plan deletes the legacy writer once consumers read this
+	// dataset via the Cloudflare SQL API.
+	"analytics_engine_datasets": [
+		{
+			"binding": "TELEMETRY",
+			"dataset": "shipflare_agent_events"
+		}
+	],
+	// Plain (non-secret) vars. Per-request: every employee gets these
+	// as `env.MCP_OAUTH_AUDIENCE` etc. Secrets live in `wrangler secret
+	// put` (see scripts/cf-deploy-checklist.md). Phase 7 of the CF-native
+	// migration wires `withOAuthProvider` onto the external MCP route
+	// for CMO at mcp.shipflare.com/cmo — the env is scaffolded here so
+	// the `Env` type stays valid while the Phase 7 wiring is staged.
+	"vars": {
+		"MCP_OAUTH_AUDIENCE": "mcp.shipflare.com"
+	},
 	// Dynamic Workflow binding — class lands in a later task. AgentPlanWorkflow
 	// drives long-running multi-step orchestration spawned by CMO when plans
 	// exceed a single MCP call's lifetime (e.g. multi-platform inbound sweep).
@@ -201,13 +259,19 @@
 			"durable_objects": {
 				"bindings": [
 					{ "name": "CMO", "class_name": "CMO" },
-					{ "name": "HEAD_OF_GROWTH", "class_name": "HeadOfGrowth" },
-					{ "name": "SOCIAL_MEDIA_MGR", "class_name": "SocialMediaMgr" },
+					{ "name": "HOG", "class_name": "HoG" },
+					{ "name": "SMM", "class_name": "SMM" },
 					{ "name": "X_MCP", "class_name": "XMcpAgent" },
 					{ "name": "REDDIT_MCP", "class_name": "RedditMcpAgent" }
 				]
 			},
-			"workflows": []
+			"workflows": [],
+			"analytics_engine_datasets": [
+				{
+					"binding": "TELEMETRY",
+					"dataset": "shipflare_agent_events_staging"
+				}
+			]
 		}
 	}
 }

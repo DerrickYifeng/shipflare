@@ -12,8 +12,8 @@ export interface RoleEntry {
   /** Wrangler binding name; MUST match the wrangler.jsonc durable_objects.bindings[].name */
   binding:
     | "CMO"
-    | "HEAD_OF_GROWTH"
-    | "SOCIAL_MEDIA_MGR"
+    | "HOG"
+    | "SMM"
     | "COPYWRITER"
     | "BRAND_ANALYST"
     | "COMMUNITY_MGR";
@@ -33,13 +33,13 @@ export const ROLE_REGISTRY = {
     defaultActive: true,
   },
   "head-of-growth": {
-    binding: "HEAD_OF_GROWTH",
+    binding: "HOG",
     displayName: "Head of Growth",
     tier: "core",
     defaultActive: true,
   },
   "social-media-manager": {
-    binding: "SOCIAL_MEDIA_MGR",
+    binding: "SMM",
     displayName: "Social Media Manager",
     tier: "core",
     defaultActive: true,

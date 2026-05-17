@@ -43,11 +43,10 @@ interface CallToolResultLike {
 /**
  * Reply envelope returned by {@link CmoClient.chat}. Carries the full
  * assistant text plus the synthetic `parentTurnId` minted by the CMO chat
- * tool (`_meta.parentTurnId`) so the team-desk UI can scope its
- * `useCmoActivity` feed to events emitted under this turn.
+ * tool (`_meta.parentTurnId`).
  *
  * `parentTurnId` is `null` only when the server omitted `_meta` (older
- * CMO builds, or future tool variants that don't emit activity).
+ * CMO builds).
  */
 export interface CmoChatReply {
   text: string;
@@ -83,9 +82,7 @@ export class CmoClient {
 
   /**
    * Send a founder message to the CMO. Returns the full assistant reply
-   * along with the `parentTurnId` minted by the CMO chat tool — callers
-   * use that id to scope an activity feed (see `useCmoActivity`) to the
-   * events emitted under this single turn.
+   * along with the `parentTurnId` minted by the CMO chat tool.
    *
    * When `onChunk` is provided, the client passes a `progressToken` so the
    * server will emit `notifications/progress` notifications for each text
@@ -96,8 +93,7 @@ export class CmoClient {
    * Callers without `onChunk` receive the full reply in one shot.
    *
    * `parentTurnId` is `null` only when the server omitted `_meta` (older
-   * CMO builds). New code should treat that as "activity feed disabled
-   * for this turn".
+   * CMO builds).
    */
   async chat(
     conversationId: string,
@@ -367,16 +363,12 @@ export class CmoClient {
   /**
    * Read the tail of CMO's per-team `activity_events` table for a
    * single conversation or run. Wraps the `getRecentActivity` MCP tool
-   * (apps/core/src/agents/cmo/tools/get-recent-activity.ts) so the web
-   * API proxy at `/api/cmo-activity` can seed the activity feed on
-   * mount + after WS reconnect.
+   * (apps/core/src/agents/cmo/tools/get-recent-activity.ts).
    *
-   * One of `conversationId` / `runId` is required server-side; the
-   * client doesn't enforce it because the proxy route validates first.
+   * One of `conversationId` / `runId` is required server-side.
    *
-   * Returns the rows untyped (`unknown[]`) and leaves Zod validation to
-   * the caller -- the hook already runs `ActivityEventSchema.safeParse`
-   * per row, so re-parsing here would just duplicate work.
+   * Returns the rows untyped (`unknown[]`); callers are responsible for
+   * parsing/validating the shape.
    */
   async getRecentActivity(args: {
     conversationId?: string;

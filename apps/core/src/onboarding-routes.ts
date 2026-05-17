@@ -10,39 +10,33 @@
 // using userId so the token never crosses the service binding.
 
 import { z } from "zod";
-import {
-  strategicPathSchema,
-  type StrategicPath,
-  type ActivityEventInput,
-} from "@shipflare/shared";
+import { strategicPathSchema, type StrategicPath } from "@shipflare/shared";
 import { createDb, user as userTable, eq } from "@shipflare/db";
 import { scrapeWebsite, analyzeWebsite } from "./lib/onboarding/scraper";
 import { auditSeo } from "./lib/onboarding/seo-audit";
 import { getAnthropic } from "./lib/onboarding/anthropic";
 import { getGitHubToken, listUserRepos } from "./lib/onboarding/github";
 import { scanRepo } from "./lib/onboarding/code-scanner";
-import { forwardActivityToCmo } from "./lib/forward-activity";
-import type { Env } from "./index";
 
 // ─── Env type (only what this file needs) ──────────────────────────────────
 
-// Subset of the full Worker `Env` consumed by this file. We include the
-// CMO binding because Task 9 forwards activity events from the
-// strategic-path SSE handler to the user's CMO DO via the shared
-// `forwardActivityToCmo` helper (spec 2026-05-15-agent-activity-feed §Task 9).
+// Subset of the full Worker `Env` consumed by this file. The
+// `forwardActivityToCmo` helper that previously wired strategic-path
+// events into the CMO DO was retired in Task 5.1b (CF-native chat
+// migration) alongside the rest of the activity_events infrastructure.
+// The handler still accepts `runId` in the request body for back-compat
+// but does not forward anything anywhere — telemetry is now routed
+// through Analytics Engine via `writeAgentEvent` further down the stack.
 //
 // `STRATEGIC_PATH_FIXTURE` is the trust-boundary-safe replacement for the
 // previous body-flag (`_test_fixture`). When `"1"`, the strategic-path
 // handler short-circuits Anthropic and emits a deterministic 3-chunk
-// schema-valid path so `strategic-path-activity.test.ts` can exercise the
-// emit path without a real API key. Only test config sets this binding;
-// production never does, so an authenticated browser can no longer force
-// fixture mode by spreading `_test_fixture: true` through the web proxy.
+// schema-valid path so tests can exercise the emit path without a real
+// API key. Only test config sets this binding; production never does.
 interface OnboardingEnv {
   ANTHROPIC_API_KEY?: string;
   STRATEGIC_PATH_FIXTURE?: string;
   DB: D1Database;
-  CMO: Env["CMO"];
 }
 
 // ─── Input schemas ──────────────────────────────────────────────────────────
@@ -331,7 +325,7 @@ export async function handleOnboardingInternal(
   request: Request,
   env: OnboardingEnv,
   url: URL,
-  ctx: ExecutionContext,
+  _ctx: ExecutionContext,
 ): Promise<Response> {
   if (request.headers.get("x-shipflare-internal") !== "1") {
     return new Response("forbidden", { status: 403 });
@@ -508,52 +502,24 @@ export async function handleOnboardingInternal(
         PLAN_TIMEOUT_MS,
       );
 
-      // Activity-forwarding helper. No-op when `runId` is missing
-      // (back-compat with old web builds that don't pass one). `userId`
-      // is required by the input schema so we don't need a separate
-      // guard for it. The full `Env` shape isn't visible from this
-      // file's `OnboardingEnv` (it only declares what onboarding needs),
-      // so we cast at the binding boundary — `forwardActivityToCmo`
-      // only touches `env.CMO` which is part of `OnboardingEnv`.
-      const runId = body.runId ?? null;
-      // Awaitable forward for lifecycle events (dispatch, finish).
-      // Text deltas use ctx.waitUntil (fire-and-forget is acceptable there).
-      const forwardAwait = runId
-        ? (evt: ActivityEventInput): Promise<void> =>
-            forwardActivityToCmo(env as unknown as Env, body.userId, evt)
-        : (): Promise<void> => Promise.resolve();
-      // Legacy fire-and-forget wrapper for text deltas.
-      const forwardBg = runId
-        ? (evt: ActivityEventInput): void => {
-            ctx.waitUntil(
-              forwardActivityToCmo(env as unknown as Env, body.userId, evt),
-            );
-          }
-        : (): void => undefined;
-
-      const dispatchStart = Date.now();
-      await forwardAwait({
-        conversationId: null,
-        parentTurnId: null,
-        runId,
-        parentEventId: null,
-        sourceAgent: "strategic-planner",
-        kind: "subagent_dispatch",
-        payload: {
-          kind: "subagent_dispatch",
-          subAgent: "strategic-planner",
-          promptPreview: `Plan for ${body.product?.name ?? "product"}`,
-        },
-      });
+      // Task 5.1b: the legacy activity-forwarding helpers
+      // (`forwardActivityToCmo` / `subagent_dispatch` / `subagent_finish`)
+      // were retired alongside the CMO McpAgent rewrite. The handler
+      // still accepts `runId` for back-compat, but no events are
+      // forwarded anywhere — Phase 8 will reintroduce
+      // strategic-path-progress signalling via the AIChatAgent stream
+      // protocol (or via Analytics Engine) when the web client moves
+      // to `useAgentChat`.
 
       try {
         let text = "";
         if (fixtureMode) {
           // Fixture path — emit a deterministic 3-chunk sequence so tests
-          // can assert ordering without burning Anthropic budget. The
-          // concatenated output is the schema-valid FIXTURE_STRATEGIC_PATH_JSON
-          // so `strategicPathSchema.parse()` below still runs and the
-          // downstream `/api/onboarding/commit` invariant is preserved.
+          // can exercise the SSE-stream shape without burning Anthropic
+          // budget. The concatenated output is the schema-valid
+          // FIXTURE_STRATEGIC_PATH_JSON so `strategicPathSchema.parse()`
+          // below still runs and the downstream `/api/onboarding/commit`
+          // invariant is preserved.
           const total = FIXTURE_STRATEGIC_PATH_JSON;
           const third = Math.floor(total.length / 3);
           const chunks = [
@@ -563,19 +529,6 @@ export async function handleOnboardingInternal(
           ];
           for (const chunk of chunks) {
             text += chunk;
-            forwardBg({
-              conversationId: null,
-              parentTurnId: null,
-              runId,
-              parentEventId: null,
-              sourceAgent: "strategic-planner",
-              kind: "subagent_text_delta",
-              payload: {
-                kind: "subagent_text_delta",
-                subAgent: "strategic-planner",
-                text: chunk,
-              },
-            });
           }
         } else {
           const client = getAnthropic(env.ANTHROPIC_API_KEY!);
@@ -589,61 +542,14 @@ export async function handleOnboardingInternal(
             { signal: abortController.signal },
           );
 
-          // Batched text-delta forwarding — flush on the next delta
-          // after the buffer hits 256 chars OR 200 ms have elapsed since
-          // the last flush. There is no setInterval watchdog: late
-          // deltas trigger the time-based path naturally, and the final
-          // `flush()` after `stream.finalMessage()` drains any tail
-          // smaller than 256 chars. Keeps the activity feed snappy
-          // without spraying a forward per token.
-          let buf = "";
-          let lastFlush = Date.now();
-          const flush = (): void => {
-            if (!buf) return;
-            forwardBg({
-              conversationId: null,
-              parentTurnId: null,
-              runId,
-              parentEventId: null,
-              sourceAgent: "strategic-planner",
-              kind: "subagent_text_delta",
-              payload: {
-                kind: "subagent_text_delta",
-                subAgent: "strategic-planner",
-                text: buf,
-              },
-            });
-            buf = "";
-            lastFlush = Date.now();
-          };
           stream.on("text", (delta: string) => {
             text += delta;
-            buf += delta;
-            if (buf.length >= 256 || Date.now() - lastFlush >= 200) {
-              flush();
-            }
           });
           await stream.finalMessage();
-          flush();
         }
 
         const m = text.match(/\{[\s\S]*\}/);
         if (!m) {
-          await forwardAwait({
-            conversationId: null,
-            parentTurnId: null,
-            runId,
-            parentEventId: null,
-            sourceAgent: "strategic-planner",
-            kind: "subagent_finish",
-            payload: {
-              kind: "subagent_finish",
-              subAgent: "strategic-planner",
-              status: "error",
-              durationMs: Date.now() - dispatchStart,
-              summary: "no_json_in_response",
-            },
-          });
           send({ type: "error", error: "no_json_in_response" });
           return;
         }
@@ -655,41 +561,8 @@ export async function handleOnboardingInternal(
         // `/api/onboarding/commit` — the trust-boundary fix from the
         // Task 9 code review.
         const strategicPath: StrategicPath = strategicPathSchema.parse(raw);
-        await forwardAwait({
-          conversationId: null,
-          parentTurnId: null,
-          runId,
-          parentEventId: null,
-          sourceAgent: "strategic-planner",
-          kind: "subagent_finish",
-          payload: {
-            kind: "subagent_finish",
-            subAgent: "strategic-planner",
-            status: "ok",
-            durationMs: Date.now() - dispatchStart,
-            summary: fixtureMode ? "plan ready (fixture)" : "plan ready",
-          },
-        });
         send({ type: "strategic_done", path: strategicPath });
       } catch (err) {
-        await forwardAwait({
-          conversationId: null,
-          parentTurnId: null,
-          runId,
-          parentEventId: null,
-          sourceAgent: "strategic-planner",
-          kind: "subagent_finish",
-          payload: {
-            kind: "subagent_finish",
-            subAgent: "strategic-planner",
-            status: "error",
-            durationMs: Date.now() - dispatchStart,
-            summary:
-              err instanceof Error
-                ? err.message.slice(0, 200)
-                : String(err).slice(0, 200),
-          },
-        });
         if (abortController.signal.aborted) {
           send({ type: "error", error: "planner_timeout" });
           return;
