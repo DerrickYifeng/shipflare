@@ -11,29 +11,37 @@
 **Phase 0 — Foundation: COMPLETE** (Tasks 0.1, 0.2, 0.3, 0.4)
 **Phase 1 — Telemetry layer: COMPLETE** (Task 1.1)
 **Phase 2 — Agent depth & cycle safety: COMPLETE** (Task 2.1)
+**Phase 3 — Skill primitive emits data parts: COMPLETE** (Task 3.1a / 3.1b / 3.1c / 3.2)
 
 ```
-115fcd8 chore: install @cloudflare/ai-chat for Phase 0 of CF-native migration
-c74b371 docs: Phase 0 SDK verifications for CF-native migration
-806a528 chore: add Analytics Engine binding for ops telemetry
-873e067 chore: scaffold OAuth env for external MCP (Phase 7 wiring)
-4494d8f docs(plan): mark Phase 0 tasks complete (0.1-0.4)
+115fcd8 chore: install @cloudflare/ai-chat
+c74b371 docs: Phase 0 SDK verifications
+806a528 chore: add Analytics Engine binding
+873e067 chore: scaffold OAuth env for external MCP
+4494d8f docs(plan): mark Phase 0 complete
 6bf9749 feat(telemetry): writeAgentEvent → Analytics Engine
-f9d9200 docs(plan): mark Task 1.1 (writeAgentEvent) complete
-df5cb6e chore(review): Phase-0 follow-ups — TODO for Phase-7 signing key
+f9d9200 docs(plan): mark Task 1.1
+df5cb6e chore(review): Phase-0 follow-ups
 8610ca8 feat(lib): safeAgentChain with depth+cycle errors
-5344f74 refactor(lib): clarify safeAgentChain — export ChainContext, fix test name
+5344f74 refactor(lib): clarify safeAgentChain
+d998631 docs(plan): mark Task 2.1
+1ba66d7 docs(plan): split Task 3.1 → 3.1a/b/c after pre-flight gap audit
+605b844 refactor(telemetry): move to packages/shared for cross-package use
+18f7f77 refactor(skills): migrate runSkill to options-bag signature
+5f7cbea refactor(skills): drop SkillContext deprecated shim
+2794bc3 feat(skills): emit data-skill-start/finish parts + telemetry
+723f873 refactor(skills): extract emitFinish + parseResponseText helpers
+dd5bf4e feat(skills): thread env+userId into SMM runSkill calls for telemetry
 ```
 
 ## Start here next session
 
-**Task 3.1: Add writer + telemetry to `runSkill`** (plan line 509).
+**Task 4.1: Peer input/output schemas** (plan line 793).
 
-First integration task — modifies the existing `runSkill` to emit
-`data-skill-start` / `data-skill-finish` parts and call
-`writeAgentEvent(env, …)` with `kind: 'skill_invocation'`.
+First task of Phase 4 — Agent orchestration (Layer 2). Build registry,
+consult tool, and rewrite employees bottom-up: SMM → HoG.
 
-Plan steps + code blocks: see plan §Task 3.1.
+Phase 4 is the biggest phase — 8 tasks. Plan §line 787 onwards.
 
 ## Execution mode
 

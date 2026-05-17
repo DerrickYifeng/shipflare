@@ -539,7 +539,7 @@ call instead of `executeSkill(meta, opts.args)`.
 - Modify: `packages/skills/src/runner.ts`
 - Test: `packages/skills/test/runner.test.ts` (extend)
 
-- [ ] **Step 1: Read current `runSkill` signature**
+- [x] **Step 1: Read current `runSkill` signature**
 
 ```bash
 sed -n '1,80p' packages/skills/src/runner.ts
@@ -547,7 +547,7 @@ sed -n '1,80p' packages/skills/src/runner.ts
 
 Note the current export. The plan augments the signature with optional `writer` + `parentRunId` + `userId` parameters and an env hook. **Do not change existing call-site behavior** — those parameters are optional.
 
-- [ ] **Step 2: Write the failing test (extend existing file)**
+- [x] **Step 2: Write the failing test (extend existing file)**
 
 ```typescript
 // packages/skills/test/runner.test.ts — append
@@ -626,13 +626,13 @@ Also add two fixture skills if not present:
 
 (If fixtures need bundled implementations, add `_bundled/noop-test-skill.ts` per existing convention.)
 
-- [ ] **Step 3: Run, expect FAIL**
+- [x] **Step 3: Run, expect FAIL**
 
 ```bash
 pnpm --filter @shipflare/skills vitest run test/runner.test.ts -t "data parts"
 ```
 
-- [ ] **Step 4: Modify `runSkill`**
+- [x] **Step 4: Modify `runSkill`**
 
 In `packages/skills/src/runner.ts`, augment the function signature and body:
 
@@ -704,21 +704,21 @@ export async function runSkill(opts: RunSkillOptions): Promise<unknown> {
 
 If `packages/skills` doesn't have a direct import path to `apps/core/src/lib/telemetry.ts`, move `telemetry.ts` to `packages/shared/src/telemetry.ts` instead. **Make this decision now**; if moving, update Task 1.1 paths.
 
-- [ ] **Step 5: Run, expect PASS**
+- [x] **Step 5: Run, expect PASS**
 
 ```bash
 pnpm --filter @shipflare/skills vitest run test/runner.test.ts
 ```
 Expected: all tests pass (including pre-existing ones).
 
-- [ ] **Step 6: Verify build**
+- [x] **Step 6: Verify build**
 
 ```bash
 pnpm -r exec tsc --noEmit
 ```
 Expected: 0 errors. Existing call sites (3 known: `apps/core/src/agents/social-media-manager/tools/{find-threads-via-xai,process-replies-batch,process-posts-batch}.ts`) still compile because all new params are optional.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add packages/skills/src/runner.ts packages/skills/test/runner.test.ts packages/skills/skills/noop-test-skill packages/skills/skills/throwing-test-skill
@@ -736,13 +736,13 @@ git commit -m "feat(skills): emit data-skill-start/finish parts + telemetry"
 
 For each file:
 
-- [ ] **Step 1: Locate the `runSkill({ ... })` call**
+- [x] **Step 1: Locate the `runSkill({ ... })` call**
 
 ```bash
 grep -n "runSkill" apps/core/src/agents/social-media-manager/tools/find-threads-via-xai.ts
 ```
 
-- [ ] **Step 2: Add writer + userId + env from tool ctx**
+- [x] **Step 2: Add writer + userId + env from tool ctx**
 
 In each tool's `execute`, change:
 
@@ -762,20 +762,20 @@ const result = await runSkill({
 
 (`experimental_context` is the AI SDK v5 tool ctx; Phase 0 verified its shape.)
 
-- [ ] **Step 3: Verify build**
+- [x] **Step 3: Verify build**
 
 ```bash
 pnpm -r exec tsc --noEmit
 ```
 
-- [ ] **Step 4: Run all unit tests**
+- [x] **Step 4: Run all unit tests**
 
 ```bash
 pnpm -r exec vitest run
 ```
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/core/src/agents/social-media-manager/tools/
