@@ -1,3 +1,7 @@
+// Maximum number of agents in a single dispatch chain, INCLUDING the target.
+// A chain already containing 3 entries is at capacity — dispatching a 4th
+// throws AgentDepthExceededError. Read as "at most 3 agents wide", not
+// "3 hops past the caller".
 export const MAX_AGENT_DEPTH = 3;
 
 export class AgentDepthExceededError extends Error {
@@ -14,7 +18,7 @@ export class AgentCycleError extends Error {
 	}
 }
 
-interface ChainContext { props: { __agentChain?: string[] } & Record<string, unknown> }
+export interface ChainContext { props: { __agentChain?: string[] } & Record<string, unknown> }
 
 export const safeAgentChain = {
 	check(ctx: ChainContext, targetClassName: string): void {

@@ -20,7 +20,7 @@ describe('safeAgentChain', () => {
     expect(() => safeAgentChain.check(ctx, 'CMO')).toThrow(AgentCycleError);
   });
 
-  it('does not mutate input chain (returns a new array)', () => {
+  it('does not mutate the source chain array (writes a new array to ctx.props)', () => {
     const original = ['CMO'];
     const ctx: any = { props: { __agentChain: original } };
     safeAgentChain.check(ctx, 'HoG');
