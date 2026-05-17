@@ -82,6 +82,23 @@ When adding a new channel (e.g., LinkedIn):
 - [ ] NO changes needed to: skill-runner, swarm, query-loop, schemas, core agent .md files,
       `full-scan.ts`, `discovery.ts`, `posting.ts`, or `/api/automation/run`
 
+### New Employee Checklist
+
+When adding a new agent (e.g., Head of Design = HoD):
+
+- [ ] Create `apps/core/src/agents/head-of-design/HeadOfDesign.ts` extending `AIChatAgent`
+- [ ] Create `apps/core/src/agents/head-of-design/SYSTEM.md` (role brain only)
+- [ ] Add ONE entry to `EMPLOYEE_REGISTRY` in `apps/core/src/agents/registry.ts`
+- [ ] Add the matching `EMPLOYEE_META` entry in `apps/core/src/agents/lib/system-prompt.ts` (circular-dep workaround; sync required)
+- [ ] Add wrangler DO binding: `{ "name": "HOD", "class_name": "HoD" }`
+- [ ] Append migration tag: `{ "tag": "vN", "new_sqlite_classes": ["HoD"] }`
+- [ ] Add `HOD: DurableObjectNamespace<HoD>` to `Env` type in `apps/core/src/index.ts`
+- [ ] Mirror in `apps/web/src/lib/employee-registry-client.ts` (displayName + description)
+- [ ] Add to the allowed-agents set in `apps/web/app/api/agent-token/route.ts`
+- [ ] Add test file under `apps/core/test/agents/hod.test.ts` (mirror SMM/HoG smoke pattern)
+- [ ] NO changes to: existing agent files, frontend renderer, consult tool, telemetry, system-prompt loader logic, hooks, JWT route allowlist (other than the one addition above).
+- [ ] If you forget the wrangler binding, compile fails with: `Property 'HOD' is missing in type 'Env'`.
+
 ### Author-Level Reply Throttle
 
 ShipFlare does not draft a second reply to the same external author
