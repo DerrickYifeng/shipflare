@@ -13,6 +13,7 @@ import { z } from "zod";
 import { runSkill } from "@shipflare/skills";
 import { makeConsultTool } from "../lib/consult-tool";
 import { loadSystemPrompt } from "../lib/system-prompt";
+import { applySmmSchema } from "./schema";
 import type { Env } from "../../index";
 
 export interface SMMState {
@@ -33,7 +34,16 @@ export interface SMMState {
 export class SMM extends AIChatAgent<Env, SMMState> {
 	initialState: SMMState = { currentRunId: null };
 
+	private _schemaApplied = false;
+
+	private ensureSchema(): void {
+		if (this._schemaApplied) return;
+		applySmmSchema(this.ctx.storage.sql);
+		this._schemaApplied = true;
+	}
+
 	async onChatMessage(onFinish: StreamTextOnFinishCallback<ToolSet>) {
+		this.ensureSchema();
 		const messages = await convertToModelMessages(this.messages);
 		const system = await loadSystemPrompt("smm");
 		const tools = this.getTools();
