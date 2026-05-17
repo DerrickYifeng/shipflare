@@ -1692,7 +1692,7 @@ The body below is the original plan content; the amendment doc is
 authoritative for execution order, exact deletions, and the LLM-tool
 vs @callable RPC split.
 
-- [ ] **Step 1: Audit current CMO**
+- [x] **Step 1: Audit current CMO**
 
 ```bash
 wc -l apps/core/src/agents/cmo/CMO.ts
@@ -1702,11 +1702,11 @@ ls apps/core/src/agents/cmo/tools/
 
 Catalog: which CMO tools are user-facing (keep, port to `getTools()`), which were inter-agent dispatch (`delegateToEmployee` → DELETE, replaced by `consult`), which were system-internal (`getRecentActivity` → DELETE).
 
-- [ ] **Step 2: Extract role-specific prompt to `SYSTEM.md`**
+- [x] **Step 2: Extract role-specific prompt to `SYSTEM.md`**
 
 Capture the CMO-only brain content (not the shared "you are a ShipFlare agent" preamble) to `apps/core/src/agents/cmo/SYSTEM.md`.
 
-- [ ] **Step 3: Rewrite the class**
+- [x] **Step 3: Rewrite the class**
 
 ```typescript
 // apps/core/src/agents/cmo/CMO.ts
@@ -1786,20 +1786,20 @@ export class CMO extends AIChatAgent<Env, CMOState> {
 }
 ```
 
-- [ ] **Step 4: Delete `delegateToEmployee` tool**
+- [x] **Step 4: Delete `delegateToEmployee` tool**
 
 ```bash
 rm apps/core/src/agents/cmo/tools/delegate.ts 2>/dev/null
 # (and any imports of it from the old CMO)
 ```
 
-- [ ] **Step 5: Delete `getRecentActivity` tool** (if present)
+- [x] **Step 5: Delete `getRecentActivity` tool** (if present)
 
 ```bash
 rm apps/core/src/agents/cmo/tools/getRecentActivity.ts 2>/dev/null
 ```
 
-- [ ] **Step 6: Update Env type**
+- [x] **Step 6: Update Env type**
 
 ```typescript
 // apps/core/src/env.ts — ensure CMO binding is typed against new class
@@ -1808,7 +1808,7 @@ HOG: DurableObjectNamespace<import('./agents/head-of-growth/HeadOfGrowth').HoG>;
 SMM: DurableObjectNamespace<import('./agents/social-media-manager/SocialMediaMgr').SMM>;
 ```
 
-- [ ] **Step 7: Verify build**
+- [x] **Step 7: Verify build**
 
 ```bash
 pnpm -r exec tsc --noEmit
@@ -1816,7 +1816,7 @@ pnpm -r exec tsc --noEmit
 
 Fix any callers of removed CMO methods (`delegateToEmployee`, `connectEmployees`, `emitActivity`).
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add apps/core/src/agents/cmo/ apps/core/src/env.ts
@@ -1830,7 +1830,7 @@ git commit -m "feat(agents): CMO extends AIChatAgent; delegateToEmployee removed
 **Files:**
 - Test: `apps/core/test/integration/cmo-chat.test.ts`
 
-- [ ] **Step 1: Write the test**
+- [x] **Step 1: Write the test**
 
 ```typescript
 // apps/core/test/integration/cmo-chat.test.ts
@@ -1874,13 +1874,13 @@ describe('CMO chat flow', () => {
 });
 ```
 
-- [ ] **Step 2: Run, expect PASS**
+- [x] **Step 2: Run, expect PASS**
 
 ```bash
 pnpm --filter @shipflare/core vitest run test/integration/cmo-chat.test.ts
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add apps/core/test/integration/cmo-chat.test.ts
@@ -1896,7 +1896,7 @@ git commit -m "test(cmo): integration test for chat flow + dispatch + telemetry"
 - Modify: `apps/core/test/agents/{smm,hog}.test.ts` (use the helper)
 - Modify: `apps/core/test/integration/cmo-chat.test.ts`
 
-- [ ] **Step 1: Implement the helper**
+- [x] **Step 1: Implement the helper**
 
 ```typescript
 // apps/core/src/agents/lib/setup-agent-test.ts
@@ -1923,7 +1923,7 @@ export function setupAgentTest(id: EmployeeId, userId = `test-${id}`) {
 }
 ```
 
-- [ ] **Step 2: Retrofit one test as a smoke**
+- [x] **Step 2: Retrofit one test as a smoke**
 
 In `apps/core/test/agents/smm.test.ts`, replace boilerplate:
 
@@ -1937,13 +1937,13 @@ it('responds to a user message', async () => {
 });
 ```
 
-- [ ] **Step 3: Run all integration tests, expect PASS**
+- [x] **Step 3: Run all integration tests, expect PASS**
 
 ```bash
 pnpm --filter @shipflare/core vitest run test/agents test/integration
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/core/src/agents/lib/setup-agent-test.ts apps/core/test/agents/ apps/core/test/integration/
@@ -1962,7 +1962,7 @@ git commit -m "test(agents): setupAgentTest helper + retrofit"
 - Create: `packages/db/migrations/<NNNN>_drop_legacy_chat_tables.sql`
 - Modify: `packages/db/src/schema.ts` (remove the dropped table definitions)
 
-- [ ] **Step 1: List existing migrations**
+- [x] **Step 1: List existing migrations**
 
 ```bash
 ls packages/db/migrations/ | tail -10
@@ -1970,7 +1970,7 @@ ls packages/db/migrations/ | tail -10
 
 Pick the next sequential number (e.g., if last is `0042_x.sql`, use `0043`).
 
-- [ ] **Step 2: Write the migration**
+- [x] **Step 2: Write the migration**
 
 ```sql
 -- packages/db/migrations/0043_drop_legacy_chat_tables.sql
@@ -1978,7 +1978,7 @@ DROP TABLE IF EXISTS founder_messages;
 DROP TABLE IF EXISTS activity_events;
 ```
 
-- [ ] **Step 3: Remove table definitions from schema**
+- [x] **Step 3: Remove table definitions from schema**
 
 ```bash
 grep -n "founder_messages\|activity_events" packages/db/src/schema.ts
@@ -1986,13 +1986,13 @@ grep -n "founder_messages\|activity_events" packages/db/src/schema.ts
 
 Delete the corresponding `sqliteTable(...)` blocks.
 
-- [ ] **Step 4: Run migration locally**
+- [x] **Step 4: Run migration locally**
 
 ```bash
 pnpm --filter @shipflare/db migrate:local
 ```
 
-- [ ] **Step 5: Verify build**
+- [x] **Step 5: Verify build**
 
 ```bash
 pnpm -r exec tsc --noEmit
@@ -2000,7 +2000,7 @@ pnpm -r exec tsc --noEmit
 
 Any remaining references to `foundermessages` table or `activityevents` table in the codebase will fail compile — fix them by deleting the code that referenced them (most lives in files queued for deletion in Phase 10).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/db/migrations/0043_drop_legacy_chat_tables.sql packages/db/src/schema.ts
@@ -2014,13 +2014,13 @@ git commit -m "feat(db): drop founder_messages and activity_events"
 **Files:**
 - Modify: `apps/core/wrangler.jsonc`
 
-- [ ] **Step 1: List existing migration tags**
+- [x] **Step 1: List existing migration tags**
 
 ```bash
 grep -A 50 '"migrations":' apps/core/wrangler.jsonc | head -50
 ```
 
-- [ ] **Step 2: Append new tag for the cutover (if not already done in 4.4/4.5)**
+- [x] **Step 2: Append new tag for the cutover (if not already done in 4.4/4.5)**
 
 ```jsonc
 "migrations": [
@@ -2037,14 +2037,14 @@ grep -A 50 '"migrations":' apps/core/wrangler.jsonc | head -50
 
 `CMO` is not renamed (still `CMO`). The fact that its base class changes from `McpAgent` to `AIChatAgent` does NOT require a migration tag — it's still the same DO class name.
 
-- [ ] **Step 3: `wrangler types` regenerates env**
+- [x] **Step 3: `wrangler types` regenerates env**
 
 ```bash
 cd apps/core && pnpm wrangler types && cd ../..
 pnpm -r exec tsc --noEmit
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/core/wrangler.jsonc

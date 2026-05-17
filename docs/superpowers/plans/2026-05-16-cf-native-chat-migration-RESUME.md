@@ -13,7 +13,9 @@
 **Phase 2 — Agent depth & cycle safety: COMPLETE** (Task 2.1)
 **Phase 3 — Skill primitive emits data parts: COMPLETE** (Task 3.1a / 3.1b / 3.1c / 3.2)
 **Phase 4 — Agent orchestration: COMPLETE** (Tasks 4.1, 4.2, 4.3, 4.4a/b/c+d, 4.5a/b, 4.6, 4.7, 4.8)
-  - Deferred: 4.4e (CMO-side ports of 6 deleted SMM tools), 4.5e (CMO-side ports of 2 deleted HoG tools) — both fold into Phase 5.
+**Phase 5 — CMO as AIChatAgent: COMPLETE** (Tasks 5.1a, 5.1b combined-atomic, 5.2+5.3 smoke)
+**Phase 6 — DB cleanup: COMPLETE (no-op)** — `founder_messages` / `activity_events` never lived in D1 (they were per-DO SQLite, dropped by v12 migration); DO migration tags landed inline with the agent rewrites (v10 SMM, v11 HoG, v12 CMO).
+  - Deferred: 4.4e / 4.5e (CMO-side ports of 8 deleted SMM+HoG tools) → fold into "Phase 5.1c" follow-up after Phase 8 (frontend chat) is unblocked.
 
 ```
 115fcd8 chore: install @cloudflare/ai-chat
@@ -38,38 +40,51 @@ dd5bf4e feat(skills): thread env+userId into SMM runSkill calls for telemetry
 
 ## Start here next session
 
-**Task 5.1: CMO class rewrite** (plan line 1643).
+**Task 7.1: External MCP for CMO + OAuth wiring** (plan line 2060).
 
-Phase 5 = CMO rewrite from McpAgent to AIChatAgent. Pattern established by
-Tasks 4.4c+d (SMM) and 4.5b (HoG): class rename, AIChatAgent class body,
-binding stays `CMO`, migration tag `v12` with deleted+new (clean DO
-namespace — dev stage). SYSTEM.md extraction. EMPLOYEE_REGISTRY tightening
-(class type from `any` → `typeof AIChatAgent` per Task 4.2 TODO).
+Phase 7 wires the external MCP route (`mcp.shipflare.com/cmo`) for 3rd-party
+MCP clients (Claude Desktop, Cursor). The CMO rewrite stubbed
+`/external/agents/cmo/<userId>/mcp` to 503 with a Phase 7 marker (see
+`apps/core/src/index.ts:handleExternalMcpRequest`); Phase 7 reactivates
+the route via `withOAuthProvider`.
 
-**Critical Phase 5 work:**
+Scope: Phase 7 in the plan spans Tasks 7.1–7.4 (~250 lines).
 
-1. CMO becomes AIChatAgent — `onChatMessage`, `getTools()` exposing user-
-   facing surface (chat, conversation, roster, shared-state). Inter-agent
-   `delegateToEmployee` deletes (replaced by `consult` for outbound peer
-   calls) — but note CMO is the orchestrator: it doesn't use `consult`
-   to call SMM/HoG, those calls go through `agentTool(Cls)` dispatch
-   the same way the `consult` tool's PEER_TOOLS table works.
+### Or alternative path: Phase 8 first
 
-2. **Fold in 4.4e + 4.5e**: the 8 deleted tools' work relocates to
-   CMO-side tools. Specifically: SMM's `find_threads_via_xai`,
-   `find_threads`, `process_replies_batch`, `process_posts_batch`,
-   `research_reddit_channels`, `list_drafts`; HoG's
-   `generate_strategic_path`, `audit_plan`. These either become CMO
-   `getTools()` entries or get ported as discrete agentTool wrappers.
+Phase 8 (frontend rewrite) is the bigger blocker for any user-visible
+demo. The web app's chat flow is broken (`/agents/cmo/<userId>/mcp` 503s).
+Until Phase 8 ships, the founder cannot actually use the system. If the
+priority is getting end-to-end demonstrable behavior back, do Phase 8
+before Phase 7.
 
-3. Delete `apps/core/src/lib/activity.ts`, `forward-activity.ts`,
-   `subagent-activity.ts` per spec §13. Delete CMO's
-   `getRecentActivity` tool. Drop the legacy `activity_events` D1
-   table writer.
+### Open follow-ups across phases
 
-4. The branch becomes deployable again once 5.1+5.2+5.3 land. Until
-   then, CMO peer-dial to SMM/HoG still fail-soft (TODO breadcrumb
-   already in CMO.ts).
+- **5.1c — port 8 deleted SMM/HoG tools to CMO-side** (queryDrafts SQL
+  filter, cron-tick real fan-out, find_threads/process_*/audit_plan/etc.)
+  This is the biggest pending work item; it's not its own plan task but
+  trail-comments + amendments reference it everywhere.
+- **queryDrafts**: currently returns rows from CMO's empty
+  `approval_queue` table. Wire it back to real data when SMM-side draft
+  mirroring is restored.
+- **cron-tick**: stub emits telemetry but does no fan-out. Restore the
+  hourly sweep behavior when 5.1c lands.
+
+## State of the branch
+
+```
+$ git status
+On branch feat/cf-native-chat-migration
+nothing to commit, working tree clean
+```
+
+```
+$ pnpm --filter @shipflare/core exec vitest run | tail -3
+ Test Files  27 passed (27)
+      Tests  105 passed (105)
+```
+
+tsc clean on both `@shipflare/core` and `@shipflare/shared`. NOT pushed.
 
 ## Execution mode
 
