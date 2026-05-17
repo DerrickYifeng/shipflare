@@ -69,6 +69,14 @@ before Phase 7.
   mirroring is restored.
 - **cron-tick**: stub emits telemetry but does no fan-out. Restore the
   hourly sweep behavior when 5.1c lands.
+- **Phase 8 hardening — CMO WS auth (MEDIUM, predates Phase 8)**:
+  `apps/core/src/index.ts:handleCmoWsRequest` forwards the WS upgrade to
+  the DO without verifying the `agent`/`name` claims minted by
+  `/api/agent-token`. CMO has no `onConnect` override to compensate. The
+  new agent-token route drops the legacy `scope: "activity"` discriminator,
+  so a leaked WS token has no second-factor scope check. Add claim
+  verification either at the worker entry OR via a CMO `onConnect`
+  override BEFORE Task 8.4 makes the WS route live to browsers.
 
 ## State of the branch
 
