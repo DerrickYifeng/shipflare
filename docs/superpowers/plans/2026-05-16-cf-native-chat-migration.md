@@ -1667,10 +1667,30 @@ Cutover the chat surface. Old `McpAgent`-based CMO is replaced.
 
 ### Task 5.1: CMO class rewrite
 
-**Files:**
+**PLAN AMENDMENT — 2026-05-17:** Mid-execution audit found Task 5.1
+collapses an even larger architectural rewrite than Task 4.4. CMO is
+698 LOC + 1306 LOC across 6 tool files + 4 lib files to delete + 11
+test files to triage + WebSocket activity feed + 9 internal HTTP
+routes + `@callable` RPC surface peers use for CMO SQLite writes.
+
+The McpAgent → AIChatAgent class-level switch is atomic at the TS
+level so Task 5.1 cannot be sliced the way 4.4 was. The amendment
+splits it into 5.1a (SYSTEM.md, small) and 5.1b (the big atomic
+rewrite + delete + migration v12), with 5.1c deferred.
+
+**Read `docs/superpowers/plans/2026-05-16-task-5.1-amendment.md` for the
+authoritative sub-task split, surface mapping, and trade-offs before
+executing.**
+
+**Files (per amendment doc):**
 - Modify: `apps/core/src/agents/cmo/CMO.ts` (rewrite)
 - Create: `apps/core/src/agents/cmo/SYSTEM.md`
-- Modify: `apps/core/src/env.ts`
+- Delete: 6 CMO tool files + 3 lib files (activity / forward-activity / subagent-activity)
+- Modify: wrangler.jsonc (migration v12), registry.ts (tighten class type), system-prompt.ts (real CMO role prompt)
+
+The body below is the original plan content; the amendment doc is
+authoritative for execution order, exact deletions, and the LLM-tool
+vs @callable RPC split.
 
 - [ ] **Step 1: Audit current CMO**
 
