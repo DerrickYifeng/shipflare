@@ -22,6 +22,7 @@ import {
 } from "../../lib/web-push";
 import { handleInternalJson } from "../../lib/internal-route";
 import { mirrorDraftBodySchema } from "../../lib/mirror-draft";
+import { strategicPathProposalBodySchema } from "../../lib/strategic-path-proposal";
 
 export interface CMOState {
 	currentRunId: string | null;
@@ -56,6 +57,7 @@ export interface CMOState {
  *   - /internal/destroy                 — account-deletion cleanup
  *   - /internal/commit-strategic-path   — onboarding-wizard direct write
  *   - /internal/mirror-draft            — SMM/HoG shadow-POST when a draft hits status='ready'
+ *   - /internal/strategic-path-proposal — HoG shadow-POST when a new strategic-path version is generated
  *
  * The legacy /internal/log-activity route + the activity_events table are
  * deleted in this commit (telemetry routes through Analytics Engine via
@@ -590,6 +592,44 @@ export class CMO extends AIChatAgent<Env, CMOState> {
 						});
 					}
 
+					return { ok: true };
+				},
+			);
+		}
+		if (url.pathname === "/internal/strategic-path-proposal") {
+			this.ensureSchema();
+			return handleInternalJson(
+				request,
+				"CMO /internal/strategic-path-proposal",
+				strategicPathProposalBodySchema,
+				async (body) => {
+					// Idempotent on (version, generated_by) — skip insert if already present.
+					const existing = this.ctx.storage.sql
+						.exec<{ id: string }>(
+							"SELECT id FROM strategic_path WHERE version = ? AND generated_by = ? LIMIT 1",
+							body.version,
+							body.generatedBy,
+						)
+						.toArray();
+					if (existing.length === 0) {
+						this.ctx.storage.sql.exec(
+							`INSERT INTO strategic_path
+								(id, version, theme, narrative_json, status, generated_at, generated_by)
+							 VALUES (?, ?, ?, ?, 'proposed', ?, ?)`,
+							crypto.randomUUID(),
+							body.version,
+							body.theme,
+							body.narrativeJson,
+							body.generatedAt,
+							body.generatedBy,
+						);
+						writeAgentEvent(this.env, {
+							kind: "agent_run",
+							userId: this.name,
+							blobs: ["CMO", "strategic-path-proposed", body.generatedBy],
+							doubles: [body.version],
+						});
+					}
 					return { ok: true };
 				},
 			);
