@@ -13,7 +13,7 @@ export interface RoleEntry {
   binding:
     | "CMO"
     | "HEAD_OF_GROWTH"
-    | "SOCIAL_MEDIA_MGR"
+    | "SMM"
     | "COPYWRITER"
     | "BRAND_ANALYST"
     | "COMMUNITY_MGR";
@@ -39,7 +39,7 @@ export const ROLE_REGISTRY = {
     defaultActive: true,
   },
   "social-media-manager": {
-    binding: "SOCIAL_MEDIA_MGR",
+    binding: "SMM",
     displayName: "Social Media Manager",
     tier: "core",
     defaultActive: true,

@@ -12,7 +12,9 @@
  * Per Phase 0 spike #2 finding: every `addMcpServer(name, ns, ...)` call MUST
  * use a name unique to the caller tenant, otherwise the McpServer DO is shared
  * across users. `platformServerName(platform, userId)` returns the canonical
- * `${platform}-mcp-${userId}` form used by `SocialMediaMgr.connectToPeers()`.
+ * `${platform}-mcp-${userId}` form previously used by `SocialMediaMgr.connectToPeers()`
+ * (retired in Task 4.4c of the CF-native chat migration when SMM was rewritten
+ * as an AIChatAgent without `addMcpServer` peer dialing).
  *
  * Replaces SMM's previous `mcpServerName("x-mcp" as any, userId)` cast (S4).
  * The cast leaked because `RoleSlug` only enumerates EMPLOYEE roles —

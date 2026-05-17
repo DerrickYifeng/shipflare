@@ -51,7 +51,7 @@ import {
 
 import { CMO } from "./agents/cmo/CMO";
 import { HeadOfGrowth } from "./agents/head-of-growth/HeadOfGrowth";
-import { SocialMediaMgr } from "./agents/social-media-manager/SocialMediaMgr";
+import { SMM } from "./agents/social-media-manager/SocialMediaMgr";
 // `XMcpAgent` / `RedditMcpAgent` are type-imported here (Env declaration).
 // The value re-exports below put the classes on the module graph so wrangler
 // can discover them once S5.3 uncomments the X_MCP / REDDIT_MCP bindings.
@@ -63,7 +63,7 @@ import type { RedditMcpAgent } from "./agents/platforms/reddit/RedditMcpAgent";
 // can also be used in the EMPLOYEE_CLASSES dispatch table for the external
 // MCP route — `export { X }` is enough on its own when there's already an
 // `import { X }` above, but we keep the explicit re-export for grep-ability.)
-export { CMO, HeadOfGrowth, SocialMediaMgr };
+export { CMO, HeadOfGrowth, SMM };
 // Re-export the platform DO classes so wrangler can discover them via the
 // module graph rooted at `main`.
 export { XMcpAgent } from "./agents/platforms/x/XMcpAgent";
@@ -74,7 +74,7 @@ export interface Env {
   // DO bindings — 3 employee agents + 2 platform tool MCPs.
   CMO: DurableObjectNamespace<CMO>;
   HEAD_OF_GROWTH: DurableObjectNamespace<HeadOfGrowth>;
-  SOCIAL_MEDIA_MGR: DurableObjectNamespace<SocialMediaMgr>;
+  SMM: DurableObjectNamespace<SMM>;
   X_MCP: DurableObjectNamespace<XMcpAgent>;
   REDDIT_MCP: DurableObjectNamespace<RedditMcpAgent>;
   // Workflow binding — added when AgentPlanWorkflow lands (S6).
@@ -145,7 +145,7 @@ export interface Env {
 const EMPLOYEE_CLASSES: Record<string, any> = {
   cmo: CMO,
   "head-of-growth": HeadOfGrowth,
-  "social-media-manager": SocialMediaMgr,
+  "social-media-manager": SMM,
 };
 
 /**

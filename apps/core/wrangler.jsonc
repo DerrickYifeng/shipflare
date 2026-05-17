@@ -50,10 +50,10 @@
 				"name": "HEAD_OF_GROWTH",
 				"class_name": "HeadOfGrowth"
 			},
-			// S4 — Social Media Manager
+			// S4 — Social Media Manager (renamed v10 from SocialMediaMgr → SMM)
 			{
-				"name": "SOCIAL_MEDIA_MGR",
-				"class_name": "SocialMediaMgr"
+				"name": "SMM",
+				"class_name": "SMM"
 			},
 			// S5 — Platform tool MCPs (landed S5.3 under migration tag v4)
 			{
@@ -143,6 +143,19 @@
 				"HackerNewsMcpAgent",
 				"DiscordMcpAgent"
 			]
+		},
+		// v10 — CF-native chat migration Task 4.4c. The SMM class was rewritten
+		// from McpAgent to AIChatAgent in the same file; the class export name
+		// changed from `SocialMediaMgr` to `SMM`. `renamed_classes` preserves
+		// the existing per-DO SQLite namespace across the rename so threads_inbox
+		// / drafts / voice_audit rows survive the rewrite. (Nothing reads those
+		// tables post-rewrite until Phase 5 / Task 4.4e ports the SMM tools to
+		// CMO-side; the rename keeps the data available for that follow-up.)
+		{
+			"tag": "v10",
+			"renamed_classes": [
+				{ "from": "SocialMediaMgr", "to": "SMM" }
+			]
 		}
 	],
 	// Ops telemetry — single Analytics Engine dataset for agent / skill /
@@ -222,7 +235,7 @@
 				"bindings": [
 					{ "name": "CMO", "class_name": "CMO" },
 					{ "name": "HEAD_OF_GROWTH", "class_name": "HeadOfGrowth" },
-					{ "name": "SOCIAL_MEDIA_MGR", "class_name": "SocialMediaMgr" },
+					{ "name": "SMM", "class_name": "SMM" },
 					{ "name": "X_MCP", "class_name": "XMcpAgent" },
 					{ "name": "REDDIT_MCP", "class_name": "RedditMcpAgent" }
 				]

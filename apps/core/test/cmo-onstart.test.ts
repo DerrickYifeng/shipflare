@@ -59,9 +59,9 @@ describe("CMO connectEmployees logic", () => {
     // to look up the DurableObjectNamespace. Mismatch here ⇒ silent skip
     // in production. Pin the contract.
     expect(ROLE_REGISTRY["head-of-growth"].binding).toBe("HEAD_OF_GROWTH");
-    expect(ROLE_REGISTRY["social-media-manager"].binding).toBe(
-      "SOCIAL_MEDIA_MGR",
-    );
+    // Task 4.4c (CF-native chat migration): SMM binding was renamed from
+    // "SOCIAL_MEDIA_MGR" to "SMM" alongside the AIChatAgent rewrite.
+    expect(ROLE_REGISTRY["social-media-manager"].binding).toBe("SMM");
     expect(ROLE_REGISTRY["cmo"].binding).toBe("CMO");
   });
 

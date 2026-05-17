@@ -1,6 +1,6 @@
 import { CMO } from './cmo/CMO';
 // import { HoG } from './head-of-growth/HeadOfGrowth';      // added in Task 4.5
-// import { SMM } from './social-media-manager/SocialMediaMgr';  // added in Task 4.4
+import { SMM } from './social-media-manager/SocialMediaMgr';
 
 export type EmployeeId = 'cmo' | 'hog' | 'smm';
 
@@ -25,6 +25,16 @@ export const EMPLOYEE_REGISTRY: Partial<Record<EmployeeId, EmployeeMeta>> = {
 		// runtime-safe form (bundler inline import or DO asset URL);
 		// CF Workers have no fs / __dirname so readFileSync won't work.
 		systemPromptPath: 'apps/core/src/agents/cmo/SYSTEM.md',
+	},
+	smm: {
+		class: SMM,
+		envBinding: 'SMM',
+		displayName: 'Social Media Manager',
+		description: 'Channel-specific drafting, voice, posting cadence.',
+		// TODO(Task 4.7): replace this workspace-relative string with a
+		// runtime-safe form (bundler inline import or DO asset URL);
+		// CF Workers have no fs / __dirname so readFileSync won't work.
+		systemPromptPath: 'apps/core/src/agents/social-media-manager/SYSTEM.md',
 	},
 };
 
