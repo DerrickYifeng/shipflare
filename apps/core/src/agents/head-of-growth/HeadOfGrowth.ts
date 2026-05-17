@@ -12,6 +12,7 @@ import { makeConsultTool } from "../lib/consult-tool";
 import { loadSystemPrompt } from "../lib/system-prompt";
 import { applyHogSchema } from "./schema";
 import { makeGenerateStrategicPathTool } from "./tools/generate-strategic-path";
+import { makeAuditPlanTool } from "./tools/audit-plan";
 import type { Env } from "../../index";
 
 export interface HoGState {
@@ -89,6 +90,7 @@ export class HoG extends AIChatAgent<Env, HoGState> {
 		return {
 			consult: makeConsultTool("hog"),
 			generate_strategic_path: makeGenerateStrategicPathTool(this),
+			audit_plan: makeAuditPlanTool(this),
 		};
 	}
 }
