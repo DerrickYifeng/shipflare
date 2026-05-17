@@ -165,6 +165,22 @@
 			"tag": "v11",
 			"deleted_classes": ["HeadOfGrowth"],
 			"new_sqlite_classes": ["HoG"]
+		},
+		// v12 — CF-native chat migration Task 5.1b. The CMO class was
+		// rewritten from McpAgent to AIChatAgent in the same file; the
+		// class export name stays `CMO` (so the binding name doesn't
+		// move). Dev-stage decision (matches v10/v11): drop the old
+		// per-DO SQLite namespace cleanly rather than migrate the
+		// retired tables (conversations / founder_messages / roster /
+		// activity_events). AIChatAgent bootstraps its own chat-history
+		// schema; applyCmoSchema reconstructs the retained per-team
+		// tables (founder_context / plan_items / drafts / memory /
+		// employee_log / strategic_path / push_subscriptions) on first
+		// chat or first /internal/* hit.
+		{
+			"tag": "v12",
+			"deleted_classes": ["CMO"],
+			"new_sqlite_classes": ["CMO"]
 		}
 	],
 	// Ops telemetry — single Analytics Engine dataset for agent / skill /

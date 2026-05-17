@@ -1,14 +1,19 @@
+import type { ChatCapableAgentClass } from 'agents/agent-tools';
 import { CMO } from './cmo/CMO';
 import { HoG } from './head-of-growth/HeadOfGrowth';
 import { SMM } from './social-media-manager/SocialMediaMgr';
 
 export type EmployeeId = 'cmo' | 'hog' | 'smm';
 
+/**
+ * Each concrete employee subclass (CMO/HoG/SMM) extends `AIChatAgent`,
+ * which `agentTool(...)` accepts via the agents-SDK `ChatCapableAgentClass`
+ * shape (a constructor returning an `Agent` subtype). Storing the class
+ * under that type lets `consult-tool.ts` hand it to `agentTool(...)`
+ * without a wide `any`.
+ */
 export interface EmployeeMeta {
-	// TODO(Phase 5): tighten to `typeof AIChatAgent` once CMO is migrated.
-	// Currently loose because CMO still extends McpAgent.
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	class: any;
+	class: ChatCapableAgentClass;
 	envBinding: string;
 	displayName: string;
 	description: string;
@@ -17,7 +22,7 @@ export interface EmployeeMeta {
 
 export const EMPLOYEE_REGISTRY: Partial<Record<EmployeeId, EmployeeMeta>> = {
 	cmo: {
-		class: CMO,
+		class: CMO as unknown as ChatCapableAgentClass,
 		envBinding: 'CMO',
 		displayName: 'Chief Marketing Officer',
 		description: 'Strategic marketing leadership; the orchestrator.',
@@ -27,7 +32,7 @@ export const EMPLOYEE_REGISTRY: Partial<Record<EmployeeId, EmployeeMeta>> = {
 		systemPromptPath: 'apps/core/src/agents/cmo/SYSTEM.md',
 	},
 	hog: {
-		class: HoG,
+		class: HoG as unknown as ChatCapableAgentClass,
 		envBinding: 'HOG',
 		displayName: 'Head of Growth',
 		description: 'Growth strategy, acquisition funnels, retention experiments.',
@@ -37,7 +42,7 @@ export const EMPLOYEE_REGISTRY: Partial<Record<EmployeeId, EmployeeMeta>> = {
 		systemPromptPath: 'apps/core/src/agents/head-of-growth/SYSTEM.md',
 	},
 	smm: {
-		class: SMM,
+		class: SMM as unknown as ChatCapableAgentClass,
 		envBinding: 'SMM',
 		displayName: 'Social Media Manager',
 		description: 'Channel-specific drafting, voice, posting cadence.',

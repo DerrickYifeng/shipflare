@@ -40,7 +40,7 @@ async function bootstrap(stub: DurableObjectStub<CMO>): Promise<void> {
 }
 
 describe("CMO /internal/init", () => {
-  it("first call seeds founder_context + default roster", async () => {
+  it("first call seeds founder_context (roster retired in Task 5.1b)", async () => {
     const stub = env.CMO.getByName("init-test-user-1");
     await bootstrap(stub);
 
@@ -66,14 +66,6 @@ describe("CMO /internal/init", () => {
         .toArray();
       expect(ctx).toContainEqual({ key: "email", value: "founder@example.com" });
       expect(ctx).toContainEqual({ key: "githubLogin", value: "founder42" });
-
-      // ROLE_REGISTRY.defaultActive=true excluding 'cmo':
-      //   head-of-growth, social-media-manager.
-      const roles = sql
-        .exec<{ role: string }>("SELECT role FROM roster ORDER BY role")
-        .toArray()
-        .map((r) => r.role);
-      expect(roles).toEqual(["head-of-growth", "social-media-manager"]);
     });
   });
 
@@ -206,10 +198,9 @@ describe("CMO /internal/peer-dm-shadow", () => {
 });
 
 describe("CMO /internal/cron-tick", () => {
-  it("returns noop:smm_not_connected (or no-userId) when SMM not hired", async () => {
+  it("returns the post-Phase-5 stub response (peer fan-out retired)", async () => {
     const stub = env.CMO.getByName("cron-test-1");
-    // No bootstrap needed — cron-tick reads from mcp.listServers() / props,
-    // not from SQL.
+    // No bootstrap needed — the stub returns a static 200 without touching SQL.
     const res = await stub.fetch(
       new Request("https://x/internal/cron-tick", {
         method: "POST",
@@ -217,13 +208,7 @@ describe("CMO /internal/cron-tick", () => {
       }),
     );
     expect(res.status).toBe(200);
-    const text = await res.text();
-    // In test context the DO's props aren't populated (non-transport name
-    // skips parent McpAgent transport init), so userId is undefined and
-    // we get "no userId in props". In production, an init'd CMO has
-    // userId set but no SMM connected yet (S4 hasn't landed), so we'd
-    // get "noop:smm_not_connected". Both are acceptable for this stub.
-    expect(["noop:smm_not_connected", "no userId in props"]).toContain(text);
+    expect(await res.text()).toBe("noop:cron-tick-stub");
   });
 
   it("rejects without internal header (403)", async () => {

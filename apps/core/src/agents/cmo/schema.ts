@@ -4,42 +4,31 @@
 /**
  * Apply the CMO Durable Object's SQLite schema.
  *
- * Called from `CMO.onStart()` to ensure the schema is in place before any
- * request handler runs. `CREATE TABLE IF NOT EXISTS` makes this idempotent
- * across DO restarts. Per Agents SDK contract, `onStart` runs once per DO
- * lifetime under an implicit `blockConcurrencyWhile`, so no outer wrap is
- * needed here.
+ * Called from `CMO.ensureSchema()` to ensure the schema is in place before
+ * any handler touches the per-team tables. `CREATE TABLE IF NOT EXISTS`
+ * makes this idempotent across DO restarts.
  *
- * Schema source of truth: migration design spec §4.2.3.
+ * Post-Phase-5 changes (Task 5.1b of CF-native chat migration):
+ *  - DROPPED: `conversations`, `founder_messages` — chat history is now
+ *    persisted by AIChatAgent's built-in tables (cf_ai_chat_*) on first
+ *    chat. Spec §2 confirms (Q3=B).
+ *  - DROPPED: `roster` — per-user hiring retired. EMPLOYEE_REGISTRY is the
+ *    static org chart; every peer always available via `consult`.
+ *  - DROPPED: `activity_events` — the bespoke activity feed is replaced by
+ *    Analytics Engine via `writeAgentEvent` (Phase 0 telemetry).
  *
- * SQLite types only — no Postgres-isms (no SERIAL / TIMESTAMP WITH TIME
- * ZONE / JSONB). `INTEGER` epoch millis stand in for timestamps; `_json`
- * suffix marks columns holding JSON-encoded TEXT.
+ * Tables retained:
+ *  - founder_context           — identity-level KV (productName, voice...)
+ *  - strategic_path            — versioned strategy from HoG consult
+ *  - plan_items                — sprint work tickets
+ *  - employee_log              — peer-DM shadows, task completions
+ *  - approval_queue            — drafts pending founder approval
+ *  - progress_snapshots        — KPI rollups for the lead's summarisation
+ *  - cross_conversation_memory — opt-in long-term "Remember this" facts
+ *  - push_subscriptions        — VAPID web-push subscriptions
  */
 export function applyCmoSchema(sql: SqlStorage): void {
   sql.exec(`
-    -- Founder conversations (Claude.ai-style chat scope, per spec D11)
-    CREATE TABLE IF NOT EXISTS conversations (
-      id TEXT PRIMARY KEY,
-      started_at INTEGER NOT NULL,
-      ended_at INTEGER,
-      title TEXT,
-      archived INTEGER NOT NULL DEFAULT 0
-    );
-
-    -- Founder <-> CMO chat messages, scoped per conversation
-    CREATE TABLE IF NOT EXISTS founder_messages (
-      conversation_id TEXT NOT NULL,
-      role TEXT NOT NULL,
-      content TEXT NOT NULL,
-      ts INTEGER NOT NULL,
-      tool_calls_json TEXT,
-      meta_json TEXT,
-      PRIMARY KEY (conversation_id, ts, role)
-    );
-    CREATE INDEX IF NOT EXISTS idx_messages_conv_ts
-      ON founder_messages(conversation_id, ts);
-
     -- Identity-level KV: productName, productDescription, voice, audience, urls, etc.
     -- Persists across conversations (per spec D11).
     CREATE TABLE IF NOT EXISTS founder_context (
@@ -47,15 +36,7 @@ export function applyCmoSchema(sql: SqlStorage): void {
       value TEXT NOT NULL
     );
 
-    -- Per-user employee roster (D12: dynamic hire on top of static role registry)
-    CREATE TABLE IF NOT EXISTS roster (
-      role TEXT PRIMARY KEY,
-      hired_at INTEGER NOT NULL,
-      status TEXT NOT NULL,
-      hire_config_json TEXT
-    );
-
-    -- Strategic path versions (HoG generates, founder approves)
+    -- Strategic path versions (HoG generates via consult; CMO approves)
     CREATE TABLE IF NOT EXISTS strategic_path (
       id TEXT PRIMARY KEY,
       version INTEGER NOT NULL,
@@ -68,7 +49,7 @@ export function applyCmoSchema(sql: SqlStorage): void {
       replaced_by TEXT
     );
 
-    -- Plan items - sprint work tickets. HoG writes, SMM/Copywriter execute.
+    -- Plan items - sprint work tickets. CMO writes, peers execute.
     CREATE TABLE IF NOT EXISTS plan_items (
       id TEXT PRIMARY KEY,
       skill TEXT NOT NULL,
@@ -155,25 +136,5 @@ export function applyCmoSchema(sql: SqlStorage): void {
       last_used INTEGER,
       last_error TEXT
     );
-
-    -- Activity events (spec 2026-05-15) — single source of truth for what
-    -- the agent team is doing. Written by emitActivity() in lib/activity.ts.
-    CREATE TABLE IF NOT EXISTS activity_events (
-      id              TEXT PRIMARY KEY,
-      conversation_id TEXT,
-      parent_turn_id  TEXT,
-      run_id          TEXT,
-      source_agent    TEXT NOT NULL,
-      parent_event_id TEXT,
-      kind            TEXT NOT NULL,
-      payload_json    TEXT NOT NULL,
-      created_at      INTEGER NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_activity_events_conv
-      ON activity_events (conversation_id, created_at);
-    CREATE INDEX IF NOT EXISTS idx_activity_events_run
-      ON activity_events (run_id, created_at);
-    CREATE INDEX IF NOT EXISTS idx_activity_events_turn
-      ON activity_events (parent_turn_id);
   `);
 }

@@ -1,698 +1,818 @@
-import { McpAgent } from "agents/mcp";
-import type { Connection, ConnectionContext } from "agents";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { AIChatAgent } from "@cloudflare/ai-chat";
 import {
-  ActivityEventInputSchema,
-  ROLE_REGISTRY,
-  mcpServerName,
-  type McpProps,
-  type RoleSlug,
-} from "@shipflare/shared";
+	streamText,
+	createUIMessageStream,
+	createUIMessageStreamResponse,
+	convertToModelMessages,
+	tool,
+	type StreamTextOnFinishCallback,
+	type ToolSet,
+} from "ai";
+import { anthropic } from "@ai-sdk/anthropic";
+import { z } from "zod";
+import { writeAgentEvent } from "@shipflare/shared";
 import type { Env } from "../../index";
-import { emitActivity } from "../../lib/activity";
-import { verifyJwt } from "../../lib/jwt";
-import { transportName } from "../../lib/do-name";
 import { applyCmoSchema } from "./schema";
-import { registerChatTool } from "./tools/chat";
-import { registerConversationTools } from "./tools/conversation";
-import { registerRosterTools } from "./tools/roster";
-import { registerDelegationTools } from "./tools/delegate";
-import { registerGetRecentActivityTool } from "./tools/get-recent-activity";
-import { registerSharedStateTools } from "./tools/shared-state";
+import { makeConsultTool } from "../lib/consult-tool";
+import { loadSystemPrompt } from "../lib/system-prompt";
 import {
-  sendWebPush,
-  type PushPayload,
-  type PushSubscriptionRow,
+	sendWebPush,
+	type PushPayload,
+	type PushSubscriptionRow,
 } from "../../lib/web-push";
 
-type CMOState = {
-  initialized: boolean;
-  lastWakeAt: number;
-};
-
+export interface CMOState {
+	currentRunId: string | null;
+}
 
 /**
- * CMO — the founder-facing orchestrator employee.
+ * CMO — founder-facing orchestrator (AIChatAgent).
  *
- * Role: lead. Receives founder messages, decomposes goals, delegates to
- * specialist employees (Head of Growth, Social Media Manager, etc.) via
- * in-process MCP RPC (`addMcpServer`), and summarizes results back for the
- * founder.
+ * Post-Phase-5 rewrite: the McpAgent surface is gone. The founder talks to
+ * CMO via the chat surface; specialist colleagues (HoG, SMM) are reached
+ * through the `consult` tool. CMO is the sole writer for per-team state
+ * (plan items, drafts, founder_context, memory) — peers answer questions
+ * and CMO commits the decisions.
  *
- * Per spec D11, chat history is conversation-scoped (Claude.ai-style reset
- * on new conversation). Sprint work products + identity config persist
- * across conversations.
+ * Per spec §2 + §3.4 of the CF-native chat migration design.
  *
- * Tools registered in S2.1-S2.5. `onStart` employee connections come in
- * S2.3. Internal endpoints (init / peer-dm-shadow / cron-tick) land in
- * S2.5. The Worker entry route (`/agents/cmo/:userId/mcp`) is wired in
- * S2.6.
+ * Tools exposed via `getTools()`:
+ *   - consult        — generic peer dispatcher (HoG / SMM)
+ *   - 14 shared-state tools that the LLM may invoke during chat to read
+ *     and write per-team SQLite (founder_context, plan_items, drafts,
+ *     memory, employee_log transcripts).
  *
- * Per Phase 0 spike #2 finding, the binding type in `Env` must be
- * `DurableObjectNamespace<CMO>` (not bare) — the `addMcpServer` generic
- * constraint relies on the parameterized form.
+ * Internal HTTP routes survive (Service-Binding-only, gated on
+ * `x-shipflare-internal: 1`):
+ *   - /internal/init                    — first-login seed of founder_context
+ *   - /internal/peer-dm-shadow          — quiet employee_log append; per
+ *                                          CLAUDE.md MUST NOT trigger chat
+ *   - /internal/cron-tick               — periodic wake; currently a no-op
+ *                                          stub (peer fan-out was deleted
+ *                                          alongside the McpAgent surface)
+ *   - /internal/push-subscribe          — web-push subscription persistence
+ *   - /internal/destroy                 — account-deletion cleanup
+ *   - /internal/commit-strategic-path   — onboarding-wizard direct write
+ *
+ * The legacy /internal/log-activity route + the activity_events table are
+ * deleted in this commit (telemetry routes through Analytics Engine via
+ * `writeAgentEvent` instead).
  */
-export class CMO extends McpAgent<Env, CMOState, McpProps> {
-  server = new McpServer({ name: "shipflare-cmo", version: "1.0.0" });
-  initialState: CMOState = { initialized: false, lastWakeAt: 0 };
-  // McpAgent.onStart() calls init() on every new MCP session but this.server
-  // persists on the same DO instance — guard so tools register exactly once.
-  private _toolsRegistered = false;
+export class CMO extends AIChatAgent<Env, CMOState> {
+	initialState: CMOState = { currentRunId: null };
 
-  /**
-   * Narrow accessors so tool-registration modules (which live outside the
-   * class and therefore can't see `protected` DurableObject members) can
-   * reach the raw SQL storage and Worker env. Returning the storage / env
-   * by reference is correct — these are stable per-DO singletons. Keep
-   * this surface minimal; broaden only when a new tool genuinely needs it.
-   *
-   * Naming: `sqlStorage` instead of `sql` because the parent `Agent`
-   * class already exposes a `sql` template-tag method for inline queries;
-   * a getter would shadow it incompatibly. The tool flow uses
-   * `sqlStorage.exec(...)` for parameterized statements via placeholders.
-   *
-   * Naming: `bindings` instead of `env` because `env` is a protected
-   * member of `DurableObject` — a public getter named `env` would alias
-   * a protected field, which TypeScript flags.
-   */
-  get sqlStorage(): SqlStorage {
-    return this.ctx.storage.sql;
-  }
-  get bindings(): Env {
-    return this.env;
-  }
+	private _schemaApplied = false;
 
-  async onStart(props?: McpProps): Promise<void> {
-    // Schema bootstrap runs BEFORE `super.onStart()` so that
-    //  (a) our tables exist even if the parent's transport-init throws
-    //      (parent reads the DO name prefix `sse:`/`streamable-http:`/`rpc:`
-    //      to pick a transport; non-transport-named DOs fail here), and
-    //  (b) schema-bootstrap tests can drive this method directly without
-    //      faking a transport. `CREATE TABLE IF NOT EXISTS` makes it
-    //      idempotent across restarts.
-    applyCmoSchema(this.ctx.storage.sql);
-    this.setState({ ...this.state, lastWakeAt: Date.now() });
-    // Parent McpAgent.onStart() sets up the MCP transport (loads props,
-    // calls init(), wires the transport, reinitializes the server). Must
-    // run after our schema bootstrap so tool handlers registered in init()
-    // can rely on the tables being there.
-    await super.onStart(props);
-    // S2.3 — connect to each hired employee via in-process MCP RPC.
-    await this.connectEmployees();
-  }
+	/**
+	 * Idempotent schema bootstrap. Called from `onChatMessage` + every
+	 * internal HTTP route handler. `CREATE TABLE IF NOT EXISTS` makes the
+	 * SQL safe to run repeatedly across DO restarts; the in-instance guard
+	 * is just a micro-optimisation to skip the bytecode compile on the
+	 * second call.
+	 */
+	private ensureSchema(): void {
+		if (this._schemaApplied) return;
+		applyCmoSchema(this.ctx.storage.sql);
+		this._schemaApplied = true;
+	}
 
-  /**
-   * Task 6 (spec 2026-05-15) — gate WebSocket connections.
-   *
-   * Two kinds of WS terminate on this DO:
-   *
-   *  1. **MCP streamable-HTTP transport** — `streamableHttpProxy` (Worker
-   *     entry) opens a synthetic WS with `cf-mcp-method`/`cf-mcp-message`
-   *     headers on a URL ending in `/mcp[/...]`. McpAgent's own onConnect
-   *     handles the transport handshake; we MUST delegate to it unchanged
-   *     or every chat message breaks.
-   *
-   *  2. **Browser activity-feed WS** — the web client opens
-   *     `wss://core/agents/cmo/<userId>?token=<jwt>` after fetching a
-   *     short-lived activity-scoped JWT from `/api/cmo-ws-token`. We
-   *     verify the token here and close with WebSocket code 1008
-   *     (Policy Violation) on any failure mode.
-   *
-   * Why query-string token, not Authorization header: browsers don't allow
-   * custom headers on `new WebSocket()`. The token is short-lived (60s)
-   * so leakage via URL is bounded; the activity scope (`scope: 'activity'`)
-   * ensures even a leak can't be replayed against the MCP path.
-   *
-   * Why derive expectedUserId from `this.name` rather than `this.props`:
-   * a bare WS upgrade doesn't go through the MCP transport's prop-loading
-   * path, so `this.props` is undefined here. The DO's name was set by the
-   * Worker route as `transportName(userId)`, so we strip that prefix to
-   * recover the canonical userId and check the JWT claim against it.
-   */
-  async onConnect(conn: Connection, ctx: ConnectionContext): Promise<void> {
-    const url = new URL(ctx.request.url);
-    // MCP transport sessions terminate on `/mcp[/...]` paths. Anything else
-    // is the activity-feed WS that needs our auth check.
-    const isMcpTransport = /\/mcp(?:\/|$)/.test(url.pathname);
-    if (isMcpTransport) {
-      return super.onConnect(conn, ctx);
-    }
+	async onChatMessage(
+		onFinish: StreamTextOnFinishCallback<ToolSet>,
+	): Promise<Response | undefined> {
+		this.ensureSchema();
+		const runId = crypto.randomUUID();
+		this.setState({ ...this.state, currentRunId: runId });
+		const t0 = Date.now();
+		const messages = await convertToModelMessages(this.messages);
+		const system = await loadSystemPrompt("cmo");
+		const tools: ToolSet = this.getTools();
 
-    const token = url.searchParams.get("token");
-    if (!token) {
-      conn.close(1008, "missing token");
-      return;
-    }
+		const stream = createUIMessageStream({
+			execute: ({ writer }) => {
+				const result = streamText({
+					model: anthropic("claude-sonnet-4-6"),
+					messages,
+					system,
+					tools,
+					experimental_context: {
+						writer,
+						userId: this.name,
+						env: this.env,
+					},
+					onFinish: (event) => {
+						writeAgentEvent(this.env, {
+							kind: "agent_run",
+							userId: this.name,
+							runId,
+							blobs: ["CMO", event.finishReason ?? "unknown"],
+							doubles: [Date.now() - t0],
+						});
+						return onFinish(event);
+					},
+				});
+				writer.merge(result.toUIMessageStream());
+			},
+		});
+		return createUIMessageStreamResponse({ stream });
+	}
 
-    let claims: Record<string, unknown>;
-    try {
-      claims = await verifyJwt(token, this.bindings.MCP_JWT_SECRET);
-    } catch {
-      conn.close(1008, "invalid token");
-      return;
-    }
+	/**
+	 * Build the LLM-facing tool surface: `consult` + 14 shared-state tools.
+	 *
+	 * `self` is captured in a local so each tool's `execute` closure has a
+	 * stable `this`-equivalent. The AI SDK invokes execute with its own
+	 * `this`, so referencing the class instance must go through this
+	 * captured binding rather than the bare `this` keyword.
+	 *
+	 * Each shared-state tool preserves the SQL behaviour of the legacy
+	 * MCP registrations in `tools/shared-state.ts`; the only changes are
+	 * (a) wrapping each fragment in `z.object(...)` and (b) returning
+	 * native JS values instead of the MCP `{ content: [{ text }] }`
+	 * envelope. SQL strings + parameter ordering are identical.
+	 */
+	getTools(): ToolSet {
+		const self = this;
+		return {
+			consult: makeConsultTool("cmo"),
 
-    const scope = claims["scope"];
-    const userId = claims["userId"];
-    if (scope !== "activity" || typeof userId !== "string") {
-      conn.close(1008, "unauthorized");
-      return;
-    }
+			queryFounderContext: tool({
+				description:
+					"Read the founder_context KV map. Identity-level config the chat needs (productName, voice, etc).",
+				inputSchema: z.object({}),
+				execute: async () => {
+					self.ensureSchema();
+					const rows = self.ctx.storage.sql
+						.exec<{ key: string; value: string }>(
+							"SELECT key, value FROM founder_context",
+						)
+						.toArray();
+					return Object.fromEntries(rows.map((r) => [r.key, r.value]));
+				},
+			}),
 
-    // Bare-WS connections don't auto-populate `this.props`. The DO's name
-    // is `transportName(userId)` (set by the Worker route), so recover the
-    // canonical userId from `this.name` and cross-check the JWT claim
-    // against it. This catches a JWT minted for user A being replayed
-    // against user B's DO.
-    const prefix = transportName("");
-    const expectedUserId = this.name.startsWith(prefix)
-      ? this.name.slice(prefix.length)
-      : this.name;
-    if (userId !== expectedUserId) {
-      conn.close(1008, "userId mismatch");
-      return;
-    }
-    // Authenticated. The Connection is already accepted by partyserver's
-    // Server.fetch — nothing else to do here. Outgoing activity events are
-    // delivered via `broadcast()` in `emitActivity()` (Task 4).
-  }
+			setFounderContext: tool({
+				description:
+					"Upsert a single founder_context KV pair (e.g. productName, voice).",
+				inputSchema: z.object({
+					key: z.string().min(1),
+					value: z.string(),
+				}),
+				execute: async ({ key, value }) => {
+					self.ensureSchema();
+					self.ctx.storage.sql.exec(
+						`INSERT INTO founder_context (key, value) VALUES (?, ?)
+						 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+						key,
+						value,
+					);
+					return { ok: true as const };
+				},
+			}),
 
-  /**
-   * Read the active roster and connect to each hired employee via in-process
-   * MCP RPC.
-   *
-   * Per Phase 0 spike #2 finding: the McpServer DO instance is keyed off the
-   * `name` argument to `addMcpServer`. WITHOUT per-tenant namespacing, all
-   * users' CMOs would share one McpServer DO per role, breaking isolation.
-   * `mcpServerName(role, userId)` (from @shipflare/shared) returns the
-   * canonical `${role}-${userId}` form.
-   *
-   * Forward-compat: if a hired role has no env binding yet (S3/S4 roles still
-   * coming online, or a Phase 2 role flagged in roster but binding not added),
-   * we log + skip. The next onStart picks it up once the binding is added.
-   *
-   * Per-role isolation: each addMcpServer call is wrapped in try/catch so one
-   * failing employee doesn't blow up the rest. The CMO remains usable for
-   * direct founder chat even if every employee dial-up fails.
-   *
-   * TODO(Task 4.4e+4.5e / Phase 5): SMM + HoG are now AIChatAgents
-   * (Task 4.4c+d landed SMM, Task 4.5b landed HoG), so the addMcpServer
-   * calls below fail fast at runtime for both peers — AIChatAgent is not
-   * an McpAgent peer. The try/catch logs and continues, so CMO stays usable,
-   * but both peers are unreachable until Phase 5 replaces this loop with
-   * the `consult` tool-mediated dispatch (per spec §3.2).
-   */
-  private async connectEmployees(): Promise<void> {
-    // `props` is populated by the parent McpAgent.onStart() from the transport
-    // session. In production this is always present once super.onStart()
-    // resolves; defensively short-circuit if absent (non-transport DO names
-    // in tests skip parent init entirely — no roster connect needed there).
-    const userId = this.props?.userId;
-    if (!userId) {
-      return;
-    }
-    const hires = this.sqlStorage
-      .exec<{ role: string }>(
-        "SELECT role FROM roster WHERE status = 'active'",
-      )
-      .toArray();
+			commitStrategicPath: tool({
+				description:
+					"Record a new strategic_path version. Auto-increments version. Status starts as 'pending_approval'.",
+				inputSchema: z.object({
+					theme: z.string().min(1),
+					narrative: z.record(z.string(), z.unknown()),
+					generatedBy: z.string().min(1),
+				}),
+				execute: async ({ theme, narrative, generatedBy }) => {
+					self.ensureSchema();
+					const id = crypto.randomUUID();
+					const latest = self.ctx.storage.sql
+						.exec<{ v: number }>(
+							"SELECT COALESCE(MAX(version), 0) as v FROM strategic_path",
+						)
+						.one();
+					const version = latest.v + 1;
+					self.ctx.storage.sql.exec(
+						`INSERT INTO strategic_path
+						 (id, version, theme, narrative_json, status, generated_at, generated_by)
+						 VALUES (?, ?, ?, ?, 'pending_approval', ?, ?)`,
+						id,
+						version,
+						theme,
+						JSON.stringify(narrative),
+						Date.now(),
+						generatedBy,
+					);
+					return { id, version };
+				},
+			}),
 
-    for (const { role } of hires) {
-      if (!(role in ROLE_REGISTRY)) {
-        console.warn(
-          `[CMO ${userId}] roster has unknown role "${role}"; skipping`,
-        );
-        continue;
-      }
-      const entry = ROLE_REGISTRY[role as RoleSlug];
-      // The `Env` interface only declares bindings that are currently
-      // configured in wrangler.jsonc (CMO + future S3/S4 additions).
-      // Indexing by an arbitrary string (entry.binding) needs an explicit
-      // widening cast — the lookup result is always validated against
-      // `undefined` below before use.
-      const binding = (this.bindings as unknown as Record<string, unknown>)[
-        entry.binding
-      ] as DurableObjectNamespace<McpAgent> | undefined;
-      if (!binding) {
-        console.warn(
-          `[CMO ${userId}] role "${role}" hired but env binding "${entry.binding}" is not configured; ` +
-            `skipping. (Likely the employee's DO class isn't deployed yet.)`,
-        );
-        continue;
-      }
-      try {
-        await this.addMcpServer(
-          mcpServerName(role as RoleSlug, userId),
-          binding,
-          {
-            props: {
-              userId,
-              caller: "cmo" as const,
-            },
-          },
-        );
-      } catch (err) {
-        // RPC connection failure is non-fatal — the CMO is still usable for
-        // direct founder chat. Failing employees will retry on next onStart.
-        console.error(
-          `[CMO ${userId}] failed to connect to ${role}:`,
-          err,
-        );
-      }
-    }
-  }
+			addPlanItem: tool({
+				description:
+					"Create a plan_item ticket. Use this to enqueue concrete sprint work derived from the strategic plan.",
+				inputSchema: z.object({
+					skill: z.string().min(1),
+					channel: z.enum(["x", "reddit"]),
+					params: z.record(z.string(), z.unknown()),
+					ownerRole: z.string().min(1),
+					scheduledFor: z.number().optional(),
+				}),
+				execute: async ({ skill, channel, params, ownerRole, scheduledFor }) => {
+					self.ensureSchema();
+					const id = crypto.randomUUID();
+					self.ctx.storage.sql.exec(
+						`INSERT INTO plan_items
+						 (id, skill, channel, params_json, status, owner_role, scheduled_for)
+						 VALUES (?, ?, ?, ?, 'pending', ?, ?)`,
+						id,
+						skill,
+						channel,
+						JSON.stringify(params),
+						ownerRole,
+						scheduledFor ?? null,
+					);
+					return { id };
+				},
+			}),
 
-  async init(): Promise<void> {
-    if (this._toolsRegistered) return;
-    this._toolsRegistered = true;
-    // S2.1: chat tool — founder's primary entrypoint.
-    registerChatTool(this);
-    // S2.2: conversation + roster management.
-    registerConversationTools(this);
-    registerRosterTools(this);
-    // S2.4: CMO → employee delegation + shared-state RPC surface
-    //   (per spec §6.1 invariant #1: CMO SQLite is the per-team source of
-    //   truth; employees write to it ONLY via these tools).
-    registerDelegationTools(this);
-    registerSharedStateTools(this);
-    // Task 5 (spec 2026-05-15): activity-feed seed-replay tool. The web
-    // client calls this on mount + after WS reconnect to backfill the
-    // feed before the live stream takes over.
-    registerGetRecentActivityTool(this);
-  }
+			queryPlanItems: tool({
+				description:
+					"List plan_items, optionally filtered by status and owner_role. Defaults to oldest-scheduled first.",
+				inputSchema: z.object({
+					status: z.string().optional(),
+					ownerRole: z.string().optional(),
+					limit: z.number().int().positive().max(200).default(50),
+				}),
+				execute: async ({ status, ownerRole, limit }) => {
+					self.ensureSchema();
+					let q =
+						"SELECT id, skill, channel, params_json, status, owner_role, scheduled_for, started_at, completed_at FROM plan_items WHERE 1=1";
+					const bindings: unknown[] = [];
+					if (status) {
+						q += " AND status = ?";
+						bindings.push(status);
+					}
+					if (ownerRole) {
+						q += " AND owner_role = ?";
+						bindings.push(ownerRole);
+					}
+					q +=
+						" ORDER BY scheduled_for IS NULL, scheduled_for ASC, plan_version ASC LIMIT ?";
+					bindings.push(limit);
+					return self.ctx.storage.sql
+						.exec(q, ...(bindings as SqlStorageValue[]))
+						.toArray();
+				},
+			}),
 
-  /**
-   * Route `/internal/*` HTTP traffic to our private handlers; everything
-   * else falls through to McpAgent's own `fetch()` (so MCP transport
-   * routes like `/mcp` still work when the Worker entry forwards them).
-   *
-   * All `/internal/*` endpoints are gated on the `x-shipflare-internal: 1`
-   * header. The Worker entry (S2.6) sets this for Service-Binding-
-   * initiated traffic; Cloudflare's network layer rejects forged versions
-   * of the header from public clients. The 403 here is a belt-and-braces
-   * check — only internal CF traffic should ever reach these paths.
-   */
-  async fetch(request: Request): Promise<Response> {
-    const url = new URL(request.url);
+			updatePlanItem: tool({
+				description:
+					"Update a plan_item's status and optional output payload. Use when reporting completion or failure.",
+				inputSchema: z.object({
+					id: z.string().min(1),
+					status: z.enum([
+						"pending",
+						"in_progress",
+						"completed",
+						"failed",
+						"cancelled",
+					]),
+					output: z.record(z.string(), z.unknown()).optional(),
+				}),
+				execute: async ({ id, status, output }) => {
+					self.ensureSchema();
+					const now = Date.now();
+					const result = self.ctx.storage.sql.exec(
+						`UPDATE plan_items SET
+						   status = ?,
+						   output_json = ?,
+						   started_at = COALESCE(started_at, CASE WHEN ? = 'in_progress' THEN ? END),
+						   completed_at = CASE WHEN ? IN ('completed','failed','cancelled') THEN ? ELSE completed_at END
+						 WHERE id = ?`,
+						status,
+						output ? JSON.stringify(output) : null,
+						status,
+						now,
+						status,
+						now,
+						id,
+					);
+					if (result.rowsWritten === 0) {
+						throw new Error(`plan_item not found: ${id}`);
+					}
+					return { id, status };
+				},
+			}),
 
-    const internal = request.headers.get("x-shipflare-internal") === "1";
-    if (!internal && url.pathname.startsWith("/internal/")) {
-      return new Response("forbidden", { status: 403 });
-    }
+			cancelPlanItem: tool({
+				description:
+					"Cancel an in-flight plan_item by id. Flips status to 'cancelled' and stamps completed_at. Throws if already terminal.",
+				inputSchema: z.object({
+					id: z.string().min(1),
+				}),
+				execute: async ({ id }) => {
+					self.ensureSchema();
+					const now = Date.now();
+					const existing = self.ctx.storage.sql
+						.exec<{ id: string; status: string }>(
+							"SELECT id, status FROM plan_items WHERE id = ?",
+							id,
+						)
+						.toArray();
+					const row = existing[0];
+					if (!row) {
+						throw new Error(`plan_item not found: ${id}`);
+					}
+					if (
+						row.status === "completed" ||
+						row.status === "failed" ||
+						row.status === "cancelled"
+					) {
+						throw new Error(
+							`plan_item ${id} is already terminal (${row.status}); cannot cancel`,
+						);
+					}
+					self.ctx.storage.sql.exec(
+						`UPDATE plan_items
+						 SET status = 'cancelled', completed_at = ?
+						 WHERE id = ?`,
+						now,
+						id,
+					);
+					return { id, status: "cancelled" as const };
+				},
+			}),
 
-    if (url.pathname === "/internal/init") {
-      return this.handleInit(request);
-    }
-    if (url.pathname === "/internal/peer-dm-shadow") {
-      return this.handlePeerShadow(request);
-    }
-    if (url.pathname === "/internal/cron-tick") {
-      return this.handleCronTick(request);
-    }
-    if (url.pathname === "/internal/push-subscribe") {
-      return this.handlePushSubscribe(request);
-    }
-    if (url.pathname === "/internal/destroy") {
-      return this.handleDestroy();
-    }
-    if (url.pathname === "/internal/commit-strategic-path") {
-      return this.handleCommitStrategicPath(request);
-    }
-    if (url.pathname === "/internal/log-activity") {
-      return this.handleLogActivity(request);
-    }
+			approveDraft: tool({
+				description:
+					"Approve a draft by its draftId. Marks the approval_queue row decided='approved'.",
+				inputSchema: z.object({
+					draftId: z.string().min(1),
+				}),
+				execute: async ({ draftId }) => {
+					self.ensureSchema();
+					const result = self.ctx.storage.sql.exec(
+						`UPDATE approval_queue
+						 SET decided_at = ?, decision = 'approved'
+						 WHERE draft_id = ?`,
+						Date.now(),
+						draftId,
+					);
+					if (result.rowsWritten === 0) {
+						throw new Error(`draft not in approval_queue: ${draftId}`);
+					}
+					return { draftId, decision: "approved" as const };
+				},
+			}),
 
-    // Fall through to McpAgent's default fetch (handles /mcp, WebSocket
-    // upgrades, etc. — S2.6 routes /mcp before this DO sees it; this is
-    // just a safety net).
-    return super.fetch(request);
-  }
+			rejectDraft: tool({
+				description:
+					"Reject a draft by its draftId. Marks the approval_queue row decided='rejected'.",
+				inputSchema: z.object({
+					draftId: z.string().min(1),
+					// reason is parsed but not persisted until approval_queue.reason column lands
+					reason: z.string().max(500).optional(),
+				}),
+				execute: async ({ draftId }) => {
+					self.ensureSchema();
+					const result = self.ctx.storage.sql.exec(
+						`UPDATE approval_queue
+						 SET decided_at = ?, decision = 'rejected'
+						 WHERE draft_id = ?`,
+						Date.now(),
+						draftId,
+					);
+					if (result.rowsWritten === 0) {
+						throw new Error(`draft not in approval_queue: ${draftId}`);
+					}
+					return { draftId, decision: "rejected" as const };
+				},
+			}),
 
-  /**
-   * Idempotent first-login hook. Called from `apps/web`'s Better Auth
-   * `databaseHooks.user.create.after` after a fresh user row lands in D1.
-   *
-   * Body: `{ email: string, githubLogin: string | null }`
-   *
-   * Effects (once, on first call):
-   *  - Seeds `founder_context` with email + githubLogin
-   *  - Hires every `ROLE_REGISTRY` entry where `defaultActive=true`
-   *    (excluding `cmo` — it's implicit; the CMO IS the DO)
-   *  - Re-runs `connectEmployees()` so the freshly-hired roles connect
-   *    now, without waiting for the next cold-start
-   *
-   * Idempotency: subsequent calls return `already_initialized` with
-   * status 200 and DO NOT overwrite existing rows. We gate on
-   * `founder_context` row count — if there's already at least one row,
-   * we've initialized before.
-   */
-  private async handleInit(request: Request): Promise<Response> {
-    const ctxCount = this.sqlStorage
-      .exec<{ c: number }>("SELECT COUNT(*) as c FROM founder_context")
-      .one().c;
-    if (ctxCount > 0) {
-      return new Response("already_initialized", { status: 200 });
-    }
+			queryDrafts: tool({
+				description:
+					"List drafts (typically pending approval) from the approval_queue table.",
+				inputSchema: z.object({
+					status: z
+						.enum(["drafting", "ready", "posted", "failed", "rejected"])
+						.default("ready"),
+					limit: z.number().int().min(1).max(200).default(50),
+				}),
+				execute: async ({ limit }) => {
+					self.ensureSchema();
+					// The post-rewrite path reads drafts directly from approval_queue
+					// (CMO is the sole writer post-Phase-5). The legacy MCP tool RPC'd
+					// to SMM.list_drafts; that path is gone alongside the McpAgent
+					// surface. The `status` filter is accepted for forward-compat but
+					// not yet wired — approval_queue.decision (not status) is the
+					// authoritative state, and SMM-side draft mirroring is a Task 5.1c
+					// concern.
+					return self.ctx.storage.sql
+						.exec(
+							`SELECT id, draft_id, employee, kind, channel, preview, created_at, decided_at, decision
+							 FROM approval_queue
+							 ORDER BY created_at DESC
+							 LIMIT ?`,
+							limit,
+						)
+						.toArray();
+				},
+			}),
 
-    const body = (await request.json()) as {
-      email: string;
-      githubLogin: string | null;
-    };
-    const now = Date.now();
+			rememberThis: tool({
+				description:
+					"Save a fact / preference to long-term memory. Will be injected into every future conversation. Opt-in; founder confirms via the chat UI.",
+				inputSchema: z.object({
+					content: z.string().min(1).max(2000),
+					sourceConversationId: z.string().optional(),
+					sourceMessageTs: z.number().int().optional(),
+				}),
+				execute: async ({ content, sourceConversationId, sourceMessageTs }) => {
+					self.ensureSchema();
+					const id = crypto.randomUUID();
+					self.ctx.storage.sql.exec(
+						`INSERT INTO cross_conversation_memory
+						   (id, content, source_conversation_id, source_message_ts, added_at, active)
+						 VALUES (?, ?, ?, ?, ?, 1)`,
+						id,
+						content,
+						sourceConversationId ?? null,
+						sourceMessageTs ?? null,
+						Date.now(),
+					);
+					return { id, ok: true as const };
+				},
+			}),
 
-    this.sqlStorage.exec(
-      "INSERT INTO founder_context (key, value) VALUES (?, ?)",
-      "email",
-      body.email,
-    );
-    if (body.githubLogin) {
-      this.sqlStorage.exec(
-        "INSERT INTO founder_context (key, value) VALUES (?, ?)",
-        "githubLogin",
-        body.githubLogin,
-      );
-    }
+			forgetThis: tool({
+				description:
+					"Deactivate a memory entry (soft delete; keeps audit trail).",
+				inputSchema: z.object({
+					id: z.string().min(1),
+				}),
+				execute: async ({ id }) => {
+					self.ensureSchema();
+					const result = self.ctx.storage.sql.exec(
+						"UPDATE cross_conversation_memory SET active = 0 WHERE id = ?",
+						id,
+					);
+					if (result.rowsWritten === 0) {
+						throw new Error(`memory not found: ${id}`);
+					}
+					return { id, ok: true as const };
+				},
+			}),
 
-    // Hire all defaultActive roles from ROLE_REGISTRY (excluding cmo —
-    // implicit). The cast on the entries iterator is safe: ROLE_REGISTRY
-    // is `as const satisfies Record<string, RoleEntry>` so the value type
-    // is `(typeof ROLE_REGISTRY)[RoleSlug]` for every key.
-    for (const [role, entry] of Object.entries(ROLE_REGISTRY) as Array<
-      [RoleSlug, (typeof ROLE_REGISTRY)[RoleSlug]]
-    >) {
-      if (role === "cmo") continue;
-      if (!entry.defaultActive) continue;
-      this.sqlStorage.exec(
-        `INSERT INTO roster (role, hired_at, status) VALUES (?, ?, 'active')`,
-        role,
-        now,
-      );
-    }
+			queryMemory: tool({
+				description: "List active long-term memories, newest first.",
+				inputSchema: z.object({
+					limit: z.number().int().positive().max(100).default(50),
+				}),
+				execute: async ({ limit }) => {
+					self.ensureSchema();
+					return self.ctx.storage.sql
+						.exec<{
+							id: string;
+							content: string;
+							added_at: number;
+							source_conversation_id: string | null;
+						}>(
+							`SELECT id, content, added_at, source_conversation_id
+							 FROM cross_conversation_memory
+							 WHERE active = 1
+							 ORDER BY added_at DESC
+							 LIMIT ?`,
+							limit,
+						)
+						.toArray();
+				},
+			}),
 
-    // Connect freshly-hired employees now (don't wait for cold-start).
-    // RPC dial-up errors are non-fatal — init has already seeded local
-    // state; the next onStart will retry connections.
-    try {
-      await this.connectEmployees();
-    } catch (err) {
-      console.error(`[CMO init] connectEmployees failed during init:`, err);
-    }
+			queryAgentTranscript: tool({
+				description:
+					"List recent employee_log entries authored by the given role, newest first. Useful for reviewing what a colleague has been doing.",
+				inputSchema: z.object({
+					role: z.string().min(1),
+					limit: z.number().int().positive().max(200).default(100),
+				}),
+				execute: async ({ role, limit }) => {
+					self.ensureSchema();
+					return self.ctx.storage.sql
+						.exec<{
+							id: number;
+							conversation_id: string | null;
+							from_role: string;
+							kind: string;
+							summary: string | null;
+							payload_json: string | null;
+							ts: number;
+						}>(
+							`SELECT id, conversation_id, from_role, kind, summary, payload_json, ts
+							 FROM employee_log
+							 WHERE from_role = ?
+							 ORDER BY ts DESC
+							 LIMIT ?`,
+							role,
+							limit,
+						)
+						.toArray();
+				},
+			}),
+		};
+	}
 
-    return new Response("initialized", { status: 200 });
-  }
+	/**
+	 * Route `/internal/*` HTTP traffic to our private handlers; everything
+	 * else falls through to AIChatAgent's own `fetch()` (which handles the
+	 * chat WebSocket transport and the agent-tool RPC path).
+	 *
+	 * All `/internal/*` endpoints are gated on the `x-shipflare-internal: 1`
+	 * header. The Worker entry sets this for Service-Binding-initiated
+	 * traffic; Cloudflare's network layer rejects forged versions of the
+	 * header from public clients. The 403 here is a belt-and-braces check —
+	 * only internal CF traffic should ever reach these paths.
+	 */
+	async fetch(request: Request): Promise<Response> {
+		const url = new URL(request.url);
+		const internal = request.headers.get("x-shipflare-internal") === "1";
+		if (!internal && url.pathname.startsWith("/internal/")) {
+			return new Response("forbidden", { status: 403 });
+		}
 
-  /**
-   * Peer-DM shadow log — Spec §6.1 invariant #2.
-   *
-   * When employee A calls employee B via RPC (e.g. SMM asks Copywriter
-   * for a rewrite), A also POSTs a quiet shadow message to the CMO via
-   * this endpoint so the CMO has visibility into peer-DMs WITHOUT being
-   * woken every time peers chat. The CMO picks these up on its next
-   * natural wake (founder message, cron tick, etc.).
-   *
-   * Body: `{ conversationId?: string, fromRole: string, toRole: string,
-   *          tool: string, summary: string, payload?: unknown }`
-   *
-   * **Must not** trigger any LLM call or broadcast. Quiet log append only.
-   */
-  private async handlePeerShadow(request: Request): Promise<Response> {
-    const body = (await request.json()) as {
-      conversationId?: string;
-      fromRole: string;
-      toRole: string;
-      tool: string;
-      summary: string;
-      payload?: unknown;
-    };
-    this.sqlStorage.exec(
-      `INSERT INTO employee_log
-         (conversation_id, from_role, kind, summary, payload_json, ts, notified_founder)
-       VALUES (?, ?, 'peer_dm_shadow', ?, ?, ?, 0)`,
-      body.conversationId ?? null,
-      body.fromRole,
-      body.summary,
-      JSON.stringify({
-        to: body.toRole,
-        tool: body.tool,
-        payload: body.payload,
-      }),
-      Date.now(),
-    );
-    return new Response("logged", { status: 200 });
-  }
+		if (url.pathname === "/internal/init") {
+			this.ensureSchema();
+			return this.handleInit(request);
+		}
+		if (url.pathname === "/internal/peer-dm-shadow") {
+			this.ensureSchema();
+			return this.handlePeerShadow(request);
+		}
+		if (url.pathname === "/internal/cron-tick") {
+			this.ensureSchema();
+			return this.handleCronTick();
+		}
+		if (url.pathname === "/internal/push-subscribe") {
+			this.ensureSchema();
+			return this.handlePushSubscribe(request);
+		}
+		if (url.pathname === "/internal/destroy") {
+			return this.handleDestroy();
+		}
+		if (url.pathname === "/internal/commit-strategic-path") {
+			this.ensureSchema();
+			return this.handleCommitStrategicPath(request);
+		}
 
-  /**
-   * Cron tick — called from `apps/core`'s `scheduled()` handler on the
-   * cron trigger. Currently fans out to SMM's inbound-sweep tool if SMM
-   * is connected; otherwise it's a no-op (SMM lands in S4).
-   *
-   * We never throw — cron should be self-healing. Failures get logged
-   * and a non-2xx-safe `200` body string identifies the case (the
-   * caller, a Worker's `scheduled()` handler, won't read the body but
-   * does benefit from a non-throw).
-   */
-  private async handleCronTick(_request: Request): Promise<Response> {
-    const userId = this.props?.userId;
-    if (!userId) {
-      return new Response("no userId in props", { status: 200 });
-    }
+		return super.fetch(request);
+	}
 
-    const smmServerName = mcpServerName("social-media-manager", userId);
-    const servers = this.mcp.listServers();
-    const smm = servers.find((s) => s.name === smmServerName);
-    if (!smm) {
-      // SMM not connected (not hired, or S4 not landed yet). Silent skip.
-      return new Response("noop:smm_not_connected", { status: 200 });
-    }
+	/**
+	 * Idempotent first-login hook. Called from `apps/web`'s Better Auth
+	 * `databaseHooks.user.create.after` after a fresh user row lands in D1.
+	 *
+	 * Body: `{ email: string, githubLogin: string | null }`
+	 *
+	 * Effects (once, on first call):
+	 *  - Seeds `founder_context` with email + githubLogin.
+	 *
+	 * Roster seeding was retired in Task 5.1b — `EMPLOYEE_REGISTRY` is now
+	 * the static org chart and all peers are always available via the
+	 * `consult` tool. The roster table is gone from `applyCmoSchema`.
+	 *
+	 * Idempotency: subsequent calls return `already_initialized` without
+	 * overwriting existing rows. We gate on `founder_context` row count.
+	 */
+	private async handleInit(request: Request): Promise<Response> {
+		const ctxCount = this.ctx.storage.sql
+			.exec<{ c: number }>("SELECT COUNT(*) as c FROM founder_context")
+			.one().c;
+		if (ctxCount > 0) {
+			return new Response("already_initialized", { status: 200 });
+		}
 
-    try {
-      await this.mcp.callTool({
-        serverId: smm.id,
-        name: "findThreadsViaXai",
-        arguments: { platform: "x", intent: "hourly-sweep" },
-      });
-    } catch (err) {
-      console.error(`[CMO cron-tick ${userId}] SMM call failed:`, err);
-      return new Response("err:smm_call_failed", { status: 200 });
-    }
-    return new Response("ticked", { status: 200 });
-  }
+		const body = (await request.json()) as {
+			email: string;
+			githubLogin: string | null;
+		};
 
-  /**
-   * P2-F — Web push subscription persistence.
-   *
-   * Browser → `/api/push/subscribe` (apps/web, session-gated) → this route
-   * via Service Binding. We store the subscription so any push trigger
-   * inside the CMO DO can later call `sendPushToFounder()` and reach
-   * every active browser the founder enabled notifications in.
-   *
-   * Body: `{ endpoint, p256dh, auth }`.
-   *
-   * Endpoint is the primary key — re-subscribing from the same browser
-   * yields the same endpoint, so an UPSERT on conflict refreshes the keys
-   * and clears `last_error`. Different browser / device → different
-   * endpoint → separate row.
-   */
-  private async handlePushSubscribe(request: Request): Promise<Response> {
-    let body: PushSubscriptionRow;
-    try {
-      body = (await request.json()) as PushSubscriptionRow;
-    } catch {
-      return new Response("invalid json", { status: 400 });
-    }
-    if (
-      typeof body.endpoint !== "string" ||
-      typeof body.p256dh !== "string" ||
-      typeof body.auth !== "string" ||
-      body.endpoint.length === 0
-    ) {
-      return new Response("invalid subscription", { status: 400 });
-    }
-    this.sqlStorage.exec(
-      `INSERT INTO push_subscriptions (endpoint, p256dh, auth, subscribed_at)
-       VALUES (?, ?, ?, ?)
-       ON CONFLICT(endpoint) DO UPDATE SET
-         p256dh = excluded.p256dh,
-         auth = excluded.auth,
-         last_error = NULL`,
-      body.endpoint,
-      body.p256dh,
-      body.auth,
-      Date.now(),
-    );
-    return new Response("subscribed", { status: 200 });
-  }
+		this.ctx.storage.sql.exec(
+			"INSERT INTO founder_context (key, value) VALUES (?, ?)",
+			"email",
+			body.email,
+		);
+		if (body.githubLogin) {
+			this.ctx.storage.sql.exec(
+				"INSERT INTO founder_context (key, value) VALUES (?, ?)",
+				"githubLogin",
+				body.githubLogin,
+			);
+		}
 
-  /**
-   * Wipe all per-DO SQLite tables for this user. Called from `/api/account`
-   * DELETE (via the apps/web service-binding) as part of account deletion.
-   *
-   * Best-effort — the D1 hard-delete of the user row fires regardless of
-   * whether this succeeds. The DO is recreated lazily on next access (it will
-   * just be empty). The `x-shipflare-internal: 1` gate is enforced by the
-   * caller's `fetch()` before this handler is reached.
-   */
-  private handleDestroy(): Response {
-    const tables = this.sqlStorage
-      .exec<{ name: string }>(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
-      )
-      .toArray();
-    for (const t of tables) {
-      this.sqlStorage.exec(`DROP TABLE IF EXISTS "${t.name}"`);
-    }
-    return new Response("destroyed", { status: 200 });
-  }
+		return new Response("initialized", { status: 200 });
+	}
 
-  /**
-   * Onboarding commit — writes a new strategic_path version from the
-   * onboarding flow directly into CMO SQLite, bypassing the MCP tool
-   * round-trip. This mirrors the `commitStrategicPath` MCP tool
-   * (see `tools/shared-state.ts`) but is triggered via Service Binding
-   * from `apps/web`'s `/api/onboarding/commit` route.
-   *
-   * Body: `{ theme: string, narrative: Record<string, unknown>, generatedBy: string }`
-   *
-   * Returns: `{ id: string, version: number }`
-   */
-  private async handleCommitStrategicPath(
-    request: Request,
-  ): Promise<Response> {
-    if (request.headers.get("x-shipflare-internal") !== "1") {
-      return new Response("forbidden", { status: 403 });
-    }
-    const body = (await request.json()) as {
-      theme: string;
-      narrative: Record<string, unknown>;
-      generatedBy: string;
-    };
-    const id = crypto.randomUUID();
-    const latest = this.sqlStorage
-      .exec<{ v: number }>(
-        "SELECT COALESCE(MAX(version), 0) as v FROM strategic_path",
-      )
-      .one();
-    const version = latest.v + 1;
-    this.sqlStorage.exec(
-      `INSERT INTO strategic_path
-         (id, version, theme, narrative_json, status, generated_at, generated_by)
-       VALUES (?, ?, ?, ?, 'pending_approval', ?, ?)`,
-      id,
-      version,
-      body.theme,
-      JSON.stringify(body.narrative),
-      Date.now(),
-      body.generatedBy,
-    );
-    return Response.json({ id, version });
-  }
+	/**
+	 * Peer-DM shadow log — Spec §6.1 invariant #2.
+	 *
+	 * When peer A wants the CMO to know it consulted peer B (e.g. for
+	 * audit purposes), it POSTs here. We append to `employee_log` and
+	 * return; this handler MUST NOT trigger `onChatMessage`. CMO picks
+	 * up shadow rows on its next natural wake.
+	 */
+	private async handlePeerShadow(request: Request): Promise<Response> {
+		const body = (await request.json()) as {
+			conversationId?: string;
+			fromRole: string;
+			toRole: string;
+			tool: string;
+			summary: string;
+			payload?: unknown;
+		};
+		this.ctx.storage.sql.exec(
+			`INSERT INTO employee_log
+			   (conversation_id, from_role, kind, summary, payload_json, ts, notified_founder)
+			 VALUES (?, ?, 'peer_dm_shadow', ?, ?, ?, 0)`,
+			body.conversationId ?? null,
+			body.fromRole,
+			body.summary,
+			JSON.stringify({
+				to: body.toRole,
+				tool: body.tool,
+				payload: body.payload,
+			}),
+			Date.now(),
+		);
+		return new Response("logged", { status: 200 });
+	}
 
-  /**
-   * Cross-DO activity ingest — spec 2026-05-15-agent-activity-feed-design §5.2.
-   *
-   * Sub-agents (HoG, SMM, onboarding, etc.) fire-and-forget POST
-   * `ActivityEventInput` payloads here via Service Binding. We validate
-   * with the shared Zod schema, then route through the single sanctioned
-   * writer (`emitActivity`) so the row lands in `activity_events` AND
-   * the WebSocket broadcast fans out to every connected /activity client.
-   *
-   * Body: `ActivityEventInput` (JSON).
-   *
-   * Returns 204 on success, 400 on validation failure, 405 on non-POST.
-   * The `x-shipflare-internal: 1` gate is enforced by the outer `fetch()`
-   * pre-check (lines 205-208) — no need to repeat it here.
-   */
-  private async handleLogActivity(request: Request): Promise<Response> {
-    if (request.method !== "POST") {
-      return new Response("method not allowed", { status: 405 });
-    }
-    let body: unknown;
-    try {
-      body = await request.json();
-    } catch {
-      return new Response("invalid json", { status: 400 });
-    }
-    const parsed = ActivityEventInputSchema.safeParse(body);
-    if (!parsed.success) {
-      return new Response(`invalid event: ${parsed.error.message}`, {
-        status: 400,
-      });
-    }
-    await emitActivity(this, parsed.data);
-    return new Response(null, { status: 204 });
-  }
+	/**
+	 * Cron tick — called from `apps/core`'s `scheduled()` handler on every
+	 * cron trigger.
+	 *
+	 * Post-Phase-5 status: this is a stub. The legacy McpAgent CMO fanned
+	 * out to SMM's `findThreadsViaXai` via in-process MCP RPC; with peers
+	 * now AIChatAgents reached only via `consult`, the cron-tick driven
+	 * fan-out is no longer wired. Task 5.1c brings the sweep back in by
+	 * re-implementing the deleted SMM tools as CMO-side LLM tools that
+	 * the cron tick can drive via a synthetic chat turn.
+	 *
+	 * Until then this returns 200 noop so the Worker's `scheduled()` loop
+	 * stays self-healing and tests that don't depend on the fan-out can
+	 * still assert "tick happened" semantics.
+	 */
+	private handleCronTick(): Response {
+		return new Response("noop:cron-tick-stub", { status: 200 });
+	}
 
-  /**
-   * P2-F — Send a Web Push notification to every active subscription
-   * for this founder.
-   *
-   * Returns `{ sent, failed }`. On 404 / 410 from the push service the
-   * subscription is dead (browser un-subscribed) and we delete the row.
-   * Other non-2xx records `last_error` so a future inspection can decide
-   * to retry or evict.
-   *
-   * Phase 2 P2-F caveat: the payload is currently delivered as an empty
-   * body (the service worker shows a generic "Check ShipFlare" message
-   * regardless of `payload.title` / `payload.body`). Encrypted payload
-   * support arrives in P2-F.2 — once that lands, `sendWebPush` will
-   * deliver the actual title/body without changes to this method.
-   *
-   * Public on the class so wiring it into draft-ready hooks
-   * (`process-replies-batch.ts`, `process-posts-batch.ts`, etc. — see
-   * P2-F.2 TODOs) doesn't need a new MCP tool.
-   */
-  async sendPushToFounder(
-    payload: PushPayload,
-  ): Promise<{ sent: number; failed: number }> {
-    const subs = this.sqlStorage
-      .exec<PushSubscriptionRow>(
-        "SELECT endpoint, p256dh, auth FROM push_subscriptions",
-      )
-      .toArray();
+	/**
+	 * P2-F — Web push subscription persistence.
+	 *
+	 * Browser → `/api/push/subscribe` (apps/web, session-gated) → this
+	 * route via Service Binding. Endpoint is the primary key — re-subscribe
+	 * from the same browser yields the same endpoint, so an UPSERT
+	 * refreshes the keys + clears `last_error`.
+	 */
+	private async handlePushSubscribe(request: Request): Promise<Response> {
+		let body: PushSubscriptionRow;
+		try {
+			body = (await request.json()) as PushSubscriptionRow;
+		} catch {
+			return new Response("invalid json", { status: 400 });
+		}
+		if (
+			typeof body.endpoint !== "string" ||
+			typeof body.p256dh !== "string" ||
+			typeof body.auth !== "string" ||
+			body.endpoint.length === 0
+		) {
+			return new Response("invalid subscription", { status: 400 });
+		}
+		this.ctx.storage.sql.exec(
+			`INSERT INTO push_subscriptions (endpoint, p256dh, auth, subscribed_at)
+			 VALUES (?, ?, ?, ?)
+			 ON CONFLICT(endpoint) DO UPDATE SET
+			   p256dh = excluded.p256dh,
+			   auth = excluded.auth,
+			   last_error = NULL`,
+			body.endpoint,
+			body.p256dh,
+			body.auth,
+			Date.now(),
+		);
+		return new Response("subscribed", { status: 200 });
+	}
 
-    const vapid = {
-      publicKey: this.bindings.VAPID_PUBLIC,
-      privateKey: this.bindings.VAPID_PRIVATE,
-      subject: this.bindings.VAPID_SUBJECT || "mailto:hello@shipflare.com",
-    };
+	/**
+	 * Wipe all per-DO SQLite tables for this user. Called from
+	 * `/api/account` DELETE (via apps/web service binding) as part of
+	 * account deletion. Best-effort — D1 hard-delete fires regardless.
+	 *
+	 * Drops every table that isn't an sqlite internal — covers both
+	 * applyCmoSchema tables and AIChatAgent's chat-history tables.
+	 */
+	private handleDestroy(): Response {
+		const tables = this.ctx.storage.sql
+			.exec<{ name: string }>(
+				"SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+			)
+			.toArray();
+		for (const t of tables) {
+			this.ctx.storage.sql.exec(`DROP TABLE IF EXISTS "${t.name}"`);
+		}
+		return new Response("destroyed", { status: 200 });
+	}
 
-    let sent = 0;
-    let failed = 0;
-    for (const sub of subs) {
-      try {
-        const result = await sendWebPush(sub, payload, vapid);
-        if (result.ok) {
-          sent++;
-          this.sqlStorage.exec(
-            "UPDATE push_subscriptions SET last_used = ?, last_error = NULL WHERE endpoint = ?",
-            Date.now(),
-            sub.endpoint,
-          );
-        } else {
-          failed++;
-          if (result.shouldDelete) {
-            this.sqlStorage.exec(
-              "DELETE FROM push_subscriptions WHERE endpoint = ?",
-              sub.endpoint,
-            );
-          } else {
-            this.sqlStorage.exec(
-              "UPDATE push_subscriptions SET last_error = ? WHERE endpoint = ?",
-              String(result.status),
-              sub.endpoint,
-            );
-          }
-        }
-      } catch (err) {
-        failed++;
-        console.error(`[CMO push] send failed for ${sub.endpoint}:`, err);
-        this.sqlStorage.exec(
-          "UPDATE push_subscriptions SET last_error = ? WHERE endpoint = ?",
-          err instanceof Error ? err.message : String(err),
-          sub.endpoint,
-        );
-      }
-    }
-    return { sent, failed };
-  }
+	/**
+	 * Onboarding commit — writes a new strategic_path version from the
+	 * onboarding flow directly into CMO SQLite, bypassing the LLM
+	 * tool-call path. Triggered via Service Binding from `apps/web`'s
+	 * `/api/onboarding/commit` route.
+	 *
+	 * Body: `{ theme: string, narrative: Record<string, unknown>, generatedBy: string }`
+	 *
+	 * Returns: `{ id: string, version: number }`
+	 */
+	private async handleCommitStrategicPath(
+		request: Request,
+	): Promise<Response> {
+		const body = (await request.json()) as {
+			theme: string;
+			narrative: Record<string, unknown>;
+			generatedBy: string;
+		};
+		const id = crypto.randomUUID();
+		const latest = this.ctx.storage.sql
+			.exec<{ v: number }>(
+				"SELECT COALESCE(MAX(version), 0) as v FROM strategic_path",
+			)
+			.one();
+		const version = latest.v + 1;
+		this.ctx.storage.sql.exec(
+			`INSERT INTO strategic_path
+			   (id, version, theme, narrative_json, status, generated_at, generated_by)
+			 VALUES (?, ?, ?, ?, 'pending_approval', ?, ?)`,
+			id,
+			version,
+			body.theme,
+			JSON.stringify(body.narrative),
+			Date.now(),
+			body.generatedBy,
+		);
+		return Response.json({ id, version });
+	}
+
+	/**
+	 * P2-F — Send a Web Push notification to every active subscription for
+	 * this founder. Public so wiring it into draft-ready hooks doesn't need
+	 * a new tool. Returns `{ sent, failed }`.
+	 */
+	async sendPushToFounder(
+		payload: PushPayload,
+	): Promise<{ sent: number; failed: number }> {
+		this.ensureSchema();
+		const subs = this.ctx.storage.sql
+			.exec<PushSubscriptionRow>(
+				"SELECT endpoint, p256dh, auth FROM push_subscriptions",
+			)
+			.toArray();
+
+		const vapid = {
+			publicKey: this.env.VAPID_PUBLIC,
+			privateKey: this.env.VAPID_PRIVATE,
+			subject: this.env.VAPID_SUBJECT || "mailto:hello@shipflare.com",
+		};
+
+		let sent = 0;
+		let failed = 0;
+		for (const sub of subs) {
+			try {
+				const result = await sendWebPush(sub, payload, vapid);
+				if (result.ok) {
+					sent++;
+					this.ctx.storage.sql.exec(
+						"UPDATE push_subscriptions SET last_used = ?, last_error = NULL WHERE endpoint = ?",
+						Date.now(),
+						sub.endpoint,
+					);
+				} else {
+					failed++;
+					if (result.shouldDelete) {
+						this.ctx.storage.sql.exec(
+							"DELETE FROM push_subscriptions WHERE endpoint = ?",
+							sub.endpoint,
+						);
+					} else {
+						this.ctx.storage.sql.exec(
+							"UPDATE push_subscriptions SET last_error = ? WHERE endpoint = ?",
+							String(result.status),
+							sub.endpoint,
+						);
+					}
+				}
+			} catch (err) {
+				failed++;
+				console.error(`[CMO push] send failed for ${sub.endpoint}:`, err);
+				this.ctx.storage.sql.exec(
+					"UPDATE push_subscriptions SET last_error = ? WHERE endpoint = ?",
+					err instanceof Error ? err.message : String(err),
+					sub.endpoint,
+				);
+			}
+		}
+		return { sent, failed };
+	}
 }
