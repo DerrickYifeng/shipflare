@@ -33,7 +33,7 @@ describe("SMM tool find_threads_via_xai", () => {
             { keep: false, score: 0.2, reason: "weak signal" },
           ],
         },
-        { experimental_context: { env: instance.getEnv(), userId } } as never,
+        { experimental_context: { env: instance.bindings, userId } } as never,
       );
       expect(result).toMatchObject({ queued: 1, scanned: 2, platform: "x" });
     });
@@ -64,7 +64,7 @@ describe("SMM tool find_threads_via_xai", () => {
           context: "{}",
           _dryRunPlatformError: "X_MCP not yet deployed",
         },
-        { experimental_context: { env: instance.getEnv(), userId } } as never,
+        { experimental_context: { env: instance.bindings, userId } } as never,
       );
       expect(result).toMatchObject({
         queued: 0, scanned: 0, error: expect.stringContaining("X_MCP"),

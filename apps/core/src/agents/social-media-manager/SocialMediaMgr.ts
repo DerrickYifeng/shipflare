@@ -44,22 +44,19 @@ export class SMM extends AIChatAgent<Env, SMMState> {
 	}
 
 	/**
-	 * Public accessor for peer tools defined in separate files. The
-	 * base-class `env` is `protected`; tools that close over the SMM
-	 * instance need a sanctioned, type-checked entry point.
+	 * Narrow accessors so tool-registration modules (which live outside the
+	 * class and therefore can't see `protected` DurableObject members) can
+	 * reach the raw SQL storage and Worker env. Same pattern as CMO/HoG
+	 * (S2.1 / S3.0) and XMcpAgent/RedditMcpAgent. `sqlStorage` instead of
+	 * `sql` because the parent `Agent` class already exposes a `sql`
+	 * template-tag method; `bindings` instead of `env` because `env` is a
+	 * protected DurableObject member.
 	 */
-	public getEnv(): Env {
-		return this.env;
-	}
-
-	/**
-	 * Public accessor for the DO's SqlStorage. Tools defined in
-	 * separate files (e.g. `tools/find-threads-via-xai.ts`) need this
-	 * to write to `threads_inbox` / `drafts`. Schema is applied via
-	 * `ensureSchema()` in `getTools()` before any tool runs.
-	 */
-	public getSql(): SqlStorage {
+	get sqlStorage(): SqlStorage {
 		return this.ctx.storage.sql;
+	}
+	get bindings(): Env {
+		return this.env;
 	}
 
 	async onChatMessage(onFinish: StreamTextOnFinishCallback<ToolSet>) {

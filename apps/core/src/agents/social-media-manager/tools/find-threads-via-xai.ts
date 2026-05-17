@@ -63,8 +63,8 @@ export function makeFindThreadsViaXaiTool(agent: SMM) {
 		}),
 		execute: async (args) => {
 			const userId = agent.name;
-			const env = agent.getEnv();
-			const sql = agent.getSql();
+			const env = agent.bindings;
+			const sql = agent.sqlStorage;
 			const ctxParsed = parseContext(args.context);
 			const product = ctxParsed.productName ?? "(product not set)";
 			const productDescription = ctxParsed.productDescription ?? "";
