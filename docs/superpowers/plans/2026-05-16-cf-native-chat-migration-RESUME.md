@@ -14,8 +14,17 @@
 **Phase 3 — Skill primitive emits data parts: COMPLETE** (Task 3.1a / 3.1b / 3.1c / 3.2)
 **Phase 4 — Agent orchestration: COMPLETE** (Tasks 4.1, 4.2, 4.3, 4.4a/b/c+d, 4.5a/b, 4.6, 4.7, 4.8)
 **Phase 5 — CMO as AIChatAgent: COMPLETE** (Tasks 5.1a, 5.1b combined-atomic, 5.2+5.3 smoke)
-**Phase 6 — DB cleanup: COMPLETE (no-op)** — `founder_messages` / `activity_events` never lived in D1 (they were per-DO SQLite, dropped by v12 migration); DO migration tags landed inline with the agent rewrites (v10 SMM, v11 HoG, v12 CMO).
-  - Deferred: 4.4e / 4.5e (CMO-side ports of 8 deleted SMM+HoG tools) → fold into "Phase 5.1c" follow-up after Phase 8 (frontend chat) is unblocked.
+**Phase 6 — DB cleanup: COMPLETE (no-op)** — `founder_messages` / `activity_events` never lived in D1; DO migration tags landed inline with the agent rewrites (v10 SMM, v11 HoG, v12 CMO).
+**Phase 7 — External MCP for CMO + OAuth: DEFERRED** — route stubbed to 503 in 5.1b; full wiring deferred (user chose Phase 8 first).
+**Phase 8 — Frontend: COMPLETE** (Tasks 8.1, 8.2, 8.3, 8.4, 8.5, 8.6) — new `/chat` page on useCmoChat + `/api/agent-token` route + 7 part renderers + WS JWT verification + CLAUDE.md New Employee Checklist + Playwright smoke spec (run deferred to Phase 11).
+**Phase 9 — Onboarding plan-build flow: COMPLETE (adapted)** — `plan-build-activity.tsx` simplified to a status card (no useCmoActivity dep). Richer activity viz deferred until onboarding flow is routed through CMO chat.
+**Phase 10 — Delete-list sweep: COMPLETE** — team-desk.tsx refactored to useCmoChat (commit 78339011), then 14 legacy files deleted (useCmoActivity, ActivityTrail, cmo-activity / cmo-ws-token routes, activity-event.ts in shared, etc.). 17 files net.
+
+**Phase 11 — Smoke + cutover: PENDING** — Playwright real-LLM smoke, telemetry verification, PR + merge.
+
+### Open follow-ups not yet addressed
+- 4.4e / 4.5e (CMO-side ports of 8 deleted SMM+HoG tools) — queryDrafts has no source, cron-tick is a noop stub
+- Phase 7 (external MCP + OAuth wrapper) — entire `/external/agents/cmo/<userId>/mcp` route stubbed to 503
 
 ```
 115fcd8 chore: install @cloudflare/ai-chat
