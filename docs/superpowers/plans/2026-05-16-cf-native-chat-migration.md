@@ -300,7 +300,7 @@ Build the Analytics Engine writer. No consumers yet — pure leaf.
 - Create: `apps/core/src/lib/telemetry.ts`
 - Test: `apps/core/test/telemetry.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```typescript
 // apps/core/test/telemetry.test.ts
@@ -346,14 +346,14 @@ describe('writeAgentEvent', () => {
 });
 ```
 
-- [ ] **Step 2: Run test, expect FAIL**
+- [x] **Step 2: Run test, expect FAIL**
 
 ```bash
 pnpm --filter @shipflare/core vitest run test/telemetry.test.ts
 ```
 Expected: FAIL ("Cannot find module ../src/lib/telemetry").
 
-- [ ] **Step 3: Implement `writeAgentEvent`**
+- [x] **Step 3: Implement `writeAgentEvent`**
 
 ```typescript
 // apps/core/src/lib/telemetry.ts
@@ -377,20 +377,20 @@ export function writeAgentEvent(env: { TELEMETRY?: AnalyticsEngineDataset }, eve
 }
 ```
 
-- [ ] **Step 4: Run test, expect PASS**
+- [x] **Step 4: Run test, expect PASS**
 
 ```bash
 pnpm --filter @shipflare/core vitest run test/telemetry.test.ts
 ```
 Expected: PASS (3 tests).
 
-- [ ] **Step 5: Verify types compile**
+- [x] **Step 5: Verify types compile**
 
 ```bash
 pnpm -r exec tsc --noEmit
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/core/src/lib/telemetry.ts apps/core/test/telemetry.test.ts
