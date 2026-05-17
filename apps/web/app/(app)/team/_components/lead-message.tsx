@@ -4,32 +4,29 @@ import { memo, type CSSProperties } from "react";
 import { ROLE_REGISTRY } from "@shipflare/shared";
 import { AgentDot } from "./agent-dot";
 import { MessageMarkdown } from "./message-markdown";
+import { ReasoningPart } from "../../chat/_components/reasoning-part";
+import { ToolInvocation } from "../../chat/_components/tool-invocation";
+import type { ToolInvocationData } from "../../chat/_components/tool-invocation";
+import { NestedAgentRun } from "../../chat/_components/nested-agent-run";
+import { SkillPart } from "../../chat/_components/skill-part";
+import { StepAnchor } from "../../chat/_components/step-anchor";
+import { EMPLOYEE_REGISTRY } from "@/lib/employee-registry-client";
 
 interface LeadMessageProps {
-  /** Slug from ROLE_REGISTRY (cmo / head-of-growth / social-media-manager / …). */
-  from: string;
-  /** Markdown body — may be empty during streaming. */
-  content: string;
-  /** ISO timestamp string. */
-  createdAt: string;
+  /**
+   * UIMessage `parts` array from `useCmoChat`. May contain text,
+   * reasoning, skill markers, step anchors, and tool invocations.
+   */
+  parts: ReadonlyArray<unknown>;
   /** True while chunks are still arriving — appends a soft breathing dot row. */
   streaming?: boolean;
-  /** True when this message is an error result, not normal output. */
-  isError?: boolean;
+  /** Nested-agent run timelines keyed by tool-call id (from `consult` tool). */
+  agentRunsByToolCall: Record<string, unknown[]>;
 }
 
 function displayNameForRole(role: string): string {
   const entry = (ROLE_REGISTRY as Record<string, { displayName: string } | undefined>)[role];
   return entry?.displayName ?? role;
-}
-
-function formatClock(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleTimeString(undefined, {
-    hour: "numeric",
-    minute: "2-digit",
-  });
 }
 
 const row: CSSProperties = {
@@ -60,22 +57,107 @@ const name: CSSProperties = {
   letterSpacing: "-0.01em",
 };
 
-const time: CSSProperties = {
-  fontFamily: "var(--sf-font-mono)",
-  fontSize: 11,
-  color: "rgba(0, 0, 0, 0.48)",
-  fontVariantNumeric: "tabular-nums",
-};
+function renderPart(
+  part: unknown,
+  index: number,
+  agentRunsByToolCall: Record<string, unknown[]>,
+  streaming: boolean,
+): React.ReactNode {
+  const p = part as Record<string, unknown>;
+  const typeStr = String(p["type"] ?? "");
 
-function LeadMessageImpl({
-  from,
-  content,
-  createdAt,
-  streaming = false,
-  isError = false,
-}: LeadMessageProps) {
-  const role = from || "cmo";
+  if (typeStr === "text") {
+    const text = String(p["text"] ?? "");
+    if (!text) return null;
+    return (
+      <div key={index} style={{ fontSize: 14, color: "var(--sf-fg-1)" }}>
+        <MessageMarkdown source={text} />
+      </div>
+    );
+  }
+
+  if (typeStr === "reasoning") {
+    return (
+      <ReasoningPart
+        key={index}
+        text={String(p["text"] ?? "")}
+        isStreaming={streaming}
+      />
+    );
+  }
+
+  if (typeStr === "data-skill-start" || typeStr === "data-skill-finish") {
+    return (
+      <SkillPart
+        key={index}
+        part={p as unknown as Parameters<typeof SkillPart>[0]["part"]}
+      />
+    );
+  }
+
+  if (typeStr === "data-step") {
+    return (
+      <StepAnchor
+        key={index}
+        part={p as Parameters<typeof StepAnchor>[0]["part"]}
+      />
+    );
+  }
+
+  if (typeStr.startsWith("tool-") || typeStr === "dynamic-tool") {
+    const toolName =
+      typeStr === "dynamic-tool"
+        ? String(p["toolName"] ?? "")
+        : typeStr.replace(/^tool-/, "");
+    const toolCallId = String(p["toolCallId"] ?? "");
+
+    if (toolName === "consult") {
+      const input = p["input"];
+      const employeeId =
+        input && typeof input === "object" && "employee" in input
+          ? String((input as Record<string, unknown>)["employee"] ?? "")
+          : "";
+      const meta = EMPLOYEE_REGISTRY[employeeId];
+      return (
+        <NestedAgentRun
+          key={index}
+          label={meta?.displayName ?? employeeId}
+          childRun={
+            agentRunsByToolCall[toolCallId] as Parameters<
+              typeof NestedAgentRun
+            >[0]["childRun"]
+          }
+        />
+      );
+    }
+
+    const invocation: ToolInvocationData = {
+      toolCallId,
+      toolName,
+      state:
+        (p["state"] as ToolInvocationData["state"]) ?? "input-available",
+      input: p["input"],
+      output: p["output"],
+      errorText:
+        typeof p["errorText"] === "string" ? p["errorText"] : undefined,
+    };
+    return <ToolInvocation key={index} invocation={invocation} />;
+  }
+
+  // Unknown / unrenderable part — fall back to nothing.
+  return null;
+}
+
+function LeadMessageImpl({ parts, streaming = false, agentRunsByToolCall }: LeadMessageProps) {
+  // Team-desk's CMO is the only assistant role surfaced at the top level.
+  // Subagents appear inside <NestedAgentRun> cards via the `consult` tool.
+  const role = "cmo";
   const displayName = displayNameForRole(role);
+
+  const hasAnyText = parts.some((p) => {
+    const part = p as Record<string, unknown>;
+    return part["type"] === "text" && String(part["text"] ?? "").length > 0;
+  });
 
   return (
     <div
@@ -89,28 +171,11 @@ function LeadMessageImpl({
       <div style={body}>
         <div style={header}>
           <span style={name}>{displayName}</span>
-          <time dateTime={createdAt} style={time}>
-            {formatClock(createdAt)}
-          </time>
         </div>
-        {isError ? (
-          <div
-            style={{
-              fontSize: 14,
-              color: "var(--sf-error-ink)",
-              whiteSpace: "pre-wrap",
-              wordBreak: "break-word",
-              fontFamily: "var(--sf-font-text)",
-            }}
-          >
-            {content}
-          </div>
-        ) : content || streaming ? (
-          <div style={{ fontSize: 14, color: "var(--sf-fg-1)" }}>
-            <MessageMarkdown source={content} />
-            {streaming && <StreamingDots />}
-          </div>
-        ) : null}
+        {parts.map((p, i) =>
+          renderPart(p, i, agentRunsByToolCall, streaming),
+        )}
+        {streaming && !hasAnyText && <StreamingDots />}
       </div>
     </div>
   );

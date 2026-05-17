@@ -1,22 +1,20 @@
 "use client";
 
-import { useEffect, useRef, type CSSProperties, type ReactNode } from "react";
-import type { TeamActivityMessage } from "@/hooks/use-team-events";
+import { useEffect, useRef, type CSSProperties } from "react";
+import type { UIMessage } from "ai";
 import { LeadMessage } from "./lead-message";
 import { UserMessage } from "./user-message";
 import { EmptyConversation } from "./empty-conversation";
 import { TypingIndicator } from "./typing-indicator";
 
 interface ConversationProps {
-  messages: TeamActivityMessage[];
+  /** UIMessages from `useCmoChat` (Phase 8). */
+  messages: UIMessage[];
+  /** True while the assistant stream is in flight. */
+  isStreaming: boolean;
+  /** Nested-agent run timelines keyed by tool-call id (from `consult`). */
+  agentRunsByToolCall: Record<string, unknown[]>;
   onPromptSelect?: (prompt: string) => void;
-  /**
-   * Optional slot rendered immediately after each assistant (CMO / lead)
-   * message bubble. Used by `TeamDesk` to inject an `<ActivityTrail>`
-   * scoped to the turn's `parentTurnId`. Returning `null` skips injection
-   * for that message (older messages without a `parentTurnId`).
-   */
-  renderMessageExtras?: (msg: TeamActivityMessage) => ReactNode;
 }
 
 const SCROLL_CONTAINER: CSSProperties = {
@@ -29,32 +27,43 @@ const SCROLL_CONTAINER: CSSProperties = {
   padding: "16px 20px",
 };
 
+function extractText(msg: UIMessage): string {
+  const buf: string[] = [];
+  for (const part of msg.parts as Array<Record<string, unknown>>) {
+    if (part["type"] === "text") {
+      const t = part["text"];
+      if (typeof t === "string") buf.push(t);
+    }
+  }
+  return buf.join("");
+}
+
 export function Conversation({
   messages,
+  isStreaming,
+  agentRunsByToolCall,
   onPromptSelect,
-  renderMessageExtras,
 }: ConversationProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll to bottom when new messages arrive or the last message
-  // grows (streaming chunks landing).
+  // Auto-scroll to bottom when new messages arrive or the last message grows
+  // (streaming chunks landing). We re-trigger on the tail message's textual
+  // length so token deltas still cause scroll.
+  const last = messages[messages.length - 1];
+  const lastText = last ? extractText(last) : "";
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length, messages[messages.length - 1]?.content?.length]);
+  }, [messages.length, lastText.length]);
 
   if (messages.length === 0) {
     return <EmptyConversation onPromptSelect={onPromptSelect} />;
   }
 
-  // Determine if the trailing message is a CMO turn still streaming
-  // with no content yet — that's when we show the typing dots instead
-  // of an empty bubble.
-  const last = messages[messages.length - 1];
+  // Show typing dots when the trailing message is an assistant with no
+  // rendered content yet (parts empty or only an empty text part) and the
+  // stream is still active.
   const showTyping =
-    !!last &&
-    last.type === "agent_text" &&
-    (last.content?.length ?? 0) === 0 &&
-    last.metadata?.streaming === true;
+    !!last && last.role === "assistant" && isStreaming && lastText.length === 0;
 
   return (
     <div
@@ -64,45 +73,42 @@ export function Conversation({
       aria-live="polite"
     >
       {messages.map((msg) => {
-        const isUser = msg.type === "user_prompt";
-        const isError = msg.type === "error";
-        const isStreaming = msg.metadata?.streaming === true;
-
-        if (isUser) {
+        if (msg.role === "user") {
           return (
             <UserMessage
               key={msg.id}
-              content={msg.content ?? ""}
-              createdAt={msg.createdAt}
+              content={extractText(msg)}
+              createdAt={new Date().toISOString()}
             />
           );
         }
 
-        // Skip the empty placeholder when we're rendering the typing
-        // indicator below it.
-        if (
-          showTyping &&
-          msg === last &&
-          (msg.content?.length ?? 0) === 0
-        ) {
-          return null;
+        if (msg.role === "assistant") {
+          // Skip the empty placeholder when we're rendering the typing
+          // indicator below it.
+          if (showTyping && msg === last) return null;
+          const isLast = msg === last;
+          return (
+            <div key={msg.id}>
+              <LeadMessage
+                parts={msg.parts}
+                streaming={isLast && isStreaming}
+                agentRunsByToolCall={agentRunsByToolCall}
+              />
+            </div>
+          );
         }
 
-        const extras = renderMessageExtras?.(msg);
+        // system messages — render as plain text only.
+        const text = extractText(msg);
+        if (!text) return null;
         return (
-          <div key={msg.id}>
-            <LeadMessage
-              from={msg.from ?? "cmo"}
-              content={msg.content ?? ""}
-              createdAt={msg.createdAt}
-              streaming={isStreaming}
-              isError={isError}
-            />
-            {extras}
+          <div key={msg.id} style={{ fontSize: 12, color: "var(--sf-fg-3)", margin: "8px 0" }}>
+            {text}
           </div>
         );
       })}
-      {showTyping && <TypingIndicator role={last.from ?? "cmo"} />}
+      {showTyping && <TypingIndicator role="cmo" />}
       <div ref={bottomRef} aria-hidden="true" />
     </div>
   );

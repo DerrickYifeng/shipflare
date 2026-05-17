@@ -1,12 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { useTeamEvents, type TeamActivityMessage } from "@/hooks/use-team-events";
-import { useCmoActivity } from "@/hooks/use-cmo-activity";
-import { ActivityTrail } from "@/components/activity/activity-trail";
+import { useCmoChat } from "@/hooks/use-cmo-chat";
 import { createCmoClient, type CmoClient } from "@/lib/mcp-client";
 import { useToast } from "@/components/ui/toast";
-import { ROLE_REGISTRY, type ActivityEvent } from "@shipflare/shared";
+import { ROLE_REGISTRY } from "@shipflare/shared";
 import type { TeamUser, RosterEmployee, ConversationMeta, PlanItemRow, DraftRow } from "./types";
 import { LeftRail } from "./left-rail";
 import { Conversation } from "./conversation";
@@ -171,76 +169,24 @@ export function TeamDesk({ user }: TeamDeskProps) {
     };
   }, []);
 
-  // ---- Chat via useTeamEvents ----
-  const handleConversationBootstrapped = useCallback(async (id: string) => {
-    setSelectedConversationId(id);
-    const client = clientRef.current;
-    if (!client) return;
-    try {
-      const convList = await client.listConversations(20);
-      setConversations(convList);
-    } catch {
-      // non-fatal — list will refresh on next user action
-    }
-  }, []);
-
+  // ---- Chat via useCmoChat (CF-native AIChatAgent WebSocket transport) ----
+  //
+  // The new hook owns its own DO transport (separate from `clientRef`,
+  // which is used only for MCP one-shot queries — roster, drafts, plan
+  // items, transcripts). Token-based JWT handshake; auto-reconnect.
+  //
+  // `conversationId` is forwarded so the founder can flip between threads
+  // via the left rail. Until the SDK rebuilds the WS on id change,
+  // re-keying via `useCmoChat`'s `id` arg is enough.
   const {
     messages,
-    sendMessage: _sendMessage,
-    status,
-    error: chatError,
-  } = useTeamEvents({
-    teamId: user.id,
-    conversationId: selectedConversationId,
-    onConversationCreated: handleConversationBootstrapped,
+    sendMessage,
+    isStreaming,
+    agentRunsByToolCall,
+  } = useCmoChat({
+    userId: user.id,
+    conversationId: selectedConversationId ?? undefined,
   });
-
-  // ---- Activity feed (per-turn ActivityTrail under each CMO bubble) ----
-  //
-  // `useCmoActivity` opens a WS to the founder's CMO Durable Object and
-  // streams every emitted ActivityEvent. We filter by the current
-  // conversation so a forgotten subscription on /team doesn't leak events
-  // from a different thread. When nothing is selected we pass a sentinel
-  // `runId` filter that never matches — the hook still opens the WS, but
-  // no events surface, keeping the UI quiet.
-  const activityFilter = useMemo(
-    () =>
-      selectedConversationId
-        ? { conversationId: selectedConversationId }
-        : { runId: "__none__" as const },
-    [selectedConversationId],
-  );
-  const { events: activityEvents } = useCmoActivity(activityFilter);
-
-  // Group events by `parentTurnId` so each assistant bubble's
-  // `renderMessageExtras` slot can look up just its own slice in O(1).
-  const eventsByTurn = useMemo(() => {
-    const map = new Map<string, ActivityEvent[]>();
-    for (const e of activityEvents) {
-      if (!e.parentTurnId) continue;
-      const arr = map.get(e.parentTurnId);
-      if (arr) arr.push(e);
-      else map.set(e.parentTurnId, [e]);
-    }
-    return map;
-  }, [activityEvents]);
-
-  const renderMessageExtras = useCallback(
-    (msg: TeamActivityMessage) => {
-      if (msg.type !== "agent_text" || msg.from !== "cmo") return null;
-      const parentTurnId = (msg.metadata as { parentTurnId?: string } | null)
-        ?.parentTurnId;
-      if (!parentTurnId) return null;
-      const turnEvents = eventsByTurn.get(parentTurnId) ?? [];
-      if (turnEvents.length === 0) return null;
-      return (
-        <div style={{ marginLeft: 38, marginBottom: 14 }}>
-          <ActivityTrail events={turnEvents} />
-        </div>
-      );
-    },
-    [eventsByTurn],
-  );
 
   // Memoised so the useEffect below has a stable dependency. Reads from
   // clientRef.current only, so no closure deps needed.
@@ -277,26 +223,23 @@ export function TeamDesk({ user }: TeamDeskProps) {
     }
   }, []);
 
-  // After each message completion, refresh plan items + drafts.
-  const prevMessageCount = useRef(0);
+  // Refresh plan items + drafts whenever an assistant stream finishes.
+  // `isStreaming` flipping from true → false marks turn completion in the
+  // new hook (replaces the legacy completion / error message types).
+  const wasStreaming = useRef(false);
   useEffect(() => {
-    const newCount = messages.length;
-    if (newCount > prevMessageCount.current && newCount > 0) {
-      prevMessageCount.current = newCount;
-      const lastMsg = messages[messages.length - 1];
-      // Refresh after assistant responds (not after every user message).
-      if (lastMsg && (lastMsg.type === "agent_text" || lastMsg.type === "error")) {
-        void refreshPanelData();
-      }
+    if (wasStreaming.current && !isStreaming) {
+      void refreshPanelData();
     }
-  }, [messages, refreshPanelData]);
+    wasStreaming.current = isStreaming;
+  }, [isStreaming, refreshPanelData]);
 
   // ---- Composer submit ----
   const handleSend = useCallback(
     async (text: string) => {
-      await _sendMessage(text);
+      sendMessage({ text });
     },
-    [_sendMessage],
+    [sendMessage],
   );
 
   // ---- Conversation management ----
@@ -385,9 +328,21 @@ export function TeamDesk({ user }: TeamDeskProps) {
     });
   }, []);
 
+  // ---- Status banner state (derived from the new hook) ----
+  // The legacy `useTeamEvents` exposed `connecting | ready | sending | error`.
+  // `useCmoChat` only exposes `isStreaming`; connection errors surface as
+  // initial CmoClient failures (`connectError`). Map streaming → "sending"
+  // for visual continuity.
+  const derivedStatus: "idle" | "connecting" | "sending" | "error" = useMemo(() => {
+    if (connectError) return "error";
+    if (!initDone) return "connecting";
+    if (isStreaming) return "sending";
+    return "idle";
+  }, [connectError, initDone, isStreaming]);
+
   // ---- Render ----
-  const composerDisabled = !initDone || status === "connecting" || status === "sending" || !!connectError;
-  const displayError = connectError ?? chatError;
+  const composerDisabled = !initDone || isStreaming || !!connectError;
+  const displayError = connectError;
 
   return (
     <main style={OUTER} aria-label="Team desk">
@@ -409,12 +364,12 @@ export function TeamDesk({ user }: TeamDeskProps) {
             <StatusBanner status="error" error={displayError} />
           </div>
         )}
-        {status === "connecting" && !displayError && (
+        {derivedStatus === "connecting" && !displayError && (
           <div style={{ padding: "8px 20px 0" }}>
             <StatusBanner status="connecting" error={null} />
           </div>
         )}
-        {status === "sending" && !displayError && (
+        {derivedStatus === "sending" && !displayError && (
           <div style={{ padding: "8px 20px 0" }}>
             <StatusBanner status="sending" error={null} />
           </div>
@@ -422,8 +377,9 @@ export function TeamDesk({ user }: TeamDeskProps) {
 
         <Conversation
           messages={messages}
+          isStreaming={isStreaming}
+          agentRunsByToolCall={agentRunsByToolCall}
           onPromptSelect={(p) => void handleSend(p)}
-          renderMessageExtras={renderMessageExtras}
         />
 
         <StickyComposer
@@ -432,7 +388,7 @@ export function TeamDesk({ user }: TeamDeskProps) {
           placeholder={
             connectError
               ? "Connection error — reload to reconnect"
-              : status === "connecting"
+              : !initDone
                 ? "Connecting…"
                 : "Message your team…"
           }
