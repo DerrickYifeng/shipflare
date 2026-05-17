@@ -4,3 +4,4 @@ export * from "./platform-registry";
 export * from "./types";
 export * from "./strategic-path-schema";
 export * from "./activity-event";
+export * from "./telemetry";

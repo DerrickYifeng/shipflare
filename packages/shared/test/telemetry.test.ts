@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { writeAgentEvent } from '../src/lib/telemetry';
+import { writeAgentEvent } from '../src/telemetry';
 
 describe('writeAgentEvent', () => {
   it('writes tool_invocation with correct blob/double/index slots', () => {

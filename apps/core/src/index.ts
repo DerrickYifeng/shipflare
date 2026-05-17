@@ -102,7 +102,7 @@ export interface Env {
   /**
    * Workers Analytics Engine dataset binding for ops telemetry —
    * agent_run / skill_invocation / tool_invocation events. Written via
-   * `apps/core/src/lib/telemetry.ts:writeAgentEvent` and queried back via
+   * `@shipflare/shared#writeAgentEvent` and queried back via
    * the Cloudflare SQL API. Replaces the legacy `activity_events` D1
    * table (deleted in Phase 5 of the CF-native chat migration).
    */
