@@ -1,90 +1,72 @@
 /**
  * HistoryTab — drafts the founder has already acted on
- * (approved / posted / handed off to platform compose).
+ * (approved / posted / handed off / rejected).
  *
- * Mirrors Railway's `/briefing/history` tab (which uses
- * `useBriefingHistory` against `/api/briefing/history`). CF queries the
- * CMO MCP directly via `queryDrafts` with each non-pending status.
+ * Migrated to the useCmoAgent + useCmoStub pattern (Task 11 — callable
+ * RPC migration). The legacy code looped over per-status `queryDrafts`
+ * calls; the new @callable surface (DraftRow) no longer takes a status
+ * arg, so we make ONE call and filter client-side on `decision`.
  */
 
 "use client";
 
 import { type CSSProperties, useEffect, useRef, useState } from "react";
-import { createCmoClient, type CmoClient } from "@/lib/mcp-client";
-
-interface Draft {
-  id: string;
-  conversation_id: string | null;
-  kind: string;
-  plan_item_id: string | null;
-  platform: string;
-  thread_id: string | null;
-  body: string;
-  why_it_works: string | null;
-  confidence: number | null;
-  status: string;
-  created_at: number;
-  updated_at: number;
-}
-
-// Must match the Zod enum in apps/core/.../cmo/tools/shared-state.ts's
-// queryDrafts inputSchema: drafting | ready | posted | failed | rejected.
-// "history" = anything no longer pending the founder's review.
-const HISTORY_STATUSES = ["posted", "failed", "rejected"] as const;
+import { useCmoAgent } from "@/hooks/use-cmo-agent";
+import { useCmoStub } from "@/hooks/use-cmo-stub";
+import type { DraftRow } from "@shipflare/shared";
 
 interface State {
   loading: boolean;
   error: string | null;
-  items: Draft[];
+  items: DraftRow[];
 }
 
-export function HistoryTab() {
+export interface HistoryTabProps {
+  /** Founder user id — drives the CMO WebSocket. */
+  userId: string;
+  /** Bare host of apps/core for the WS — see `useCmoAgent`. */
+  coreHost?: string;
+}
+
+export function HistoryTab({ userId, coreHost }: HistoryTabProps) {
+  const { agent } = useCmoAgent({ userId, coreHost });
+  const stub = useCmoStub({ agent });
+
   const [state, setState] = useState<State>({
     loading: true,
     error: null,
     items: [],
   });
-  const clientRef = useRef<CmoClient | null>(null);
+  // One-shot init guard — JWT refresh churns the agent ref and would
+  // re-fire this effect with stale data.
+  const initRanRef = useRef(false);
 
   useEffect(() => {
+    if (initRanRef.current) return;
+    initRanRef.current = true;
     let cancelled = false;
-
-    createCmoClient()
-      .then(async (c) => {
-        if (cancelled) {
-          void c.close();
-          return;
-        }
-        clientRef.current = c;
-        try {
-          const buckets = await Promise.all(
-            HISTORY_STATUSES.map((status) =>
-              c.queryDrafts<Draft>({ status, limit: 50 }),
-            ),
-          );
-          if (cancelled) return;
-          const items = buckets
-            .flat()
-            .sort((a, b) => b.updated_at - a.updated_at);
-          setState({ loading: false, error: null, items });
-        } catch (err: unknown) {
-          if (cancelled) return;
-          const msg = err instanceof Error ? err.message : String(err);
-          setState({ loading: false, error: msg, items: [] });
-        }
-      })
-      .catch((err: unknown) => {
+    void (async () => {
+      try {
+        const rows = await stub.queryDrafts({ limit: 200 });
+        if (cancelled) return;
+        const items = rows
+          .filter((r) => r.decision !== null && r.decision !== undefined)
+          .sort((a, b) => {
+            const aT = a.decided_at ?? a.created_at;
+            const bT = b.decided_at ?? b.created_at;
+            return bT - aT;
+          });
+        setState({ loading: false, error: null, items });
+      } catch (err: unknown) {
         if (cancelled) return;
         const msg = err instanceof Error ? err.message : String(err);
         setState({ loading: false, error: msg, items: [] });
-      });
-
+      }
+    })();
     return () => {
       cancelled = true;
-      void clientRef.current?.close();
-      clientRef.current = null;
     };
-  }, []);
+  }, [stub]);
 
   if (state.loading) {
     return (
@@ -151,19 +133,23 @@ export function HistoryTab() {
   );
 }
 
-const STATUS_LABEL: Record<string, string> = {
-  posted: "Posted",
-  failed: "Failed",
+const DECISION_LABEL: Record<string, string> = {
+  approved: "Approved",
   rejected: "Rejected",
+  posted: "Posted",
+  handed_off: "Handed off",
+  failed: "Failed",
 };
 
-const STATUS_COLOR: Record<string, string> = {
+const DECISION_COLOR: Record<string, string> = {
+  approved: "var(--sf-success, #16a34a)",
   posted: "var(--sf-success, #16a34a)",
-  failed: "var(--sf-error, #c33)",
   rejected: "var(--sf-fg-3)",
+  failed: "var(--sf-error, #c33)",
+  handed_off: "var(--sf-accent)",
 };
 
-function HistoryCard({ draft }: { draft: Draft }) {
+function HistoryCard({ draft }: { draft: DraftRow }) {
   const cardStyle: CSSProperties = {
     padding: 16,
     border: "1px solid var(--sf-border, rgba(0,0,0,0.08))",
@@ -189,10 +175,11 @@ function HistoryCard({ draft }: { draft: Draft }) {
     textTransform: "uppercase",
   };
 
+  const decision = draft.decision ?? "";
   const statusStyle: CSSProperties = {
     fontSize: 12,
     fontWeight: 600,
-    color: STATUS_COLOR[draft.status] ?? "var(--sf-fg-3)",
+    color: DECISION_COLOR[decision] ?? "var(--sf-fg-3)",
     letterSpacing: "0.04em",
     textTransform: "uppercase",
   };
@@ -211,19 +198,21 @@ function HistoryCard({ draft }: { draft: Draft }) {
     color: "var(--sf-fg-3)",
   };
 
+  const ts = draft.decided_at ?? draft.created_at;
+
   return (
     <article style={cardStyle}>
       <div style={headerStyle}>
         <span style={tagStyle}>
-          {draft.kind === "reply" ? "↪ Reply" : "✒ Post"} · {draft.platform.toUpperCase()}
+          {draft.kind === "reply" ? "↪ Reply" : "✒ Post"} · {draft.channel.toUpperCase()}
         </span>
         <span style={statusStyle}>
-          {STATUS_LABEL[draft.status] ?? draft.status}
+          {DECISION_LABEL[decision] ?? decision}
         </span>
       </div>
-      <p style={bodyStyle}>{draft.body}</p>
+      <p style={bodyStyle}>{draft.preview}</p>
       <span style={metaStyle}>
-        {new Date(draft.updated_at).toLocaleString(undefined, {
+        {new Date(ts).toLocaleString(undefined, {
           dateStyle: "medium",
           timeStyle: "short",
         })}

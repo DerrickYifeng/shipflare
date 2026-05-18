@@ -29,7 +29,8 @@ import {
 } from "react";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
-import { createCmoClient, type CmoClient } from "@/lib/mcp-client";
+import { useCmoAgent } from "@/hooks/use-cmo-agent";
+import { useCmoStub } from "@/hooks/use-cmo-stub";
 
 interface PlanItem {
   id: string;
@@ -235,54 +236,53 @@ function buildView(items: PlanItem[], weekOffset: number): CalendarView {
 
 /* ── Component ─────────────────────────────────────────────────────── */
 
-export function PlanTab() {
+export interface PlanTabProps {
+  /** Founder user id — drives the CMO WebSocket. */
+  userId: string;
+  /** Bare host of apps/core for the WS — see `useCmoAgent`. */
+  coreHost?: string;
+}
+
+export function PlanTab({ userId, coreHost }: PlanTabProps) {
+  const { agent } = useCmoAgent({ userId, coreHost });
+  const stub = useCmoStub({ agent });
+
   const [state, setState] = useState<State>({
     loading: true,
     error: null,
     view: null,
     weekOffset: 0,
   });
-  const clientRef = useRef<CmoClient | null>(null);
   const rawItemsRef = useRef<PlanItem[]>([]);
+  // One-shot init guard — JWT refresh churns the agent ref and would
+  // re-fire this effect, clobbering the current week's bucketing.
+  const initRanRef = useRef(false);
 
   // Fetch once on mount; re-bucket client-side on week change.
   useEffect(() => {
+    if (initRanRef.current) return;
+    initRanRef.current = true;
     let cancelled = false;
-
-    createCmoClient()
-      .then(async (c) => {
-        if (cancelled) {
-          void c.close();
-          return;
-        }
-        clientRef.current = c;
-        try {
-          const items = await c.queryPlanItems<PlanItem>({ limit: 500 });
-          if (cancelled) return;
-          rawItemsRef.current = items;
-          setState((s) => ({
-            ...s,
-            loading: false,
-            view: buildView(items, s.weekOffset),
-          }));
-        } catch (err: unknown) {
-          if (cancelled) return;
-          const msg = err instanceof Error ? err.message : String(err);
-          setState((s) => ({ ...s, loading: false, error: msg }));
-        }
-      })
-      .catch((err: unknown) => {
+    void (async () => {
+      try {
+        const items = (await stub.queryPlanItems({ limit: 500 })) as unknown as PlanItem[];
+        if (cancelled) return;
+        rawItemsRef.current = items;
+        setState((s) => ({
+          ...s,
+          loading: false,
+          view: buildView(items, s.weekOffset),
+        }));
+      } catch (err: unknown) {
         if (cancelled) return;
         const msg = err instanceof Error ? err.message : String(err);
         setState((s) => ({ ...s, loading: false, error: msg }));
-      });
-
+      }
+    })();
     return () => {
       cancelled = true;
-      void clientRef.current?.close();
-      clientRef.current = null;
     };
-  }, []);
+  }, [stub]);
 
   const goWeek = useCallback((delta: number) => {
     setState((s) => {

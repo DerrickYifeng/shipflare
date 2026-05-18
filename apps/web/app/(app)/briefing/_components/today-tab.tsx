@@ -1,133 +1,120 @@
 /**
  * TodayTab — approval inbox for the Briefing page.
  *
- * Ported from Railway's TodayBody. Replaces the Railway SWR + `/api/today`
- * pattern with a direct browser→core CmoClient call (CF spec D13).
+ * Ported from Railway's TodayBody. Migrated to the useCmoAgent +
+ * useCmoStub pattern (Task 11 — callable RPC migration) — one
+ * WebSocket per page tree, typed @callable surface.
  *
- * Data model difference:
- *   Railway: flat TodoItem list from `/api/today` (Postgres)
- *   CF: `queryPlanItems` + `queryDrafts` via CMO MCP tools
- *
- * The Railway TodayBody drove approve/skip via `/api/today/<id>/approve`
- * REST endpoints. Here we use `approveDraft` on the CmoClient directly.
- *
- * Visual chrome (Section headers, card layout, empty states) mirrors
- * Railway's layout so the UX stays consistent.
+ * Data-model gap from the legacy `Draft` shape:
+ *   The new @callable `queryDrafts` returns the approval-queue row
+ *   (DraftRow from @shipflare/shared): `preview`, `decision`, `channel`,
+ *   `employee` — no `body`, `why_it_works`, `confidence`, `status`. The
+ *   card renders `body` from `preview` and treats the dropped fields as
+ *   undefined. Acceptable for this migration; fuller cards can come back
+ *   when CmoCallableSurface adds detail-shape methods.
  */
 
 "use client";
 
 import { type CSSProperties, useCallback, useEffect, useRef, useState } from "react";
-import { createCmoClient, type CmoClient } from "@/lib/mcp-client";
+import { useCmoAgent } from "@/hooks/use-cmo-agent";
+import { useCmoStub } from "@/hooks/use-cmo-stub";
+import type { DraftRow } from "@shipflare/shared";
 
-/* ── Types mirroring the CMO tool return shapes ─────────────────────── */
+/* ── Local view-model ────────────────────────────────────────────────── */
 
-/** Row emitted by `queryDrafts` (SMM's list_drafts shape). */
-interface Draft {
+/**
+ * Local shape consumed by `DraftCard`. Maps `DraftRow.preview` to `body`
+ * and leaves Railway-era fields (`why_it_works`, `confidence`) as
+ * `undefined` since the @callable surface no longer returns them.
+ */
+interface DraftView {
   id: string;
-  conversation_id: string | null;
   kind: string;
-  plan_item_id: string | null;
   platform: string;
-  thread_id: string | null;
   body: string;
-  why_it_works: string | null;
-  confidence: number | null;
-  status: string;
-  created_at: number;
-  updated_at: number;
+  why_it_works?: string | null;
+  confidence?: number | null;
 }
 
-interface BriefingData {
-  pendingDrafts: Draft[];
-}
-
-interface BriefingState {
-  loading: boolean;
-  error: string | null;
-  data: BriefingData | null;
-  approvingId: string | null;
-}
-
-/* ── Hook ────────────────────────────────────────────────────────────── */
-
-function useBriefing(): BriefingState & {
-  approveDraft: (draftId: string) => Promise<void>;
-} {
-  const [state, setState] = useState<BriefingState>({
-    loading: true,
-    error: null,
-    data: null,
-    approvingId: null,
-  });
-  const clientRef = useRef<CmoClient | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    createCmoClient()
-      .then(async (c) => {
-        if (cancelled) {
-          void c.close();
-          return;
-        }
-        clientRef.current = c;
-        try {
-          const pendingDrafts = await c.queryDrafts<Draft>({
-            status: "ready",
-            limit: 50,
-          });
-          if (cancelled) return;
-          setState((s) => ({
-            ...s,
-            loading: false,
-            data: { pendingDrafts },
-          }));
-        } catch (err: unknown) {
-          if (cancelled) return;
-          const msg = err instanceof Error ? err.message : String(err);
-          setState((s) => ({ ...s, loading: false, error: msg }));
-        }
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        const msg = err instanceof Error ? err.message : String(err);
-        setState((s) => ({ ...s, loading: false, error: msg }));
-      });
-
-    return () => {
-      cancelled = true;
-      void clientRef.current?.close();
-      clientRef.current = null;
-    };
-  }, []);
-
-  const approveDraft = useCallback(async (draftId: string) => {
-    const c = clientRef.current;
-    if (!c || state.approvingId) return;
-    setState((s) => ({ ...s, approvingId: draftId }));
-    try {
-      await c.approveDraft(draftId);
-      // Refresh the drafts list after approval.
-      const pendingDrafts = await c.queryDrafts<Draft>({ status: "ready", limit: 50 });
-      setState((s) => ({
-        ...s,
-        approvingId: null,
-        data: s.data ? { ...s.data, pendingDrafts } : null,
-      }));
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setState((s) => ({ ...s, approvingId: null, error: msg }));
-    }
-  }, [state.approvingId]);
-
-  return { ...state, approveDraft };
+function rowToView(row: DraftRow): DraftView {
+  return {
+    id: row.id,
+    kind: row.kind,
+    platform: row.channel,
+    body: row.preview,
+  };
 }
 
 /* ── Component ───────────────────────────────────────────────────────── */
 
-export function TodayTab() {
-  const { loading, error, data, approvingId, approveDraft } = useBriefing();
+export interface TodayTabProps {
+  /** Founder user id — drives the CMO WebSocket. */
+  userId: string;
+  /** Bare host of apps/core for the WS — see `useCmoAgent`. */
+  coreHost?: string;
+}
+
+export function TodayTab({ userId, coreHost }: TodayTabProps) {
+  const { agent } = useCmoAgent({ userId, coreHost });
+  const stub = useCmoStub({ agent });
+
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [pendingDrafts, setPendingDrafts] = useState<DraftView[]>([]);
+  const [approvingId, setApprovingId] = useState<string | null>(null);
+
+  // One-shot init guard: JWT refresh (60s TTL) churns the agent
+  // reference → stub re-memos → without this guard the effect re-fires
+  // and clobbers state on every refresh.
+  const initRanRef = useRef(false);
+
+  useEffect(() => {
+    if (initRanRef.current) return;
+    initRanRef.current = true;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const rows = await stub.queryDrafts({ limit: 50 });
+        if (cancelled) return;
+        // Only show drafts the founder hasn't decided on yet.
+        const pending = rows
+          .filter((r) => r.decision === null || r.decision === undefined)
+          .map(rowToView);
+        setPendingDrafts(pending);
+        setLoading(false);
+      } catch (err: unknown) {
+        if (cancelled) return;
+        const msg = err instanceof Error ? err.message : String(err);
+        setError(msg);
+        setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [stub]);
+
+  const approveDraft = useCallback(
+    async (draftId: string) => {
+      if (approvingId) return;
+      setApprovingId(draftId);
+      try {
+        await stub.approveDraft({ draftId });
+        const rows = await stub.queryDrafts({ limit: 50 });
+        const pending = rows
+          .filter((r) => r.decision === null || r.decision === undefined)
+          .map(rowToView);
+        setPendingDrafts(pending);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setError(msg);
+      } finally {
+        setApprovingId(null);
+      }
+    },
+    [approvingId, stub],
+  );
 
   if (loading) {
     return (
@@ -150,10 +137,6 @@ export function TodayTab() {
       </div>
     );
   }
-
-  if (!data) return null;
-
-  const { pendingDrafts } = data;
 
   return (
     <div style={{ width: "100%", padding: "28px clamp(16px, 3vw, 32px) 48px" }}>
@@ -185,7 +168,7 @@ export function TodayTab() {
 /* ── DraftCard ───────────────────────────────────────────────────────── */
 
 interface DraftCardProps {
-  draft: Draft;
+  draft: DraftView;
   approving: boolean;
   onApprove: (id: string) => Promise<void>;
 }
@@ -251,7 +234,7 @@ function DraftCard({ draft, approving, onApprove }: DraftCardProps) {
         <span style={tagStyle}>
           {draft.kind === "reply" ? "↪ Reply" : "✒ Post"} · {draft.platform.toUpperCase()}
         </span>
-        {draft.confidence !== null && (
+        {draft.confidence !== null && draft.confidence !== undefined && (
           <span style={{ fontSize: 12, color: "var(--sf-fg-3)" }}>
             {(draft.confidence * 100).toFixed(0)}% confidence
           </span>
