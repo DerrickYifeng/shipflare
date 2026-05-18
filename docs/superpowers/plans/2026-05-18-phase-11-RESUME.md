@@ -137,3 +137,59 @@ work; deserves its own plan.
 **Net result:** Chat WebSocket works end-to-end on the new custom
 domains. /team page renders without the SSR crash. Right-panel data
 is empty (queries 503) until task #11 lands.
+
+## Addendum — 2026-05-18 (post Task #11)
+
+Task #11 callable RPC migration shipped to staging. 14-task plan at
+`docs/superpowers/plans/2026-05-19-task-11-callable-rpc-migration.md`,
+design at `docs/superpowers/specs/2026-05-19-task-11-callable-rpc-migration-design.md`.
+
+**What landed (16 commits, dev → 5bd1d024):**
+
+| Phase | Commits | Surface |
+|---|---|---|
+| Server | `02c2de41` → `597ebdfb` | 13 `@callable` methods on CMO + `conversations` table + 14 unit tests |
+| Build-gate fixes | `0a6f8466` `72d07ed8` | WEB-binding type for `tsc`; `agents/vite` plugin for vitest stage-3 decorator transform |
+| Bug fixes | `dfb45425` `597ebdfb` | approve/reject idempotency; listConversations ROWID tiebreaker |
+| Web hooks | `ed4f5cca` | Extract `useCmoAgent` (one WS shared by `useCmoChat` + `useCmoStub`) — design assumption that `useAgent` dedupes was false |
+| Web migration | `7b1a6ca2` `e36aad5e` `1861f2be` `ca7557a2` | `/team`, transcript drawer, `/briefing` × 3, `/growth/reddit-channels` all on `useCmoStub` |
+| Cleanup | `ce53bf12` `5bd1d024` | Delete `apps/web/src/lib/mcp-client.ts`, `/api/mcp-token`, browser `@modelcontextprotocol/sdk` dep, apps/core `MCP_ROUTE` regex + `handleMcpRequest` 503 stub |
+
+**Auto-verified on staging:**
+
+- `https://mcp-staging.shipflare.ai/healthz` → 200
+- `/.well-known/oauth-authorization-server` → 200 (external `/cmo/mcp` OAuth surface intact)
+- `/agents/cmo/x` (WS) → 426 expected (upgrade-required)
+- `/agents/cmo/x/mcp` (legacy) → 401 (no JWT will validate this path; effectively dead)
+- `https://app-staging.shipflare.ai/api/mcp-token` → 404 (deleted)
+- `/team`, `/briefing`, `/growth/reddit-channels` → 307 (auth redirect, expected for unauthenticated curl)
+
+**Interactive smoke — user verification needed.** Open in the local
+browser (already authenticated to `app-staging.shipflare.ai` as
+`cdhyfpp@gmail.com`):
+
+1. `/team` — left rail shows 3 employee cards; right panel renders
+   plan items + drafts; DevTools Network: ONE `wss://mcp-staging.../agents/cmo/<uid>?token=...&tz=...`
+2. `/team` — "New conversation" creates a new thread visible in left rail
+3. `/team` — send a chat message → CMO responds
+4. `/team` — cancel a plan_item → status flips to cancelled
+5. `/team` — open a role card → drawer shows employee_log rows
+6. `/briefing/today` — pending drafts render; approve flow works
+7. `/briefing/plan` — plan items bucketed by week
+8. `/briefing/history` — decided drafts render
+9. `/growth/reddit-channels` — subreddit list renders (or empty state)
+
+If anything red, file under Task #11 follow-up.
+
+**Tracked debt (post-plan cleanup PRs):**
+- CMO.ts at ~1432 lines (CLAUDE.md target 800) — extract `getTools()` or
+  `_impl` block to sibling file
+- `DraftRow.decision: string | null` could tighten to literal union
+- `_rejectDraft.reason` accepted but not persisted (needs schema column)
+- `queryRoster` silently coerces non-numeric `founder_context.created_at` to NaN
+- 7 stale comments in apps/web referencing `/api/mcp-token` (deleted)
+- `apps/web/test/mcp-token.test.ts` only tests JWT helpers — rename to
+  `jwt.test.ts`
+- Pre-existing: `/team` `handleApproveDraft` passes `approval_queue.id`
+  where `draft_id` is expected (silent 'not in approval_queue' error
+  toast — predates Task #11)
