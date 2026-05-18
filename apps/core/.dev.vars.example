@@ -32,11 +32,3 @@ CHANNEL_ENC_KEY=
 VAPID_PUBLIC=
 VAPID_PRIVATE=
 VAPID_SUBJECT=mailto:hello@shipflare.com
-
-# Phase 7 (CF-native chat migration): signs OAuth tokens for the external
-# MCP route mcp.shipflare.com/cmo. Distinct from MCP_JWT_SECRET (browser-
-# session) and EXTERNAL_MCP_SECRET (founder long-lived).
-#   openssl rand -base64 32
-MCP_OAUTH_JWT_SIGNING_KEY=
-# Phase 7 — published audience claim on external MCP OAuth tokens.
-MCP_OAUTH_AUDIENCE=mcp.shipflare.com

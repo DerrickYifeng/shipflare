@@ -8,13 +8,14 @@
  *   JWT-protected (HS256, signed by `apps/web` via `MCP_JWT_SECRET`).
  *   Phase 1 only exposes `cmo` here; HoG / SMM ride along on the CMO's
  *   `addMcpServer` in-process pipe.
- * - `/external/agents/<role>/<userId>/mcp[/...]` → Phase 2 external MCP
- *   entry for 3rd-party MCP clients (Claude Desktop, Cursor, founder's
- *   own LLM stack). Long-lived (30d) tokens signed with a SEPARATE
- *   `EXTERNAL_MCP_SECRET` so a leaked browser-session token can't
- *   impersonate a 3rd-party client (and vice-versa). Each employee class
- *   (CMO / HoG / SMM) is exposed; scope is recorded in the token but
- *   per-tool gating is forward-compat (P2-A.followup).
+ * - `/cmo/mcp`, `/authorize`, `/oauth/*`, `/.well-known/oauth-*` → Phase 7
+ *   external MCP entry for 3rd-party MCP clients (Claude Desktop, Cursor,
+ *   the founder's own LLM stack). Fronted by
+ *   `@cloudflare/workers-oauth-provider` (OAuth 2.1 + PKCE + RFC 7591 DCR).
+ *   The provider mints encrypted, refreshable tokens carrying
+ *   `{ userId, scopes }` props that surface on `CmoExternalMcp.this.props`.
+ *   Auth code → token exchange runs end-to-end via the provider; only
+ *   `/authorize` requires an interactive ShipFlare login (Phase 7.5).
  * - `/agents/<role>/<userId>/internal/<path>` → Service-Binding-only routes
  *   for sibling-agent RPC. Gated by `x-shipflare-internal: 1` (Cloudflare
  *   strips this header from public-edge traffic, so only intra-network
@@ -36,12 +37,16 @@
  * tests invoke `worker.scheduled!(ctl, env, ctx)` directly instead.
  */
 
+import OAuthProvider from "@cloudflare/workers-oauth-provider";
+import type { OAuthHelpers } from "@cloudflare/workers-oauth-provider";
+
 import { handleOnboardingInternal } from "./onboarding-routes";
 import { verifyJwt } from "./lib/jwt";
-import { validateExternalAccess } from "./lib/external-auth";
 import { transportName } from "./lib/do-name";
 import { inferTimezone } from "./lib/tz-inference";
 import { ROLE_REGISTRY, isValidRole, type RoleSlug } from "@shipflare/shared";
+import { CmoExternalMcp } from "./external/CmoExternalMcp";
+import { ExternalAuthHandler } from "./external/auth-handler";
 import {
   createDb,
   channels as channelsTable,
@@ -67,15 +72,27 @@ export { CMO, HoG, SMM };
 // module graph rooted at `main`.
 export { XMcpAgent } from "./agents/platforms/x/XMcpAgent";
 export { RedditMcpAgent } from "./agents/platforms/reddit/RedditMcpAgent";
+// Phase 7 — external MCP surface (chat-only, OAuth-scoped, per-user DO).
+// Mounted via `@cloudflare/workers-oauth-provider` at `/cmo/mcp` (Task 7.3).
+// The OAuth provider sits in front of the DO and populates `this.props =
+// { userId, scopes }` after a successful PKCE flow; see
+// `apps/core/src/external/auth-handler.ts` for the `/authorize` consent screen.
+export { CmoExternalMcp };
 
 export interface Env {
   DB: D1Database;
-  // DO bindings — 3 employee agents + 2 platform tool MCPs.
+  // DO bindings — 3 employee agents + 2 platform tool MCPs + 1 external MCP.
   CMO: DurableObjectNamespace<CMO>;
   HOG: DurableObjectNamespace<HoG>;
   SMM: DurableObjectNamespace<SMM>;
   X_MCP: DurableObjectNamespace<XMcpAgent>;
   REDDIT_MCP: DurableObjectNamespace<RedditMcpAgent>;
+  /**
+   * Phase 7 — per-user external MCP surface (chat-only, OAuth-scoped). Each
+   * user gets a SQLite-backed DO instance keyed by their userId. Exposed at
+   * mcp.shipflare.com/cmo via `@cloudflare/workers-oauth-provider`.
+   */
+  CMO_EXTERNAL_MCP: DurableObjectNamespace<CmoExternalMcp>;
   // Workflow binding — added when AgentPlanWorkflow lands (S6).
   // AGENT_PLAN_WORKFLOW: Workflow;
   // Secrets (wrangler secret put ...)
@@ -107,29 +124,59 @@ export interface Env {
    */
   TELEMETRY: AnalyticsEngineDataset;
   /**
-   * Phase 7 wiring (CF-native migration): `withOAuthProvider` wraps the
-   * external MCP route for CMO so 3rd-party clients (Claude Desktop,
-   * Cursor, the founder's own LLM stack) authenticate via the standard
-   * MCP OAuth flow. The audience claim is published; the signing key is
-   * provisioned via `wrangler secret put MCP_OAUTH_JWT_SIGNING_KEY`.
-   *
-   * Scaffolded in Phase 0 so the `Env` type stays consistent across the
-   * migration; the route handler that consumes these lands in Phase 7.
+   * Phase 7 — KV namespace for `@cloudflare/workers-oauth-provider`. Stores
+   * OAuth 2.1 client registrations, authorization codes, refresh tokens, and
+   * access-token metadata for the mcp.shipflare.com/cmo external surface.
    */
-  MCP_OAUTH_AUDIENCE: string;
-  // TODO(Phase 7): the route handler that installs `withOAuthProvider` must
-  // assert this is non-empty at startup — bindings injected by Wrangler can
-  // silently arrive as `""` if `wrangler secret put MCP_OAUTH_JWT_SIGNING_KEY`
-  // was never run for the environment.
-  MCP_OAUTH_JWT_SIGNING_KEY: string;
+  OAUTH_KV: KVNamespace;
+  /**
+   * Phase 7 — `@cloudflare/workers-oauth-provider` lazily attaches its helper
+   * surface (`parseAuthRequest`, `lookupClient`, `completeAuthorization`,
+   * `createClient`, ...) to `env.OAUTH_PROVIDER` right before invoking the
+   * default handler. The auth-handler reads it from `env`, so the type is
+   * declared here even though wrangler doesn't bind it directly.
+   *
+   * Optional because the binding is only present once the OAuthProvider's
+   * fetch handler has dispatched into the default handler — for routes that
+   * never enter the provider (e.g. /healthz) it stays undefined.
+   */
+  OAUTH_PROVIDER?: OAuthHelpers;
+  /**
+   * Phase 7.5 — Service Binding back to `shipflare-web`. Used ONLY by
+   * `apps/core/src/external/auth-handler.ts:resolveUserIdFromSessionCookie`
+   * to delegate Better Auth session-cookie verification to apps/web (the
+   * canonical owner of the HMAC-signed cookie). Phase 0 spike #8 finding:
+   * Service Bindings strip `host` + `cf-connecting-ip` — that's fine here
+   * since we only forward the `cookie` header.
+   *
+   * Optional because the binding is absent in `wrangler dev` when apps/web
+   * isn't running, and in vitest the binding is overridden per-test with a
+   * Fetcher stub. The auth-handler fails closed (401) when undefined.
+   */
+  WEB?: Fetcher;
+  /**
+   * Phase 7.3 security gate (mirrors `STRATEGIC_PATH_FIXTURE`). When `"1"`,
+   * `apps/core/src/external/auth-handler.ts` honors the `x-test-user-id`
+   * header on `/authorize` POST so the auth-handler tests can complete the
+   * OAuth grant without standing up a Better Auth session.
+   *
+   * MUST remain absent from `apps/core/wrangler.jsonc`. Set ONLY in
+   * `apps/core/vitest.config.mts` under `miniflare.bindings`. If it ever
+   * leaks into prod, any caller can mint an OAuth code for any victim's
+   * userId (PKCE only proves same-client; it doesn't authenticate the
+   * user). Phase 7.5 retires this seam once Better Auth verification is
+   * wired in.
+   */
+  EXTERNAL_AUTH_TEST_SEAM?: string;
 }
 
-// EMPLOYEE_CLASSES dispatch table for the legacy external MCP route was
-// retired in Task 5.1b (CF-native chat migration). All three employee
-// classes are now AIChatAgent subclasses; AIChatAgent has no `.serve()`
-// HTTP-handler shim, so the external MCP path is offline until Phase 7
-// reinstalls a withOAuthProvider-wrapped surface. See `handleExternalMcpRequest`
-// below — it returns 503 with a Phase 7 marker for any role.
+// Task 7.3 retired the legacy `/external/agents/<role>/<userId>/mcp` 503
+// stub and the EMPLOYEE_CLASSES dispatch table that fed it. The new
+// external surface lives at `/cmo/mcp` behind
+// `@cloudflare/workers-oauth-provider` — wired in the main fetch handler
+// below. `CmoExternalMcp` is the McpAgent class mounted as the provider's
+// only apiHandler; `ExternalAuthHandler` renders the `/authorize` consent
+// screen and completes grants.
 
 /**
  * `/agents/<role>/<userId>/mcp[/...]` — Phase 1 internal MCP entry. The
@@ -154,21 +201,11 @@ const MCP_ROUTE = /^\/agents\/([a-z-]+)\/([^/]+)\/mcp(?:\/|$)/;
  */
 const CMO_WS_ROUTE = /^\/agents\/cmo\/([^/]+)$/;
 
-/**
- * `/external/agents/<role>/<userId>/mcp[/...]` — Phase 2 external MCP entry.
- *
- * Long-lived (30d) tokens signed with `EXTERNAL_MCP_SECRET` (distinct from
- * the browser-session `MCP_JWT_SECRET`). Token claims must match the URL
- * `<role>` and `<userId>` segments exactly (or `role === "*"` for the
- * admin-issued any-role token).
- *
- * Per Phase 0 spike #3 finding: `McpAgent.serve()` defaults its binding to
- * `"MCP_OBJECT"`. We MUST override with `{ binding: "<NAME>" }` explicitly
- * for each employee class; otherwise the SDK will look up a binding name
- * that doesn't exist in our wrangler config.
- */
-const EXTERNAL_MCP_ROUTE =
-  /^\/external\/agents\/([a-z-]+)\/([^/]+)\/mcp(?:\/|$)/;
+// Task 7.3: `/external/agents/<role>/<userId>/mcp` and its `EXTERNAL_MCP_ROUTE`
+// regex were retired. The external MCP surface now lives at `/cmo/mcp`
+// behind `@cloudflare/workers-oauth-provider` — wired in the main fetch()
+// handler above. `EXTERNAL_MCP_SECRET` lingers in Env for the legacy
+// `validateExternalAccess` helper but no live route consumes it.
 
 /**
  * `/agents/<role>/<userId>/internal/<path>` — Service-Binding-only RPC.
@@ -194,6 +231,52 @@ export default {
     const cors = corsHeadersFor(request);
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: cors });
+    }
+
+    // Phase 7 — external MCP surface mounted at `/cmo/mcp` behind OAuth 2.1
+    // (PKCE + DCR). Any path the OAuthProvider owns is dispatched to it
+    // BEFORE the existing ShipFlare routes so the well-known endpoints,
+    // /authorize consent UI, /oauth/* token endpoints, and the protected
+    // /cmo/mcp resource handler all live behind one provider instance.
+    //
+    // The provider attaches `env.OAUTH_PROVIDER` lazily on its way to the
+    // default handler — `ExternalAuthHandler` then calls
+    // `env.OAUTH_PROVIDER.completeAuthorization(...)` to mint the code +
+    // redirect. Props (`{ userId, scopes }`) flow from there into the
+    // verified-Bearer request that hits `CmoExternalMcp.serve("/cmo/mcp")`.
+    if (
+      url.pathname === "/cmo/mcp" ||
+      url.pathname.startsWith("/cmo/mcp/") ||
+      url.pathname === "/authorize" ||
+      url.pathname.startsWith("/oauth/") ||
+      url.pathname.startsWith("/.well-known/oauth-")
+    ) {
+      const oauth = new OAuthProvider({
+        apiHandlers: {
+          "/cmo/mcp": CmoExternalMcp.serve("/cmo/mcp", {
+            binding: "CMO_EXTERNAL_MCP",
+          }) as unknown as ExportedHandler<Env> & {
+            fetch: NonNullable<ExportedHandler<Env>["fetch"]>;
+          },
+        },
+        defaultHandler: ExternalAuthHandler,
+        authorizeEndpoint: "/authorize",
+        tokenEndpoint: "/oauth/token",
+        clientRegistrationEndpoint: "/oauth/register",
+        scopesSupported: ["cmo:chat"],
+        accessTokenTTL: 3600,
+        // 30 days in seconds — matches the long-lived TTL of the prior
+        // EXTERNAL_MCP_SECRET-signed JWTs so the operational story
+        // ("re-auth Claude Desktop monthly") doesn't change.
+        refreshTokenTTL: 60 * 60 * 24 * 30,
+        allowImplicitFlow: false,
+        allowPlainPKCE: false,
+        // D4: public DCR is enabled — Claude Desktop / mcp-remote /
+        // Cursor self-register as public PKCE clients without a secret.
+        disallowPublicClientRegistration: false,
+      });
+      const oauthRes = await oauth.fetch(request, env, ctx);
+      return withCorsHeaders(oauthRes, cors);
     }
 
     const res = await routeRequest(request, env, ctx, url);
@@ -402,12 +485,6 @@ async function routeRequest(
     return handleOnboardingInternal(request, env, url, ctx);
   }
 
-  const externalMatch = EXTERNAL_MCP_ROUTE.exec(url.pathname);
-  if (externalMatch) {
-    const [, role, userId] = externalMatch;
-    return handleExternalMcpRequest(request, env, ctx, role!, userId!);
-  }
-
   const internalMatch = INTERNAL_ROUTE.exec(url.pathname);
   if (internalMatch) {
     const [, role, userId, internalPath] = internalMatch;
@@ -612,47 +689,8 @@ async function handleMcpRequest(
   );
 }
 
-// ──────────────────────────────────────────────────────────────────────────
-// /external/agents/<role>/<userId>/mcp  — Phase 2 external MCP entry
-//
-// Long-lived (30d) tokens signed with `EXTERNAL_MCP_SECRET`. Token claims
-// must match the URL `<role>` and `<userId>` (or `role === "*"`).
-//
-// Per Phase 0 spike #3:
-//   - `McpAgent.serve()` defaults its binding to `"MCP_OBJECT"` — we MUST
-//     pass `{ binding: "<NAME>" }` explicitly. The binding name comes from
-//     ROLE_REGISTRY[role].binding.
-//   - The external HTTP path does NOT auto-populate `this.props`, so
-//     per-tool scope gating is NOT implemented in P2-A. Scope is recorded
-//     in the token (forward-compat) but currently grants URL-level access
-//     (any tool on this role). Documented in /docs/mcp + /mcp-urls.
-// ──────────────────────────────────────────────────────────────────────────
-async function handleExternalMcpRequest(
-  request: Request,
-  env: Env,
-  _ctx: ExecutionContext,
-  role: string,
-  userId: string,
-): Promise<Response> {
-  const token = await validateExternalAccess(request, env, userId, role);
-  if (!token) {
-    return new Response("unauthorized", { status: 401 });
-  }
-
-  if (!isValidRole(role)) {
-    return new Response("unknown role", { status: 404 });
-  }
-  const entry = ROLE_REGISTRY[role as RoleSlug];
-  if (!entry) {
-    return new Response("role not exposed externally", { status: 404 });
-  }
-
-  // Task 5.1b: every employee class (CMO/HoG/SMM) is now AIChatAgent and
-  // has no `.serve()` MCP shim. The external MCP surface is offline until
-  // Phase 7 wires `withOAuthProvider` on the chat-native entry. Auth
-  // still runs above so token-validation tests stay green.
-  return new Response(
-    "external MCP surface offline; Phase 7 reinstalls via withOAuthProvider",
-    { status: 503 },
-  );
-}
+// Task 7.3 (CF-native external MCP): the legacy
+// `/external/agents/<role>/<userId>/mcp` 503 stub + `handleExternalMcpRequest`
+// were removed in favour of the Phase 7 `@cloudflare/workers-oauth-provider`
+// mount at `/cmo/mcp`. The new surface is wired in the main `fetch()` handler
+// above; the auth gate is OAuth 2.1 PKCE, not an HS256 EXTERNAL_MCP_SECRET.

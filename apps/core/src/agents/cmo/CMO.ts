@@ -32,6 +32,26 @@ export interface CMOState {
 }
 
 /**
+ * Concatenate all `text`-typed parts of a UIMessage into a single string.
+ * Returns "" if `parts` is missing or contains no text blocks.
+ *
+ * Separate from `extractText` in social-media-manager/lib/mcp-result.ts —
+ * that one unpacks MCP `{ content: [{ type, text }] }` envelopes; this one
+ * walks AI SDK v6 UIMessage `parts: [{ type, text }]`. Same conceptual job,
+ * different input shape.
+ */
+function extractTextFromUIMessage(message: UIMessage): string {
+	const parts = message.parts ?? [];
+	const texts: string[] = [];
+	for (const p of parts) {
+		if (p && typeof p === "object" && (p as { type?: string }).type === "text") {
+			texts.push((p as { text?: string }).text ?? "");
+		}
+	}
+	return texts.join("");
+}
+
+/**
  * CMO — founder-facing orchestrator (AIChatAgent).
  *
  * Post-Phase-5 rewrite: the McpAgent surface is gone. The founder talks to
@@ -937,6 +957,72 @@ export class CMO extends AIChatAgent<Env, CMOState> {
 			(current) => [...current, synthetic],
 		);
 		return result.status;
+	}
+
+	/**
+	 * 7.1 — Synchronous one-shot tool dispatch for external MCP callers.
+	 *
+	 * Currently supports `chat`: appends a user-role message representing
+	 * the external client's question via `saveMessages` (function form, same
+	 * primitive as `runRelayTurn`), then reads back the resulting assistant
+	 * message and returns its text. No WS / streaming; external callers
+	 * want a JSON reply.
+	 *
+	 * Dry-run seam: if `this._invokeAsToolDryRun` is set (a string), returns
+	 * it as the reply and skips both the message append AND the LLM call.
+	 * Same pattern as `_alarmDryRun` (5.1c.13). Used by vitest-pool-workers
+	 * tests since `vi.mock` doesn't propagate into the worker bundle
+	 * (resume-note). Phase 7.5 manual smoke exercises the real path.
+	 *
+	 * Visibility: PUBLIC — Phase 7.2's `CmoExternalMcp` invokes this via the
+	 * Durable Object RPC stub. The Cloudflare DO RPC pattern auto-exposes
+	 * public methods to sibling Workers / namespaces.
+	 *
+	 * Returns the assistant's reply text. Throws on unknown tool name or
+	 * if `saveMessages` reports a non-`completed` status (e.g. founder
+	 * cleared chat mid-flight = `skipped`; external abort = `aborted`).
+	 */
+	public async invokeAsTool(
+		tool: "chat",
+		args: { message: string },
+	): Promise<string> {
+		if (tool !== "chat") {
+			throw new Error(`invokeAsTool: unknown tool '${tool}'`);
+		}
+		this.ensureSchema();
+
+		const dryRun = (this as unknown as { _invokeAsToolDryRun?: string })
+			._invokeAsToolDryRun;
+		if (dryRun !== undefined) {
+			return dryRun;
+		}
+
+		const userMessage: UIMessage = {
+			id: `external-${crypto.randomUUID()}`,
+			role: "user",
+			parts: [{ type: "text", text: args.message }],
+			metadata: { source: "external-mcp", firedAt: Date.now() },
+		};
+		const result = await this.saveMessages((current) => [
+			...current,
+			userMessage,
+		]);
+		if (result.status !== "completed") {
+			throw new Error(
+				`invokeAsTool: saveMessages returned status='${result.status}'`,
+			);
+		}
+
+		// Find the most recent assistant message — that's the reply to our
+		// user message. `this.messages` is AIChatAgent's canonical source.
+		const messages = this.messages;
+		for (let i = messages.length - 1; i >= 0; i--) {
+			const m = messages[i];
+			if (m?.role === "assistant") {
+				return extractTextFromUIMessage(m);
+			}
+		}
+		throw new Error("invokeAsTool: no assistant reply found");
 	}
 
 	/**

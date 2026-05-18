@@ -22,10 +22,39 @@ export default defineConfig({
       // could spread the same flag through the web proxy and force core to
       // skip the LLM call + schema validation). Production never sets this
       // binding.
+      //
+      // `EXTERNAL_AUTH_TEST_SEAM` is the Phase-7.3 sibling: it gates the
+      // `x-test-user-id` header in `apps/core/src/external/auth-handler.ts`
+      // so the auth-handler tests can complete the OAuth grant without a
+      // real Better Auth session. If this binding ever leaks into
+      // `wrangler.jsonc`, any caller can mint an OAuth code for any
+      // victim's userId. See the JSDoc on `resolveUserIdFromSessionCookie`.
       miniflare: {
         bindings: {
           STRATEGIC_PATH_FIXTURE: "1",
+          EXTERNAL_AUTH_TEST_SEAM: "1",
         },
+        // Phase 7.5 — stub the `shipflare-web` service binding so miniflare
+        // can resolve `env.WEB`. The stub default-returns 401 (no session);
+        // tests that need a "valid session" override `env.WEB` at runtime
+        // with a Fetcher whose `fetch()` returns 200 with `{ user: { id } }`.
+        // See `test/external/auth-handler-session.test.ts`.
+        workers: [
+          {
+            name: "shipflare-web",
+            modules: true,
+            script: `export default {
+              async fetch() {
+                // Default stub — tests override env.WEB locally when they
+                // want to exercise the happy path.
+                return new Response("null", {
+                  status: 200,
+                  headers: { "content-type": "application/json" },
+                });
+              }
+            };`,
+          },
+        ],
       },
     }),
   ],
