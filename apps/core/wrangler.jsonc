@@ -286,6 +286,15 @@
 	"env": {
 		"staging": {
 			"name": "shipflare-core-staging",
+			// Custom subdomain so the Better Auth session cookie (set with
+			// `domain=.shipflare.ai` by apps/web staging) is included on
+			// the `/authorize` request from a browser tab opened by an
+			// external MCP client. *.workers.dev is on the Public Suffix
+			// List, so cookies cannot be shared across subdomains there
+			// — the cross-domain handshake only works on a real zone.
+			"routes": [
+				{ "pattern": "mcp-staging.shipflare.ai", "custom_domain": true }
+			],
 			"d1_databases": [
 				{
 					"binding": "DB",

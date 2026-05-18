@@ -52,13 +52,22 @@
   //   Provision D1 in apps/core first (see apps/core/wrangler.jsonc comment),
   //   then paste the same database_id into REPLACE_WITH_STAGING_DB_ID below.
   //   Set secrets with --env staging flag for both apps/core and apps/web.
-  //   OAuth callback URLs for staging workers:
-  //     GitHub:  https://shipflare-web-staging.<account>.workers.dev/api/auth/callback/github
-  //     X:       https://shipflare-web-staging.<account>.workers.dev/api/channels/x/callback
-  //     Reddit:  https://shipflare-web-staging.<account>.workers.dev/api/channels/reddit/callback
+  //   OAuth callback URLs for staging workers (custom domain, post Phase 11):
+  //     GitHub:  https://app-staging.shipflare.ai/api/auth/callback/github
+  //     X:       https://app-staging.shipflare.ai/api/channels/x/callback
+  //     Reddit:  https://app-staging.shipflare.ai/api/channels/reddit/callback
+  //
+  //   Staging runs on a custom subdomain (not *.workers.dev) so that the
+  //   Better Auth session cookie can be set with `domain=.shipflare.ai` and
+  //   ride across to `mcp-staging.shipflare.ai` for the Phase 7 external
+  //   MCP `/authorize` handshake. Workers Custom Domains auto-provision DNS
+  //   in the `shipflare.ai` zone owned by the staging account.
   "env": {
     "staging": {
       "name": "shipflare-web-staging",
+      "routes": [
+        { "pattern": "app-staging.shipflare.ai", "custom_domain": true }
+      ],
       "d1_databases": [
         {
           "binding": "DB",

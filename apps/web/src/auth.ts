@@ -20,6 +20,33 @@ type BetterAuthInstance = Auth<BetterAuthOptions>;
 let _auth: BetterAuthInstance | null = null;
 
 /**
+ * Decide whether to widen the session cookie scope to a parent domain so
+ * `apps/core` on a sibling subdomain (e.g. `mcp-staging.shipflare.ai`)
+ * can read it during the Phase 7 external MCP `/authorize` handshake.
+ *
+ * Returns `{ domain }` only when `baseURL` is a real zone we own
+ * (`*.shipflare.ai` or `*.shipflare.com`). Skips:
+ *   - localhost (no parent domain to widen to)
+ *   - `*.workers.dev` (Public Suffix List — browsers refuse `domain=workers.dev`)
+ *   - anything else unrecognized (fail closed — don't accidentally widen)
+ */
+function cookieDomainAttribute(baseUrl: string | undefined): { domain?: string } {
+  if (!baseUrl) return {};
+  let host: string;
+  try {
+    host = new URL(baseUrl).hostname;
+  } catch {
+    return {};
+  }
+  for (const zone of ["shipflare.ai", "shipflare.com"] as const) {
+    if (host === zone || host.endsWith(`.${zone}`)) {
+      return { domain: `.${zone}` };
+    }
+  }
+  return {};
+}
+
+/**
  * Build (or return the cached) Better Auth instance.
  *
  * Reads env via `getCloudflareContext()` from OpenNext — this works in both
@@ -97,6 +124,18 @@ export function getAuth(): BetterAuthInstance {
         sameSite: "lax",
         path: "/",
         httpOnly: true,
+        // Cross-subdomain cookie sharing for the Phase 7 external MCP
+        // `/authorize` handshake. apps/core lives on a sibling subdomain
+        // (`mcp-staging.shipflare.ai` / `mcp.shipflare.com`) and reads
+        // this session cookie via service binding when an MCP client
+        // opens `/authorize` in the browser. Cookies set host-only on
+        // apps/web would never reach apps/core.
+        //
+        // Only set the `domain` attribute when BETTER_AUTH_URL points at
+        // a real zone we control — otherwise we'd silently widen scope
+        // on `*.workers.dev` (which is in the Public Suffix List and
+        // wouldn't honor it anyway) or break local dev on localhost.
+        ...cookieDomainAttribute(env.BETTER_AUTH_URL),
       },
     },
     databaseHooks: {
