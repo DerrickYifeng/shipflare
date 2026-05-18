@@ -141,6 +141,20 @@ export interface Env {
    * never enter the provider (e.g. /healthz) it stays undefined.
    */
   OAUTH_PROVIDER?: OAuthHelpers;
+  /**
+   * Phase 7.3 security gate (mirrors `STRATEGIC_PATH_FIXTURE`). When `"1"`,
+   * `apps/core/src/external/auth-handler.ts` honors the `x-test-user-id`
+   * header on `/authorize` POST so the auth-handler tests can complete the
+   * OAuth grant without standing up a Better Auth session.
+   *
+   * MUST remain absent from `apps/core/wrangler.jsonc`. Set ONLY in
+   * `apps/core/vitest.config.mts` under `miniflare.bindings`. If it ever
+   * leaks into prod, any caller can mint an OAuth code for any victim's
+   * userId (PKCE only proves same-client; it doesn't authenticate the
+   * user). Phase 7.5 retires this seam once Better Auth verification is
+   * wired in.
+   */
+  EXTERNAL_AUTH_TEST_SEAM?: string;
 }
 
 // Task 7.3 retired the legacy `/external/agents/<role>/<userId>/mcp` 503

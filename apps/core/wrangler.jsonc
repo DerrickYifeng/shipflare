@@ -245,6 +245,19 @@
 	//
 	// apps/web must hold the same MCP_JWT_SECRET — both sides verify the
 	// HS256 signature with one shared secret.
+	//
+	// Test-only bindings — DO NOT add here. The following bindings exist
+	// solely as security gates for test seams and are set ONLY in
+	// `apps/core/vitest.config.mts` under `miniflare.bindings`. Adding any
+	// of them to wrangler.jsonc activates the seam in production:
+	//   - `STRATEGIC_PATH_FIXTURE` — gates the Anthropic short-circuit in
+	//     `onboarding-routes.ts`. Leaking it lets any browser force the
+	//     fixture path and skip LLM + schema validation.
+	//   - `EXTERNAL_AUTH_TEST_SEAM` (Phase 7.3) — gates the
+	//     `x-test-user-id` header read in `external/auth-handler.ts`.
+	//     Leaking it lets any caller mint an OAuth code for any victim's
+	//     userId (PKCE only proves same-client; it doesn't authenticate
+	//     the user).
 
 	// --- Environments ---
 	//

@@ -53,7 +53,7 @@ export const ExternalAuthHandler = {
 		// POST = user clicked "Authorize". Resolve their ShipFlare identity,
 		// then ask the provider to mint the auth code + redirect.
 		if (request.method === "POST") {
-			const userId = await resolveUserIdFromSessionCookie(request);
+			const userId = await resolveUserIdFromSessionCookie(request, env);
 			if (!userId) {
 				return new Response("not signed in to ShipFlare", { status: 401 });
 			}
@@ -137,10 +137,18 @@ function escapeHtml(s: string): string {
  * `apps/web`'s `/api/auth/session` (Service Binding) or read the shared
  * D1 session table directly.
  *
- * Phase 7.5 wires the real session check. For 7.3 the handler accepts a
- * test header so the auth-handler tests + manual Inspector smoke can
- * exercise the consent → grant → token flow end-to-end without standing
- * up a full apps/web session.
+ * Phase 7.3 SECURITY NOTE: the `x-test-user-id` header is honored ONLY
+ * when `env.EXTERNAL_AUTH_TEST_SEAM === "1"`. That binding is set in
+ * `apps/core/vitest.config.mts` under `miniflare.bindings` and MUST
+ * remain absent from `apps/core/wrangler.jsonc`. If it ever leaks into
+ * prod, any caller can mint an OAuth code for any victim's userId (PKCE
+ * only proves same-client; it doesn't authenticate the user). The gate
+ * mirrors the `STRATEGIC_PATH_FIXTURE` pattern in `onboarding-routes.ts`.
+ *
+ * Phase 7.5 wires Better Auth session-cookie verification here for the
+ * real production path. The only path to userId today IS the test seam;
+ * with the gate closed (prod), this function always returns null and
+ * `/authorize` POST always returns 401 "not signed in to ShipFlare".
  *
  * TODO(phase-7.5): replace this with a real Better Auth verification.
  * Two options on the table:
@@ -150,10 +158,20 @@ function escapeHtml(s: string): string {
  *   (b) Read the Better Auth session row directly from D1 — tighter
  *       coupling but no extra hop.
  */
-async function resolveUserIdFromSessionCookie(request: Request): Promise<string | null> {
+async function resolveUserIdFromSessionCookie(
+	request: Request,
+	env: Env,
+): Promise<string | null> {
 	// Test seam — exercised by `apps/core/test/external/auth-handler.test.ts`.
-	const headerUid = request.headers.get("x-test-user-id");
-	if (headerUid) return headerUid;
+	// Gated on `EXTERNAL_AUTH_TEST_SEAM === "1"` (set ONLY in
+	// `apps/core/vitest.config.mts` under `miniflare.bindings`). Production
+	// MUST NOT set this binding in `wrangler.jsonc`; if it does, an
+	// attacker can POST /authorize with `x-test-user-id: <victim>` and
+	// walk away with a valid OAuth code for that user.
+	if (env.EXTERNAL_AUTH_TEST_SEAM === "1") {
+		const headerUid = request.headers.get("x-test-user-id");
+		if (headerUid) return headerUid;
+	}
 
 	// TODO(phase-7.5): verify Better Auth session cookie. See doc comment above.
 	return null;

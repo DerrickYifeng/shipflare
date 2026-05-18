@@ -21,8 +21,8 @@
  * same vitest pass.
  */
 
-import { SELF } from "cloudflare:test";
-import { describe, expect, it } from "vitest";
+import { SELF, env } from "cloudflare:test";
+import { afterEach, describe, expect, it } from "vitest";
 
 const ORIGIN = "https://example.com";
 const CLIENT_REDIRECT = "http://localhost:9999/callback";
@@ -133,5 +133,64 @@ describe("ExternalAuthHandler — OAuth provider mount", () => {
     // return 200 — proving the provider doesn't swallow non-OAuth routes.
     const res = await SELF.fetch(`${ORIGIN}/healthz`);
     expect(res.status).toBe(200);
+  });
+});
+
+/**
+ * Phase 7.3 regression: when `EXTERNAL_AUTH_TEST_SEAM` is NOT "1" (the
+ * production posture — the binding is absent from `wrangler.jsonc`), the
+ * `x-test-user-id` header MUST be ignored. The previous patch honored
+ * the header unconditionally, which let any caller POST `/authorize`
+ * with `x-test-user-id: <victim>` and walk away with a valid OAuth code
+ * for that user (PKCE only proves same-client; it doesn't authenticate
+ * the user).
+ *
+ * The vitest-pool-workers `env` proxy is mutable per-test, so we flip
+ * the binding off in `beforeEach`-style setup, assert the gate rejects,
+ * then restore it in `afterEach` so the rest of the suite still passes.
+ */
+describe("ExternalAuthHandler — EXTERNAL_AUTH_TEST_SEAM gate (security)", () => {
+  const ORIGINAL_SEAM = (env as { EXTERNAL_AUTH_TEST_SEAM?: string })
+    .EXTERNAL_AUTH_TEST_SEAM;
+
+  afterEach(() => {
+    // Restore so the rest of the test file (and any later files in the
+    // same isolate) see the seam enabled again.
+    (env as { EXTERNAL_AUTH_TEST_SEAM?: string }).EXTERNAL_AUTH_TEST_SEAM =
+      ORIGINAL_SEAM;
+  });
+
+  it("rejects x-test-user-id when EXTERNAL_AUTH_TEST_SEAM is unset (prod posture)", async () => {
+    // Simulate prod: the binding is absent. If this assertion ever
+    // fails it means the gate has been removed or the seam is honored
+    // unconditionally — that's a victim-account takeover. Do NOT relax
+    // this test without understanding the OAuth flow at
+    // apps/core/src/external/auth-handler.ts:resolveUserIdFromSessionCookie.
+    (env as { EXTERNAL_AUTH_TEST_SEAM?: string }).EXTERNAL_AUTH_TEST_SEAM =
+      undefined;
+
+    const clientId = await registerPublicClient();
+    const res = await SELF.fetch(buildAuthorizeUrl(clientId), {
+      method: "POST",
+      headers: { "x-test-user-id": "attacker-supplied-victim" },
+      redirect: "manual",
+    });
+    expect(res.status).toBe(401);
+    expect(await res.text()).toContain("not signed in");
+  });
+
+  it("rejects x-test-user-id when EXTERNAL_AUTH_TEST_SEAM is set to a non-'1' value", async () => {
+    // Defense-in-depth: the gate is `=== "1"`, not truthy. Any other
+    // string ("true", "yes", "0") MUST still reject.
+    (env as { EXTERNAL_AUTH_TEST_SEAM?: string }).EXTERNAL_AUTH_TEST_SEAM =
+      "true";
+
+    const clientId = await registerPublicClient();
+    const res = await SELF.fetch(buildAuthorizeUrl(clientId), {
+      method: "POST",
+      headers: { "x-test-user-id": "attacker-supplied-victim" },
+      redirect: "manual",
+    });
+    expect(res.status).toBe(401);
   });
 });
