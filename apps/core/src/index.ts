@@ -150,11 +150,13 @@ export interface Env {
    * Service Bindings strip `host` + `cf-connecting-ip` — that's fine here
    * since we only forward the `cookie` header.
    *
-   * Optional because the binding is absent in `wrangler dev` when apps/web
-   * isn't running, and in vitest the binding is overridden per-test with a
-   * Fetcher stub. The auth-handler fails closed (401) when undefined.
+   * Typed as required to match the generated `Cloudflare.Env` constraint
+   * that AIChatAgent<Env, S> enforces. At runtime the binding may still
+   * be absent (vitest stubs per-test; `wrangler dev` without apps/web
+   * leaves it undefined); `auth-handler.ts:185` performs a defensive
+   * null-check and fails closed (401) when missing.
    */
-  WEB?: Fetcher;
+  WEB: Fetcher;
   /**
    * Phase 7.3 security gate (mirrors `STRATEGIC_PATH_FIXTURE`). When `"1"`,
    * `apps/core/src/external/auth-handler.ts` honors the `x-test-user-id`
