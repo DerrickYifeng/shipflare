@@ -1,13 +1,8 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type CSSProperties,
-} from "react";
-import { createCmoClient, type CmoClient } from "@/lib/mcp-client";
+import { useEffect, useState, type CSSProperties } from "react";
+import { useCmoAgent } from "@/hooks/use-cmo-agent";
+import { useCmoStub } from "@/hooks/use-cmo-stub";
 import { AgentDot } from "./agent-dot";
 import { PhaseTag, type PhaseTone } from "./phase-tag";
 import { roleCodeForRole } from "./agent-accent";
@@ -20,6 +15,10 @@ export interface TranscriptDrawerTarget {
 interface TeammateTranscriptDrawerProps {
   target: TranscriptDrawerTarget | null;
   onClose: () => void;
+  /** Founder user id — drives the CMO WebSocket. */
+  userId: string;
+  /** Bare host of apps/core for the WS — see `useCmoAgent`. */
+  coreHost?: string;
 }
 
 interface LogEntry {
@@ -149,38 +148,52 @@ const EMPTY: CSSProperties = {
 export function TeammateTranscriptDrawer({
   target,
   onClose,
+  userId,
+  coreHost,
 }: TeammateTranscriptDrawerProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [entries, setEntries] = useState<LogEntry[]>([]);
-  const clientRef = useRef<CmoClient | null>(null);
 
-  const fetchFor = useCallback(async (role: string) => {
-    setLoading(true);
-    setError(null);
-    try {
-      if (!clientRef.current) {
-        clientRef.current = await createCmoClient();
-      }
-      const rows = await clientRef.current.queryAgentTranscript(role, 100);
-      setEntries(rows);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setError(msg);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  // Share the same CMO WebSocket the parent page tree already opened —
+  // useCmoAgent is idempotent per (agent, name, host), so this hook
+  // resolves to the same socket instance as the surrounding TeamDesk's
+  // `useCmoAgent` call.
+  const { agent } = useCmoAgent({ userId, coreHost });
+  const stub = useCmoStub({ agent });
 
-  // Fetch when the drawer opens for a new target.
+  // Fetch transcript whenever target changes. No init guard: switching
+  // between drawer targets (e.g. founder clicks a different role) MUST
+  // re-fetch.
   useEffect(() => {
     if (!target) {
       setEntries([]);
       setError(null);
       return;
     }
-    void fetchFor(target.role);
-  }, [target, fetchFor]);
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    void (async () => {
+      try {
+        const rows = await stub.queryAgentTranscript({
+          role: target.role,
+          limit: 100,
+        });
+        if (cancelled) return;
+        setEntries(rows);
+      } catch (err: unknown) {
+        if (cancelled) return;
+        const msg = err instanceof Error ? err.message : String(err);
+        setError(msg);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [target, stub]);
 
   // Close on Escape.
   useEffect(() => {
@@ -191,15 +204,6 @@ export function TeammateTranscriptDrawer({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [target, onClose]);
-
-  // Close transport when the component unmounts.
-  useEffect(() => {
-    return () => {
-      const c = clientRef.current;
-      clientRef.current = null;
-      if (c) void c.close();
-    };
-  }, []);
 
   if (!target) return null;
 

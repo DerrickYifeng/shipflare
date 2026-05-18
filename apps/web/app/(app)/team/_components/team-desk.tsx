@@ -406,6 +406,8 @@ export function TeamDesk({ user, coreHost }: TeamDeskProps) {
       <TeammateTranscriptDrawer
         target={drawerTarget}
         onClose={() => setDrawerTarget(null)}
+        userId={user.id}
+        coreHost={coreHost}
       />
     </main>
   );
