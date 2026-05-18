@@ -3,8 +3,8 @@
  *
  * Server wrapper only — auth gate runs in `(app)/layout.tsx` but we also
  * read the session here so we can pass user metadata to the client component
- * (avatar, name for the composer). All MCP data fetching happens in the
- * browser via CmoClient (spec D13: browser→core direct).
+ * (avatar, name for the composer). All CMO data fetching happens in the
+ * browser via useCmoStub (spec D13: browser→core direct via callable RPC).
  */
 
 import { headers } from "next/headers";

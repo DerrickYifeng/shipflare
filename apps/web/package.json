@@ -16,7 +16,6 @@
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.78",
     "@cloudflare/ai-chat": "^0.7.0",
-    "@modelcontextprotocol/sdk": "^1.29.0",
     "@opennextjs/cloudflare": "^1.19.9",
     "@shipflare/crypto": "workspace:*",
     "@shipflare/db": "workspace:*",

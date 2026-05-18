@@ -3,7 +3,7 @@
  *
  * Ported from Railway's BriefingHeader. Simplified to accept flat
  * counts rather than a server-fetched BriefingSummary object; the
- * CF Briefing page derives these counts from CmoClient.queryDrafts.
+ * CF Briefing page derives these counts via useCmoStub.queryDrafts.
  */
 
 import type { CSSProperties } from "react";
