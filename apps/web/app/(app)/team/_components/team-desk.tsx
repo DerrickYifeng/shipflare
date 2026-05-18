@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useCmoAgent } from "@/hooks/use-cmo-agent";
 import { useCmoChat } from "@/hooks/use-cmo-chat";
-import { createCmoClient, type CmoClient } from "@/lib/mcp-client";
+import { useCmoStub } from "@/hooks/use-cmo-stub";
 import { useToast } from "@/components/ui/toast";
 import { ROLE_REGISTRY } from "@shipflare/shared";
 import type { TeamUser, RosterEmployee, ConversationMeta, PlanItemRow, DraftRow } from "./types";
@@ -80,9 +80,6 @@ export function TeamDesk({ user, coreHost }: TeamDeskProps) {
   // ---- Toast (for surfacing approve / new-conversation errors) ----
   const { toast } = useToast();
 
-  // ---- Client ref (used for one-shot queries, separate from chat) ----
-  const clientRef = useRef<CmoClient | null>(null);
-
   // ---- Left rail data ----
   const [employees, setEmployees] = useState<RosterEmployee[]>([]);
   const [conversations, setConversations] = useState<ConversationMeta[]>([]);
@@ -104,30 +101,45 @@ export function TeamDesk({ user, coreHost }: TeamDeskProps) {
   const [connectError, setConnectError] = useState<string | null>(null);
   const [initDone, setInitDone] = useState(false);
 
+  // ---- Chat via useCmoChat (CF-native AIChatAgent WebSocket transport) ----
+  //
+  // useCmoAgent owns the single WebSocket; useCmoChat and useCmoStub both
+  // consume it, so chat + RPC share ONE socket per page tree (the agents
+  // SDK does NOT de-dupe useAgent calls per options). Token-based JWT
+  // handshake; auto-reconnect.
+  //
+  // `conversationId` is forwarded so the founder can flip between threads
+  // via the left rail. Until the SDK rebuilds the WS on id change,
+  // re-keying via `useCmoChat`'s `id` arg is enough.
+  const { agent, error: agentError } = useCmoAgent({
+    userId: user.id,
+    coreHost,
+  });
+
+  const {
+    messages,
+    sendMessage,
+    isStreaming,
+    agentRunsByToolCall,
+  } = useCmoChat({
+    agent,
+    conversationId: selectedConversationId ?? undefined,
+  });
+
+  // Typed @callable RPC stub on the same WS as useCmoChat.
+  const stub = useCmoStub({ agent });
+
   useEffect(() => {
     let cancelled = false;
-
-    (async () => {
+    void (async () => {
       try {
-        const client = await createCmoClient();
-        if (cancelled) {
-          void client.close();
-          return;
-        }
-        clientRef.current = client;
-
-        // Parallel initial fetches.
         const [rosterRaw, convList, items, pendingDrafts] = await Promise.all([
-          client.queryRoster(),
-          client.listConversations(20),
-          client.queryPlanItems<PlanItemRow>({ limit: 50 }),
-          client.queryDrafts<DraftRow>({ status: "ready", limit: 20 }),
+          stub.queryRoster(),
+          stub.listConversations({ limit: 20 }),
+          stub.queryPlanItems({ limit: 50 }),
+          stub.queryDrafts({ limit: 20 }),
         ]);
-
         if (cancelled) return;
-
-        // Compute per-role task counts from in-flight plan items so the
-        // left rail can render real workload signal (badge after status pill).
         const activeStatuses = new Set([
           "pending",
           "drafting",
@@ -149,52 +161,23 @@ export function TeamDesk({ user, coreHost }: TeamDeskProps) {
           }),
         );
         setConversations(convList);
-        // Select the most-recent conversation if any.
         if (convList.length > 0 && convList[0]) {
           setSelectedConversationId(convList[0].id);
         }
-        setPlanItems(items);
-        setDrafts(pendingDrafts);
+        setPlanItems(items as unknown as PlanItemRow[]);
+        setDrafts(pendingDrafts as unknown as DraftRow[]);
         setInitDone(true);
       } catch (err) {
         if (cancelled) return;
-        const msg = err instanceof Error ? err.message : "Failed to connect";
+        const msg = err instanceof Error ? err.message : "Failed to load";
         setConnectError(msg);
         setInitDone(true);
       }
     })();
-
     return () => {
       cancelled = true;
-      const c = clientRef.current;
-      clientRef.current = null;
-      if (c) void c.close();
     };
-  }, []);
-
-  // ---- Chat via useCmoChat (CF-native AIChatAgent WebSocket transport) ----
-  //
-  // The new hook owns its own DO transport (separate from `clientRef`,
-  // which is used only for MCP one-shot queries — roster, drafts, plan
-  // items, transcripts). Token-based JWT handshake; auto-reconnect.
-  //
-  // `conversationId` is forwarded so the founder can flip between threads
-  // via the left rail. Until the SDK rebuilds the WS on id change,
-  // re-keying via `useCmoChat`'s `id` arg is enough.
-  const { agent, error: agentError } = useCmoAgent({
-    userId: user.id,
-    coreHost,
-  });
-
-  const {
-    messages,
-    sendMessage,
-    isStreaming,
-    agentRunsByToolCall,
-  } = useCmoChat({
-    agent,
-    conversationId: selectedConversationId ?? undefined,
-  });
+  }, [stub]);
 
   useEffect(() => {
     if (agentError && !connectError) {
@@ -202,18 +185,17 @@ export function TeamDesk({ user, coreHost }: TeamDeskProps) {
     }
   }, [agentError, connectError]);
 
-  // Memoised so the useEffect below has a stable dependency. Reads from
-  // clientRef.current only, so no closure deps needed.
+  // Memoised so the useEffect below has a stable dependency. The stub
+  // identity is stable across renders (useMemo on agent), so refreshes
+  // only re-create when the underlying WS does.
   const refreshPanelData = useCallback(async () => {
-    const client = clientRef.current;
-    if (!client) return;
     try {
       const [items, pendingDrafts] = await Promise.all([
-        client.queryPlanItems<PlanItemRow>({ limit: 50 }),
-        client.queryDrafts<DraftRow>({ status: "ready", limit: 20 }),
+        stub.queryPlanItems({ limit: 50 }),
+        stub.queryDrafts({ limit: 20 }),
       ]);
-      setPlanItems(items);
-      setDrafts(pendingDrafts);
+      setPlanItems(items as unknown as PlanItemRow[]);
+      setDrafts(pendingDrafts as unknown as DraftRow[]);
       // Recompute per-role task counts so the left-rail badges stay live.
       const activeStatuses = new Set([
         "pending",
@@ -235,7 +217,7 @@ export function TeamDesk({ user, coreHost }: TeamDeskProps) {
     } catch {
       // non-fatal — panel will show stale data on next user action
     }
-  }, []);
+  }, [stub]);
 
   // Refresh plan items + drafts whenever an assistant stream finishes.
   // `isStreaming` flipping from true → false marks turn completion in the
@@ -258,30 +240,27 @@ export function TeamDesk({ user, coreHost }: TeamDeskProps) {
 
   // ---- Conversation management ----
   const handleNewConversation = useCallback(async () => {
-    const client = clientRef.current;
-    if (!client || creating) return;
+    if (creating) return;
     setCreating(true);
     try {
-      const { conversationId } = await client.startNewConversation();
+      const { conversationId } = await stub.startNewConversation();
       setSelectedConversationId(conversationId);
       // Refresh conversation list.
-      const convList = await client.listConversations(20);
+      const convList = await stub.listConversations({ limit: 20 });
       setConversations(convList);
     } catch {
       // Silently fail — conversation list will be stale but user can retry.
     } finally {
       setCreating(false);
     }
-  }, [creating]);
+  }, [creating, stub]);
 
   // ---- Draft actions ----
   const handleApproveDraft = useCallback(
     async (id: string) => {
-      const client = clientRef.current;
-      if (!client) return;
       setLoadingDraftId(id);
       try {
-        await client.approveDraft(id);
+        await stub.approveDraft({ draftId: id });
         setDrafts((prev) => prev.filter((d) => d.id !== id));
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Approve failed";
@@ -290,16 +269,14 @@ export function TeamDesk({ user, coreHost }: TeamDeskProps) {
         setLoadingDraftId(null);
       }
     },
-    [toast],
+    [stub, toast],
   );
 
   const handleRejectDraft = useCallback(
     async (id: string) => {
-      const client = clientRef.current;
-      if (!client) return;
       setLoadingDraftId(id);
       try {
-        await client.rejectDraft(id);
+        await stub.rejectDraft({ draftId: id });
         setDrafts((prev) => prev.filter((d) => d.id !== id));
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Reject failed";
@@ -308,16 +285,14 @@ export function TeamDesk({ user, coreHost }: TeamDeskProps) {
         setLoadingDraftId(null);
       }
     },
-    [toast],
+    [stub, toast],
   );
 
   const handleCancelPlanItem = useCallback(
     async (id: string) => {
-      const client = clientRef.current;
-      if (!client) return;
       setCancellingPlanId(id);
       try {
-        await client.cancelPlanItem(id);
+        await stub.cancelPlanItem({ id });
         // Optimistically flip status in local state; next refresh will
         // confirm.
         setPlanItems((prev) =>
@@ -332,7 +307,7 @@ export function TeamDesk({ user, coreHost }: TeamDeskProps) {
         setCancellingPlanId(null);
       }
     },
-    [toast],
+    [stub, toast],
   );
 
   const handleSelectEmployee = useCallback((employee: RosterEmployee) => {
@@ -345,7 +320,7 @@ export function TeamDesk({ user, coreHost }: TeamDeskProps) {
   // ---- Status banner state (derived from the new hook) ----
   // The legacy `useTeamEvents` exposed `connecting | ready | sending | error`.
   // `useCmoChat` only exposes `isStreaming`; connection errors surface as
-  // initial CmoClient failures (`connectError`). Map streaming → "sending"
+  // initial stub-query failures (`connectError`). Map streaming → "sending"
   // for visual continuity.
   const derivedStatus: "idle" | "connecting" | "sending" | "error" = useMemo(() => {
     if (connectError) return "error";
