@@ -1,6 +1,5 @@
 import { SELF, env, runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import { signJwt } from "../src/lib/jwt";
 import { applyCmoSchema } from "../src/agents/cmo/schema";
 import type { CMO } from "../src/agents/cmo/CMO";
 
@@ -10,17 +9,11 @@ import type { CMO } from "../src/agents/cmo/CMO";
  * Coverage:
  *  - /agents/<role>/<userId>/internal/<path> — header-gated; 200 happy
  *    path forwards to the CMO DO's fetch handler.
- *  - /agents/<role>/<userId>/mcp — JWT-protected. 401 / 403 / 404 negative
- *    paths are exercised here; the JWT happy-path round-trips through the
- *    CMO McpAgent transport which needs a full Streamable-HTTP handshake
- *    that's out of scope for unit tests (verified manually via wrangler
- *    dev + curl per the task brief).
  *
- * Notes:
- *  - `MCP_JWT_SECRET` is supplied by `apps/core/.dev.vars` (read by
- *    vitest-pool-workers + `wrangler dev`). We sign with the same secret the
- *    Worker verifies against, which is exactly what the production browser →
- *    core flow does. Production overrides via `wrangler secret put`.
+ * The /agents/<role>/<userId>/mcp routing tests were retired alongside the
+ * route itself in Phase 11 (task #11). The browser surface now uses the
+ * CMO_WS_ROUTE + @callable RPC path; external MCP is mounted at /cmo/mcp
+ * via withOAuthProvider in a different code path.
  */
 
 const INTERNAL_HEADERS = {
@@ -95,82 +88,3 @@ describe("Worker /agents/<role>/<userId>/internal/* routing", () => {
   // the static role-registry + dynamic deploy pattern.
 });
 
-describe("Worker /agents/<role>/<userId>/mcp routing", () => {
-  const SECRET = env.MCP_JWT_SECRET;
-
-  it("returns 401 without an Authorization header", async () => {
-    const res = await SELF.fetch(
-      "https://example.com/agents/cmo/mcp-user-1/mcp",
-      { method: "POST" },
-    );
-    expect(res.status).toBe(401);
-  });
-
-  it("returns 401 for a malformed bearer token", async () => {
-    const res = await SELF.fetch(
-      "https://example.com/agents/cmo/mcp-user-2/mcp",
-      {
-        method: "POST",
-        headers: { authorization: "Bearer not.a.real.jwt" },
-      },
-    );
-    expect(res.status).toBe(401);
-  });
-
-  it("returns 401 for an expired token", async () => {
-    const token = await signJwt({ userId: "mcp-user-3" }, SECRET, -10);
-    const res = await SELF.fetch(
-      "https://example.com/agents/cmo/mcp-user-3/mcp",
-      {
-        method: "POST",
-        headers: { authorization: `Bearer ${token}` },
-      },
-    );
-    expect(res.status).toBe(401);
-  });
-
-  it("returns 403 when JWT userId doesn't match URL userId", async () => {
-    const token = await signJwt({ userId: "userA" }, SECRET, 60);
-    const res = await SELF.fetch(
-      "https://example.com/agents/cmo/userB/mcp",
-      {
-        method: "POST",
-        headers: { authorization: `Bearer ${token}` },
-      },
-    );
-    expect(res.status).toBe(403);
-  });
-
-  it("returns 404 for non-cmo roles (Phase 1 only exposes cmo at /agents)", async () => {
-    const token = await signJwt({ userId: "userA" }, SECRET, 60);
-    const res = await SELF.fetch(
-      "https://example.com/agents/head-of-growth/userA/mcp",
-      {
-        method: "POST",
-        headers: { authorization: `Bearer ${token}` },
-      },
-    );
-    expect(res.status).toBe(404);
-  });
-
-  it("returns 403 when an activity-scoped token is replayed at /mcp", async () => {
-    // Regression: /api/cmo-ws-token mints scope:'activity' for the activity
-    // WS path. Without a scope check here, an exfiltrated activity token
-    // could be replayed for a full MCP session, defeating the scope
-    // separation CMO.onConnect promises.
-    const token = await signJwt(
-      { userId: "scope-user-1", scope: "activity" },
-      SECRET,
-      60,
-    );
-    const res = await SELF.fetch(
-      "https://example.com/agents/cmo/scope-user-1/mcp",
-      {
-        method: "POST",
-        headers: { authorization: `Bearer ${token}` },
-      },
-    );
-    expect(res.status).toBe(403);
-    expect(await res.text()).toBe("token scope not valid for mcp");
-  });
-});

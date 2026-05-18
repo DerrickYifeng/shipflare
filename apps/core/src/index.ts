@@ -182,13 +182,6 @@ export interface Env {
 // screen and completes grants.
 
 /**
- * `/agents/<role>/<userId>/mcp[/...]` — Phase 1 internal MCP entry. The
- * trailing `(?:\/|$)` covers BOTH the initial handshake POST to `/mcp` and
- * any subsequent McpAgent sub-paths (e.g. `/mcp/messages`).
- */
-const MCP_ROUTE = /^\/agents\/([a-z-]+)\/([^/]+)\/mcp(?:\/|$)/;
-
-/**
  * `/agents/cmo/<userId>` (no /mcp suffix) — Browser chat WebSocket.
  *
  * Post-Phase-8 (CF-native chat migration): the web client opens this WS
@@ -198,9 +191,9 @@ const MCP_ROUTE = /^\/agents\/([a-z-]+)\/([^/]+)\/mcp(?:\/|$)/;
  * before forwarding to the DO; the DO is AIChatAgent so the WS upgrade
  * is handled by the framework's native chat transport.
  *
- * The trailing `$` (no further path) is what discriminates this from the
- * `/mcp[/...]` route — the regex order in `routeRequest()` checks MCP_ROUTE
- * first so streamable-HTTP handshakes still flow through `streamableHttpProxy`.
+ * The trailing `$` (no further path) is what discriminates this from
+ * `CMO_HTTP_ROUTE` — the regex order in `routeRequest()` checks the WS
+ * route before falling through to the framework HTTP routes.
  */
 const CMO_WS_ROUTE = /^\/agents\/cmo\/([^/]+)$/;
 
@@ -214,9 +207,8 @@ const CMO_WS_ROUTE = /^\/agents\/cmo\/([^/]+)$/;
  * our job here is to verify the JWT (same one used for the WS) before
  * spinning up the DO, then forward.
  *
- * Excludes `/mcp[/...]` (handled by MCP_ROUTE above) and `/internal/...`
- * (INTERNAL_ROUTE, service-binding only) — those have stricter access
- * controls.
+ * Excludes `/internal/...` (INTERNAL_ROUTE, service-binding only) — that
+ * path has stricter access controls.
  */
 const CMO_HTTP_ROUTE = /^\/agents\/cmo\/([^/]+)\/([^/].*)$/;
 
@@ -514,12 +506,6 @@ async function routeRequest(
     return handleInternalRequest(request, env, role!, userId!, internalPath!);
   }
 
-  const mcpMatch = MCP_ROUTE.exec(url.pathname);
-  if (mcpMatch) {
-    const [, role, userId] = mcpMatch;
-    return handleMcpRequest(request, env, role!, userId!);
-  }
-
   const wsMatch = CMO_WS_ROUTE.exec(url.pathname);
   if (wsMatch) {
     const [, userId] = wsMatch;
@@ -704,65 +690,6 @@ async function handleInternalRequest(
   // Strip the public path prefix — the DO's fetch handler expects
   // `/internal/<path>`, not `/agents/<role>/<userId>/internal/<path>`.
   return stub.fetch(new Request(`https://internal${internalPath}`, request));
-}
-
-// ──────────────────────────────────────────────────────────────────────────
-// /agents/<role>/<userId>/mcp
-//
-// Task 5.1b (CF-native chat migration): CMO is now an AIChatAgent and no
-// longer speaks the MCP transport. The legacy `streamableHttpProxy` +
-// `setInitializeRequest`/`getInitializeRequest` helpers were deleted with
-// the McpAgent surface. Phase 8 reinstalls a chat-native browser entry
-// (apps/web → `useAgentChat` over `/agents/cmo/<userId>` WebSocket).
-//
-// Existing auth assertions in `cmo-routing.test.ts` (401 without bearer,
-// 401 expired, 403 mismatched userId / scope) survive — the JWT validation
-// happens here before the 503 dispatch.
-// ──────────────────────────────────────────────────────────────────────────
-
-async function handleMcpRequest(
-  request: Request,
-  env: Env,
-  role: string,
-  userId: string,
-): Promise<Response> {
-  if (role !== "cmo") {
-    return new Response("role not exposed at /agents in Phase 1", {
-      status: 404,
-    });
-  }
-
-  // JWT validation. Bearer prefix → verify → claim.userId vs URL.userId.
-  const auth = request.headers.get("authorization");
-  if (!auth?.startsWith("Bearer ")) {
-    return new Response("unauthorized", { status: 401 });
-  }
-  let claims: Record<string, unknown>;
-  try {
-    claims = await verifyJwt(auth.slice(7), env.MCP_JWT_SECRET);
-  } catch {
-    return new Response("invalid token", { status: 401 });
-  }
-  if (claims["userId"] !== userId) {
-    return new Response("token userId mismatch", { status: 403 });
-  }
-  // Scope-claim guard: historical cross-replay protection. The legacy
-  // /api/cmo-ws-token route minted scope:'activity' tokens; it was
-  // retired in Phase 10 of the CF-native chat migration. /api/mcp-token
-  // continues to mint MCP-scoped (no `scope` claim today) tokens. We
-  // accept undefined (back-compat) or 'mcp'.
-  const scope = (claims as { scope?: unknown }).scope;
-  if (scope !== undefined && scope !== "mcp") {
-    return new Response("token scope not valid for mcp", { status: 403 });
-  }
-
-  // Past auth: the MCP transport is offline. Phase 8 will rewire to a
-  // chat-native browser entry. Returning 503 (not 200) so old web builds
-  // surface the migration state clearly instead of silently hanging.
-  return new Response(
-    "MCP transport retired in Phase 5; chat-native browser entry lands in Phase 8",
-    { status: 503 },
-  );
 }
 
 // Task 7.3 (CF-native external MCP): the legacy
