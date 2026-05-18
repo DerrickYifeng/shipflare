@@ -245,7 +245,8 @@ export default {
     // redirect. Props (`{ userId, scopes }`) flow from there into the
     // verified-Bearer request that hits `CmoExternalMcp.serve("/cmo/mcp")`.
     if (
-      url.pathname.startsWith("/cmo/mcp") ||
+      url.pathname === "/cmo/mcp" ||
+      url.pathname.startsWith("/cmo/mcp/") ||
       url.pathname === "/authorize" ||
       url.pathname.startsWith("/oauth/") ||
       url.pathname.startsWith("/.well-known/oauth-")
