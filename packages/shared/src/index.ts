@@ -3,4 +3,5 @@ export * from "./role-registry";
 export * from "./platform-registry";
 export * from "./types";
 export * from "./strategic-path-schema";
+export * from "./cmo-callable";
 export * from "./telemetry";
