@@ -22,6 +22,14 @@ import { useAgentChat } from '@cloudflare/ai-chat/react';
 import { useAgent, useAgentToolEvents } from 'agents/react';
 
 async function fetchAgentJwt(agent: string, name?: string): Promise<string> {
+  // SSR guard: useAgent's `query` callback runs via React 19's `use()` which
+  // SUSPENDS during SSR — meaning the promise is awaited server-side. A
+  // relative-URL `fetch('/api/agent-token?...')` throws "Invalid URL" with
+  // no base, crashing the page render. Returning an empty token during SSR
+  // lets the page render; the client will re-fetch on mount (queryDeps
+  // changes trigger a refresh, but even without that the WS connect kicks
+  // a retry once `typeof window !== 'undefined'`).
+  if (typeof window === 'undefined') return '';
   const params = new URLSearchParams({ agent });
   if (name) params.set('name', name);
   const res = await fetch(`/api/agent-token?${params.toString()}`);
@@ -51,13 +59,22 @@ export interface UseCmoChatResult {
  *
  * The hook handles the JWT dance via `query` (query-string params for the
  * WS handshake). Re-fetches the token when `userId` changes.
+ *
+ * `coreHost` is the bare host (no scheme) of apps/core, e.g.
+ * `mcp-staging.shipflare.ai` or `localhost:3001`. The parent page must
+ * derive it from `env.CORE_PUBLIC_URL` server-side and pass it in — the
+ * client bundle has no env access. When omitted, `useAgent` falls back to
+ * `window.location.host`, which is wrong on the custom-domain split
+ * (apps/web on app-*.shipflare.ai, apps/core on mcp-*.shipflare.ai).
  */
 export function useCmoChat({
   userId,
   conversationId,
+  coreHost,
 }: {
   userId: string;
   conversationId?: string;
+  coreHost?: string;
 }): UseCmoChatResult {
   // The browser knows its own timezone via Intl; we ship it on the WS
   // handshake so the CMO DO can bootstrap `founder_context.tz` on first
@@ -69,6 +86,10 @@ export function useCmoChat({
   const agent = useAgent({
     agent: 'cmo',
     name: userId,
+    // Cross-origin WS target. Without `host`, useAgent defaults to
+    // `window.location.host` — broken when apps/web and apps/core live
+    // on different subdomains (Phase 11 custom-domain migration).
+    host: coreHost,
     // The SDK's QueryObject is Record<string, string | null>. We return the
     // token alongside the inferred timezone so `useAgent` appends
     // `?token=<jwt>&tz=<IANA>` to the WS URL. The server reads `tz` in

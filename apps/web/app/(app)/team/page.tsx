@@ -8,7 +8,9 @@
  */
 
 import { headers } from "next/headers";
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { getAuth } from "@/auth";
+import { resolveCoreHost } from "@/lib/core-host";
 import { TeamDesk } from "./_components/team-desk";
 
 export const dynamic = "force-dynamic";
@@ -21,6 +23,7 @@ export interface TeamUser {
 }
 
 export default async function TeamPage() {
+  const { env } = getCloudflareContext();
   let session = null;
   try {
     session = await getAuth().api.getSession({ headers: await headers() });
@@ -37,6 +40,7 @@ export default async function TeamPage() {
         email: session.user.email ?? null,
         image: session.user.image ?? null,
       }}
+      coreHost={resolveCoreHost(env.CORE_PUBLIC_URL)}
     />
   );
 }

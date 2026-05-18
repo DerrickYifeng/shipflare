@@ -39,6 +39,7 @@
 
 import OAuthProvider from "@cloudflare/workers-oauth-provider";
 import type { OAuthHelpers } from "@cloudflare/workers-oauth-provider";
+import { routeAgentRequest } from "agents";
 
 import { handleOnboardingInternal } from "./onboarding-routes";
 import { verifyJwt } from "./lib/jwt";
@@ -200,6 +201,22 @@ const MCP_ROUTE = /^\/agents\/([a-z-]+)\/([^/]+)\/mcp(?:\/|$)/;
  * first so streamable-HTTP handshakes still flow through `streamableHttpProxy`.
  */
 const CMO_WS_ROUTE = /^\/agents\/cmo\/([^/]+)$/;
+
+/**
+ * `/agents/cmo/<userId>/<framework-path>` — Framework HTTP routes for the
+ * browser chat surface (e.g. `/get-messages`, `/set-messages`). The
+ * `@cloudflare/ai-chat/react` `useAgentChat` hook fetches initial message
+ * history via a cross-origin GET to `<host>/agents/cmo/<userId>/get-messages`
+ * — `host` comes from the same `useAgent({ host })` we configure for the
+ * WS handshake. The DO (AIChatAgent) implements `/get-messages` natively;
+ * our job here is to verify the JWT (same one used for the WS) before
+ * spinning up the DO, then forward.
+ *
+ * Excludes `/mcp[/...]` (handled by MCP_ROUTE above) and `/internal/...`
+ * (INTERNAL_ROUTE, service-binding only) — those have stricter access
+ * controls.
+ */
+const CMO_HTTP_ROUTE = /^\/agents\/cmo\/([^/]+)\/([^/].*)$/;
 
 // Task 7.3: `/external/agents/<role>/<userId>/mcp` and its `EXTERNAL_MCP_ROUTE`
 // regex were retired. The external MCP surface now lives at `/cmo/mcp`
@@ -428,6 +445,10 @@ async function fetchPlatformMetrics(
 // ──────────────────────────────────────────────────────────────────────────
 const CORS_ALLOWED_ORIGINS = new Set([
   "https://shipflare.ai",
+  "https://app.shipflare.ai",
+  "https://app-staging.shipflare.ai",
+  "https://shipflare.com",
+  "https://app.shipflare.com",
   "https://shipflare-web.cdhyfpp.workers.dev",
   "http://localhost:3000",
   "http://localhost:8788",
@@ -501,6 +522,12 @@ async function routeRequest(
   if (wsMatch) {
     const [, userId] = wsMatch;
     return handleCmoWsRequest(request, env, userId!);
+  }
+
+  const httpMatch = CMO_HTTP_ROUTE.exec(url.pathname);
+  if (httpMatch) {
+    const [, userId] = httpMatch;
+    return handleCmoHttpRequest(request, env, userId!);
   }
 
   return new Response("not found", { status: 404 });
@@ -585,6 +612,53 @@ async function handleCmoWsRequest(
   // original `/agents/cmo/<userId>` path (CMO uses pathname to
   // discriminate this from /mcp transport WS).
   return stub.fetch(forwarded);
+}
+
+/**
+ * Framework HTTP routes for the browser chat surface (e.g. `/get-messages`,
+ * `/set-messages`). Mirror of `handleCmoWsRequest`'s JWT verification: same
+ * token format (minted by apps/web `/api/agent-token`), same claim checks
+ * (token.name === userId, token.agent === "cmo"). Forwards to the SDK's
+ * `routeAgentRequest` which strips the `/agents/<agent>/<name>` prefix and
+ * dispatches to the DO's framework handlers.
+ *
+ * Returns 404 if the SDK doesn't recognize the subpath (e.g. typos).
+ */
+async function handleCmoHttpRequest(
+  request: Request,
+  env: Env,
+  userId: string,
+): Promise<Response> {
+  const url = new URL(request.url);
+  const token = url.searchParams.get("token");
+  if (!token) {
+    return new Response("missing token", { status: 401 });
+  }
+
+  let claims: Record<string, unknown>;
+  try {
+    claims = await verifyJwt(token, env.MCP_JWT_SECRET);
+  } catch (err) {
+    return new Response(
+      `invalid token: ${err instanceof Error ? err.message : String(err)}`,
+      { status: 401 },
+    );
+  }
+
+  if (claims["name"] !== userId) {
+    return new Response("token.name mismatch", { status: 403 });
+  }
+  if (claims["agent"] !== "cmo") {
+    return new Response("token.agent mismatch", { status: 403 });
+  }
+
+  // Delegate to the SDK's router. It matches the `agents/<kebab>/<name>`
+  // prefix, strips it, looks up the DO via `getServerByName`, and forwards
+  // the request with the framework subpath (e.g. `/get-messages`) intact.
+  const handled = await routeAgentRequest(request, env);
+  if (handled) return handled;
+
+  return new Response("not found", { status: 404 });
 }
 
 // ──────────────────────────────────────────────────────────────────────────

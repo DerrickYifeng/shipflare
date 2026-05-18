@@ -22,6 +22,8 @@ import {
 
 export interface TeamDeskProps {
   user: TeamUser;
+  /** Bare host of apps/core for the chat WebSocket — see `useCmoChat`. */
+  coreHost: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -73,7 +75,7 @@ function toRosterEmployee(raw: {
 // Component
 // ---------------------------------------------------------------------------
 
-export function TeamDesk({ user }: TeamDeskProps) {
+export function TeamDesk({ user, coreHost }: TeamDeskProps) {
   // ---- Toast (for surfacing approve / new-conversation errors) ----
   const { toast } = useToast();
 
@@ -186,6 +188,7 @@ export function TeamDesk({ user }: TeamDeskProps) {
   } = useCmoChat({
     userId: user.id,
     conversationId: selectedConversationId ?? undefined,
+    coreHost,
   });
 
   // Memoised so the useEffect below has a stable dependency. Reads from

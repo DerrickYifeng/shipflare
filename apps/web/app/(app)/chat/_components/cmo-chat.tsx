@@ -13,8 +13,14 @@ import { StepAnchor } from "./step-anchor";
 import { EMPLOYEE_REGISTRY } from "@/lib/employee-registry-client";
 import { shouldRenderMessage } from "@/lib/chat/message-filter";
 
-export function CmoChat({ userId }: { userId: string }) {
-	const { messages, sendMessage, isStreaming, agentRunsByToolCall } = useCmoChat({ userId });
+export function CmoChat({
+	userId,
+	coreHost,
+}: { userId: string; coreHost: string }) {
+	const { messages, sendMessage, isStreaming, agentRunsByToolCall } = useCmoChat({
+		userId,
+		coreHost,
+	});
 	const [input, setInput] = useState("");
 
 	function handleSubmit(e: FormEvent) {

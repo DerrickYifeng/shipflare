@@ -7,12 +7,15 @@
  */
 
 import { headers } from "next/headers";
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { getAuth } from "@/auth";
+import { resolveCoreHost } from "@/lib/core-host";
 import { CmoChat } from "./_components/cmo-chat";
 
 export const dynamic = "force-dynamic";
 
 export default async function ChatPage() {
+	const { env } = getCloudflareContext();
 	let session = null;
 	try {
 		session = await getAuth().api.getSession({ headers: await headers() });
@@ -21,5 +24,10 @@ export default async function ChatPage() {
 		session = null;
 	}
 	if (!session?.user) return null;
-	return <CmoChat userId={session.user.id} />;
+	return (
+		<CmoChat
+			userId={session.user.id}
+			coreHost={resolveCoreHost(env.CORE_PUBLIC_URL)}
+		/>
+	);
 }
