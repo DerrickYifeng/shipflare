@@ -29,7 +29,7 @@ import type { CMO } from "../src/agents/cmo/CMO";
  */
 
 describe("CMO schema", () => {
-  it("applies all 8 retained tables on ensureSchema", async () => {
+  it("applies all 9 retained tables on ensureSchema", async () => {
     const stub = env.CMO.getByName("schema-test-user");
     await runInDurableObject(stub, async (_instance: CMO, state) => {
       applyCmoSchema(state.storage.sql);
@@ -49,12 +49,14 @@ describe("CMO schema", () => {
         .toArray()
         .map((r) => r.name);
 
-      // Task 5.1b dropped `conversations`, `founder_messages` (replaced by
-      // AIChatAgent's chat-history tables), `roster` (retired with the
-      // hire/fire surface), and `activity_events` (replaced by Analytics
-      // Engine via writeAgentEvent).
+      // Task 5.1b dropped `founder_messages` (replaced by AIChatAgent's
+      // chat-history tables), `roster` (retired with the hire/fire surface),
+      // and `activity_events` (replaced by Analytics Engine via
+      // writeAgentEvent). Task #11 (2026-05-19) restored `conversations` as
+      // the authoritative thread index for the /team multi-thread UI.
       expect(tables).toEqual([
         "approval_queue",
+        "conversations",
         "cross_conversation_memory",
         "employee_log",
         "founder_context",
@@ -62,6 +64,24 @@ describe("CMO schema", () => {
         "progress_snapshots",
         "push_subscriptions",
         "strategic_path",
+      ]);
+    });
+  });
+
+  it("creates conversations table with the expected columns", async () => {
+    const stub = env.CMO.getByName("schema-conv-1");
+    await runInDurableObject(stub, async (_instance: CMO, state) => {
+      applyCmoSchema(state.storage.sql);
+      const cols = state.storage.sql
+        .exec<{ name: string }>("PRAGMA table_info(conversations)")
+        .toArray()
+        .map((r) => r.name);
+      expect(cols).toEqual([
+        "id",
+        "started_at",
+        "ended_at",
+        "title",
+        "archived_at",
       ]);
     });
   });

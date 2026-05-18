@@ -9,13 +9,21 @@
  * makes this idempotent across DO restarts.
  *
  * Post-Phase-5 changes (Task 5.1b of CF-native chat migration):
- *  - DROPPED: `conversations`, `founder_messages` — chat history is now
- *    persisted by AIChatAgent's built-in tables (cf_ai_chat_*) on first
- *    chat. Spec §2 confirms (Q3=B).
+ *  - DROPPED: `founder_messages` — chat history is persisted by AIChatAgent's
+ *    built-in `cf_ai_chat_agent_messages` table on first chat. Spec §2 confirms (Q3=B).
  *  - DROPPED: `roster` — per-user hiring retired. EMPLOYEE_REGISTRY is the
- *    static org chart; every peer always available via `consult`.
+ *    static org chart; every peer always available via `consult`. queryRoster
+ *    derives from the registry (Task #11, 2026-05-19).
  *  - DROPPED: `activity_events` — the bespoke activity feed is replaced by
  *    Analytics Engine via `writeAgentEvent` (Phase 0 telemetry).
+ *
+ * Post-Task-#11 (2026-05-19):
+ *  - RESTORED: `conversations` — AIChatAgent's cf_ai_chat_agent_messages is
+ *    one bag per DO; `useAgentChat({id})` doesn't partition storage. The
+ *    founder UI needs an authoritative thread list, so we keep this small
+ *    table on per-team SQLite. startNewConversation INSERTs; listConversations
+ *    READs. Threads themselves are still rendered from the AIChatAgent bag
+ *    (filtered client-side by id at render time).
  *
  * Tables retained:
  *  - founder_context           — identity-level KV (productName, voice...)
@@ -136,5 +144,21 @@ export function applyCmoSchema(sql: SqlStorage): void {
       last_used INTEGER,
       last_error TEXT
     );
+
+    -- Founder-facing conversation thread list (Task #11, 2026-05-19).
+    -- AIChatAgent stores all messages in one cf_ai_chat_agent_messages bag
+    -- per DO; this table is the authoritative thread index the /team UI
+    -- enumerates via listConversations. startNewConversation INSERTs a row;
+    -- the resulting id is passed to useAgentChat({id}) so the client can
+    -- key its message-list rendering.
+    CREATE TABLE IF NOT EXISTS conversations (
+      id           TEXT PRIMARY KEY,
+      started_at   INTEGER NOT NULL,
+      ended_at     INTEGER,
+      title        TEXT,
+      archived_at  INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_conversations_active
+      ON conversations(archived_at, started_at DESC);
   `);
 }
