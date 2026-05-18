@@ -49,4 +49,28 @@ describe("CMO as AIChatAgent", () => {
 			expect(names.length).toBe(15);
 		});
 	});
+
+	it("exposes 13 @callable methods on the public surface", async () => {
+		const id = env.CMO.idFromName("cmo-test-callables");
+		await runInDurableObject<CMO, void>(env.CMO.get(id), async (instance) => {
+			const expected = [
+				"queryFounderContext",
+				"queryPlanItems",
+				"cancelPlanItem",
+				"approveDraft",
+				"rejectDraft",
+				"queryDrafts",
+				"rememberThis",
+				"forgetThis",
+				"queryMemory",
+				"queryAgentTranscript",
+				"queryRoster",
+				"listConversations",
+				"startNewConversation",
+			];
+			for (const name of expected) {
+				expect(typeof (instance as unknown as Record<string, unknown>)[name]).toBe("function");
+			}
+		});
+	});
 });

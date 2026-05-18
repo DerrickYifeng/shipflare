@@ -751,7 +751,7 @@ export class CMO extends AIChatAgent<Env, CMOState> {
 				`SELECT id, started_at, ended_at, title
 				 FROM conversations
 				 WHERE archived_at IS NULL
-				 ORDER BY started_at DESC
+				 ORDER BY started_at DESC, ROWID DESC
 				 LIMIT ?`,
 				limit,
 			)
