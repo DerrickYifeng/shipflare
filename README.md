@@ -179,3 +179,51 @@ pnpm test:e2e         # run Playwright E2E tests
 pnpm test:e2e:ui      # Playwright UI mode
 pnpm test:e2e:headed  # run in headed browser
 ```
+
+## External MCP (Claude Desktop / Cursor)
+
+ShipFlare exposes a remote MCP server at `https://mcp.shipflare.com/cmo/mcp`
+(the mount route lives in `apps/core/wrangler.jsonc` — adjust if your deploy uses
+a different subdomain). Speaks OAuth 2.1 + PKCE with Dynamic Client Registration —
+most MCP clients auto-register on first connect.
+
+### Claude Desktop setup
+
+Claude Desktop today connects to remote MCP servers via the `mcp-remote` local
+proxy. Add to your config (macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`,
+Windows: `%APPDATA%\Claude\claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "shipflare-cmo": {
+      "command": "npx",
+      "args": ["mcp-remote", "https://mcp.shipflare.com/cmo/mcp"]
+    }
+  }
+}
+```
+
+Restart Claude Desktop. On first use, a browser window opens for the OAuth flow.
+Sign in to ShipFlare if you aren't already, click **Authorize**, and you're done.
+
+### Cursor setup
+
+Cursor speaks Streamable HTTP natively. Add to `~/.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "shipflare-cmo": {
+      "url": "https://mcp.shipflare.com/cmo/mcp"
+    }
+  }
+}
+```
+
+Cursor handles the OAuth dance in its built-in browser.
+
+### Tool surface
+
+One tool: `chat(message: string)` — send a natural-language message; the CMO LLM
+handles consulting peers, reviewing drafts, and acting on your behalf.
