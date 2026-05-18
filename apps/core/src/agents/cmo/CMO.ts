@@ -1,4 +1,5 @@
 import { AIChatAgent } from "@cloudflare/ai-chat";
+import { callable } from "agents";
 import {
 	streamText,
 	createUIMessageStream,
@@ -178,15 +179,7 @@ export class CMO extends AIChatAgent<Env, CMOState> {
 				description:
 					"Read the founder_context KV map. Identity-level config the chat needs (productName, voice, etc).",
 				inputSchema: z.object({}),
-				execute: async () => {
-					self.ensureSchema();
-					const rows = self.ctx.storage.sql
-						.exec<{ key: string; value: string }>(
-							"SELECT key, value FROM founder_context",
-						)
-						.toArray();
-					return Object.fromEntries(rows.map((r) => [r.key, r.value]));
-				},
+				execute: async () => self._queryFounderContext(),
 			}),
 
 			setFounderContext: tool({
@@ -279,26 +272,7 @@ export class CMO extends AIChatAgent<Env, CMOState> {
 					ownerRole: z.string().optional(),
 					limit: z.number().int().positive().max(200).default(50),
 				}),
-				execute: async ({ status, ownerRole, limit }) => {
-					self.ensureSchema();
-					let q =
-						"SELECT id, skill, channel, params_json, status, owner_role, scheduled_for, started_at, completed_at FROM plan_items WHERE 1=1";
-					const bindings: unknown[] = [];
-					if (status) {
-						q += " AND status = ?";
-						bindings.push(status);
-					}
-					if (ownerRole) {
-						q += " AND owner_role = ?";
-						bindings.push(ownerRole);
-					}
-					q +=
-						" ORDER BY scheduled_for IS NULL, scheduled_for ASC, plan_version ASC LIMIT ?";
-					bindings.push(limit);
-					return self.ctx.storage.sql
-						.exec(q, ...(bindings as SqlStorageValue[]))
-						.toArray();
-				},
+				execute: async (args) => self._queryPlanItems(args),
 			}),
 
 			updatePlanItem: tool({
@@ -431,25 +405,7 @@ export class CMO extends AIChatAgent<Env, CMOState> {
 				inputSchema: z.object({
 					limit: z.number().int().min(1).max(200).default(50),
 				}),
-				execute: async ({ limit }) => {
-					self.ensureSchema();
-					// The post-rewrite path reads drafts directly from approval_queue
-					// (CMO is the sole writer post-Phase-5). The legacy MCP tool RPC'd
-					// to SMM.list_drafts; that path is gone alongside the McpAgent
-					// surface. The legacy `status` filter param was dropped —
-					// approval_queue.decision is the authoritative state, and the
-					// queue is empty until SMM-side draft mirroring lands in Task
-					// 5.1c. Status filtering will be re-added then.
-					return self.ctx.storage.sql
-						.exec(
-							`SELECT id, draft_id, employee, kind, channel, preview, created_at, decided_at, decision
-							 FROM approval_queue
-							 ORDER BY created_at DESC
-							 LIMIT ?`,
-							limit,
-						)
-						.toArray();
-				},
+				execute: async (args) => self._queryDrafts(args),
 			}),
 
 			rememberThis: tool({
@@ -501,24 +457,7 @@ export class CMO extends AIChatAgent<Env, CMOState> {
 				inputSchema: z.object({
 					limit: z.number().int().positive().max(100).default(50),
 				}),
-				execute: async ({ limit }) => {
-					self.ensureSchema();
-					return self.ctx.storage.sql
-						.exec<{
-							id: string;
-							content: string;
-							added_at: number;
-							source_conversation_id: string | null;
-						}>(
-							`SELECT id, content, added_at, source_conversation_id
-							 FROM cross_conversation_memory
-							 WHERE active = 1
-							 ORDER BY added_at DESC
-							 LIMIT ?`,
-							limit,
-						)
-						.toArray();
-				},
+				execute: async (args) => self._queryMemory(args),
 			}),
 
 			queryAgentTranscript: tool({
@@ -528,30 +467,152 @@ export class CMO extends AIChatAgent<Env, CMOState> {
 					role: z.string().min(1),
 					limit: z.number().int().positive().max(200).default(100),
 				}),
-				execute: async ({ role, limit }) => {
-					self.ensureSchema();
-					return self.ctx.storage.sql
-						.exec<{
-							id: number;
-							conversation_id: string | null;
-							from_role: string;
-							kind: string;
-							summary: string | null;
-							payload_json: string | null;
-							ts: number;
-						}>(
-							`SELECT id, conversation_id, from_role, kind, summary, payload_json, ts
-							 FROM employee_log
-							 WHERE from_role = ?
-							 ORDER BY ts DESC
-							 LIMIT ?`,
-							role,
-							limit,
-						)
-						.toArray();
-				},
+				execute: async (args) => self._queryAgentTranscript(args),
 			}),
 		};
+	}
+
+	// ──────────────────────────────────────────────────────────────────────
+	// @callable RPC surface — read group
+	//
+	// Each method has an `_impl` companion that the AI-SDK `tool({...})`
+	// definitions in `getTools()` also delegate to. One SQL implementation,
+	// two entry points: the LLM via `tool()`, the browser via `@callable`.
+	//
+	// Browser auth: every connection to this DO is JWT-verified by
+	// `handleCmoWsRequest` (apps/core/src/index.ts) which enforces
+	// claims.name === this.name. No per-method auth check needed.
+	// ──────────────────────────────────────────────────────────────────────
+
+	private async _queryFounderContext(): Promise<Record<string, string>> {
+		this.ensureSchema();
+		const rows = this.ctx.storage.sql
+			.exec<{ key: string; value: string }>(
+				"SELECT key, value FROM founder_context",
+			)
+			.toArray();
+		return Object.fromEntries(rows.map((r) => [r.key, r.value]));
+	}
+
+	@callable()
+	async queryFounderContext(): Promise<Record<string, string>> {
+		return this._queryFounderContext();
+	}
+
+	private async _queryPlanItems(args: {
+		status?: string;
+		ownerRole?: string;
+		limit?: number;
+	}): Promise<unknown[]> {
+		this.ensureSchema();
+		const limit = Math.min(Math.max(args.limit ?? 50, 1), 200);
+		let q =
+			"SELECT id, skill, channel, params_json, status, owner_role, scheduled_for, started_at, completed_at FROM plan_items WHERE 1=1";
+		const bindings: unknown[] = [];
+		if (args.status) {
+			q += " AND status = ?";
+			bindings.push(args.status);
+		}
+		if (args.ownerRole) {
+			q += " AND owner_role = ?";
+			bindings.push(args.ownerRole);
+		}
+		q +=
+			" ORDER BY scheduled_for IS NULL, scheduled_for ASC, plan_version ASC LIMIT ?";
+		bindings.push(limit);
+		return this.ctx.storage.sql
+			.exec(q, ...(bindings as SqlStorageValue[]))
+			.toArray();
+	}
+
+	@callable()
+	async queryPlanItems(
+		args: {
+			status?: string;
+			ownerRole?: string;
+			limit?: number;
+		} = {},
+	): Promise<unknown[]> {
+		return this._queryPlanItems(args);
+	}
+
+	private async _queryDrafts(args: { limit?: number }): Promise<unknown[]> {
+		this.ensureSchema();
+		const limit = Math.min(Math.max(args.limit ?? 50, 1), 200);
+		return this.ctx.storage.sql
+			.exec(
+				`SELECT id, draft_id, employee, kind, channel, preview, created_at, decided_at, decision
+				 FROM approval_queue
+				 ORDER BY created_at DESC
+				 LIMIT ?`,
+				limit,
+			)
+			.toArray();
+	}
+
+	@callable()
+	async queryDrafts(args: { limit?: number } = {}): Promise<unknown[]> {
+		return this._queryDrafts(args);
+	}
+
+	private async _queryMemory(args: { limit?: number }): Promise<unknown[]> {
+		this.ensureSchema();
+		const limit = Math.min(Math.max(args.limit ?? 50, 1), 100);
+		return this.ctx.storage.sql
+			.exec<{
+				id: string;
+				content: string;
+				added_at: number;
+				source_conversation_id: string | null;
+			}>(
+				`SELECT id, content, added_at, source_conversation_id
+				 FROM cross_conversation_memory
+				 WHERE active = 1
+				 ORDER BY added_at DESC
+				 LIMIT ?`,
+				limit,
+			)
+			.toArray();
+	}
+
+	@callable()
+	async queryMemory(args: { limit?: number } = {}): Promise<unknown[]> {
+		return this._queryMemory(args);
+	}
+
+	private async _queryAgentTranscript(args: {
+		role: string;
+		limit?: number;
+	}): Promise<unknown[]> {
+		this.ensureSchema();
+		const limit = Math.min(Math.max(args.limit ?? 100, 1), 200);
+		return this.ctx.storage.sql
+			.exec<{
+				id: number;
+				conversation_id: string | null;
+				from_role: string;
+				kind: string;
+				summary: string | null;
+				payload_json: string | null;
+				ts: number;
+			}>(
+				`SELECT id, conversation_id, from_role, kind, summary, payload_json, ts
+				 FROM employee_log
+				 WHERE from_role = ?
+				 ORDER BY ts DESC
+				 LIMIT ?`,
+				args.role,
+				limit,
+			)
+			.toArray();
+	}
+
+	@callable()
+	async queryAgentTranscript(args: {
+		role: string;
+		limit?: number;
+	}): Promise<unknown[]> {
+		return this._queryAgentTranscript(args);
 	}
 
 	/**
