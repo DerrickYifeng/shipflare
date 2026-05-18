@@ -1,0 +1,314 @@
+# Task #11 — Browser RPC migration via `@callable` on CMO
+
+**Status:** Design ready for review.
+**Branch target:** `dev` → eventually rolls into the cf-native-chat PR.
+**Carries over from:** `docs/superpowers/plans/2026-05-18-phase-11-RESUME.md` Task #11.
+**Predecessor design:** `docs/superpowers/specs/2026-05-16-cf-native-chat-migration-design.md`
+(§6.2 promised `invokeAsTool` as the universal RPC primitive; the implementation
+landed for `chat` only, leaving the right-panel surfaces stranded after Phase 5
+retired the StreamableHTTP MCP transport).
+
+## 1. Problem
+
+`apps/web/src/lib/mcp-client.ts` (the `CmoClient` over `StreamableHTTPClientTransport`)
+calls `/agents/cmo/<userId>/mcp` for every right-panel query. Phase 5 retired
+that transport — `apps/core/src/index.ts:721-764` now answers any browser hit
+with a 503 ("MCP transport retired in Phase 5; chat-native browser entry lands
+in Phase 8"). Phase 8 migrated chat but did not rewire the queries.
+
+The break has two faces:
+
+- **Existing surface, stranded:** the AI-SDK `tool({...})` definitions inside
+  `CMO.ts` still implement queryPlanItems, queryDrafts, approveDraft,
+  rejectDraft, cancelPlanItem, queryFounderContext, queryMemory,
+  queryAgentTranscript, rememberThis, forgetThis. The LLM can call them
+  from inside a chat turn; the browser cannot reach them.
+- **Deleted surface, never restored:** queryRoster, listConversations,
+  startNewConversation, getRecentActivity, hireEmployee, fireEmployee
+  were removed in `f61362ae` ("rewrite CMO as AIChatAgent + delete obsolete
+  tool surface + migration v12"). Their SQLite tables (`roster`,
+  `conversations`) were dropped too.
+
+Net effect on the live `/team` and `/briefing` pages: right-panel data is empty,
+roster shows zero employees, conversation list is empty, draft approval buttons
+500, hire/fire is impossible.
+
+## 2. Goals & non-goals
+
+**Goals**
+
+- Restore every right-panel query / mutation surface the `/team` and
+  `/briefing` pages need.
+- Use one transport for chat + queries (no parallel WS, no parallel
+  HTTP proxy).
+- Share business logic between the LLM-facing AI-SDK tools and the
+  browser-facing RPC methods (one SQL implementation per surface).
+- Delete the dead StreamableHTTP client and its support endpoints.
+
+**Non-goals**
+
+- No changes to the external `/cmo/mcp` OAuth-gated surface — that
+  Phase 7 path is unaffected and keeps its scope-tier model.
+- No changes to the chat transport itself (the WS established by
+  `useCmoChat` continues to ride `useAgent` exactly as today).
+- No new server-push / live-data primitives. Queries remain pull;
+  callers re-fetch after mutations as they do today.
+- No D1 schema changes. (`channels` is the only D1 table touched
+  indirectly via existing code paths.)
+
+## 3. Architecture
+
+```
+Browser (apps/web)                    apps/core Worker                    CMO DO (per-user)
+─────────────────                     ───────────────                     ──────────────────
+useCmoChat ──────────┐                                                    
+                     │  one WS  →    handleCmoWsRequest                   onConnect
+                     │   (JWT)        (JWT verify, x-inferred-tz)         │
+useCmoStub ──────────┘                       │                            ├─ chat handler (existing)
+                                             ↓                            │
+agent.stub.queryDrafts({...})           routeAgentRequest (SDK)  ────→    ├─ @callable queryDrafts ──┐
+                                                                          │  (auth: this.name        │
+                                                                          │   === claims.name)       │
+                                                                          ├─ @callable hireEmployee ──┤
+                                                                          │   ...                    │
+                                                                          │                          ↓
+                                                                          │            private _queryDrafts(args)
+                                                                          │            (shared with AI-SDK tool)
+                                                                          └──────────────────────────┘
+```
+
+The transport is already in place. The agents SDK's `useAgent({...}).stub`
+proxy invokes any `@callable`-decorated method on the connected DO over that
+same WebSocket. JWT auth, multi-user routing (`name` → DO instance),
+hibernation-aware reconnection, and ordered message delivery are framework
+guarantees.
+
+## 4. CMO `@callable` surface — 16 methods
+
+(Two more than scope conversation's "14" — re-counted: 10 wrap existing tools,
+6 are net-new restorations.)
+
+### 4.1 Wrap existing AI-SDK tools (no schema change)
+
+For each of these, extract the `execute` body into a `private async _name(args)`
+method on the CMO class. Both the AI-SDK tool definition and a new
+`@callable() name(args)` public method delegate to it. One SQL impl, two
+entry points.
+
+| Method | Current location | Notes |
+|---|---|---|
+| `queryPlanItems` | CMO.ts:274 | unchanged shape; clamp limit ≤ 200 (already enforced server-side) |
+| `cancelPlanItem` | CMO.ts:343 | throws on terminal state — keep same error |
+| `approveDraft` | CMO.ts:382 | flips `approval_queue.decision = 'approved'` |
+| `rejectDraft` | CMO.ts:404 | accepts optional `reason` for forward-compat |
+| `queryDrafts` | CMO.ts:428 | wraps SMM RPC; returns `[]` if SMM not hired |
+| `rememberThis` | CMO.ts:455 | P2-D long-term memory write |
+| `forgetThis` | CMO.ts:480 | soft-delete (`active=0`) |
+| `queryMemory` | CMO.ts:499 | newest-first, default limit 50 |
+| `queryAgentTranscript` | CMO.ts:524 | per-role `employee_log` tail |
+| `queryFounderContext` | CMO.ts:177 | returns KV map of raw JSON strings |
+
+### 4.2 Restore deleted surfaces (require schema additions)
+
+These need fresh implementations because the original tool files
+(`tools/roster.ts`, `tools/conversation.ts`, `tools/get-recent-activity.ts`)
+were deleted in `f61362ae`. The new code lives directly on the CMO class.
+
+| Method | Behavior | Schema dependency |
+|---|---|---|
+| `queryRoster` | List every role hired this team has ever had (active + fired). | new `roster` table |
+| `hireEmployee` | UPSERT `roster` row to status='active'. CMO is implicit — reject `role==='cmo'`. | new `roster` table |
+| `fireEmployee` | UPDATE `roster` SET status='fired', fired_at=now. Preserves SQLite + history so re-hire restores the same DO. | new `roster` table |
+| `startNewConversation` | INSERT into `conversations`, return `{ conversationId }`. Caller navigates to `/team/<id>` and `useAgentChat({ agent, id })` opens that thread. | new `conversations` table |
+| `listConversations` | Newest-first, default limit 20, excludes archived. | new `conversations` table |
+| `getRecentActivity` | Wraps reads of `employee_log` plus the new conversations table to surface a chronological activity tail. Same shape the activity drawer expects. | reuses `employee_log` + new `conversations` |
+
+### 4.3 SQLite schema additions
+
+Appended to `apps/core/src/agents/cmo/schema.ts` as new `CREATE TABLE IF NOT
+EXISTS` statements inside the existing `ensureSchema()` path. **Do not edit the
+existing v12-v14 migration tags** — `wrangler` rejects same-tag mutations
+(see prior RESUME).
+
+```sql
+CREATE TABLE IF NOT EXISTS roster (
+  role             TEXT PRIMARY KEY,
+  hired_at         INTEGER NOT NULL,
+  fired_at         INTEGER,
+  status           TEXT NOT NULL CHECK (status IN ('active', 'fired')),
+  hire_config_json TEXT
+);
+
+CREATE TABLE IF NOT EXISTS conversations (
+  id           TEXT PRIMARY KEY,
+  started_at   INTEGER NOT NULL,
+  ended_at     INTEGER,
+  title        TEXT,
+  archived_at  INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_conversations_active
+  ON conversations(archived_at, started_at DESC);
+```
+
+### 4.4 Auth
+
+**Primary gate (already in place):** `handleCmoWsRequest` at
+`apps/core/src/index.ts:584-586` rejects any WS upgrade where
+`claims.name !== userId` (the URL segment that names the DO). Once a
+connection exists on this DO, the framework guarantees it belongs to a
+JWT whose `name` matches `this.name`. There is no in-band way to call
+`@callable` methods on a DO without first holding a verified connection
+to it.
+
+**Per-method posture:** `@callable` bodies don't re-check JWT claims.
+The DO-name identity check at WS upgrade is sufficient and exhaustive
+for browser-only callers. Methods stay terse:
+
+```ts
+@callable()
+async queryDrafts(args: QueryDraftsArgs): Promise<DraftRow[]> {
+  return this._queryDrafts(args);
+}
+```
+
+**Out of scope:** The external-MCP scope map in
+`apps/core/src/lib/external-auth.ts` is **unchanged** — that path is
+OAuth-gated for 3rd-party clients and keeps its read/write/admin
+tiers. `hireEmployee` / `fireEmployee` are first-party founder actions
+on the founder's own roster; no `admin` scope tier needed for the
+browser path.
+
+## 5. apps/web client API
+
+### 5.1 Delete
+
+- `apps/web/src/lib/mcp-client.ts` — the `CmoClient` class and `createCmoClient`
+- `apps/web/app/api/mcp-token/route.ts` — only consumer was `createCmoClient`
+- Browser-side `@modelcontextprotocol/sdk` imports
+  (the package stays in `apps/core` for `/cmo/mcp`'s `McpAgent.serve`)
+
+### 5.2 Add
+
+`apps/web/src/hooks/use-cmo-stub.ts`:
+
+```ts
+import { useAgent } from 'agents/react';
+import type { CMO } from '@shipflare/core/agents/cmo/CMO';   // typed stub
+
+export function useCmoStub(userId: string) {
+  const agent = useAgent<CMO, CMOState>({
+    agent: 'cmo',
+    name: userId,
+    host: useCoreHost(),
+    query: async () => ({ token: await fetchAgentJwt('cmo', userId) }),
+  });
+  return { stub: agent.stub, ready: agent.ready, error: /* … */ };
+}
+```
+
+Pages that use `useCmoChat` AND `useCmoStub` get the same underlying `useAgent`
+connection (the SDK de-dupes by `{agent, name}` per render tree). One WS, two
+hooks.
+
+### 5.3 Migrate call sites (7 files)
+
+| File | Methods used | Migration |
+|---|---|---|
+| `app/(app)/team/_components/team-desk.tsx` | queryRoster, listConversations, queryPlanItems, queryDrafts, startNewConversation, approveDraft, rejectDraft, cancelPlanItem, hireEmployee, fireEmployee | swap `clientRef.current.*` → `stub.*`; drop `createCmoClient()` effect; rely on `useCmoStub().ready`. Hire/fire bind to existing left-rail role rows via context-menu items added in this migration. |
+| `app/(app)/team/_components/teammate-transcript-drawer.tsx` | queryAgentTranscript | same |
+| `app/(app)/briefing/_components/today-tab.tsx` | queryDrafts, approveDraft | same |
+| `app/(app)/briefing/_components/history-tab.tsx` | queryDrafts | same |
+| `app/(app)/briefing/_components/plan-tab.tsx` | queryPlanItems | same |
+| `app/(app)/briefing/_components/briefing-header.tsx` | (derived count) | depends on today-tab's data — receives via props |
+| `app/(app)/growth/reddit-channels/reddit-channels-content.tsx` | queryFounderContext | same |
+
+No call site keeps a "client ref" pattern. Each component either calls
+`stub.foo()` directly inside an effect or, where reactivity is wanted, wraps
+in TanStack-style local state (deferred — not part of this plan).
+
+## 6. apps/core cleanup
+
+Once no browser hits `/agents/cmo/<userId>/mcp`:
+
+- Delete `handleMcpRequest` + the 503 stub at `apps/core/src/index.ts:721-764`
+- Delete `MCP_ROUTE` regex (line 187) — chat WS regex `CMO_WS_ROUTE` and
+  framework regex `CMO_HTTP_ROUTE` are unaffected
+- Update `apps/core/test/cmo-routing.test.ts` to drop the 401/403/503
+  assertions for the retired path
+
+The external `/cmo/mcp` route (Phase 7's OAuth-gated McpAgent) stays exactly
+as-is.
+
+## 7. Schema migration ordering
+
+The two new tables are CREATE-IF-NOT-EXISTS — no destructive change, no
+migration tag manipulation required. They land via `ensureSchema()` on first
+write after deploy. Existing v12-v14 tags remain untouched.
+
+## 8. Testing
+
+### 8.1 Unit (apps/core)
+
+`apps/core/test/agents/cmo-callable.test.ts` — one isolated DO per test,
+mirror the existing `cmo.test.ts` pattern. Per-method: happy path + the
+documented failure modes (e.g. `cancelPlanItem` throws on terminal state).
+
+### 8.2 Integration
+
+`apps/core/test/cmo-callable-routing.test.ts` — full JWT round-trip via
+`SELF.fetch` on the WS endpoint, send a `.stub.queryRoster()` over the
+connection, assert the response.
+
+### 8.3 Real-browser smoke (must be added to the Phase 11 smoke checklist)
+
+Following the global rule "every plan must include real-browser Playwright
+testing", run these on `https://app-staging.shipflare.ai`:
+
+1. `/team` renders roster, conversations, plan_items, drafts
+2. `/team` — create new conversation, navigate, send chat turn
+3. `/team` — approve a draft, see toast, list updates
+4. `/team` — cancel a plan_item, see status change
+5. `/briefing/today` — drafts list, approve flow
+6. `/briefing/history` — drafts list for all non-pending statuses
+7. `/briefing/plan` — plan_items bucketed by status
+8. `/growth/reddit-channels` — `queryFounderContext` returns the
+   subreddits map
+9. Open transcript drawer for one role — `queryAgentTranscript` renders
+
+Existing local browser context already authenticated to staging — Playwright
+connects to the existing session.
+
+## 9. Migration sequencing (high level — full plan comes from writing-plans)
+
+1. CMO server: add the 10 `@callable` wrappers around extracted `_impl` methods.
+2. CMO server: add `roster` + `conversations` tables + the 6 net-new methods.
+3. CMO server: unit tests for all 16 methods.
+4. apps/web: `useCmoStub` hook + migrate `/team` first (the heaviest user).
+5. apps/web: migrate `/briefing/*` and `/growth/reddit-channels` call sites.
+6. apps/core: delete `handleMcpRequest`, `MCP_ROUTE`, the 503 stub.
+7. apps/web: delete `mcp-client.ts`, `/api/mcp-token`, browser MCP SDK imports.
+8. Real-browser smoke on staging — must pass before this folds into the
+   cf-native-chat PR.
+
+Each step is a separate commit. Steps 6-7 wait until step 5 is green to
+preserve a working dev branch.
+
+## 10. Risks & open questions
+
+| Risk | Mitigation |
+|---|---|
+| `useAgent` de-duplication assumption is wrong | If `useCmoChat` and `useCmoStub` open two WS connections instead of sharing one, ref-count manually via a context provider. Adds ~30 LOC; not blocking. |
+| Typed `stub` requires CMO class type accessible from apps/web | Re-export the type-only signature from `@shipflare/shared` (or a new `@shipflare/core/types` entry). Server runtime stays in apps/core. |
+| New `conversations` table conflicts with how `useAgentChat` enumerates threads | The framework stores messages per-conversation via the `id` param; it does NOT manage a conversation list itself. Our table is the authoritative list for the founder's UI. |
+| `getRecentActivity` shape drift | The drawer renders the rows untyped today; keep the existing wire shape (untyped rows + caller-side narrowing). |
+| Multi-tab: two browser tabs open `/team` for the same founder | Each tab gets its own WS; framework hibernates the DO between turns. Stub calls are stateless from the DO's perspective — no race. |
+
+## 11. What this design does NOT touch
+
+- The `useCmoChat` hook, `useAgentChat`, the activity feed, telemetry
+  emission, JWT minting in `/api/agent-token`, the external `/cmo/mcp`
+  OAuth flow, or any platform MCP agent (X / Reddit).
+- The CMO `chat` tool body itself — only the right-panel surface.
+- Cron `scheduled()` handlers and DO `alarm()` paths.
+- Daily relay messages — those still ride `saveMessages` with
+  `source='daily-relay'`.
