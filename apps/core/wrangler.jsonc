@@ -63,9 +63,27 @@
 			{
 				"name": "REDDIT_MCP",
 				"class_name": "RedditMcpAgent"
+			},
+			// S7 — External MCP surface (Phase 7). Per-user DO that holds the
+			// OAuth-scoped, chat-only tool surface exposed at
+			// mcp.shipflare.com/cmo. Backed by SQLite via migration v13.
+			{
+				"name": "CMO_EXTERNAL_MCP",
+				"class_name": "CmoExternalMcp"
 			}
 		]
 	},
+	// KV namespace for `@cloudflare/workers-oauth-provider` (Phase 7). Stores
+	// OAuth 2.1 client registrations, authorization codes, and refresh tokens
+	// for the external MCP surface. Created via
+	// `wrangler kv namespace create OAUTH_KV` (prod + --preview).
+	"kv_namespaces": [
+		{
+			"binding": "OAUTH_KV",
+			"id": "7d866a4ae83847e080410ede3fcb7c24",
+			"preview_id": "073815de9829474bb08d938a26d16f7b"
+		}
+	],
 	// Wrangler migration tags are append-only. Adding a class to an existing tag
 	// after it's already been applied to a running env won't take effect — new
 	// SQLite-backed DO classes must use a NEW tag (v2, v3, ...). Never modify
@@ -181,6 +199,14 @@
 			"tag": "v12",
 			"deleted_classes": ["CMO"],
 			"new_sqlite_classes": ["CMO"]
+		},
+		// v13 — Phase 7 external MCP surface. CmoExternalMcp is a chat-only,
+		// OAuth-scoped per-user McpAgent exposed at mcp.shipflare.com/cmo.
+		// SQLite-backed so the OAuth provider can store client + token state
+		// per tenant.
+		{
+			"tag": "v13",
+			"new_sqlite_classes": ["CmoExternalMcp"]
 		}
 	],
 	// Ops telemetry — single Analytics Engine dataset for agent / skill /
@@ -194,15 +220,6 @@
 			"dataset": "shipflare_agent_events"
 		}
 	],
-	// Plain (non-secret) vars. Per-request: every employee gets these
-	// as `env.MCP_OAUTH_AUDIENCE` etc. Secrets live in `wrangler secret
-	// put` (see scripts/cf-deploy-checklist.md). Phase 7 of the CF-native
-	// migration wires `withOAuthProvider` onto the external MCP route
-	// for CMO at mcp.shipflare.com/cmo — the env is scaffolded here so
-	// the `Env` type stays valid while the Phase 7 wiring is staged.
-	"vars": {
-		"MCP_OAUTH_AUDIENCE": "mcp.shipflare.com"
-	},
 	// Dynamic Workflow binding — class lands in a later task. AgentPlanWorkflow
 	// drives long-running multi-step orchestration spawned by CMO when plans
 	// exceed a single MCP call's lifetime (e.g. multi-platform inbound sweep).
@@ -262,9 +279,22 @@
 					{ "name": "HOG", "class_name": "HoG" },
 					{ "name": "SMM", "class_name": "SMM" },
 					{ "name": "X_MCP", "class_name": "XMcpAgent" },
-					{ "name": "REDDIT_MCP", "class_name": "RedditMcpAgent" }
+					{ "name": "REDDIT_MCP", "class_name": "RedditMcpAgent" },
+					{ "name": "CMO_EXTERNAL_MCP", "class_name": "CmoExternalMcp" }
 				]
 			},
+			// kv_namespaces are not inherited by environments either. Staging
+			// reuses the same OAuth_KV namespace as production for Phase 7 —
+			// switch to a separate namespace if staging needs isolated OAuth
+			// state. (Create with `wrangler kv namespace create OAUTH_KV_STAGING`
+			// and paste the id here.)
+			"kv_namespaces": [
+				{
+					"binding": "OAUTH_KV",
+					"id": "7d866a4ae83847e080410ede3fcb7c24",
+					"preview_id": "073815de9829474bb08d938a26d16f7b"
+				}
+			],
 			"workflows": [],
 			"analytics_engine_datasets": [
 				{

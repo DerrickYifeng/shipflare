@@ -56,6 +56,7 @@ import { SMM } from "./agents/social-media-manager/SocialMediaMgr";
 // can discover them once S5.3 uncomments the X_MCP / REDDIT_MCP bindings.
 import type { XMcpAgent } from "./agents/platforms/x/XMcpAgent";
 import type { RedditMcpAgent } from "./agents/platforms/reddit/RedditMcpAgent";
+import type { CmoExternalMcp } from "./external/CmoExternalMcp";
 
 // Value re-export so wrangler can discover the DO classes via the module
 // graph rooted at `main`. (We `import` the classes above as values so they
@@ -67,15 +68,25 @@ export { CMO, HoG, SMM };
 // module graph rooted at `main`.
 export { XMcpAgent } from "./agents/platforms/x/XMcpAgent";
 export { RedditMcpAgent } from "./agents/platforms/reddit/RedditMcpAgent";
+// Phase 7 — external MCP surface (chat-only, OAuth-scoped, per-user DO).
+// Stub implementation in src/external/CmoExternalMcp.ts; the real tool surface
+// + withOAuthProvider wrapper lands in Phase 7.2/7.3.
+export { CmoExternalMcp } from "./external/CmoExternalMcp";
 
 export interface Env {
   DB: D1Database;
-  // DO bindings — 3 employee agents + 2 platform tool MCPs.
+  // DO bindings — 3 employee agents + 2 platform tool MCPs + 1 external MCP.
   CMO: DurableObjectNamespace<CMO>;
   HOG: DurableObjectNamespace<HoG>;
   SMM: DurableObjectNamespace<SMM>;
   X_MCP: DurableObjectNamespace<XMcpAgent>;
   REDDIT_MCP: DurableObjectNamespace<RedditMcpAgent>;
+  /**
+   * Phase 7 — per-user external MCP surface (chat-only, OAuth-scoped). Each
+   * user gets a SQLite-backed DO instance keyed by their userId. Exposed at
+   * mcp.shipflare.com/cmo via `@cloudflare/workers-oauth-provider`.
+   */
+  CMO_EXTERNAL_MCP: DurableObjectNamespace<CmoExternalMcp>;
   // Workflow binding — added when AgentPlanWorkflow lands (S6).
   // AGENT_PLAN_WORKFLOW: Workflow;
   // Secrets (wrangler secret put ...)
@@ -107,21 +118,11 @@ export interface Env {
    */
   TELEMETRY: AnalyticsEngineDataset;
   /**
-   * Phase 7 wiring (CF-native migration): `withOAuthProvider` wraps the
-   * external MCP route for CMO so 3rd-party clients (Claude Desktop,
-   * Cursor, the founder's own LLM stack) authenticate via the standard
-   * MCP OAuth flow. The audience claim is published; the signing key is
-   * provisioned via `wrangler secret put MCP_OAUTH_JWT_SIGNING_KEY`.
-   *
-   * Scaffolded in Phase 0 so the `Env` type stays consistent across the
-   * migration; the route handler that consumes these lands in Phase 7.
+   * Phase 7 — KV namespace for `@cloudflare/workers-oauth-provider`. Stores
+   * OAuth 2.1 client registrations, authorization codes, refresh tokens, and
+   * access-token metadata for the mcp.shipflare.com/cmo external surface.
    */
-  MCP_OAUTH_AUDIENCE: string;
-  // TODO(Phase 7): the route handler that installs `withOAuthProvider` must
-  // assert this is non-empty at startup — bindings injected by Wrangler can
-  // silently arrive as `""` if `wrangler secret put MCP_OAUTH_JWT_SIGNING_KEY`
-  // was never run for the environment.
-  MCP_OAUTH_JWT_SIGNING_KEY: string;
+  OAUTH_KV: KVNamespace;
 }
 
 // EMPLOYEE_CLASSES dispatch table for the legacy external MCP route was
