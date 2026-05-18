@@ -2,7 +2,7 @@
  * Wire shapes for CMO's @callable RPC surface.
  *
  * Defines the 13 callables the browser invokes via
- * `useAgent({agent:'cmo'}).call(...)` (see useCmoStub in apps/web). The
+ * `useAgent({agent:'cmo'}).stub.foo(...)` (see useCmoStub in apps/web). The
  * CMO class in apps/core implements these as @callable methods; this
  * interface is the contract.
  *
@@ -62,6 +62,7 @@ export interface ConversationRow {
 
 export interface RosterRow {
   role: RoleSlug;
+  /** Always "active" — queryRoster derives from EMPLOYEE_REGISTRY (no hire/fire model). */
   status: "active";
   hired_at: number;
   hire_config_json: string | null;
