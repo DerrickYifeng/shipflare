@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { createCmoClient, type CmoClient } from "@/lib/mcp-client";
+import { useCmoAgent } from "@/hooks/use-cmo-agent";
+import { useCmoStub } from "@/hooks/use-cmo-stub";
 import { HeaderBar } from "@/components/layout/header-bar";
 
 /**
@@ -23,23 +24,32 @@ type LoadState =
   | { kind: "done"; subreddits: Subreddit[] }
   | { kind: "error"; message: string };
 
-export function RedditChannelsContent() {
+export interface RedditChannelsContentProps {
+  /** Founder user id — drives the CMO WebSocket. */
+  userId: string;
+  /** Bare host of apps/core for the WS — see `useCmoAgent`. */
+  coreHost?: string;
+}
+
+export function RedditChannelsContent({
+  userId,
+  coreHost,
+}: RedditChannelsContentProps) {
+  const { agent } = useCmoAgent({ userId, coreHost });
+  const stub = useCmoStub({ agent });
+
   const [state, setState] = useState<LoadState>({ kind: "loading" });
-  const clientRef = useRef<CmoClient | null>(null);
+  // One-shot init guard — JWT refresh churns the agent ref and would
+  // re-fire this effect, flashing the loading state on every refresh.
+  const initRanRef = useRef(false);
 
   useEffect(() => {
+    if (initRanRef.current) return;
+    initRanRef.current = true;
     let cancelled = false;
-
-    (async () => {
+    void (async () => {
       try {
-        const client = await createCmoClient();
-        if (cancelled) {
-          await client.close().catch(() => {});
-          return;
-        }
-        clientRef.current = client;
-
-        const ctx = await client.queryFounderContext();
+        const ctx = await stub.queryFounderContext();
         if (cancelled) return;
 
         const raw = ctx["subreddits"];
@@ -69,14 +79,10 @@ export function RedditChannelsContent() {
         });
       }
     })();
-
     return () => {
       cancelled = true;
-      const c = clientRef.current;
-      clientRef.current = null;
-      if (c) c.close().catch(() => {});
     };
-  }, []);
+  }, [stub]);
 
   return (
     <>
