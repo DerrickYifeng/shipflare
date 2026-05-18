@@ -198,28 +198,24 @@
 			"deleted_classes": ["HeadOfGrowth"],
 			"new_sqlite_classes": ["HoG"]
 		},
-		// v12 — CF-native chat migration Task 5.1b. The CMO class was
-		// rewritten from McpAgent to AIChatAgent in the same file; the
-		// class export name stays `CMO` (so the binding name doesn't
-		// move). Dev-stage decision (matches v10/v11): drop the old
-		// per-DO SQLite namespace cleanly rather than migrate the
-		// retired tables (conversations / founder_messages / roster /
-		// activity_events). AIChatAgent bootstraps its own chat-history
-		// schema; applyCmoSchema reconstructs the retained per-team
-		// tables (founder_context / plan_items / drafts / memory /
-		// employee_log / strategic_path / push_subscriptions) on first
-		// chat or first /internal/* hit.
-		{
-			"tag": "v12",
-			"deleted_classes": ["CMO"],
-			"new_sqlite_classes": ["CMO"]
-		},
-		// v13 — Phase 7 external MCP surface. CmoExternalMcp is a chat-only,
+		// v12 — Phase 7 external MCP surface. CmoExternalMcp is a chat-only,
 		// OAuth-scoped per-user McpAgent exposed at mcp.shipflare.com/cmo.
 		// SQLite-backed so the OAuth provider can store client + token state
 		// per tenant.
+		//
+		// NOTE (2026-05-18 Phase 11.2a): the original CF-native chat migration
+		// proposed a v12 to delete+recreate the CMO class for a clean per-DO
+		// SQLite namespace (drop the retired conversations / founder_messages /
+		// roster / activity_events tables). CF rejects same-name delete+create
+		// in one tag (code 10021) AND rejects splitting it without first
+		// removing the binding (code 10061). The clean-reset would require a
+		// two-deploy dance (remove binding → deploy → re-add → deploy).
+		// Punt: applyCmoSchema uses `CREATE TABLE IF NOT EXISTS` so it
+		// initializes the new tables alongside any stale legacy ones. The
+		// retired tables are dead weight but harmless (no writer exists in the
+		// new AIChatAgent CMO).
 		{
-			"tag": "v13",
+			"tag": "v12",
 			"new_sqlite_classes": ["CmoExternalMcp"]
 		}
 	],
