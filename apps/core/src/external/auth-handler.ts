@@ -131,11 +131,26 @@ function escapeHtml(s: string): string {
 /**
  * Resolve the ShipFlare user id from the inbound request.
  *
- * Production: the user arrives at `/authorize` in a browser tab the MCP
- * client opened — same origin as `apps/web`, so the Better Auth session
- * cookie rides along. The right way to verify is to delegate to
- * `apps/web`'s `/api/auth/session` (Service Binding) or read the shared
- * D1 session table directly.
+ * Production (Phase 7.5): the user arrives at `/authorize` in a browser
+ * tab the MCP client opened — same origin as `apps/web`, so the Better
+ * Auth session cookie rides along. We verify by forwarding the cookie
+ * to apps/web's `/api/auth/get-session` over a Service Binding (`env.WEB`).
+ * apps/web is the canonical owner of Better Auth — it does the HMAC
+ * verification (the cookie value is signed with `BETTER_AUTH_SECRET`),
+ * looks up the session row in D1, checks expiry, and returns the user
+ * payload. Anything other than a body of shape `{ user: { id: string } }`
+ * → 401 (fail closed).
+ *
+ * Path A was chosen over a direct D1 read of the `session` table
+ * because:
+ *   1. The cookie value is HMAC-signed (`<token>.<sig>` via
+ *      `setSignedCookie` in better-auth's cookies/index.mjs:127).
+ *      Re-implementing the verification core-side would mean exporting
+ *      `BETTER_AUTH_SECRET` to a second Worker and keeping the HMAC
+ *      logic in sync with the upstream package. The service binding
+ *      delegates that to the library's own implementation.
+ *   2. The session table's expiry semantics may evolve (e.g. rolling
+ *      sessions); Better Auth handles those, we shouldn't duplicate.
  *
  * Phase 7.3 SECURITY NOTE: the `x-test-user-id` header is honored ONLY
  * when `env.EXTERNAL_AUTH_TEST_SEAM === "1"`. That binding is set in
@@ -144,19 +159,6 @@ function escapeHtml(s: string): string {
  * prod, any caller can mint an OAuth code for any victim's userId (PKCE
  * only proves same-client; it doesn't authenticate the user). The gate
  * mirrors the `STRATEGIC_PATH_FIXTURE` pattern in `onboarding-routes.ts`.
- *
- * Phase 7.5 wires Better Auth session-cookie verification here for the
- * real production path. The only path to userId today IS the test seam;
- * with the gate closed (prod), this function always returns null and
- * `/authorize` POST always returns 401 "not signed in to ShipFlare".
- *
- * TODO(phase-7.5): replace this with a real Better Auth verification.
- * Two options on the table:
- *   (a) Service-binding fetch to apps/web's `/api/auth/session` — clean
- *       separation, follows the existing pattern used by
- *       `apps/web/app/api/agent-token/route.ts`.
- *   (b) Read the Better Auth session row directly from D1 — tighter
- *       coupling but no extra hop.
  */
 async function resolveUserIdFromSessionCookie(
 	request: Request,
@@ -173,6 +175,39 @@ async function resolveUserIdFromSessionCookie(
 		if (headerUid) return headerUid;
 	}
 
-	// TODO(phase-7.5): verify Better Auth session cookie. See doc comment above.
-	return null;
+	// Production path — Better Auth session verification via service binding.
+	const cookie = request.headers.get("cookie");
+	if (!cookie) return null;
+
+	// `env.WEB` is bound to `shipflare-web` (see apps/core/wrangler.jsonc).
+	// In vitest the binding is overridden per-test with a Fetcher stub; in
+	// `wrangler dev` without `apps/web` running it's undefined — fail closed.
+	const web = env.WEB;
+	if (!web) {
+		console.warn(
+			"[auth-handler] WEB service binding unavailable; rejecting /authorize",
+		);
+		return null;
+	}
+
+	try {
+		const res = await web.fetch(
+			new Request("https://internal/api/auth/get-session", {
+				method: "GET",
+				headers: { cookie },
+			}),
+		);
+		if (!res.ok) return null;
+		// Better Auth returns `null` (literal) when there's no session.
+		const body = (await res.json()) as
+			| { user?: { id?: unknown } }
+			| null;
+		if (!body || typeof body !== "object") return null;
+		const uid = body.user?.id;
+		return typeof uid === "string" && uid.length > 0 ? uid : null;
+	} catch (err) {
+		// Fail closed — never grant an auth code on a transient WEB error.
+		console.warn("[auth-handler] session lookup failed:", err);
+		return null;
+	}
 }

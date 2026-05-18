@@ -84,6 +84,20 @@
 			"preview_id": "073815de9829474bb08d938a26d16f7b"
 		}
 	],
+	// Phase 7.5 — Service Binding back to `shipflare-web`. Used by
+	// `external/auth-handler.ts` to delegate Better-Auth session-cookie
+	// verification on `/authorize` POST. apps/web already binds to core
+	// (CORE binding) — this is the reverse direction. Phase 0 spike #8
+	// finding: Service Bindings strip `host` + `cf-connecting-ip`; the
+	// auth handler forwards only `cookie`, so that's not an issue here.
+	//
+	// Mutual deploy ordering: both Workers must exist for the binding to
+	// resolve at runtime. Deploy apps/web first, then apps/core (or vice
+	// versa with `wrangler deploy --keep-vars` so the binding is allowed
+	// to be unresolved on the first deploy).
+	"services": [
+		{ "binding": "WEB", "service": "shipflare-web" }
+	],
 	// Wrangler migration tags are append-only. Adding a class to an existing tag
 	// after it's already been applied to a running env won't take effect — new
 	// SQLite-backed DO classes must use a NEW tag (v2, v3, ...). Never modify
@@ -307,6 +321,12 @@
 					"id": "7d866a4ae83847e080410ede3fcb7c24",
 					"preview_id": "073815de9829474bb08d938a26d16f7b"
 				}
+			],
+			// Staging reverse-direction service binding to apps/web staging.
+			// Mirrors the top-level prod entry; required because environments
+			// don't inherit service bindings from the top-level config.
+			"services": [
+				{ "binding": "WEB", "service": "shipflare-web-staging" }
 			],
 			"workflows": [],
 			"analytics_engine_datasets": [

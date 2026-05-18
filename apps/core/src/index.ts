@@ -142,6 +142,19 @@ export interface Env {
    */
   OAUTH_PROVIDER?: OAuthHelpers;
   /**
+   * Phase 7.5 — Service Binding back to `shipflare-web`. Used ONLY by
+   * `apps/core/src/external/auth-handler.ts:resolveUserIdFromSessionCookie`
+   * to delegate Better Auth session-cookie verification to apps/web (the
+   * canonical owner of the HMAC-signed cookie). Phase 0 spike #8 finding:
+   * Service Bindings strip `host` + `cf-connecting-ip` — that's fine here
+   * since we only forward the `cookie` header.
+   *
+   * Optional because the binding is absent in `wrangler dev` when apps/web
+   * isn't running, and in vitest the binding is overridden per-test with a
+   * Fetcher stub. The auth-handler fails closed (401) when undefined.
+   */
+  WEB?: Fetcher;
+  /**
    * Phase 7.3 security gate (mirrors `STRATEGIC_PATH_FIXTURE`). When `"1"`,
    * `apps/core/src/external/auth-handler.ts` honors the `x-test-user-id`
    * header on `/authorize` POST so the auth-handler tests can complete the

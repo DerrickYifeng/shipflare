@@ -34,6 +34,27 @@ export default defineConfig({
           STRATEGIC_PATH_FIXTURE: "1",
           EXTERNAL_AUTH_TEST_SEAM: "1",
         },
+        // Phase 7.5 — stub the `shipflare-web` service binding so miniflare
+        // can resolve `env.WEB`. The stub default-returns 401 (no session);
+        // tests that need a "valid session" override `env.WEB` at runtime
+        // with a Fetcher whose `fetch()` returns 200 with `{ user: { id } }`.
+        // See `test/external/auth-handler-session.test.ts`.
+        workers: [
+          {
+            name: "shipflare-web",
+            modules: true,
+            script: `export default {
+              async fetch() {
+                // Default stub — tests override env.WEB locally when they
+                // want to exercise the happy path.
+                return new Response("null", {
+                  status: 200,
+                  headers: { "content-type": "application/json" },
+                });
+              }
+            };`,
+          },
+        ],
       },
     }),
   ],
