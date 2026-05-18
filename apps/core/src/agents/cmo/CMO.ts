@@ -326,37 +326,7 @@ export class CMO extends AIChatAgent<Env, CMOState> {
 				inputSchema: z.object({
 					id: z.string().min(1),
 				}),
-				execute: async ({ id }) => {
-					self.ensureSchema();
-					const now = Date.now();
-					const existing = self.ctx.storage.sql
-						.exec<{ id: string; status: string }>(
-							"SELECT id, status FROM plan_items WHERE id = ?",
-							id,
-						)
-						.toArray();
-					const row = existing[0];
-					if (!row) {
-						throw new Error(`plan_item not found: ${id}`);
-					}
-					if (
-						row.status === "completed" ||
-						row.status === "failed" ||
-						row.status === "cancelled"
-					) {
-						throw new Error(
-							`plan_item ${id} is already terminal (${row.status}); cannot cancel`,
-						);
-					}
-					self.ctx.storage.sql.exec(
-						`UPDATE plan_items
-						 SET status = 'cancelled', completed_at = ?
-						 WHERE id = ?`,
-						now,
-						id,
-					);
-					return { id, status: "cancelled" as const };
-				},
+				execute: async (args) => self._cancelPlanItem(args),
 			}),
 
 			approveDraft: tool({
@@ -365,20 +335,7 @@ export class CMO extends AIChatAgent<Env, CMOState> {
 				inputSchema: z.object({
 					draftId: z.string().min(1),
 				}),
-				execute: async ({ draftId }) => {
-					self.ensureSchema();
-					const result = self.ctx.storage.sql.exec(
-						`UPDATE approval_queue
-						 SET decided_at = ?, decision = 'approved'
-						 WHERE draft_id = ?`,
-						Date.now(),
-						draftId,
-					);
-					if (result.rowsWritten === 0) {
-						throw new Error(`draft not in approval_queue: ${draftId}`);
-					}
-					return { draftId, decision: "approved" as const };
-				},
+				execute: async (args) => self._approveDraft(args),
 			}),
 
 			rejectDraft: tool({
@@ -389,20 +346,7 @@ export class CMO extends AIChatAgent<Env, CMOState> {
 					// reason is parsed but not persisted until approval_queue.reason column lands
 					reason: z.string().max(500).optional(),
 				}),
-				execute: async ({ draftId }) => {
-					self.ensureSchema();
-					const result = self.ctx.storage.sql.exec(
-						`UPDATE approval_queue
-						 SET decided_at = ?, decision = 'rejected'
-						 WHERE draft_id = ?`,
-						Date.now(),
-						draftId,
-					);
-					if (result.rowsWritten === 0) {
-						throw new Error(`draft not in approval_queue: ${draftId}`);
-					}
-					return { draftId, decision: "rejected" as const };
-				},
+				execute: async (args) => self._rejectDraft(args),
 			}),
 
 			queryDrafts: tool({
@@ -422,21 +366,7 @@ export class CMO extends AIChatAgent<Env, CMOState> {
 					sourceConversationId: z.string().optional(),
 					sourceMessageTs: z.number().int().optional(),
 				}),
-				execute: async ({ content, sourceConversationId, sourceMessageTs }) => {
-					self.ensureSchema();
-					const id = crypto.randomUUID();
-					self.ctx.storage.sql.exec(
-						`INSERT INTO cross_conversation_memory
-						   (id, content, source_conversation_id, source_message_ts, added_at, active)
-						 VALUES (?, ?, ?, ?, ?, 1)`,
-						id,
-						content,
-						sourceConversationId ?? null,
-						sourceMessageTs ?? null,
-						Date.now(),
-					);
-					return { id, ok: true as const };
-				},
+				execute: async (args) => self._rememberThis(args),
 			}),
 
 			forgetThis: tool({
@@ -445,17 +375,7 @@ export class CMO extends AIChatAgent<Env, CMOState> {
 				inputSchema: z.object({
 					id: z.string().min(1),
 				}),
-				execute: async ({ id }) => {
-					self.ensureSchema();
-					const result = self.ctx.storage.sql.exec(
-						"UPDATE cross_conversation_memory SET active = 0 WHERE id = ?",
-						id,
-					);
-					if (result.rowsWritten === 0) {
-						throw new Error(`memory not found: ${id}`);
-					}
-					return { id, ok: true as const };
-				},
+				execute: async (args) => self._forgetThis(args),
 			}),
 
 			queryMemory: tool({
@@ -619,6 +539,149 @@ export class CMO extends AIChatAgent<Env, CMOState> {
 		limit?: number;
 	}): Promise<AgentTranscriptRow[]> {
 		return this._queryAgentTranscript(args);
+	}
+
+	// ──────────────────────────────────────────────────────────────────────
+	// @callable RPC surface — write group
+	// ──────────────────────────────────────────────────────────────────────
+
+	private async _cancelPlanItem(args: {
+		id: string;
+	}): Promise<{ id: string; status: "cancelled" }> {
+		this.ensureSchema();
+		const now = Date.now();
+		const existing = this.ctx.storage.sql
+			.exec<{ id: string; status: string }>(
+				"SELECT id, status FROM plan_items WHERE id = ?",
+				args.id,
+			)
+			.toArray();
+		const row = existing[0];
+		if (!row) {
+			throw new Error(`plan_item not found: ${args.id}`);
+		}
+		if (
+			row.status === "completed" ||
+			row.status === "failed" ||
+			row.status === "cancelled"
+		) {
+			throw new Error(
+				`plan_item ${args.id} is already terminal (${row.status}); cannot cancel`,
+			);
+		}
+		this.ctx.storage.sql.exec(
+			`UPDATE plan_items
+			 SET status = 'cancelled', completed_at = ?
+			 WHERE id = ?`,
+			now,
+			args.id,
+		);
+		return { id: args.id, status: "cancelled" as const };
+	}
+
+	@callable()
+	async cancelPlanItem(args: {
+		id: string;
+	}): Promise<{ id: string; status: "cancelled" }> {
+		return this._cancelPlanItem(args);
+	}
+
+	private async _approveDraft(args: {
+		draftId: string;
+	}): Promise<{ draftId: string; decision: "approved" }> {
+		this.ensureSchema();
+		const result = this.ctx.storage.sql.exec(
+			`UPDATE approval_queue
+			 SET decided_at = ?, decision = 'approved'
+			 WHERE draft_id = ?`,
+			Date.now(),
+			args.draftId,
+		);
+		if (result.rowsWritten === 0) {
+			throw new Error(`draft not in approval_queue: ${args.draftId}`);
+		}
+		return { draftId: args.draftId, decision: "approved" as const };
+	}
+
+	@callable()
+	async approveDraft(args: {
+		draftId: string;
+	}): Promise<{ draftId: string; decision: "approved" }> {
+		return this._approveDraft(args);
+	}
+
+	private async _rejectDraft(args: {
+		draftId: string;
+		reason?: string;
+	}): Promise<{ draftId: string; decision: "rejected" }> {
+		this.ensureSchema();
+		const result = this.ctx.storage.sql.exec(
+			`UPDATE approval_queue
+			 SET decided_at = ?, decision = 'rejected'
+			 WHERE draft_id = ?`,
+			Date.now(),
+			args.draftId,
+		);
+		if (result.rowsWritten === 0) {
+			throw new Error(`draft not in approval_queue: ${args.draftId}`);
+		}
+		return { draftId: args.draftId, decision: "rejected" as const };
+	}
+
+	@callable()
+	async rejectDraft(args: {
+		draftId: string;
+		reason?: string;
+	}): Promise<{ draftId: string; decision: "rejected" }> {
+		return this._rejectDraft(args);
+	}
+
+	private async _rememberThis(args: {
+		content: string;
+		sourceConversationId?: string;
+		sourceMessageTs?: number;
+	}): Promise<{ id: string; ok: true }> {
+		this.ensureSchema();
+		const id = crypto.randomUUID();
+		this.ctx.storage.sql.exec(
+			`INSERT INTO cross_conversation_memory
+			   (id, content, source_conversation_id, source_message_ts, added_at, active)
+			 VALUES (?, ?, ?, ?, ?, 1)`,
+			id,
+			args.content,
+			args.sourceConversationId ?? null,
+			args.sourceMessageTs ?? null,
+			Date.now(),
+		);
+		return { id, ok: true as const };
+	}
+
+	@callable()
+	async rememberThis(args: {
+		content: string;
+		sourceConversationId?: string;
+		sourceMessageTs?: number;
+	}): Promise<{ id: string; ok: true }> {
+		return this._rememberThis(args);
+	}
+
+	private async _forgetThis(args: {
+		id: string;
+	}): Promise<{ id: string; ok: true }> {
+		this.ensureSchema();
+		const result = this.ctx.storage.sql.exec(
+			"UPDATE cross_conversation_memory SET active = 0 WHERE id = ?",
+			args.id,
+		);
+		if (result.rowsWritten === 0) {
+			throw new Error(`memory not found: ${args.id}`);
+		}
+		return { id: args.id, ok: true as const };
+	}
+
+	@callable()
+	async forgetThis(args: { id: string }): Promise<{ id: string; ok: true }> {
+		return this._forgetThis(args);
 	}
 
 	/**
