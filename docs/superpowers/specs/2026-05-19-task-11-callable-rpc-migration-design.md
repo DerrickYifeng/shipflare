@@ -237,9 +237,11 @@ export function useCmoStub(userId: string) {
 }
 ```
 
-Pages that use `useCmoChat` AND `useCmoStub` get the same underlying `useAgent`
-connection (the SDK de-dupes by `{agent, name}` per render tree). One WS, two
-hooks.
+The agents SDK does NOT de-dupe `useAgent({agent, name})` calls — each
+invocation opens its own WebSocket. To guarantee one WS per page tree,
+we extract WS creation into `useCmoAgent`; both `useCmoChat` and
+`useCmoStub` take the resulting `agent` as input. Pages mount
+`useCmoAgent` once and thread the result through both downstream hooks.
 
 ### 5.3 Migrate call sites (7 files)
 
@@ -328,7 +330,7 @@ preserve a working dev branch.
 
 | Risk | Mitigation |
 |---|---|
-| `useAgent` de-duplication assumption is wrong | If `useCmoChat` and `useCmoStub` open two WS connections instead of sharing one, ref-count manually via a context provider. Adds ~30 LOC; not blocking. |
+| ~~`useAgent` de-duplication assumption is wrong~~ | ~~If `useCmoChat` and `useCmoStub` open two WS connections instead of sharing one, ref-count manually via a context provider. Adds ~30 LOC; not blocking.~~ **CONFIRMED FALSE on review** — addressed by extracting `useCmoAgent` (Task 7). |
 | Typed `stub` requires CMO class type accessible from apps/web | Re-export the type-only signature from `@shipflare/shared` (or a new `@shipflare/core/types` entry). Server runtime stays in apps/core. |
 | New `conversations` table conflicts with how `useAgentChat` enumerates threads | The framework stores messages per-conversation via the `id` param; it does NOT manage a conversation list itself. Our table is the authoritative list for the founder's UI. |
 | `getRecentActivity` shape drift | The drawer renders the rows untyped today; keep the existing wire shape (untyped rows + caller-side narrowing). |

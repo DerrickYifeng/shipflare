@@ -1,5 +1,6 @@
 "use client";
 import { useState, type FormEvent } from "react";
+import { useCmoAgent } from "@/hooks/use-cmo-agent";
 import { useCmoChat } from "@/hooks/use-cmo-chat";
 import type { UIMessage } from "ai";
 import { MessageBubble } from "./message-bubble";
@@ -17,9 +18,9 @@ export function CmoChat({
 	userId,
 	coreHost,
 }: { userId: string; coreHost: string }) {
+	const { agent } = useCmoAgent({ userId, coreHost });
 	const { messages, sendMessage, isStreaming, agentRunsByToolCall } = useCmoChat({
-		userId,
-		coreHost,
+		agent,
 	});
 	const [input, setInput] = useState("");
 

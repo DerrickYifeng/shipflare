@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCmoAgent } from "@/hooks/use-cmo-agent";
 import { useCmoChat } from "@/hooks/use-cmo-chat";
 import { createCmoClient, type CmoClient } from "@/lib/mcp-client";
 import { useToast } from "@/components/ui/toast";
@@ -180,16 +181,26 @@ export function TeamDesk({ user, coreHost }: TeamDeskProps) {
   // `conversationId` is forwarded so the founder can flip between threads
   // via the left rail. Until the SDK rebuilds the WS on id change,
   // re-keying via `useCmoChat`'s `id` arg is enough.
+  const { agent, error: agentError } = useCmoAgent({
+    userId: user.id,
+    coreHost,
+  });
+
   const {
     messages,
     sendMessage,
     isStreaming,
     agentRunsByToolCall,
   } = useCmoChat({
-    userId: user.id,
+    agent,
     conversationId: selectedConversationId ?? undefined,
-    coreHost,
   });
+
+  useEffect(() => {
+    if (agentError && !connectError) {
+      setConnectError(agentError);
+    }
+  }, [agentError, connectError]);
 
   // Memoised so the useEffect below has a stable dependency. Reads from
   // clientRef.current only, so no closure deps needed.
