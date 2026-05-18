@@ -31,6 +31,7 @@ import {
 	type PushSubscriptionRow,
 } from "../../lib/web-push";
 import { handleInternalJson } from "../../lib/internal-route";
+import { EMPLOYEE_REGISTRY } from "../registry";
 import { mirrorDraftBodySchema } from "../../lib/mirror-draft";
 import { strategicPathProposalBodySchema } from "../../lib/strategic-path-proposal";
 
@@ -707,6 +708,97 @@ export class CMO extends AIChatAgent<Env, CMOState> {
 	@callable()
 	async forgetThis(args: { id: string }): Promise<{ id: string; ok: true }> {
 		return this._forgetThis(args);
+	}
+
+	// ──────────────────────────────────────────────────────────────────────
+	// @callable RPC surface — conversations + roster
+	// ──────────────────────────────────────────────────────────────────────
+
+	@callable()
+	async startNewConversation(args: { title?: string } = {}): Promise<{
+		conversationId: string;
+	}> {
+		this.ensureSchema();
+		const id = crypto.randomUUID();
+		this.ctx.storage.sql.exec(
+			`INSERT INTO conversations (id, started_at, title)
+			 VALUES (?, ?, ?)`,
+			id,
+			Date.now(),
+			args.title ?? null,
+		);
+		return { conversationId: id };
+	}
+
+	@callable()
+	async listConversations(args: { limit?: number } = {}): Promise<
+		Array<{
+			id: string;
+			started_at: number;
+			ended_at: number | null;
+			title: string | null;
+		}>
+	> {
+		this.ensureSchema();
+		const limit = Math.min(Math.max(args.limit ?? 20, 1), 100);
+		return this.ctx.storage.sql
+			.exec<{
+				id: string;
+				started_at: number;
+				ended_at: number | null;
+				title: string | null;
+			}>(
+				`SELECT id, started_at, ended_at, title
+				 FROM conversations
+				 WHERE archived_at IS NULL
+				 ORDER BY started_at DESC
+				 LIMIT ?`,
+				limit,
+			)
+			.toArray();
+	}
+
+	/**
+	 * Static roster derived from EMPLOYEE_REGISTRY.
+	 *
+	 * Post-rewrite (f61362ae) the per-team `roster` table was dropped:
+	 * EMPLOYEE_REGISTRY is the static org chart and every employee is
+	 * always available via `consult`. hireEmployee / fireEmployee are
+	 * not exposed on the @callable surface for this reason.
+	 *
+	 * EmployeeId in registry is the short slug (cmo / hog / smm); the
+	 * /team UI matches against ROLE_REGISTRY (full slug like
+	 * `head-of-growth`). Map short→full for wire compat.
+	 */
+	@callable()
+	async queryRoster(): Promise<
+		Array<{
+			role: string;
+			status: "active";
+			hired_at: number;
+			hire_config_json: null;
+		}>
+	> {
+		this.ensureSchema();
+		const createdAtRow = this.ctx.storage.sql
+			.exec<{ value: string }>(
+				"SELECT value FROM founder_context WHERE key = 'created_at' LIMIT 1",
+			)
+			.toArray();
+		const hiredAt = createdAtRow[0]?.value
+			? Number(createdAtRow[0].value)
+			: Date.now();
+		const SLUG_MAP: Record<string, string> = {
+			cmo: "cmo",
+			hog: "head-of-growth",
+			smm: "social-media-manager",
+		};
+		return Object.keys(EMPLOYEE_REGISTRY).map((shortId) => ({
+			role: SLUG_MAP[shortId] ?? shortId,
+			status: "active" as const,
+			hired_at: hiredAt,
+			hire_config_json: null,
+		}));
 	}
 
 	/**
