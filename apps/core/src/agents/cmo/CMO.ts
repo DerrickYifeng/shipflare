@@ -593,12 +593,25 @@ export class CMO extends AIChatAgent<Env, CMOState> {
 		const result = this.ctx.storage.sql.exec(
 			`UPDATE approval_queue
 			 SET decided_at = ?, decision = 'approved'
-			 WHERE draft_id = ?`,
+			 WHERE draft_id = ? AND decision IS NULL`,
 			Date.now(),
 			args.draftId,
 		);
 		if (result.rowsWritten === 0) {
-			throw new Error(`draft not in approval_queue: ${args.draftId}`);
+			// Disambiguate: missing row vs already-decided.
+			const existing = this.ctx.storage.sql
+				.exec<{ decision: string | null }>(
+					"SELECT decision FROM approval_queue WHERE draft_id = ? LIMIT 1",
+					args.draftId,
+				)
+				.toArray();
+			const row = existing[0];
+			if (!row) {
+				throw new Error(`draft not in approval_queue: ${args.draftId}`);
+			}
+			throw new Error(
+				`draft ${args.draftId} already decided as '${row.decision}'; cannot approve`,
+			);
 		}
 		return { draftId: args.draftId, decision: "approved" as const };
 	}
@@ -618,12 +631,24 @@ export class CMO extends AIChatAgent<Env, CMOState> {
 		const result = this.ctx.storage.sql.exec(
 			`UPDATE approval_queue
 			 SET decided_at = ?, decision = 'rejected'
-			 WHERE draft_id = ?`,
+			 WHERE draft_id = ? AND decision IS NULL`,
 			Date.now(),
 			args.draftId,
 		);
 		if (result.rowsWritten === 0) {
-			throw new Error(`draft not in approval_queue: ${args.draftId}`);
+			const existing = this.ctx.storage.sql
+				.exec<{ decision: string | null }>(
+					"SELECT decision FROM approval_queue WHERE draft_id = ? LIMIT 1",
+					args.draftId,
+				)
+				.toArray();
+			const row = existing[0];
+			if (!row) {
+				throw new Error(`draft not in approval_queue: ${args.draftId}`);
+			}
+			throw new Error(
+				`draft ${args.draftId} already decided as '${row.decision}'; cannot reject`,
+			);
 		}
 		return { draftId: args.draftId, decision: "rejected" as const };
 	}
