@@ -1,4 +1,5 @@
 import { cloudflareTest } from "@cloudflare/vitest-pool-workers";
+import agents from "agents/vite";
 import { defineConfig } from "vitest/config";
 
 /**
@@ -12,6 +13,16 @@ import { defineConfig } from "vitest/config";
  */
 export default defineConfig({
   plugins: [
+    // Vitest 4.x is built on rolldown-vite, which uses oxc for transforms.
+    // Oxc doesn't yet support TC39 stage-3 decorators (oxc#9170), so any
+    // test file that imports a module using `@callable()` from the agents
+    // SDK crashes with `SyntaxError: Invalid or unexpected token` when
+    // workerd tries to parse the bundle. The `agents/vite` plugin wraps
+    // `@rolldown/plugin-babel` to transform decorators ahead of oxc.
+    // Must be listed BEFORE `cloudflareTest` so the transform applies
+    // before the worker bundle is built. See:
+    //   https://developers.cloudflare.com/agents/api-reference/configuration/
+    agents(),
     cloudflareTest({
       wrangler: { configPath: "./wrangler.jsonc" },
       // Test-only bindings layered over wrangler.jsonc. `STRATEGIC_PATH_FIXTURE`
