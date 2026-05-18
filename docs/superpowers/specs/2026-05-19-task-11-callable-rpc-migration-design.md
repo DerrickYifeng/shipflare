@@ -163,17 +163,35 @@ the `roster` deletion rationale intact (the rewrite was correct on that).
 
 ### 4.5 Auth
 
-**Primary gate (already in place):** `handleCmoWsRequest` at
+**Primary gate for browser callers (already in place):** `handleCmoWsRequest` at
 `apps/core/src/index.ts:584-586` rejects any WS upgrade where
 `claims.name !== userId` (the URL segment that names the DO). Once a
-connection exists on this DO, the framework guarantees it belongs to a
-JWT whose `name` matches `this.name`. There is no in-band way to call
-`@callable` methods on a DO without first holding a verified connection
-to it.
+WebSocket connection exists on this DO, the framework guarantees the
+connecting JWT's `name` matches `this.name`. The `@callable` decorator
+gates WS-RPC dispatch through the WebSocket envelope — so any browser
+call to `agent.stub.queryDrafts(...)` is owner-scoped by construction.
 
-**Per-method posture:** `@callable` bodies don't re-check JWT claims.
-The DO-name identity check at WS upgrade is sufficient and exhaustive
-for browser-only callers. Methods stay terse:
+**Peer-DO access surface (additional reachable path):** Public methods on
+a Durable Object are ALSO directly callable from sibling Workers via
+`env.CMO.getByName(...).queryDrafts(...)` — Cloudflare's native DO RPC
+bypasses the WS gate entirely. This is safe today because:
+1. Per-tenant isolation: `env.CMO.idFromName(userId)` returns a different
+   DO per user, so a peer DO calling `cmoStub.queryDrafts()` only ever
+   reads the same user's data the peer DO already operates on.
+2. CLAUDE.md mandates peer DOs route writes through CMO's exposed
+   `/internal/*` HTTP routes (e.g. `mirrorDraft`), not direct method
+   invocation. The new @callable methods inherit the same convention.
+
+If a future peer-DO call site needs to invoke a write-side @callable
+(approveDraft, cancelPlanItem, etc.), prefer adding an `/internal/*`
+route on CMO for that specific need — keeps the cross-DO surface
+enumerable and code-reviewable.
+
+**Per-method posture:** `@callable` bodies don't re-check JWT claims for
+the browser path. The DO-name identity check at WS upgrade is sufficient
+for browser callers. For peer-DO callers, the tenancy isolation
+(`idFromName(userId)`) is the safety boundary — every public method is
+implicitly scoped to "this DO's userId".
 
 ```ts
 @callable()

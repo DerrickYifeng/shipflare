@@ -13,6 +13,12 @@ import {
 import { anthropic } from "@ai-sdk/anthropic";
 import { z } from "zod";
 import { writeAgentEvent } from "@shipflare/shared";
+import type {
+	PlanItemRow,
+	DraftRow,
+	MemoryRow,
+	AgentTranscriptRow,
+} from "@shipflare/shared";
 import type { Env } from "../../index";
 import { applyCmoSchema } from "./schema";
 import { computeNextDailyAt } from "./scheduling";
@@ -503,7 +509,7 @@ export class CMO extends AIChatAgent<Env, CMOState> {
 		status?: string;
 		ownerRole?: string;
 		limit?: number;
-	}): Promise<unknown[]> {
+	}): Promise<PlanItemRow[]> {
 		this.ensureSchema();
 		const limit = Math.min(Math.max(args.limit ?? 50, 1), 200);
 		let q =
@@ -522,7 +528,7 @@ export class CMO extends AIChatAgent<Env, CMOState> {
 		bindings.push(limit);
 		return this.ctx.storage.sql
 			.exec(q, ...(bindings as SqlStorageValue[]))
-			.toArray();
+			.toArray() as unknown as PlanItemRow[];
 	}
 
 	@callable()
@@ -532,11 +538,11 @@ export class CMO extends AIChatAgent<Env, CMOState> {
 			ownerRole?: string;
 			limit?: number;
 		} = {},
-	): Promise<unknown[]> {
+	): Promise<PlanItemRow[]> {
 		return this._queryPlanItems(args);
 	}
 
-	private async _queryDrafts(args: { limit?: number }): Promise<unknown[]> {
+	private async _queryDrafts(args: { limit?: number }): Promise<DraftRow[]> {
 		this.ensureSchema();
 		const limit = Math.min(Math.max(args.limit ?? 50, 1), 200);
 		return this.ctx.storage.sql
@@ -547,15 +553,15 @@ export class CMO extends AIChatAgent<Env, CMOState> {
 				 LIMIT ?`,
 				limit,
 			)
-			.toArray();
+			.toArray() as unknown as DraftRow[];
 	}
 
 	@callable()
-	async queryDrafts(args: { limit?: number } = {}): Promise<unknown[]> {
+	async queryDrafts(args: { limit?: number } = {}): Promise<DraftRow[]> {
 		return this._queryDrafts(args);
 	}
 
-	private async _queryMemory(args: { limit?: number }): Promise<unknown[]> {
+	private async _queryMemory(args: { limit?: number }): Promise<MemoryRow[]> {
 		this.ensureSchema();
 		const limit = Math.min(Math.max(args.limit ?? 50, 1), 100);
 		return this.ctx.storage.sql
@@ -572,18 +578,18 @@ export class CMO extends AIChatAgent<Env, CMOState> {
 				 LIMIT ?`,
 				limit,
 			)
-			.toArray();
+			.toArray() as unknown as MemoryRow[];
 	}
 
 	@callable()
-	async queryMemory(args: { limit?: number } = {}): Promise<unknown[]> {
+	async queryMemory(args: { limit?: number } = {}): Promise<MemoryRow[]> {
 		return this._queryMemory(args);
 	}
 
 	private async _queryAgentTranscript(args: {
 		role: string;
 		limit?: number;
-	}): Promise<unknown[]> {
+	}): Promise<AgentTranscriptRow[]> {
 		this.ensureSchema();
 		const limit = Math.min(Math.max(args.limit ?? 100, 1), 200);
 		return this.ctx.storage.sql
@@ -604,14 +610,14 @@ export class CMO extends AIChatAgent<Env, CMOState> {
 				args.role,
 				limit,
 			)
-			.toArray();
+			.toArray() as unknown as AgentTranscriptRow[];
 	}
 
 	@callable()
 	async queryAgentTranscript(args: {
 		role: string;
 		limit?: number;
-	}): Promise<unknown[]> {
+	}): Promise<AgentTranscriptRow[]> {
 		return this._queryAgentTranscript(args);
 	}
 
