@@ -96,3 +96,44 @@ feat(staging): migrate to custom subdomains for cross-origin OAuth handshake
 - C6 Chat through MCP — **completed** (with separate CMO truncation bug logged)
 - D Telemetry verify — **completed** (soft-green via tail; direct AE query blocked by tooling bugs)
 - New follow-ups: #6 CMO truncation, #7 warm-cache install docs, #8 verify-telemetry.ts fix, #9 CF_API_TOKEN setup docs, #10 web team-page connection error
+
+## Addendum — 2026-05-18 ~22:50 (post-Phase-11)
+
+Investigated `/team` "Failed to fetch" (task #10). Found three independent
+breakages and shipped fixes for two:
+
+**Fixed in commit `8db20268`:**
+
+1. **useAgent same-origin default.** `useCmoChat` was opening WS to
+   `app-staging.shipflare.ai/agents/cmo/<id>` (apps/web), which 404s.
+   Fix: `resolveCoreHost(env.CORE_PUBLIC_URL)` helper, server-renders
+   the bare host into TeamPage/ChatPage props → drilled into useCmoChat
+   → passed as `host` to useAgent. WS now correctly targets apps/core.
+2. **SSR crash on `use(queryPromise)`.** useAgent's `use(query())` runs
+   server-side via React 19 Suspense. `fetch('/api/agent-token?...')`
+   with a relative URL throws "Invalid URL" with no base, crashing the
+   page render (Chrome shows "This page couldn't load"). Fix: SSR guard
+   in `fetchAgentJwt` returns empty token when `typeof window ===
+   'undefined'`; client re-fetches on mount.
+3. **CORS + /get-messages routing.** apps/core blocked the
+   cross-origin `/get-messages` fetch (CORS allowlist didn't include
+   `app-staging.shipflare.ai`) AND had no route for the framework's
+   `/get-messages` path at all. Fix: extended `CORS_ALLOWED_ORIGINS`
+   and added `CMO_HTTP_ROUTE` regex + `handleCmoHttpRequest` that
+   JWT-verifies and delegates to SDK's `routeAgentRequest`.
+
+**NOT FIXED — bigger debt, tracked as task #11:**
+
+The right-panel queries on /team (`queryRoster`, `listConversations`,
+`queryPlanItems`, `queryDrafts` via `createCmoClient`) use the MCP
+StreamableHTTP transport that was **retired at Phase 5** —
+`/agents/cmo/<id>/mcp` returns 503 with "MCP transport retired in
+Phase 5; chat-native browser entry lands in Phase 8". Phase 8
+migrated chat but not these queries. Each call site needs migration
+to either (a) @callable RPC on CMO via useAgent, (b) apps/web HTTP
+proxy via service binding, or (c) direct D1. ~1-2 days of careful
+work; deserves its own plan.
+
+**Net result:** Chat WebSocket works end-to-end on the new custom
+domains. /team page renders without the SSR crash. Right-panel data
+is empty (queries 503) until task #11 lands.
