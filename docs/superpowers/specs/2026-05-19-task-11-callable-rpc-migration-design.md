@@ -83,10 +83,27 @@ same WebSocket. JWT auth, multi-user routing (`name` → DO instance),
 hibernation-aware reconnection, and ordered message delivery are framework
 guarantees.
 
-## 4. CMO `@callable` surface — 16 methods
+## 4. CMO `@callable` surface — 12 methods
 
-(Two more than scope conversation's "14" — re-counted: 10 wrap existing tools,
-6 are net-new restorations.)
+**Revised after architecture conflict review (2026-05-19).** The original
+brainstorm picked the "restore + hire/fire" option, but reading
+`apps/core/src/agents/cmo/schema.ts:11-18` surfaced an explicit rewrite
+decision: `roster`, `hireEmployee`, `fireEmployee` were dropped because
+`EMPLOYEE_REGISTRY` is now the static org chart and every peer is always
+available via `consult`. Hire/fire is an anti-pattern under the new model.
+
+Resolution: **honor the rewrite**. queryRoster derives from
+`EMPLOYEE_REGISTRY` (read-only). hire/fire are dropped from scope.
+getRecentActivity is dropped too — it has no live UI caller (`grep`
+confirmed only the dead wrapper in `mcp-client.ts`), and the activity
+feed is now `useAgentToolEvents` (per-connection live stream, already
+wired through `useCmoChat`).
+
+Net surface: 10 wrappers around existing AI-SDK tools + 1 registry-derived
+read + 2 new with a single new `conversations` table. The framework
+genuinely does not partition `cf_ai_chat_agent_messages` by `useAgentChat`
+id, so a `conversations` table is required to model multi-thread UI; the
+rewrite's comment was incomplete on that point.
 
 ### 4.1 Wrap existing AI-SDK tools (no schema change)
 
@@ -108,22 +125,20 @@ entry points.
 | `queryAgentTranscript` | CMO.ts:524 | per-role `employee_log` tail |
 | `queryFounderContext` | CMO.ts:177 | returns KV map of raw JSON strings |
 
-### 4.2 Restore deleted surfaces (require schema additions)
+### 4.2 Registry-derived read (no schema change)
 
-These need fresh implementations because the original tool files
-(`tools/roster.ts`, `tools/conversation.ts`, `tools/get-recent-activity.ts`)
-were deleted in `f61362ae`. The new code lives directly on the CMO class.
+| Method | Behavior |
+|---|---|
+| `queryRoster` | Reads `EMPLOYEE_REGISTRY` (re-exported from `@shipflare/shared`) and returns the static org chart in the row shape the existing UI expects: `{ role, status: 'active', hired_at, hire_config_json }`. Every employee is always active; `hired_at` is the team's creation timestamp (founder_context.created_at, with `Date.now()` fallback). No SQL — no schema needed. |
+
+### 4.3 New surfaces (require one schema addition)
 
 | Method | Behavior | Schema dependency |
 |---|---|---|
-| `queryRoster` | List every role hired this team has ever had (active + fired). | new `roster` table |
-| `hireEmployee` | UPSERT `roster` row to status='active'. CMO is implicit — reject `role==='cmo'`. | new `roster` table |
-| `fireEmployee` | UPDATE `roster` SET status='fired', fired_at=now. Preserves SQLite + history so re-hire restores the same DO. | new `roster` table |
-| `startNewConversation` | INSERT into `conversations`, return `{ conversationId }`. Caller navigates to `/team/<id>` and `useAgentChat({ agent, id })` opens that thread. | new `conversations` table |
-| `listConversations` | Newest-first, default limit 20, excludes archived. | new `conversations` table |
-| `getRecentActivity` | Wraps reads of `employee_log` plus the new conversations table to surface a chronological activity tail. Same shape the activity drawer expects. | reuses `employee_log` + new `conversations` |
+| `startNewConversation` | INSERT into `conversations`, return `{ conversationId }`. Caller navigates to `/team/<id>` and `useAgentChat({ agent, id: conversationId })` opens that thread. | new `conversations` table |
+| `listConversations` | Newest-first, default limit 20, excludes archived. Caller renders left-rail thread list. | new `conversations` table |
 
-### 4.3 SQLite schema additions
+### 4.4 SQLite schema additions
 
 Appended to `apps/core/src/agents/cmo/schema.ts` as new `CREATE TABLE IF NOT
 EXISTS` statements inside the existing `ensureSchema()` path. **Do not edit the
@@ -131,14 +146,6 @@ existing v12-v14 migration tags** — `wrangler` rejects same-tag mutations
 (see prior RESUME).
 
 ```sql
-CREATE TABLE IF NOT EXISTS roster (
-  role             TEXT PRIMARY KEY,
-  hired_at         INTEGER NOT NULL,
-  fired_at         INTEGER,
-  status           TEXT NOT NULL CHECK (status IN ('active', 'fired')),
-  hire_config_json TEXT
-);
-
 CREATE TABLE IF NOT EXISTS conversations (
   id           TEXT PRIMARY KEY,
   started_at   INTEGER NOT NULL,
@@ -150,7 +157,11 @@ CREATE INDEX IF NOT EXISTS idx_conversations_active
   ON conversations(archived_at, started_at DESC);
 ```
 
-### 4.4 Auth
+The accompanying comment in `schema.ts` is rewritten to clarify why
+`conversations` came back (framework single-bag storage), while leaving
+the `roster` deletion rationale intact (the rewrite was correct on that).
+
+### 4.5 Auth
 
 **Primary gate (already in place):** `handleCmoWsRequest` at
 `apps/core/src/index.ts:584-586` rejects any WS upgrade where
@@ -174,9 +185,11 @@ async queryDrafts(args: QueryDraftsArgs): Promise<DraftRow[]> {
 **Out of scope:** The external-MCP scope map in
 `apps/core/src/lib/external-auth.ts` is **unchanged** — that path is
 OAuth-gated for 3rd-party clients and keeps its read/write/admin
-tiers. `hireEmployee` / `fireEmployee` are first-party founder actions
-on the founder's own roster; no `admin` scope tier needed for the
-browser path.
+tiers. The `hireEmployee` / `fireEmployee` entries in that scope map
+become unreferenced when this lands; leave them in place rather than
+ripping out (they remain valid 3rd-party RPC contracts even if the
+browser doesn't surface them — and the rewrite to actually delete
+the map entries belongs in a separate cleanup PR).
 
 ## 5. apps/web client API
 
@@ -214,7 +227,7 @@ hooks.
 
 | File | Methods used | Migration |
 |---|---|---|
-| `app/(app)/team/_components/team-desk.tsx` | queryRoster, listConversations, queryPlanItems, queryDrafts, startNewConversation, approveDraft, rejectDraft, cancelPlanItem, hireEmployee, fireEmployee | swap `clientRef.current.*` → `stub.*`; drop `createCmoClient()` effect; rely on `useCmoStub().ready`. Hire/fire bind to existing left-rail role rows via context-menu items added in this migration. |
+| `app/(app)/team/_components/team-desk.tsx` | queryRoster, listConversations, queryPlanItems, queryDrafts, startNewConversation, approveDraft, rejectDraft, cancelPlanItem | swap `clientRef.current.*` → `stub.*`; drop `createCmoClient()` effect; rely on `useCmoStub().ready`. Any existing UI affordances for hire/fire (if present) become read-only roster cards. |
 | `app/(app)/team/_components/teammate-transcript-drawer.tsx` | queryAgentTranscript | same |
 | `app/(app)/briefing/_components/today-tab.tsx` | queryDrafts, approveDraft | same |
 | `app/(app)/briefing/_components/history-tab.tsx` | queryDrafts | same |
@@ -281,8 +294,8 @@ connects to the existing session.
 ## 9. Migration sequencing (high level — full plan comes from writing-plans)
 
 1. CMO server: add the 10 `@callable` wrappers around extracted `_impl` methods.
-2. CMO server: add `roster` + `conversations` tables + the 6 net-new methods.
-3. CMO server: unit tests for all 16 methods.
+2. CMO server: add `conversations` table + `startNewConversation` + `listConversations` + `queryRoster` (registry-derived). Rewrite schema.ts comment.
+3. CMO server: unit tests for all 13 methods.
 4. apps/web: `useCmoStub` hook + migrate `/team` first (the heaviest user).
 5. apps/web: migrate `/briefing/*` and `/growth/reddit-channels` call sites.
 6. apps/core: delete `handleMcpRequest`, `MCP_ROUTE`, the 503 stub.
