@@ -129,7 +129,15 @@ export function TeamDesk({ user, coreHost }: TeamDeskProps) {
   // Typed @callable RPC stub on the same WS as useCmoChat.
   const stub = useCmoStub({ agent });
 
+  // One-shot guard for the init effect below. JWT refresh (60s TTL) churns
+  // the agent reference → stub re-memos → this effect would re-fire and
+  // clobber the founder's currently-selected conversation. Guard ensures
+  // init runs exactly once per component mount.
+  const initRanRef = useRef(false);
+
   useEffect(() => {
+    if (initRanRef.current) return;
+    initRanRef.current = true;
     let cancelled = false;
     void (async () => {
       try {
